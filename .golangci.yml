@@ -1,0 +1,34 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - gosec
+    - misspell
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - tparallel
+    - unconvert
+    - unparam
+    - whitespace
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+    rules:
+      # Tests exercise throwaway repos and fixed local paths.
+      - path: _test\.go
+        linters:
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports

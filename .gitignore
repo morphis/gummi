@@ -1,0 +1,18 @@
+# build output
+/bin/
+/dist/
+
+# test and profiling artifacts
+*.out
+*.test
+
+# gummi's own runtime state when dogfooding in this repo
+/.gummi/state/
+/.gummi/worktrees/
+
+# editor droppings
+*.swp
+.DS_Store
+
+# workshop container lockfile
+.workshop.lock
