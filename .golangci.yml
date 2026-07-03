@@ -14,6 +14,16 @@ linters:
     - unconvert
     - unparam
     - whitespace
+  settings:
+    errcheck:
+      # Close/Remove in defer or error paths: failure is either
+      # unactionable or already surfaced by the operation that matters.
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        - (*os.File).Close
+        - os.Remove
+        - (*github.com/morphia/gummi/internal/state.Store).Close
   exclusions:
     generated: lax
     presets:

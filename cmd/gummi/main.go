@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+
+	"github.com/morphia/gummi/internal/state"
 )
 
 // Version is the release version, injected via -ldflags at build time.
@@ -35,5 +37,23 @@ func run(args []string) error {
 		fmt.Printf("gummi %s\n", version())
 		return nil
 	}
-	return fmt.Errorf("unknown command %q", args[0])
+	switch args[0] {
+	case "init":
+		return runInit()
+	default:
+		return fmt.Errorf("unknown command %q (commands: init, version)", args[0])
+	}
+}
+
+func runInit() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	w, err := state.Init(cwd)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("initialized gummi workspace in %s\n", w.GummiDir())
+	return nil
 }

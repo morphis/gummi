@@ -16,5 +16,4 @@ import (
 	_ "github.com/charmbracelet/x/ansi"
 	_ "github.com/charmbracelet/x/exp/charmtone"
 	_ "github.com/charmbracelet/x/exp/golden"
-	_ "modernc.org/sqlite"
 )
