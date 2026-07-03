@@ -1,0 +1,6 @@
+name: gummi
+base: ubuntu@24.04
+
+sdks:
+- name: claude-code
+- name: go
