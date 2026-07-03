@@ -170,6 +170,51 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 	return nil
 }
 
+// CommitFile writes content to relPath inside the feature's worktree
+// and commits it to the feature branch. relPath is verified to stay
+// inside the worktree.
+func (m *Manager) CommitFile(ctx context.Context, f *domain.Feature, relPath, content, message string) error {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return err
+	}
+	dest := filepath.Clean(filepath.Join(p, relPath))
+	if dest != p && !strings.HasPrefix(dest, p+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to write %s: escapes worktree %s", relPath, p)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+		return err
+	}
+	if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
+		return err
+	}
+	if _, err := runGit(ctx, p, "add", "--", dest); err != nil {
+		return err
+	}
+	// idempotent: identical content means nothing staged, nothing to do
+	status, err := runGit(ctx, p, "status", "--porcelain", "--", dest)
+	if err != nil {
+		return err
+	}
+	if status == "" {
+		return nil
+	}
+	if _, err := runGit(ctx, p, "commit", "-m", message, "--", dest); err != nil {
+		return err
+	}
+	return nil
+}
+
+// FileCommitted reports whether relPath inside the feature's worktree
+// is tracked by git (i.e. has been committed or staged).
+func (m *Manager) FileCommitted(ctx context.Context, f *domain.Feature, relPath string) (bool, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	return gitOK(ctx, p, "ls-files", "--error-unmatch", "--", filepath.Join(p, relPath))
+}
+
 // BranchExists reports whether the feature's branch ref exists.
 func (m *Manager) BranchExists(ctx context.Context, f *domain.Feature) (bool, error) {
 	_, branch, err := m.featurePaths(f)

@@ -28,6 +28,7 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"g", "advance stage (gate)"},
 		{"b", "bounce back to implement"},
 		{"n", "new feature"},
+		{"s", "spec (tab: read ⇄ annotate)"},
 		{"x", "delete feature"},
 		{"?", "help"},
 		{"q", "quit"},

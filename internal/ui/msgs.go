@@ -3,10 +3,13 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/workflow"
 )
@@ -120,12 +123,46 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 					return noticeMsg{text: err.Error(), isErr: true}
 				}
 			}
+			// spec approval commits the spec to the feature branch and
+			// retires the draft (DESIGN §10.11)
+			if err := m.migrateDraft(ctx, &f); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
 		}
 		if _, err := m.store.Transition(ctx, id, next, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s → %s", id, next)}
 	}
+}
+
+// migrateDraft moves the spec draft into the feature's worktree as a
+// committed file. A feature that never had a draft gets one from the
+// template — the branch always carries a spec. Idempotent, keyed on
+// git tracking (a merely-present uncommitted file is not migrated).
+func (m *Shell) migrateDraft(ctx context.Context, f *domain.Feature) error {
+	draftPath := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f))
+	if tracked, err := m.wt.FileCommitted(ctx, f, f.SpecPath()); err != nil {
+		return err
+	} else if tracked {
+		return os.RemoveAll(draftPath)
+	}
+	// content preference: the draft; else a stray uncommitted worktree
+	// copy (e.g. a crashed earlier migration); else a fresh template
+	wtSpec := filepath.Join(m.wt.Root(), f.WorktreePath(), f.SpecPath())
+	content := spec.Template(f)
+	if raw, err := os.ReadFile(draftPath); err == nil {
+		content = string(raw)
+	} else if !os.IsNotExist(err) {
+		return err
+	} else if raw, err := os.ReadFile(wtSpec); err == nil {
+		content = string(raw)
+	}
+	if err := m.wt.CommitFile(ctx, f, f.SpecPath(), content,
+		fmt.Sprintf("docs(spec): %s %s", f.ID, f.Title)); err != nil {
+		return err
+	}
+	return os.RemoveAll(draftPath)
 }
 
 // bounceStage sends a review/verify feature back to implement (the

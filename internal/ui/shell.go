@@ -8,6 +8,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/ui/layout"
 	"github.com/morphia/gummi/internal/ui/logo"
@@ -40,6 +41,7 @@ type Shell struct {
 	rows   []featureRow
 	sel    int
 	notice noticeMsg
+	spec   *specView // non-nil while the spec surface is open
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -94,6 +96,20 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case specLoadedMsg:
+		if msg.err != nil {
+			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
+			return m, nil
+		}
+		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1}
+		if m.spec != nil && m.spec.path == msg.path {
+			// reload in place: keep mode, cursor, and scroll
+			sv.annotate, sv.offset = m.spec.annotate, m.spec.offset
+			sv.cursor = min(m.spec.cursor, len(sv.doc.Lines))
+		}
+		m.spec = sv
+		return m, nil
+
 	case tea.KeyPressMsg:
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
 			return m, cmd
@@ -105,8 +121,14 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
+	if key == "ctrl+c" {
+		return tea.Quit
+	}
+	if m.spec != nil {
+		return m.handleSpecKey(key)
+	}
 	switch key {
-	case "q", "ctrl+c":
+	case "q":
 		return tea.Quit
 	case "?":
 		m.Overlay.Push(helpDialog{})
@@ -116,6 +138,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch key {
+	case "s":
+		if r, ok := m.selected(); ok {
+			return m.openSpec(r.F)
+		}
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":
@@ -251,6 +277,9 @@ func (m *Shell) draw(scr uv.Screen) {
 }
 
 func (m *Shell) mainView(w, h int) string {
+	if m.spec != nil {
+		return m.specViewRender(w, h)
+	}
 	if len(m.rows) > 0 {
 		return m.dashboardView(w, h)
 	}
