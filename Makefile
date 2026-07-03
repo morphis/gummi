@@ -1,7 +1,7 @@
 GOBIN := $(shell go env GOPATH)/bin
 export PATH := $(PATH):$(GOBIN)
 
-.PHONY: build test lint golden-update vet ci clean
+.PHONY: build test lint golden-update vet ci clean demo e2e
 
 build:
 	go build -o bin/gummi ./cmd/gummi
@@ -22,6 +22,14 @@ golden-update:
 	go test ./internal/ui/... -update
 
 ci: build test lint
+
+# Create a throwaway demo repo with gummi initialized.
+demo: build
+	./scripts/demo.sh
+
+# Drive the real TUI end-to-end in a tmux PTY (needs tmux).
+e2e: build
+	./scripts/e2e.sh
 
 clean:
 	rm -rf bin
