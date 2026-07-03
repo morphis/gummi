@@ -170,6 +170,15 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 	return nil
 }
 
+// BranchExists reports whether the feature's branch ref exists.
+func (m *Manager) BranchExists(ctx context.Context, f *domain.Feature) (bool, error) {
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return false, err
+	}
+	return gitOK(ctx, m.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+}
+
 // DeleteBranch removes the feature's branch. Without force it refuses
 // branches that are not fully merged into HEAD (git -d semantics).
 func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force bool) error {

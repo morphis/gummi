@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -12,6 +13,7 @@ import (
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/ui"
 	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphia/gummi/internal/worktree"
 )
 
 // Version is the release version, injected via -ldflags at build time.
@@ -52,8 +54,26 @@ func run(args []string) error {
 }
 
 func runBoard() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ws, err := state.Open(cwd)
+	if err != nil {
+		return err
+	}
+	store, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	wt, err := worktree.NewManager(context.Background(), cwd)
+	if err != nil {
+		return err
+	}
 	shell := ui.NewShell(theme.GummiDark(), version())
-	_, err := tea.NewProgram(shell).Run()
+	shell.Attach(store, wt, ws)
+	_, err = tea.NewProgram(shell).Run()
 	return err
 }
 
