@@ -7,7 +7,11 @@ import (
 	"os"
 	"runtime/debug"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/morphia/gummi/internal/state"
+	"github.com/morphia/gummi/internal/ui"
+	"github.com/morphia/gummi/internal/ui/theme"
 )
 
 // Version is the release version, injected via -ldflags at build time.
@@ -40,9 +44,17 @@ func run(args []string) error {
 	switch args[0] {
 	case "init":
 		return runInit()
+	case "board":
+		return runBoard()
 	default:
-		return fmt.Errorf("unknown command %q (commands: init, version)", args[0])
+		return fmt.Errorf("unknown command %q (commands: init, board, version)", args[0])
 	}
+}
+
+func runBoard() error {
+	shell := ui.NewShell(theme.GummiDark(), version())
+	_, err := tea.NewProgram(shell).Run()
+	return err
 }
 
 func runInit() error {

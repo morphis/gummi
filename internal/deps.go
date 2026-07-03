@@ -8,12 +8,7 @@ package internal
 
 import (
 	_ "charm.land/bubbles/v2/textarea"
-	_ "charm.land/bubbletea/v2"
 	_ "charm.land/glamour/v2"
-	_ "charm.land/lipgloss/v2"
 	_ "github.com/charmbracelet/colorprofile"
-	_ "github.com/charmbracelet/ultraviolet"
-	_ "github.com/charmbracelet/x/ansi"
-	_ "github.com/charmbracelet/x/exp/charmtone"
 	_ "github.com/charmbracelet/x/exp/golden"
 )
