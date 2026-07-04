@@ -265,6 +265,20 @@ func TestRebaseConflictAbortsCleanly(t *testing.T) {
 	}
 }
 
+func TestLandedFalseForFreshBranch(t *testing.T) {
+	// a just-created branch sits at main's HEAD (a trivial ancestor); it
+	// must not be reported as landed.
+	root := newRepo(t)
+	m, _ := NewManager(ctx, root)
+	f := feature(7, "Fresh")
+	if _, err := m.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if landed, err := m.Landed(ctx, f); landed || err != nil {
+		t.Fatalf("fresh branch landed=%v err=%v, want false", landed, err)
+	}
+}
+
 func TestList(t *testing.T) {
 	root := newRepo(t)
 	m, _ := NewManager(ctx, root)

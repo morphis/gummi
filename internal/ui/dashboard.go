@@ -50,6 +50,10 @@ func (m *Shell) dashboardView(w, h int) string {
 		wt = f.WorktreePath()
 	}
 	line(s.Muted.Render("worktree ") + s.Base.Render(wt))
+	if r.Landed {
+		line(s.Muted.Render("         ") + s.Success.Render("↑ landed on main") +
+			s.Faint.Render("  · press c to clean up"))
+	}
 	if f.Budget.Envelope > 0 {
 		released := m.engine != nil && m.engine.ReserveReleased(f.ID)
 		line(s.Muted.Render("budget   ") + s.Base.Render(budgetSummary(f, released)))

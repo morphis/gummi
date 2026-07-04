@@ -333,6 +333,20 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.rebaseFeature(r.F)
 		}
+	case "c":
+		if r, ok := m.selected(); ok {
+			if !r.Landed {
+				m.notice = noticeMsg{text: string(r.F.ID) + " hasn't landed on main yet", isErr: true}
+				return nil
+			}
+			f := r.F
+			m.Overlay.Push(&confirmDialog{
+				id:        "confirm-cleanup",
+				question:  "clean up " + string(f.ID) + "?",
+				detail:    "removes the worktree (incl. untracked files) and merged branch — keeps the record",
+				onConfirm: func() tea.Cmd { return m.cleanupLanded(f) },
+			})
+		}
 	case "x":
 		if r, ok := m.selected(); ok {
 			f := r.F

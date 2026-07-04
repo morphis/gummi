@@ -32,6 +32,7 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"g", "advance stage (gate)"},
 		{"b", "bounce back to implement"},
 		{"r", "rebase branch onto main"},
+		{"c", "clean up a landed branch"},
 		{"n", "new feature"},
 		{"s", "spec (tab: read ⇄ annotate)"},
 		{"d", "diff (tab: read ⇄ annotate)"},

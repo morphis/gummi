@@ -87,11 +87,16 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if r.HasWorktree {
 		wtMark = " " + s.Faint.Render("⎇")
 	}
+	// a landed branch is cleanup-ready (press c) — flag it so it stands out
+	landed := ""
+	if r.Landed {
+		landed = " " + s.Success.Render("landed")
+	}
 	cost := ""
 	if !r.F.Spend.Zero() {
 		cost = " " + s.Faint.Render(spendTick(r.F.Spend))
 	}
-	line := cursor + num + " " + glyph + " " + id + " " + title + tag + wtMark + cost
+	line := cursor + num + " " + glyph + " " + id + " " + title + tag + wtMark + landed + cost
 	return ansi.Truncate(line, w, "…")
 }
 

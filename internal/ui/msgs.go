@@ -21,6 +21,7 @@ import (
 type featureRow struct {
 	F           domain.Feature
 	HasWorktree bool
+	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
 }
 
@@ -52,6 +53,13 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 		if ok, err := m.wt.Exists(ctx, &f); err == nil {
 			row.HasWorktree = ok
+			// a branch that has merged into main no longer needs its
+			// worktree — flag it so the board can offer cleanup.
+			if ok {
+				if landed, err := m.wt.Landed(ctx, &f); err == nil {
+					row.Landed = landed
+				}
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -175,6 +183,44 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + " rebased onto main"}
+	}
+}
+
+// cleanupLanded removes a landed feature's worktree and branch, keeping
+// the feature record (it stays on the board as a done entry). It
+// re-checks Landed at run time so a stale board row can't trigger a
+// cleanup of unmerged work (DESIGN §9 M4, §10 landed-branch detection).
+func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		landed, err := m.wt.Landed(ctx, &f)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if !landed {
+			return noticeMsg{text: string(f.ID) + " hasn't landed on main yet — nothing to clean up", isErr: true}
+		}
+		m.dropSession(f.ID)
+		if ok, err := m.wt.Exists(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		} else if ok {
+			// force: the branch has landed, so every committed change is
+			// already in main; only disposable untracked artifacts remain,
+			// and a non-force remove would abort on them. The confirm
+			// dialog spells this out.
+			if err := m.wt.Remove(ctx, &f, true); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+		}
+		if ok, err := m.wt.BranchExists(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		} else if ok {
+			// non-force: git's own merged-check is a backstop to Landed.
+			if err := m.wt.DeleteBranch(ctx, &f, false); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+		}
+		return noticeMsg{text: string(f.ID) + " cleaned up — worktree and merged branch removed"}
 	}
 }
 

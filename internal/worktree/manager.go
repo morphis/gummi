@@ -253,16 +253,32 @@ func (m *Manager) Dirty(ctx context.Context, f *domain.Feature) (bool, error) {
 	return out != "", nil
 }
 
-// Landed reports whether the feature branch's tip is an ancestor of
-// the main checkout's HEAD — i.e. the branch has been merged (or
-// fast-forwarded) into main. Squash-merges are not detected; that
-// refinement is scheduled for M4.
+// Landed reports whether the feature branch has merged into main: its
+// tip is an ancestor of the main checkout's HEAD AND it is not still
+// sitting at that HEAD. The second clause excludes a freshly created
+// branch (whose tip equals main's HEAD and is therefore a trivial
+// ancestor) from being mistaken for a landed one. Limitations, deferred:
+// squash-merges aren't detected, and a branch merged by fast-forward
+// while main had no other activity (HEAD == branch tip) reads as not-yet
+// landed until main next advances.
 func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return false, err
 	}
-	return gitOK(ctx, m.root, "merge-base", "--is-ancestor", branch, "HEAD")
+	anc, err := gitOK(ctx, m.root, "merge-base", "--is-ancestor", branch, "HEAD")
+	if err != nil || !anc {
+		return false, err
+	}
+	branchTip, err := runGit(ctx, m.root, "rev-parse", branch)
+	if err != nil {
+		return false, err
+	}
+	head, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	return branchTip != head, nil
 }
 
 // RebaseConflictError reports that a rebase stopped on conflicts and was
