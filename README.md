@@ -55,6 +55,3 @@ make lint           # go vet + golangci-lint
 make golden-update  # regenerate UI golden files
 make ci             # the full phase gate
 ```
-
-A [vhs](https://github.com/charmbracelet/vhs) tape for the demo GIF
-lives at `demo/gummi.tape` (recording needs ttyd + ffmpeg).
