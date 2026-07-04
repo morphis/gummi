@@ -36,6 +36,7 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"n", "new feature"},
 		{"s", "spec (tab: read ⇄ annotate)"},
 		{"d", "diff (tab: read ⇄ annotate)"},
+		{"a", "raw-attach the agent CLI in the worktree"},
 		{"v", "run verify checks"},
 		{"x", "delete feature"},
 		{"?", "help"},

@@ -326,6 +326,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.openDiff(r.F)
 		}
+	case "a":
+		if r, ok := m.selected(); ok {
+			return m.attachRaw(r.F)
+		}
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":
