@@ -20,6 +20,12 @@ jobs:
         run: |
           go build ./...
           go build -tags pin ./...
+      - name: Install Copilot CLI
+        # Enables the BYOK round-trip test; the agent tests skip cleanly
+        # if this step is removed or fails.
+        run: |
+          curl -fsSL https://gh.io/copilot-install | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Test
         run: go test ./...
       - name: Lint

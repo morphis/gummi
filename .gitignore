@@ -16,3 +16,7 @@
 
 # workshop container lockfile
 .workshop.lock
+
+# copilot CLI logs when dogfooding
+.copilot/
+

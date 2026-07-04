@@ -29,10 +29,15 @@ gummi is under construction. `docs/DESIGN.md` is the design;
     threaded `%% @user(date):` comments, `n/p` marker jumps, `e`
     opens `$EDITOR`.
 
-**No agents yet.** M1 wires the Copilot SDK (interactive
-brainstorm/spec chat + autonomous implement). Profiles, budgets, the
-scheduler, and the review loop follow (see the roadmap in
-`docs/DESIGN.md` §9).
+**Agent layer (M1 spike landed).** `internal/agent` is the adapter
+abstraction (DESIGN §4.1): a `Fake` for tests and a `Copilot` adapter
+over the official Go SDK. A BYOK (bring-your-own-key) session against
+any OpenAI-compatible endpoint works **without GitHub authentication**;
+`internal/agent/fakeopenai`
+is a localhost fake provider for tests. Not yet wired into the TUI —
+the interactive chat pane and autonomous implement stage are the rest
+of M1. Profiles, budgets, the scheduler, and the review loop follow
+(see the roadmap in `docs/DESIGN.md` §9).
 
 ## Try it
 
