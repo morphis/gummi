@@ -46,10 +46,12 @@ type Config struct {
 	// Profiles maps a feature's profile + role to a concrete model /
 	// BYOK provider. Empty falls back to Model/Provider for every role.
 	Profiles config.Profiles
-	// StageBudget is the per-autonomous-stage credit budget (0 = no
+	// StageBudget is a flat per-autonomous-stage credit budget (0 = no
 	// budget). The session cap is set ~10% below it (soft-stop
 	// headroom); the model is told its budget and nudged at thresholds.
-	// Phase 20 replaces this flat value with per-feature spend plans.
+	// It is the fallback for features without a spend-plan envelope; a
+	// feature with an envelope uses per-stage allocations instead (§5.1
+	// layer 3, see stageBudget).
 	StageBudget float64
 }
 
@@ -64,11 +66,12 @@ type Engine struct {
 	events  chan Event
 	stopped chan struct{}
 
-	mu      sync.Mutex
-	live    map[domain.FeatureID]*Session
-	queue   []domain.FeatureID // autonomous features awaiting a slot, FIFO
-	running int                // autonomous sessions currently holding slots
-	closed  bool
+	mu       sync.Mutex
+	live     map[domain.FeatureID]*Session
+	queue    []domain.FeatureID        // autonomous features awaiting a slot, FIFO
+	running  int                       // autonomous sessions currently holding slots
+	released map[domain.FeatureID]bool // features whose reserve a top-up released
+	closed   bool
 }
 
 // New builds an engine. The caller owns cfg.Agent's lifetime.
@@ -87,6 +90,7 @@ func New(cfg Config) *Engine {
 		events:    make(chan Event),
 		stopped:   make(chan struct{}),
 		live:      map[domain.FeatureID]*Session{},
+		released:  map[domain.FeatureID]bool{},
 	}
 	go e.forward()
 	return e
@@ -157,7 +161,8 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		return prior, nil
 	}
 
-	sess, err := e.newAgentSession(ctx, f, role)
+	// interactive chat is human-paced: no budget cap.
+	sess, err := e.newAgentSession(ctx, f, role, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +246,16 @@ func (e *Engine) schedule() {
 // startAutonomous creates the agent session for a queued run and kicks
 // it off. On setup failure it frees the slot and records the error.
 func (e *Engine) startAutonomous(s *Session) {
-	sess, err := e.newAgentSession(context.Background(), s.Feature, s.Role)
+	// compute the stage budget once so the enforced cap, the budget-aware
+	// hint, and the session's own budget all agree.
+	budget := e.stageBudget(s.Feature)
+	// a budgeted feature with nothing left must not run uncapped (a 0
+	// budget elsewhere means "unbudgeted"): gate it immediately.
+	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !interactiveStage(s.Feature.Stage) {
+		e.exhaust(s)
+		return
+	}
+	sess, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget)
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -249,7 +263,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.freeSlot(s)
 		return
 	}
-	s.setBudget(e.stageBudget())
+	s.setBudget(budget)
 	s.attachAgent(sess)
 	go e.pump(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
@@ -266,7 +280,7 @@ func (e *Engine) startAutonomous(s *Session) {
 
 // newAgentSession builds an agent session for a feature's stage, with
 // the model/provider chosen by the feature's profile for this role.
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role) (agent.Session, error) {
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64) (agent.Session, error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, err
@@ -276,9 +290,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	var maxCredits float64
 	// autonomous stages get a budget cap + budget-aware hint (interactive
 	// chat is human-paced, so it isn't capped).
-	if b := e.stageBudget(); b > 0 && !interactiveStage(f.Stage) {
-		maxCredits = b * capHeadroom
-		hints = append(hints, budgetHint(b))
+	if budget > 0 && !interactiveStage(f.Stage) {
+		maxCredits = budget * capHeadroom
+		hints = append(hints, budgetHint(budget))
 	}
 	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
@@ -374,6 +388,10 @@ func (e *Engine) Drop(id domain.FeatureID) {
 	e.mu.Lock()
 	s := e.live[id]
 	e.dropLocked(id)
+	// a deleted feature's reserve-release state is gone for good; clean it
+	// here (not in dropLocked, which also fires on a TopUp's re-Run and
+	// would drop the flag it just set).
+	delete(e.released, id)
 	e.mu.Unlock()
 	if s != nil {
 		s.stop()
@@ -424,6 +442,20 @@ func (e *Engine) freeSlot(s *Session) {
 	}
 	e.mu.Unlock()
 	e.schedule()
+}
+
+// TopUp releases a feature's held reserve into its stage caps and resumes
+// the exhausted stage from its checkpoint with the extra headroom — the
+// "top up" action of a budget-exhaustion gate (DESIGN §5.1 layer 3).
+func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
+	e.mu.Lock()
+	e.released[id] = true
+	e.mu.Unlock()
+	f, err := e.cfg.Store.GetFeature(ctx, id)
+	if err != nil {
+		return err
+	}
+	return e.Run(f)
 }
 
 // exhaust checkpoints and stops a session that hit its credit budget —

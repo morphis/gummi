@@ -88,6 +88,13 @@ func runBoard() error {
 		shell.SetProfileNames(names)
 		defer cleanup()
 	}
+	// layer-3 spend plan: new features get this credit envelope, split
+	// into per-stage allocations with rollover and a protected review floor.
+	if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			shell.SetEnvelope(n)
+		}
+	}
 
 	_, err = tea.NewProgram(shell).Run()
 	return err

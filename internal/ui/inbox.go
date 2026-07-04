@@ -16,6 +16,8 @@ const (
 	attnFailure attnKind = "failure"
 	// attnQuestion: the agent asked something and is waiting.
 	attnQuestion attnKind = "question"
+	// attnBudget: a stage hit its budget and awaits a top-up/park decision.
+	attnBudget attnKind = "budget"
 )
 
 // attnItem is one entry in the needs-attention queue.

@@ -54,6 +54,7 @@ type Shell struct {
 	checks       map[domain.FeatureID][]verify.Result
 	reviewRounds map[domain.FeatureID]int // automatic review→fix→review counter
 	profileNames []string                 // profile names for the new-feature form
+	envelope     int                      // default spend-plan envelope for new features (0 = none)
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -84,6 +85,11 @@ func (m *Shell) AttachEngine(e *engine.Engine) { m.engine = e }
 // SetProfileNames sets the profile names offered by the new-feature
 // form (from profiles.yaml). Empty leaves the built-in presets.
 func (m *Shell) SetProfileNames(names []string) { m.profileNames = names }
+
+// SetEnvelope sets the default spend-plan envelope (credits) stamped on
+// new features, enabling layer-3 per-stage budgets. 0 leaves features
+// unbudgeted (or governed by a flat per-stage budget).
+func (m *Shell) SetEnvelope(credits int) { m.envelope = credits }
 
 // Styles exposes the derived style set to panes.
 func (m *Shell) Styles() *theme.Styles { return m.styles }
@@ -134,7 +140,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
 		m.reviewRounds[ev.Feature] = 0
-		m.inbox.add(ev.Feature, attnGate, string(ev.Stage)+" hit its budget — top up, downshift, or park")
+		m.inbox.add(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
 		m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
@@ -522,7 +528,23 @@ func (m *Shell) openInbox() {
 			return nil
 		},
 		m.inbox.remove,
+		m.topUpBudget,
 	))
+}
+
+// topUpBudget releases a feature's reserve and resumes its exhausted
+// stage (the "top up" action of a budget gate).
+func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
+	m.inbox.remove(id)
+	if m.engine == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := m.engine.TopUp(context.Background(), id); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: string(id) + " topped up — reserve released, resuming"}
+	}
 }
 
 // autonomousStage reports whether a stage runs an autonomous agent

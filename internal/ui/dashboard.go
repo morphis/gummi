@@ -51,7 +51,8 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 	line(s.Muted.Render("worktree ") + s.Base.Render(wt))
 	if f.Budget.Envelope > 0 {
-		line(s.Muted.Render("budget   ") + s.Base.Render(budgetSummary(f)))
+		released := m.engine != nil && m.engine.ReserveReleased(f.ID)
+		line(s.Muted.Render("budget   ") + s.Base.Render(budgetSummary(f, released)))
 	}
 	if !f.Spend.Zero() {
 		line(s.Muted.Render("spent    ") + s.Base.Render(featureSpend(f.Spend)))
@@ -156,9 +157,25 @@ func skipSummary(f domain.Feature) string {
 	return strings.Join(parts, ", ")
 }
 
-// budgetSummary formats "spent/envelope credits".
-func budgetSummary(f domain.Feature) string {
-	return fmt.Sprintf("%d/%d credits", f.Budget.Spent, f.Budget.Envelope)
+// budgetSummary formats the spend plan: spend against the envelope, plus
+// the current stage's cap (allocation + rollover) and the protected
+// reserve, so the card shows where this stage's money comes from.
+func budgetSummary(f domain.Feature, reserveReleased bool) string {
+	env := float64(f.Budget.Envelope)
+	spent := f.Spend.CreditEquivalent()
+	plan := domain.DefaultPlan(env)
+	s := fmt.Sprintf("%g / %g credits", roundSpend(spent), env)
+	if cap := plan.StageBudget(f.Stage, spent, reserveReleased); cap > 0 {
+		s += fmt.Sprintf("  ·  %s stage cap %g", f.Stage, roundSpend(cap))
+	}
+	if r := env * plan.Reserve; r > 0 {
+		if reserveReleased {
+			s += fmt.Sprintf("  ·  %g reserve released", roundSpend(r))
+		} else {
+			s += fmt.Sprintf("  ·  %g reserve", roundSpend(r))
+		}
+	}
+	return s
 }
 
 // featureSpend formats the full metered cost for the dashboard.

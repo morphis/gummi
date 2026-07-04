@@ -143,6 +143,73 @@ func TestBudgetOverspendEnforcedGummiSide(t *testing.T) {
 	}
 }
 
+func TestSpendPlanDrivesStageBudget(t *testing.T) {
+	// a feature with an envelope gets its per-stage allocation with
+	// rollover and the protected review/verify floor, not a flat budget.
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	f.Budget.Envelope = 300
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	// 40 credits already spent in earlier stages
+	if err := store.AddSpend(context.Background(), f.ID, 40, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	// implement cap through 70% of 300 = 210, minus 40 spent = 170 available;
+	// the enforced cap sits 10% below that.
+	if got := rec.opts().MaxCredits; got < 152.9 || got > 153.1 {
+		t.Errorf("MaxCredits = %v, want ~153 (170 stage budget × 0.9)", got)
+	}
+}
+
+func TestTopUpReleasesReserve(t *testing.T) {
+	// a verify stage at its 95% cap has nothing left and gates immediately;
+	// a top-up releases the 5% reserve and resumes with that headroom.
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify", domain.StageVerify)
+	f.Budget.Envelope = 300
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSpend(context.Background(), f.ID, 285, 0, 0); err != nil { // at the 95% cap
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	// nothing left: the stage gates immediately without opening a session.
+	waitFor(t, e, EventExhausted)
+	if rec.opts().MaxCredits != 0 {
+		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
+	}
+
+	// top up: reserve (15 credits) released, stage resumes with a cap.
+	if err := e.TopUp(context.Background(), f.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+	// 15 credit budget × 0.9 headroom = 13.5.
+	if got := rec.opts().MaxCredits; got < 13.4 || got > 13.6 {
+		t.Errorf("resumed MaxCredits = %v, want ~13.5 (reserve released)", got)
+	}
+}
+
 func TestBudgetByokTokensEnforced(t *testing.T) {
 	// a BYOK session reports tokens, never credits: the budget must still
 	// engage via the token→credit conversion (DESIGN §5.1 unified spend).

@@ -1,0 +1,95 @@
+package domain
+
+// SpendPlan is a feature's layer-3 budget (DESIGN §5.1): an envelope of
+// credits split into per-stage allocations, plus an orchestrator-held
+// reserve. Allocations are consumed in workflow order, and two rules make
+// the plan real rather than decorative:
+//
+//   - Rollover forward: a stage's cap is the cumulative allocation up to
+//     and including it, minus everything spent so far — so budget a stage
+//     doesn't use inflates the next stage's headroom.
+//   - Protected quality floor: because a stage's cap sums allocations only
+//     up to itself, it can never reach into a later stage's share. Review
+//     and verify allocations cannot be borrowed by implementation.
+//
+// The reserve is never included in any stage cap until a human releases it
+// at an exhaustion gate ("top up").
+type SpendPlan struct {
+	Envelope float64 // total credits for the feature; 0 = unbudgeted
+	// Alloc is each stage's share as a fraction of the envelope. Stages
+	// absent from the map (todo, done) consume no allocation. The
+	// fractions plus Reserve should sum to 1.
+	Alloc   map[Stage]float64
+	Reserve float64 // fraction held back, released only at a human gate
+}
+
+// defaultAlloc is the v1 static allocation (DESIGN §5.1). brainstorm+spec
+// share 15%; reserve is held separately. Estimation-driven allocation is
+// an M4+ refinement.
+var defaultAlloc = map[Stage]float64{
+	StageBrainstorm: 0.075,
+	StageSpec:       0.075,
+	StagePlan:       0.10,
+	StageImplement:  0.45,
+	StageReview:     0.15,
+	StageVerify:     0.10,
+}
+
+// DefaultPlan returns the standard plan for an envelope (0 = unbudgeted).
+func DefaultPlan(envelope float64) SpendPlan {
+	return SpendPlan{Envelope: envelope, Alloc: defaultAlloc, Reserve: 0.05}
+}
+
+// ByokCreditsPer1KTokens converts a BYOK session's tokens into a credit-
+// equivalent so one credit-denominated plan governs both hosted and BYOK
+// spend (DESIGN §5.1). A single default rate; per-provider rates are a
+// later refinement. 0.5 credits/1K ≈ $0.005/1K, a mid local rate.
+const ByokCreditsPer1KTokens = 0.5
+
+// CreditEquivalent returns the spend as a credit figure: the metered
+// credits for hosted usage, or a token-derived equivalent for BYOK
+// (which reports tokens, never credits).
+func (s Spend) CreditEquivalent() float64 {
+	if s.Credits > 0 {
+		return s.Credits
+	}
+	return float64(s.InputTokens+s.OutputTokens) / 1000 * ByokCreditsPer1KTokens
+}
+
+// capThrough returns the cumulative credit cap available up to and
+// including stage s: the envelope times the sum of allocations for every
+// stage at or before s in workflow order. Later stages (the protected
+// floor) and the reserve are excluded. When reserveReleased is true the
+// reserve is folded in, lifting the cap for a topped-up stage.
+func (p SpendPlan) capThrough(s Stage, reserveReleased bool) float64 {
+	if p.Envelope <= 0 {
+		return 0
+	}
+	var frac float64
+	for _, st := range Stages {
+		frac += p.Alloc[st]
+		if st == s {
+			break
+		}
+	}
+	if reserveReleased {
+		frac += p.Reserve
+	}
+	return p.Envelope * frac
+}
+
+// StageBudget returns the credits available to stage s given the credits
+// already spent across the feature so far. This is the per-stage cap the
+// orchestrator enforces: cumulative allocation through s (with rollover),
+// minus prior spend. reserveReleased folds the reserve in after a top-up.
+// The result is clamped at 0 (an over-budget feature gets no more).
+func (p SpendPlan) StageBudget(s Stage, spentSoFar float64, reserveReleased bool) float64 {
+	if p.Envelope <= 0 {
+		return 0
+	}
+	b := p.capThrough(s, reserveReleased) - spentSoFar
+	if b < 0 {
+		return 0
+	}
+	return b
+}

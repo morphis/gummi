@@ -84,7 +84,8 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 		f := domain.Feature{
 			ID: id, Num: num, Title: res.Title, OneLiner: res.OneLiner,
 			Slug: slug, Stage: workflow.Initial(), Skip: res.Skip,
-			Profile: res.Profile, CreatedAt: now, UpdatedAt: now,
+			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
+			CreatedAt: now, UpdatedAt: now,
 		}
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
