@@ -180,6 +180,9 @@ func (s *Session) appendUser(text string) {
 }
 
 func (s *Session) appendDelta(text string) {
+	if text == "" {
+		return // nothing to add; don't open an empty streaming bubble
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming {
@@ -192,10 +195,22 @@ func (s *Session) appendDelta(text string) {
 // finishAssistant finalizes the streaming assistant message with the
 // authoritative full text, or appends a completed one if no deltas
 // arrived (the common case for adapters that only emit whole messages).
+// An empty completion — a tool-call or reasoning step that carries no
+// prose, which agents emit many of per turn — adds no bubble: it just
+// finalizes an in-progress streamed message (keeping its content) so the
+// transcript never fills with blank assistant replies.
 func (s *Session) finishAssistant(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming {
+	n := len(s.transcript)
+	streaming := n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming
+	if strings.TrimSpace(text) == "" {
+		if streaming {
+			s.transcript[n-1].Streaming = false
+		}
+		return
+	}
+	if streaming {
 		s.transcript[n-1].Content = text
 		s.transcript[n-1].Streaming = false
 		return
