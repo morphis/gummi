@@ -17,38 +17,30 @@ const capHeadroom = 0.90
 // (DESIGN §5.1 layer 2). 100% is the exhaustion checkpoint.
 var budgetThresholds = []int{50, 80, 95}
 
-// creditEquiv returns a usage total in credits: the metered credits for a
-// hosted session, or a token-derived equivalent for a BYOK session (which
-// reports tokens, never credits). This is what budget math compares —
-// enforcement for BYOK is gummi-side since --max-ai-credits never fires
-// for credit-free sessions (DESIGN §5.1).
-func creditEquiv(credits float64, inTok, outTok int64) float64 {
-	return domain.Spend{Credits: credits, InputTokens: inTok, OutputTokens: outTok}.CreditEquivalent()
-}
-
 // stageBudget returns the credit budget for a feature's current stage.
 // A feature with a spend-plan envelope (layer 3) gets its per-stage
 // allocation with rollover and the protected review/verify floor; one
 // without falls back to the flat config value (layer 1/2 behavior).
-func (e *Engine) stageBudget(f domain.Feature) float64 {
+func (e *Engine) stageBudget(f domain.Feature, byokRate float64) float64 {
 	if f.Budget.Envelope > 0 {
 		return domain.DefaultPlan(float64(f.Budget.Envelope)).
-			StageBudget(f.Stage, e.featureSpent(f), e.reserveReleased(f.ID))
+			StageBudget(f.Stage, e.featureSpent(f, byokRate), e.reserveReleased(f.ID))
 	}
 	return e.cfg.StageBudget
 }
 
 // featureSpent returns the feature's credit-equivalent spend so far,
-// reading the store's authoritative running total (updated on every
-// usage event) so rollover math sees spend from prior stages.
-func (e *Engine) featureSpent(f domain.Feature) float64 {
+// reading the store's authoritative running total (updated on every usage
+// event) so rollover math sees spend from prior stages, priced at the
+// current session's provider rate.
+func (e *Engine) featureSpent(f domain.Feature, byokRate float64) float64 {
 	sp := f.Spend
 	if e.cfg.Store != nil {
 		if cur, err := e.cfg.Store.GetFeature(context.Background(), f.ID); err == nil {
 			sp = cur.Spend
 		}
 	}
-	return sp.CreditEquivalent()
+	return sp.CreditEquivalentAt(byokRate)
 }
 
 // reserveReleased reports whether a top-up has released the feature's

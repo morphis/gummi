@@ -40,6 +40,10 @@ type Provider struct {
 	// adapter reads it at session start. The key itself is never
 	// stored on SessionOpts, so it can't leak into state or logs.
 	APIKeyEnv string
+	// CreditsPer1KTokens is the provider's token→credit rate for budget
+	// math (0 = the orchestrator's default). Advisory to the adapter; the
+	// engine uses it to price this session's token spend.
+	CreditsPer1KTokens float64
 }
 
 // SessionOpts configures one agent session.

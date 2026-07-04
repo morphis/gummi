@@ -94,6 +94,23 @@ func TestEstimateEnvelope(t *testing.T) {
 	}
 }
 
+func TestCreditEquivalentAt(t *testing.T) {
+	tok := Spend{OutputTokens: 10000}
+	if got := tok.CreditEquivalentAt(2.0); got != 20 { // 10000/1000 × 2.0
+		t.Errorf("rate 2.0 = %v, want 20", got)
+	}
+	if got := tok.CreditEquivalentAt(0); got != 5 { // default 0.5
+		t.Errorf("default rate = %v, want 5", got)
+	}
+	if got := tok.CreditEquivalent(); got != 5 {
+		t.Errorf("CreditEquivalent = %v, want 5 (default)", got)
+	}
+	// hosted credits ignore the token rate
+	if got := (Spend{Credits: 7}).CreditEquivalentAt(2.0); got != 7 {
+		t.Errorf("hosted = %v, want 7", got)
+	}
+}
+
 func TestStageBudgetUnbudgeted(t *testing.T) {
 	p := DefaultPlan(0)
 	if got := p.StageBudget(StageImplement, 0, false); got != 0 {

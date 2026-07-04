@@ -51,14 +51,22 @@ func DefaultPlan(envelope float64) SpendPlan {
 // later refinement. 0.5 credits/1K ≈ $0.005/1K, a mid local rate.
 const ByokCreditsPer1KTokens = 0.5
 
-// CreditEquivalent returns the spend as a credit figure: the metered
-// credits for hosted usage, or a token-derived equivalent for BYOK
-// (which reports tokens, never credits).
-func (s Spend) CreditEquivalent() float64 {
+// CreditEquivalent returns the spend as a credit figure at the default
+// rate. See CreditEquivalentAt for a per-provider rate.
+func (s Spend) CreditEquivalent() float64 { return s.CreditEquivalentAt(0) }
+
+// CreditEquivalentAt returns the spend as a credit figure: the metered
+// credits for hosted usage, or a token-derived equivalent for BYOK (which
+// reports tokens, never credits) at ratePer1K credits per 1000 tokens. A
+// non-positive rate falls back to the default ByokCreditsPer1KTokens.
+func (s Spend) CreditEquivalentAt(ratePer1K float64) float64 {
 	if s.Credits > 0 {
 		return s.Credits
 	}
-	return float64(s.InputTokens+s.OutputTokens) / 1000 * ByokCreditsPer1KTokens
+	if ratePer1K <= 0 {
+		ratePer1K = ByokCreditsPer1KTokens
+	}
+	return float64(s.InputTokens+s.OutputTokens) / 1000 * ratePer1K
 }
 
 // estimateHeadroom pads the historical median so an estimated envelope

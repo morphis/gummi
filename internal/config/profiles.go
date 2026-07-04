@@ -24,6 +24,10 @@ type ProviderConfig struct {
 	BaseURL   string `yaml:"base_url"`
 	Model     string `yaml:"model"`
 	APIKeyEnv string `yaml:"api_key_env"`
+	// CreditsPer1KTokens is this provider's token→credit rate for budget
+	// math (0 = gummi's default). It lets a cheap local endpoint and a
+	// pricey hosted one meter against the same credit budget accurately.
+	CreditsPer1KTokens float64 `yaml:"credits_per_1k_tokens"`
 	// APIKey is intentionally rejected: keys must be env references.
 	APIKey string `yaml:"api_key"`
 }
@@ -117,17 +121,19 @@ profiles:
     scribe: { model: gpt-5-mini }
 
   # local-heavy: near-zero cloud spend via a local llama.cpp server.
-  # Uncomment and point base_url at your endpoint:
+  # Uncomment and point base_url at your endpoint. credits_per_1k_tokens
+  # sets the token→credit rate for budget math (default 0.5); a near-free
+  # local endpoint can meter cheaply against the same credit budget.
   #
   # local-heavy:
   #   architect: { model: claude-sonnet-5 } # design still wants a big brain
   #   implementer:
   #     model: qwen2.5-coder-32b
-  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1 }
+  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1, credits_per_1k_tokens: 0.02 }
   #   reviewer:
   #     model: qwen2.5-coder-32b
-  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1 }
+  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1, credits_per_1k_tokens: 0.02 }
   #   scribe:
   #     model: qwen2.5-coder-32b
-  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1 }
+  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1, credits_per_1k_tokens: 0.02 }
 `

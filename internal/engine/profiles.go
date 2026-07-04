@@ -36,8 +36,9 @@ func providerFrom(p *config.ProviderConfig) agent.Provider {
 		typ = "openai"
 	}
 	return agent.Provider{
-		Type:      typ,
-		BaseURL:   p.BaseURL,
-		APIKeyEnv: p.APIKeyEnv,
+		Type:               typ,
+		BaseURL:            p.BaseURL,
+		APIKeyEnv:          p.APIKeyEnv,
+		CreditsPer1KTokens: p.CreditsPer1KTokens,
 	}
 }

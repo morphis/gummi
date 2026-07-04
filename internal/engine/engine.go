@@ -246,9 +246,14 @@ func (e *Engine) schedule() {
 // startAutonomous creates the agent session for a queued run and kicks
 // it off. On setup failure it frees the slot and records the error.
 func (e *Engine) startAutonomous(s *Session) {
+	// price this session's token spend at its provider's rate (0 =
+	// default), and use the same rate for the rollover baseline so the
+	// budget math is self-consistent.
+	_, provider := e.resolveRole(s.Feature.Profile, s.Role)
+	s.setByokRate(provider.CreditsPer1KTokens)
 	// compute the stage budget once so the enforced cap, the budget-aware
 	// hint, and the session's own budget all agree.
-	budget := e.stageBudget(s.Feature)
+	budget := e.stageBudget(s.Feature, provider.CreditsPer1KTokens)
 	// a budgeted feature with nothing left must not run uncapped (a 0
 	// budget elsewhere means "unbudgeted"): gate it immediately.
 	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !interactiveStage(s.Feature.Stage) {

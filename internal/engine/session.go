@@ -107,6 +107,7 @@ type Session struct {
 	finalized  bool    // stopped; must not be persisted (may be dropped)
 	heldSlot   bool    // true between taking and releasing an attention slot
 	budget     float64 // stage credit budget (0 = none)
+	byokRate   float64 // provider token→credit rate (0 = default)
 	threshold  int     // highest budget threshold crossed (%)
 	exhausted  bool    // hit the credit cap
 }
@@ -277,9 +278,17 @@ func (s *Session) crossedThreshold() (pct int, spent float64) {
 }
 
 // spentForBudgetLocked returns the session's spend as a credit-equivalent
-// (credits for hosted, token-derived for BYOK). Caller holds s.mu.
+// (credits for hosted, token-derived for BYOK at the provider's rate).
+// Caller holds s.mu.
 func (s *Session) spentForBudgetLocked() float64 {
-	return creditEquiv(s.spend.Credits, s.spend.InputTokens, s.spend.OutputTokens)
+	return domain.Spend{Credits: s.spend.Credits, InputTokens: s.spend.InputTokens, OutputTokens: s.spend.OutputTokens}.
+		CreditEquivalentAt(s.byokRate)
+}
+
+func (s *Session) setByokRate(r float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byokRate = r
 }
 
 // isExhausted reports whether the session has hit its budget.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morphia/gummi/internal/agent"
+	"github.com/morphia/gummi/internal/config"
 	"github.com/morphia/gummi/internal/domain"
 )
 
@@ -208,6 +209,35 @@ func TestTopUpReleasesReserve(t *testing.T) {
 	if got := rec.opts().MaxCredits; got < 13.4 || got > 13.6 {
 		t.Errorf("resumed MaxCredits = %v, want ~13.5 (reserve released)", got)
 	}
+}
+
+func TestBudgetUsesProviderRate(t *testing.T) {
+	// 6000 tokens is 3 credits at the default 0.5/1k (under an 8 budget),
+	// but 12 at this provider's 2.0/1k rate — so the rate must drive the
+	// exhaustion, proving per-provider rates thread into the budget math.
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{OutputTokens: 6000}},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	profs := config.Profiles{Default: "r", Profiles: map[string]config.Profile{
+		"r": {"implementer": {
+			Model:    "m",
+			Provider: &config.ProviderConfig{Type: "openai", BaseURL: "http://x/v1", CreditsPer1KTokens: 2.0},
+		}},
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 8, Profiles: profs})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	f.Profile = "r"
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventExhausted)
 }
 
 func TestBudgetByokTokensEnforced(t *testing.T) {
