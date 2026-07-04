@@ -114,6 +114,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		var estimate string // set at spec approval by plan-time estimation
 		nexts := workflow.Next(f.Stage, f.Skip)
 		if len(nexts) == 0 {
 			return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id)}
@@ -146,13 +147,52 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			if err := m.migrateDraft(ctx, &f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
+			// plan-time estimation: size the spend-plan envelope from what
+			// completed features actually cost, before budgeted autonomous
+			// work begins (DESIGN §5.1). Persisted while still at spec, so
+			// UpdateFeature's no-stage-change rule holds.
+			estimate = m.estimateEnvelope(ctx, &f)
 		}
 		if _, err := m.store.Transition(ctx, id, next, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		m.dropSession(id) // the old stage's session is stale now
-		return noticeMsg{text: fmt.Sprintf("%s → %s", id, next)}
+		return noticeMsg{text: fmt.Sprintf("%s → %s", id, next) + estimate}
 	}
+}
+
+// estimateEnvelope sizes a feature's spend-plan envelope from the median
+// spend of previously completed features and persists it, returning a
+// notice suffix describing the estimate. It only fills an *unset*
+// envelope (0), so an explicit GUMMI_ENVELOPE default a user chose is
+// respected, not silently replaced. Empty when the envelope is already
+// set, when there's no history to learn from, or on any error —
+// estimation is best-effort and never blocks the transition.
+func (m *Shell) estimateEnvelope(ctx context.Context, f *domain.Feature) string {
+	if f.Budget.Envelope != 0 {
+		return "" // an explicit envelope wins over estimation
+	}
+	feats, err := m.store.ListFeatures(ctx)
+	if err != nil {
+		return ""
+	}
+	var hist []domain.Spend
+	for _, x := range feats {
+		if x.ID != f.ID && x.Stage == domain.StageDone {
+			hist = append(hist, x.Spend)
+		}
+	}
+	env, n := domain.EstimateEnvelope(hist)
+	if n == 0 || env <= 0 {
+		return ""
+	}
+	f.Budget.Envelope = int(env)
+	if err := m.store.UpdateFeature(ctx, f); err != nil {
+		return ""
+	}
+	// n is the number of past features that metered spend (zero-spend
+	// completions are not samples).
+	return fmt.Sprintf(" · envelope estimated at %d credits from %d metered feature(s)", int(env), n)
 }
 
 // rebaseFeature rebases a feature's branch onto main from the TUI

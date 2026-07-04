@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"math"
+	"sort"
+)
+
 // SpendPlan is a feature's layer-3 budget (DESIGN §5.1): an envelope of
 // credits split into per-stage allocations, plus an orchestrator-held
 // reserve. Allocations are consumed in workflow order, and two rules make
@@ -54,6 +59,37 @@ func (s Spend) CreditEquivalent() float64 {
 		return s.Credits
 	}
 	return float64(s.InputTokens+s.OutputTokens) / 1000 * ByokCreditsPer1KTokens
+}
+
+// estimateHeadroom pads the historical median so an estimated envelope
+// isn't sized right at the typical cost — a feature a bit above the median
+// still finishes without a top-up.
+const estimateHeadroom = 1.25
+
+// EstimateEnvelope proposes a feature's credit envelope from the actual
+// spend of previously completed features — the historical-spend signal
+// of plan-time estimation (DESIGN §5.1). It takes the median
+// credit-equivalent spend of the samples (robust to the odd runaway
+// feature), adds headroom, and rounds up to a tidy 10, so a repo's
+// features get budgets sized to what work there actually costs rather
+// than a flat default. Returns (0, 0) when there is no spend to learn
+// from, leaving the caller's existing envelope untouched.
+func EstimateEnvelope(history []Spend) (envelope float64, samples int) {
+	vals := make([]float64, 0, len(history))
+	for _, s := range history {
+		if c := s.CreditEquivalent(); c > 0 {
+			vals = append(vals, c)
+		}
+	}
+	if len(vals) == 0 {
+		return 0, 0
+	}
+	sort.Float64s(vals)
+	med := vals[len(vals)/2]
+	if len(vals)%2 == 0 {
+		med = (vals[len(vals)/2-1] + vals[len(vals)/2]) / 2
+	}
+	return math.Ceil(med*estimateHeadroom/10) * 10, len(vals)
 }
 
 // capThrough returns the cumulative credit cap available up to and
