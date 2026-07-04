@@ -47,6 +47,29 @@ CREATE TABLE IF NOT EXISTS transitions (
 	at         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS transitions_feature ON transitions(feature_id);
+
+-- One row per feature that has (or had) an agent session; the durable
+-- record used to restore the board after a restart.
+CREATE TABLE IF NOT EXISTS sessions (
+	feature_id    TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	stage         TEXT NOT NULL,
+	role          TEXT NOT NULL,
+	state         TEXT NOT NULL,
+	spend_credits REAL NOT NULL DEFAULT 0,
+	spend_in      INTEGER NOT NULL DEFAULT 0,
+	spend_out     INTEGER NOT NULL DEFAULT 0,
+	spend_model   TEXT NOT NULL DEFAULT '',
+	activity      TEXT NOT NULL DEFAULT '',
+	updated_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_messages (
+	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+	feature_id TEXT NOT NULL REFERENCES sessions(feature_id) ON DELETE CASCADE,
+	ord        INTEGER NOT NULL,
+	author     TEXT NOT NULL,
+	content    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_messages_feature ON session_messages(feature_id);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.

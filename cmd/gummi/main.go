@@ -121,8 +121,13 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 	}
 	eng := engine.New(engine.Config{
 		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
-		Model: model, Provider: provider, MaxActive: maxActive,
+		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
 	})
+	// reload any sessions from a previous run so the board shows where
+	// each feature left off.
+	if err := eng.Restore(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi: restoring sessions:", err)
+	}
 	return eng, func() { _ = eng.Close(); _ = ag.Close() }
 }
 

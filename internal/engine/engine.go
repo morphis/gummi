@@ -39,6 +39,9 @@ type Config struct {
 	Permission agent.Permission
 	// MaxActive is the number of concurrent autonomous slots (default 1).
 	MaxActive int
+	// Persist writes session transcripts to Store so they survive a
+	// restart (Restore reloads them).
+	Persist bool
 }
 
 // Engine orchestrates all live sessions and the autonomous run queue.
@@ -135,22 +138,33 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		e.mu.Unlock()
 		return nil, errors.New("engine is closed")
 	}
-	if s, ok := e.live[f.ID]; ok && s.Feature.Stage == f.Stage {
-		e.mu.Unlock()
-		return s, nil // reuse the live session
-	}
+	prior := e.live[f.ID]
 	e.mu.Unlock()
+
+	// A live agent session for this stage is reused (keeps its context);
+	// a restored session (no agent) or a different stage starts fresh,
+	// carrying the prior transcript over so the history stays visible.
+	if prior != nil && prior.Feature.Stage == f.Stage && prior.agent() != nil {
+		return prior, nil
+	}
 
 	sess, err := e.newAgentSession(ctx, f, role)
 	if err != nil {
 		return nil, err
 	}
 	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{})}
+	if prior != nil && prior.Feature.Stage == f.Stage {
+		ps := prior.Snapshot()
+		s.transcript = append(s.transcript, ps.Transcript...)
+		s.activity = append(s.activity, ps.Activity...)
+		s.spend = ps.Spend
+	}
 	s.attachAgent(sess)
 	s.setState(StateInteractive)
 
 	e.replace(f.ID, s)
 	go e.pump(s)
+	e.persist(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
 	return s, nil
 }
@@ -232,6 +246,7 @@ func (e *Engine) startAutonomous(s *Session) {
 
 	s.appendUser(kickoff)
 	s.setBusy(true)
+	e.persist(s)
 	if err := sess.Send(context.Background(), kickoff); err != nil {
 		s.setError(err)
 		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
@@ -290,6 +305,7 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	}
 	s.appendUser(msg)
 	s.setBusy(true)
+	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
 	if err := a.Send(ctx, msg); err != nil {
 		s.setError(err)
@@ -326,6 +342,7 @@ func (e *Engine) Pause(ctx context.Context, id domain.FeatureID) error {
 	e.removeFromQueue(id)
 	e.mu.Unlock()
 	s.setState(StatePaused)
+	e.persist(s) // record the paused state before finalizing
 	s.stop()
 	e.freeSlot(s)
 	return nil
@@ -341,6 +358,7 @@ func (e *Engine) Drop(id domain.FeatureID) {
 		s.stop()
 		e.freeSlot(s)
 	}
+	e.persistDelete(id)
 }
 
 // dropLocked removes a feature's live session and any queue entry.
@@ -452,8 +470,14 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		}
 	case agent.EventError:
 		s.setError(ev.Err)
+		e.persist(s)
 		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: ev.Err})
 		return
+	}
+	// persist once per turn, at idle (which follows the finalized
+	// message), rather than on every message + idle.
+	if ev.Kind == agent.EventIdle {
+		e.persist(s)
 	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: kind})
 }

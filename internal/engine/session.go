@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/morphia/gummi/internal/agent"
@@ -96,6 +97,7 @@ type Session struct {
 	busy       bool
 	err        error
 	stopped    bool
+	finalized  bool // stopped; must not be persisted (may be dropped)
 	heldSlot   bool // true between taking and releasing an attention slot
 }
 
@@ -194,6 +196,9 @@ func (s *Session) finishAssistant(text string) {
 }
 
 func (s *Session) appendActivity(tool string) {
+	// activity is stored newline-joined; keep labels single-line so they
+	// round-trip through persistence intact.
+	tool = strings.ReplaceAll(strings.ReplaceAll(tool, "\n", " "), "\r", " ")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activity = append(s.activity, tool)
@@ -243,13 +248,25 @@ func (s *Session) markStopped() bool {
 	return true
 }
 
-// stop ends the session: it signals the pump and closes the agent
-// session (if one was created). Idempotent.
+// stop ends the session: it marks it finalized (so no late persist can
+// resurrect it), signals the pump, and closes the agent session (if one
+// was created). Idempotent.
 func (s *Session) stop() {
 	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.finalized = true
+		s.mu.Unlock()
 		close(s.done)
 		if a := s.agent(); a != nil {
 			_ = a.Close()
 		}
 	})
+}
+
+// finalizedState reports whether the session has been stopped; a
+// finalized session must not be persisted (it may have been dropped).
+func (s *Session) finalizedState() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.finalized
 }
