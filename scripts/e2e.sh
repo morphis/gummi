@@ -32,7 +32,7 @@ await() {
     fail "timed out waiting for: $1"
 }
 
-tmux -L "$sock" new-session -d -x 120 -y 34 "cd '$dir' && '$bin' board"
+tmux -L "$sock" new-session -d -x 120 -y 34 "cd '$dir' && '$bin'"
 await "no features yet"
 
 # create a feature through the real form

@@ -1,9 +1,47 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestEnsureWorkspaceLazyInit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := ensureWorkspace(dir)
+	if err != nil {
+		t.Fatalf("ensureWorkspace: %v", err)
+	}
+	for _, p := range []string{ws.GummiDir(), ws.ConfigFile(), ws.ProfilesFile()} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("lazy init did not create %s: %v", p, err)
+		}
+	}
+	// idempotent: an existing config is never clobbered
+	if err := os.WriteFile(ws.ConfigFile(), []byte("custom"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorkspace(dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(ws.ConfigFile()); string(b) != "custom" {
+		t.Error("ensureWorkspace clobbered an existing config.yaml")
+	}
+}
+
+func TestEnsureWorkspaceRejectsNonRepo(t *testing.T) {
+	if _, err := ensureWorkspace(t.TempDir()); err == nil {
+		t.Error("ensureWorkspace in a non-git dir should error")
+	}
+}
 
 func TestRunVersion(t *testing.T) {
-	for _, args := range [][]string{nil, {"version"}, {"--version"}} {
+	// (no-arg `run` launches the board, which needs a repo + TTY, so it
+	// isn't exercised here.)
+	for _, args := range [][]string{{"version"}, {"--version"}, {"-v"}} {
 		if err := run(args); err != nil {
 			t.Errorf("run(%v) = %v, want nil", args, err)
 		}

@@ -48,18 +48,18 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 0 || args[0] == "version" || args[0] == "--version" {
-		fmt.Printf("gummi %s\n", version())
-		return nil
+	if len(args) > 0 {
+		switch args[0] {
+		case "version", "--version", "-v":
+			fmt.Printf("gummi %s\n", version())
+			return nil
+		default:
+			return fmt.Errorf("unknown argument %q (usage: gummi [version])", args[0])
+		}
 	}
-	switch args[0] {
-	case "init":
-		return runInit()
-	case "board":
-		return runBoard()
-	default:
-		return fmt.Errorf("unknown command %q (commands: init, board, version)", args[0])
-	}
+	// `gummi` with no arguments launches the board, creating the .gummi
+	// workspace lazily on first run.
+	return runBoard()
 }
 
 func runBoard() error {
@@ -67,7 +67,7 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
-	ws, err := state.Open(cwd)
+	ws, err := ensureWorkspace(cwd)
 	if err != nil {
 		return err
 	}
@@ -194,26 +194,24 @@ func buildAgent() (agent.Agent, error) {
 	return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
 }
 
-func runInit() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+// ensureWorkspace returns the .gummi workspace at cwd, creating it (and
+// scaffolding config.yaml + profiles.yaml) on first run. Idempotent: an
+// existing workspace and its files are left untouched. cwd must be a git
+// repository root (gummi manages worktrees).
+func ensureWorkspace(cwd string) (state.Workspace, error) {
 	w, err := state.Init(cwd)
 	if err != nil {
-		return err
+		return state.Workspace{}, err
 	}
-	// scaffold the repo config + profiles if absent
 	for _, f := range []struct{ path, body string }{
 		{w.ConfigFile(), config.Template},
 		{w.ProfilesFile(), config.ProfilesTemplate},
 	} {
 		if _, err := os.Stat(f.path); os.IsNotExist(err) {
 			if err := os.WriteFile(f.path, []byte(f.body), 0o600); err != nil {
-				return fmt.Errorf("writing %s: %w", filepath.Base(f.path), err)
+				return state.Workspace{}, fmt.Errorf("writing %s: %w", filepath.Base(f.path), err)
 			}
 		}
 	}
-	fmt.Printf("initialized gummi workspace in %s\n", w.GummiDir())
-	return nil
+	return w, nil
 }

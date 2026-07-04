@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Creates a throwaway demo repository with gummi initialized, then
-# prints how to open the board. Usage: scripts/demo.sh [dir]
+# Creates a throwaway demo repository (a git repo); gummi creates its
+# .gummi workspace lazily on first launch. Usage: scripts/demo.sh [dir]
 set -eu
 
 dir="${1:-$(mktemp -d "${TMPDIR:-/tmp}/gummi-demo.XXXXXX")}"
@@ -29,9 +29,8 @@ if [ ! -d .git ]; then
     git commit -qm "initial"
 fi
 
-"$bin" init
-
+# .gummi is created lazily on first launch — no init step needed.
 echo
 echo "demo repo ready: $dir"
-echo "open the board with:"
-echo "  cd $dir && $bin board"
+echo "open it with:"
+echo "  cd $dir && $bin"

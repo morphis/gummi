@@ -7,9 +7,9 @@ gummi is under construction. `docs/DESIGN.md` is the design;
 
 ## What works today (M0 — walking skeleton)
 
-- `gummi init` — sets up `.gummi/` in a repo: state dir (0700), spec
-  drafts, worktrees dir, ignore rules, FD counter.
-- `gummi board` — the kanban TUI:
+- `gummi` — launches the kanban TUI, creating the `.gummi/` workspace
+  (state dir at 0700, spec drafts, worktrees dir, ignore rules, FD
+  counter, config + profiles) lazily on first run. The TUI:
   - create features (`n`): title, one-liner, profile preset, skip
     flags; IDs minted as `FD-NNN` with merge-safe retry.
   - cards grouped by super-state with stage-accent glyphs, `j/k` and
