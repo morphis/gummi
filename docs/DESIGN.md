@@ -580,9 +580,9 @@ landed-branch detection + cleanup, notification hooks (bell/desktop),
 plan-time budget estimation.
 
 **M5 — second adapter & polish**
-opencode adapter (HTTP), generic headless adapter, additional themes
-(light + alternates on the token system), raw-attach escape hatch, demo
-GIFs (vhs), docs site.
+opencode adapter, generic headless adapter, additional themes
+(light + alternates on the token system), raw-attach escape hatch.
+(Demo GIFs and a docs site were dropped from scope.)
 
 ## 10. Decisions & open questions
 
