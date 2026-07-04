@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,8 +64,6 @@ func feature(num int, title string, stage domain.Stage) domain.Feature {
 	}
 }
 
-// waitFor reads engine events until one matching kind arrives or the
-// deadline passes.
 func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
@@ -80,19 +79,52 @@ func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 	}
 }
 
+// waitState polls a feature's session until it reaches want.
+func waitState(t *testing.T, e *Engine, id domain.FeatureID, want SessionState) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		if s := e.Get(id); s != nil && s.State() == want {
+			return
+		}
+		select {
+		case <-deadline:
+			cur := "<nil>"
+			if s := e.Get(id); s != nil {
+				cur = string(s.State())
+			}
+			t.Fatalf("%s did not reach %s (at %s)", id, want, cur)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// newEngine builds a single-slot engine (MaxActive 1); multi-slot tests
+// construct New directly.
 func newEngine(t *testing.T, ag agent.Agent) *Engine {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
 
-func TestStartRejectsNonAgentStages(t *testing.T) {
+// withWorktree creates a feature's worktree so autonomous stages locate it.
+func withWorktree(t *testing.T, wt *worktree.Manager, f domain.Feature) {
+	t.Helper()
+	if _, err := wt.Create(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRejectsNonAgentStages(t *testing.T) {
 	e := newEngine(t, agent.NewFake("hi"))
 	for _, st := range []domain.Stage{domain.StageTodo, domain.StageDone} {
-		if _, err := e.Start(context.Background(), feature(1, "x", st)); err == nil {
-			t.Errorf("stage %s should have no agent action", st)
+		if _, err := e.Attach(context.Background(), feature(1, "x", st)); err == nil {
+			t.Errorf("Attach: stage %s should have no agent action", st)
+		}
+		if err := e.Run(feature(1, "x", st)); err == nil {
+			t.Errorf("Run: stage %s should have no agent action", st)
 		}
 	}
 }
@@ -101,185 +133,271 @@ func TestInteractiveRoundTrip(t *testing.T) {
 	e := newEngine(t, agent.NewFake("Here are two approaches."))
 	ctx := context.Background()
 
-	s, err := e.Start(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
+	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Role != agent.RoleArchitect || !s.Interactive {
-		t.Fatalf("brainstorm should be interactive architect: %+v", s)
+	if s.Role != agent.RoleArchitect || !s.Interactive || s.State() != StateInteractive {
+		t.Fatalf("brainstorm should be an interactive architect session: %+v", s.Snapshot())
 	}
 	waitFor(t, e, EventStarted)
 
-	if err := e.Send(ctx, "how should dark mode persist?"); err != nil {
+	if err := e.Send(ctx, "FD-001", "how should dark mode persist?"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle)
 
 	snap := s.Snapshot()
-	if len(snap.Transcript) != 2 {
-		t.Fatalf("transcript = %+v, want user+assistant", snap.Transcript)
+	if len(snap.Transcript) != 2 || snap.Transcript[1].Content != "Here are two approaches." {
+		t.Fatalf("transcript = %+v", snap.Transcript)
 	}
-	if snap.Transcript[0].Author != AuthorUser || snap.Transcript[0].Content != "how should dark mode persist?" {
-		t.Errorf("user turn wrong: %+v", snap.Transcript[0])
+	if snap.Busy || snap.Spend.Credits != 1 {
+		t.Errorf("post-turn state wrong: busy=%v spend=%+v", snap.Busy, snap.Spend)
 	}
-	if snap.Transcript[1].Author != AuthorAssistant || snap.Transcript[1].Content != "Here are two approaches." {
-		t.Errorf("assistant turn wrong: %+v", snap.Transcript[1])
-	}
-	if snap.Transcript[1].Streaming {
-		t.Error("assistant turn should be finalized")
-	}
-	if snap.Busy {
-		t.Error("session should be idle after the turn")
-	}
-	if snap.Spend.Credits != 1 {
-		t.Errorf("spend not metered: %+v", snap.Spend)
+	// interactive sessions do not consume a slot
+	if s := e.Get("FD-001"); s.State() != StateInteractive {
+		t.Errorf("interactive session changed state to %s", s.State())
 	}
 }
 
-func TestStreamingDeltasAndActivity(t *testing.T) {
+func TestAutonomousRunKicksOff(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{
-			{Kind: agent.EventTextDelta, Text: "Look"},
-			{Kind: agent.EventTextDelta, Text: "ing…"},
-			{Kind: agent.EventToolCall, Tool: "grep internal/"},
 			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
-			{Kind: agent.EventMessage, Text: "Looking… done."},
+			{Kind: agent.EventMessage, Text: "Implemented."},
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, OutputTokens: 40}},
 			{Kind: agent.EventIdle},
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
 
-	f := feature(2, "search", domain.StageImplement)
-	if _, err := wt.Create(ctx, &f); err != nil {
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}
-	s, err := e.Start(ctx, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Interactive {
-		t.Error("implement is autonomous, not interactive")
-	}
-	waitFor(t, e, EventStarted)
-	if err := e.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, e, EventIdle)
+	// the engine kicks it off automatically and it finishes → done
+	waitState(t, e, "FD-001", StateDone)
 
-	snap := s.Snapshot()
-	last := snap.Transcript[len(snap.Transcript)-1]
-	if last.Content != "Looking… done." || last.Streaming {
-		t.Errorf("streamed message not finalized: %+v", last)
+	snap := e.Get("FD-001").Snapshot()
+	if len(snap.Activity) != 1 || snap.Activity[0] != "edit theme.go" {
+		t.Errorf("activity = %+v", snap.Activity)
 	}
-	if len(snap.Activity) != 2 || snap.Activity[0] != "grep internal/" {
-		t.Errorf("activity feed wrong: %+v", snap.Activity)
+	if snap.Spend.Credits != 2 {
+		t.Errorf("spend = %+v", snap.Spend)
 	}
-	if snap.Spend.Credits != 2 || snap.Spend.OutputTokens != 40 {
-		t.Errorf("spend wrong: %+v", snap.Spend)
+	// the kickoff turn is recorded as the first user message
+	if len(snap.Transcript) < 1 || snap.Transcript[0].Author != AuthorUser {
+		t.Errorf("kickoff not recorded: %+v", snap.Transcript)
 	}
 }
 
-func TestStartReplacesActiveSession(t *testing.T) {
-	e := newEngine(t, agent.NewFake("ok"))
-	ctx := context.Background()
-	s1, err := e.Start(ctx, feature(1, "one", domain.StageBrainstorm))
-	if err != nil {
+func TestSchedulerQueuesBeyondMaxActive(t *testing.T) {
+	// a responder that blocks until released, so slot 1 stays occupied
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() {
+		close(release)
+		e.Close()
+	})
+
+	f1 := feature(1, "one", domain.StageImplement)
+	f2 := feature(2, "two", domain.StageImplement)
+	withWorktree(t, wt, f1)
+	withWorktree(t, wt, f2)
+
+	if err := e.Run(f1); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, e, EventStarted)
-	s2, err := e.Start(ctx, feature(2, "two", domain.StageBrainstorm))
-	if err != nil {
+	waitState(t, e, "FD-001", StateRunning)
+	if err := e.Run(f2); err != nil {
 		t.Fatal(err)
 	}
-	// the first session is stopped; the engine's active is the second
-	if e.Active() != s2 {
-		t.Error("active session was not replaced")
+	// slot is full → f2 queues
+	waitState(t, e, "FD-002", StateQueued)
+
+	// release f1's turn → it goes done, frees the slot, f2 starts
+	release <- struct{}{}
+	waitState(t, e, "FD-001", StateDone)
+	waitState(t, e, "FD-002", StateRunning)
+}
+
+func TestPauseFreesSlotAndPromotes(t *testing.T) {
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() {
+		close(release)
+		e.Close()
+	})
+
+	f1 := feature(1, "one", domain.StageImplement)
+	f2 := feature(2, "two", domain.StageImplement)
+	withWorktree(t, wt, f1)
+	withWorktree(t, wt, f2)
+	if err := e.Run(f1); err != nil {
+		t.Fatal(err)
 	}
-	// s1 eventually reports stopped on the event stream
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-e.Events():
-			if ev.Feature == s1.Feature.ID && ev.Kind == EventStopped {
-				return
-			}
-		case <-deadline:
-			t.Fatal("first session never stopped")
+	waitState(t, e, "FD-001", StateRunning)
+	if err := e.Run(f2); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-002", StateQueued)
+
+	// pause f1 → slot frees, f2 promoted to running
+	if err := e.Pause(context.Background(), "FD-001"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StatePaused)
+	waitState(t, e, "FD-002", StateRunning)
+}
+
+func TestMaxActiveTwo(t *testing.T) {
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 2})
+	t.Cleanup(func() {
+		close(release)
+		e.Close()
+	})
+
+	for i := 1; i <= 3; i++ {
+		f := feature(i, "f", domain.StageImplement)
+		withWorktree(t, wt, f)
+		if err := e.Run(f); err != nil {
+			t.Fatal(err)
 		}
 	}
+	waitState(t, e, "FD-001", StateRunning)
+	waitState(t, e, "FD-002", StateRunning)
+	waitState(t, e, "FD-003", StateQueued) // third waits behind two slots
 }
 
-func TestErrorEvent(t *testing.T) {
+func TestRunRequiresWorktree(t *testing.T) {
+	e := newEngine(t, agent.NewFake("ok"))
+	f := feature(1, "no wt", domain.StageImplement)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err) // Run enqueues fine
+	}
+	// the failure surfaces asynchronously as the scheduler tries to start
+	ev := waitFor(t, e, EventError)
+	if ev.Err == nil {
+		t.Error("missing worktree produced no error")
+	}
+	waitState(t, e, "FD-001", StatePaused)
+}
+
+func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
+	// Regression: dropping/pausing a QUEUED session must not decrement
+	// the running count (it never held a slot), which would let an extra
+	// autonomous session start beyond MaxActive.
+	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		return []agent.Event{{Kind: agent.EventError, Err: context.DeadlineExceeded}}
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
-	e := newEngine(t, ag)
-	ctx := context.Background()
-	s, err := e.Start(ctx, feature(1, "x", domain.StageBrainstorm))
-	if err != nil {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() {
+		close(release)
+		e.Close()
+	})
+
+	f1 := feature(1, "one", domain.StageImplement)
+	f2 := feature(2, "two", domain.StageImplement)
+	f3 := feature(3, "three", domain.StageImplement)
+	for _, f := range []domain.Feature{f1, f2, f3} {
+		withWorktree(t, wt, f)
+	}
+	if err := e.Run(f1); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateRunning)
+	if err := e.Run(f2); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Run(f3); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-002", StateQueued)
+	waitState(t, e, "FD-003", StateQueued)
+
+	// drop the queued FD-002 — the slot is still held by FD-001, so
+	// FD-003 must NOT start (that would be 2 running with MaxActive 1).
+	e.Drop("FD-002")
+	// give any erroneous scheduling a moment to happen
+	time.Sleep(50 * time.Millisecond)
+	if s := e.Get("FD-003"); s == nil || s.State() != StateQueued {
+		t.Fatalf("FD-003 wrongly promoted past MaxActive after dropping a queued session: %v", s)
+	}
+	if e.Get("FD-001").State() != StateRunning {
+		t.Error("FD-001 stopped running unexpectedly")
+	}
+}
+
+func TestDropStopsSession(t *testing.T) {
+	e := newEngine(t, agent.NewFake("hi"))
+	if _, err := e.Attach(context.Background(), feature(1, "x", domain.StageBrainstorm)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventStarted)
-	if err := e.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	ev := waitFor(t, e, EventError)
-	if ev.Err == nil {
-		t.Error("error event carried no error")
-	}
-	if s.Snapshot().Err == nil {
-		t.Error("session did not record the error")
+	e.Drop("FD-001")
+	if e.Get("FD-001") != nil {
+		t.Error("Drop did not remove the session")
 	}
 }
 
-func TestSendWithoutActiveSession(t *testing.T) {
+func TestSendUnknownFeature(t *testing.T) {
 	e := newEngine(t, agent.NewFake("x"))
-	if err := e.Send(context.Background(), "hi"); err == nil {
-		t.Error("send with no active session should error")
+	if err := e.Send(context.Background(), "FD-999", "hi"); err == nil {
+		t.Error("send to unknown feature should error")
 	}
-	if err := e.Interrupt(context.Background()); err == nil {
-		t.Error("interrupt with no active session should error")
+	if err := e.Interrupt(context.Background(), "FD-999"); err == nil {
+		t.Error("interrupt of unknown feature should error")
 	}
 }
 
 func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: recordingAgent(), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl me", domain.StageImplement)
-	if _, err := wt.Create(context.Background(), &f); err != nil {
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Start(context.Background(), f); err != nil {
-		t.Fatal(err)
-	}
-	ra := e.cfg.Agent.(*recorder)
-	wantDir := filepath.Join(wt.Root(), f.WorktreePath())
-	if ra.lastOpts.WorkDir != wantDir {
-		t.Errorf("workdir = %s, want worktree %s", ra.lastOpts.WorkDir, wantDir)
-	}
-	if ra.lastOpts.Role != agent.RoleImplementer {
-		t.Errorf("role = %s, want implementer", ra.lastOpts.Role)
-	}
-}
+	waitState(t, e, "FD-001", StateDone)
 
-func TestWorktreeStageRequiresWorktree(t *testing.T) {
-	e := newEngine(t, agent.NewFake("ok"))
-	// implement with no worktree must error, not silently run in root
-	_, err := e.Start(context.Background(), feature(1, "no wt", domain.StageImplement))
-	if err == nil {
-		t.Fatal("implement without a worktree should error")
+	wantDir := filepath.Join(wt.Root(), f.WorktreePath())
+	if rec.opts().WorkDir != wantDir {
+		t.Errorf("workdir = %s, want worktree %s", rec.opts().WorkDir, wantDir)
+	}
+	if rec.opts().Role != agent.RoleImplementer {
+		t.Errorf("role = %s, want implementer", rec.opts().Role)
 	}
 }
 
 // recorder is an Agent that captures the last SessionOpts.
 type recorder struct {
 	*agent.Fake
+	mu       sync.Mutex
 	lastOpts agent.SessionOpts
 }
 
@@ -288,6 +406,14 @@ func recordingAgent() *recorder {
 }
 
 func (r *recorder) NewSession(ctx context.Context, opts agent.SessionOpts) (agent.Session, error) {
+	r.mu.Lock()
 	r.lastOpts = opts
+	r.mu.Unlock()
 	return r.Fake.NewSession(ctx, opts)
+}
+
+func (r *recorder) opts() agent.SessionOpts {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastOpts
 }

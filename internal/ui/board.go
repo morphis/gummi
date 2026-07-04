@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/engine"
 )
 
 // stageGlyph is the card marker: readable by shape as well as color.
@@ -59,9 +60,16 @@ func (m *Shell) boardView(w int) string {
 func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) string {
 	s := m.styles
 	glyph := s.Stage(r.F.Stage).Render(stageGlyph(r.F.Stage))
-	// a running agent session marks the card with a spinner glyph
-	if sess := m.sessionFor(r.F.ID); sess != nil && sess.Busy() {
-		glyph = s.Info.Render("⣾")
+	// a live agent session marks the card by scheduling state
+	if sess := m.sessionFor(r.F.ID); sess != nil {
+		switch sess.State() {
+		case engine.StateRunning:
+			if sess.Busy() {
+				glyph = s.Info.Render("⣾")
+			}
+		case engine.StateQueued:
+			glyph = s.Warning.Render("◔")
+		}
 	}
 	cursor := " "
 	if selected {

@@ -47,7 +47,16 @@ func (f *Fake) NewSession(_ context.Context, opts SessionOpts) (Session, error) 
 	if opts.Provider.BaseURL != "" && opts.Model == "" {
 		return nil, errors.New("model required when a provider is set")
 	}
-	s := &fakeSession{agent: f, opts: opts, events: make(chan Event, 32), stop: make(chan struct{})}
+	s := &fakeSession{
+		agent: f,
+		opts:  opts,
+		// small buffer so Interrupt takes effect within a few events
+		// rather than after a large pre-buffered burst
+		raw:    make(chan Event, 4),
+		events: make(chan Event),
+		stop:   make(chan struct{}),
+	}
+	go s.forward()
 	f.sessions = append(f.sessions, s)
 	return s, nil
 }
@@ -67,9 +76,14 @@ type fakeSession struct {
 	agent *Fake
 	opts  SessionOpts
 
-	events    chan Event
-	stop      chan struct{}
-	wg        sync.WaitGroup
+	// raw carries events from streaming goroutines to the forwarder;
+	// events is the consumer-facing stream, owned solely by the
+	// forwarder so it closes exactly once with no send-on-closed race
+	// and no wait for goroutines that a test may have blocked.
+	raw    chan Event
+	events chan Event
+	stop   chan struct{}
+
 	mu        sync.Mutex
 	closed    bool
 	sends     int
@@ -78,6 +92,22 @@ type fakeSession struct {
 }
 
 func (s *fakeSession) Events() <-chan Event { return s.events }
+
+func (s *fakeSession) forward() {
+	defer close(s.events)
+	for {
+		select {
+		case <-s.stop:
+			return
+		case e := <-s.raw:
+			select {
+			case s.events <- e:
+			case <-s.stop:
+				return
+			}
+		}
+	}
+}
 
 func (s *fakeSession) Send(_ context.Context, msg string) error {
 	s.mu.Lock()
@@ -88,26 +118,27 @@ func (s *fakeSession) Send(_ context.Context, msg string) error {
 	s.sends++
 	s.lastMsg = msg
 	s.interrupt = false
-	s.wg.Add(1)
 	s.mu.Unlock()
 
-	reply := s.agent.Reply
-	if reply == "" {
-		reply = fmt.Sprintf("ack: %s", strings.TrimSpace(msg))
-	}
-	stream := []Event{
-		{Kind: EventMessage, Text: reply},
-		{Kind: EventUsage, Usage: Usage{Credits: 1, OutputTokens: int64(len(reply)), Model: s.opts.Model}},
-		{Kind: EventIdle},
-	}
-	if s.agent.Responder != nil {
-		stream = s.agent.Responder(s.opts, msg)
-	}
-
 	// Stream asynchronously: a real session delivers events while the
-	// caller consumes them, so Send must not block on the channel.
+	// caller consumes them, so Send must not block — and the Responder
+	// (which a test may block to hold a slot) runs inside the goroutine,
+	// not in Send, so it never stalls the caller.
 	go func() {
-		defer s.wg.Done()
+		var stream []Event
+		if s.agent.Responder != nil {
+			stream = s.agent.Responder(s.opts, msg)
+		} else {
+			reply := s.agent.Reply
+			if reply == "" {
+				reply = fmt.Sprintf("ack: %s", strings.TrimSpace(msg))
+			}
+			stream = []Event{
+				{Kind: EventMessage, Text: reply},
+				{Kind: EventUsage, Usage: Usage{Credits: 1, OutputTokens: int64(len(reply)), Model: s.opts.Model}},
+				{Kind: EventIdle},
+			}
+		}
 		for _, e := range stream {
 			s.mu.Lock()
 			interrupted := s.interrupt
@@ -116,7 +147,7 @@ func (s *fakeSession) Send(_ context.Context, msg string) error {
 				e = Event{Kind: EventIdle}
 			}
 			select {
-			case s.events <- e:
+			case s.raw <- e:
 			case <-s.stop:
 				return
 			}
@@ -150,11 +181,8 @@ func (s *fakeSession) closeOnce() {
 		return
 	}
 	s.closed = true
-	close(s.stop) // unblock any in-flight streaming goroutines
 	s.mu.Unlock()
-
-	s.wg.Wait()     // let them exit before closing the channel they send on
-	close(s.events) // then close the stream
+	close(s.stop) // forwarder closes events; blocked goroutines exit via stop
 }
 
 // SendCount reports how many turns the session has received (test aid).

@@ -132,7 +132,15 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		if _, err := m.store.Transition(ctx, id, next, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		m.dropSession(id) // the old stage's session is stale now
 		return noticeMsg{text: fmt.Sprintf("%s → %s", id, next)}
+	}
+}
+
+// dropSession ends and forgets a feature's engine session, if any.
+func (m *Shell) dropSession(id domain.FeatureID) {
+	if m.engine != nil {
+		m.engine.Drop(id)
 	}
 }
 
@@ -181,6 +189,7 @@ func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
 		if _, err := m.store.Transition(ctx, id, domain.StageImplement, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		m.dropSession(id)
 		return noticeMsg{text: fmt.Sprintf("%s bounced back to implement", id)}
 	}
 }
@@ -210,6 +219,7 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		if err := m.store.DeleteFeature(ctx, id); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		m.dropSession(id)
 		return noticeMsg{text: fmt.Sprintf("%s deleted", id)}
 	}
 }

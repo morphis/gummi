@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -357,13 +358,7 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 // attachChat opens the interactive chat pane for a feature, starting
 // (or reusing) its engine session.
 func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
-	// reuse the live session only if it matches this feature AND stage
-	// (a stage advance while detached must start a fresh role/session)
-	if a := m.engine.Active(); a != nil && a.Feature.ID == f.ID && a.Feature.Stage == f.Stage {
-		m.chat = newChatPane(f.ID, a)
-		return nil
-	}
-	s, err := m.engine.Start(context.Background(), f)
+	s, err := m.engine.Attach(context.Background(), f)
 	if err != nil {
 		m.notice = noticeMsg{text: err.Error(), isErr: true}
 		return nil
@@ -372,57 +367,48 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	return nil
 }
 
-// runStage starts an autonomous session for a feature's stage and kicks
-// it off. Activity streams into the dashboard; `p` pauses it.
+// runStage enqueues an autonomous run for a feature's stage; the engine
+// schedules and kicks it off. Activity streams into the dashboard;
+// `p` pauses it.
 func (m *Shell) runStage(f domain.Feature) tea.Cmd {
-	if a := m.engine.Active(); a != nil && a.Feature.ID == f.ID {
-		m.notice = noticeMsg{text: string(f.ID) + " is already running"}
-		return nil
+	if s := m.engine.Get(f.ID); s != nil {
+		switch s.State() {
+		case engine.StateRunning:
+			m.notice = noticeMsg{text: string(f.ID) + " is already running"}
+			return nil
+		case engine.StateQueued:
+			m.notice = noticeMsg{text: string(f.ID) + " is queued"}
+			return nil
+		}
 	}
-	started, err := m.engine.Start(context.Background(), f)
-	if err != nil {
+	if err := m.engine.Run(f); err != nil {
 		m.notice = noticeMsg{text: err.Error(), isErr: true}
 		return nil
 	}
-	eng := m.engine
-	return func() tea.Msg {
-		// If the user paused (or switched) before this kickoff runs, the
-		// session is no longer active — that's not an error.
-		if eng.Active() != started {
-			return nil
-		}
-		// kick off the autonomous loop; the stage hints already tell the
-		// agent what to do, so a short go-ahead is enough.
-		if err := eng.Send(context.Background(), "Proceed with this stage per your instructions and the spec."); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return noticeMsg{text: string(f.ID) + " running"}
-	}
+	m.notice = noticeMsg{text: string(f.ID) + " queued"}
+	return nil
 }
 
-// pauseRun stops the active autonomous session for a feature, freeing
-// the attention slot. The stage does not change; re-running resumes.
+// pauseRun stops a feature's autonomous session, freeing its slot.
 func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
-	a := m.engine.Active()
-	if a == nil || a.Feature.ID != f.ID {
+	s := m.engine.Get(f.ID)
+	if s == nil || s.Interactive {
 		return nil
 	}
-	_ = m.engine.Interrupt(context.Background())
-	m.engine.Stop()
+	if err := m.engine.Pause(context.Background(), f.ID); err != nil {
+		m.notice = noticeMsg{text: err.Error(), isErr: true}
+		return nil
+	}
 	m.notice = noticeMsg{text: string(f.ID) + " paused"}
 	return nil
 }
 
-// sessionFor returns the active engine session bound to a feature, or
-// nil. Used by the dashboard and cards to show live state.
+// sessionFor returns the engine session bound to a feature, or nil.
 func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
 	if m.engine == nil {
 		return nil
 	}
-	if a := m.engine.Active(); a != nil && a.Feature.ID == id {
-		return a
-	}
-	return nil
+	return m.engine.Get(id)
 }
 
 // autonomousStage reports whether a stage runs an autonomous agent
@@ -457,11 +443,12 @@ func (m *Shell) handleChatKey(msg tea.KeyPressMsg) tea.Cmd {
 // wrong feature's session.
 func (m *Shell) sendChat(text string) tea.Cmd {
 	eng, sess := m.engine, m.chat.session
+	id := sess.Feature.ID
 	return func() tea.Msg {
-		if eng.Active() != sess {
+		if eng.Get(id) != sess {
 			return noticeMsg{text: "chat session is no longer active", isErr: true}
 		}
-		if err := eng.Send(context.Background(), text); err != nil {
+		if err := eng.Send(context.Background(), id, text); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return nil
@@ -486,6 +473,9 @@ func (m *Shell) statusView(w int) string {
 		{Text: "gummi", Kind: statusbar.KindMode},
 		{Text: m.boardCounts(), Kind: statusbar.KindNeutral},
 	}
+	if run := m.runCounts(); run != "" {
+		pills = append(pills, statusbar.Pill{Text: run, Kind: statusbar.KindNeutral})
+	}
 	if m.notice.text != "" {
 		kind := statusbar.KindNeutral
 		if m.notice.isErr {
@@ -501,4 +491,29 @@ func (m *Shell) statusView(w int) string {
 			{Key: "q", Label: "quit"},
 		},
 	)
+}
+
+// runCounts summarizes live agent sessions for the status bar
+// (⬤ running · ◔ queued), empty when nothing is running.
+func (m *Shell) runCounts() string {
+	if m.engine == nil {
+		return ""
+	}
+	var running, queued int
+	for _, s := range m.engine.Sessions() {
+		switch s.State() {
+		case engine.StateRunning:
+			running++
+		case engine.StateQueued:
+			queued++
+		}
+	}
+	var parts []string
+	if running > 0 {
+		parts = append(parts, "⬤ "+strconv.Itoa(running)+" running")
+	}
+	if queued > 0 {
+		parts = append(parts, "◔ "+strconv.Itoa(queued)+" queued")
+	}
+	return strings.Join(parts, " · ")
 }

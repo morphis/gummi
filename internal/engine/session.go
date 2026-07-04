@@ -34,6 +34,22 @@ type Event struct {
 	Err     error
 }
 
+// SessionState is a session's scheduling status.
+type SessionState string
+
+const (
+	// StateInteractive is a chat session; it holds no attention slot.
+	StateInteractive SessionState = "interactive"
+	// StateQueued is an autonomous session waiting for a free slot.
+	StateQueued SessionState = "queued"
+	// StateRunning is an autonomous session holding a slot, agent working.
+	StateRunning SessionState = "running"
+	// StatePaused is an autonomous session stopped by the user; slot freed.
+	StatePaused SessionState = "paused"
+	// StateDone is an autonomous session that finished its turn; slot freed.
+	StateDone SessionState = "done"
+)
+
 // Author labels a transcript message.
 type Author string
 
@@ -54,6 +70,7 @@ type Snapshot struct {
 	Feature     domain.Feature
 	Role        agent.Role
 	Interactive bool
+	State       SessionState
 	Transcript  []Message
 	Activity    []string // recent tool-call lines
 	Spend       agent.Usage
@@ -67,17 +84,19 @@ type Session struct {
 	Role        agent.Role
 	Interactive bool
 
-	agentSess agent.Session
-	done      chan struct{}
-	stopOnce  sync.Once
+	done     chan struct{}
+	stopOnce sync.Once
 
 	mu         sync.Mutex
+	agentSess  agent.Session // nil while queued
+	state      SessionState
 	transcript []Message
 	activity   []string
 	spend      agent.Usage
 	busy       bool
 	err        error
 	stopped    bool
+	heldSlot   bool // true between taking and releasing an attention slot
 }
 
 // Snapshot returns a render-safe copy of the session's state.
@@ -88,12 +107,59 @@ func (s *Session) Snapshot() Snapshot {
 		Feature:     s.Feature,
 		Role:        s.Role,
 		Interactive: s.Interactive,
+		State:       s.state,
 		Transcript:  append([]Message(nil), s.transcript...),
 		Activity:    append([]string(nil), s.activity...),
 		Spend:       s.spend,
 		Busy:        s.busy,
 		Err:         s.err,
 	}
+}
+
+// State returns the session's scheduling status.
+func (s *Session) State() SessionState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state
+}
+
+func (s *Session) setState(st SessionState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = st
+}
+
+// agent returns the session's agent session (nil while queued).
+func (s *Session) agent() agent.Session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.agentSess
+}
+
+// attachAgent binds an agent session and marks it running.
+func (s *Session) attachAgent(a agent.Session) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentSess = a
+	s.state = StateRunning
+}
+
+// takeSlot marks that this session holds an attention slot.
+func (s *Session) takeSlot() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.heldSlot = true
+}
+
+// releaseSlot clears the slot flag, returning whether it was held (so
+// the engine decrements the running count exactly once, and never for a
+// session — queued or interactive — that never took a slot).
+func (s *Session) releaseSlot() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.heldSlot
+	s.heldSlot = false
+	return held
 }
 
 func (s *Session) appendUser(text string) {
@@ -178,10 +244,12 @@ func (s *Session) markStopped() bool {
 }
 
 // stop ends the session: it signals the pump and closes the agent
-// session. Idempotent.
+// session (if one was created). Idempotent.
 func (s *Session) stop() {
 	s.stopOnce.Do(func() {
 		close(s.done)
-		_ = s.agentSess.Close()
+		if a := s.agent(); a != nil {
+			_ = a.Close()
+		}
 	})
 }

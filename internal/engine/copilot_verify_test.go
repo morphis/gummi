@@ -51,11 +51,11 @@ func TestEngineWithCopilotBYOK(t *testing.T) {
 	defer e.Close()
 
 	f := feature(1, "Dark mode", domain.StageBrainstorm)
-	s, err := e.Start(ctx, f)
+	s, err := e.Attach(ctx, f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Send(ctx, "How should dark mode persist?"); err != nil {
+	if err := e.Send(ctx, f.ID, "How should dark mode persist?"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle)

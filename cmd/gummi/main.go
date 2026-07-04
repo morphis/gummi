@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strconv"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -112,9 +113,15 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 			APIKeyEnv: os.Getenv("GUMMI_PROVIDER_KEY_ENV"),
 		}
 	}
+	maxActive := 1
+	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxActive = n
+		}
+	}
 	eng := engine.New(engine.Config{
 		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
-		Model: model, Provider: provider,
+		Model: model, Provider: provider, MaxActive: maxActive,
 	})
 	return eng, func() { _ = eng.Close(); _ = ag.Close() }
 }

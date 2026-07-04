@@ -76,12 +76,13 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 	return m, eng
 }
 
-// settleChat waits for the engine's async stream to finish a turn.
+// settleChat waits for the first feature's (FD-001) session to finish a
+// turn — every chat/run test creates FD-001 as its subject.
 func settleChat(t *testing.T, eng *engine.Engine) {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
 	for {
-		if a := eng.Active(); a != nil {
+		if a := eng.Get("FD-001"); a != nil {
 			snap := a.Snapshot()
 			if !snap.Busy && len(snap.Transcript) > 0 {
 				return
@@ -89,7 +90,7 @@ func settleChat(t *testing.T, eng *engine.Engine) {
 		}
 		select {
 		case <-deadline:
-			t.Fatal("chat did not settle")
+			t.Fatal("session did not settle")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -128,7 +129,7 @@ func TestChatAttachAndSend(t *testing.T) {
 	if m.chat != nil {
 		t.Fatal("esc did not detach")
 	}
-	if eng.Active() == nil {
+	if eng.Get("FD-001") == nil {
 		t.Fatal("detach killed the engine session")
 	}
 
@@ -160,7 +161,7 @@ func TestChatReuseRespectsStage(t *testing.T) {
 	if m.chat.session == brainstormSess {
 		t.Error("reused the stale brainstorm session for the spec stage")
 	}
-	if a := eng.Active(); a == nil || a.Feature.Stage != domain.StageSpec {
+	if a := eng.Get("FD-001"); a == nil || a.Feature.Stage != domain.StageSpec {
 		t.Errorf("active session stage = %v, want spec", a)
 	}
 }

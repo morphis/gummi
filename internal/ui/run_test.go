@@ -9,6 +9,7 @@ import (
 
 	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/engine"
 )
 
 func TestRunAutonomousStage(t *testing.T) {
@@ -65,34 +66,14 @@ func TestPauseStopsRun(t *testing.T) {
 	if m.sessionFor("FD-001") == nil {
 		t.Fatal("run did not start a session")
 	}
-	// p pauses: the active session is stopped
+	// p pauses: the session is stopped and marked paused (kept visible)
 	m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if m.engine.Active() != nil {
-		t.Error("pause did not stop the active session")
+	s := m.engine.Get("FD-001")
+	if s == nil || s.State() != engine.StatePaused {
+		t.Errorf("after pause: session state = %v, want paused", s)
 	}
 	if !strings.Contains(m.notice.text, "paused") {
 		t.Errorf("notice = %q, want paused", m.notice.text)
-	}
-}
-
-func TestPauseBeforeKickoffNoError(t *testing.T) {
-	m, _ := chatWorkspace(t, agent.NewFake("x"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-
-	// press enter (runStage starts the session, returns a kickoff cmd)
-	model, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = model.(*Shell)
-	// pause BEFORE running the kickoff command
-	m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if m.engine.Active() != nil {
-		t.Fatal("pause did not stop the session")
-	}
-	// now run the deferred kickoff — it must not produce an error notice
-	m = pump(t, m, cmd)
-	if m.notice.isErr {
-		t.Errorf("kickoff after pause produced an error: %q", m.notice.text)
 	}
 }
 
