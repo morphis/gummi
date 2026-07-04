@@ -157,6 +157,11 @@ func TestSpecMigratesToWorktreeAtApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "keep me")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	// resolve it (an open user annotation blocks approval); the comment
+	// still travels with the migrated spec
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "resolved — keeping it")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// approve the spec (leave Spec) → worktree + committed spec

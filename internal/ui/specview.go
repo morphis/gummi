@@ -145,6 +145,9 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		return nil
 	case "e":
 		return m.editSpec()
+	case "R":
+		// request changes: send the open %% questions to the architect
+		return m.requestSpecChanges(sv)
 	}
 	if !sv.annotate {
 		switch key {
@@ -230,8 +233,8 @@ func (m *Shell) specViewRender(w, h int) string {
 		b.WriteString(sv.renderAnnotate(m, w, body))
 		b.WriteString("\n" + s.KeyHint.Render("c") + s.KeyLabel.Render(" comment") +
 			s.Faint.Render(" · ") + s.KeyHint.Render("n/p") + s.KeyLabel.Render(" markers") +
+			s.Faint.Render(" · ") + s.KeyHint.Render("R") + s.KeyLabel.Render(" request changes") +
 			s.Faint.Render(" · ") + s.KeyHint.Render("e") + s.KeyLabel.Render(" editor") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("tab") + s.KeyLabel.Render(" read") +
 			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" back"))
 	} else {
 		b.WriteString(sv.renderRead(m, w, body))

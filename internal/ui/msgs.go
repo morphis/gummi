@@ -116,6 +116,13 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			next = nexts[0]
 		}
 		if f.Stage == domain.StageSpec {
+			// unresolved %% annotations block spec approval (DESIGN §6.1)
+			if n := m.openQuestionsBlockingGate(ctx, f); n > 0 {
+				return noticeMsg{
+					text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the spec view", id, n),
+					isErr: true,
+				}
+			}
 			if ok, err := m.wt.Exists(ctx, &f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			} else if !ok {
