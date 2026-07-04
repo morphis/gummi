@@ -74,7 +74,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	}
 	cursor := " "
 	if selected {
-		cursor = s.KeyHint.Render("▸")
+		cursor = s.Cursor.Render("▸")
 	}
 	num := s.Faint.Render(shortcutLabel(shortcut))
 	id := s.CardID.Render(string(r.F.ID))

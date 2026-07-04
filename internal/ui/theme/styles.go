@@ -27,13 +27,14 @@ type Styles struct {
 	PaneTitle  lipgloss.Style // section headers in panes (TODO, IN PROGRESS…)
 	KeyHint    lipgloss.Style // "enter" in key hints
 	KeyLabel   lipgloss.Style // "attach" in key hints
+	Cursor     lipgloss.Style // the ▸ selection/focus marker
 	Selection  lipgloss.Style // selected row highlight
 	CardID     lipgloss.Style // FD-042
 	CardTitle  lipgloss.Style
 	ProfileTag lipgloss.Style // [thrifty]
 
 	// Status bar.
-	StatusBase lipgloss.Style // the bar background
+	StatusBase lipgloss.Style // the bar's base text (quiet, no fill)
 	PillMode   lipgloss.Style // leading mode pill
 	Pill       lipgloss.Style // neutral pill
 	PillAlert  lipgloss.Style // needs-you pill
@@ -69,23 +70,27 @@ func New(t Theme) *Styles {
 
 		Separator: base.Foreground(t.Separator),
 		PaneTitle: base.Foreground(t.FgFaint).Bold(true),
-		KeyHint:   base.Foreground(t.Accent),
+		// key hints stay quiet greys (the crush help pattern); the
+		// accent is reserved for the cursor and interactive pills.
+		KeyHint:   base.Foreground(t.FgSubtle),
 		KeyLabel:  base.Foreground(t.FgMuted),
+		Cursor:    base.Foreground(t.Accent),
 		Selection: base.Foreground(t.FgBase).Background(t.BgRaised),
 
 		CardID:     base.Foreground(t.FgSubtle).Bold(true),
 		CardTitle:  base,
 		ProfileTag: base.Foreground(t.FgFaint),
 
-		StatusBase: base.Background(t.BgSurface),
+		StatusBase: base,
 		PillMode:   lipgloss.NewStyle().Foreground(t.OnAccent).Background(t.Accent).Bold(true).Padding(0, 1),
 		Pill:       lipgloss.NewStyle().Foreground(t.FgSubtle).Background(t.BgRaised).Padding(0, 1),
 		PillAlert:  lipgloss.NewStyle().Foreground(t.OnAccent).Background(t.Warning).Bold(true).Padding(0, 1),
 
+		// no fill: a dialog is its border on the base background, so
+		// the panel reads as part of the canvas rather than a slab.
 		DialogFrame: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.Accent).
-			Background(t.BgSubtle).
 			Padding(1, 2),
 		DialogTitle: base.Foreground(t.Primary).Bold(true),
 

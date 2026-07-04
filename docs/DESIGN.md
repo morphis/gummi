@@ -410,7 +410,8 @@ design system.
     mode** (see 6.1).
   - *Diff view* — worktree diff pager before gates, with the same
     annotation mechanics as the spec view.
-- **Global**: `n` new feature (huh form: title, one-liner, profile),
+- **Global**: `n` new feature (a single description line — brainstorm
+  develops the rest; profile and skip flags on a demoted options row),
   `tab` cycle needs-attention queue, `1..9` jump to feature, `?` help.
 
 ### 6.1 Annotation editor (line-level review, like a PR)

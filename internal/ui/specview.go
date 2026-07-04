@@ -330,7 +330,7 @@ func (sv *specView) renderAnnotate(m *Shell, w, h int) string {
 		lineStr := s.Faint.Render(num) + gutter + " " + content
 		if n == sv.cursor {
 			lineStr = s.Selection.Render(ansi.Strip(num)) + gutter + " " + content
-			lineStr = s.KeyHint.Render("▸") + lineStr
+			lineStr = s.Cursor.Render("▸") + lineStr
 		} else {
 			lineStr = " " + lineStr
 		}

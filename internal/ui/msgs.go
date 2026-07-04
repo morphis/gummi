@@ -66,12 +66,13 @@ func (m *Shell) loadRows() tea.Msg {
 	return rowsMsg{rows: rows}
 }
 
-// formResult carries the new-feature form's fields.
+// formResult carries the new-feature form's fields. The description
+// the user types is the feature's title; everything richer lives in
+// the spec, which the brainstorm stage develops.
 type formResult struct {
-	Title    string
-	OneLiner string
-	Profile  string
-	Skip     domain.SkipFlags
+	Title   string
+	Profile string
+	Skip    domain.SkipFlags
 }
 
 // createFeature mints a number and persists a new feature in todo.
@@ -92,7 +93,7 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 		}
 		now := m.now()
 		f := domain.Feature{
-			ID: id, Num: num, Title: res.Title, OneLiner: res.OneLiner,
+			ID: id, Num: num, Title: res.Title,
 			Slug: slug, Stage: workflow.Initial(), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
 			CreatedAt: now, UpdatedAt: now,

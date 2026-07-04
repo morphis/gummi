@@ -76,7 +76,7 @@ func (d *inboxDialog) View(s *theme.Styles, w, h int) string {
 		cursor := "  "
 		row := s.Base
 		if i == d.sel {
-			cursor = s.KeyHint.Render("▸ ")
+			cursor = s.Cursor.Render("▸ ")
 			row = s.Subtle
 		}
 		icon := attnIcon(s, it.Kind)

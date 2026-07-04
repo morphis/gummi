@@ -16,20 +16,17 @@ var defaultProfilePresets = []string{"thrifty", "premium", "local-heavy"}
 
 // form fields, in tab order.
 const (
-	fieldTitle = iota
-	fieldOneLiner
-	fieldProfile
-	fieldSkipBrainstorm
-	fieldSkipPlan
+	fieldDesc = iota
+	fieldOpts
 	fieldCount
 )
 
-// featureForm is the new-feature dialog: title, one-liner, profile,
-// and the two skip flags (the only workflow flexibility, fixed at
-// creation).
+// featureForm is the new-feature dialog: one description line — the
+// brainstorm stage develops everything else in the spec. Profile and
+// the skip flags (the only workflow flexibility, fixed at creation)
+// share a single demoted options row.
 type featureForm struct {
-	title    textinput.Model
-	oneLiner textinput.Model
+	desc     textinput.Model
 	profiles []string
 	profile  int
 	skip     domain.SkipFlags
@@ -40,22 +37,18 @@ type featureForm struct {
 }
 
 // newFeatureForm builds the dialog; profiles are the selectable profile
-// names (falling back to the built-in presets when empty), and onSubmit
-// receives the validated fields.
+// names in display order, first selected (falling back to the built-in
+// presets when empty), and onSubmit receives the validated fields.
 func newFeatureForm(profiles []string, onSubmit func(formResult) tea.Cmd) *featureForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
-	title := textinput.New()
-	title.Placeholder = "feature title"
-	title.CharLimit = 80
-	title.SetWidth(38)
-	title.Focus()
-	one := textinput.New()
-	one.Placeholder = "one-liner (optional)"
-	one.CharLimit = 120
-	one.SetWidth(38)
-	return &featureForm{title: title, oneLiner: one, profiles: profiles, onSubmit: onSubmit}
+	desc := textinput.New()
+	desc.Placeholder = "describe the feature…"
+	desc.CharLimit = 120
+	desc.SetWidth(46)
+	desc.Focus()
+	return &featureForm{desc: desc, profiles: profiles, onSubmit: onSubmit}
 }
 
 // ID implements overlay.Dialog.
@@ -67,20 +60,19 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "esc":
 		return true, nil
 	case "enter":
-		title := strings.TrimSpace(d.title.Value())
-		if title == "" {
-			d.errText = "title must not be empty"
+		desc := strings.TrimSpace(d.desc.Value())
+		if desc == "" {
+			d.errText = "description must not be empty"
 			return false, nil
 		}
-		if _, err := domain.Slugify(title); err != nil {
+		if _, err := domain.Slugify(desc); err != nil {
 			d.errText = err.Error()
 			return false, nil
 		}
 		res := formResult{
-			Title:    title,
-			OneLiner: strings.TrimSpace(d.oneLiner.Value()),
-			Profile:  d.profiles[d.profile],
-			Skip:     d.skip,
+			Title:   desc,
+			Profile: d.profiles[d.profile],
+			Skip:    d.skip,
 		}
 		return true, d.onSubmit(res)
 	case "tab", "down":
@@ -92,75 +84,73 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	switch d.focus {
-	case fieldProfile:
+	case fieldOpts:
 		switch key.String() {
 		case "left", "h":
 			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
 		case "right", "l", "space":
 			d.profile = (d.profile + 1) % len(d.profiles)
-		}
-	case fieldSkipBrainstorm:
-		if key.String() == "space" {
+		case "b":
 			d.skip.Brainstorm = !d.skip.Brainstorm
-		}
-	case fieldSkipPlan:
-		if key.String() == "space" {
+		case "p":
 			d.skip.Plan = !d.skip.Plan
 		}
-	case fieldTitle:
-		d.title, _ = d.title.Update(key)
+	case fieldDesc:
+		d.desc, _ = d.desc.Update(key)
 		d.errText = ""
-	case fieldOneLiner:
-		d.oneLiner, _ = d.oneLiner.Update(key)
 	}
 	return false, nil
 }
 
 func (d *featureForm) setFocus(f int) {
 	d.focus = f
-	d.title.Blur()
-	d.oneLiner.Blur()
-	switch f {
-	case fieldTitle:
-		d.title.Focus()
-	case fieldOneLiner:
-		d.oneLiner.Focus()
+	if f == fieldDesc {
+		d.desc.Focus()
+	} else {
+		d.desc.Blur()
 	}
+}
+
+// skipLabel names the workflow route the skip flags select.
+func (d *featureForm) skipLabel() string {
+	switch {
+	case d.skip.Brainstorm && d.skip.Plan:
+		return "skip brainstorm+plan"
+	case d.skip.Brainstorm:
+		return "skip brainstorm"
+	case d.skip.Plan:
+		return "skip plan"
+	}
+	return "full workflow"
 }
 
 // View implements overlay.Dialog.
 func (d *featureForm) View(s *theme.Styles, w, h int) string {
-	label := func(field int, text string) string {
-		if d.focus == field {
-			return s.KeyHint.Render("▸ " + text)
-		}
-		return s.Muted.Render("  " + text)
-	}
-	check := func(on bool) string {
-		if on {
-			return s.Success.Render("[x]")
-		}
-		return s.Faint.Render("[ ]")
-	}
-
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new feature") + "\n\n")
-	b.WriteString(label(fieldTitle, "title    ") + d.title.View() + "\n")
-	b.WriteString(label(fieldOneLiner, "one-liner") + d.oneLiner.View() + "\n")
-	b.WriteString(label(fieldProfile, "profile  "))
-	for i, p := range d.profiles {
-		if i == d.profile {
-			b.WriteString(s.PillMode.Render(p) + " ")
-		} else {
-			b.WriteString(s.Faint.Render(p) + " ")
-		}
+	// the input's own "> " prompt is the focus affordance for this row
+	b.WriteString(d.desc.View() + "\n\n")
+
+	// the options row: quiet until focused, skips flagged when set
+	marker := "  "
+	profile := s.Faint.Render(d.profiles[d.profile])
+	skips := s.Faint.Render(d.skipLabel())
+	if d.focus == fieldOpts {
+		marker = s.Cursor.Render("▸ ")
+		profile = s.Subtle.Render(d.profiles[d.profile])
 	}
-	b.WriteString("\n")
-	b.WriteString(label(fieldSkipBrainstorm, "skip brainstorm ") + check(d.skip.Brainstorm) + "\n")
-	b.WriteString(label(fieldSkipPlan, "skip plan       ") + check(d.skip.Plan) + "\n")
+	if d.skip.Brainstorm || d.skip.Plan {
+		skips = s.Warning.Render(d.skipLabel())
+	}
+	b.WriteString(marker + profile + s.Faint.Render(" · ") + skips + "\n")
+
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	b.WriteString("\n" + s.Faint.Render("enter create · tab next · space toggle · esc cancel"))
+	hint := "enter create · tab options · esc cancel"
+	if d.focus == fieldOpts {
+		hint = "←/→ profile · b/p toggle skips · enter create · esc cancel"
+	}
+	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
 }

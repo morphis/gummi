@@ -10,8 +10,9 @@ gummi is under construction. `docs/DESIGN.md` is the design;
 - `gummi` — launches the kanban TUI, creating the `.gummi/` workspace
   (state dir at 0700, spec drafts, worktrees dir, ignore rules, FD
   counter, config + profiles) lazily on first run. The TUI:
-  - create features (`n`): title, one-liner, profile preset, skip
-    flags; IDs minted as `FD-NNN` with merge-safe retry.
+  - create features (`n`): one description line — brainstorm develops
+    the rest; profile preset and skip flags sit on a quiet options
+    row. IDs minted as `FD-NNN` with merge-safe retry.
   - cards grouped by super-state with stage-accent glyphs, `j/k` and
     `1..9` navigation, `?` help.
   - feature dashboard: stage, branch, worktree, budget, full

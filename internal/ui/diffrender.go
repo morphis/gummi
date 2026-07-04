@@ -116,7 +116,7 @@ func (dv *diffView) renderAnnotate(m *Shell, w, h int) string {
 		content := diffLineStyle(m, diffCell(dv.lines[i], w-numW-3))
 		var lineStr string
 		if n == dv.cursor {
-			lineStr = s.KeyHint.Render("▸") + s.Selection.Render(num) + gutter + " " + content
+			lineStr = s.Cursor.Render("▸") + s.Selection.Render(num) + gutter + " " + content
 		} else {
 			lineStr = " " + s.Faint.Render(num) + gutter + " " + content
 		}

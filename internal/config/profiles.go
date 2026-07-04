@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -50,12 +51,19 @@ type Profiles struct {
 	Profiles map[string]Profile `yaml:"profiles"`
 }
 
-// Names lists the profile names, always including at least the ones
-// present. Used by the new-feature form.
+// Names lists the profile names for the new-feature form: the declared
+// default first (it becomes the form's initial selection), the rest
+// sorted, so the order is stable rather than map-iteration luck.
 func (p Profiles) Names() []string {
 	out := make([]string, 0, len(p.Profiles))
 	for name := range p.Profiles {
-		out = append(out, name)
+		if name != p.Default {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	if _, ok := p.Profiles[p.Default]; ok {
+		out = append([]string{p.Default}, out...)
 	}
 	return out
 }

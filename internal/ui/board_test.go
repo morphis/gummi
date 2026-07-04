@@ -122,9 +122,9 @@ func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
 	form := newFeatureForm(nil, func(formResult) tea.Cmd { return nil })
 	form.skip.Brainstorm = true
-	form.focus = fieldProfile
-	form.title.SetValue("dark mode toggle")
-	form.title.Blur()
+	form.focus = fieldOpts
+	form.desc.SetValue("dark mode toggle")
+	form.desc.Blur()
 	m.Overlay.Push(form)
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
