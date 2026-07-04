@@ -265,11 +265,26 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	return gitOK(ctx, m.root, "merge-base", "--is-ancestor", branch, "HEAD")
 }
 
+// RebaseConflictError reports that a rebase stopped on conflicts and was
+// aborted (the worktree is left clean, on its original tip). Files lists
+// the paths that conflicted, so the UI can tell the user what to resolve.
+type RebaseConflictError struct {
+	Files []string
+}
+
+func (e *RebaseConflictError) Error() string {
+	if len(e.Files) == 0 {
+		return "rebase hit conflicts and was aborted (worktree clean)"
+	}
+	return "rebase conflicts in " + strings.Join(e.Files, ", ") + " — aborted, worktree clean"
+}
+
 // RebaseOnMain rebases the feature branch onto the main checkout's
 // current HEAD, inside the feature's worktree. When a started rebase
 // stops on conflicts it is aborted so the worktree is never left
-// mid-rebase; when the rebase could not start at all (e.g. dirty
-// worktree) the original error is returned untouched.
+// mid-rebase, and a *RebaseConflictError naming the conflicted files is
+// returned; when the rebase could not start at all (e.g. dirty worktree)
+// the original error is returned untouched.
 func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
 	p, err := m.requireWorktree(f)
 	if err != nil {
@@ -283,12 +298,24 @@ func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
 		if !m.rebaseInProgress(ctx, p) {
 			return fmt.Errorf("rebase of %s did not start: %w", f.ID, err)
 		}
+		// capture what conflicted before we abort and lose the state
+		conflicts := m.conflictedFiles(ctx, p)
 		if _, abortErr := runGit(ctx, p, "rebase", "--abort"); abortErr != nil {
 			return fmt.Errorf("rebase failed AND abort failed, worktree %s needs manual attention: %w (abort: %v)", p, err, abortErr)
 		}
-		return fmt.Errorf("rebase aborted cleanly after conflict: %w", err)
+		return &RebaseConflictError{Files: conflicts}
 	}
 	return nil
+}
+
+// conflictedFiles lists the unmerged paths in wt (empty on any error, so
+// callers still get a useful conflict error even if the list is missing).
+func (m *Manager) conflictedFiles(ctx context.Context, wt string) []string {
+	out, err := runGit(ctx, wt, "diff", "--name-only", "--diff-filter=U")
+	if err != nil || out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
 }
 
 // Diff returns the unified diff of the feature branch against the point

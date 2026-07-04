@@ -329,6 +329,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.inbox.remove(r.F.ID)
 			return m.bounceStage(r.F.ID)
 		}
+	case "r":
+		if r, ok := m.selected(); ok {
+			return m.rebaseFeature(r.F)
+		}
 	case "x":
 		if r, ok := m.selected(); ok {
 			f := r.F

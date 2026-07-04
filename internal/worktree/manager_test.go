@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,8 +239,17 @@ func TestRebaseConflictAbortsCleanly(t *testing.T) {
 	mustGit(t, root, "add", ".")
 	mustGit(t, root, "commit", "-q", "-m", "main edit")
 
-	if err := m.RebaseOnMain(ctx, f); err == nil {
+	rerr := m.RebaseOnMain(ctx, f)
+	if rerr == nil {
 		t.Fatal("conflicting rebase reported success")
+	}
+	// the error names the conflicted file so the UI can surface it
+	var ce *RebaseConflictError
+	if !errors.As(rerr, &ce) {
+		t.Fatalf("want *RebaseConflictError, got %T: %v", rerr, rerr)
+	}
+	if len(ce.Files) != 1 || ce.Files[0] != "README.md" {
+		t.Errorf("conflicted files = %v, want [README.md]", ce.Files)
 	}
 	// worktree must not be left mid-rebase (.git is a file in a
 	// worktree; ask git where the rebase state would live)

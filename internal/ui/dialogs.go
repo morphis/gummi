@@ -31,6 +31,7 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"i", "open needs-attention inbox"},
 		{"g", "advance stage (gate)"},
 		{"b", "bounce back to implement"},
+		{"r", "rebase branch onto main"},
 		{"n", "new feature"},
 		{"s", "spec (tab: read ⇄ annotate)"},
 		{"d", "diff (tab: read ⇄ annotate)"},

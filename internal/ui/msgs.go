@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/workflow"
+	"github.com/morphia/gummi/internal/worktree"
 )
 
 // featureRow is one board entry: the stored feature plus the bits of
@@ -142,6 +144,37 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		}
 		m.dropSession(id) // the old stage's session is stale now
 		return noticeMsg{text: fmt.Sprintf("%s → %s", id, next)}
+	}
+}
+
+// rebaseFeature rebases a feature's branch onto main from the TUI
+// (DESIGN §9 M4). It refuses a dirty worktree (so nothing uncommitted is
+// risked), reports the conflicted files when the rebase can't apply
+// cleanly (the rebase self-aborts, leaving the worktree untouched), and
+// confirms success otherwise.
+func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if ok, err := m.wt.Exists(ctx, &f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		} else if !ok {
+			return noticeMsg{text: string(f.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+		}
+		if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		} else if dirty {
+			return noticeMsg{text: string(f.ID) + ": worktree has uncommitted changes — commit them before rebasing", isErr: true}
+		}
+		if err := m.wt.RebaseOnMain(ctx, &f); err != nil {
+			var ce *worktree.RebaseConflictError
+			if errors.As(err, &ce) {
+				// ce carries git-derived file names; sanitize like every
+				// other notice before it reaches the terminal.
+				return noticeMsg{text: sanitize(string(f.ID) + ": " + ce.Error() + " — resolve on the branch, then retry"), isErr: true}
+			}
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + " rebased onto main"}
 	}
 }
 
