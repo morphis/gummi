@@ -20,6 +20,7 @@ import (
 	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/config"
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/worktree"
 )
@@ -27,6 +28,20 @@ import (
 // kickoff is the go-ahead sent to start an autonomous stage; the stage
 // hints already tell the agent what to do.
 const kickoff = "Proceed with this stage per your instructions and the spec."
+
+// interactiveKickoff opens a fresh interactive session with the agent
+// leading — the user shouldn't have to know what to say to start an
+// interview (DESIGN §3: brainstorm develops a one-line description).
+func interactiveKickoff(s domain.Stage) string {
+	if s == domain.StageSpec {
+		return "The user just opened the spec chat. Read the spec and its open %% threads, " +
+			"then drive convergence: recommend one approach with your reasoning, and put the " +
+			"most consequential open question to the user first. Keep it short."
+	}
+	return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
+		"interview: state the problem as you understand it in a sentence or two and ask the " +
+		"user the two or three highest-leverage questions. Keep it short."
+}
 
 // Config wires an engine to its backend. Model/Provider are the M1
 // stand-in for profiles (M3): one model config for every role.
@@ -174,13 +189,29 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		s.activity = append(s.activity, ps.Activity...)
 		s.spend = ps.Spend
 	}
+	// A fresh conversation opens with a stage kickoff so the agent leads;
+	// a carried-over transcript means the interview is already underway,
+	// so reattaching stays silent.
+	fresh := len(s.transcript) == 0
 	s.attachAgent(sess)
 	s.setState(StateInteractive)
 
 	e.replace(f.ID, s)
 	go e.pump(s)
+	var ko string
+	if fresh {
+		ko = interactiveKickoff(f.Stage)
+		s.appendSystem(ko)
+		s.setBusy(true)
+	}
 	e.persist(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
+	if fresh {
+		if err := sess.Send(ctx, ko); err != nil {
+			s.setError(err)
+			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventError, Err: err})
+		}
+	}
 	return s, nil
 }
 
@@ -339,11 +370,16 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 
 // locate resolves the working directory and spec path for a feature's
 // stage. Interactive pre-worktree stages run in the main checkout
-// against the draft; later stages require the worktree.
+// against the draft — materialized here so the agent never starts
+// against a missing spec; later stages require the worktree.
 func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPath string, err error) {
 	root := e.cfg.Worktrees.Root()
 	if interactiveStage(f.Stage) {
-		return root, filepath.Join(e.cfg.Workspace.DraftsDir(), draftName(f)), nil
+		draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
+		if err := spec.EnsureDraft(draft, &f); err != nil {
+			return "", "", err
+		}
+		return root, draft, nil
 	}
 	hasWT, err := e.cfg.Worktrees.Exists(ctx, &f)
 	if err != nil {
@@ -624,8 +660,4 @@ func (e *Engine) send(ev Event) {
 	case e.raw <- ev:
 	case <-e.stopped:
 	}
-}
-
-func draftName(f domain.Feature) string {
-	return string(f.ID) + "-" + f.Slug + ".md"
 }

@@ -5,12 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/worktree"
 )
@@ -141,17 +143,20 @@ func TestInteractiveRoundTrip(t *testing.T) {
 		t.Fatalf("brainstorm should be an interactive architect session: %+v", s.Snapshot())
 	}
 	waitFor(t, e, EventStarted)
+	waitFor(t, e, EventIdle) // the kickoff turn (agent speaks first) completes
 
 	if err := e.Send(ctx, "FD-001", "how should dark mode persist?"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle)
 
+	// kickoff (system) + its reply, then the user turn + its reply
 	snap := s.Snapshot()
-	if len(snap.Transcript) != 2 || snap.Transcript[1].Content != "Here are two approaches." {
+	if len(snap.Transcript) != 4 || snap.Transcript[0].Author != AuthorSystem ||
+		snap.Transcript[3].Content != "Here are two approaches." {
 		t.Fatalf("transcript = %+v", snap.Transcript)
 	}
-	if snap.Busy || snap.Spend.Credits != 1 {
+	if snap.Busy || snap.Spend.Credits != 2 {
 		t.Errorf("post-turn state wrong: busy=%v spend=%+v", snap.Busy, snap.Spend)
 	}
 	// interactive sessions do not consume a slot
@@ -391,6 +396,43 @@ func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	}
 	if rec.opts().Role != agent.RoleImplementer {
 		t.Errorf("role = %s, want implementer", rec.opts().Role)
+	}
+}
+
+func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	if _, err := e.Attach(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	// the draft exists before the agent's first turn
+	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	raw, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatalf("draft not materialized: %v", err)
+	}
+	if !strings.Contains(string(raw), "## Problem") {
+		t.Errorf("draft is not the template: %q", raw)
+	}
+
+	// the hints carry the compiled-in contract, pointing at the draft
+	hints := strings.Join(rec.opts().SystemHints, "\n")
+	for _, want := range []string{draft, "single source of truth", "nearest preceding non-marker line"} {
+		if !strings.Contains(hints, want) {
+			t.Errorf("contract hint missing %q", want)
+		}
+	}
+
+	// the agent led: gummi's kickoff is the first transcript turn
+	snap := e.Get("FD-001").Snapshot()
+	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != AuthorSystem {
+		t.Errorf("kickoff not recorded as a system turn: %+v", snap.Transcript)
 	}
 }
 

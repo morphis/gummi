@@ -39,6 +39,7 @@ func TestSessionPersistAndRestore(t *testing.T) {
 	if _, err := e1.Attach(ctx, f); err != nil {
 		t.Fatal(err)
 	}
+	waitFor(t, e1, EventIdle) // kickoff turn completes
 	if err := e1.Send(ctx, f.ID, "how should it persist?"); err != nil {
 		t.Fatal(err)
 	}
@@ -54,15 +55,17 @@ func TestSessionPersistAndRestore(t *testing.T) {
 	if s == nil {
 		t.Fatal("session not restored")
 	}
+	// kickoff (system) + reply, then the user turn + reply
 	snap := s.Snapshot()
-	if len(snap.Transcript) != 2 {
+	if len(snap.Transcript) != 4 {
 		t.Fatalf("restored transcript = %+v", snap.Transcript)
 	}
-	if snap.Transcript[0].Content != "how should it persist?" ||
-		snap.Transcript[1].Content != "Two approaches, per-device vs synced." {
+	if snap.Transcript[0].Author != AuthorSystem ||
+		snap.Transcript[2].Content != "how should it persist?" ||
+		snap.Transcript[3].Content != "Two approaches, per-device vs synced." {
 		t.Errorf("restored transcript wrong: %+v", snap.Transcript)
 	}
-	if snap.Spend.Credits != 1 {
+	if snap.Spend.Credits != 2 {
 		t.Errorf("restored spend = %+v", snap.Spend)
 	}
 	if s.State() != StateInteractive {

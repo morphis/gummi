@@ -21,6 +21,8 @@ package spec
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -168,11 +170,35 @@ func Template(f *domain.Feature) string {
 
 ## Implementation notes
 
+## Progress
+
+%% @gummi: implement checkpoints here — what's done, what's left, where to resume
+
+## Review
+
+%% @gummi: reviewer findings land here; the implementer resolves each one
+
 ## Verification plan
 
 %% @gummi: repo checks always run; what feature-specific live checks prove this works?
 `)
 	return b.String()
+}
+
+// EnsureDraft materializes a feature's draft at path from the template
+// if it does not exist yet. Both the engine (before an agent session
+// spawns) and the spec view go through here — one creation path, so an
+// agent never starts against a missing spec.
+func EnsureDraft(path string, f *domain.Feature) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(Template(f)), 0o600)
 }
 
 // DraftFilename is the draft's name under .gummi/state/drafts/.

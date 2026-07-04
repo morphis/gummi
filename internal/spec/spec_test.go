@@ -149,8 +149,8 @@ func TestTemplateParsesWithOpenQuestions(t *testing.T) {
 		t.Error("template missing header bits")
 	}
 	d := Parse(tpl)
-	if got := len(d.OpenQuestions()); got != 4 {
-		t.Errorf("template has %d open questions, want 4", got)
+	if got := len(d.OpenQuestions()); got != 6 {
+		t.Errorf("template has %d open questions, want 6", got)
 	}
 	if DraftFilename(f) != "FD-007-search.md" {
 		t.Errorf("draft filename = %s", DraftFilename(f))

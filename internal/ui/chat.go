@@ -95,6 +95,9 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		switch msg.Author {
 		case engine.AuthorUser:
 			label = s.KeyHint.Render("you")
+		case engine.AuthorSystem:
+			label = s.Faint.Render("gummi")
+			style = s.Faint
 		default:
 			label = s.Title.Render(string(snap.Role))
 			style = s.Subtle

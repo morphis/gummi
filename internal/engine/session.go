@@ -62,6 +62,9 @@ type Author string
 const (
 	AuthorUser      Author = "user"
 	AuthorAssistant Author = "assistant"
+	// AuthorSystem labels gummi-authored turns (stage kickoffs): sent to
+	// the agent like a user turn, rendered as gummi's own line.
+	AuthorSystem Author = "system"
 )
 
 // Message is one transcript turn.
@@ -191,6 +194,13 @@ func (s *Session) appendUser(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text})
+	s.err = nil
+}
+
+func (s *Session) appendSystem(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transcript = append(s.transcript, Message{Author: AuthorSystem, Content: text})
 	s.err = nil
 }
 

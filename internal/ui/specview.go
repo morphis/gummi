@@ -56,18 +56,11 @@ func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 			path = filepath.Join(m.wt.Root(), f.WorktreePath(), f.SpecPath())
 		} else {
 			path = filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
+			if err := spec.EnsureDraft(path, &f); err != nil {
+				return specLoadedMsg{err: err}
+			}
 		}
 		raw, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			content := spec.Template(&f)
-			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-				return specLoadedMsg{err: err}
-			}
-			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-				return specLoadedMsg{err: err}
-			}
-			return specLoadedMsg{f: f, path: path, content: content}
-		}
 		if err != nil {
 			return specLoadedMsg{err: err}
 		}

@@ -99,7 +99,7 @@ func settleChat(t *testing.T, eng *engine.Engine) {
 func TestChatAttachAndSend(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("Two options: localStorage or synced account."))
 
-	// enter attaches the chat pane
+	// enter attaches the chat pane; gummi's kickoff turn runs first
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.chat == nil {
 		t.Fatal("enter did not attach the chat pane")
@@ -107,21 +107,26 @@ func TestChatAttachAndSend(t *testing.T) {
 	if m.chat.feature != "FD-001" {
 		t.Fatalf("attached to wrong feature: %s", m.chat.feature)
 	}
+	settleChat(t, eng) // kickoff reply lands
 
 	// type and send
 	m = typeString(t, m, "how should it persist?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	settleChat(t, eng)
 
+	// kickoff (system) + reply, then the user turn + reply
 	snap := m.chat.session.Snapshot()
-	if len(snap.Transcript) != 2 {
+	if len(snap.Transcript) != 4 {
 		t.Fatalf("transcript = %+v", snap.Transcript)
 	}
-	if snap.Transcript[0].Author != engine.AuthorUser || snap.Transcript[0].Content != "how should it persist?" {
-		t.Errorf("user turn wrong: %+v", snap.Transcript[0])
+	if snap.Transcript[0].Author != engine.AuthorSystem {
+		t.Errorf("kickoff turn wrong: %+v", snap.Transcript[0])
 	}
-	if snap.Transcript[1].Content != "Two options: localStorage or synced account." {
-		t.Errorf("assistant turn wrong: %+v", snap.Transcript[1])
+	if snap.Transcript[2].Author != engine.AuthorUser || snap.Transcript[2].Content != "how should it persist?" {
+		t.Errorf("user turn wrong: %+v", snap.Transcript[2])
+	}
+	if snap.Transcript[3].Content != "Two options: localStorage or synced account." {
+		t.Errorf("assistant turn wrong: %+v", snap.Transcript[3])
 	}
 
 	// esc detaches; the session stays alive
@@ -135,7 +140,7 @@ func TestChatAttachAndSend(t *testing.T) {
 
 	// re-attach reuses the same session (transcript preserved)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.chat == nil || len(m.chat.session.Snapshot().Transcript) != 2 {
+	if m.chat == nil || len(m.chat.session.Snapshot().Transcript) != 4 {
 		t.Fatal("re-attach lost the transcript")
 	}
 }
@@ -169,6 +174,7 @@ func TestChatReuseRespectsStage(t *testing.T) {
 func TestChatViewGolden(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("Persist per-device via localStorage; account sync is a follow-up."))
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleChat(t, eng) // kickoff reply lands before the user types
 	m = typeString(t, m, "per-device or synced?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	settleChat(t, eng)

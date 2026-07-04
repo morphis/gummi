@@ -97,11 +97,20 @@ func TestRequestChangesSendsToAgent(t *testing.T) {
 	if s == nil {
 		t.Fatal("request-changes did not start an architect session")
 	}
+	// the compiled turn is the first user-authored message (a fresh
+	// session opens with gummi's system kickoff before it)
 	snap := s.Snapshot()
-	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != engine.AuthorUser {
+	var compiled string
+	for _, msg := range snap.Transcript {
+		if msg.Author == engine.AuthorUser {
+			compiled = msg.Content
+			break
+		}
+	}
+	if compiled == "" {
 		t.Fatalf("no compiled turn sent: %+v", snap.Transcript)
 	}
-	if !strings.Contains(snap.Transcript[0].Content, "reconsider the storage choice") {
-		t.Errorf("compiled turn missing the annotation:\n%s", snap.Transcript[0].Content)
+	if !strings.Contains(compiled, "reconsider the storage choice") {
+		t.Errorf("compiled turn missing the annotation:\n%s", compiled)
 	}
 }
