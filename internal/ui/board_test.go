@@ -120,7 +120,7 @@ func TestConfirmOverlay(t *testing.T) {
 
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
-	form := newFeatureForm(func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, func(formResult) tea.Cmd { return nil })
 	form.skip.Brainstorm = true
 	form.focus = fieldProfile
 	form.title.SetValue("dark mode toggle")

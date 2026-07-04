@@ -36,6 +36,9 @@ func (w Workspace) SeqFile() string { return filepath.Join(w.GummiDir(), "seq") 
 // ConfigFile is the repo-controlled config (verify checks, permissions).
 func (w Workspace) ConfigFile() string { return filepath.Join(w.GummiDir(), "config.yaml") }
 
+// ProfilesFile maps roles to models per profile.
+func (w Workspace) ProfilesFile() string { return filepath.Join(w.GummiDir(), "profiles.yaml") }
+
 // DBFile is the SQLite state store.
 func (w Workspace) DBFile() string { return filepath.Join(w.StateDir(), "gummi.db") }
 

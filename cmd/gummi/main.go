@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
@@ -81,8 +83,9 @@ func runBoard() error {
 
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
-	if eng, cleanup := buildEngine(store, wt, ws); eng != nil {
+	if eng, names, cleanup := buildEngine(store, wt, ws); eng != nil {
 		shell.AttachEngine(eng)
+		shell.SetProfileNames(names)
 		defer cleanup()
 	}
 
@@ -100,10 +103,10 @@ func runBoard() error {
 //	GUMMI_PROVIDER_BASE_URL  BYOK OpenAI-compatible endpoint (optional)
 //	GUMMI_PROVIDER_TYPE      "openai"|"azure"|"anthropic" (default openai)
 //	GUMMI_PROVIDER_KEY_ENV   env var holding the provider key (optional)
-func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, func()) {
+func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, []string, func()) {
 	ag, err := agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
 	var provider agent.Provider
@@ -120,16 +123,25 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 			maxActive = n
 		}
 	}
+	// per-role model routing from .gummi/profiles.yaml (falls back to
+	// the single env model when absent or a role isn't covered)
+	profiles, err := config.LoadProfiles(ws.ProfilesFile())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+	}
 	eng := engine.New(engine.Config{
 		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
 		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
+		Profiles: profiles,
 	})
 	// reload any sessions from a previous run so the board shows where
 	// each feature left off.
 	if err := eng.Restore(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, "gummi: restoring sessions:", err)
 	}
-	return eng, func() { _ = eng.Close(); _ = ag.Close() }
+	names := profiles.Names()
+	sort.Strings(names)
+	return eng, names, func() { _ = eng.Close(); _ = ag.Close() }
 }
 
 func runInit() error {
@@ -141,10 +153,15 @@ func runInit() error {
 	if err != nil {
 		return err
 	}
-	// scaffold the repo config (verify checks) if absent
-	if _, err := os.Stat(w.ConfigFile()); os.IsNotExist(err) {
-		if err := os.WriteFile(w.ConfigFile(), []byte(config.Template), 0o600); err != nil {
-			return fmt.Errorf("writing config.yaml: %w", err)
+	// scaffold the repo config + profiles if absent
+	for _, f := range []struct{ path, body string }{
+		{w.ConfigFile(), config.Template},
+		{w.ProfilesFile(), config.ProfilesTemplate},
+	} {
+		if _, err := os.Stat(f.path); os.IsNotExist(err) {
+			if err := os.WriteFile(f.path, []byte(f.body), 0o600); err != nil {
+				return fmt.Errorf("writing %s: %w", filepath.Base(f.path), err)
+			}
 		}
 	}
 	fmt.Printf("initialized gummi workspace in %s\n", w.GummiDir())

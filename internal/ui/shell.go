@@ -53,6 +53,7 @@ type Shell struct {
 	inbox        *inbox    // needs-attention queue
 	checks       map[domain.FeatureID][]verify.Result
 	reviewRounds map[domain.FeatureID]int // automatic review→fix→review counter
+	profileNames []string                 // profile names for the new-feature form
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -79,6 +80,10 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Manager, ws state.Worksp
 // AttachEngine wires the agent orchestrator, enabling interactive chat
 // and autonomous stages. Optional: without it the board is static.
 func (m *Shell) AttachEngine(e *engine.Engine) { m.engine = e }
+
+// SetProfileNames sets the profile names offered by the new-feature
+// form (from profiles.yaml). Empty leaves the built-in presets.
+func (m *Shell) SetProfileNames(names []string) { m.profileNames = names }
 
 // Styles exposes the derived style set to panes.
 func (m *Shell) Styles() *theme.Styles { return m.styles }
@@ -274,7 +279,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "k", "up":
 		m.moveSel(-1)
 	case "n":
-		m.Overlay.Push(newFeatureForm(m.createFeature))
+		m.Overlay.Push(newFeatureForm(m.profileNames, m.createFeature))
 	case "g":
 		if r, ok := m.selected(); ok {
 			m.inbox.remove(r.F.ID)

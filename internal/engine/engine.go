@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/morphia/gummi/internal/agent"
+	"github.com/morphia/gummi/internal/config"
 	"github.com/morphia/gummi/internal/domain"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/worktree"
@@ -42,6 +43,9 @@ type Config struct {
 	// Persist writes session transcripts to Store so they survive a
 	// restart (Restore reloads them).
 	Persist bool
+	// Profiles maps a feature's profile + role to a concrete model /
+	// BYOK provider. Empty falls back to Model/Provider for every role.
+	Profiles config.Profiles
 }
 
 // Engine orchestrates all live sessions and the autonomous run queue.
@@ -254,18 +258,20 @@ func (e *Engine) startAutonomous(s *Session) {
 	}
 }
 
-// newAgentSession builds an agent session for a feature's stage.
+// newAgentSession builds an agent session for a feature's stage, with
+// the model/provider chosen by the feature's profile for this role.
 func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role) (agent.Session, error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, err
 	}
+	model, provider := e.resolveRole(f.Profile, role)
 	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
 		Role:        role,
-		Model:       e.cfg.Model,
+		Model:       model,
 		SystemHints: stageHints(f, specPath),
-		Provider:    e.cfg.Provider,
+		Provider:    provider,
 		Permission:  e.cfg.Permission,
 	})
 	if err != nil {

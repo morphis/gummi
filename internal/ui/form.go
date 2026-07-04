@@ -10,8 +10,9 @@ import (
 	"github.com/morphia/gummi/internal/ui/theme"
 )
 
-// profiles gummi knows about in M0 (profiles.yaml lands in M3).
-var profilePresets = []string{"thrifty", "premium", "local-heavy"}
+// defaultProfilePresets is the fallback profile list when no
+// profiles.yaml is loaded.
+var defaultProfilePresets = []string{"thrifty", "premium", "local-heavy"}
 
 // form fields, in tab order.
 const (
@@ -29,6 +30,7 @@ const (
 type featureForm struct {
 	title    textinput.Model
 	oneLiner textinput.Model
+	profiles []string
 	profile  int
 	skip     domain.SkipFlags
 	focus    int
@@ -37,9 +39,13 @@ type featureForm struct {
 	onSubmit func(formResult) tea.Cmd
 }
 
-// newFeatureForm builds the dialog; onSubmit receives the validated
-// fields and returns the command that persists them.
-func newFeatureForm(onSubmit func(formResult) tea.Cmd) *featureForm {
+// newFeatureForm builds the dialog; profiles are the selectable profile
+// names (falling back to the built-in presets when empty), and onSubmit
+// receives the validated fields.
+func newFeatureForm(profiles []string, onSubmit func(formResult) tea.Cmd) *featureForm {
+	if len(profiles) == 0 {
+		profiles = defaultProfilePresets
+	}
 	title := textinput.New()
 	title.Placeholder = "feature title"
 	title.CharLimit = 80
@@ -49,7 +55,7 @@ func newFeatureForm(onSubmit func(formResult) tea.Cmd) *featureForm {
 	one.Placeholder = "one-liner (optional)"
 	one.CharLimit = 120
 	one.SetWidth(38)
-	return &featureForm{title: title, oneLiner: one, onSubmit: onSubmit}
+	return &featureForm{title: title, oneLiner: one, profiles: profiles, onSubmit: onSubmit}
 }
 
 // ID implements overlay.Dialog.
@@ -73,7 +79,7 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		res := formResult{
 			Title:    title,
 			OneLiner: strings.TrimSpace(d.oneLiner.Value()),
-			Profile:  profilePresets[d.profile],
+			Profile:  d.profiles[d.profile],
 			Skip:     d.skip,
 		}
 		return true, d.onSubmit(res)
@@ -89,9 +95,9 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case fieldProfile:
 		switch key.String() {
 		case "left", "h":
-			d.profile = (d.profile + len(profilePresets) - 1) % len(profilePresets)
+			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
 		case "right", "l", "space":
-			d.profile = (d.profile + 1) % len(profilePresets)
+			d.profile = (d.profile + 1) % len(d.profiles)
 		}
 	case fieldSkipBrainstorm:
 		if key.String() == "space" {
@@ -142,7 +148,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(label(fieldTitle, "title    ") + d.title.View() + "\n")
 	b.WriteString(label(fieldOneLiner, "one-liner") + d.oneLiner.View() + "\n")
 	b.WriteString(label(fieldProfile, "profile  "))
-	for i, p := range profilePresets {
+	for i, p := range d.profiles {
 		if i == d.profile {
 			b.WriteString(s.PillMode.Render(p) + " ")
 		} else {
