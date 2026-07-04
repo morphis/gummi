@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -59,11 +60,22 @@ func newWorkspace(t *testing.T) (*Shell, string) {
 }
 
 // pump executes a command and feeds resulting messages back into the
-// model until the command chain settles.
+// model until the command chain settles. Commands that don't return
+// promptly (timers such as the textarea cursor blink, or the engine
+// event listener that blocks on its channel) run asynchronously in the
+// real Bubble Tea runtime; here we treat a slow command as async and
+// stop following it rather than blocking on the timer.
 func pump(t *testing.T, m *Shell, cmd tea.Cmd) *Shell {
 	t.Helper()
 	for cmd != nil {
-		msg := cmd()
+		done := make(chan tea.Msg, 1)
+		go func(c tea.Cmd) { done <- c() }(cmd)
+		var msg tea.Msg
+		select {
+		case msg = <-done:
+		case <-time.After(100 * time.Millisecond):
+			return m // slow/timer command: async in the real runtime
+		}
 		if msg == nil {
 			return m
 		}

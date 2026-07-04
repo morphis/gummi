@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/engine"
 	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/ui/layout"
@@ -43,6 +45,10 @@ type Shell struct {
 	notice noticeMsg
 	spec   *specView // non-nil while the spec surface is open
 
+	// agent orchestration (nil engine means no agent wired)
+	engine *engine.Engine
+	chat   *chatPane // non-nil while attached to an interactive session
+
 	// now is injectable for deterministic tests.
 	now func() time.Time
 }
@@ -58,6 +64,10 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Manager, ws state.Worksp
 	m.store, m.wt, m.ws = store, wt, ws
 }
 
+// AttachEngine wires the agent orchestrator, enabling interactive chat
+// and autonomous stages. Optional: without it the board is static.
+func (m *Shell) AttachEngine(e *engine.Engine) { m.engine = e }
+
 // Styles exposes the derived style set to panes.
 func (m *Shell) Styles() *theme.Styles { return m.styles }
 
@@ -66,11 +76,31 @@ func (m *Shell) attached() bool { return m.store != nil }
 
 // Init implements tea.Model.
 func (m *Shell) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	if m.attached() {
-		return m.loadRows
+		cmds = append(cmds, m.loadRows)
 	}
-	return nil
+	if m.engine != nil {
+		cmds = append(cmds, m.listenEngine)
+	}
+	return tea.Batch(cmds...)
 }
+
+// listenEngine bridges the engine's event channel into Bubble Tea: it
+// blocks for one event and returns it as a message, and is re-issued
+// after each one so the stream stays live.
+func (m *Shell) listenEngine() tea.Msg {
+	ev, ok := <-m.engine.Events()
+	if !ok {
+		return engineClosedMsg{}
+	}
+	return engineEventMsg{ev}
+}
+
+type (
+	engineEventMsg  struct{ ev engine.Event }
+	engineClosedMsg struct{}
+)
 
 // Update implements tea.Model.
 func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -110,6 +140,24 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spec = sv
 		return m, nil
 
+	case engineEventMsg:
+		if msg.ev.Kind == engine.EventError && msg.ev.Err != nil {
+			// engine/provider errors may embed model-controlled bytes
+			m.notice = noticeMsg{text: sanitize(msg.ev.Err.Error()), isErr: true}
+		}
+		// engine events carry no payload the view needs — they just
+		// signal "re-render from Snapshot" — so keep listening.
+		return m, m.listenEngine
+
+	case engineClosedMsg:
+		// the agent backend shut down unexpectedly; drop the pane so the
+		// user isn't left on a frozen chat, and say why.
+		if m.chat != nil {
+			m.chat = nil
+			m.notice = noticeMsg{text: "agent backend stopped", isErr: true}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
 			return m, cmd
@@ -123,6 +171,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	if key == "ctrl+c" {
 		return tea.Quit
+	}
+	// The chat pane captures all keys except the global quit.
+	if m.chat != nil {
+		return m.handleChatKey(msg)
 	}
 	if m.spec != nil {
 		return m.handleSpecKey(key)
@@ -138,6 +190,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch key {
+	case "enter":
+		if r, ok := m.selected(); ok {
+			return m.attachChat(r.F)
+		}
 	case "s":
 		if r, ok := m.selected(); ok {
 			return m.openSpec(r.F)
@@ -276,7 +332,69 @@ func (m *Shell) draw(scr uv.Screen) {
 	m.Overlay.Draw(scr, l.Area, s)
 }
 
+// attachChat opens the interactive chat pane for a feature, starting
+// (or reusing) its engine session. Only interactive stages
+// (brainstorm/spec) chat; other stages get a notice.
+func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
+	if m.engine == nil {
+		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable chat)", isErr: true}
+		return nil
+	}
+	if f.Stage != domain.StageBrainstorm && f.Stage != domain.StageSpec {
+		m.notice = noticeMsg{text: string(f.ID) + " is in " + string(f.Stage) + " — chat is for brainstorm/spec", isErr: true}
+		return nil
+	}
+	// reuse the live session only if it matches this feature AND stage
+	// (a stage advance while detached must start a fresh role/session)
+	if a := m.engine.Active(); a != nil && a.Feature.ID == f.ID && a.Feature.Stage == f.Stage {
+		m.chat = newChatPane(f.ID, a)
+		return nil
+	}
+	s, err := m.engine.Start(context.Background(), f)
+	if err != nil {
+		m.notice = noticeMsg{text: err.Error(), isErr: true}
+		return nil
+	}
+	m.chat = newChatPane(f.ID, s)
+	return nil
+}
+
+// handleChatKey routes keys while the chat pane is open.
+func (m *Shell) handleChatKey(msg tea.KeyPressMsg) tea.Cmd {
+	detach, send, cmd := m.chat.handleKey(msg)
+	if detach {
+		// esc detaches; the engine session keeps running (DESIGN §6).
+		m.chat = nil
+		return nil
+	}
+	if send != "" {
+		return m.sendChat(send)
+	}
+	return cmd
+}
+
+// sendChat delivers a user turn to the engine in a command. It captures
+// the pane's session and engine at call time (not inside the goroutine,
+// which would race the main loop) and refuses to send if that session
+// is no longer the active one — the turn would otherwise land in the
+// wrong feature's session.
+func (m *Shell) sendChat(text string) tea.Cmd {
+	eng, sess := m.engine, m.chat.session
+	return func() tea.Msg {
+		if eng.Active() != sess {
+			return noticeMsg{text: "chat session is no longer active", isErr: true}
+		}
+		if err := eng.Send(context.Background(), text); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return nil
+	}
+}
+
 func (m *Shell) mainView(w, h int) string {
+	if m.chat != nil {
+		return m.chat.view(m.styles, w, h)
+	}
 	if m.spec != nil {
 		return m.specViewRender(w, h)
 	}
