@@ -11,6 +11,7 @@ import (
 
 	"github.com/morphia/gummi/internal/domain"
 	"github.com/morphia/gummi/internal/engine"
+	"github.com/morphia/gummi/internal/notify"
 	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/ui/layout"
@@ -56,6 +57,7 @@ type Shell struct {
 	reviewRounds map[domain.FeatureID]int // automatic review→fix→review counter
 	profileNames []string                 // profile names for the new-feature form
 	envelope     int                      // default spend-plan envelope for new features (0 = none)
+	notifier     *notify.Notifier         // bell/desktop hook for needs-attention events
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -91,6 +93,17 @@ func (m *Shell) SetProfileNames(names []string) { m.profileNames = names }
 // new features, enabling layer-3 per-stage budgets. 0 leaves features
 // unbudgeted (or governed by a flat per-stage budget).
 func (m *Shell) SetEnvelope(credits int) { m.envelope = credits }
+
+// SetNotifier wires the needs-attention notification hook (bell/desktop).
+func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
+
+// raiseAttention adds a needs-attention item and, when it is a new alert
+// (not an update of an existing one), fires the notification hook.
+func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
+	if m.inbox.add(id, kind, text) {
+		m.notifier.Alert(string(id) + ": " + text)
+	}
+}
 
 // Styles exposes the derived style set to panes.
 func (m *Shell) Styles() *theme.Styles { return m.styles }
@@ -136,12 +149,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// engine/provider errors may embed model-controlled bytes
 			text := sanitize(ev.Err.Error())
 			m.notice = noticeMsg{text: text, isErr: true}
-			m.inbox.add(ev.Feature, attnFailure, text)
+			m.raiseAttention(ev.Feature, attnFailure, text)
 		}
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
 		m.reviewRounds[ev.Feature] = 0
-		m.inbox.add(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
+		m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
 		m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
@@ -153,7 +166,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
 			return cmd
 		}
-		m.inbox.add(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
+		m.raiseAttention(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
 	}
 	return nil
 }

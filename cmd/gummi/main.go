@@ -17,6 +17,7 @@ import (
 	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/config"
 	"github.com/morphia/gummi/internal/engine"
+	"github.com/morphia/gummi/internal/notify"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/ui"
 	"github.com/morphia/gummi/internal/ui/theme"
@@ -95,6 +96,14 @@ func runBoard() error {
 			shell.SetEnvelope(n)
 		}
 	}
+	// needs-attention notification hook: GUMMI_NOTIFY=bell|desktop|off
+	// (default bell when unset). Escapes go to stderr so they reach the
+	// terminal without disturbing the render surface.
+	notifyMode := notify.Bell
+	if v := os.Getenv("GUMMI_NOTIFY"); v != "" {
+		notifyMode = notify.ParseMode(v)
+	}
+	shell.SetNotifier(notify.New(notifyMode, os.Stderr))
 
 	_, err = tea.NewProgram(shell).Run()
 	return err

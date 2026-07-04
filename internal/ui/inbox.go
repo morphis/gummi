@@ -44,13 +44,18 @@ func newInbox() *inbox {
 }
 
 // add upserts an item for a feature, keeping insertion order.
-func (b *inbox) add(id domain.FeatureID, kind attnKind, text string) {
+// add upserts a feature's attention item, returning true when the feature
+// had no prior item (a genuinely new alert, worth a notification) and
+// false when it merely updated an existing one.
+func (b *inbox) add(id domain.FeatureID, kind attnKind, text string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, ok := b.items[id]; !ok {
+	_, existed := b.items[id]
+	if !existed {
 		b.order = append(b.order, id)
 	}
 	b.items[id] = attnItem{Feature: id, Kind: kind, Text: text}
+	return !existed
 }
 
 // remove clears a feature's item (it has been attended to).
