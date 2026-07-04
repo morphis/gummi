@@ -80,7 +80,9 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
-	shell := ui.NewShell(theme.GummiDark(), version())
+	// GUMMI_THEME selects the palette (dark|light|neon); default dark.
+	th, _ := theme.ByName(cmp.Or(os.Getenv("GUMMI_THEME"), "dark"))
+	shell := ui.NewShell(th, version())
 	shell.Attach(store, wt, ws)
 
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
