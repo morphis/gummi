@@ -129,10 +129,16 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
 	}
+	var stageBudget float64
+	if v := os.Getenv("GUMMI_STAGE_BUDGET"); v != "" {
+		if b, err := strconv.ParseFloat(v, 64); err == nil && b > 0 {
+			stageBudget = b
+		}
+	}
 	eng := engine.New(engine.Config{
 		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
 		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
-		Profiles: profiles,
+		Profiles: profiles, StageBudget: stageBudget,
 	})
 	// reload any sessions from a previous run so the board shows where
 	// each feature left off.

@@ -46,6 +46,11 @@ type Config struct {
 	// Profiles maps a feature's profile + role to a concrete model /
 	// BYOK provider. Empty falls back to Model/Provider for every role.
 	Profiles config.Profiles
+	// StageBudget is the per-autonomous-stage credit budget (0 = no
+	// budget). The session cap is set ~10% below it (soft-stop
+	// headroom); the model is told its budget and nudged at thresholds.
+	// Phase 20 replaces this flat value with per-feature spend plans.
+	StageBudget float64
 }
 
 // Engine orchestrates all live sessions and the autonomous run queue.
@@ -244,6 +249,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.freeSlot(s)
 		return
 	}
+	s.setBudget(e.stageBudget())
 	s.attachAgent(sess)
 	go e.pump(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
@@ -266,13 +272,22 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		return nil, err
 	}
 	model, provider := e.resolveRole(f.Profile, role)
+	hints := stageHints(f, specPath)
+	var maxCredits float64
+	// autonomous stages get a budget cap + budget-aware hint (interactive
+	// chat is human-paced, so it isn't capped).
+	if b := e.stageBudget(); b > 0 && !interactiveStage(f.Stage) {
+		maxCredits = b * capHeadroom
+		hints = append(hints, budgetHint(b))
+	}
 	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
 		Role:        role,
 		Model:       model,
-		SystemHints: stageHints(f, specPath),
+		SystemHints: hints,
 		Provider:    provider,
 		Permission:  e.cfg.Permission,
+		MaxCredits:  maxCredits,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("starting %s session: %w", role, err)
@@ -411,6 +426,20 @@ func (e *Engine) freeSlot(s *Session) {
 	e.schedule()
 }
 
+// exhaust checkpoints and stops a session that hit its credit budget —
+// whether the CLI reported it or gummi-side enforcement tripped first —
+// moving it to the needs-attention queue (never a silent death).
+func (e *Engine) exhaust(s *Session) {
+	if !s.markExhausted() {
+		return // already checkpointed; a re-raised event must not duplicate the gate
+	}
+	s.appendActivity("budget exhausted — stage stopped for review")
+	s.setState(StateDone)
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted})
+	e.freeSlot(s)
+}
+
 // Close stops every session and closes the event stream.
 func (e *Engine) Close() error {
 	e.mu.Lock()
@@ -471,8 +500,35 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
 				ev.Usage.Credits, ev.Usage.InputTokens, ev.Usage.OutputTokens)
 		}
+		// budget awareness: on crossing a threshold, record a nudge and
+		// signal the UI (DESIGN §5.1 layer 2).
+		if pct, spent := s.crossedThreshold(); pct > 0 {
+			s.appendActivity(nudge(pct, spent, s.Budget()))
+			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventBudget, Threshold: pct})
+		}
+		// gummi-side enforcement: interrupt and checkpoint once spend
+		// reaches the budget (covers BYOK and sub-floor budgets the CLI
+		// cap can't).
+		if s.overBudget() {
+			if a := s.agent(); a != nil {
+				_ = a.Interrupt(context.Background())
+			}
+			e.exhaust(s)
+			return
+		}
+	case agent.EventBudgetExhausted:
+		// the credit cap was hit (CLI-reported): checkpoint and stop.
+		e.exhaust(s)
+		return
 	case agent.EventIdle:
 		s.setBusy(false)
+		// a turn that already exhausted its budget has raised the
+		// budget gate and freed its slot; the trailing idle must not
+		// downgrade that gate to a generic "finished" one.
+		if s.isExhausted() {
+			e.persist(s)
+			return
+		}
 		kind = EventIdle
 		// an autonomous turn completing frees the slot
 		if !s.Interactive && s.State() == StateRunning {

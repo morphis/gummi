@@ -131,6 +131,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.notice = noticeMsg{text: text, isErr: true}
 			m.inbox.add(ev.Feature, attnFailure, text)
 		}
+	case engine.EventExhausted:
+		// budget exhausted mid-stage: raise a gate, don't auto-continue.
+		m.reviewRounds[ev.Feature] = 0
+		m.inbox.add(ev.Feature, attnGate, string(ev.Stage)+" hit its budget — top up, downshift, or park")
+		m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
 		if s == nil || s.Interactive || s.State() != engine.StateDone {

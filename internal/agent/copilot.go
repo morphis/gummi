@@ -11,6 +11,10 @@ import (
 	copilot "github.com/github/copilot-sdk/go"
 )
 
+// cliMinCredits is the CLI's minimum accepted session credit cap; below
+// it the CLI rejects session.create, so gummi enforces the budget itself.
+const cliMinCredits = 30
+
 // Copilot is an Agent backed by the GitHub Copilot CLI via the official
 // Go SDK. It runs one CLI server process (the client) and opens one SDK
 // session per gummi Session. BYOK providers are passed per session, so
@@ -82,7 +86,11 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	if opts.Permission != PermissionGuarded {
 		cfg.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
 	}
-	if opts.MaxCredits > 0 {
+	// The CLI enforces a floor on its own session cap (currently 30
+	// credits) and only meters GitHub-hosted usage; below the floor, or
+	// for BYOK, the orchestrator enforces the budget itself. So only
+	// pass the CLI cap when it clears the floor — it's an extra backstop.
+	if opts.MaxCredits >= cliMinCredits {
 		credits := opts.MaxCredits
 		cfg.SessionLimits = &copilot.SessionLimitsConfig{MaxAiCredits: &credits}
 	}
@@ -205,6 +213,8 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		out = Event{Kind: EventUsage, Usage: u}
 	case *copilot.SessionIdleData:
 		out = Event{Kind: EventIdle}
+	case *copilot.SessionLimitsExhaustedRequestedData:
+		out = Event{Kind: EventBudgetExhausted, Usage: Usage{Credits: d.UsedAiCredits}}
 	case *copilot.SessionErrorData:
 		out = Event{Kind: EventError, Err: fmt.Errorf("%s: %s", d.ErrorType, d.Message)}
 	default:

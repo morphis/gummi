@@ -19,6 +19,9 @@ type Fake struct {
 	Reply string
 	// Caps is what Capabilities reports.
 	Caps Capabilities
+	// OnInterrupt, if set, is called each time a session is interrupted
+	// (lets a test observe orchestrator-side budget enforcement).
+	OnInterrupt func()
 
 	mu       sync.Mutex
 	sessions []*fakeSession
@@ -166,6 +169,9 @@ func (s *fakeSession) Interrupt(_ context.Context) error {
 		return errors.New("session closed")
 	}
 	s.interrupt = true
+	if s.agent.OnInterrupt != nil {
+		s.agent.OnInterrupt()
+	}
 	return nil
 }
 

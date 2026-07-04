@@ -114,6 +114,9 @@ const (
 	EventUsage EventKind = "usage"
 	// EventIdle marks the agent finished its turn and awaits input.
 	EventIdle EventKind = "idle"
+	// EventBudgetExhausted reports the session hit its credit cap; the
+	// in-flight response completes (soft stop) but no more turns run.
+	EventBudgetExhausted EventKind = "budget-exhausted"
 	// EventError reports a session error (Err populated).
 	EventError EventKind = "error"
 )

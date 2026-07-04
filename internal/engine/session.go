@@ -25,14 +25,19 @@ const (
 	EventError EventKind = "error"
 	// EventStopped fires once when the session ends.
 	EventStopped EventKind = "stopped"
+	// EventBudget fires when a budget threshold is crossed (Threshold set).
+	EventBudget EventKind = "budget"
+	// EventExhausted fires when the session hit its credit cap.
+	EventExhausted EventKind = "exhausted"
 )
 
 // Event is one item in the engine's UI-facing stream.
 type Event struct {
-	Feature domain.FeatureID
-	Stage   domain.Stage
-	Kind    EventKind
-	Err     error
+	Feature   domain.FeatureID
+	Stage     domain.Stage
+	Kind      EventKind
+	Err       error
+	Threshold int // budget % for EventBudget
 }
 
 // SessionState is a session's scheduling status.
@@ -97,8 +102,11 @@ type Session struct {
 	busy       bool
 	err        error
 	stopped    bool
-	finalized  bool // stopped; must not be persisted (may be dropped)
-	heldSlot   bool // true between taking and releasing an attention slot
+	finalized  bool    // stopped; must not be persisted (may be dropped)
+	heldSlot   bool    // true between taking and releasing an attention slot
+	budget     float64 // stage credit budget (0 = none)
+	threshold  int     // highest budget threshold crossed (%)
+	exhausted  bool    // hit the credit cap
 }
 
 // Snapshot returns a render-safe copy of the session's state.
@@ -213,6 +221,80 @@ func (s *Session) addSpend(u agent.Usage) {
 	if u.Model != "" {
 		s.spend.Model = u.Model
 	}
+}
+
+// crossedThreshold returns the highest new budget threshold this
+// session's spend has crossed since the last call (0 if none), and the
+// current spent credits. Advances the recorded threshold so each is
+// reported once.
+func (s *Session) crossedThreshold() (pct int, spent float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	spent = s.spentForBudgetLocked()
+	if s.budget <= 0 {
+		return 0, spent
+	}
+	frac := spent / s.budget * 100
+	crossed := 0
+	for _, t := range budgetThresholds {
+		if int(frac) >= t && t > s.threshold {
+			crossed = t
+		}
+	}
+	if crossed > 0 {
+		s.threshold = crossed
+	}
+	return crossed, spent
+}
+
+// spentForBudgetLocked returns the session's spend as a credit-equivalent
+// (credits for hosted, token-derived for BYOK). Caller holds s.mu.
+func (s *Session) spentForBudgetLocked() float64 {
+	return creditEquiv(s.spend.Credits, s.spend.InputTokens, s.spend.OutputTokens)
+}
+
+// isExhausted reports whether the session has hit its budget.
+func (s *Session) isExhausted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exhausted
+}
+
+// markExhausted records that the session hit its budget, returning true
+// only the first time so the exhaustion checkpoint fires exactly once.
+// Both trigger paths — gummi-side overspend and the CLI's (re-raisable)
+// limits-exhausted event — funnel through here (cf. markStopped).
+func (s *Session) markExhausted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.exhausted {
+		return false
+	}
+	s.exhausted = true
+	s.busy = false
+	return true
+}
+
+// overBudget reports whether the session's spend has reached its budget —
+// gummi-side enforcement that works for BYOK and small budgets the CLI
+// cap can't cover. The exactly-once latch lives in markExhausted.
+func (s *Session) overBudget() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.budget > 0 && !s.exhausted && s.spentForBudgetLocked() >= s.budget
+}
+
+// Budget returns the session's stage budget (0 = none).
+func (s *Session) Budget() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.budget
+}
+
+func (s *Session) setBudget(b float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.budget = b
 }
 
 func (s *Session) setBusy(b bool) {
