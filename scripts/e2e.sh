@@ -45,10 +45,19 @@ k s; await "open questions"
 k Tab; k n; k c; k 'noted in e2e'; k Enter
 grep -q "noted in e2e" "$dir/.gummi/state/drafts/FD-001-demo-feature.md" \
     || fail "annotation not persisted to draft"
-k Escape
 
-# advance todo→brainstorm→spec→plan: worktree + branch + committed spec
-k g; k g; k g; sleep 0.5
+# advance to spec, then try to approve — the open user annotation blocks it
+k Escape
+k g; k g          # todo→brainstorm→spec
+k g; sleep 0.3    # spec→plan blocked by the open annotation
+pane | grep -q "block" || fail "open annotation did not block spec approval"
+git -C "$dir" worktree list | grep -q "FD-001" && fail "worktree created despite blocked approval"
+
+# resolve the annotation (navigate to its marker first), then approval proceeds
+k s; k Tab; k n; k c; k 'resolved — acknowledged'; k Enter; k Escape
+
+# advance spec→plan: worktree + branch + committed spec
+k g; sleep 0.5
 git -C "$dir" worktree list | grep -q "FD-001" || fail "worktree not created at spec approval"
 git -C "$dir" branch --list 'gummi/FD-001-*' | grep -q gummi || fail "branch missing"
 spec_file="$dir/.gummi/worktrees/FD-001/.gummi/specs/FD-001-demo-feature.md"
