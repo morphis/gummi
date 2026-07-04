@@ -53,6 +53,9 @@ func (m *Shell) dashboardView(w, h int) string {
 	if f.Budget.Envelope > 0 {
 		line(s.Muted.Render("budget   ") + s.Base.Render(budgetSummary(f)))
 	}
+	if !f.Spend.Zero() {
+		line(s.Muted.Render("spent    ") + s.Base.Render(featureSpend(f.Spend)))
+	}
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
 
@@ -156,4 +159,16 @@ func skipSummary(f domain.Feature) string {
 // budgetSummary formats "spent/envelope credits".
 func budgetSummary(f domain.Feature) string {
 	return fmt.Sprintf("%d/%d credits", f.Budget.Spent, f.Budget.Envelope)
+}
+
+// featureSpend formats the full metered cost for the dashboard.
+func featureSpend(sp domain.Spend) string {
+	parts := []string{}
+	if sp.Credits > 0 {
+		parts = append(parts, fmt.Sprintf("%g credits (≈$%.2f)", roundSpend(sp.Credits), sp.Credits*0.01))
+	}
+	if sp.InputTokens+sp.OutputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("%d in / %d out tokens", sp.InputTokens, sp.OutputTokens))
+	}
+	return strings.Join(parts, " · ")
 }

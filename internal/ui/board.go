@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -86,8 +87,30 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if r.HasWorktree {
 		wtMark = " " + s.Faint.Render("⎇")
 	}
-	line := cursor + num + " " + glyph + " " + id + " " + title + tag + wtMark
+	cost := ""
+	if !r.F.Spend.Zero() {
+		cost = " " + s.Faint.Render(spendTick(r.F.Spend))
+	}
+	line := cursor + num + " " + glyph + " " + id + " " + title + tag + wtMark + cost
 	return ansi.Truncate(line, w, "…")
+}
+
+// spendTick is the compact cost marker on a card: Copilot credits when
+// any were metered, else BYOK tokens.
+func spendTick(sp domain.Spend) string {
+	if sp.Credits > 0 {
+		return fmt.Sprintf("%gcr", roundSpend(sp.Credits))
+	}
+	tk := sp.InputTokens + sp.OutputTokens
+	if tk >= 1000 {
+		return fmt.Sprintf("%.1fktk", float64(tk)/1000)
+	}
+	return fmt.Sprintf("%dtk", tk)
+}
+
+// roundSpend rounds credits to one decimal for display.
+func roundSpend(c float64) float64 {
+	return float64(int(c*10+0.5)) / 10
 }
 
 // shortcutLabel shows 1..9 jump keys; features beyond nine get a dot.

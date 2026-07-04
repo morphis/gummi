@@ -466,6 +466,11 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.appendActivity(ev.Tool)
 	case agent.EventUsage:
 		s.addSpend(ev.Usage)
+		// accumulate the feature's running total across all stages
+		if e.cfg.Persist && e.cfg.Store != nil {
+			_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
+				ev.Usage.Credits, ev.Usage.InputTokens, ev.Usage.OutputTokens)
+		}
 	case agent.EventIdle:
 		s.setBusy(false)
 		kind = EventIdle

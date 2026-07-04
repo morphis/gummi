@@ -39,6 +39,27 @@ type Budget struct {
 	Spent    int // credits consumed so far
 }
 
+// Spend is a feature's metered cost, accumulated across every stage's
+// agent sessions. Credits meter Copilot-hosted usage; tokens meter BYOK
+// (each convertible to display dollars in a later milestone).
+type Spend struct {
+	Credits      float64
+	InputTokens  int64
+	OutputTokens int64
+}
+
+// Add accumulates another usage sample.
+func (s *Spend) Add(credits float64, in, out int64) {
+	s.Credits += credits
+	s.InputTokens += in
+	s.OutputTokens += out
+}
+
+// Zero reports whether nothing has been metered.
+func (s Spend) Zero() bool {
+	return s.Credits == 0 && s.InputTokens == 0 && s.OutputTokens == 0
+}
+
 // Feature is one unit of work: the kanban card, its workflow position,
 // and everything needed to derive its branch, worktree, and spec paths.
 type Feature struct {
@@ -51,6 +72,7 @@ type Feature struct {
 	Skip      SkipFlags
 	Profile   string // profile name mapping roles to agent configs
 	Budget    Budget
+	Spend     Spend // metered cost across all stages
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

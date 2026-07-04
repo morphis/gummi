@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go sqlite driver
@@ -35,6 +36,9 @@ CREATE TABLE IF NOT EXISTS features (
 	profile         TEXT NOT NULL DEFAULT '',
 	budget_envelope INTEGER NOT NULL DEFAULT 0,
 	budget_spent    INTEGER NOT NULL DEFAULT 0,
+	spend_credits   REAL NOT NULL DEFAULT 0,
+	spend_in        INTEGER NOT NULL DEFAULT 0,
+	spend_out       INTEGER NOT NULL DEFAULT 0,
 	created_at      TEXT NOT NULL,
 	updated_at      TEXT NOT NULL
 );
@@ -90,7 +94,23 @@ func OpenStore(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
+	// Additive column migrations for DBs created by an earlier version;
+	// a duplicate-column error means the column already exists.
+	for _, stmt := range migrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrating state db: %w", err)
+		}
+	}
 	return &Store{db: db}, nil
+}
+
+// migrations are idempotent ADD COLUMN statements applied on open.
+var migrations = []string{
+	`ALTER TABLE features ADD COLUMN spend_credits REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN spend_in INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN spend_out INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.
@@ -129,7 +149,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 
 const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
-	budget_envelope, budget_spent, created_at, updated_at`
+	budget_envelope, budget_spent, spend_credits, spend_in, spend_out,
+	created_at, updated_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -138,7 +159,9 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	var id, stage, created, updated string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
-		&f.Budget.Envelope, &f.Budget.Spent, &created, &updated)
+		&f.Budget.Envelope, &f.Budget.Spent,
+		&f.Spend.Credits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
+		&created, &updated)
 	if err != nil {
 		return f, err
 	}
@@ -156,6 +179,22 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		return f, fmt.Errorf("corrupt feature row: %w", err)
 	}
 	return f, nil
+}
+
+// AddSpend accumulates a usage sample onto a feature's running total.
+// It is a metering side-channel (does not touch updated_at or require
+// full-feature validation), so it stays cheap and lock-light.
+func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits float64, in, out int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE features SET
+			spend_credits = spend_credits + ?,
+			spend_in = spend_in + ?,
+			spend_out = spend_out + ?
+		WHERE id = ?`, credits, in, out, string(id))
+	if err != nil {
+		return fmt.Errorf("metering %s: %w", id, err)
+	}
+	return nil
 }
 
 // GetFeature loads one feature by ID.
