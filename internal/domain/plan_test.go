@@ -117,3 +117,18 @@ func TestStageBudgetUnbudgeted(t *testing.T) {
 		t.Errorf("unbudgeted plan = %v, want 0 (no cap)", got)
 	}
 }
+
+func TestBlendEstimate(t *testing.T) {
+	if got := BlendEstimate(100, 200); got != 150 { // avg → 150
+		t.Errorf("blend(100,200) = %v, want 150", got)
+	}
+	if got := BlendEstimate(0, 175); got != 180 { // scribe only, round up to 10
+		t.Errorf("blend(0,175) = %v, want 180", got)
+	}
+	if got := BlendEstimate(130, 0); got != 130 { // historical only
+		t.Errorf("blend(130,0) = %v, want 130", got)
+	}
+	if got := BlendEstimate(0, 0); got != 0 {
+		t.Errorf("blend(0,0) = %v, want 0", got)
+	}
+}

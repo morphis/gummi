@@ -153,11 +153,56 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			// UpdateFeature's no-stage-change rule holds.
 			estimate = m.estimateEnvelope(ctx, &f)
 		}
+		fromSpec := f.Stage == domain.StageSpec
 		if _, err := m.store.Transition(ctx, id, next, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		m.dropSession(id) // the old stage's session is stale now
-		return noticeMsg{text: fmt.Sprintf("%s → %s", id, next) + estimate}
+		note := fmt.Sprintf("%s → %s", id, next) + estimate
+		// on spec approval, follow the historical estimate with a scribe
+		// agent pass over the now-committed spec (only in estimation mode —
+		// an explicit GUMMI_ENVELOPE wins).
+		if fromSpec && m.envelope == 0 {
+			return specApprovedMsg{id: id, note: note}
+		}
+		return noticeMsg{text: note}
+	}
+}
+
+// specApprovedMsg is emitted when a feature's spec is approved (leaves
+// spec) in estimation mode, so the shell can kick off the scribe pass.
+type specApprovedMsg struct {
+	id   domain.FeatureID
+	note string
+}
+
+// scribeEstimate runs a scribe-agent pass over the approved spec and, if
+// it returns a usable number, blends it with the historical estimate and
+// updates the envelope (DESIGN §5.1). Best-effort: any failure or an
+// unparseable reply leaves the envelope as the historical estimate.
+func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return nil
+		}
+		scribe, err := m.engine.Estimate(ctx, f)
+		if err != nil || scribe <= 0 {
+			return nil
+		}
+		blended := int(domain.BlendEstimate(float64(f.Budget.Envelope), scribe))
+		if blended == f.Budget.Envelope {
+			return nil
+		}
+		f.Budget.Envelope = blended
+		if err := m.store.UpdateFeature(ctx, &f); err != nil {
+			return nil
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", id, blended)}
 	}
 }
 

@@ -79,6 +79,14 @@ func pump(t *testing.T, m *Shell, cmd tea.Cmd) *Shell {
 		if msg == nil {
 			return m
 		}
+		// a batch fans out into concurrent commands (as the real runtime
+		// does); drain each so tests see all their effects.
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				m = pump(t, m, c)
+			}
+			return m
+		}
 		var model tea.Model
 		model, cmd = m.Update(msg)
 		m = model.(*Shell)

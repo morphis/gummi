@@ -195,6 +195,12 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case specApprovedMsg:
+		// show the transition notice, reload, and refine the envelope with
+		// a scribe pass in the background.
+		m.notice = noticeMsg{text: msg.note}
+		return m, tea.Batch(m.loadRows, m.scribeEstimate(msg.id))
+
 	case specLoadedMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}

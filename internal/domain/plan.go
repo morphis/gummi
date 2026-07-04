@@ -97,7 +97,25 @@ func EstimateEnvelope(history []Spend) (envelope float64, samples int) {
 	if len(vals)%2 == 0 {
 		med = (vals[len(vals)/2-1] + vals[len(vals)/2]) / 2
 	}
-	return math.Ceil(med*estimateHeadroom/10) * 10, len(vals)
+	return roundUpTo10(med * estimateHeadroom), len(vals)
+}
+
+// roundUpTo10 rounds a credit figure up to a tidy multiple of 10.
+func roundUpTo10(v float64) float64 { return math.Ceil(v/10) * 10 }
+
+// BlendEstimate combines the historical-spend envelope with a scribe
+// agent's plan-time estimate (DESIGN §5.1). With both signals it averages
+// them (the history grounds the guess, the scribe reflects this specific
+// plan); with one, it uses that; with neither, 0. Rounded to a tidy 10.
+func BlendEstimate(historical, scribe float64) float64 {
+	switch {
+	case historical > 0 && scribe > 0:
+		return roundUpTo10((historical + scribe) / 2)
+	case scribe > 0:
+		return roundUpTo10(scribe)
+	default:
+		return roundUpTo10(historical) // 0 stays 0
+	}
 }
 
 // capThrough returns the cumulative credit cap available up to and
