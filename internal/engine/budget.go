@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/morphia/gummi/internal/domain"
 )
@@ -61,6 +62,37 @@ func (e *Engine) reserveReleased(id domain.FeatureID) bool {
 // ReserveReleased reports whether a feature's reserve has been released by
 // a top-up, so the UI can show its stage cap with the extra headroom.
 func (e *Engine) ReserveReleased(id domain.FeatureID) bool { return e.reserveReleased(id) }
+
+// diffReviewHints turns a feature's open diff annotations into system
+// hints for an implement run (DESIGN §6.1). Empty when the store is
+// absent or there is nothing open.
+func (e *Engine) diffReviewHints(ctx context.Context, id domain.FeatureID) []string {
+	if e.cfg.Store == nil {
+		return nil
+	}
+	anns, err := e.cfg.Store.ListDiffAnnotations(ctx, id)
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, a := range anns {
+		if a.Resolved {
+			continue
+		}
+		loc := a.File
+		if a.Excerpt != "" {
+			loc += " — " + a.Excerpt
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", loc, a.Comment))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return []string{
+		"Address these diff review comments from the last review; make the " +
+			"edits and keep the change minimal:\n" + strings.Join(lines, "\n"),
+	}
+}
 
 // budgetHint is the session-start system instruction telling the model
 // its budget (DESIGN §5.1 layer 2, "at session start").

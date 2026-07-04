@@ -291,6 +291,26 @@ func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
 	return nil
 }
 
+// Diff returns the unified diff of the feature branch against the point
+// it forked from main: the merge base to the worktree (so both committed
+// branch work and uncommitted edits show, without main's later commits
+// appearing as spurious reversals). Empty when nothing changed.
+func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return "", err
+	}
+	mainHead, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	base, err := runGit(ctx, p, "merge-base", mainHead, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return runGit(ctx, p, "diff", base)
+}
+
 // rebaseInProgress reports whether wt has rebase state on disk.
 func (m *Manager) rebaseInProgress(ctx context.Context, wt string) bool {
 	for _, dir := range []string{"rebase-merge", "rebase-apply"} {

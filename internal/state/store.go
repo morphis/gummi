@@ -74,6 +74,21 @@ CREATE TABLE IF NOT EXISTS session_messages (
 	content    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_messages_feature ON session_messages(feature_id);
+
+-- Line comments on a feature's worktree diff (DESIGN §6.1). Anchored by
+-- content hash (not line number) so they survive minor rebases; an
+-- annotation whose anchor no longer matches degrades to a file comment.
+CREATE TABLE IF NOT EXISTS diff_annotations (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	file       TEXT NOT NULL,
+	anchor     TEXT NOT NULL,
+	excerpt    TEXT NOT NULL DEFAULT '',
+	comment    TEXT NOT NULL,
+	resolved   INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS diff_annotations_feature ON diff_annotations(feature_id);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.

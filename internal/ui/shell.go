@@ -46,6 +46,7 @@ type Shell struct {
 	sel    int
 	notice noticeMsg
 	spec   *specView // non-nil while the spec surface is open
+	diff   *diffView // non-nil while the diff surface is open
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -195,6 +196,26 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spec = sv
 		return m, nil
 
+	case diffLoadedMsg:
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		if msg.empty {
+			m.notice = noticeMsg{text: string(msg.f.ID) + ": no changes in the worktree yet"}
+			return m, nil
+		}
+		dv := newDiffView(msg.f, msg.diff, msg.anns)
+		if m.diff != nil && m.diff.f.ID == msg.f.ID {
+			// reload in place: keep mode, cursor, and scroll, clamped in
+			// case the diff shrank (e.g. after a fix-up run).
+			dv.annotate = m.diff.annotate
+			dv.offset = min(m.diff.offset, max(len(dv.lines)-1, 0))
+			dv.cursor = min(max(m.diff.cursor, 1), len(dv.lines))
+		}
+		m.diff = dv
+		return m, nil
+
 	case verifyResultMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
@@ -250,6 +271,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.spec != nil {
 		return m.handleSpecKey(key)
 	}
+	if m.diff != nil {
+		return m.handleDiffKey(key)
+	}
 	switch key {
 	case "q":
 		return tea.Quit
@@ -284,6 +308,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "s":
 		if r, ok := m.selected(); ok {
 			return m.openSpec(r.F)
+		}
+	case "d":
+		if r, ok := m.selected(); ok {
+			return m.openDiff(r.F)
 		}
 	case "j", "down":
 		m.moveSel(1)
@@ -597,6 +625,9 @@ func (m *Shell) mainView(w, h int) string {
 	}
 	if m.spec != nil {
 		return m.specViewRender(w, h)
+	}
+	if m.diff != nil {
+		return m.diffViewRender(w, h)
 	}
 	if len(m.rows) > 0 {
 		return m.dashboardView(w, h)

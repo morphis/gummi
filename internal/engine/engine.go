@@ -287,6 +287,13 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	}
 	model, provider := e.resolveRole(f.Profile, role)
 	hints := stageHints(f, specPath)
+	// implementation runs carry any open diff review comments so a fix-up
+	// (bounce from the diff surface's "request changes") addresses each
+	// (DESIGN §6.1). The store is the source of truth, so this reaches
+	// every implement run, not just the one that triggered it.
+	if f.Stage == domain.StageImplement {
+		hints = append(hints, e.diffReviewHints(ctx, f.ID)...)
+	}
 	var maxCredits float64
 	// autonomous stages get a budget cap + budget-aware hint (interactive
 	// chat is human-paced, so it isn't capped).
