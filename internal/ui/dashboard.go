@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/domain"
 	"github.com/morphia/gummi/internal/engine"
 )
@@ -72,10 +71,10 @@ func (m *Shell) dashboardView(w, h int) string {
 		if snap.Busy {
 			title += "  " + s.Info.Render("⣾ running")
 		}
-		if snap.Spend.Credits > 0 || snap.Spend.OutputTokens > 0 {
-			title += "  " + s.Faint.Render(spendSummary(snap.Spend))
-		}
 		line(title)
+		if meta := sessionMeta(snap); meta != "" {
+			line("  " + s.Faint.Render(meta))
+		}
 		acts := snap.Activity
 		if len(acts) > 6 {
 			acts = acts[len(acts)-6:]
@@ -141,12 +140,48 @@ func lastAssistant(snap engine.Snapshot) string {
 	return ""
 }
 
-// spendSummary formats a running spend total for the activity header.
-func spendSummary(u agent.Usage) string {
-	if u.Credits > 0 {
-		return fmt.Sprintf("%.1f credits", u.Credits)
+// sessionMeta is the who-is-running line under the activity header:
+// backend · model · provider · running spend, each shown once known.
+func sessionMeta(snap engine.Snapshot) string {
+	var parts []string
+	if snap.AgentName != "" {
+		parts = append(parts, snap.AgentName)
 	}
-	return fmt.Sprintf("%d tok", u.OutputTokens)
+	if m := runModel(snap); m != "" {
+		parts = append(parts, m)
+	}
+	if p := snap.Provider.Describe(); p != "" {
+		parts = append(parts, p)
+	}
+	if sp := spendSummary(snap); sp != "" {
+		parts = append(parts, sp)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// runModel prefers the model the agent reported in usage events over the
+// profile-resolved one (the reported one is ground truth).
+func runModel(snap engine.Snapshot) string {
+	if snap.Spend.Model != "" {
+		return snap.Spend.Model
+	}
+	return snap.Model
+}
+
+// spendSummary formats the running spend: metered credits when the
+// backend reports them, otherwise tokens priced at the provider's rate.
+func spendSummary(snap engine.Snapshot) string {
+	if snap.Spend.Credits > 0 {
+		return fmt.Sprintf("%g credits", roundSpend(snap.Spend.Credits))
+	}
+	if tok := snap.Spend.InputTokens + snap.Spend.OutputTokens; tok > 0 {
+		out := humanTokens(tok) + " tok"
+		if snap.SpentCredits > 0 {
+			out += fmt.Sprintf(" ≈%g credits", roundSpend(snap.SpentCredits))
+		}
+		return out
+	}
+	return ""
 }
 
 // skipSummary names the stages this feature was created to skip.

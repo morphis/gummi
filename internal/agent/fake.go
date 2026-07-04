@@ -37,6 +37,9 @@ func NewFake(reply string) *Fake {
 	}
 }
 
+// Name implements Agent.
+func (f *Fake) Name() string { return "fake" }
+
 // Capabilities implements Agent.
 func (f *Fake) Capabilities() Capabilities { return f.Caps }
 

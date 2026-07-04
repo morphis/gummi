@@ -73,16 +73,20 @@ type Message struct {
 
 // Snapshot is an immutable view of a session's state, safe to render.
 type Snapshot struct {
-	Feature     domain.Feature
-	Role        agent.Role
-	Interactive bool
-	State       SessionState
-	Transcript  []Message
-	Activity    []string // recent tool-call lines
-	Spend       agent.Usage
-	Context     agent.Context // latest context-window occupancy
-	Busy        bool          // agent is mid-turn
-	Err         error
+	Feature      domain.Feature
+	Role         agent.Role
+	Interactive  bool
+	State        SessionState
+	AgentName    string         // backend running this session ("copilot", "opencode", …)
+	Model        string         // model resolved at spawn (Spend.Model is the reported one)
+	Provider     agent.Provider // BYOK endpoint; zero means native routing
+	Transcript   []Message
+	Activity     []string // recent tool-call lines
+	Spend        agent.Usage
+	SpentCredits float64       // Spend as a credit-equivalent at the provider's rate
+	Context      agent.Context // latest context-window occupancy
+	Busy         bool          // agent is mid-turn
+	Err          error
 }
 
 // Session is one live agent conversation bound to a feature + stage.
@@ -96,6 +100,9 @@ type Session struct {
 
 	mu         sync.Mutex
 	agentSess  agent.Session // nil while queued
+	agentName  string        // backend identity, for display
+	model      string        // model resolved at spawn
+	provider   agent.Provider
 	state      SessionState
 	transcript []Message
 	activity   []string
@@ -117,16 +124,20 @@ func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Snapshot{
-		Feature:     s.Feature,
-		Role:        s.Role,
-		Interactive: s.Interactive,
-		State:       s.state,
-		Transcript:  append([]Message(nil), s.transcript...),
-		Activity:    append([]string(nil), s.activity...),
-		Spend:       s.spend,
-		Context:     s.context,
-		Busy:        s.busy,
-		Err:         s.err,
+		Feature:      s.Feature,
+		Role:         s.Role,
+		Interactive:  s.Interactive,
+		State:        s.state,
+		AgentName:    s.agentName,
+		Model:        s.model,
+		Provider:     s.provider,
+		Transcript:   append([]Message(nil), s.transcript...),
+		Activity:     append([]string(nil), s.activity...),
+		Spend:        s.spend,
+		SpentCredits: s.spentForBudgetLocked(),
+		Context:      s.context,
+		Busy:         s.busy,
+		Err:          s.err,
 	}
 }
 
@@ -289,6 +300,16 @@ func (s *Session) setByokRate(r float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byokRate = r
+}
+
+// setSpawnInfo records which backend, model, and provider this session
+// runs on, so the UI can say so before the first usage event arrives.
+func (s *Session) setSpawnInfo(agentName, model string, provider agent.Provider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentName = agentName
+	s.model = model
+	s.provider = provider
 }
 
 // isExhausted reports whether the session has hit its budget.

@@ -96,6 +96,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 		s.activity = append(s.activity, snap.Activity...)
 		s.spend = usageFrom(snap)
+		e.stampSpawnInfo(s)
 		e.live[snap.Feature] = s
 	}
 	return nil

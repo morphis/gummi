@@ -57,6 +57,9 @@ func NewCopilot(ctx context.Context, opts CopilotOptions) (*Copilot, error) {
 	return &Copilot{client: client}, nil
 }
 
+// Name implements Agent.
+func (c *Copilot) Name() string { return "copilot" }
+
 // Capabilities implements Agent. The Copilot SDK provides all four.
 func (c *Copilot) Capabilities() Capabilities {
 	return Capabilities{BYOK: true, Resume: true, UsageEvents: true, Interrupt: true}

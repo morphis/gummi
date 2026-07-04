@@ -47,6 +47,9 @@ func NewOpencode(bin string) (*Opencode, error) {
 	return &Opencode{bin: resolved}, nil
 }
 
+// Name implements Agent.
+func (o *Opencode) Name() string { return "opencode" }
+
 // Capabilities implements Agent. opencode persists sessions (--session),
 // reports per-step token/cost usage, and can be interrupted by killing the
 // turn's process. BYOK routing needs opencode-side provider config rather

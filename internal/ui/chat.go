@@ -169,15 +169,22 @@ func (c *chatPane) scrollBy(delta int) {
 	c.scroll = min(max(c.scroll+delta, 0), maxScroll)
 }
 
-// chatMeta is the model / spend / context-window status line under the
-// chat header. Each piece is shown only when the agent has reported it.
+// chatMeta is the backend / model / provider / spend / context-window
+// status line under the chat header. Backend, model, and provider are
+// known from spawn; spend and context appear as the agent reports them.
 func chatMeta(s *theme.Styles, snap engine.Snapshot) string {
 	var parts []string
-	if m := snap.Spend.Model; m != "" {
+	if snap.AgentName != "" {
+		parts = append(parts, s.Muted.Render(snap.AgentName))
+	}
+	if m := runModel(snap); m != "" {
 		parts = append(parts, s.Muted.Render(m))
 	}
-	if spent := snap.Spend.InputTokens + snap.Spend.OutputTokens; spent > 0 {
-		parts = append(parts, s.Faint.Render(humanTokens(spent)+" tok spent"))
+	if p := snap.Provider.Describe(); p != "" {
+		parts = append(parts, s.Faint.Render(p))
+	}
+	if sp := spendSummary(snap); sp != "" {
+		parts = append(parts, s.Faint.Render(sp+" spent"))
 	}
 	if c := snap.Context; c.Tokens > 0 {
 		ctx := humanTokens(c.Tokens) + " ctx"

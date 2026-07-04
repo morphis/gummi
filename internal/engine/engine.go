@@ -167,6 +167,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		return nil, err
 	}
 	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{})}
+	e.stampSpawnInfo(s)
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
 		s.transcript = append(s.transcript, ps.Transcript...)
@@ -207,6 +208,7 @@ func (e *Engine) Run(f domain.Feature) error {
 		}
 	}
 	s := &Session{Feature: f, Role: role, state: StateQueued, done: make(chan struct{})}
+	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
 	e.queue = append(e.queue, f.ID)
@@ -281,6 +283,20 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
 		e.freeSlot(s)
 	}
+}
+
+// stampSpawnInfo records on the session which backend, model, and
+// provider its profile/role resolve to — and the provider's token→credit
+// rate — so status displays (and interactive budget math) have them from
+// the moment the session exists, not after the first usage event.
+func (e *Engine) stampSpawnInfo(s *Session) {
+	model, provider := e.resolveRole(s.Feature.Profile, s.Role)
+	name := ""
+	if e.cfg.Agent != nil {
+		name = e.cfg.Agent.Name()
+	}
+	s.setSpawnInfo(name, model, provider)
+	s.setByokRate(provider.CreditsPer1KTokens)
 }
 
 // newAgentSession builds an agent session for a feature's stage, with

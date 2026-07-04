@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -55,6 +56,10 @@ func NewHeadless(argv []string) (*Headless, error) {
 	}
 	return &Headless{argv: append([]string(nil), argv...)}, nil
 }
+
+// Name implements Agent: the configured command's basename, so the UI
+// names the binary doing the work.
+func (h *Headless) Name() string { return filepath.Base(h.argv[0]) }
 
 // Capabilities implements Agent. The protocol carries a provider (BYOK),
 // an interrupt frame, and a usage frame, so those are supported; there is

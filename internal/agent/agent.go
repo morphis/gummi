@@ -4,7 +4,10 @@
 // used by tests. gummi's orchestrator speaks only this vocabulary.
 package agent
 
-import "context"
+import (
+	"context"
+	"net/url"
+)
 
 // Role is a named capability slot a profile maps to a concrete model.
 type Role string
@@ -46,6 +49,23 @@ type Provider struct {
 	CreditsPer1KTokens float64
 }
 
+// Describe renders the provider for status displays: empty for native
+// routing, otherwise the type and endpoint host ("openai @ 127.0.0.1:8080").
+func (p Provider) Describe() string {
+	if p.BaseURL == "" {
+		return ""
+	}
+	typ := p.Type
+	if typ == "" {
+		typ = "openai"
+	}
+	host := p.BaseURL
+	if u, err := url.Parse(p.BaseURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return typ + " @ " + host
+}
+
 // SessionOpts configures one agent session.
 type SessionOpts struct {
 	// WorkDir is the feature's worktree; the agent's cwd.
@@ -69,6 +89,9 @@ type SessionOpts struct {
 
 // Agent creates sessions and reports what its backend can do.
 type Agent interface {
+	// Name identifies the backend for status displays ("copilot",
+	// "opencode", the headless command's basename).
+	Name() string
 	// NewSession starts a session in opts.WorkDir with a role config.
 	NewSession(ctx context.Context, opts SessionOpts) (Session, error)
 	// Capabilities reports optional features (BYOK, resume, usage
