@@ -33,6 +33,9 @@ func (w Workspace) WorktreesDir() string { return filepath.Join(w.GummiDir(), "w
 // SeqFile is the FD-NNN monotonic counter.
 func (w Workspace) SeqFile() string { return filepath.Join(w.GummiDir(), "seq") }
 
+// ConfigFile is the repo-controlled config (verify checks, permissions).
+func (w Workspace) ConfigFile() string { return filepath.Join(w.GummiDir(), "config.yaml") }
+
 // DBFile is the SQLite state store.
 func (w Workspace) DBFile() string { return filepath.Join(w.StateDir(), "gummi.db") }
 

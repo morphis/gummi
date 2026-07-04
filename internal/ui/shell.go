@@ -18,6 +18,7 @@ import (
 	"github.com/morphia/gummi/internal/ui/overlay"
 	"github.com/morphia/gummi/internal/ui/statusbar"
 	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphia/gummi/internal/verify"
 	"github.com/morphia/gummi/internal/worktree"
 )
 
@@ -50,6 +51,7 @@ type Shell struct {
 	engine *engine.Engine
 	chat   *chatPane // non-nil while attached to an interactive session
 	inbox  *inbox    // needs-attention queue
+	checks map[domain.FeatureID][]verify.Result
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -57,7 +59,13 @@ type Shell struct {
 
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
-	return &Shell{styles: theme.New(t), version: version, now: time.Now, inbox: newInbox()}
+	return &Shell{
+		styles:  theme.New(t),
+		version: version,
+		now:     time.Now,
+		inbox:   newInbox(),
+		checks:  map[domain.FeatureID][]verify.Result{},
+	}
 }
 
 // Attach wires the shell to a workspace: its store, worktree manager,
@@ -163,6 +171,24 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spec = sv
 		return m, nil
 
+	case verifyResultMsg:
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		m.checks[msg.feature] = msg.results
+		passed := 0
+		for _, r := range msg.results {
+			if r.OK {
+				passed++
+			}
+		}
+		m.notice = noticeMsg{
+			text:  string(msg.feature) + " verify: " + strconv.Itoa(passed) + "/" + strconv.Itoa(len(msg.results)) + " passed",
+			isErr: passed != len(msg.results),
+		}
+		return m, nil
+
 	case engineEventMsg:
 		m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
@@ -225,6 +251,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			m.inbox.remove(r.F.ID)
 			return m.pauseRun(r.F)
+		}
+	case "v":
+		if r, ok := m.selected(); ok {
+			return m.runChecks(r.F)
 		}
 	case "s":
 		if r, ok := m.selected(); ok {

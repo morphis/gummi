@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphia/gummi/internal/agent"
+	"github.com/morphia/gummi/internal/config"
 	"github.com/morphia/gummi/internal/engine"
 	"github.com/morphia/gummi/internal/state"
 	"github.com/morphia/gummi/internal/ui"
@@ -139,6 +140,12 @@ func runInit() error {
 	w, err := state.Init(cwd)
 	if err != nil {
 		return err
+	}
+	// scaffold the repo config (verify checks) if absent
+	if _, err := os.Stat(w.ConfigFile()); os.IsNotExist(err) {
+		if err := os.WriteFile(w.ConfigFile(), []byte(config.Template), 0o600); err != nil {
+			return fmt.Errorf("writing config.yaml: %w", err)
+		}
 	}
 	fmt.Printf("initialized gummi workspace in %s\n", w.GummiDir())
 	return nil

@@ -85,6 +85,13 @@ func (m *Shell) dashboardView(w, h int) string {
 			line("  " + s.Faint.Render("starting…"))
 		}
 		line("")
+	} else if res := m.checks[f.ID]; len(res) > 0 {
+		for _, l := range strings.Split(verifySummary(s, res), "\n") {
+			if l != "" {
+				line(l)
+			}
+		}
+		line("")
 	} else if len(r.History) > 0 {
 		line(s.Subtitle.Render("history"))
 		hist := r.History

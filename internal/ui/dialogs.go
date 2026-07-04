@@ -33,6 +33,7 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"b", "bounce back to implement"},
 		{"n", "new feature"},
 		{"s", "spec (tab: read ⇄ annotate)"},
+		{"v", "run verify checks"},
 		{"x", "delete feature"},
 		{"?", "help"},
 		{"q", "quit"},
