@@ -67,6 +67,16 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if opts.Model == "" {
 		return nil, errors.New("opencode requires a model (provider/model, e.g. opencode/deepseek-v4-flash-free)")
 	}
+	// opencode owns provider configuration through its own config
+	// (`opencode auth`, opencode.json). A gummi-style BYOK Provider (a
+	// Copilot base_url + key) doesn't map onto it, so rather than silently
+	// ignore it, fail clearly: configure the endpoint in opencode and
+	// reference it as `<provider>/<model>` in the profile's model.
+	if opts.Provider.BaseURL != "" {
+		return nil, fmt.Errorf("opencode manages providers itself; configure %q in opencode "+
+			"(`opencode auth` or opencode.json) and set the profile model to <provider>/<model> "+
+			"instead of a BYOK block", opts.Provider.BaseURL)
+	}
 	s := &opencodeSession{
 		o:       o,
 		workdir: opts.WorkDir,
