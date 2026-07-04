@@ -93,6 +93,7 @@ type Snapshot struct {
 	Context      agent.Context // latest context-window occupancy
 	Busy         bool          // agent is mid-turn
 	PendingAsk   *Ask          // the agent's open ask_user question, if any
+	Verdict      string        // review verdict via submit_verdict, if submitted
 	Err          error
 }
 
@@ -118,6 +119,7 @@ type Session struct {
 	context    agent.Context
 	busy       bool
 	pendingAsk *Ask
+	verdict    string // review verdict from submit_verdict ("pass"/"changes")
 	err        error
 	stopped    bool
 	finalized  bool    // stopped; must not be persisted (may be dropped)
@@ -147,6 +149,7 @@ func (s *Session) Snapshot() Snapshot {
 		Context:      s.context,
 		Busy:         s.busy,
 		PendingAsk:   s.pendingAsk,
+		Verdict:      s.verdict,
 		Err:          s.err,
 	}
 }
@@ -359,6 +362,12 @@ func (s *Session) setPendingAsk(a *Ask) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pendingAsk = a
+}
+
+func (s *Session) setVerdict(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.verdict = v
 }
 
 // takePendingAsk clears and returns the open ask (nil if none), so the

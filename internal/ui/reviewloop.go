@@ -27,6 +27,18 @@ const (
 
 var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes)\s*$`)
 
+// verdictFromTool maps a submit_verdict tool result to a reviewVerdict.
+func verdictFromTool(v string) reviewVerdict {
+	switch v {
+	case "pass":
+		return verdictPass
+	case "changes":
+		return verdictChanges
+	default:
+		return verdictUnclear
+	}
+}
+
 // parseVerdict finds the last VERDICT line in review output.
 func parseVerdict(text string) reviewVerdict {
 	matches := verdictRe.FindAllStringSubmatch(text, -1)
@@ -68,7 +80,13 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	verdict := parseVerdict(lastAssistant(s.Snapshot()))
+	// prefer the structured submit_verdict tool result; fall back to
+	// parsing the VERDICT: line for backends/agents that didn't use it.
+	snap := s.Snapshot()
+	verdict := verdictFromTool(snap.Verdict)
+	if verdict == verdictUnclear {
+		verdict = parseVerdict(lastAssistant(snap))
+	}
 	switch verdict {
 	case verdictPass:
 		m.reviewRounds[id] = 0

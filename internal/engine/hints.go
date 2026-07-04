@@ -91,10 +91,13 @@ gummi parses this exact line to drive the automatic
 review→fix→review loop; without it the loop stalls.`))
 	case domain.StageVerify:
 		hints = append(hints, strings.TrimSpace(`
-Stage: Verify (autonomous). Run the repo's check commands (from
-.gummi/config.yaml) and the spec's Verification plan. Record the
-results in the spec — the Verification plan section, with a summary
-line in Progress — and report pass or fail plainly with the evidence.`))
+Stage: Verify (autonomous). gummi runs the repo's fixed check commands
+(from .gummi/config.yaml) for you and gives you their results in the
+kickoff — do not re-run them. Your job is the spec's Verification plan:
+the feature-specific live checks. Record all results in the spec (the
+Verification plan section, with a summary line in Progress) and report
+pass or fail plainly with the evidence. (If the kickoff carries no
+check results — e.g. guarded mode — run the repo commands yourself.)`))
 	}
 	return hints
 }

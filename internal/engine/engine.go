@@ -18,11 +18,14 @@ import (
 	"sync"
 	"time"
 
+	"strings"
+
 	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/config"
 	"github.com/morphia/gummi/internal/domain"
 	"github.com/morphia/gummi/internal/spec"
 	"github.com/morphia/gummi/internal/state"
+	"github.com/morphia/gummi/internal/verify"
 	"github.com/morphia/gummi/internal/worktree"
 )
 
@@ -313,11 +316,84 @@ func (e *Engine) startAutonomous(s *Session) {
 	s.appendUser(kickoff)
 	s.setBusy(true)
 	e.persist(s)
-	if err := sess.Send(context.Background(), kickoff); err != nil {
+	// The kickoff is sent off the scheduler goroutine: the Verify stage
+	// runs the repo's fixed checks gummi-side first, which can take
+	// minutes, and must not stall slot scheduling.
+	go e.sendKickoff(s, sess)
+}
+
+// sendKickoff delivers the stage kickoff. For the Verify stage in
+// allow-all mode it first runs the repo's fixed checks gummi-side and
+// prepends their results, so the scribe only does the spec's
+// feature-specific live checks and the write-up — no frontier model
+// shepherding `go test` output.
+func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
+	msg := kickoff
+	if s.Feature.Stage == domain.StageVerify && e.cfg.Permission != agent.PermissionGuarded {
+		if pre := e.runFixedChecks(s); pre != "" {
+			msg = pre + "\n\n" + kickoff
+		}
+	}
+	if err := sess.Send(context.Background(), msg); err != nil {
 		s.setError(err)
 		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
 		e.freeSlot(s)
 	}
+}
+
+// verifyStageTimeout bounds the gummi-side check run at the Verify stage
+// (mirrors the manual verify dialog's cap).
+const verifyStageTimeout = 10 * time.Minute
+
+// runFixedChecks executes the repo's config.yaml checks in the feature's
+// worktree, records each outcome in the activity feed, and returns a
+// compact summary to hand the scribe (empty when there are no checks or
+// the config can't be read — the scribe then runs them itself, as before).
+func (e *Engine) runFixedChecks(s *Session) string {
+	cfg, err := config.Load(e.cfg.Workspace.ConfigFile())
+	if err != nil || len(cfg.Checks) == 0 {
+		return ""
+	}
+	workDir := filepath.Join(e.cfg.Worktrees.Root(), s.Feature.WorktreePath())
+	ctx, cancel := context.WithTimeout(context.Background(), verifyStageTimeout)
+	defer cancel()
+	results := verify.Run(ctx, workDir, cfg.Checks)
+
+	var b strings.Builder
+	b.WriteString("gummi already ran the repo's fixed checks in this worktree — do NOT re-run them:\n")
+	for _, r := range results {
+		status := "pass"
+		if !r.OK {
+			status = fmt.Sprintf("FAIL (exit %d)", r.ExitCode)
+		}
+		s.appendActivity(fmt.Sprintf("check %s: %s", r.Name, status))
+		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
+		if !r.OK {
+			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
+		}
+	}
+	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +
+		"checks), record all results in the spec's Verification plan and a summary " +
+		"line in Progress, and report pass or fail with the evidence.")
+	e.persist(s)
+	return b.String()
+}
+
+// tailLines keeps the last n lines of s (check failures are most
+// informative at the end).
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = append([]string{"…(earlier output trimmed)"}, lines[len(lines)-n:]...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indentLines(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "    " + strings.ReplaceAll(s, "\n", "\n    ")
 }
 
 // stampSpawnInfo records on the session which backend, model, and
@@ -359,19 +435,19 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		maxCredits = budget * capHeadroom
 		hints = append(hints, budgetHint(budget))
 	}
-	// ask_user is offered only on interactive stages: that is where the
-	// chat pane's picker can answer it. An autonomous stage has no answer
-	// surface, so a blocked ask there would wedge its slot — those stages
-	// keep the "stop and raise a gate" behavior instead. Client tools when
-	// the backend supports them; otherwise the prompt-convention fallback.
+	// gummi-owned client tools per stage. When the backend supports them,
+	// register the tools and tell the agent they exist; otherwise fall
+	// back to prompt conventions (ask_user has a fenced-block convention;
+	// spec_annotate and submit_verdict degrade to the %% and VERDICT:
+	// text forms the stage hints already describe).
 	var tools []agent.ToolDef
-	if interactiveStage(f.Stage) {
-		if e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools {
-			tools = clientTools()
-			hints = append(hints, askToolHint)
-		} else {
-			hints = append(hints, askConventionHint)
+	if e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools {
+		tools = stageTools(f.Stage)
+		if h := toolHint(f.Stage); h != "" {
+			hints = append(hints, h)
 		}
+	} else if interactiveStage(f.Stage) {
+		hints = append(hints, askConventionHint)
 	}
 	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,

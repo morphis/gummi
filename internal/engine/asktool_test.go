@@ -193,6 +193,80 @@ func TestConventionAskPath(t *testing.T) {
 	}
 }
 
+// toolCallFake advertises client tools and, on its first turn, emits a
+// single client-tool call with the given name/args, then idles.
+func toolCallFake(name string, args json.RawMessage) *agent.Fake {
+	f := agent.NewFake("")
+	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true}
+	first := true
+	f.Responder = func(_ agent.SessionOpts, _ string) []agent.Event {
+		if first {
+			first = false
+			return []agent.Event{
+				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "c1", Name: name, Args: args}},
+				{Kind: agent.EventIdle},
+			}
+		}
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}
+	return f
+}
+
+func TestSpecAnnotateWritesMarker(t *testing.T) {
+	args := json.RawMessage(`{"anchor":"## Chosen approach","note":"per-device or synced?"}`)
+	e := newEngine(t, toolCallFake("spec_annotate", args))
+	e.now = fixedNow
+	ctx := context.Background()
+
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	if _, err := e.Attach(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
+	raw, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "%% @architect(2026-07-04): per-device or synced?") {
+		t.Errorf("annotation not written:\n%s", raw)
+	}
+	// the marker is placed under the anchor line, not elsewhere
+	if !strings.Contains(string(raw), "## Chosen approach\n%% @architect(2026-07-04): per-device or synced?") {
+		t.Errorf("annotation not anchored correctly:\n%s", raw)
+	}
+}
+
+func TestSubmitVerdictRecorded(t *testing.T) {
+	args := json.RawMessage(`{"verdict":"changes","summary":"nil deref in foo"}`)
+	ag := toolCallFake("submit_verdict", args)
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageReview)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	snap := e.Get("FD-001").Snapshot()
+	if snap.Verdict != "changes" {
+		t.Errorf("verdict = %q, want changes", snap.Verdict)
+	}
+	var noted bool
+	for _, a := range snap.Activity {
+		if strings.Contains(a, "verdict: changes") && strings.Contains(a, "nil deref") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("verdict summary not in activity: %+v", snap.Activity)
+	}
+}
+
 func TestUnknownClientToolAutoResolves(t *testing.T) {
 	ag := agent.NewFake("")
 	ag.Caps = agent.Capabilities{ClientTools: true, Interrupt: true}

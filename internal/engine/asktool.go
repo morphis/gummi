@@ -35,10 +35,30 @@ type AskOption struct {
 	Detail string `json:"detail"`
 }
 
-// clientTools is the set of gummi-owned tools registered on every
-// session whose backend supports client tools.
-func clientTools() []agent.ToolDef {
-	return []agent.ToolDef{{
+const (
+	annotateToolName = "spec_annotate"
+	verdictToolName  = "submit_verdict"
+)
+
+// stageTools returns the gummi-owned client tools offered on a stage.
+// ask_user is interactive-only (it blocks on a human, and only the chat
+// picker can answer it); spec_annotate is offered to the interactive
+// architect; submit_verdict to the reviewer. The non-blocking tools
+// (annotate, verdict) are gummi-resolved immediately, so they are safe
+// on autonomous stages.
+func stageTools(stage domain.Stage) []agent.ToolDef {
+	switch stage {
+	case domain.StageBrainstorm, domain.StageSpec:
+		return []agent.ToolDef{askUserTool(), specAnnotateTool()}
+	case domain.StageReview:
+		return []agent.ToolDef{submitVerdictTool()}
+	default:
+		return nil
+	}
+}
+
+func askUserTool() agent.ToolDef {
+	return agent.ToolDef{
 		Name: askToolName,
 		Description: "Ask the user a question with a small set of options and wait for their " +
 			"answer. Use this whenever you need a decision from the user: it is cheaper and " +
@@ -72,16 +92,71 @@ func clientTools() []agent.ToolDef {
 			},
 			"required": []any{"question", "options"},
 		},
-	}}
+	}
 }
 
-// askToolHint tells a client-tool-capable agent how gummi routes ask_user.
-const askToolHint = `You have an ask_user tool: call it to ask the user a question with a
-small set of options and get their choice back. Prefer it over asking
-in prose whenever you need a decision — it is faster for the user and
-cheaper. Pass spec_anchor (a unique snippet of the spec line the
-decision belongs to) to have gummi record the answer into the spec for
-you.`
+func specAnnotateTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: annotateToolName,
+		Description: "Attach an open question or note to a spec line as a %% marker. Use this " +
+			"instead of writing %% lines by hand: gummi places the marker with correct " +
+			"anchoring so it surfaces as its own checklist thread.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"anchor": map[string]any{
+					"type":        "string",
+					"description": "A unique snippet of the spec line to annotate.",
+				},
+				"note": map[string]any{
+					"type":        "string",
+					"description": "The question or note (one line).",
+				},
+			},
+			"required": []any{"anchor", "note"},
+		},
+	}
+}
+
+func submitVerdictTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: verdictToolName,
+		Description: "Submit your review verdict. Call this exactly once at the end of a review " +
+			"to drive gummi's automatic review→fix→review loop.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"verdict": map[string]any{
+					"type":        "string",
+					"enum":        []any{"pass", "changes"},
+					"description": "pass = ready to verify; changes = serious findings, bounce back to implement.",
+				},
+				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
+			},
+			"required": []any{"verdict"},
+		},
+	}
+}
+
+// toolHint tells a client-tool-capable agent which gummi tools this
+// stage offers and when to use them.
+func toolHint(stage domain.Stage) string {
+	switch stage {
+	case domain.StageBrainstorm, domain.StageSpec:
+		return `You have two gummi tools. ask_user: put a decision to the user as a
+few options and get their choice back — prefer it over asking in prose
+(faster for the user, cheaper); pass spec_anchor to have gummi record
+the answer into the spec. spec_annotate: attach an open question to a
+spec line and let gummi place the %% marker with correct anchoring,
+instead of writing %% lines yourself.`
+	case domain.StageReview:
+		return `Call the submit_verdict tool exactly once at the end of your review
+(verdict "pass" or "changes") to drive gummi's review loop, instead of
+writing a VERDICT: line.`
+	default:
+		return ""
+	}
+}
 
 // askConventionHint is the fallback for backends without client tools:
 // the agent emits a fenced block gummi parses into the same picker.
@@ -100,10 +175,21 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 	if tc == nil {
 		return
 	}
-	if tc.Name != askToolName {
+	switch tc.Name {
+	case askToolName:
+		e.handleAsk(s, tc)
+	case annotateToolName:
+		e.handleAnnotate(s, tc)
+	case verdictToolName:
+		e.handleVerdict(s, tc)
+	default:
 		e.resolveNow(s, tc.ID, fmt.Sprintf("unknown tool %q — proceed without it", tc.Name))
-		return
 	}
+}
+
+// handleAsk turns an ask_user call into a pending question (blocks the
+// agent's turn until Answer).
+func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	ask, err := parseAsk(tc.ID, tc.Args)
 	if err != nil {
 		e.resolveNow(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
@@ -114,6 +200,68 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 	// the agent is waiting on the user, not the model; drop the busy spinner
 	s.setBusy(false)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
+}
+
+// handleAnnotate writes a %% marker onto a spec line and resolves the
+// call immediately — a mechanical write, no human involved.
+func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
+	var a struct {
+		Anchor string `json:"anchor"`
+		Note   string `json:"note"`
+	}
+	if err := json.Unmarshal(tc.Args, &a); err != nil || strings.TrimSpace(a.Anchor) == "" || strings.TrimSpace(a.Note) == "" {
+		e.resolveNow(s, tc.ID, "spec_annotate needs an anchor and a note")
+		return
+	}
+	path := s.SpecPath()
+	raw, err := os.ReadFile(path) //nolint:gosec // gummi-owned spec path
+	if err != nil {
+		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
+		return
+	}
+	line, ok := spec.FindAnchor(string(raw), a.Anchor)
+	if !ok {
+		e.resolveNow(s, tc.ID, fmt.Sprintf("anchor %q not found or not unique — write the %%%% marker yourself", a.Anchor))
+		return
+	}
+	out, err := spec.AddComment(string(raw), line, string(s.Role), e.now().Format("2006-01-02"), a.Note)
+	if err != nil {
+		e.resolveNow(s, tc.ID, "could not annotate: "+err.Error())
+		return
+	}
+	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+		e.resolveNow(s, tc.ID, "could not write the spec: "+err.Error())
+		return
+	}
+	s.appendActivity("annotated spec: " + a.Note)
+	e.persist(s)
+	e.resolveNow(s, tc.ID, "annotation added to the spec")
+}
+
+// handleVerdict records a review verdict and resolves immediately. The
+// review loop prefers this structured verdict over parsing prose.
+func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
+	var v struct {
+		Verdict string `json:"verdict"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(tc.Args, &v); err != nil {
+		e.resolveNow(s, tc.ID, "submit_verdict needs a verdict")
+		return
+	}
+	verdict := strings.ToLower(strings.TrimSpace(v.Verdict))
+	if verdict != "pass" && verdict != "changes" {
+		e.resolveNow(s, tc.ID, `verdict must be "pass" or "changes"`)
+		return
+	}
+	s.setVerdict(verdict)
+	note := "verdict: " + verdict
+	if v.Summary != "" {
+		note += " — " + v.Summary
+	}
+	s.appendActivity(note)
+	e.persist(s)
+	e.resolveNow(s, tc.ID, "verdict recorded")
 }
 
 // resolveNow answers a tool call directly (no user involved), for calls

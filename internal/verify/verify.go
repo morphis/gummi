@@ -1,7 +1,13 @@
 // Package verify runs the repo's fixed Verify-stage check commands in a
 // feature's worktree and reports pass/fail with output. The commands
-// come from .gummi/config.yaml — repo-controlled input — so callers
-// must surface them to the user before invoking Run (DESIGN §4.4).
+// come from .gummi/config.yaml — repo-controlled input (DESIGN §4.4).
+//
+// Two callers, two safety stories: the manual verify dialog surfaces the
+// commands and runs on confirmation (a bare host may be watching); the
+// engine runs them autonomously at the Verify stage only in allow-all
+// mode, where the sandbox is the boundary and the stage's agent would
+// otherwise run the identical shell itself. In guarded mode the engine
+// does not auto-run them — the agent handles verification instead.
 package verify
 
 import (
