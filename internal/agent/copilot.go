@@ -184,17 +184,12 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 	case *copilot.AssistantMessageDeltaData:
 		out = Event{Kind: EventTextDelta, Text: d.DeltaContent}
 	case *copilot.AssistantMessageData:
+		// Usage is metered from AssistantUsageData (the authoritative
+		// per-call event) only; emitting it here too would double-count
+		// whenever the CLI sends both. Providers that report tokens only
+		// on the message and never send a usage event will undercount —
+		// dedup by APICallID is an M3 (cost) refinement.
 		s.emit(Event{Kind: EventMessage, Text: d.Content})
-		// Token accounting some providers report on the message rather
-		// than a separate usage event — surface it as EventUsage too so
-		// metering consumers see it in one place.
-		if d.OutputTokens != nil {
-			u := Usage{OutputTokens: *d.OutputTokens}
-			if d.Model != nil {
-				u.Model = *d.Model
-			}
-			s.emit(Event{Kind: EventUsage, Usage: u})
-		}
 		return
 	case *copilot.AssistantUsageData:
 		u := Usage{Model: d.Model}

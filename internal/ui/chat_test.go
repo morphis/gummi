@@ -174,20 +174,22 @@ func TestChatViewGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-func TestChatRejectsNonInteractiveStage(t *testing.T) {
-	m, _ := chatWorkspace(t, agent.NewFake("x"))
+func TestChatNotOpenedForAutonomousStage(t *testing.T) {
+	m, eng := chatWorkspace(t, agent.NewFake("x"))
 	// advance brainstorm → spec → plan (needs worktree at spec approval)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan (worktree created)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
 	}
+	// enter on an autonomous stage runs it, it does not open a chat pane
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleChat(t, eng)
 	if m.chat != nil {
 		t.Fatal("chat attached for a non-interactive stage")
 	}
-	if !m.notice.isErr {
-		t.Error("no notice for non-interactive attach")
+	if m.sessionFor("FD-001") == nil {
+		t.Error("enter on plan did not start an autonomous run")
 	}
 }
 

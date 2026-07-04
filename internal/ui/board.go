@@ -59,6 +59,10 @@ func (m *Shell) boardView(w int) string {
 func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) string {
 	s := m.styles
 	glyph := s.Stage(r.F.Stage).Render(stageGlyph(r.F.Stage))
+	// a running agent session marks the card with a spinner glyph
+	if sess := m.sessionFor(r.F.ID); sess != nil && sess.Busy() {
+		glyph = s.Info.Render("⣾")
+	}
 	cursor := " "
 	if selected {
 		cursor = s.KeyHint.Render("▸")

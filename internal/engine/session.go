@@ -150,6 +150,14 @@ func (s *Session) setBusy(b bool) {
 	s.busy = b
 }
 
+// Busy reports whether the agent is mid-turn, without copying the
+// transcript (cheap enough to call per card per frame).
+func (s *Session) Busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy
+}
+
 func (s *Session) setError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

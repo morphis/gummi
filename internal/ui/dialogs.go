@@ -25,7 +25,8 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 	rows := [][2]string{
 		{"j/k ↓↑", "select feature"},
 		{"1..9", "jump to feature"},
-		{"enter", "attach chat (brainstorm/spec)"},
+		{"enter", "chat (brainstorm/spec) · run (autonomous)"},
+		{"p", "pause the running agent"},
 		{"g", "advance stage (gate)"},
 		{"b", "bounce back to implement"},
 		{"n", "new feature"},

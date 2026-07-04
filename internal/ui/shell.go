@@ -192,7 +192,11 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch key {
 	case "enter":
 		if r, ok := m.selected(); ok {
-			return m.attachChat(r.F)
+			return m.attachOrRun(r.F)
+		}
+	case "p":
+		if r, ok := m.selected(); ok {
+			return m.pauseRun(r.F)
 		}
 	case "s":
 		if r, ok := m.selected(); ok {
@@ -332,18 +336,27 @@ func (m *Shell) draw(scr uv.Screen) {
 	m.Overlay.Draw(scr, l.Area, s)
 }
 
-// attachChat opens the interactive chat pane for a feature, starting
-// (or reusing) its engine session. Only interactive stages
-// (brainstorm/spec) chat; other stages get a notice.
-func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
+// attachOrRun handles `enter`: interactive stages open the chat pane;
+// autonomous stages start (or observe) an autonomous run.
+func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable chat)", isErr: true}
+		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
 		return nil
 	}
-	if f.Stage != domain.StageBrainstorm && f.Stage != domain.StageSpec {
-		m.notice = noticeMsg{text: string(f.ID) + " is in " + string(f.Stage) + " — chat is for brainstorm/spec", isErr: true}
+	switch {
+	case f.Stage == domain.StageBrainstorm || f.Stage == domain.StageSpec:
+		return m.attachChat(f)
+	case autonomousStage(f.Stage):
+		return m.runStage(f)
+	default:
+		m.notice = noticeMsg{text: string(f.ID) + " is in " + string(f.Stage) + " — nothing to run", isErr: true}
 		return nil
 	}
+}
+
+// attachChat opens the interactive chat pane for a feature, starting
+// (or reusing) its engine session.
+func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	// reuse the live session only if it matches this feature AND stage
 	// (a stage advance while detached must start a fresh role/session)
 	if a := m.engine.Active(); a != nil && a.Feature.ID == f.ID && a.Feature.Stage == f.Stage {
@@ -357,6 +370,70 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	}
 	m.chat = newChatPane(f.ID, s)
 	return nil
+}
+
+// runStage starts an autonomous session for a feature's stage and kicks
+// it off. Activity streams into the dashboard; `p` pauses it.
+func (m *Shell) runStage(f domain.Feature) tea.Cmd {
+	if a := m.engine.Active(); a != nil && a.Feature.ID == f.ID {
+		m.notice = noticeMsg{text: string(f.ID) + " is already running"}
+		return nil
+	}
+	started, err := m.engine.Start(context.Background(), f)
+	if err != nil {
+		m.notice = noticeMsg{text: err.Error(), isErr: true}
+		return nil
+	}
+	eng := m.engine
+	return func() tea.Msg {
+		// If the user paused (or switched) before this kickoff runs, the
+		// session is no longer active — that's not an error.
+		if eng.Active() != started {
+			return nil
+		}
+		// kick off the autonomous loop; the stage hints already tell the
+		// agent what to do, so a short go-ahead is enough.
+		if err := eng.Send(context.Background(), "Proceed with this stage per your instructions and the spec."); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + " running"}
+	}
+}
+
+// pauseRun stops the active autonomous session for a feature, freeing
+// the attention slot. The stage does not change; re-running resumes.
+func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
+	a := m.engine.Active()
+	if a == nil || a.Feature.ID != f.ID {
+		return nil
+	}
+	_ = m.engine.Interrupt(context.Background())
+	m.engine.Stop()
+	m.notice = noticeMsg{text: string(f.ID) + " paused"}
+	return nil
+}
+
+// sessionFor returns the active engine session bound to a feature, or
+// nil. Used by the dashboard and cards to show live state.
+func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
+	if m.engine == nil {
+		return nil
+	}
+	if a := m.engine.Active(); a != nil && a.Feature.ID == id {
+		return a
+	}
+	return nil
+}
+
+// autonomousStage reports whether a stage runs an autonomous agent
+// (as opposed to interactive chat or no agent).
+func autonomousStage(s domain.Stage) bool {
+	switch s {
+	case domain.StagePlan, domain.StageImplement, domain.StageReview, domain.StageVerify:
+		return true
+	default:
+		return false
+	}
 }
 
 // handleChatKey routes keys while the chat pane is open.

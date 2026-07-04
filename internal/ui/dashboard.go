@@ -6,12 +6,15 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/engine"
 )
 
 // dashboardView renders the selected feature's detail pane: identity,
-// workflow position, derived git facts, budget, and the audit trail.
-// Static/stage data only — live agent activity lands in M1.
+// workflow position, derived git facts, budget, the live agent activity
+// feed (when a session is running for this feature), and the audit
+// trail.
 func (m *Shell) dashboardView(w, h int) string {
 	if m.sel < 0 || m.sel >= len(m.rows) {
 		return ""
@@ -53,7 +56,36 @@ func (m *Shell) dashboardView(w, h int) string {
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
 
-	if len(r.History) > 0 {
+	// live activity: shown when an engine session is running for this
+	// feature (an autonomous stage in progress).
+	if sess := m.sessionFor(f.ID); sess != nil {
+		snap := sess.Snapshot()
+		title := s.Subtitle.Render("activity")
+		if snap.Busy {
+			title += "  " + s.Info.Render("⣾ running")
+		}
+		if snap.Spend.Credits > 0 || snap.Spend.OutputTokens > 0 {
+			title += "  " + s.Faint.Render(spendSummary(snap.Spend))
+		}
+		line(title)
+		acts := snap.Activity
+		if len(acts) > 6 {
+			acts = acts[len(acts)-6:]
+		}
+		for _, a := range acts {
+			line("  " + s.Success.Render("✓ ") + s.Subtle.Render(sanitize(a)))
+		}
+		last := lastAssistant(snap)
+		if last != "" {
+			for _, l := range strings.Split(wrapText(sanitize(last), max(w-4, 8)), "\n") {
+				line("  " + s.Faint.Render(l))
+			}
+		}
+		if len(acts) == 0 && last == "" {
+			line("  " + s.Faint.Render("starting…"))
+		}
+		line("")
+	} else if len(r.History) > 0 {
 		line(s.Subtitle.Render("history"))
 		hist := r.History
 		// most recent last; clamp to the pane
@@ -69,11 +101,37 @@ func (m *Shell) dashboardView(w, h int) string {
 		line("")
 	}
 
-	line(s.KeyHint.Render("g") + s.KeyLabel.Render(" advance") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("b") + s.KeyLabel.Render(" bounce") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("x") + s.KeyLabel.Render(" delete") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("n") + s.KeyLabel.Render(" new"))
+	hints := s.KeyHint.Render("g") + s.KeyLabel.Render(" advance") +
+		s.Faint.Render(" · ") + s.KeyHint.Render("b") + s.KeyLabel.Render(" bounce")
+	if autonomousStage(f.Stage) {
+		if m.sessionFor(f.ID) != nil {
+			hints += s.Faint.Render(" · ") + s.KeyHint.Render("p") + s.KeyLabel.Render(" pause")
+		} else {
+			hints += s.Faint.Render(" · ") + s.KeyHint.Render("enter") + s.KeyLabel.Render(" run")
+		}
+	}
+	hints += s.Faint.Render(" · ") + s.KeyHint.Render("x") + s.KeyLabel.Render(" delete") +
+		s.Faint.Render(" · ") + s.KeyHint.Render("n") + s.KeyLabel.Render(" new")
+	line(hints)
 	return b.String()
+}
+
+// lastAssistant returns the most recent assistant message text.
+func lastAssistant(snap engine.Snapshot) string {
+	for i := len(snap.Transcript) - 1; i >= 0; i-- {
+		if snap.Transcript[i].Author == engine.AuthorAssistant {
+			return snap.Transcript[i].Content
+		}
+	}
+	return ""
+}
+
+// spendSummary formats a running spend total for the activity header.
+func spendSummary(u agent.Usage) string {
+	if u.Credits > 0 {
+		return fmt.Sprintf("%.1f credits", u.Credits)
+	}
+	return fmt.Sprintf("%d tok", u.OutputTokens)
 }
 
 // skipSummary names the stages this feature was created to skip.
