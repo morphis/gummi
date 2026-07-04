@@ -1,6 +1,21 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/morphia/gummi/internal/agent"
+)
+
+func TestSetContextStickyLimit(t *testing.T) {
+	s := &Session{}
+	s.setContext(agent.Context{Tokens: 100, Limit: 8000})
+	// a later event that omits the limit must not blank it
+	s.setContext(agent.Context{Tokens: 250, Limit: 0})
+	got := s.Snapshot().Context
+	if got.Tokens != 250 || got.Limit != 8000 {
+		t.Errorf("context = %+v, want tokens 250 / sticky limit 8000", got)
+	}
+}
 
 func assistantContents(s *Session) []string {
 	var out []string

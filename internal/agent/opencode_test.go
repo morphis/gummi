@@ -43,13 +43,17 @@ func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 		t.Fatalf("tool = %+v, want EventToolCall read", evs)
 	}
 	evs = s.mapEvent([]byte(`{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":100,"output":20},"cost":0.05}}`), &msg)
-	if len(evs) != 1 || evs[0].Kind != EventUsage {
-		t.Fatalf("usage = %+v, want EventUsage", evs)
+	// step_finish yields a usage event plus a context event (input≈context)
+	if len(evs) != 2 || evs[0].Kind != EventUsage || evs[1].Kind != EventContext {
+		t.Fatalf("step_finish = %+v, want [usage, context]", evs)
 	}
 	u := evs[0].Usage
 	// cost 0.05 USD → 5 credits ($0.01 units); tokens carried through
 	if u.InputTokens != 100 || u.OutputTokens != 20 || u.Credits < 4.99 || u.Credits > 5.01 {
 		t.Errorf("usage = %+v, want in100/out20/credits~5", u)
+	}
+	if evs[1].Context.Tokens != 100 {
+		t.Errorf("context tokens = %d, want 100 (step input)", evs[1].Context.Tokens)
 	}
 }
 

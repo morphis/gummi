@@ -532,6 +532,8 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		kind = EventMessage
 	case agent.EventToolCall:
 		s.appendActivity(ev.Tool)
+	case agent.EventContext:
+		s.setContext(ev.Context)
 	case agent.EventUsage:
 		s.addSpend(ev.Usage)
 		// accumulate the feature's running total across all stages

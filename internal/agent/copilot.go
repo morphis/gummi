@@ -211,6 +211,10 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 			u.InputTokens = *d.InputTokens
 		}
 		out = Event{Kind: EventUsage, Usage: u}
+	case *copilot.SessionUsageInfoData:
+		// the SDK's live context-window occupancy: current tokens vs the
+		// model's limit.
+		out = Event{Kind: EventContext, Context: Context{Tokens: d.CurrentTokens, Limit: d.TokenLimit}}
 	case *copilot.SessionIdleData:
 		out = Event{Kind: EventIdle}
 	case *copilot.SessionLimitsExhaustedRequestedData:

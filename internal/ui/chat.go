@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -57,6 +58,9 @@ func (c *chatPane) view(s *theme.Styles, w, h int) string {
 		head += "  " + s.Faint.Render("↑ scrolled — pgdn to latest")
 	}
 	b.WriteString("\n" + head + "\n")
+	if meta := chatMeta(s, snap); meta != "" {
+		b.WriteString(ansi.Truncate(meta, max(w, 8), "…") + "\n")
+	}
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 80), 0))) + "\n")
 
 	if newW := max(w-2, 10); newW != c.width {
@@ -163,6 +167,38 @@ func (c *chatPane) page() int {
 func (c *chatPane) scrollBy(delta int) {
 	maxScroll := max(c.totalLines-c.bodyH, 0)
 	c.scroll = min(max(c.scroll+delta, 0), maxScroll)
+}
+
+// chatMeta is the model / spend / context-window status line under the
+// chat header. Each piece is shown only when the agent has reported it.
+func chatMeta(s *theme.Styles, snap engine.Snapshot) string {
+	var parts []string
+	if m := snap.Spend.Model; m != "" {
+		parts = append(parts, s.Muted.Render(m))
+	}
+	if spent := snap.Spend.InputTokens + snap.Spend.OutputTokens; spent > 0 {
+		parts = append(parts, s.Faint.Render(humanTokens(spent)+" tok spent"))
+	}
+	if c := snap.Context; c.Tokens > 0 {
+		ctx := humanTokens(c.Tokens) + " ctx"
+		if c.Limit > 0 {
+			ctx = fmt.Sprintf("%s/%s ctx (%d%%)", humanTokens(c.Tokens), humanTokens(c.Limit), c.Tokens*100/c.Limit)
+		}
+		parts = append(parts, s.Faint.Render(ctx))
+	}
+	return strings.Join(parts, s.Faint.Render("  ·  "))
+}
+
+// humanTokens renders a token count compactly: 1234 → "1.2k", 2e6 → "2M".
+func humanTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 func lineCount(s string) int { return strings.Count(s, "\n") + 1 }

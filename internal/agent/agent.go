@@ -112,6 +112,9 @@ const (
 	EventPermission EventKind = "permission"
 	// EventUsage carries per-turn spend (Usage populated).
 	EventUsage EventKind = "usage"
+	// EventContext reports the conversation's context-window usage
+	// (Context populated): current tokens vs the model's limit.
+	EventContext EventKind = "context"
 	// EventIdle marks the agent finished its turn and awaits input.
 	EventIdle EventKind = "idle"
 	// EventBudgetExhausted reports the session hit its credit cap; the
@@ -130,11 +133,19 @@ type Usage struct {
 	Model        string
 }
 
+// Context is the conversation's context-window occupancy: Tokens
+// currently in the window against the model's Limit (0 = unknown).
+type Context struct {
+	Tokens int64
+	Limit  int64
+}
+
 // Event is one item in a session's activity stream.
 type Event struct {
-	Kind  EventKind
-	Text  string // text for deltas/messages
-	Tool  string // tool name for tool-call/permission events
-	Usage Usage  // populated for EventUsage
-	Err   error  // populated for EventError
+	Kind    EventKind
+	Text    string  // text for deltas/messages
+	Tool    string  // tool name for tool-call/permission events
+	Usage   Usage   // populated for EventUsage
+	Context Context // populated for EventContext
+	Err     error   // populated for EventError
 }

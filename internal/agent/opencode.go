@@ -321,10 +321,16 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 		u := Usage{Model: s.model, InputTokens: e.Part.Tokens.Input, OutputTokens: e.Part.Tokens.Output}
 		// opencode cost is USD; gummi credits are $0.01 units.
 		u.Credits = e.Part.Cost * 100
-		if u.Credits == 0 && u.InputTokens == 0 && u.OutputTokens == 0 {
-			return nil
+		var out []Event
+		if u.Credits != 0 || u.InputTokens != 0 || u.OutputTokens != 0 {
+			out = append(out, Event{Kind: EventUsage, Usage: u})
 		}
-		return []Event{{Kind: EventUsage, Usage: u}}
+		// the step's input tokens approximate the current context size
+		// (opencode reports no window limit, so Limit stays 0/unknown).
+		if e.Part.Tokens.Input > 0 {
+			out = append(out, Event{Kind: EventContext, Context: Context{Tokens: e.Part.Tokens.Input}})
+		}
+		return out
 	case "error":
 		detail := e.Part.Error
 		if detail == "" {

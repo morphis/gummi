@@ -80,7 +80,8 @@ type Snapshot struct {
 	Transcript  []Message
 	Activity    []string // recent tool-call lines
 	Spend       agent.Usage
-	Busy        bool // agent is mid-turn
+	Context     agent.Context // latest context-window occupancy
+	Busy        bool          // agent is mid-turn
 	Err         error
 }
 
@@ -99,6 +100,7 @@ type Session struct {
 	transcript []Message
 	activity   []string
 	spend      agent.Usage
+	context    agent.Context
 	busy       bool
 	err        error
 	stopped    bool
@@ -121,6 +123,7 @@ func (s *Session) Snapshot() Snapshot {
 		Transcript:  append([]Message(nil), s.transcript...),
 		Activity:    append([]string(nil), s.activity...),
 		Spend:       s.spend,
+		Context:     s.context,
 		Busy:        s.busy,
 		Err:         s.err,
 	}
@@ -235,6 +238,17 @@ func (s *Session) addSpend(u agent.Usage) {
 	s.spend.OutputTokens += u.OutputTokens
 	if u.Model != "" {
 		s.spend.Model = u.Model
+	}
+}
+
+// setContext records the latest context-window occupancy (a known limit
+// is sticky, so a later event that omits it doesn't blank the display).
+func (s *Session) setContext(c agent.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.context.Tokens = c.Tokens
+	if c.Limit > 0 {
+		s.context.Limit = c.Limit
 	}
 }
 
