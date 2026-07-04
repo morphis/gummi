@@ -6,6 +6,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 )
 
@@ -66,6 +67,31 @@ func (p Provider) Describe() string {
 	return typ + " @ " + host
 }
 
+// ToolDef declares a gummi-owned client tool exposed to the agent's
+// model. The adapter surfaces each invocation as EventClientToolCall
+// and blocks that call until the orchestrator answers via ToolResolver
+// — the mechanism behind ask_user (a blocked call costs no tokens).
+type ToolDef struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Parameters is the tool's JSON Schema (a plain map, adapter-agnostic).
+	Parameters map[string]any `json:"parameters,omitempty"`
+}
+
+// ToolCall is one in-flight client-tool invocation awaiting Resolve.
+type ToolCall struct {
+	ID   string
+	Name string
+	Args json.RawMessage
+}
+
+// ToolResolver is implemented by sessions that support client tools:
+// Resolve completes the call surfaced as EventClientToolCall, feeding
+// result back to the model as the tool's output.
+type ToolResolver interface {
+	Resolve(ctx context.Context, callID, result string) error
+}
+
 // SessionOpts configures one agent session.
 type SessionOpts struct {
 	// WorkDir is the feature's worktree; the agent's cwd.
@@ -85,6 +111,9 @@ type SessionOpts struct {
 	// MaxCredits caps session spend (Copilot credits, 1 = $0.01); 0
 	// means uncapped. Enforced by the adapter as a backstop.
 	MaxCredits float64
+	// Tools are gummi-owned client tools (ignored by adapters without
+	// the ClientTools capability; the orchestrator gates on it).
+	Tools []ToolDef
 }
 
 // Agent creates sessions and reports what its backend can do.
@@ -107,6 +136,10 @@ type Capabilities struct {
 	Resume      bool // session resume across restarts
 	UsageEvents bool // per-turn usage/credit events
 	Interrupt   bool // mid-turn interruption
+	// ClientTools reports native support for SessionOpts.Tools: the
+	// session surfaces invocations as EventClientToolCall and implements
+	// ToolResolver. Adapters without it fall back to a prompt convention.
+	ClientTools bool
 }
 
 // Session is one live agent conversation bound to a feature + stage.
@@ -134,6 +167,10 @@ const (
 	EventMessage EventKind = "message"
 	// EventToolCall reports a tool invocation (name in Tool).
 	EventToolCall EventKind = "tool-call"
+	// EventClientToolCall reports the model invoking a gummi-owned client
+	// tool (ToolCall populated). The call blocks until the orchestrator
+	// answers via ToolResolver.Resolve.
+	EventClientToolCall EventKind = "client-tool-call"
 	// EventPermission reports a pending tool-call approval (guarded
 	// mode); the orchestrator answers via the queue.
 	EventPermission EventKind = "permission"
@@ -169,10 +206,11 @@ type Context struct {
 
 // Event is one item in a session's activity stream.
 type Event struct {
-	Kind    EventKind
-	Text    string  // text for deltas/messages
-	Tool    string  // tool name for tool-call/permission events
-	Usage   Usage   // populated for EventUsage
-	Context Context // populated for EventContext
-	Err     error   // populated for EventError
+	Kind     EventKind
+	Text     string    // text for deltas/messages
+	Tool     string    // tool name for tool-call/permission events
+	ToolCall *ToolCall // populated for EventClientToolCall
+	Usage    Usage     // populated for EventUsage
+	Context  Context   // populated for EventContext
+	Err      error     // populated for EventError
 }

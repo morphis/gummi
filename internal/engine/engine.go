@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/morphia/gummi/internal/agent"
 	"github.com/morphia/gummi/internal/config"
@@ -74,6 +75,7 @@ type Config struct {
 type Engine struct {
 	cfg       Config
 	maxActive int
+	now       func() time.Time // injectable clock (spec-capture timestamps)
 
 	// raw carries events from pump goroutines to the forwarder; events
 	// is the UI-facing stream, owned solely by the forwarder.
@@ -101,6 +103,7 @@ func New(cfg Config) *Engine {
 	e := &Engine{
 		cfg:       cfg,
 		maxActive: max,
+		now:       time.Now,
 		raw:       make(chan Event, 256),
 		events:    make(chan Event),
 		stopped:   make(chan struct{}),
@@ -177,11 +180,11 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	}
 
 	// interactive chat is human-paced: no budget cap.
-	sess, err := e.newAgentSession(ctx, f, role, 0)
+	sess, specPath, err := e.newAgentSession(ctx, f, role, 0)
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{})}
+	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), specPath: specPath}
 	e.stampSpawnInfo(s)
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
@@ -293,7 +296,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.exhaust(s)
 		return
 	}
-	sess, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget)
+	sess, specPath, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget)
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -301,6 +304,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.freeSlot(s)
 		return
 	}
+	s.setSpecPath(specPath)
 	s.setBudget(budget)
 	s.attachAgent(sess)
 	go e.pump(s)
@@ -331,11 +335,13 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 }
 
 // newAgentSession builds an agent session for a feature's stage, with
-// the model/provider chosen by the feature's profile for this role.
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64) (agent.Session, error) {
+// the model/provider chosen by the feature's profile for this role. It
+// also returns the resolved spec path so the caller can record it on the
+// Session (ask_user answer capture writes there).
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64) (agent.Session, string, error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	model, provider := e.resolveRole(f.Profile, role)
 	hints := stageHints(f, specPath)
@@ -353,6 +359,20 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		maxCredits = budget * capHeadroom
 		hints = append(hints, budgetHint(budget))
 	}
+	// ask_user is offered only on interactive stages: that is where the
+	// chat pane's picker can answer it. An autonomous stage has no answer
+	// surface, so a blocked ask there would wedge its slot — those stages
+	// keep the "stop and raise a gate" behavior instead. Client tools when
+	// the backend supports them; otherwise the prompt-convention fallback.
+	var tools []agent.ToolDef
+	if interactiveStage(f.Stage) {
+		if e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools {
+			tools = clientTools()
+			hints = append(hints, askToolHint)
+		} else {
+			hints = append(hints, askConventionHint)
+		}
+	}
 	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
 		Role:        role,
@@ -361,11 +381,12 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		Provider:    provider,
 		Permission:  e.cfg.Permission,
 		MaxCredits:  maxCredits,
+		Tools:       tools,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("starting %s session: %w", role, err)
+		return nil, "", fmt.Errorf("starting %s session: %w", role, err)
 	}
-	return sess, nil
+	return sess, specPath, nil
 }
 
 // locate resolves the working directory and spec path for a feature's
@@ -589,6 +610,9 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		kind = EventMessage
 	case agent.EventToolCall:
 		s.appendActivity(ev.Tool)
+	case agent.EventClientToolCall:
+		e.handleClientTool(s, ev.ToolCall)
+		return
 	case agent.EventContext:
 		s.setContext(ev.Context)
 	case agent.EventUsage:
@@ -625,6 +649,14 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// downgrade that gate to a generic "finished" one.
 		if s.isExhausted() {
 			e.persist(s)
+			return
+		}
+		// convention-path ask (backends without client tools): a
+		// gummi-ask block in the final message becomes a pending question
+		// instead of a finished turn.
+		if e.maybeConventionAsk(s) {
+			e.persist(s)
+			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
 			return
 		}
 		kind = EventIdle

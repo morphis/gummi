@@ -118,6 +118,87 @@ func TestHeadlessRoundTrip(t *testing.T) {
 	}
 }
 
+// askAgentScript emits an ask_user client-tool call, then waits for the
+// resolve frame and echoes the result back as a message before idling.
+const askAgentScript = `import sys, json
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    m=json.loads(line)
+    t=m.get("type")
+    if t=="send":
+        print(json.dumps({"type":"ask","id":"q1","ask":{"question":"Where?","options":[{"label":"a"},{"label":"b"}]}}), flush=True)
+    elif t=="resolve":
+        print(json.dumps({"type":"message","text":"resolved=%s id=%s"%(m.get("result",""), m.get("id",""))}), flush=True)
+        print(json.dumps({"type":"idle"}), flush=True)
+`
+
+func TestHeadlessAskResolveRoundTrip(t *testing.T) {
+	argv := writeFakeAgent(t, askAgentScript)
+	ag, err := NewHeadless(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	if !ag.Capabilities().ClientTools {
+		t.Error("headless should advertise ClientTools")
+	}
+
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{
+		WorkDir: t.TempDir(), Model: "m",
+		Tools: []ToolDef{{Name: "ask_user", Description: "ask"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	// first event is the ask
+	var call *ToolCall
+	deadline := time.After(5 * time.Second)
+awaitAsk:
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind == EventClientToolCall {
+				call = e.ToolCall
+				break awaitAsk
+			}
+		case <-deadline:
+			t.Fatal("no client-tool call received")
+		}
+	}
+	if call == nil || call.Name != "ask_user" || call.ID != "q1" {
+		t.Fatalf("unexpected ask call: %+v", call)
+	}
+	if !strings.Contains(string(call.Args), "Where?") {
+		t.Errorf("ask args missing question: %s", call.Args)
+	}
+
+	// resolve it; the child echoes the result back
+	r, ok := sess.(ToolResolver)
+	if !ok {
+		t.Fatal("headless session is not a ToolResolver")
+	}
+	if err := r.Resolve(ctx, "q1", "a"); err != nil {
+		t.Fatal(err)
+	}
+	evs := collect(t, sess)
+	var msg string
+	for _, e := range evs {
+		if e.Kind == EventMessage {
+			msg = e.Text
+		}
+	}
+	if !strings.Contains(msg, "resolved=a") || !strings.Contains(msg, "id=q1") {
+		t.Errorf("resolve not echoed: %q", msg)
+	}
+}
+
 func TestHeadlessMalformedLineIsError(t *testing.T) {
 	argv := writeFakeAgent(t, `import sys
 sys.stdout.write("not json\n"); sys.stdout.flush()

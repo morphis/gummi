@@ -249,6 +249,43 @@ On first run outside an obvious container (no `/.dockerenv`, no
 with allow-all permissions" warning rather than silently degrading either
 safety or flow.
 
+### 4.5 Client tools & the ask protocol
+
+Beyond reading and writing the spec, agents need a first-class way to
+*ask the user a bounded question* — "per-device or synced?" — without
+that decision getting lost in prose. gummi exposes gummi-owned **client
+tools**: tool declarations passed on `SessionOpts.Tools`, whose handlers
+run inside gummi, not the model's sandbox.
+
+The one tool today is **`ask_user`** (`{question, options[], multi_select,
+allow_free_form, spec_anchor}`). When the model calls it, the adapter
+surfaces an `EventClientToolCall` and *blocks that call* until the
+orchestrator answers — a blocked call spends no tokens, so waiting on a
+human is free. gummi renders the question as an inline option picker in
+the chat pane (or, when detached, a needs-attention item that jumps to
+the picker). The chosen answer is fed back as the tool's result, so the
+model's turn resumes in-context — cheaper than a fresh chat round-trip.
+If the ask carries a `spec_anchor` (a unique snippet of a spec line),
+gummi writes the answer into the spec as a resolved `%%` marker, so
+decisions become durable spec content with no model effort.
+
+Two design rules keep this from fighting the "workflow compiled in,
+model does the thinking" stance: the tool owns *mechanics* (surfacing,
+capture, anchoring) while the model owns *content*; and `ask_user` is
+offered **only on interactive stages**, where the picker exists to
+answer it — an autonomous stage that needs a decision still stops and
+raises a gate rather than blocking a slot on an unanswerable question.
+
+**Adapter coverage.** The Copilot SDK provides client tools natively
+(in-process `Tool.Handler`), so the handler blocks the turn directly.
+The generic headless adapter carries them over its JSON protocol (an
+`ask` frame out, a `resolve` frame back). Backends without a tool
+channel (opencode) use the **prompt-convention fallback**: the stage
+hint asks the model to emit a fenced ` ```gummi-ask``` ` JSON block,
+which gummi parses into the same picker and answers as the next turn.
+One `Ask` type, one picker, one answer path — the capability differences
+live entirely in the adapters.
+
 ## 5. Profiles & cost strategy
 
 `.gummi/profiles.yaml`:

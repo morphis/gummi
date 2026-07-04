@@ -124,6 +124,33 @@ func (d Doc) MarkerLines() []int {
 	return out
 }
 
+// FindAnchor locates the content line that uniquely contains snippet
+// (trimmed, case-sensitive) and returns its 1-based line number. It
+// requires exactly one match among non-marker, non-blank lines — zero or
+// multiple matches return ok=false, so answer capture fails closed rather
+// than annotating the wrong line. A marker line is never an anchor (its
+// own anchor is the content above it).
+func FindAnchor(content, snippet string) (line int, ok bool) {
+	snippet = strings.TrimSpace(snippet)
+	if snippet == "" {
+		return 0, false
+	}
+	found := 0
+	for i, raw := range strings.Split(content, "\n") {
+		if IsMarkerLine(raw) || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if strings.Contains(raw, snippet) {
+			found++
+			line = i + 1
+		}
+	}
+	if found != 1 {
+		return 0, false
+	}
+	return line, true
+}
+
 // AddComment inserts `%% @author(date): text` into content after the
 // given 1-based line, below any markers already threaded there, and
 // returns the new content. Comment text must be a single line.

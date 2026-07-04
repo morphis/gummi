@@ -95,6 +95,31 @@ type fakeSession struct {
 	sends     int
 	lastMsg   string
 	interrupt bool
+	resolved  map[string]string // client-tool callID → result (Resolve)
+}
+
+// Resolve implements ToolResolver: records the result so a test can
+// assert what the orchestrator answered a client-tool call with.
+func (s *fakeSession) Resolve(_ context.Context, callID, result string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session closed")
+	}
+	if s.resolved == nil {
+		s.resolved = map[string]string{}
+	}
+	s.resolved[callID] = result
+	return nil
+}
+
+// Resolved returns the result a client-tool call was answered with
+// (test aid).
+func (s *fakeSession) Resolved(callID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.resolved[callID]
+	return r, ok
 }
 
 func (s *fakeSession) Events() <-chan Event { return s.events }

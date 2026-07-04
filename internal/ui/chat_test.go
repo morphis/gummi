@@ -181,6 +181,74 @@ func TestChatViewGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
+// askingFake advertises client tools and puts an ask_user question on
+// its first turn, then acknowledges later turns.
+func askingFake() *agent.Fake {
+	f := agent.NewFake("")
+	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}
+	args := []byte(`{"question":"Persist where?","options":[{"label":"per-device","detail":"localStorage"},{"label":"synced","detail":"account"}],"allow_free_form":true}`)
+	first := true
+	f.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		if first {
+			first = false
+			return []agent.Event{{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: args}}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ack: " + msg}, {Kind: agent.EventIdle}}
+	}
+	return f
+}
+
+// waitAsk blocks until FD-001 has an open ask (the picker is showing).
+func waitAsk(t *testing.T, eng *engine.Engine) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		if s := eng.Get("FD-001"); s != nil && s.Snapshot().PendingAsk != nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("no pending ask surfaced")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestChatPickerGolden(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // attach; kickoff triggers the ask
+	waitAsk(t, eng)
+	m = press(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // move cursor to the second option
+	golden.RequireEqual(t, []byte(m.View().Content))
+}
+
+func TestChatPickerAnswers(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	waitAsk(t, eng)
+
+	// selecting option 1 (per-device) answers the question
+	m = press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
+	deadline := time.After(3 * time.Second)
+	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
+		select {
+		case <-deadline:
+			t.Fatal("answer did not clear the pending ask")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// the choice is recorded as a user turn
+	var got string
+	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+		if msg.Author == engine.AuthorUser {
+			got = msg.Content
+		}
+	}
+	if got != "per-device" {
+		t.Errorf("answer recorded as %q, want per-device", got)
+	}
+}
+
 func TestChatNotOpenedForAutonomousStage(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("x"))
 	// advance brainstorm → spec → plan (needs worktree at spec approval)

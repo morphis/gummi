@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -60,9 +61,9 @@ func NewCopilot(ctx context.Context, opts CopilotOptions) (*Copilot, error) {
 // Name implements Agent.
 func (c *Copilot) Name() string { return "copilot" }
 
-// Capabilities implements Agent. The Copilot SDK provides all four.
+// Capabilities implements Agent. The Copilot SDK provides all of these.
 func (c *Copilot) Capabilities() Capabilities {
-	return Capabilities{BYOK: true, Resume: true, UsageEvents: true, Interrupt: true}
+	return Capabilities{BYOK: true, Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
 }
 
 // NewSession implements Agent.
@@ -113,17 +114,31 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		cfg.Provider = p
 	}
 
+	cs := &copilotSession{
+		raw:     make(chan Event, 256),
+		events:  make(chan Event),
+		stop:    make(chan struct{}),
+		pending: map[string]chan string{},
+	}
+	// Register gummi's client tools with a handler that surfaces the call
+	// as an event and blocks until the orchestrator resolves it. The
+	// handler runs on the SDK's goroutine; blocking it holds the model's
+	// turn open (what ask_user needs) without spending tokens.
+	for _, td := range opts.Tools {
+		cfg.Tools = append(cfg.Tools, copilot.Tool{
+			Name:           td.Name,
+			Description:    td.Description,
+			Parameters:     td.Parameters,
+			SkipPermission: true, // gummi asking gummi; no approval prompt
+			Handler:        cs.toolHandler(td.Name),
+		})
+	}
+
 	sess, err := c.client.CreateSession(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating copilot session: %w", err)
 	}
-
-	cs := &copilotSession{
-		sdk:    sess,
-		raw:    make(chan Event, 256),
-		events: make(chan Event),
-		stop:   make(chan struct{}),
-	}
+	cs.sdk = sess
 	go cs.forward()
 	cs.unsub = sess.On(cs.onEvent)
 
@@ -162,8 +177,52 @@ type copilotSession struct {
 	stop   chan struct{}
 	unsub  func()
 
-	mu     sync.Mutex
-	closed bool
+	mu      sync.Mutex
+	closed  bool
+	pending map[string]chan string // client-tool callID → answer channel
+}
+
+// toolHandler builds an SDK handler for a client tool: it emits an
+// EventClientToolCall and blocks until Resolve (or session teardown)
+// delivers a result. Blocking here holds the model's turn open, which
+// is exactly the ask_user semantics — the turn resumes with the answer.
+func (s *copilotSession) toolHandler(name string) copilot.ToolHandler {
+	return func(inv copilot.ToolInvocation) (copilot.ToolResult, error) {
+		callID := inv.ToolCallID
+		ans := make(chan string, 1)
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return copilot.ToolResult{TextResultForLLM: "cancelled — proceed with your best judgment"}, nil
+		}
+		s.pending[callID] = ans
+		s.mu.Unlock()
+
+		args, _ := json.Marshal(inv.Arguments)
+		s.emit(Event{Kind: EventClientToolCall, ToolCall: &ToolCall{ID: callID, Name: name, Args: args}})
+
+		select {
+		case result := <-ans:
+			return copilot.ToolResult{TextResultForLLM: result}, nil
+		case <-s.stop:
+			return copilot.ToolResult{TextResultForLLM: "cancelled — proceed with your best judgment"}, nil
+		}
+	}
+}
+
+// Resolve completes a pending client-tool call with result, resuming
+// the model's blocked turn. Unknown or already-resolved calls are a
+// no-op (a late Resolve after teardown must not panic).
+func (s *copilotSession) Resolve(_ context.Context, callID, result string) error {
+	s.mu.Lock()
+	ans, ok := s.pending[callID]
+	delete(s.pending, callID)
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("no pending tool call %q", callID)
+	}
+	ans <- result
+	return nil
 }
 
 func (s *copilotSession) Events() <-chan Event { return s.events }

@@ -156,6 +156,20 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		m.reviewRounds[ev.Feature] = 0
 		m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
 		m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
+	case engine.EventQuestion:
+		// the agent asked something. When you're attached to this feature
+		// the inline picker already shows it; otherwise queue it so you can
+		// jump to the picker from the needs-attention inbox.
+		if m.chat != nil && m.chat.feature == ev.Feature {
+			return nil
+		}
+		q := "the agent has a question — attach to answer"
+		if s := m.engine.Get(ev.Feature); s != nil {
+			if a := s.Snapshot().PendingAsk; a != nil {
+				q = "asks: " + a.Question
+			}
+		}
+		m.raiseAttention(ev.Feature, attnQuestion, q)
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
 		if s == nil || s.Interactive || s.State() != engine.StateDone {
@@ -629,16 +643,36 @@ func autonomousStage(s domain.Stage) bool {
 
 // handleChatKey routes keys while the chat pane is open.
 func (m *Shell) handleChatKey(msg tea.KeyPressMsg) tea.Cmd {
-	detach, send, cmd := m.chat.handleKey(msg)
+	detach, send, answer, cmd := m.chat.handleKey(msg)
 	if detach {
 		// esc detaches; the engine session keeps running (DESIGN §6).
 		m.chat = nil
 		return nil
 	}
+	if answer != "" {
+		return m.answerChat(answer)
+	}
 	if send != "" {
 		return m.sendChat(send)
 	}
 	return cmd
+}
+
+// answerChat delivers the user's reply to an open ask_user question,
+// resolving the agent's blocked tool call. Like sendChat it captures the
+// session at call time and refuses to answer a since-swapped session.
+func (m *Shell) answerChat(text string) tea.Cmd {
+	eng, sess := m.engine, m.chat.session
+	id := sess.Feature.ID
+	return func() tea.Msg {
+		if eng.Get(id) != sess {
+			return noticeMsg{text: "chat session is no longer active", isErr: true}
+		}
+		if err := eng.Answer(context.Background(), id, text); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return nil
+	}
 }
 
 // sendChat delivers a user turn to the engine in a command. It captures

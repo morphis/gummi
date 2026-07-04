@@ -25,6 +25,12 @@ type chatPane struct {
 	scroll     int // lines scrolled up from the bottom (0 = latest)
 	bodyH      int // transcript viewport height, from the last render
 	totalLines int // total transcript lines, from the last render
+
+	// picker state, live while the agent has an open ask_user question
+	askID    string       // pending ask CallID the picker is bound to
+	cursor   int          // highlighted option index
+	picked   map[int]bool // chosen indices (multi-select)
+	freeForm bool         // typing a custom answer instead of picking
 }
 
 func newChatPane(feature domain.FeatureID, session *engine.Session) *chatPane {
@@ -67,22 +73,73 @@ func (c *chatPane) view(s *theme.Styles, w, h int) string {
 		c.input.SetWidth(newW)
 		c.width = newW
 	}
-	inputView := c.input.View()
-	inputH := lineCount(inputView)
+
+	// the footer is either the option picker (open ask, not in free-form)
+	// or the message input.
+	c.syncAsk(snap.PendingAsk)
+	var footer string
+	if snap.PendingAsk != nil && !c.freeForm {
+		footer = c.pickerView(s, snap.PendingAsk, w)
+	} else {
+		footer = c.input.View()
+	}
+	footerH := lineCount(footer)
 
 	errH := 0
 	if snap.Err != nil {
 		errH = 1
 	}
-	// header (3 lines) + trailing newline + optional error + input; the
+	// header (3 lines) + trailing newline + optional error + footer; the
 	// transcript takes whatever is left, never overflowing the pane.
-	bodyH := max(h-4-inputH-errH, 1)
+	bodyH := max(h-4-footerH-errH, 1)
 	b.WriteString(c.transcript(s, snap, w, bodyH))
 	b.WriteString("\n")
 	if snap.Err != nil {
 		b.WriteString(s.Error.Render("✗ "+ansi.Truncate(sanitize(snap.Err.Error()), max(w-2, 4), "…")) + "\n")
 	}
-	b.WriteString(inputView)
+	b.WriteString(footer)
+	return b.String()
+}
+
+// pickerView renders the inline ask_user option picker: the question,
+// then one line per option with a cursor and (multi-select) tick, then a
+// muted key-hint line. No dialog frame — it reads as part of the chat,
+// per gummi's minimal styling.
+func (c *chatPane) pickerView(s *theme.Styles, ask *engine.Ask, w int) string {
+	width := max(w-2, 10)
+	var b strings.Builder
+	b.WriteString(s.Title.Render(string(c.feature)+" asks") + "  " +
+		s.Base.Render(ansi.Truncate(sanitize(ask.Question), max(width-len(c.feature)-8, 8), "…")) + "\n")
+	for i, o := range ask.Options {
+		cursor := "  "
+		label := s.Base
+		if i == c.cursor {
+			cursor = s.KeyHint.Render("▸ ")
+			label = s.Title
+		}
+		tick := ""
+		if ask.MultiPick {
+			box := "○ "
+			if c.picked[i] {
+				box = "● "
+			}
+			tick = s.Faint.Render(box)
+		}
+		line := fmt.Sprintf("%s%s%d. %s", cursor, tick, i+1, sanitize(o.Label))
+		if o.Detail != "" {
+			line += s.Faint.Render(" — " + sanitize(o.Detail))
+		}
+		b.WriteString(ansi.Truncate(label.Render(line), width, "…") + "\n")
+	}
+	hint := "↑↓ move · enter select"
+	if ask.MultiPick {
+		hint = "↑↓ move · space tick · enter submit"
+	}
+	if ask.FreeForm {
+		hint += " · o type your own"
+	}
+	hint += " · esc detach"
+	b.WriteString(s.Faint.Render(hint))
 	return b.String()
 }
 
@@ -132,30 +189,120 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 	return strings.Join(visible, "\n")
 }
 
+// syncAsk aligns the picker with the session's current pending ask,
+// resetting selection state when a new question arrives and clearing it
+// when the question is answered.
+func (c *chatPane) syncAsk(ask *engine.Ask) {
+	if ask == nil {
+		c.askID, c.freeForm, c.picked = "", false, nil
+		return
+	}
+	key := ask.CallID + "|" + ask.Question // stable per question (CallID empty on convention path)
+	if key != c.askID {
+		c.askID = key
+		c.cursor = 0
+		c.picked = map[int]bool{}
+		c.freeForm = false
+	}
+}
+
 // handleKey processes a key while the chat pane is focused. It returns
-// (detach, send, cmd): detach closes the pane; send carries a message
-// to deliver to the engine.
-func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send string, cmd tea.Cmd) {
+// (detach, send, answer, cmd): detach closes the pane; send carries a
+// chat message; answer carries the user's reply to an open ask_user
+// question. At most one of send/answer is non-empty.
+func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send, answer string, cmd tea.Cmd) {
+	var ask *engine.Ask
+	if c.session != nil {
+		ask = c.session.Snapshot().PendingAsk
+	}
+	c.syncAsk(ask)
+	if ask != nil && !c.freeForm {
+		return c.handlePickerKey(msg, ask)
+	}
+
 	switch msg.String() {
 	case "esc":
-		return true, "", nil
+		if ask != nil { // leave free-form back to the picker, don't detach
+			c.freeForm = false
+			return false, "", "", nil
+		}
+		return true, "", "", nil
 	case "enter":
 		text := strings.TrimSpace(c.input.Value())
 		if text == "" {
-			return false, "", nil
+			return false, "", "", nil
 		}
 		c.input.Reset()
-		c.scroll = 0 // jump back to the latest on send
-		return false, text, nil
+		c.scroll = 0    // jump back to the latest on send
+		if ask != nil { // free-form answer to the open question
+			return false, "", text, nil
+		}
+		return false, text, "", nil
 	case "pgup", "ctrl+u":
 		c.scrollBy(c.page())
-		return false, "", nil
+		return false, "", "", nil
 	case "pgdown", "ctrl+d":
 		c.scrollBy(-c.page())
-		return false, "", nil
+		return false, "", "", nil
 	}
 	c.input, cmd = c.input.Update(msg)
-	return false, "", cmd
+	return false, "", "", cmd
+}
+
+// handlePickerKey drives the inline option picker for an open ask.
+func (c *chatPane) handlePickerKey(msg tea.KeyPressMsg, ask *engine.Ask) (detach bool, send, answer string, cmd tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		return true, "", "", nil // detach; the question stays pending
+	case "up", "k", "ctrl+p":
+		c.cursor = (c.cursor - 1 + len(ask.Options)) % len(ask.Options)
+	case "down", "j", "ctrl+n":
+		c.cursor = (c.cursor + 1) % len(ask.Options)
+	case "o":
+		if ask.FreeForm {
+			c.freeForm = true
+			c.input.Reset()
+		}
+	case " ":
+		if ask.MultiPick {
+			c.picked[c.cursor] = !c.picked[c.cursor]
+		}
+	case "enter":
+		return false, "", c.answerText(ask), nil
+	default:
+		// number keys 1-9 jump to an option
+		if d := msg.String(); len(d) == 1 && d[0] >= '1' && d[0] <= '9' {
+			if i := int(d[0] - '1'); i < len(ask.Options) {
+				c.cursor = i
+				if !ask.MultiPick {
+					return false, "", c.answerText(ask), nil
+				}
+				c.picked[i] = !c.picked[i]
+			}
+		}
+	}
+	return false, "", "", nil
+}
+
+// answerText renders the current selection into the answer string sent
+// back to the agent: the chosen labels (comma-joined for multi-select),
+// falling back to the cursor's label when nothing is explicitly ticked.
+func (c *chatPane) answerText(ask *engine.Ask) string {
+	if ask.MultiPick {
+		var picks []string
+		for i, o := range ask.Options {
+			if c.picked[i] {
+				picks = append(picks, o.Label)
+			}
+		}
+		if len(picks) > 0 {
+			return strings.Join(picks, ", ")
+		}
+	}
+	if c.cursor >= 0 && c.cursor < len(ask.Options) {
+		return ask.Options[c.cursor].Label
+	}
+	return ""
 }
 
 // page is the scroll step: most of a viewport, with a small overlap.

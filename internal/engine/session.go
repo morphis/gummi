@@ -29,6 +29,9 @@ const (
 	EventBudget EventKind = "budget"
 	// EventExhausted fires when the session hit its credit cap.
 	EventExhausted EventKind = "exhausted"
+	// EventQuestion fires when the agent asks the user a question via the
+	// ask_user client tool (Snapshot.PendingAsk populated).
+	EventQuestion EventKind = "question"
 )
 
 // Event is one item in the engine's UI-facing stream.
@@ -89,6 +92,7 @@ type Snapshot struct {
 	SpentCredits float64       // Spend as a credit-equivalent at the provider's rate
 	Context      agent.Context // latest context-window occupancy
 	Busy         bool          // agent is mid-turn
+	PendingAsk   *Ask          // the agent's open ask_user question, if any
 	Err          error
 }
 
@@ -106,12 +110,14 @@ type Session struct {
 	agentName  string        // backend identity, for display
 	model      string        // model resolved at spawn
 	provider   agent.Provider
+	specPath   string // resolved spec/draft path (for ask_user capture)
 	state      SessionState
 	transcript []Message
 	activity   []string
 	spend      agent.Usage
 	context    agent.Context
 	busy       bool
+	pendingAsk *Ask
 	err        error
 	stopped    bool
 	finalized  bool    // stopped; must not be persisted (may be dropped)
@@ -140,6 +146,7 @@ func (s *Session) Snapshot() Snapshot {
 		SpentCredits: s.spentForBudgetLocked(),
 		Context:      s.context,
 		Busy:         s.busy,
+		PendingAsk:   s.pendingAsk,
 		Err:          s.err,
 	}
 }
@@ -243,6 +250,29 @@ func (s *Session) finishAssistant(text string) {
 	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text})
 }
 
+// lastAssistant returns the most recent assistant message's content and
+// its transcript index, or ("", -1) when there is none.
+func (s *Session) lastAssistant() (string, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.transcript) - 1; i >= 0; i-- {
+		if s.transcript[i].Author == AuthorAssistant {
+			return s.transcript[i].Content, i
+		}
+	}
+	return "", -1
+}
+
+// replaceMessage overwrites a transcript entry's content (used to strip
+// a parsed gummi-ask block out of the visible message).
+func (s *Session) replaceMessage(i int, content string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i >= 0 && i < len(s.transcript) {
+		s.transcript[i].Content = content
+	}
+}
+
 func (s *Session) appendActivity(tool string) {
 	// activity is stored newline-joined; keep labels single-line so they
 	// round-trip through persistence intact.
@@ -310,6 +340,35 @@ func (s *Session) setByokRate(r float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byokRate = r
+}
+
+func (s *Session) setSpecPath(p string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.specPath = p
+}
+
+// SpecPath returns the session's resolved spec/draft path.
+func (s *Session) SpecPath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.specPath
+}
+
+func (s *Session) setPendingAsk(a *Ask) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingAsk = a
+}
+
+// takePendingAsk clears and returns the open ask (nil if none), so the
+// answer path resolves exactly one call.
+func (s *Session) takePendingAsk() *Ask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.pendingAsk
+	s.pendingAsk = nil
+	return a
 }
 
 // setSpawnInfo records which backend, model, and provider this session

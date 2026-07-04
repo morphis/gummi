@@ -34,9 +34,15 @@ import (
 //	{"type":"message","text":"…"}   → EventMessage
 //	{"type":"tool","name":"…"}      → EventToolCall
 //	{"type":"usage","credits":N,"input":I,"output":O,"model":"…"} → EventUsage
+//	{"type":"ask","id":"…","ask":{…}} → EventClientToolCall (ask_user)
 //	{"type":"idle"}                 → EventIdle
 //	{"type":"error","message":"…"}  → EventError
 //
+// gummi answers an ask with a turn frame back to the child:
+//
+//	{"type":"resolve","id":"…","result":"…"}
+//
+// The declared client tools are advertised in the init frame's "tools".
 // The provider API key is never written into the protocol: init carries
 // only the env-var NAME, and the child inherits gummi's environment, so it
 // resolves the key itself (threat list: keys are references, not literals).
@@ -67,7 +73,7 @@ func (h *Headless) Name() string { return filepath.Base(h.argv[0]) }
 // to emit usage frames — the orchestrator meters whatever arrives and
 // enforces caps itself as a backstop regardless.
 func (h *Headless) Capabilities() Capabilities {
-	return Capabilities{BYOK: true, Interrupt: true, UsageEvents: true}
+	return Capabilities{BYOK: true, Interrupt: true, UsageEvents: true, ClientTools: true}
 }
 
 // initMsg / turnMsg are the gummi → agent frames.
@@ -76,6 +82,7 @@ type headlessInit struct {
 	WorkDir  string        `json:"workdir"`
 	Model    string        `json:"model,omitempty"`
 	Hints    []string      `json:"hints,omitempty"`
+	Tools    []ToolDef     `json:"tools,omitempty"`
 	Provider *headlessProv `json:"provider,omitempty"`
 }
 
@@ -133,7 +140,7 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		stop:     make(chan struct{}),
 		readDone: make(chan struct{}),
 	}
-	initFrame := headlessInit{Type: "init", WorkDir: opts.WorkDir, Model: opts.Model, Hints: opts.SystemHints}
+	initFrame := headlessInit{Type: "init", WorkDir: opts.WorkDir, Model: opts.Model, Hints: opts.SystemHints, Tools: opts.Tools}
 	if opts.Provider.BaseURL != "" {
 		p := opts.Provider
 		initFrame.Provider = &headlessProv{Type: cmpOr(p.Type, "openai"), BaseURL: p.BaseURL, APIKeyEnv: p.APIKeyEnv}
@@ -250,14 +257,16 @@ func (s *headlessSession) read(stdout io.Reader) {
 
 // headlessEvent is the agent → gummi frame.
 type headlessEvent struct {
-	Type    string  `json:"type"`
-	Text    string  `json:"text"`
-	Name    string  `json:"name"`
-	Message string  `json:"message"`
-	Credits float64 `json:"credits"`
-	Input   int64   `json:"input"`
-	Output  int64   `json:"output"`
-	Model   string  `json:"model"`
+	Type    string          `json:"type"`
+	Text    string          `json:"text"`
+	Name    string          `json:"name"`
+	Message string          `json:"message"`
+	Credits float64         `json:"credits"`
+	Input   int64           `json:"input"`
+	Output  int64           `json:"output"`
+	Model   string          `json:"model"`
+	ID      string          `json:"id"`  // client-tool call id (ask)
+	Ask     json.RawMessage `json:"ask"` // ask_user payload
 }
 
 func decodeHeadless(line []byte) (Event, bool) {
@@ -272,6 +281,10 @@ func decodeHeadless(line []byte) (Event, bool) {
 		return Event{Kind: EventMessage, Text: m.Text}, true
 	case "tool":
 		return Event{Kind: EventToolCall, Tool: m.Name}, true
+	case "ask":
+		// the ask payload is passed through verbatim; the orchestrator
+		// parses it into a question (name defaults to ask_user).
+		return Event{Kind: EventClientToolCall, ToolCall: &ToolCall{ID: m.ID, Name: cmpOr(m.Name, "ask_user"), Args: m.Ask}}, true
 	case "usage":
 		return Event{Kind: EventUsage, Usage: Usage{Credits: m.Credits, InputTokens: m.Input, OutputTokens: m.Output, Model: m.Model}}, true
 	case "idle":
@@ -302,6 +315,12 @@ func (s *headlessSession) Send(_ context.Context, msg string) error {
 
 func (s *headlessSession) Interrupt(_ context.Context) error {
 	return s.write(map[string]string{"type": "interrupt"})
+}
+
+// Resolve implements ToolResolver: answer a client-tool call (ask_user)
+// with result, letting the child resume the model's blocked turn.
+func (s *headlessSession) Resolve(_ context.Context, callID, result string) error {
+	return s.write(map[string]string{"type": "resolve", "id": callID, "result": result})
 }
 
 func (s *headlessSession) Close() error {

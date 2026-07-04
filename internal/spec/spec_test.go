@@ -142,6 +142,30 @@ func TestAddComment(t *testing.T) {
 	}
 }
 
+func TestFindAnchor(t *testing.T) {
+	content := "## Problem\nThe toggle persists via localStorage.\n%% @gummi: note\nAnother line about storage.\nThe toggle persists via localStorage.\n"
+	// unique content line
+	if line, ok := FindAnchor(content, "Another line about storage"); !ok || line != 4 {
+		t.Errorf("unique anchor = %d,%v; want 4,true", line, ok)
+	}
+	// duplicated line → not unique → fail closed
+	if _, ok := FindAnchor(content, "persists via localStorage"); ok {
+		t.Error("duplicated snippet should not resolve to an anchor")
+	}
+	// snippet only on a marker line is not an anchor
+	if _, ok := FindAnchor(content, "@gummi: note"); ok {
+		t.Error("marker line should never be an anchor")
+	}
+	// missing snippet
+	if _, ok := FindAnchor(content, "nonexistent"); ok {
+		t.Error("missing snippet resolved")
+	}
+	// empty snippet
+	if _, ok := FindAnchor(content, "   "); ok {
+		t.Error("empty snippet resolved")
+	}
+}
+
 func TestTemplateParsesWithOpenQuestions(t *testing.T) {
 	f := &domain.Feature{ID: "FD-007", Num: 7, Title: "Search", OneLiner: "find things", Slug: "search", Stage: domain.StageTodo}
 	tpl := Template(f)

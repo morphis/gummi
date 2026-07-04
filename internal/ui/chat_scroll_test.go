@@ -15,7 +15,7 @@ func TestChatScrollbackPaging(t *testing.T) {
 	pgdn := tea.KeyPressMsg{Code: tea.KeyPgDown}
 
 	// pgup scrolls up by a page (bodyH-1 = 9); no detach/send
-	if detach, send, _ := c.handleKey(pgup); detach || send != "" {
+	if detach, send, _, _ := c.handleKey(pgup); detach || send != "" {
 		t.Fatalf("pgup detach=%v send=%q, want false/empty", detach, send)
 	}
 	if c.scroll != 9 {
@@ -47,7 +47,7 @@ func TestChatSendJumpsToLatest(t *testing.T) {
 	c.input = newChatInput()
 	c.input.SetValue("a question")
 	c.scroll = 40 // scrolled up into history
-	detach, send, _ := c.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	detach, send, _, _ := c.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if detach || send != "a question" {
 		t.Fatalf("enter detach=%v send=%q", detach, send)
 	}
