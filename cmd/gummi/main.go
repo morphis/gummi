@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strconv"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -120,7 +121,10 @@ func runBoard() error {
 //	GUMMI_PROVIDER_TYPE      "openai"|"azure"|"anthropic" (default openai)
 //	GUMMI_PROVIDER_KEY_ENV   env var holding the provider key (optional)
 func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, []string, func()) {
-	ag, err := agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
+	// Adapter selection: GUMMI_AGENT_CMD picks the generic headless
+	// adapter (any agent binary speaking the stdio JSON protocol);
+	// otherwise gummi uses the first-class Copilot SDK adapter.
+	ag, err := buildAgent()
 	if err != nil {
 		return nil, nil, nil
 	}
@@ -164,6 +168,18 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 	names := profiles.Names()
 	sort.Strings(names)
 	return eng, names, func() { _ = eng.Close(); _ = ag.Close() }
+}
+
+// buildAgent selects the agent backend. GUMMI_AGENT_CMD (a shell-style
+// command line) selects the generic headless adapter; empty falls back to
+// the Copilot SDK adapter. The command is split on spaces — operator
+// config, not untrusted input — so quoting is not supported; use a
+// wrapper script for arguments with spaces.
+func buildAgent() (agent.Agent, error) {
+	if cmd := strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")); cmd != "" {
+		return agent.NewHeadless(strings.Fields(cmd))
+	}
+	return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
 }
 
 func runInit() error {
