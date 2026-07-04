@@ -48,10 +48,11 @@ type Shell struct {
 	spec   *specView // non-nil while the spec surface is open
 
 	// agent orchestration (nil engine means no agent wired)
-	engine *engine.Engine
-	chat   *chatPane // non-nil while attached to an interactive session
-	inbox  *inbox    // needs-attention queue
-	checks map[domain.FeatureID][]verify.Result
+	engine       *engine.Engine
+	chat         *chatPane // non-nil while attached to an interactive session
+	inbox        *inbox    // needs-attention queue
+	checks       map[domain.FeatureID][]verify.Result
+	reviewRounds map[domain.FeatureID]int // automatic review→fix→review counter
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -60,11 +61,12 @@ type Shell struct {
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
 	return &Shell{
-		styles:  theme.New(t),
-		version: version,
-		now:     time.Now,
-		inbox:   newInbox(),
-		checks:  map[domain.FeatureID][]verify.Result{},
+		styles:       theme.New(t),
+		version:      version,
+		now:          time.Now,
+		inbox:        newInbox(),
+		checks:       map[domain.FeatureID][]verify.Result{},
+		reviewRounds: map[domain.FeatureID]int{},
 	}
 }
 
@@ -112,10 +114,10 @@ type (
 	engineClosedMsg struct{}
 )
 
-// handleEngineEvent folds an engine event into the notice line and the
-// needs-attention queue: errors and completed autonomous stages become
-// inbox items.
-func (m *Shell) handleEngineEvent(ev engine.Event) {
+// handleEngineEvent folds an engine event into the notice line, the
+// needs-attention queue, and the automatic review loop. It returns a
+// command for any automatic follow-up (review→fix→review), or nil.
+func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	switch ev.Kind {
 	case engine.EventError:
 		if ev.Err != nil {
@@ -125,12 +127,18 @@ func (m *Shell) handleEngineEvent(ev engine.Event) {
 			m.inbox.add(ev.Feature, attnFailure, text)
 		}
 	case engine.EventIdle:
-		// an autonomous stage that has finished its turn awaits your
-		// review/decision — a gate item.
-		if s := m.engine.Get(ev.Feature); s != nil && !s.Interactive && s.State() == engine.StateDone {
-			m.inbox.add(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
+		s := m.engine.Get(ev.Feature)
+		if s == nil || s.Interactive || s.State() != engine.StateDone {
+			return nil
 		}
+		// review/implement completions may drive the automatic loop;
+		// anything the loop doesn't consume becomes a generic gate item.
+		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
+			return cmd
+		}
+		m.inbox.add(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
 	}
+	return nil
 }
 
 // Update implements tea.Model.
@@ -190,10 +198,11 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case engineEventMsg:
-		m.handleEngineEvent(msg.ev)
+		cmd := m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
-		// just signal "re-render from Snapshot" — so keep listening.
-		return m, m.listenEngine
+		// just signal "re-render from Snapshot" — so keep listening, plus
+		// any automatic review-loop follow-up.
+		return m, tea.Batch(m.listenEngine, cmd)
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly; drop the pane so the

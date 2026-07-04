@@ -69,15 +69,19 @@ plan is written; the user approves it.`))
 		hints = append(hints, strings.TrimSpace(`
 Stage: Implement (autonomous). Implement the feature in this worktree
 using the spec and plan as context. Make focused edits, run the
-relevant checks as you go, and keep changes reviewable. If you need a
-decision or hit a blocker, stop and say so clearly rather than
+relevant checks as you go, and keep changes reviewable. If you are
+addressing review findings, resolve each one and note how. If you need
+a decision or hit a blocker, stop and say so clearly rather than
 guessing.`))
 	case domain.StageReview:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Review (autonomous, fresh context). Review the worktree diff
-against the spec. Write findings into the spec's review section.
-Serious findings should bounce the feature back to Implement; be
-specific and actionable.`))
+against the spec. Write findings into the spec's review section; be
+specific and actionable. End your final message with a verdict on its
+own line, exactly one of:
+  VERDICT: pass       — no changes needed; ready to verify
+  VERDICT: changes    — serious findings; bounce back to implement
+This verdict drives gummi's automatic review→fix→review loop.`))
 	case domain.StageVerify:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Verify (autonomous). Run the repo's check commands and the
