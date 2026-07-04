@@ -137,10 +137,14 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 	}
 }
 
-// dropSession ends and forgets a feature's engine session, if any.
+// dropSession ends and forgets a feature's engine session and clears
+// any needs-attention item for it.
 func (m *Shell) dropSession(id domain.FeatureID) {
 	if m.engine != nil {
 		m.engine.Drop(id)
+	}
+	if m.inbox != nil {
+		m.inbox.remove(id)
 	}
 }
 

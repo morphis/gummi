@@ -49,6 +49,7 @@ type Shell struct {
 	// agent orchestration (nil engine means no agent wired)
 	engine *engine.Engine
 	chat   *chatPane // non-nil while attached to an interactive session
+	inbox  *inbox    // needs-attention queue
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -56,7 +57,7 @@ type Shell struct {
 
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
-	return &Shell{styles: theme.New(t), version: version, now: time.Now}
+	return &Shell{styles: theme.New(t), version: version, now: time.Now, inbox: newInbox()}
 }
 
 // Attach wires the shell to a workspace: its store, worktree manager,
@@ -103,6 +104,27 @@ type (
 	engineClosedMsg struct{}
 )
 
+// handleEngineEvent folds an engine event into the notice line and the
+// needs-attention queue: errors and completed autonomous stages become
+// inbox items.
+func (m *Shell) handleEngineEvent(ev engine.Event) {
+	switch ev.Kind {
+	case engine.EventError:
+		if ev.Err != nil {
+			// engine/provider errors may embed model-controlled bytes
+			text := sanitize(ev.Err.Error())
+			m.notice = noticeMsg{text: text, isErr: true}
+			m.inbox.add(ev.Feature, attnFailure, text)
+		}
+	case engine.EventIdle:
+		// an autonomous stage that has finished its turn awaits your
+		// review/decision — a gate item.
+		if s := m.engine.Get(ev.Feature); s != nil && !s.Interactive && s.State() == engine.StateDone {
+			m.inbox.add(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
+		}
+	}
+}
+
 // Update implements tea.Model.
 func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -142,12 +164,9 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case engineEventMsg:
-		if msg.ev.Kind == engine.EventError && msg.ev.Err != nil {
-			// engine/provider errors may embed model-controlled bytes
-			m.notice = noticeMsg{text: sanitize(msg.ev.Err.Error()), isErr: true}
-		}
-		// engine events carry no payload the view needs — they just
-		// signal "re-render from Snapshot" — so keep listening.
+		m.handleEngineEvent(msg.ev)
+		// engine events otherwise carry no payload the view needs — they
+		// just signal "re-render from Snapshot" — so keep listening.
 		return m, m.listenEngine
 
 	case engineClosedMsg:
@@ -191,12 +210,20 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch key {
+	case "tab":
+		m.cycleAttention()
+		return nil
+	case "i":
+		m.openInbox()
+		return nil
 	case "enter":
 		if r, ok := m.selected(); ok {
+			m.inbox.remove(r.F.ID)
 			return m.attachOrRun(r.F)
 		}
 	case "p":
 		if r, ok := m.selected(); ok {
+			m.inbox.remove(r.F.ID)
 			return m.pauseRun(r.F)
 		}
 	case "s":
@@ -211,10 +238,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.Overlay.Push(newFeatureForm(m.createFeature))
 	case "g":
 		if r, ok := m.selected(); ok {
+			m.inbox.remove(r.F.ID)
 			return m.advanceStage(r.F.ID)
 		}
 	case "b":
 		if r, ok := m.selected(); ok {
+			m.inbox.remove(r.F.ID)
 			return m.bounceStage(r.F.ID)
 		}
 	case "x":
@@ -411,6 +440,42 @@ func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
 	return m.engine.Get(id)
 }
 
+// cycleAttention moves the selection to the next feature in the
+// needs-attention queue (DESIGN §6: `tab` cycles the queue).
+func (m *Shell) cycleAttention() {
+	var cur domain.FeatureID
+	if r, ok := m.selected(); ok {
+		cur = r.F.ID
+	}
+	next := m.inbox.next(cur)
+	if next == "" {
+		return
+	}
+	for i, r := range m.rows {
+		if r.F.ID == next {
+			m.sel = i
+			return
+		}
+	}
+}
+
+// openInbox shows the needs-attention overlay.
+func (m *Shell) openInbox() {
+	m.Overlay.Push(newInboxDialog(m.inbox.list(),
+		func(id domain.FeatureID) tea.Cmd {
+			m.inbox.remove(id)
+			for i, r := range m.rows {
+				if r.F.ID == id {
+					m.sel = i
+					break
+				}
+			}
+			return nil
+		},
+		m.inbox.remove,
+	))
+}
+
 // autonomousStage reports whether a stage runs an autonomous agent
 // (as opposed to interactive chat or no agent).
 func autonomousStage(s domain.Stage) bool {
@@ -475,6 +540,9 @@ func (m *Shell) statusView(w int) string {
 	}
 	if run := m.runCounts(); run != "" {
 		pills = append(pills, statusbar.Pill{Text: run, Kind: statusbar.KindNeutral})
+	}
+	if n := m.inbox.len(); n > 0 {
+		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})
 	}
 	if m.notice.text != "" {
 		kind := statusbar.KindNeutral

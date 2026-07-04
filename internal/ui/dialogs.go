@@ -27,6 +27,8 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"1..9", "jump to feature"},
 		{"enter", "chat (brainstorm/spec) · run (autonomous)"},
 		{"p", "pause the running agent"},
+		{"tab", "cycle needs-attention queue"},
+		{"i", "open needs-attention inbox"},
 		{"g", "advance stage (gate)"},
 		{"b", "bounce back to implement"},
 		{"n", "new feature"},
