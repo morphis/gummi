@@ -20,16 +20,26 @@ type chatPane struct {
 	session *engine.Session
 	input   textarea.Model
 	width   int // last width the input was sized to
+
+	scroll     int // lines scrolled up from the bottom (0 = latest)
+	bodyH      int // transcript viewport height, from the last render
+	totalLines int // total transcript lines, from the last render
 }
 
 func newChatPane(feature domain.FeatureID, session *engine.Session) *chatPane {
+	in := newChatInput()
+	in.Focus()
+	return &chatPane{feature: feature, session: session, input: in}
+}
+
+// newChatInput builds the message textarea (shared with tests).
+func newChatInput() textarea.Model {
 	in := textarea.New()
-	in.Placeholder = "message the agent…  (enter to send, esc to detach)"
+	in.Placeholder = "message the agent…  (enter send · pgup/pgdn scroll · esc detach)"
 	in.CharLimit = 4000
 	in.ShowLineNumbers = false
 	in.SetHeight(3)
-	in.Focus()
-	return &chatPane{feature: feature, session: session, input: in}
+	return in
 }
 
 // view renders the chat pane into the main area.
@@ -42,6 +52,9 @@ func (c *chatPane) view(s *theme.Styles, w, h int) string {
 		s.ProfileTag.Render("["+string(snap.Role)+"]")
 	if snap.Busy {
 		head += "  " + s.Info.Render("⣾ thinking")
+	}
+	if c.scroll > 0 {
+		head += "  " + s.Faint.Render("↑ scrolled — pgdn to latest")
 	}
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 80), 0))) + "\n")
@@ -95,9 +108,16 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		lines = append(lines, s.Faint.Render("  start the conversation below"))
 	}
 
-	// tail-anchor: show the last bodyH lines
-	start := max(len(lines)-bodyH, 0)
-	visible := lines[start:]
+	// record layout for the key handler (paging clamps against these);
+	// clamp the scroll locally so render never mutates the stored offset.
+	total := len(lines)
+	c.bodyH, c.totalLines = bodyH, total
+	maxScroll := max(total-bodyH, 0)
+	scroll := min(max(c.scroll, 0), maxScroll)
+
+	end := total - scroll
+	start := max(end-bodyH, 0)
+	visible := lines[start:end]
 	// pad to fill so the input stays pinned to the bottom
 	for len(visible) < bodyH {
 		visible = append([]string{""}, visible...)
@@ -118,10 +138,31 @@ func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send string, cmd
 			return false, "", nil
 		}
 		c.input.Reset()
+		c.scroll = 0 // jump back to the latest on send
 		return false, text, nil
+	case "pgup", "ctrl+u":
+		c.scrollBy(c.page())
+		return false, "", nil
+	case "pgdown", "ctrl+d":
+		c.scrollBy(-c.page())
+		return false, "", nil
 	}
 	c.input, cmd = c.input.Update(msg)
 	return false, "", cmd
+}
+
+// page is the scroll step: most of a viewport, with a small overlap.
+func (c *chatPane) page() int {
+	if c.bodyH > 2 {
+		return c.bodyH - 1
+	}
+	return 5
+}
+
+// scrollBy moves the scrollback offset, clamped to the transcript.
+func (c *chatPane) scrollBy(delta int) {
+	maxScroll := max(c.totalLines-c.bodyH, 0)
+	c.scroll = min(max(c.scroll+delta, 0), maxScroll)
 }
 
 func lineCount(s string) int { return strings.Count(s, "\n") + 1 }
