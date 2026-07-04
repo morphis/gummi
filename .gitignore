@@ -6,9 +6,8 @@
 *.out
 *.test
 
-# gummi's own runtime state when dogfooding in this repo
-/.gummi/state/
-/.gummi/worktrees/
+# gummi's own runtime workspace when dogfooding in this repo
+/.gummi/
 
 # editor droppings
 *.swp
