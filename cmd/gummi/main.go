@@ -172,12 +172,22 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 	return eng, names, func() { _ = eng.Close(); _ = ag.Close() }
 }
 
-// buildAgent selects the agent backend. GUMMI_AGENT_CMD (a shell-style
-// command line) selects the generic headless adapter; empty falls back to
-// the Copilot SDK adapter. The command is split on spaces — operator
-// config, not untrusted input — so quoting is not supported; use a
-// wrapper script for arguments with spaces.
+// buildAgent selects the agent backend from GUMMI_AGENT:
+//
+//	copilot   (default) — the GitHub Copilot SDK adapter
+//	opencode            — the opencode CLI adapter (GUMMI_OPENCODE_BIN overrides the binary)
+//	headless            — a generic subprocess agent (GUMMI_AGENT_CMD is its command line)
+//
+// For back-compat, setting GUMMI_AGENT_CMD alone still selects headless.
+// Command lines are split on spaces (operator config, not untrusted
+// input); use a wrapper script for arguments containing spaces.
 func buildAgent() (agent.Agent, error) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT"))) {
+	case "opencode":
+		return agent.NewOpencode(os.Getenv("GUMMI_OPENCODE_BIN"))
+	case "headless":
+		return agent.NewHeadless(strings.Fields(os.Getenv("GUMMI_AGENT_CMD")))
+	}
 	if cmd := strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")); cmd != "" {
 		return agent.NewHeadless(strings.Fields(cmd))
 	}
