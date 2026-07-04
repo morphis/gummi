@@ -253,21 +253,25 @@ func (m *Manager) Dirty(ctx context.Context, f *domain.Feature) (bool, error) {
 	return out != "", nil
 }
 
-// Landed reports whether the feature branch has merged into main: its
-// tip is an ancestor of the main checkout's HEAD AND it is not still
-// sitting at that HEAD. The second clause excludes a freshly created
-// branch (whose tip equals main's HEAD and is therefore a trivial
-// ancestor) from being mistaken for a landed one. Limitations, deferred:
-// squash-merges aren't detected, and a branch merged by fast-forward
-// while main had no other activity (HEAD == branch tip) reads as not-yet
-// landed until main next advances.
+// Landed reports whether the feature branch has merged into main, by
+// either of two routes:
+//
+//   - Regular / fast-forward merge: the branch tip is an ancestor of the
+//     main checkout's HEAD and has moved past that HEAD (the second clause
+//     excludes a fresh branch sitting at HEAD, a trivial ancestor).
+//   - Squash merge: the branch has its own commits, but every change it
+//     makes is already present in main — merging it would be a no-op — so
+//     its work has landed even though its commits aren't ancestors.
+//
+// A branch merged by fast-forward while main had no other activity (HEAD
+// == branch tip) still reads as not-yet-landed until main next advances.
 func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return false, err
 	}
 	anc, err := gitOK(ctx, m.root, "merge-base", "--is-ancestor", branch, "HEAD")
-	if err != nil || !anc {
+	if err != nil {
 		return false, err
 	}
 	branchTip, err := runGit(ctx, m.root, "rev-parse", branch)
@@ -278,7 +282,43 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return branchTip != head, nil
+	if anc {
+		return branchTip != head, nil
+	}
+	return m.squashLanded(ctx, branch)
+}
+
+// squashLanded reports whether branch has its own commits whose changes
+// are all already in main — i.e. a squash-merge landed it. It merges the
+// branch against main in memory (no working-tree touch) and checks the
+// result tree is identical to main's: if merging adds nothing, the work
+// is in. Any merge-tree failure (conflict, or a git too old for
+// --write-tree) reads as not-landed, the safe default.
+func (m *Manager) squashLanded(ctx context.Context, branch string) (bool, error) {
+	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	if err != nil {
+		return false, err
+	}
+	n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch)
+	if err != nil {
+		return false, err
+	}
+	if n == "0" { // no commits of its own — a fresh/empty branch, not landed
+		return false, nil
+	}
+	merged, err := runGit(ctx, m.root, "merge-tree", "--write-tree", "HEAD", branch)
+	if err != nil {
+		return false, nil // conflict or unsupported: treat as not landed
+	}
+	mainTree, err := runGit(ctx, m.root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		return false, err
+	}
+	// --write-tree prints the merged tree oid on the first line.
+	if i := strings.IndexByte(merged, '\n'); i >= 0 {
+		merged = merged[:i]
+	}
+	return merged == mainTree, nil
 }
 
 // RebaseConflictError reports that a rebase stopped on conflicts and was

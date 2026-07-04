@@ -265,6 +265,34 @@ func TestRebaseConflictAbortsCleanly(t *testing.T) {
 	}
 }
 
+func TestLandedSquashMerge(t *testing.T) {
+	root := newRepo(t)
+	m, _ := NewManager(ctx, root)
+	f := feature(8, "Squash me")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "sq.txt", "feature work\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "feature commit")
+
+	if landed, err := m.Landed(ctx, f); landed || err != nil {
+		t.Fatalf("unmerged branch landed=%v err=%v, want false", landed, err)
+	}
+
+	// squash-merge into main: main gains the changes as a fresh commit, so
+	// the branch's own commit is NOT an ancestor of main's HEAD.
+	mustGit(t, root, "merge", "--squash", f.BranchName())
+	mustGit(t, root, "commit", "-q", "-m", "squash "+string(f.ID))
+	if anc, _ := gitOK(ctx, root, "merge-base", "--is-ancestor", f.BranchName(), "HEAD"); anc {
+		t.Fatal("setup: a squash-merge should not make the branch an ancestor")
+	}
+	if landed, err := m.Landed(ctx, f); !landed || err != nil {
+		t.Errorf("squash-merged branch landed=%v err=%v, want true", landed, err)
+	}
+}
+
 func TestLandedFalseForFreshBranch(t *testing.T) {
 	// a just-created branch sits at main's HEAD (a trivial ancestor); it
 	// must not be reported as landed.
