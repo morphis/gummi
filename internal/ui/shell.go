@@ -351,7 +351,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleIngestKey(key)
 	}
 	if m.bugIngest != nil {
-		return m.handleBugIngestKey(key)
+		return m.handleBugIngestKey(msg)
 	}
 	switch key {
 	case "q":

@@ -867,6 +867,10 @@ piece of machinery doc-ingest didn't need, and what makes GitHub polling safe.
 The gate lives on two surfaces, mirroring §11.4: the TUI import-review pane
 (reusing the annotate-style list — drop/rename/edit/approve; no merge, since
 issues are discrete) and the CLI (`gummi bugs ingest`, gated y/N or `--yes`).
+The review pane adds an interactive `/` filter — a live substring match over
+the fetched issues' title/label/body — so a repo with dozens of issues can be
+narrowed to the ones worth importing before approving; what is visible under
+the filter and not dropped is exactly what materializes.
 
 ### 12.5 Deferred
 
