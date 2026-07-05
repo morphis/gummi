@@ -30,6 +30,11 @@ func (w Workspace) SpecsDir() string { return filepath.Join(w.GummiDir(), "specs
 // WorktreesDir holds the nested per-feature git worktrees.
 func (w Workspace) WorktreesDir() string { return filepath.Join(w.GummiDir(), "worktrees") }
 
+// IngestDir holds source documents an ingest pass decomposed into
+// features (DESIGN §11): committed with the repo, so a seeded draft's
+// provenance pointer stays resolvable.
+func (w Workspace) IngestDir() string { return filepath.Join(w.GummiDir(), "ingest") }
+
 // SeqFile is the FD-NNN monotonic counter.
 func (w Workspace) SeqFile() string { return filepath.Join(w.GummiDir(), "seq") }
 
@@ -95,7 +100,7 @@ func Init(root string) (Workspace, error) {
 	if err := os.Chmod(w.StateDir(), 0o700); err != nil { //nolint:gosec // directories need the execute bit; 0700 is owner-only
 		return Workspace{}, fmt.Errorf("securing state dir: %w", err)
 	}
-	for _, dir := range []string{w.DraftsDir(), w.SpecsDir(), w.WorktreesDir()} {
+	for _, dir := range []string{w.DraftsDir(), w.SpecsDir(), w.WorktreesDir(), w.IngestDir()} {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return Workspace{}, fmt.Errorf("creating %s: %w", dir, err)
 		}

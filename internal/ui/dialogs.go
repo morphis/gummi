@@ -34,6 +34,7 @@ func (helpDialog) View(s *theme.Styles, w, h int) string {
 		{"r", "rebase branch onto main"},
 		{"c", "clean up a landed branch"},
 		{"n", "new feature"},
+		{"I", "ingest a spec into features"},
 		{"s", "spec (tab: read ⇄ annotate)"},
 		{"d", "diff (tab: read ⇄ annotate)"},
 		{"a", "raw-attach the agent CLI in the worktree"},

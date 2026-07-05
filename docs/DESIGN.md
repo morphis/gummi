@@ -674,7 +674,121 @@ Still open:
    attributed per stage from SDK events; may need an estimation fallback
    for the kanban cost column.
 
-## 11. References
+## 11. Spec ingestion — decomposing an existing spec into features
+
+gummi's unit is a Feature (FD): one PR-sized branch that flows through the
+fixed workflow. Today features are *born blank* — the creation form takes a
+single title line, mints an ID, and stamps the empty spec template; brainstorm
+and spec then author the FD from scratch. But work often *starts* from a
+document that already exists — a PRD, a design doc, a meeting write-up that
+describes many features at once. Ingestion inverts the birth path: gummi reads
+a source spec and **decomposes it into N pre-seeded FDs**, so brainstorm/spec
+*refine* an already-populated draft instead of starting cold.
+
+### 11.1 How ingestion fits the stances
+
+Three existing rules shape the design, and they all point the same way:
+
+- **Tool owns mechanics, model owns content** (§4.5). gummi owns reading the
+  source file, the decomposition *schema*, minting IDs/slugs, writing drafts,
+  and the review surface. The model owns where the feature boundaries fall, the
+  slice of source text per feature, the dependencies, and the coverage map. So
+  the decomposition is delivered through a **structured client tool**
+  (`propose_features`, the same plumbing as `ask_user` / `submit_verdict`), not
+  free prose gummi regexes out.
+- **One-shot agent passes already exist.** Plan-time `Estimate` (§5.1) is the
+  template: a transient session that is not tracked on the board, sends one
+  prompt, collects a structured result, and closes. Ingestion is the same shape
+  but **architect-role** — decomposition is design judgment (boundaries,
+  dependencies, coverage), not scribe mechanics.
+- **High-leverage, error-prone work takes a human gate.** Auto-minting a dozen
+  FDs you then have to delete fights the attention-based model. Ingestion's
+  output is therefore a **proposal you review, edit, and approve** — reusing the
+  annotate/gate interaction (§6.1) — and only then materializes onto the board.
+
+### 11.2 What a proposal carries
+
+The architect pass emits, per candidate FD, a structured record:
+
+- **title + one-liner** — feed the slug and the feature's one-liner directly.
+- **source refs** — which sections / line ranges of the source it came from;
+  provenance and traceability back to the original document.
+- **seeded draft** — the extracted *problem*, *constraints*, and *acceptance
+  criteria*, mapped into the real template sections. The *considered/chosen
+  approach* sections stay open `%%` prompts — ingestion seeds the **what**, not
+  the **how**; converging on an approach is still brainstorm's job.
+- **open questions** — anything the decomposition is unsure about is emitted as
+  a `%%` marker on its anchor, so **decomposition uncertainty becomes the FD's
+  open-questions checklist for free**, with no new machinery.
+- **depends_on** — other proposals this one needs. gummi has no dependency model
+  today, so v1 records this as prose ("Depends on: FD-…") in the draft;
+  first-class edges are deferred (§11.5).
+- **skip hint** — a well-specified slice may propose the Brainstorm skip flag.
+
+Plus one document-level **coverage map**: every source requirement mapped to an
+FD or explicitly marked out-of-scope, with an **unmapped** list surfaced loudly
+so the human can see nothing fell through the cracks.
+
+The **source document itself** is copied into the workspace
+(`.gummi/ingest/<name>.md`) for provenance, so each draft references it by path
+and any downstream agent can read the full context on demand — the draft carries
+only the slice, not the whole document.
+
+### 11.3 Decomposition granularity
+
+The target is **PR-sized vertical slices**: each FD is one independently
+reviewable and verifiable branch, which is exactly gummi's deliverable. Too
+fine and you drown in per-FD workflow overhead; too coarse and each "feature" is
+a mini-project that brainstorm has to re-split. A typical PRD lands as a handful
+to ~15 FDs. The granularity rule lives in the ingest system hint, and the
+coverage map is where the agent justifies its cut.
+
+### 11.4 The pipeline
+
+```
+  source.md ──▶ [A] architect pass ──▶ IngestResult ──▶ [B] review gate ──▶ [C] materialize
+                (propose_features)      (proposals +      (edit/merge/split/    (mint + seed
+                                         coverage)         drop/approve)         drafts → todo)
+```
+
+- **A · extraction primitive** *(engine)* — `Engine.Ingest(source, profile)`,
+  modeled on `Estimate`: copy the source into `.gummi/ingest/`, open a transient
+  architect session with the source path + granularity + coverage rules in the
+  system hint, register the `propose_features` client tool whose handler
+  captures the structured `IngestResult`, and close. Creates nothing on the
+  board.
+- **B · review gate** — the cheap human judgment gummi can't do itself, on two
+  surfaces. In the **TUI**, an ingest-review pane reusing the annotate
+  interaction (§6.1): the proposals as a line-cursor list with a detail panel
+  (one-liner, refs, dependencies, seed highlights) and a coverage panel that
+  flags the unmapped list loudly. Keys `r` rename · `o` edit one-liner · `x`
+  drop/undrop · `m` merge into the proposal above · `A` approve (confirms, and
+  surfaces any unmapped count before minting). *Split* is intentionally not a
+  gate operation — a too-coarse slice is better re-split by brainstorm once it
+  is a real feature, so the gate only coarsens (drop/merge) and edits. On the
+  **CLI**, `gummi ingest <path>` prints the proposals + coverage and gates on a
+  y/N confirmation (or `--yes`).
+- **C · materialization** *(engine)* — each approved proposal runs the existing
+  create path (mint number → ID → slug → create in todo, with the proposed skip
+  flags), but writes a **seeded** draft instead of the blank template:
+  provenance header, the mapped sections, the `%%` questions, and the
+  dependency prose. Features land in todo, pre-loaded, ready for the normal
+  workflow.
+
+Each piece is independently testable: domain types + the seeded template (golden
+tests, no agent), `Engine.Ingest` + the tool (unit-tested against the `Fake`
+agent, both the client-tool and fenced-convention paths), materialization
+(headless engine/state), the `gummi ingest` CLI, and the TUI review pane (driven
+through simulated key presses against a `Fake` architect).
+
+### 11.5 Deferred
+
+- **First-class dependencies** — `depends_on` as real edges the scheduler orders
+  on, rather than prose. Only if the prose approach proves insufficient.
+- **Persisted coverage report** — keeping the source→FD map queryable after
+  ingestion, for traceability audits against the original document.
+
+## 12. References
 
 - Spec-driven parallel agents workflow: <https://schipper.ai/posts/parallel-coding-agents/>
 - Copilot SDK (Go): <https://github.com/github/copilot-sdk>

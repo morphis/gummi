@@ -176,40 +176,128 @@ func AddComment(content string, line int, author, date, text string) (string, er
 	return strings.Join(out, "\n"), nil
 }
 
-// Template renders the initial spec draft for a feature.
+// section prompts are the %% guidance a blank draft carries in each
+// section; a seeded draft replaces the prompt with extracted content
+// where ingestion supplied it (DESIGN §11.2).
+const (
+	promptProblem      = "%% @gummi: what hurts today? who feels it?"
+	promptConsidered   = "%% @gummi: at least two candidates, with tradeoffs"
+	promptChosen       = "%% @gummi: converge on one during the spec stage"
+	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
+	promptReview       = "%% @gummi: reviewer findings land here; the implementer resolves each one"
+	promptVerification = "%% @gummi: repo checks always run; what feature-specific live checks prove this works?"
+)
+
+// Template renders the initial (blank) spec draft for a feature.
 func Template(f *domain.Feature) string {
+	return renderDraft(f, domain.DraftSeed{}, domain.DraftProvenance{})
+}
+
+// SeededTemplate renders a draft pre-populated from an ingested spec
+// (DESIGN §11.2): the seed's extracted content fills the Problem,
+// Implementation notes, and Verification plan sections; its open
+// questions become %% markers under Problem (so they surface in the
+// checklist); and the provenance header records the source and
+// dependencies. Sections the seed leaves empty keep their %% prompt, and
+// the considered/chosen approach sections are never seeded — that's
+// brainstorm's work.
+func SeededTemplate(f *domain.Feature, seed domain.DraftSeed, prov domain.DraftProvenance) string {
+	return renderDraft(f, seed, prov)
+}
+
+// section renders "## Title" followed by body, falling back to prompt
+// when body is blank. A section with neither (Implementation notes on a
+// blank draft) is just its heading.
+func section(b *strings.Builder, title, body, prompt string) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	if body = strings.TrimSpace(body); body == "" {
+		body = prompt
+	}
+	if body != "" {
+		b.WriteString(body + "\n\n")
+	}
+}
+
+func renderDraft(f *domain.Feature, seed domain.DraftSeed, prov domain.DraftProvenance) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s: %s\n\n", f.ID, f.Title)
 	if f.OneLiner != "" {
 		fmt.Fprintf(&b, "> %s\n\n", f.OneLiner)
 	}
-	b.WriteString(`## Problem
+	renderProvenance(&b, prov)
 
-%% @gummi: what hurts today? who feels it?
+	// Problem, plus any ingested open questions. Each question is its own
+	// content line (a bullet) with a %% flag threaded under it, so each is
+	// an independent thread in the checklist: resolving one never closes
+	// the others (adjacent %% lines with no content between would all share
+	// one anchor and collapse into a single thread).
+	section(&b, "Problem", neutralizeMarkers(seed.Problem), promptProblem)
+	emitted := 0
+	for _, q := range seed.OpenQuestions {
+		if q = oneLine(q); q != "" {
+			fmt.Fprintf(&b, "- %s\n%%%% @gummi: open question from the ingested spec\n", q)
+			emitted++
+		}
+	}
+	if emitted > 0 {
+		b.WriteString("\n")
+	}
 
-## Considered approaches
+	section(&b, "Considered approaches", "", promptConsidered)
+	section(&b, "Chosen approach", "", promptChosen)
+	section(&b, "Implementation notes", neutralizeMarkers(seed.Constraints), "")
+	section(&b, "Progress", "", promptProgress)
+	section(&b, "Review", "", promptReview)
+	section(&b, "Verification plan", neutralizeMarkers(seed.Acceptance), promptVerification)
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
 
-%% @gummi: at least two candidates, with tradeoffs
+// oneLine flattens a seed value to a single line (open-question markers
+// are one line each), mirroring AddComment's newline handling so ingested
+// text can't inject extra content lines into the draft.
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.TrimSpace(s)
+}
 
-## Chosen approach
+// neutralizeMarkers defuses any line of ingested body text that would
+// otherwise parse as a %% marker — an injected marker could spawn a
+// spurious checklist thread or, worse, silently resolve a real one. The
+// %% channel is gummi's, not the source document's.
+func neutralizeMarkers(body string) string {
+	if !strings.Contains(body, "%%") {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	for i, ln := range lines {
+		if IsMarkerLine(ln) {
+			lines[i] = strings.Replace(ln, "%%", "% %", 1)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
-%% @gummi: converge on one during the spec stage
-
-## Implementation notes
-
-## Progress
-
-%% @gummi: implement checkpoints here — what's done, what's left, where to resume
-
-## Review
-
-%% @gummi: reviewer findings land here; the implementer resolves each one
-
-## Verification plan
-
-%% @gummi: repo checks always run; what feature-specific live checks prove this works?
-`)
-	return b.String()
+// renderProvenance writes the "Ingested from …" header for a seeded
+// draft: source path, the source refs it was cut from, and its
+// dependencies. Nothing is written for a blank (non-ingested) draft.
+func renderProvenance(b *strings.Builder, p domain.DraftProvenance) {
+	if p.Empty() {
+		return
+	}
+	b.WriteString("> _Ingested")
+	if p.Source != "" {
+		fmt.Fprintf(b, " from `%s`", p.Source)
+	}
+	if len(p.Refs) > 0 {
+		fmt.Fprintf(b, " · §%s", strings.Join(p.Refs, ", "))
+	}
+	b.WriteString("_\n")
+	if len(p.DependsOn) > 0 {
+		fmt.Fprintf(b, ">\n> Depends on: %s\n", strings.Join(p.DependsOn, ", "))
+	}
+	b.WriteString("\n")
 }
 
 // EnsureDraft materializes a feature's draft at path from the template

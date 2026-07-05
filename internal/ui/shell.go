@@ -43,11 +43,13 @@ type Shell struct {
 	wt    *worktree.Manager
 	ws    state.Workspace
 
-	rows   []featureRow
-	sel    int
-	notice noticeMsg
-	spec   *specView // non-nil while the spec surface is open
-	diff   *diffView // non-nil while the diff surface is open
+	rows      []featureRow
+	sel       int
+	notice    noticeMsg
+	spec      *specView   // non-nil while the spec surface is open
+	diff      *diffView   // non-nil while the diff surface is open
+	ingest    *ingestView // non-nil while the ingest review surface is open
+	ingesting bool        // an ingest pass is decomposing (one at a time)
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -267,6 +269,21 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case ingestLoadedMsg:
+		m.ingesting = false
+		if msg.err != nil {
+			m.notice = noticeMsg{text: "ingest: " + sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		// the user explicitly asked for this decomposition and has been
+		// waiting on it, so it takes the foreground: clear any pane opened
+		// meanwhile (chat detaches, its session keeps running) so the review
+		// surface is never installed hidden behind another view.
+		m.chat, m.spec, m.diff = nil, nil, nil
+		m.ingest = newIngestView(msg.res, msg.profile, msg.envelope)
+		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
+		return m, nil
+
 	case engineEventMsg:
 		cmd := m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
@@ -306,6 +323,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.diff != nil {
 		return m.handleDiffKey(key)
+	}
+	if m.ingest != nil {
+		return m.handleIngestKey(key)
 	}
 	switch key {
 	case "q":
@@ -356,6 +376,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.moveSel(-1)
 	case "n":
 		m.Overlay.Push(newFeatureForm(m.profileNames, m.createFeature))
+	case "I":
+		if m.engine == nil {
+			m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
+			return nil
+		}
+		if m.ingesting {
+			m.notice = noticeMsg{text: "an ingest is already decomposing — wait for it", isErr: true}
+			return nil
+		}
+		m.Overlay.Push(newIngestForm(m.profileNames, m.startIngest))
 	case "g":
 		if r, ok := m.selected(); ok {
 			m.inbox.remove(r.F.ID)
@@ -703,6 +733,9 @@ func (m *Shell) mainView(w, h int) string {
 	}
 	if m.diff != nil {
 		return m.diffViewRender(w, h)
+	}
+	if m.ingest != nil {
+		return m.ingestViewRender(w, h)
 	}
 	if len(m.rows) > 0 {
 		return m.dashboardView(w, h)

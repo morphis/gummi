@@ -53,8 +53,10 @@ func run(args []string) error {
 		case "version", "--version", "-v":
 			fmt.Printf("gummi %s\n", version())
 			return nil
+		case "ingest":
+			return runIngest(args[1:])
 		default:
-			return fmt.Errorf("unknown argument %q (usage: gummi [version])", args[0])
+			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest])", args[0])
 		}
 	}
 	// `gummi` with no arguments launches the board, creating the .gummi
@@ -123,6 +125,24 @@ func runBoard() error {
 //	GUMMI_PROVIDER_TYPE      "openai"|"azure"|"anthropic" (default openai)
 //	GUMMI_PROVIDER_KEY_ENV   env var holding the provider key (optional)
 func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, []string, func()) {
+	eng, ag, names := newEngineFromEnv(store, wt, ws)
+	if eng == nil {
+		return nil, nil, nil
+	}
+	// reload any sessions from a previous run so the board shows where
+	// each feature left off.
+	if err := eng.Restore(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi: restoring sessions:", err)
+	}
+	return eng, names, func() { _ = eng.Close(); _ = ag.Close() }
+}
+
+// newEngineFromEnv constructs the orchestrator and its agent from the
+// environment, without restoring prior sessions. buildEngine wraps it for
+// the board (adding Restore + a combined cleanup); one-shot commands like
+// `gummi ingest` use it directly and own the agent's lifetime. Returns
+// (nil, nil, nil) when no agent can be started.
+func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, agent.Agent, []string) {
 	// Adapter selection: GUMMI_AGENT_CMD picks the generic headless
 	// adapter (any agent binary speaking the stdio JSON protocol);
 	// otherwise gummi uses the first-class Copilot SDK adapter.
@@ -162,14 +182,9 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget,
 	})
-	// reload any sessions from a previous run so the board shows where
-	// each feature left off.
-	if err := eng.Restore(context.Background()); err != nil {
-		fmt.Fprintln(os.Stderr, "gummi: restoring sessions:", err)
-	}
 	names := profiles.Names()
 	sort.Strings(names)
-	return eng, names, func() { _ = eng.Close(); _ = ag.Close() }
+	return eng, ag, names
 }
 
 // buildAgent selects the agent backend from GUMMI_AGENT:
