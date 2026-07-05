@@ -23,7 +23,7 @@ var budgetThresholds = []int{50, 80, 95}
 // without falls back to the flat config value (layer 1/2 behavior).
 func (e *Engine) stageBudget(f domain.Feature, byokRate float64) float64 {
 	if f.Budget.Envelope > 0 {
-		return domain.DefaultPlan(float64(f.Budget.Envelope)).
+		return domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
 			StageBudget(f.Stage, e.featureSpent(f, byokRate), e.reserveReleased(f.ID))
 	}
 	return e.cfg.StageBudget

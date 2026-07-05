@@ -40,8 +40,13 @@ CREATE TABLE IF NOT EXISTS features (
 	spend_in        INTEGER NOT NULL DEFAULT 0,
 	spend_out       INTEGER NOT NULL DEFAULT 0,
 	created_at      TEXT NOT NULL,
-	updated_at      TEXT NOT NULL
+	updated_at      TEXT NOT NULL,
+	kind            TEXT NOT NULL DEFAULT 'feature',
+	external_ref    TEXT NOT NULL DEFAULT '',
+	skip_triage     INTEGER NOT NULL DEFAULT 0,
+	skip_diagnose   INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
 	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
 	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
@@ -126,6 +131,11 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN spend_credits REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN spend_in INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN spend_out INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN kind TEXT NOT NULL DEFAULT 'feature'`,
+	`ALTER TABLE features ADD COLUMN external_ref TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN skip_triage INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN skip_diagnose INTEGER NOT NULL DEFAULT 0`,
+	`CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref)`,
 }
 
 // Close releases the database.
@@ -147,15 +157,24 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
+	// Persist a concrete kind so the column never holds '' — the empty
+	// default reads as a feature everywhere, but a stored value keeps
+	// queries and the audit trail unambiguous.
+	kind := f.Kind
+	if kind == "" {
+		kind = domain.KindFeature
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
-			budget_envelope, budget_spent, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			budget_envelope, budget_spent, created_at, updated_at,
+			kind, external_ref, skip_triage, skip_diagnose)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
-		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt))
+		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -165,22 +184,25 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, budget_spent, spend_credits, spend_in, spend_out,
-	created_at, updated_at`
+	created_at, updated_at,
+	kind, external_ref, skip_triage, skip_diagnose`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
-	var id, stage, created, updated string
+	var id, stage, created, updated, kind string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
 		&f.Budget.Envelope, &f.Budget.Spent,
 		&f.Spend.Credits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
-		&created, &updated)
+		&created, &updated,
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose)
 	if err != nil {
 		return f, err
 	}
 	f.ID = domain.FeatureID(id)
+	f.Kind = domain.Kind(kind)
 	f.Stage = domain.Stage(stage)
 	if f.CreatedAt, err = time.Parse(timeFmt, created); err != nil {
 		return f, fmt.Errorf("feature %s: corrupt created_at %q: %w", id, created, err)
@@ -223,6 +245,23 @@ func (s *Store) GetFeature(ctx context.Context, id domain.FeatureID) (domain.Fea
 	return f, err
 }
 
+// FeatureByExternalRef returns the feature carrying the given external
+// reference (e.g. a GitHub issue URL), or ErrNotFound. Bug ingestion uses
+// it to skip sources already imported, so re-ingesting a repo never mints
+// duplicate bugs. An empty ref never matches (manual items share "").
+func (s *Store) FeatureByExternalRef(ctx context.Context, ref string) (domain.Feature, error) {
+	if ref == "" {
+		return domain.Feature{}, ErrNotFound
+	}
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+featureCols+` FROM features WHERE external_ref = ? ORDER BY num LIMIT 1`, ref)
+	f, err := scanFeature(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return f, fmt.Errorf("external ref %q: %w", ref, ErrNotFound)
+	}
+	return f, err
+}
+
 // ListFeatures returns all features ordered by number.
 func (s *Store) ListFeatures(ctx context.Context) ([]domain.Feature, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -259,11 +298,11 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE features SET title=?, one_liner=?, slug=?,
-			skip_brainstorm=?, skip_plan=?, profile=?,
+			skip_brainstorm=?, skip_plan=?, skip_triage=?, skip_diagnose=?, profile=?,
 			budget_envelope=?, budget_spent=?, updated_at=?
 		WHERE id=?`,
 		f.Title, f.OneLiner, f.Slug,
-		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
+		f.Skip.Brainstorm, f.Skip.Plan, f.Skip.Triage, f.Skip.Diagnose, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
 		now.Format(timeFmt), string(f.ID))
 	if err != nil {
@@ -306,7 +345,7 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	if err != nil {
 		return f, err
 	}
-	if err := workflow.CanTransition(f.Stage, to, f.Skip); err != nil {
+	if err := workflow.CanTransition(f.Kind, f.Stage, to, f.Skip); err != nil {
 		return f, fmt.Errorf("%s: %w", id, err)
 	}
 	now := time.Now().UTC()

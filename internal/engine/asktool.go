@@ -48,7 +48,7 @@ const (
 // on autonomous stages.
 func stageTools(stage domain.Stage) []agent.ToolDef {
 	switch stage {
-	case domain.StageBrainstorm, domain.StageSpec:
+	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return []agent.ToolDef{askUserTool(), specAnnotateTool()}
 	case domain.StageReview:
 		return []agent.ToolDef{submitVerdictTool()}
@@ -142,13 +142,13 @@ func submitVerdictTool() agent.ToolDef {
 // stage offers and when to use them.
 func toolHint(stage domain.Stage) string {
 	switch stage {
-	case domain.StageBrainstorm, domain.StageSpec:
+	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return `You have two gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
 (faster for the user, cheaper); pass spec_anchor to have gummi record
-the answer into the spec. spec_annotate: attach an open question to a
-spec line and let gummi place the %% marker with correct anchoring,
-instead of writing %% lines yourself.`
+the answer into the artifact. spec_annotate: attach an open question to a
+line and let gummi place the %% marker with correct anchoring, instead
+of writing %% lines yourself.`
 	case domain.StageReview:
 		return `Call the submit_verdict tool exactly once at the end of your review
 (verdict "pass" or "changes") to drive gummi's review loop, instead of

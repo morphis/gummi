@@ -94,9 +94,62 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 		now := m.now()
 		f := domain.Feature{
 			ID: id, Num: num, Title: res.Title,
-			Slug: slug, Stage: workflow.Initial(), Skip: res.Skip,
+			Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
 			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := m.store.CreateFeature(ctx, &f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s created", id)}
+	}
+}
+
+// bugFormResult carries the new-bug form's fields. Like a feature, the
+// title is the card title; the symptoms are seeded into the report and
+// triage develops the rest.
+type bugFormResult struct {
+	Title    string
+	OneLiner string
+	Severity domain.Severity
+	Profile  string
+	Skip     domain.SkipFlags
+}
+
+// createBug mints a BG number and persists a new bug in todo, seeding its
+// report with the one-liner and severity so nothing the user typed is
+// lost (triage fills reproduction and root cause).
+func (m *Shell) createBug(res bugFormResult) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		slug, err := domain.Slugify(res.Title)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		id, err := domain.NewID(domain.KindBug, num)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		now := m.now()
+		f := domain.Feature{
+			ID: id, Num: num, Kind: domain.KindBug, Title: res.Title, OneLiner: res.OneLiner,
+			Slug: slug, Stage: workflow.Initial(domain.KindBug), Skip: res.Skip,
+			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		// Seed the report draft first (so severity/one-liner survive), then
+		// persist — a persisted bug with no draft would be reseeded blank.
+		draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
+		content := spec.SeededBugTemplate(&f, domain.BugReport{}, domain.BugProvenance{Source: "manual"}, res.Severity)
+		if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := os.WriteFile(draft, []byte(content), 0o600); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
@@ -116,43 +169,57 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		var estimate string // set at spec approval by plan-time estimation
-		nexts := workflow.Next(f.Stage, f.Skip)
+		nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
 		if len(nexts) == 0 {
 			return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id)}
 		}
-		// prefer the skip edge when the flag opts the feature out of
-		// the intermediate stage, otherwise take the primary edge
+		// prefer the skip edge when the flag opts the item out of the
+		// intermediate stage, otherwise take the primary edge.
 		next := nexts[len(nexts)-1]
-		if next == domain.StageImplement && f.Stage != domain.StageSpec {
-			// rerun edges (review/verify → implement) are bounces, not
-			// forward moves; g always goes forward
+		if f.Stage == domain.StageReview || f.Stage == domain.StageVerify {
+			// the last edge out of review/verify is a rerun (→ implement/fix),
+			// a bounce, not a forward move; g always goes forward.
 			next = nexts[0]
 		}
-		if f.Stage == domain.StageSpec {
-			// unresolved %% annotations block spec approval (DESIGN §6.1)
+		// Crossing from the design phase (todo / interactive) into the first
+		// worktree stage is the approval gate: it creates the worktree and
+		// commits the artifact (spec or bug report) to the branch. Bounces
+		// (review/verify → work stage) already have a worktree, so this
+		// fires exactly once, whichever design stage is being left.
+		enteringWorktree := next != domain.StageTodo && !workflow.Interactive(next)
+		existed := true
+		if enteringWorktree {
+			var err error
+			if existed, err = m.wt.Exists(ctx, &f); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
+		}
+		if enteringWorktree && !existed {
+			// unresolved %% annotations block approval (DESIGN §6.1)
 			if n := m.openQuestionsBlockingGate(ctx, f); n > 0 {
+				surface := "spec"
+				if f.Kind == domain.KindBug {
+					surface = "report"
+				}
 				return noticeMsg{
-					text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the spec view", id, n),
+					text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, n, surface),
 					isErr: true,
 				}
 			}
-			if ok, err := m.wt.Exists(ctx, &f); err != nil {
+			if _, err := m.wt.Create(ctx, &f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
-			} else if !ok {
-				if _, err := m.wt.Create(ctx, &f); err != nil {
-					return noticeMsg{text: err.Error(), isErr: true}
-				}
 			}
-			// spec approval commits the spec to the feature branch and
-			// retires the draft (DESIGN §10.11)
+			// approval commits the artifact to the branch and retires the
+			// draft (DESIGN §10.11)
 			if err := m.migrateDraft(ctx, &f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			// plan-time estimation: size the spend-plan envelope from what
-			// completed features actually cost, before budgeted autonomous
-			// work begins (DESIGN §5.1). Persisted while still at spec, so
-			// UpdateFeature's no-stage-change rule holds.
-			estimate = m.estimateEnvelope(ctx, &f)
+			// plan-time estimation is feature-specific (spec approval): size
+			// the spend-plan envelope from what completed features cost,
+			// before budgeted autonomous work begins (DESIGN §5.1).
+			if f.Stage == domain.StageSpec {
+				estimate = m.estimateEnvelope(ctx, &f)
+			}
 		}
 		fromSpec := f.Stage == domain.StageSpec
 		if _, err := m.store.Transition(ctx, id, next, "user"); err != nil {
@@ -321,30 +388,37 @@ func (m *Shell) dropSession(id domain.FeatureID) {
 	}
 }
 
-// migrateDraft moves the spec draft into the feature's worktree as a
-// committed file. A feature that never had a draft gets one from the
-// template — the branch always carries a spec. Idempotent, keyed on
-// git tracking (a merely-present uncommitted file is not migrated).
+// migrateDraft moves the artifact draft (spec or bug report) into the
+// item's worktree as a committed file. An item that never had a draft
+// gets one from its template — the branch always carries its artifact.
+// Idempotent, keyed on git tracking (a merely-present uncommitted file is
+// not migrated).
 func (m *Shell) migrateDraft(ctx context.Context, f *domain.Feature) error {
+	artifact := f.ArtifactPath()
 	draftPath := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f))
-	if tracked, err := m.wt.FileCommitted(ctx, f, f.SpecPath()); err != nil {
+	if tracked, err := m.wt.FileCommitted(ctx, f, artifact); err != nil {
 		return err
 	} else if tracked {
 		return os.RemoveAll(draftPath)
 	}
 	// content preference: the draft; else a stray uncommitted worktree
 	// copy (e.g. a crashed earlier migration); else a fresh template
-	wtSpec := filepath.Join(m.wt.Root(), f.WorktreePath(), f.SpecPath())
+	wtArtifact := filepath.Join(m.wt.Root(), f.WorktreePath(), artifact)
 	content := spec.Template(f)
+	commitKind := "spec"
+	if f.Kind == domain.KindBug {
+		content = spec.BugTemplate(f)
+		commitKind = "bug"
+	}
 	if raw, err := os.ReadFile(draftPath); err == nil {
 		content = string(raw)
 	} else if !os.IsNotExist(err) {
 		return err
-	} else if raw, err := os.ReadFile(wtSpec); err == nil {
+	} else if raw, err := os.ReadFile(wtArtifact); err == nil {
 		content = string(raw)
 	}
-	if err := m.wt.CommitFile(ctx, f, f.SpecPath(), content,
-		fmt.Sprintf("docs(spec): %s %s", f.ID, f.Title)); err != nil {
+	if err := m.wt.CommitFile(ctx, f, artifact, content,
+		fmt.Sprintf("docs(%s): %s %s", commitKind, f.ID, f.Title)); err != nil {
 		return err
 	}
 	return os.RemoveAll(draftPath)
@@ -363,11 +437,12 @@ func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
 		if f.Stage != domain.StageReview && f.Stage != domain.StageVerify {
 			return noticeMsg{text: fmt.Sprintf("%s is in %s — only review/verify can bounce back", id, f.Stage), isErr: true}
 		}
-		if _, err := m.store.Transition(ctx, id, domain.StageImplement, "user"); err != nil {
+		back := workflow.WorkStage(f.Kind)
+		if _, err := m.store.Transition(ctx, id, back, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		m.dropSession(id)
-		return noticeMsg{text: fmt.Sprintf("%s bounced back to implement", id)}
+		return noticeMsg{text: fmt.Sprintf("%s bounced back to %s", id, back)}
 	}
 }
 

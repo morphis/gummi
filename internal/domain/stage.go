@@ -17,6 +17,17 @@ const (
 	// StagePlan derives a line-level implementation plan from the spec;
 	// gated on human approval. Skippable at creation.
 	StagePlan Stage = "plan"
+	// StageTriage confirms and reproduces a bug and records severity +
+	// repro steps (interactive, role: architect). Skippable at creation.
+	// The bug workflow's analog of Brainstorm.
+	StageTriage Stage = "triage"
+	// StageDiagnose converges on the root cause; gated on human approval of
+	// the diagnosis (interactive, role: architect). Skippable at creation.
+	// The bug workflow's analog of Spec.
+	StageDiagnose Stage = "diagnose"
+	// StageFix is the autonomous fix in the worktree (role: implementer).
+	// The bug workflow's analog of Implement.
+	StageFix Stage = "fix"
 	// StageImplement is the autonomous implementation in the worktree.
 	StageImplement Stage = "implement"
 	// StageReview is a fresh-context autonomous review. Never skippable.
@@ -28,10 +39,16 @@ const (
 	StageDone Stage = "done"
 )
 
-// Stages lists every stage in workflow order.
+// Stages lists every stage across both workflows, in workflow order:
+// the shared entry (todo), the feature-specific stages, the bug-specific
+// stages, then the shared tail (implement/fix converge into review →
+// verify → done).
 var Stages = []Stage{
-	StageTodo, StageBrainstorm, StageSpec, StagePlan,
-	StageImplement, StageReview, StageVerify, StageDone,
+	StageTodo,
+	StageBrainstorm, StageSpec, StagePlan,
+	StageTriage, StageDiagnose,
+	StageFix, StageImplement,
+	StageReview, StageVerify, StageDone,
 }
 
 // Valid reports whether s is one of the compiled-in stages.
@@ -62,7 +79,8 @@ func (s Stage) SuperState() SuperState {
 	switch s {
 	case StageTodo:
 		return SuperTodo
-	case StageBrainstorm, StageSpec, StagePlan, StageImplement:
+	case StageBrainstorm, StageSpec, StagePlan, StageImplement,
+		StageTriage, StageDiagnose, StageFix:
 		return SuperInProgress
 	case StageReview, StageVerify:
 		return SuperReviewVerify
@@ -72,9 +90,13 @@ func (s Stage) SuperState() SuperState {
 	return SuperTodo
 }
 
-// SkipFlags are the only per-feature workflow flexibility, set at
-// creation. Review and Verify have no flags: they can never be skipped.
+// SkipFlags are the only per-item workflow flexibility, set at creation.
+// Brainstorm/Plan gate the feature workflow; Triage/Diagnose gate the bug
+// workflow; each workflow ignores the other's flags. Review and Verify
+// have no flags in either workflow: they can never be skipped.
 type SkipFlags struct {
-	Brainstorm bool
-	Plan       bool
+	Brainstorm bool // feature
+	Plan       bool // feature
+	Triage     bool // bug
+	Diagnose   bool // bug
 }

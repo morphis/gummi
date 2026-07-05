@@ -55,8 +55,10 @@ func run(args []string) error {
 			return nil
 		case "ingest":
 			return runIngest(args[1:])
+		case "bugs":
+			return runBugs(args[1:])
 		default:
-			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest])", args[0])
+			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest|bugs])", args[0])
 		}
 	}
 	// `gummi` with no arguments launches the board, creating the .gummi

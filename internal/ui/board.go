@@ -33,8 +33,8 @@ func (m *Shell) boardView(w int) string {
 	if len(m.rows) == 0 {
 		var b strings.Builder
 		b.WriteString("\n " + s.PaneTitle.Render("BOARD") + "\n\n")
-		b.WriteString(" " + s.Faint.Render("no features yet") + "\n")
-		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" to create one") + "\n")
+		b.WriteString(" " + s.Faint.Render("nothing on the board yet") + "\n")
+		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" new feature · ") + s.KeyHint.Render("B") + s.Muted.Render(" new bug") + "\n")
 		return b.String()
 	}
 
@@ -77,7 +77,12 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 		cursor = s.Cursor.Render("▸")
 	}
 	num := s.Faint.Render(shortcutLabel(shortcut))
+	// a bug's ID reads in a warm tint so bugs stand out among features in
+	// the shared board (the BG- prefix already distinguishes them).
 	id := s.CardID.Render(string(r.F.ID))
+	if r.F.Kind == domain.KindBug {
+		id = s.Warning.Render(string(r.F.ID))
+	}
 	title := s.CardTitle.Render(r.F.Title)
 	tag := ""
 	if r.F.Profile != "" {

@@ -37,14 +37,25 @@ const kickoff = "Proceed with this stage per your instructions and the spec."
 // leading — the user shouldn't have to know what to say to start an
 // interview (DESIGN §3: brainstorm develops a one-line description).
 func interactiveKickoff(s domain.Stage) string {
-	if s == domain.StageSpec {
+	switch s {
+	case domain.StageSpec:
 		return "The user just opened the spec chat. Read the spec and its open %% threads, " +
 			"then drive convergence: recommend one approach with your reasoning, and put the " +
 			"most consequential open question to the user first. Keep it short."
+	case domain.StageTriage:
+		return "The user just opened the triage chat. Read the bug report, then start " +
+			"reproducing: state the bug as you understand it in a sentence, and ask the two or " +
+			"three questions you most need to reproduce it (steps, environment, expected vs " +
+			"actual). Keep it short."
+	case domain.StageDiagnose:
+		return "The user just opened the diagnose chat. Read the bug report and its " +
+			"reproduction, then drive toward root cause: state your leading hypothesis with your " +
+			"reasoning, and put the most consequential open question to the user first. Keep it short."
+	default:
+		return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
+			"interview: state the problem as you understand it in a sentence or two and ask the " +
+			"user the two or three highest-leverage questions. Keep it short."
 	}
-	return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
-		"interview: state the problem as you understand it in a sentence or two and ask the " +
-		"user the two or three highest-leverage questions. Keep it short."
 }
 
 // Config wires an engine to its backend. Model/Provider are the M1
@@ -425,7 +436,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// (bounce from the diff surface's "request changes") addresses each
 	// (DESIGN §6.1). The store is the source of truth, so this reaches
 	// every implement run, not just the one that triggered it.
-	if f.Stage == domain.StageImplement {
+	if f.Stage == domain.StageImplement || f.Stage == domain.StageFix {
 		hints = append(hints, e.diffReviewHints(ctx, f.ID)...)
 	}
 	var maxCredits float64
@@ -486,7 +497,7 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		return "", "", fmt.Errorf("feature %s at stage %s has no worktree; approve the spec to create one first", f.ID, f.Stage)
 	}
 	workDir = filepath.Join(root, f.WorktreePath())
-	return workDir, filepath.Join(workDir, f.SpecPath()), nil
+	return workDir, filepath.Join(workDir, f.ArtifactPath()), nil
 }
 
 // Send routes a user/orchestrator turn to a feature's session.

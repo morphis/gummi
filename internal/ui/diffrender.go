@@ -165,10 +165,12 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		m.notice = noticeMsg{text: "no open diff comments to send"}
 		return nil
 	}
-	// "request changes" bounces to implement; only offer it from a stage
-	// where that edge is legal (review/verify/plan), so it never tears
-	// down a running session for a transition that will just be rejected.
-	if err := workflow.CanTransition(dv.f.Stage, domain.StageImplement, dv.f.Skip); err != nil {
+	// "request changes" bounces to the work stage (implement/fix); only
+	// offer it from a stage where that edge is legal (review/verify), so
+	// it never tears down a running session for a transition that will
+	// just be rejected.
+	bounceTo := workflow.WorkStage(dv.f.Kind)
+	if err := workflow.CanTransition(dv.f.Kind, dv.f.Stage, bounceTo, dv.f.Skip); err != nil {
 		m.notice = noticeMsg{text: "request changes works from the review or verify gate", isErr: true}
 		return nil
 	}
@@ -179,7 +181,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		ctx := context.Background()
 		// transition first (it validates the edge); only then drop the
 		// stale session, so a rejected bounce is never destructive.
-		nf, err := m.store.Transition(ctx, f.ID, domain.StageImplement, "user")
+		nf, err := m.store.Transition(ctx, f.ID, bounceTo, "user")
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

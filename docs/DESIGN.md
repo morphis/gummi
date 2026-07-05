@@ -788,7 +788,94 @@ through simulated key presses against a `Fake` architect).
 - **Persisted coverage report** — keeping the source→FD map queryable after
   ingestion, for traceability audits against the original document.
 
-## 12. References
+## 12. Bugs — the second workflow
+
+Features are design-driven: brainstorm an approach, spec it, plan it, build it.
+Bugs are diagnosis-driven: something already works wrong, and the work is to
+reproduce it, find why, and fix it without regressing. gummi models a bug as a
+second **kind** of work item that shares everything structural with a feature —
+the store, the engine, the worktree, the board, the never-skippable Review →
+Verify quality floor — but runs its own compiled-in workflow and carries a bug
+report instead of a spec.
+
+### 12.1 The kind discriminator
+
+A work item has a `Kind` (`feature` | `bug`). Bugs get `BG-NNN` IDs from the
+same monotonic counter features draw from (shared, so numbers never collide),
+and everything derived from the ID — branch, worktree, artifact path — follows.
+Only three things branch on kind: which workflow governs transitions, which
+template seeds the artifact, and a board badge. The empty kind reads as a
+feature, so items predating bugs need no backfill. This is deliberately *not* a
+separate `Bug` entity: the engine already orchestrates *(item, stage)* sessions
+generically, so a parallel type would duplicate the store, engine, and board for
+no gain.
+
+### 12.2 The bug workflow
+
+One more fixed graph, still never configurable:
+
+```
+  todo ──▶ Triage ──▶ Diagnose ──▶ Fix ──▶ Review ──▶ Verify ──▶ Done
+           (interactive) (interactive) (autonomous) (shared quality floor)
+```
+
+- **Triage** *(interactive, architect; skippable)* — confirm and reproduce the
+  bug; pin down repro steps, expected vs actual, environment, severity. The
+  analog of Brainstorm.
+- **Diagnose** *(interactive, architect; skippable)* — converge on the root
+  cause and record it in the report; gated on human approval. The analog of
+  Spec. (Both design-side stages are skippable for an obvious bug; when both are
+  skipped a `todo → fix` edge applies, since they are adjacent.)
+- **Fix** *(autonomous, implementer)* — implement the smallest change that
+  resolves the bug **and add a regression test**. The analog of Implement; the
+  Review/Verify rerun edges bounce here.
+- **Review / Verify** — the same stages features use, so the scheduler, slots,
+  budgets, and board columns are untouched. Verify gains a sharp bug meaning:
+  the deterministic repo checks still run, and on top the reproduction must no
+  longer reproduce and a regression test must cover the fix.
+
+### 12.3 The bug report
+
+A bug's durable artifact is `.gummi/bugs/BG-NNN-slug.md` (the analog of the
+spec): Summary · Reproduction · Expected vs actual · Environment · Root cause ·
+Fix · Review · Verification. Symptoms are seeded from the source; Root cause and
+Fix stay open `%%` prompts — converging on *why* and *how* is diagnose/fix work,
+exactly as the spec's chosen-approach is brainstorm's.
+
+### 12.4 Ingestion — sources, not decomposition
+
+Bug ingestion reuses spec ingestion's pipeline shape — source → proposals →
+human gate → materialize — but the source yields *discrete* bugs rather than one
+document to decompose, so there is no architect pass and no coverage map. A
+`BugSource` is the seam:
+
+- **GitHub** — `gh issue list` against a target repo (default: the repo's origin
+  remote; overridable to any `owner/repo`), filtered by label/state. The import
+  is **deterministic and agent-free**: one issue → one proposal, body verbatim
+  into Summary, labels mapped to severity. Per-bug reproduction and root-cause
+  enrichment is the triage/diagnose stages' job, not the source's — "tool owns
+  mechanics, model owns content" (§11.1), applied to bugs. This spends no tokens
+  on issues you drop at the gate.
+- **Manual** — a single hand-entered bug, from the TUI new-bug form or
+  `gummi bugs new`.
+- **Future** (Sentry, Linear, …) implement the same interface.
+
+Each bug persists its **external ref** (e.g. the issue URL), so re-ingesting a
+repo skips bugs already on the board rather than minting duplicates — the one
+piece of machinery doc-ingest didn't need, and what makes GitHub polling safe.
+
+The gate lives on two surfaces, mirroring §11.4: the TUI import-review pane
+(reusing the annotate-style list — drop/rename/edit/approve; no merge, since
+issues are discrete) and the CLI (`gummi bugs ingest`, gated y/N or `--yes`).
+
+### 12.5 Deferred
+
+- **Severity-ordered backlog** — using the seeded severity to rank the todo
+  column, once there are enough bugs for ordering to matter.
+- **Agent triage-at-ingest** — an optional pass that dedupes/clusters near-
+  duplicate issues before the gate, if verbatim import proves too noisy.
+
+## 13. References
 
 - Spec-driven parallel agents workflow: <https://schipper.ai/posts/parallel-coding-agents/>
 - Copilot SDK (Go): <https://github.com/github/copilot-sdk>

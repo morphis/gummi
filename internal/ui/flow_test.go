@@ -186,6 +186,79 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	}
 }
 
+func TestBugLifecycleFlow(t *testing.T) {
+	m, root := newWorkspace(t)
+	m = pump(t, m, m.Init())
+
+	// B → bug form, type a title, enter → bug created in todo
+	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	if m.Overlay.Top() == nil || m.Overlay.Top().ID() != "new-bug" {
+		t.Fatal("B did not open the new-bug form")
+	}
+	m = typeString(t, m, "Login loops")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(m.rows) != 1 || m.rows[0].F.Kind != domain.KindBug {
+		t.Fatalf("bug not created: %+v", m.rows)
+	}
+	if m.rows[0].F.ID != "BG-001" || m.rows[0].F.Stage != domain.StageTodo {
+		t.Fatalf("bad bug: %+v", m.rows[0].F)
+	}
+
+	// advance: todo → triage → diagnose (interactive; no worktree yet)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageDiagnose {
+		t.Fatalf("stage = %s, want diagnose", m.rows[0].F.Stage)
+	}
+	if m.rows[0].HasWorktree {
+		t.Fatal("worktree exists before diagnosis approval")
+	}
+
+	// advance out of diagnose → worktree + branch created, report committed
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageFix {
+		t.Fatalf("stage = %s, want fix", m.rows[0].F.Stage)
+	}
+	if !m.rows[0].HasWorktree {
+		t.Fatal("worktree missing after diagnosis approval")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", "BG-001", ".gummi", "bugs", "BG-001-login-loops.md")); err != nil {
+		t.Fatalf("bug report not committed in worktree: %v", err)
+	}
+
+	// walk to done: fix → review → verify → done
+	for _, want := range []domain.Stage{domain.StageReview, domain.StageVerify, domain.StageDone} {
+		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		if m.rows[0].F.Stage != want {
+			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
+		}
+	}
+}
+
+func TestBugBouncesReviewToFix(t *testing.T) {
+	m, _ := newWorkspace(t)
+	m = pump(t, m, m.Init())
+	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	m = typeString(t, m, "Crash on nil")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	for range 4 { // todo→triage→diagnose→fix→review
+		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	}
+	if m.rows[0].F.Stage != domain.StageReview {
+		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
+	}
+	// forward g from review goes to verify (not the rerun edge to fix)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageVerify {
+		t.Fatalf("forward from review = %s, want verify", m.rows[0].F.Stage)
+	}
+	// b from verify bounces back to fix (the bug work stage), not implement
+	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
+	if m.rows[0].F.Stage != domain.StageFix {
+		t.Fatalf("bounce: stage = %s, want fix", m.rows[0].F.Stage)
+	}
+}
+
 func TestBounceFromReview(t *testing.T) {
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())

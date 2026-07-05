@@ -300,6 +300,115 @@ func renderProvenance(b *strings.Builder, p domain.DraftProvenance) {
 	b.WriteString("\n")
 }
 
+// Bug report prompts: the %% guidance a blank bug report carries. The
+// root-cause and fix sections stay open until the diagnose/fix stages
+// fill them — a source seeds symptoms, not the why or the how.
+const (
+	promptBugSummary   = "%% @gummi: what's broken, and who hits it?"
+	promptBugRepro     = "%% @gummi: exact steps to reproduce — a minimal repro if you can"
+	promptBugExpAct    = "%% @gummi: what should happen, vs what actually happens?"
+	promptBugEnv       = "%% @gummi: versions, OS, config where it reproduces"
+	promptBugRootCause = "%% @gummi: the diagnose stage records the root cause here — the why"
+	promptBugFix       = "%% @gummi: the fix stage summarizes the change here"
+	promptBugReview    = "%% @gummi: reviewer findings land here; the fix addresses each one"
+	// The verify contract for a bug: the deterministic quality floor plus
+	// the bug-specific proof (repro gone + regression test).
+	promptBugVerify = "%% @gummi: repo checks always run. The reproduction above must no longer " +
+		"reproduce, and a regression test must lock the fix in."
+)
+
+// BugTemplate renders the initial (blank) bug report for a bug.
+func BugTemplate(f *domain.Feature) string {
+	return renderBug(f, domain.BugReport{}, domain.BugProvenance{}, "")
+}
+
+// SeededBugTemplate renders a bug report pre-populated from a source
+// (GitHub issue, manual entry): the symptoms fill Summary, Reproduction,
+// Expected vs actual, and Environment; open questions become %% markers
+// under Summary; the provenance header records the source and severity.
+// Root cause and Fix stay open %% prompts — diagnose/fix work.
+func SeededBugTemplate(f *domain.Feature, r domain.BugReport, prov domain.BugProvenance, sev domain.Severity) string {
+	return renderBug(f, r, prov, sev)
+}
+
+func renderBug(f *domain.Feature, r domain.BugReport, prov domain.BugProvenance, sev domain.Severity) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s: %s\n\n", f.ID, f.Title)
+	if f.OneLiner != "" {
+		fmt.Fprintf(&b, "> %s\n\n", f.OneLiner)
+	}
+	renderBugProvenance(&b, prov, sev)
+
+	// Summary, plus any open questions the source or triage flagged. Each
+	// question is its own thread (a content line + %% flag), matching the
+	// spec template so resolving one never closes the others.
+	section(&b, "Summary", neutralizeMarkers(r.Description), promptBugSummary)
+	emitted := 0
+	for _, q := range r.OpenQuestions {
+		if q = oneLine(q); q != "" {
+			fmt.Fprintf(&b, "- %s\n%%%% @gummi: open question from triage\n", q)
+			emitted++
+		}
+	}
+	if emitted > 0 {
+		b.WriteString("\n")
+	}
+
+	section(&b, "Reproduction", neutralizeMarkers(r.Reproduction), promptBugRepro)
+	section(&b, "Expected vs actual", expectedVsActual(r), promptBugExpAct)
+	section(&b, "Environment", neutralizeMarkers(r.Environment), promptBugEnv)
+	section(&b, "Root cause", "", promptBugRootCause)
+	section(&b, "Fix", "", promptBugFix)
+	section(&b, "Review", "", promptBugReview)
+	section(&b, "Verification", "", promptBugVerify)
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// expectedVsActual renders the seeded expected/actual pair as a labelled
+// block; empty when the source supplied neither (the section then keeps
+// its %% prompt).
+func expectedVsActual(r domain.BugReport) string {
+	exp, act := strings.TrimSpace(r.Expected), strings.TrimSpace(r.Actual)
+	if exp == "" && act == "" {
+		return ""
+	}
+	var b strings.Builder
+	if exp != "" {
+		fmt.Fprintf(&b, "**Expected:** %s\n\n", neutralizeMarkers(exp))
+	}
+	if act != "" {
+		fmt.Fprintf(&b, "**Actual:** %s", neutralizeMarkers(act))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderBugProvenance writes the "Reported via …" header for a bug: the
+// source, its external reference, and the severity. Nothing is written
+// when there is neither provenance nor severity.
+func renderBugProvenance(b *strings.Builder, p domain.BugProvenance, sev domain.Severity) {
+	if p.Empty() && sev == "" {
+		return
+	}
+	if !p.Empty() {
+		b.WriteString("> _Reported")
+		if p.Source != "" {
+			fmt.Fprintf(b, " via %s", p.Source)
+		}
+		if p.ExternalRef != "" {
+			fmt.Fprintf(b, " · %s", p.ExternalRef)
+		}
+		b.WriteString("_\n")
+	}
+	if sev != "" {
+		if p.Empty() {
+			fmt.Fprintf(b, "> Severity: %s\n", sev)
+		} else {
+			fmt.Fprintf(b, ">\n> Severity: %s\n", sev)
+		}
+	}
+	b.WriteString("\n")
+}
+
 // EnsureDraft materializes a feature's draft at path from the template
 // if it does not exist yet. Both the engine (before an agent session
 // spawns) and the spec view go through here — one creation path, so an
@@ -313,7 +422,16 @@ func EnsureDraft(path string, f *domain.Feature) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(Template(f)), 0o600)
+	return os.WriteFile(path, []byte(blankTemplate(f)), 0o600)
+}
+
+// blankTemplate is the initial artifact for a work item: a bug report
+// for bugs, a spec draft for features.
+func blankTemplate(f *domain.Feature) string {
+	if f.Kind == domain.KindBug {
+		return BugTemplate(f)
+	}
+	return Template(f)
 }
 
 // DraftFilename is the draft's name under .gummi/state/drafts/.

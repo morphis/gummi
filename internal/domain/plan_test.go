@@ -132,3 +132,37 @@ func TestBlendEstimate(t *testing.T) {
 		t.Errorf("blend(0,0) = %v, want 0", got)
 	}
 }
+
+func TestBugPlanSumsToOneAndProtectsFloor(t *testing.T) {
+	p := PlanFor(KindBug, 200)
+	var sum float64
+	for _, f := range p.Alloc {
+		sum += f
+	}
+	sum += p.Reserve
+	if !approx(sum, 1.0) {
+		t.Errorf("bug allocation + reserve = %v, want 1.0", sum)
+	}
+	// Fix's cap is its own share only (0.55·200 = 110) despite feature
+	// stages sharing the Stages order — capThrough must skip their zeros.
+	if got := p.StageBudget(StageFix, 0, false); !approx(got, 110) {
+		t.Errorf("fix budget = %v, want 110", got)
+	}
+	// Spending all of fix's share cannot borrow into review (protected floor).
+	if got := p.StageBudget(StageFix, 110, false); !approx(got, 0) {
+		t.Errorf("exhausted fix budget = %v, want 0", got)
+	}
+	// Review still has its own 0.20·200 = 40 after fix is spent out.
+	if got := p.StageBudget(StageReview, 110, false); !approx(got, 40) {
+		t.Errorf("review budget after fix spent = %v, want 40", got)
+	}
+}
+
+func TestFeaturePlanUnaffectedByBugStages(t *testing.T) {
+	// Adding triage/diagnose/fix to domain.Stages must not shift a
+	// feature's cumulative caps: implement is still 0.70·300 = 210.
+	p := DefaultPlan(300)
+	if got := p.StageBudget(StageImplement, 0, false); !approx(got, 210) {
+		t.Errorf("feature implement budget = %v, want 210", got)
+	}
+}

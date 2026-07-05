@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,9 @@ type Shell struct {
 	diff      *diffView   // non-nil while the diff surface is open
 	ingest    *ingestView // non-nil while the ingest review surface is open
 	ingesting bool        // an ingest pass is decomposing (one at a time)
+
+	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
+	bugIngesting bool           // a bug import is fetching (one at a time)
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -284,6 +288,25 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
 		return m, nil
 
+	case bugIngestLoadedMsg:
+		m.bugIngesting = false
+		if msg.err != nil {
+			m.notice = noticeMsg{text: "import: " + sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		if len(msg.res.Proposals) == 0 {
+			extra := ""
+			if n := len(msg.res.Skipped); n > 0 {
+				extra = fmt.Sprintf(" (%d already on the board)", n)
+			}
+			m.notice = noticeMsg{text: "no new bugs to import" + extra}
+			return m, nil
+		}
+		m.chat, m.spec, m.diff, m.ingest = nil, nil, nil, nil
+		m.bugIngest = newBugIngestView(msg.res, msg.profile, msg.envelope)
+		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " bug(s) — review & approve"}
+		return m, nil
+
 	case engineEventMsg:
 		cmd := m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
@@ -326,6 +349,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.ingest != nil {
 		return m.handleIngestKey(key)
+	}
+	if m.bugIngest != nil {
+		return m.handleBugIngestKey(key)
 	}
 	switch key {
 	case "q":
@@ -376,6 +402,8 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.moveSel(-1)
 	case "n":
 		m.Overlay.Push(newFeatureForm(m.profileNames, m.createFeature))
+	case "B":
+		m.Overlay.Push(newBugForm(m.profileNames, m.createBug))
 	case "I":
 		if m.engine == nil {
 			m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
@@ -386,6 +414,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.Overlay.Push(newIngestForm(m.profileNames, m.startIngest))
+	case "G":
+		if m.engine == nil {
+			m.notice = noticeMsg{text: "no agent configured — bug import needs the engine", isErr: true}
+			return nil
+		}
+		if m.bugIngesting {
+			m.notice = noticeMsg{text: "an import is already running — wait for it", isErr: true}
+			return nil
+		}
+		m.Overlay.Push(newBugIngestForm(m.profileNames, m.startBugIngest))
 	case "g":
 		if r, ok := m.selected(); ok {
 			m.inbox.remove(r.F.ID)
@@ -664,7 +702,7 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 // (as opposed to interactive chat or no agent).
 func autonomousStage(s domain.Stage) bool {
 	switch s {
-	case domain.StagePlan, domain.StageImplement, domain.StageReview, domain.StageVerify:
+	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageReview, domain.StageVerify:
 		return true
 	default:
 		return false
@@ -736,6 +774,9 @@ func (m *Shell) mainView(w, h int) string {
 	}
 	if m.ingest != nil {
 		return m.ingestViewRender(w, h)
+	}
+	if m.bugIngest != nil {
+		return m.bugIngestViewRender(w, h)
 	}
 	if len(m.rows) > 0 {
 		return m.dashboardView(w, h)

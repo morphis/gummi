@@ -40,9 +40,29 @@ var defaultAlloc = map[Stage]float64{
 	StageVerify:     0.10,
 }
 
-// DefaultPlan returns the standard plan for an envelope (0 = unbudgeted).
+// defaultBugAlloc is the v1 static allocation for the bug workflow.
+// Triage and diagnose are interactive (uncapped, like brainstorm/spec),
+// so they carry no allocation; the autonomous fix/review/verify stages
+// share the envelope. Feature-only stages are absent (0), so the shared
+// capThrough math over domain.Stages stays correct for both kinds.
+var defaultBugAlloc = map[Stage]float64{
+	StageFix:    0.55,
+	StageReview: 0.20,
+	StageVerify: 0.15,
+}
+
+// DefaultPlan returns the standard feature plan for an envelope (0 =
+// unbudgeted). See PlanFor for the kind-aware entry point.
 func DefaultPlan(envelope float64) SpendPlan {
 	return SpendPlan{Envelope: envelope, Alloc: defaultAlloc, Reserve: 0.05}
+}
+
+// PlanFor returns the standard plan for a work kind's workflow.
+func PlanFor(kind Kind, envelope float64) SpendPlan {
+	if kind == KindBug {
+		return SpendPlan{Envelope: envelope, Alloc: defaultBugAlloc, Reserve: 0.10}
+	}
+	return DefaultPlan(envelope)
 }
 
 // ByokCreditsPer1KTokens converts a BYOK session's tokens into a credit-

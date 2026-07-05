@@ -53,7 +53,7 @@ func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 			if err := m.migrateDraft(ctx, &f); err != nil {
 				return specLoadedMsg{err: err}
 			}
-			path = filepath.Join(m.wt.Root(), f.WorktreePath(), f.SpecPath())
+			path = filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath())
 		} else {
 			path = filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
 			if err := spec.EnsureDraft(path, &f); err != nil {

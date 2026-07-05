@@ -8,25 +8,63 @@ import (
 	"time"
 )
 
-// FeatureID is a feature's identifier, e.g. "FD-042". IDs are minted
-// from the monotonic counter in .gummi/seq and zero-padded to three
-// digits.
-type FeatureID string
+// Kind distinguishes the two units of work gummi tracks. Both share the
+// store, engine, worktree, and board; they differ only in which workflow
+// governs them (see internal/workflow) and which artifact template seeds
+// them (see internal/spec). An empty Kind reads as a feature, so features
+// created or scanned before bugs existed need no backfill.
+type Kind string
 
-var featureIDRe = regexp.MustCompile(`^FD-[0-9]{3,}$`)
+const (
+	// KindFeature is design-driven work: brainstorm → spec → plan → …
+	KindFeature Kind = "feature"
+	// KindBug is diagnosis-driven work: triage → diagnose → fix → …
+	KindBug Kind = "bug"
+)
 
-// NewFeatureID builds the canonical ID for sequence number n (n >= 1).
-func NewFeatureID(n int) (FeatureID, error) {
-	if n < 1 {
-		return "", fmt.Errorf("feature number must be >= 1, got %d", n)
+// prefix is the ID prefix for a kind: FD for features, BG for bugs.
+func (k Kind) prefix() string {
+	if k == KindBug {
+		return "BG"
 	}
-	return FeatureID(fmt.Sprintf("FD-%03d", n)), nil
+	return "FD" // KindFeature and the empty default
 }
 
-// ParseFeatureID validates s as a canonical feature ID.
+// Valid reports whether k is a recognized kind (empty is not — callers
+// that accept a default normalize it before validating).
+func (k Kind) Valid() bool { return k == KindFeature || k == KindBug }
+
+// FeatureID is a work item's identifier, e.g. "FD-042" (feature) or
+// "BG-007" (bug). IDs are minted from the monotonic counter in
+// .gummi/seq — shared across kinds, so numbers never collide — and
+// zero-padded to three digits.
+type FeatureID string
+
+var featureIDRe = regexp.MustCompile(`^(FD|BG)-[0-9]{3,}$`)
+
+// Kind reports the work kind an ID's prefix encodes.
+func (id FeatureID) Kind() Kind {
+	if strings.HasPrefix(string(id), "BG-") {
+		return KindBug
+	}
+	return KindFeature
+}
+
+// NewID builds the canonical ID for kind and sequence number n (n >= 1).
+func NewID(kind Kind, n int) (FeatureID, error) {
+	if n < 1 {
+		return "", fmt.Errorf("work item number must be >= 1, got %d", n)
+	}
+	return FeatureID(fmt.Sprintf("%s-%03d", kind.prefix(), n)), nil
+}
+
+// NewFeatureID builds the canonical feature ID for sequence number n.
+func NewFeatureID(n int) (FeatureID, error) { return NewID(KindFeature, n) }
+
+// ParseFeatureID validates s as a canonical work-item ID (feature or bug).
 func ParseFeatureID(s string) (FeatureID, error) {
 	if !featureIDRe.MatchString(s) {
-		return "", fmt.Errorf("invalid feature ID %q (want FD-NNN)", s)
+		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN or BG-NNN)", s)
 	}
 	return FeatureID(s), nil
 }
@@ -63,18 +101,32 @@ func (s Spend) Zero() bool {
 // Feature is one unit of work: the kanban card, its workflow position,
 // and everything needed to derive its branch, worktree, and spec paths.
 type Feature struct {
-	ID        FeatureID
-	Num       int    // numeric part of ID, unique
-	Title     string // human title, free text
-	OneLiner  string // short description from the creation form
-	Slug      string // allowlist-sanitized, used in branch and file names
-	Stage     Stage
-	Skip      SkipFlags
-	Profile   string // profile name mapping roles to agent configs
-	Budget    Budget
-	Spend     Spend // metered cost across all stages
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID       FeatureID
+	Num      int    // numeric part of ID, unique
+	Kind     Kind   // feature (default) or bug; selects workflow + template
+	Title    string // human title, free text
+	OneLiner string // short description from the creation form
+	Slug     string // allowlist-sanitized, used in branch and file names
+	Stage    Stage
+	Skip     SkipFlags
+	Profile  string // profile name mapping roles to agent configs
+	Budget   Budget
+	Spend    Spend // metered cost across all stages
+	// ExternalRef ties a bug back to its source (e.g. a GitHub issue URL),
+	// so re-ingesting the same source skips items already imported. Empty
+	// for manually created features and bugs.
+	ExternalRef string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Kind returns the feature's kind, treating the empty default as a
+// feature so items predating bugs read correctly.
+func (f *Feature) kind() Kind {
+	if f.Kind == KindBug {
+		return KindBug
+	}
+	return KindFeature
 }
 
 // BranchName is the feature's git branch: gummi/FD-042-slug.
@@ -94,17 +146,31 @@ func (f *Feature) SpecPath() string {
 	return path.Join(".gummi", "specs", string(f.ID)+"-"+f.Slug+".md")
 }
 
+// ArtifactPath is the item's durable design artifact relative to the
+// repo root: a feature's spec (.gummi/specs/…) or a bug's report
+// (.gummi/bugs/…). Both travel with the item's branch and are what the
+// stage agents read and write.
+func (f *Feature) ArtifactPath() string {
+	if f.kind() == KindBug {
+		return path.Join(".gummi", "bugs", string(f.ID)+"-"+f.Slug+".md")
+	}
+	return f.SpecPath()
+}
+
 // Validate checks the invariants every stored feature must satisfy.
 func (f *Feature) Validate() error {
 	if _, err := ParseFeatureID(string(f.ID)); err != nil {
 		return err
 	}
-	want, err := NewFeatureID(f.Num)
+	if f.Kind != "" && !f.Kind.Valid() {
+		return fmt.Errorf("feature %s: unknown kind %q", f.ID, f.Kind)
+	}
+	want, err := NewID(f.kind(), f.Num)
 	if err != nil {
 		return fmt.Errorf("feature %s: %w", f.ID, err)
 	}
 	if want != f.ID {
-		return fmt.Errorf("feature %s: ID does not match number %d", f.ID, f.Num)
+		return fmt.Errorf("feature %s: ID %s does not match kind %s / number %d", f.ID, f.ID, f.kind(), f.Num)
 	}
 	if strings.TrimSpace(f.Title) == "" {
 		return fmt.Errorf("feature %s: title is empty", f.ID)

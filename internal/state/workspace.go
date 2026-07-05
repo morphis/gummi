@@ -27,6 +27,10 @@ func (w Workspace) DraftsDir() string { return filepath.Join(w.StateDir(), "draf
 // SpecsDir holds approved specs (committed with the feature branch).
 func (w Workspace) SpecsDir() string { return filepath.Join(w.GummiDir(), "specs") }
 
+// BugsDir holds bug reports (committed with the bug's branch), the
+// bug-workflow analog of SpecsDir.
+func (w Workspace) BugsDir() string { return filepath.Join(w.GummiDir(), "bugs") }
+
 // WorktreesDir holds the nested per-feature git worktrees.
 func (w Workspace) WorktreesDir() string { return filepath.Join(w.GummiDir(), "worktrees") }
 
@@ -100,7 +104,7 @@ func Init(root string) (Workspace, error) {
 	if err := os.Chmod(w.StateDir(), 0o700); err != nil { //nolint:gosec // directories need the execute bit; 0700 is owner-only
 		return Workspace{}, fmt.Errorf("securing state dir: %w", err)
 	}
-	for _, dir := range []string{w.DraftsDir(), w.SpecsDir(), w.WorktreesDir(), w.IngestDir()} {
+	for _, dir := range []string{w.DraftsDir(), w.SpecsDir(), w.BugsDir(), w.WorktreesDir(), w.IngestDir()} {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return Workspace{}, fmt.Errorf("creating %s: %w", dir, err)
 		}

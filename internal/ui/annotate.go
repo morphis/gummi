@@ -93,16 +93,13 @@ func (m *Shell) requestSpecChanges(sv *specView) tea.Cmd {
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored
-// `%%` annotations in a spec-stage feature's spec. These block approval
-// (DESIGN §6.1: unresolved annotations block the gate). The template's
-// own `@gummi` prompts and unattributed notes do not block — only the
-// human's review comments do. Zero for non-spec stages or an unreadable
-// spec.
+// `%%` annotations in an item's draft artifact (a feature's spec or a
+// bug's report). These block approval (DESIGN §6.1: unresolved
+// annotations block the gate). The template's own `@gummi` prompts and
+// unattributed notes do not block — only the human's review comments do.
+// Called at the approval moment (before a worktree exists), so it reads
+// the draft; zero for an unreadable draft.
 func (m *Shell) openQuestionsBlockingGate(_ context.Context, f domain.Feature) int {
-	if f.Stage != domain.StageSpec {
-		return 0
-	}
-	// spec-stage features have no worktree yet: read the draft.
 	path := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
 	raw, err := os.ReadFile(path)
 	if err != nil {

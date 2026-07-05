@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphia/gummi/internal/workflow"
 )
 
 // maxReviewRounds caps the automatic review→fix→review loop (DESIGN §10
@@ -63,8 +64,8 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 	switch stage {
 	case domain.StageReview:
 		return true, m.onReviewDone(id)
-	case domain.StageImplement:
-		// only auto-continue implements that are part of a review loop
+	case domain.StageImplement, domain.StageFix:
+		// only auto-continue work stages that are part of a review loop
 		if m.reviewRounds[id] > 0 {
 			return true, m.autoStep(id, domain.StageReview, "re-reviewing")
 		}
@@ -99,7 +100,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 			return nil
 		}
 		m.reviewRounds[id]++
-		return m.autoStep(id, domain.StageImplement, "review requested changes → fixing (round "+itoa(m.reviewRounds[id])+")")
+		return m.autoStep(id, workflow.WorkStage(id.Kind()), "review requested changes → fixing (round "+itoa(m.reviewRounds[id])+")")
 	default:
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
