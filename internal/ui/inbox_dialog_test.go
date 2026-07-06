@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestInboxDialogTopUpOnlyBudgetItems(t *testing.T) {

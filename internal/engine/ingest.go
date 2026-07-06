@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // Ingestion (DESIGN §11) decomposes an existing document into a set of

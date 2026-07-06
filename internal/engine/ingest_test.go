@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // sampleProposalJSON is a well-formed decomposition the fake architect

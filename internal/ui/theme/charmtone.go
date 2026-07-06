@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/x/exp/charmtone"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // GummiDark is the default theme: charmtone's restrained dark base with

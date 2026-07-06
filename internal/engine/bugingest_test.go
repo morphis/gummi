@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 )
 
 // fakeGH returns a run func that serves canned issue JSON and records the

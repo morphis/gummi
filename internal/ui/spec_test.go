@@ -12,7 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/morphia/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/spec"
 )
 
 // openSpecFor drives 's' on the selected feature and settles commands.

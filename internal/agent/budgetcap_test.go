@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/agent/fakeopenai"
+	"github.com/morphis/gummi/internal/agent/fakeopenai"
 )
 
 func TestCopilotBudgetCap(t *testing.T) {

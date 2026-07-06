@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // renderSwatch draws one line per derived style, so a theme's rendered

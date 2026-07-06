@@ -10,10 +10,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/ui/theme"
-	"github.com/morphia/gummi/internal/worktree"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // newWorkspace creates a real repo + initialized gummi workspace.

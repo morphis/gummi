@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/config"
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func profilesFixture() config.Profiles {

@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // edge is one (from, to) pair; the tests build the full expected legal

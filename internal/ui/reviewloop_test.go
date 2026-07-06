@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestParseVerdict(t *testing.T) {

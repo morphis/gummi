@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // Bug ingestion (DESIGN §11, bug variant) mirrors spec ingestion's

@@ -15,14 +15,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/config"
-	"github.com/morphia/gummi/internal/engine"
-	"github.com/morphia/gummi/internal/notify"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/ui"
-	"github.com/morphia/gummi/internal/ui/theme"
-	"github.com/morphia/gummi/internal/worktree"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/notify"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/ui"
+	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // Version is the release version, injected via -ldflags at build time.

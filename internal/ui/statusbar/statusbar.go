@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // Kind selects a pill's visual weight.

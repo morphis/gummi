@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // AddDiffAnnotation stores a line comment on a feature's diff and returns

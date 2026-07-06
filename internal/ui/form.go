@@ -6,8 +6,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // defaultProfilePresets is the fallback profile list when no

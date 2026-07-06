@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/morphia/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agent"
 )
 
 func TestSetContextStickyLimit(t *testing.T) {

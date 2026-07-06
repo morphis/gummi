@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/worktree"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 func newRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {

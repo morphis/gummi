@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/agent/fakeopenai"
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agent/fakeopenai"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // TestEngineWithCopilotBYOK drives the whole stack — engine → Copilot

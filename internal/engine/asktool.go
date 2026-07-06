@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 )
 
 // askToolName is the client tool the agent calls to put a multiple-choice

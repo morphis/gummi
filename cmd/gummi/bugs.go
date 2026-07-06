@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/engine"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/worktree"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // runBugs implements `gummi bugs …`: bug ingestion from GitHub issues and

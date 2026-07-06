@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The artifact section lists the contract states so an agent never has

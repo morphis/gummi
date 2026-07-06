@@ -1,4 +1,4 @@
-module github.com/morphia/gummi
+module github.com/morphis/gummi
 
 go 1.26
 

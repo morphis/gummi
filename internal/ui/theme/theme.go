@@ -7,7 +7,7 @@ package theme
 import (
 	"image/color"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // Theme is the complete set of semantic color slots. Everything the UI

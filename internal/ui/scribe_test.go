@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/engine"
 )
 
 func TestScribeEstimateBlendsAndPersists(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // commentDialog is the inline popover collecting one annotation for

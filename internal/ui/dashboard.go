@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 )
 
 // dashboardView renders the selected feature's detail pane: identity,

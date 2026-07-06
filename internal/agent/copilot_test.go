@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/agent/fakeopenai"
+	"github.com/morphis/gummi/internal/agent/fakeopenai"
 )
 
 // findCopilot locates the CLI so the test can drive it; it skips the

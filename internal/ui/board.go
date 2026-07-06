@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 )
 
 // stageGlyph is the card marker: readable by shape as well as color.

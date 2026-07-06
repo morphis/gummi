@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // Dialog is one modal surface. Dialogs are plain stateful structs (the

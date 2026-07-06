@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // capHeadroom sets the enforced cap this fraction below the stage budget,

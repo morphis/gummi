@@ -6,8 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // inboxDialog lists the needs-attention queue and lets the user jump to

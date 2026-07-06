@@ -6,9 +6,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/engine"
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 func TestHumanTokens(t *testing.T) {

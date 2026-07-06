@@ -3,7 +3,7 @@ package ui
 import (
 	"sync"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // attnKind classifies why a feature needs your attention.

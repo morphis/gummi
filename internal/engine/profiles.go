@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/config"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
 )
 
 // resolveRole picks the model and provider for a feature's profile and

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestBugTemplateIsBlankAndParses(t *testing.T) {

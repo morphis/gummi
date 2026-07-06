@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // diffCell sanitizes an untrusted diff line (it is agent/repo-authored

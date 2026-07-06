@@ -7,7 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // textPromptDialog is a one-field inline editor (rename, one-liner). An

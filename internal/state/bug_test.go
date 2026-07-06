@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func bug(num int, title, ref string) *domain.Feature {

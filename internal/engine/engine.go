@@ -20,13 +20,13 @@ import (
 
 	"strings"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/config"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/verify"
-	"github.com/morphia/gummi/internal/worktree"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // kickoff is the go-ahead sent to start an autonomous stage; the stage

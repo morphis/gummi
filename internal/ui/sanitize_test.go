@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agent"
 )
 
 func TestSanitizeStripsEscapes(t *testing.T) {

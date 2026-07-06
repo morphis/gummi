@@ -3,7 +3,7 @@ package workflow
 import (
 	"fmt"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // gummi compiles in exactly two workflows — one for features, one for

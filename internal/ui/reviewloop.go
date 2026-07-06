@@ -8,8 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // maxReviewRounds caps the automatic review→fix→review loop (DESIGN §10

@@ -26,7 +26,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // Marker is one parsed %% line.

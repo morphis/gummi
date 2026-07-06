@@ -8,9 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/engine"
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // chatPane is the interactive brainstorm/spec surface: a scrollable

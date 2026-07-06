@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 )
 
 // fixedNow is a deterministic clock for spec-capture marker dates.

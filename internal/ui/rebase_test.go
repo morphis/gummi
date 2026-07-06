@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // rebaseFeatureFixture creates a feature with a worktree branched from

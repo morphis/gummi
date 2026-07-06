@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // letterforms are gummi's own 3-row half-block glyphs.

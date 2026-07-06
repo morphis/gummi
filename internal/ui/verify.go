@@ -9,10 +9,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/config"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/ui/theme"
-	"github.com/morphia/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/verify"
 )
 
 // verifyResultMsg carries the outcome of a verify run.

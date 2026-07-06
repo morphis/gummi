@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphia/gummi/internal/diffannot"
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/diffannot"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // diffView is the diff surface: a feature's worktree diff in read mode

@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morphia/gummi/internal/agent"
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/state"
-	"github.com/morphia/gummi/internal/worktree"
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // persistEngine builds a persisting engine sharing a store/repo so a

@@ -17,7 +17,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/morphia/gummi/internal/config"
+	"github.com/morphis/gummi/internal/config"
 )
 
 // Result is the outcome of one check.

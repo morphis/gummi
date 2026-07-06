@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphia/gummi/internal/config"
+	"github.com/morphis/gummi/internal/config"
 )
 
 func TestRunPassAndFail(t *testing.T) {

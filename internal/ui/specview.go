@@ -14,8 +14,8 @@ import (
 	gstyles "charm.land/glamour/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 )
 
 // specView is the spec surface state: one feature's design doc, in

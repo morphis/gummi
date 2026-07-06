@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/morphia/gummi/internal/notify"
-	"github.com/morphia/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/notify"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 func TestAttentionRingsOncePerFeature(t *testing.T) {

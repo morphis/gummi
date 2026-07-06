@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestDiffAnnotationCRUD(t *testing.T) {

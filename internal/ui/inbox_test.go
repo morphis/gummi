@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/morphia/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agent"
 )
 
 func TestInboxOps(t *testing.T) {

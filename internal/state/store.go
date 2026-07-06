@@ -11,8 +11,8 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go sqlite driver
 
-	"github.com/morphia/gummi/internal/domain"
-	"github.com/morphia/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // ErrNotFound is returned when a feature ID has no row.

@@ -24,7 +24,7 @@ linters:
         - (*os.File).Close
         - (io.ReadCloser).Close
         - os.Remove
-        - (*github.com/morphia/gummi/internal/state.Store).Close
+        - (*github.com/morphis/gummi/internal/state.Store).Close
   exclusions:
     generated: lax
     presets:

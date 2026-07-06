@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphia/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestResolveAttachSuccess(t *testing.T) {
