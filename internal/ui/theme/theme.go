@@ -6,6 +6,7 @@ package theme
 
 import (
 	"image/color"
+	"math"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -33,7 +34,9 @@ type Theme struct {
 	BgSurface color.Color
 	BgRaised  color.Color
 
-	// OnAccent is the foreground for text sitting on Accent/stage pills.
+	// OnAccent is the foreground for text sitting on the Accent fill
+	// (the mode pill). Other fills — warning, stage accents — vary too
+	// much in brightness for one slot; they use OnFill instead.
 	OnAccent color.Color
 
 	// Separator is for low-contrast rules and pane borders.
@@ -58,4 +61,37 @@ func (t Theme) StageAccent(s domain.Stage) color.Color {
 		return c
 	}
 	return t.FgMuted
+}
+
+// OnFill returns readable ink for text on the given fill. FgBase/BgBase
+// always form a dark/light pair (whichever theme polarity), so the one
+// with more contrast against the fill is legible on it — bright fills
+// like Zest get dark ink instead of the near-white OnAccent.
+func (t Theme) OnFill(fill color.Color) color.Color {
+	if contrast(fill, t.FgBase) >= contrast(fill, t.BgBase) {
+		return t.FgBase
+	}
+	return t.BgBase
+}
+
+// contrast is the WCAG contrast ratio between two colors (1–21).
+func contrast(a, b color.Color) float64 {
+	la, lb := luminance(a), luminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// luminance is WCAG relative luminance.
+func luminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+	lin := func(v uint32) float64 {
+		s := float64(v) / 0xFFFF
+		if s <= 0.04045 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
 }

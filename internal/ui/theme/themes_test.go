@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
@@ -78,5 +79,28 @@ func TestByNameFallsBackToDark(t *testing.T) {
 	}
 	if th.Name != "gummi-dark" {
 		t.Errorf("fallback = %s, want gummi-dark", th.Name)
+	}
+}
+
+// TestFilledPillsAreReadable guards every theme's filled pills against
+// the white-on-Zest class of bug (contrast 1.1): ink picked for one
+// fill silently reused on a much brighter one. 3.0 is the WCAG AA
+// ratio for large/bold text — the right floor for pill labels; some
+// mid-tone fills (Squid, Chili) can't reach 4.5 with any ink.
+func TestFilledPillsAreReadable(t *testing.T) {
+	const minRatio = 3.0
+	for _, name := range Names() {
+		th, _ := ByName(name)
+		check := func(what string, fill, ink color.Color) {
+			if r := contrast(fill, ink); r < minRatio {
+				t.Errorf("theme %s: %s ink/fill contrast %.2f < %.1f", name, what, r, minRatio)
+			}
+		}
+		check("mode pill", th.Accent, th.OnAccent)
+		check("alert pill", th.Warning, th.OnFill(th.Warning))
+		for _, st := range domain.Stages {
+			a := th.StageAccent(st)
+			check("stage pill "+string(st), a, th.OnFill(a))
+		}
 	}
 }

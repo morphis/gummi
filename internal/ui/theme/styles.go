@@ -84,7 +84,7 @@ func New(t Theme) *Styles {
 		StatusBase: base,
 		PillMode:   lipgloss.NewStyle().Foreground(t.OnAccent).Background(t.Accent).Bold(true).Padding(0, 1),
 		Pill:       lipgloss.NewStyle().Foreground(t.FgSubtle).Background(t.BgRaised).Padding(0, 1),
-		PillAlert:  lipgloss.NewStyle().Foreground(t.OnAccent).Background(t.Warning).Bold(true).Padding(0, 1),
+		PillAlert:  lipgloss.NewStyle().Foreground(t.OnFill(t.Warning)).Background(t.Warning).Bold(true).Padding(0, 1),
 
 		// no fill: a dialog is its border on the base background, so
 		// the panel reads as part of the canvas rather than a slab.
@@ -105,7 +105,7 @@ func New(t Theme) *Styles {
 	}
 	for _, st := range domain.Stages {
 		accent := t.StageAccent(st)
-		s.stagePill[st] = lipgloss.NewStyle().Foreground(t.OnAccent).Background(accent).Padding(0, 1)
+		s.stagePill[st] = lipgloss.NewStyle().Foreground(t.OnFill(accent)).Background(accent).Padding(0, 1)
 		s.stageFg[st] = base.Foreground(accent)
 	}
 	return s
