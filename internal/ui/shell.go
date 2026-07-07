@@ -47,10 +47,10 @@ type Shell struct {
 	rows      []featureRow
 	sel       int
 	notice    noticeMsg
-	spec      *specView   // non-nil while the spec surface is open
-	diff      *diffView   // non-nil while the diff surface is open
-	ingest    *ingestView // non-nil while the ingest review surface is open
-	ingesting bool        // an ingest pass is decomposing (one at a time)
+	spec      *specView      // non-nil while the spec surface is open
+	diff      *diffView      // non-nil while the diff surface is open
+	ingest    *ingestView    // non-nil while the ingest review surface is open
+	ingestRun *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
 
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
@@ -273,8 +273,19 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case ingestStepMsg:
+		// live progress from the running pass; keep listening on the same
+		// stream (a finished/discarded run just drains silently).
+		if m.ingestRun != nil {
+			m.ingestRun.apply(msg.step)
+		}
+		return m, listenIngestSteps(msg.ch)
+
+	case ingestStreamClosedMsg:
+		return m, nil
+
 	case ingestLoadedMsg:
-		m.ingesting = false
+		m.ingestRun = nil
 		if msg.err != nil {
 			m.notice = noticeMsg{text: "ingest: " + sanitize(msg.err.Error()), isErr: true}
 			return m, nil
@@ -409,11 +420,19 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
 			return nil
 		}
-		if m.ingesting {
-			m.notice = noticeMsg{text: "an ingest is already decomposing — wait for it", isErr: true}
+		if m.ingestRun != nil {
+			// one pass at a time; I brings a backgrounded feed forward
+			m.ingestRun.hidden = false
+			m.notice = noticeMsg{text: "an ingest is already decomposing — showing its progress"}
 			return nil
 		}
 		m.Overlay.Push(newIngestForm(m.profileNames, m.startIngest))
+	case "esc":
+		if m.ingestRun != nil && !m.ingestRun.hidden {
+			// background the feed; the pass keeps running and the review
+			// surface still takes the foreground when it lands.
+			m.ingestRun.hidden = true
+		}
 	case "G":
 		if m.engine == nil {
 			m.notice = noticeMsg{text: "no agent configured — bug import needs the engine", isErr: true}
@@ -778,6 +797,9 @@ func (m *Shell) mainView(w, h int) string {
 	if m.bugIngest != nil {
 		return m.bugIngestViewRender(w, h)
 	}
+	if m.ingestRun != nil && !m.ingestRun.hidden {
+		return m.ingestRunRender(w, h)
+	}
 	if len(m.rows) > 0 {
 		return m.dashboardView(w, h)
 	}
@@ -791,6 +813,9 @@ func (m *Shell) statusView(w int) string {
 	}
 	if run := m.runCounts(); run != "" {
 		pills = append(pills, statusbar.Pill{Text: run, Kind: statusbar.KindNeutral})
+	}
+	if m.ingestRun != nil {
+		pills = append(pills, statusbar.Pill{Text: "⣾ ingest", Kind: statusbar.KindNeutral})
 	}
 	if n := m.inbox.len(); n > 0 {
 		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})

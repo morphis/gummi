@@ -76,7 +76,16 @@ func runIngest(args []string) error {
 
 	ctx := context.Background()
 	fmt.Printf("Ingesting %s (architect / profile %q) …\n", source, cmpOrDefault(prof))
-	res, err := eng.Ingest(ctx, source, prof)
+	// stream the pass's discrete steps (milestones + tool calls) so the
+	// wait isn't silent; the architect's prose commentary stays quiet.
+	res, err := eng.Ingest(ctx, source, prof, func(st engine.IngestStep) {
+		switch st.Kind {
+		case engine.IngestStepNote:
+			fmt.Printf("  · %s\n", st.Text)
+		case engine.IngestStepTool:
+			fmt.Printf("  ✓ %s\n", st.Text)
+		}
+	})
 	if err != nil {
 		return err
 	}

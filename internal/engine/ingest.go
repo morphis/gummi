@@ -49,12 +49,41 @@ const ingestConventionHint = "When your decomposition is ready, emit it as a sin
 	`"open_questions":["…"]}],"coverage":[{"requirement":"…","feature":"title","status":"mapped|out-of-scope|unmapped","note":"…"}]}. ` +
 	"Emit the block once, at the end, and nothing after it."
 
+// IngestStepKind classifies one step of a running ingest pass.
+type IngestStepKind string
+
+const (
+	// IngestStepNote is a gummi-side milestone ("architect started").
+	IngestStepNote IngestStepKind = "note"
+	// IngestStepTool is a tool call the architect made (Text is the
+	// adapter's display label, e.g. "read prd.md").
+	IngestStepTool IngestStepKind = "tool"
+	// IngestStepDelta is an incremental chunk of the architect's
+	// streamed commentary.
+	IngestStepDelta IngestStepKind = "delta"
+	// IngestStepMessage is a completed commentary message (the
+	// authoritative text of what deltas were streaming).
+	IngestStepMessage IngestStepKind = "message"
+)
+
+// IngestStep is one visible moment of a running ingest pass. The pass is
+// transient — it holds no board Session to snapshot — so this stream is
+// the only window into what the architect is doing while it decomposes.
+type IngestStep struct {
+	Kind IngestStepKind
+	Text string
+}
+
 // Ingest decomposes the document at sourcePath into feature proposals via
 // a transient architect pass under the given profile. The source is
 // copied into .gummi/ingest/ for provenance and the returned result's
 // SourcePath points at that copy. No features are created — that is
 // Materialize's job, after the human reviews the proposal.
-func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string) (domain.IngestResult, error) {
+//
+// progress, when non-nil, receives live steps (tool calls, streamed
+// commentary) as the pass runs. It is called from the pass's goroutine;
+// callers wanting UI updates must hand off to their own loop.
+func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progress func(IngestStep)) (domain.IngestResult, error) {
 	if e.cfg.Agent == nil {
 		return domain.IngestResult{}, fmt.Errorf("no agent configured; cannot ingest")
 	}
@@ -97,13 +126,25 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string) (domain
 	}
 	defer func() { _ = sess.Close() }()
 
+	emit := func(k IngestStepKind, text string) {
+		if progress != nil {
+			progress(IngestStep{Kind: k, Text: text})
+		}
+	}
+	started := "architect reading " + filepath.Base(relPath)
+	if model != "" {
+		started += " (" + model + ")"
+	}
+	emit(IngestStepNote, started)
+
 	if err := sess.Send(ctx, ingestPrompt); err != nil {
 		return domain.IngestResult{}, err
 	}
-	res, err := e.collectProposal(ctx, sess)
+	res, err := e.collectProposal(ctx, sess, emit)
 	if err != nil {
 		return domain.IngestResult{}, err
 	}
+	emit(IngestStepNote, fmt.Sprintf("proposal received — %d feature(s)", len(res.Proposals)))
 	res.SourcePath = relPath
 	return res, nil
 }
@@ -155,8 +196,9 @@ func uniqueIngestName(dir, base string, content []byte) (string, error) {
 
 // collectProposal consumes the ingest session until the architect submits
 // its decomposition — via the propose_features tool call or, on backends
-// without client tools, a gummi-propose block in the reply.
-func (e *Engine) collectProposal(ctx context.Context, sess agent.Session) (domain.IngestResult, error) {
+// without client tools, a gummi-propose block in the reply. Each visible
+// step is relayed to emit so the caller can show the pass working.
+func (e *Engine) collectProposal(ctx context.Context, sess agent.Session, emit func(IngestStepKind, string)) (domain.IngestResult, error) {
 	var b strings.Builder
 	for {
 		select {
@@ -165,6 +207,8 @@ func (e *Engine) collectProposal(ctx context.Context, sess agent.Session) (domai
 				return proposalFromText(b.String())
 			}
 			switch ev.Kind {
+			case agent.EventToolCall:
+				emit(IngestStepTool, ev.Tool)
 			case agent.EventClientToolCall:
 				if ev.ToolCall == nil {
 					continue
@@ -183,8 +227,10 @@ func (e *Engine) collectProposal(ctx context.Context, sess agent.Session) (domai
 				return res, nil
 			case agent.EventTextDelta:
 				b.WriteString(ev.Text)
+				emit(IngestStepDelta, ev.Text)
 			case agent.EventMessage:
 				b.WriteString("\n" + ev.Text)
+				emit(IngestStepMessage, ev.Text)
 			case agent.EventIdle:
 				return proposalFromText(b.String())
 			case agent.EventError:

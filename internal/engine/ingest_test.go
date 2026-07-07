@@ -98,7 +98,7 @@ func TestIngestClientToolPath(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# Platform PRD\nlots of requirements\n")
-	res, err := e.Ingest(context.Background(), src, "premium")
+	res, err := e.Ingest(context.Background(), src, "premium", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestIngestConventionPath(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "design.md", "# Design\nstuff\n")
-	res, err := e.Ingest(context.Background(), src, "thrifty")
+	res, err := e.Ingest(context.Background(), src, "thrifty", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestIngestNoProposalIsError(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "empty-ish.md", "not really a spec\n")
-	if _, err := e.Ingest(context.Background(), src, ""); err == nil {
+	if _, err := e.Ingest(context.Background(), src, "", nil); err == nil {
 		t.Error("expected an error when the agent returns no proposal")
 	}
 }
@@ -152,7 +152,7 @@ func TestIngestEmptySourceRejected(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "blank.md", "   \n")
-	if _, err := e.Ingest(context.Background(), src, ""); err == nil {
+	if _, err := e.Ingest(context.Background(), src, "", nil); err == nil {
 		t.Error("expected empty source to be rejected before spawning a session")
 	}
 }
@@ -181,11 +181,11 @@ func TestIngestStashDoesNotClobberSameBasename(t *testing.T) {
 	srcA := writeSource(t, wsRoot{ws.Root}, filepath.Join("a", "spec.md"), "AAA content\n")
 	srcB := writeSource(t, wsRoot{ws.Root}, filepath.Join("b", "spec.md"), "BBB content\n")
 
-	resA, err := e.Ingest(context.Background(), srcA, "")
+	resA, err := e.Ingest(context.Background(), srcA, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resB, err := e.Ingest(context.Background(), srcB, "")
+	resB, err := e.Ingest(context.Background(), srcB, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,12 +199,54 @@ func TestIngestStashDoesNotClobberSameBasename(t *testing.T) {
 	}
 
 	// re-ingesting the identical document reuses its existing stash.
-	resA2, err := e.Ingest(context.Background(), srcA, "")
+	resA2, err := e.Ingest(context.Background(), srcA, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resA2.SourcePath != resA.SourcePath {
 		t.Errorf("identical re-ingest made a new file %q (want reuse of %q)", resA2.SourcePath, resA.SourcePath)
+	}
+}
+
+func TestIngestReportsProgress(t *testing.T) {
+	ag := &agent.Fake{
+		Caps: agent.Capabilities{ClientTools: true},
+		Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+			return []agent.Event{
+				{Kind: agent.EventToolCall, Tool: "read prd.md"},
+				{Kind: agent.EventTextDelta, Text: "splitting into vertical slices"},
+				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "c1", Name: ingestToolName, Args: json.RawMessage(sampleProposalJSON)}},
+				{Kind: agent.EventIdle},
+			}
+		},
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# PRD\nrequirements\n")
+	// progress is invoked synchronously from the pass, so the slice is
+	// safe to inspect once Ingest returns.
+	var steps []IngestStep
+	if _, err := e.Ingest(context.Background(), src, "", func(st IngestStep) { steps = append(steps, st) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) < 4 {
+		t.Fatalf("got %d steps, want at least 4: %+v", len(steps), steps)
+	}
+	if steps[0].Kind != IngestStepNote || !strings.Contains(steps[0].Text, "architect") {
+		t.Errorf("first step should be the architect-started note, got %+v", steps[0])
+	}
+	var sawTool, sawDelta bool
+	for _, st := range steps {
+		sawTool = sawTool || (st.Kind == IngestStepTool && st.Text == "read prd.md")
+		sawDelta = sawDelta || (st.Kind == IngestStepDelta && strings.Contains(st.Text, "slices"))
+	}
+	if !sawTool || !sawDelta {
+		t.Errorf("tool/delta steps missing (tool=%v delta=%v): %+v", sawTool, sawDelta, steps)
+	}
+	if last := steps[len(steps)-1]; last.Kind != IngestStepNote || !strings.Contains(last.Text, "2 feature(s)") {
+		t.Errorf("last step should be the proposal-received note, got %+v", last)
 	}
 }
 

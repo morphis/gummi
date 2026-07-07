@@ -12,6 +12,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 )
 
 const uiProposalJSON = `{
@@ -116,7 +117,7 @@ func TestIngestSingleInFlight(t *testing.T) {
 	// mark a pass as in flight (as startIngest does) without delivering its
 	// result yet, then confirm a second start is refused and 'I' won't open
 	// the form.
-	m.ingesting = true
+	m.ingestRun = newIngestRunView(src)
 	if cmd := m.startIngest(src, ""); cmd != nil {
 		t.Error("a second ingest should be refused while one is in flight")
 	}
@@ -125,10 +126,66 @@ func TestIngestSingleInFlight(t *testing.T) {
 		t.Error("I should not open the form while an ingest is in flight")
 	}
 
-	// delivering the result clears the in-flight flag and opens the surface
+	// delivering the result clears the in-flight run and opens the surface
 	m, _ = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
-	if m.ingesting {
-		t.Error("in-flight flag should clear when the result arrives")
+	if m.ingestRun != nil {
+		t.Error("in-flight run should clear when the result arrives")
+	}
+	if m.ingest == nil {
+		t.Error("review surface should open on result")
+	}
+}
+
+func TestIngestRunFeedShowsProgress(t *testing.T) {
+	m, _ := chatWorkspace(t, fakeProposer())
+	src := writeRepoFile(t, m, "prd.md", "# PRD\nx\n")
+
+	// starting a pass installs the live feed in the main pane
+	cmd := m.startIngest(src, "premium")
+	if m.ingestRun == nil {
+		t.Fatal("startIngest did not install the live feed")
+	}
+	if !strings.Contains(m.mainView(100, 30), "decomposing") {
+		t.Error("main pane should show the decomposing feed")
+	}
+
+	// steps stream into the feed: milestones, tool calls, commentary
+	m.ingestRun.apply(engine.IngestStep{Kind: engine.IngestStepNote, Text: "architect reading prd.md"})
+	m.ingestRun.apply(engine.IngestStep{Kind: engine.IngestStepTool, Text: "read prd.md"})
+	m.ingestRun.apply(engine.IngestStep{Kind: engine.IngestStepDelta, Text: "splitting the doc "})
+	m.ingestRun.apply(engine.IngestStep{Kind: engine.IngestStepDelta, Text: "into slices"})
+	view := m.mainView(100, 30)
+	for _, want := range []string{"architect reading prd.md", "read prd.md", "splitting the doc into slices"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("feed missing %q\n%s", want, view)
+		}
+	}
+	// a completed message replaces the streamed tail rather than doubling it
+	m.ingestRun.apply(engine.IngestStep{Kind: engine.IngestStepMessage, Text: "splitting the doc into slices"})
+	if got := m.ingestRun.tail; got != "splitting the doc into slices" {
+		t.Errorf("tail after message = %q", got)
+	}
+
+	// esc backgrounds the feed (the pass keeps running); I brings it back
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.ingestRun == nil || !m.ingestRun.hidden {
+		t.Fatal("esc should background the feed, not discard the run")
+	}
+	if strings.Contains(m.mainView(100, 30), "decomposing") {
+		t.Error("hidden feed should yield the main pane")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'I', Text: "I"})
+	if m.ingestRun.hidden {
+		t.Error("I should bring the backgrounded feed forward")
+	}
+	if m.Overlay.Contains("ingest-spec") {
+		t.Error("I must not open a second ingest form while a pass runs")
+	}
+
+	// the finished pass clears the feed and opens the review surface
+	m = pump(t, m, cmd)
+	if m.ingestRun != nil {
+		t.Error("feed should clear when the result arrives")
 	}
 	if m.ingest == nil {
 		t.Error("review surface should open on result")

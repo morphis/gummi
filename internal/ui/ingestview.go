@@ -213,27 +213,60 @@ func (m *Shell) materializeIngest() tea.Cmd {
 
 // startIngest runs the architect decomposition pass for a source file and
 // opens the review surface on success. The pass spawns a transient agent
-// session, so it runs in a command (off the main loop).
+// session, so it runs in a command (off the main loop); its live steps
+// stream through a channel into the ingestRun feed so the user can watch
+// the architect work instead of staring at a static notice.
 func (m *Shell) startIngest(path, profile string) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
 		return nil
 	}
-	if m.ingesting {
+	if m.ingestRun != nil {
 		m.notice = noticeMsg{text: "an ingest is already decomposing — wait for it", isErr: true}
 		return nil
 	}
 	eng, envelope := m.engine, m.envelope
-	m.ingesting = true
+	m.ingestRun = newIngestRunView(path)
 	m.notice = noticeMsg{text: "ingesting " + path + " — decomposing…"}
-	return func() tea.Msg {
-		res, err := eng.Ingest(context.Background(), path, profile)
+	steps := make(chan engine.IngestStep, 256)
+	pass := func() tea.Msg {
+		defer close(steps)
+		res, err := eng.Ingest(context.Background(), path, profile, func(st engine.IngestStep) {
+			select {
+			case steps <- st:
+			default: // progress is advisory — never stall the pass on a full feed
+			}
+		})
 		if err != nil {
 			return ingestLoadedMsg{err: err}
 		}
 		return ingestLoadedMsg{res: res, profile: profile, envelope: envelope}
 	}
+	return tea.Batch(pass, listenIngestSteps(steps))
 }
+
+// listenIngestSteps bridges the pass's progress channel into Bubble Tea:
+// it blocks for one step and returns it as a message, and is re-issued
+// after each one so the feed stays live until the channel closes.
+func listenIngestSteps(ch <-chan engine.IngestStep) tea.Cmd {
+	return func() tea.Msg {
+		st, ok := <-ch
+		if !ok {
+			return ingestStreamClosedMsg{}
+		}
+		return ingestStepMsg{step: st, ch: ch}
+	}
+}
+
+// ingestStepMsg carries one live step of the running pass (plus its
+// stream, so Update can keep listening on the same channel).
+type ingestStepMsg struct {
+	step engine.IngestStep
+	ch   <-chan engine.IngestStep
+}
+
+// ingestStreamClosedMsg marks the end of a pass's progress stream.
+type ingestStreamClosedMsg struct{}
 
 // ingestLoadedMsg delivers the result of an ingest pass to the shell.
 type ingestLoadedMsg struct {
