@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -152,10 +153,13 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, numW int) string
 	return pad + mark + " " + body
 }
 
-// requestDiffChanges bounces the feature to implement and re-runs it; the
-// engine folds the open diff annotations into the implement stage's hints
-// (see newAgentSession), so the implementer addresses each comment. Blocks
-// with a notice when there is nothing open to send.
+// requestDiffChanges sends the open diff annotations to the implementer
+// (DESIGN §6.1). From review/verify it bounces the feature to the work
+// stage and re-runs it; already at the work stage (the implement/fix
+// gate) there is no edge to take, so the stage is re-run in place — the
+// engine folds the open annotations into every implement/fix run's
+// hints (see newAgentSession), so either way the implementer addresses
+// each comment. Blocks with a notice when there is nothing open to send.
 func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured", isErr: true}
@@ -165,23 +169,48 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		m.notice = noticeMsg{text: "no open diff comments to send"}
 		return nil
 	}
-	// "request changes" bounces to the work stage (implement/fix); only
-	// offer it from a stage where that edge is legal (review/verify), so
-	// it never tears down a running session for a transition that will
-	// just be rejected.
-	bounceTo := workflow.WorkStage(dv.f.Kind)
-	if err := workflow.CanTransition(dv.f.Kind, dv.f.Stage, bounceTo, dv.f.Skip); err != nil {
-		m.notice = noticeMsg{text: "request changes works from the review or verify gate", isErr: true}
-		return nil
+	// "request changes" targets the work stage (implement/fix); only
+	// offer it there or from a stage with a legal edge to it
+	// (review/verify), so it never tears down a running session for a
+	// transition that will just be rejected.
+	workStage := workflow.WorkStage(dv.f.Kind)
+	atWork := dv.f.Stage == workStage
+	if !atWork {
+		if err := workflow.CanTransition(dv.f.Kind, dv.f.Stage, workStage, dv.f.Skip); err != nil {
+			m.notice = noticeMsg{text: "request changes works from the implement, review, or verify gate", isErr: true}
+			return nil
+		}
 	}
 	f := dv.f
 	n := dv.openCount()
+	turn := compileDiffComments(dv.anns)
 	m.diff = nil // close the surface; the fix runs on the board
 	return func() tea.Msg {
 		ctx := context.Background()
+		if atWork {
+			// no transition: deliver to a running session as a live turn,
+			// or re-run the stage (a fresh run reads the open annotations
+			// from the store).
+			if s := m.engine.Get(f.ID); s != nil {
+				switch s.State() {
+				case engine.StateRunning:
+					if err := m.engine.Send(ctx, f.ID, turn); err != nil {
+						return noticeMsg{text: sanitize(err.Error()), isErr: true}
+					}
+					return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the running %s agent", f.ID, n, f.Stage)}
+				case engine.StateQueued:
+					return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open diff comments when it starts", f.ID, f.Stage)}
+				}
+			}
+			m.dropSession(f.ID)
+			if err := m.engine.Run(f); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
+			return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment(s)", f.ID, f.Stage, n)}
+		}
 		// transition first (it validates the edge); only then drop the
 		// stale session, so a rejected bounce is never destructive.
-		nf, err := m.store.Transition(ctx, f.ID, bounceTo, "user")
+		nf, err := m.store.Transition(ctx, f.ID, workStage, "user")
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
@@ -191,4 +220,27 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the implementer", f.ID, n)}
 	}
+}
+
+// compileDiffComments builds a fix-up turn from the open diff
+// annotations — the same shape the engine folds into a fresh
+// implement/fix run's hints (diffReviewHints), for delivery to a
+// session that is already running.
+func compileDiffComments(anns []domain.DiffAnnotation) string {
+	var lines []string
+	for _, a := range anns {
+		if a.Resolved {
+			continue
+		}
+		loc := a.File
+		if a.Excerpt != "" {
+			loc += " — " + a.Excerpt
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", loc, a.Comment))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Address these diff review comments; make the edits and keep " +
+		"the change minimal:\n" + strings.Join(lines, "\n")
 }

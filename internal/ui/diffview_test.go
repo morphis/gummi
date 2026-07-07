@@ -149,8 +149,87 @@ func TestDiffRequestChangesGuardsStage(t *testing.T) {
 	if f.Stage != domain.StageReview {
 		t.Errorf("guard failed: stage changed to %s", f.Stage)
 	}
-	if !strings.Contains(m.notice.text, "review or verify") {
+	if !strings.Contains(m.notice.text, "implement, review, or verify") {
 		t.Errorf("missing guard notice, got %q", m.notice.text)
+	}
+}
+
+func TestDiffRequestChangesRerunsWorkStage(t *testing.T) {
+	// R at the work stage itself (the "implement finished" gate) has no
+	// bounce edge to take: it re-runs implement in place, and the fresh
+	// run carries the open annotations via the engine's diff hints.
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	if _, err := m.store.Transition(ctx, "FD-001", domain.StageImplement, "review"); err != nil {
+		t.Fatal(err)
+	}
+	eng := engine.New(engine.Config{
+		Agent: agent.NewFake("addressed"), Store: m.store, Worktrees: m.wt,
+		Workspace: m.ws, MaxActive: 1,
+	})
+	t.Cleanup(func() { eng.Close() })
+	m.AttachEngine(eng)
+	m = pump(t, m, m.Init()) // reload rows at the new stage
+
+	m = openDiffFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	for i, l := range m.diff.lines {
+		if l == "+second line" {
+			m.diff.cursor = i + 1
+		}
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "extract this into a helper")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	if m.diff != nil {
+		t.Fatal("request-changes did not close the diff surface")
+	}
+	if !strings.Contains(m.notice.text, "re-running implement") {
+		t.Errorf("notice = %q, want a re-run confirmation", m.notice.text)
+	}
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StageImplement {
+		t.Errorf("stage changed to %s, want implement (no transition)", f.Stage)
+	}
+	settleChat(t, eng)
+	s := eng.Get("FD-001")
+	if s == nil || s.Feature.Stage != domain.StageImplement {
+		t.Fatal("request-changes did not re-run the implement stage")
+	}
+}
+
+func TestOpenDiffCommentBlocksGate(t *testing.T) {
+	// unresolved diff annotations block g (DESIGN §6.1), same as spec
+	// annotations; resolving unblocks.
+	m, _ := diffWorkspace(t) // FD-001 at review with a worktree
+	ctx := context.Background()
+	ann := domain.DiffAnnotation{
+		Feature: "FD-001", File: "README.md",
+		Anchor: "second line", Excerpt: "+second line", Comment: "nit",
+	}
+	id, err := m.store.AddDiffAnnotation(ctx, ann, fixedTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StageReview {
+		t.Fatalf("open diff comment did not block the gate (stage=%s)", f.Stage)
+	}
+	if !strings.Contains(m.notice.text, "diff comment") {
+		t.Errorf("notice = %q, want a blocking message", m.notice.text)
+	}
+
+	if err := m.store.SetDiffAnnotationResolved(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	f, _ = m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StageVerify {
+		t.Fatalf("resolving the diff comment did not unblock the gate (stage=%s)", f.Stage)
 	}
 }
 

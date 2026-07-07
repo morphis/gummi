@@ -21,6 +21,7 @@ import (
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -643,7 +644,8 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 		return nil
 	}
 	switch {
-	case f.Stage == domain.StageBrainstorm || f.Stage == domain.StageSpec:
+	case workflow.Interactive(f.Stage):
+		// brainstorm/spec for features, triage/diagnose for bugs
 		return m.attachChat(f)
 	case autonomousStage(f.Stage):
 		return m.runStage(f)

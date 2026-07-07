@@ -86,6 +86,48 @@ func TestRunRejectsInteractiveViaRunPath(t *testing.T) {
 	}
 }
 
+// selectRow points the board selection at a feature by ID.
+func selectRow(t *testing.T, m *Shell, id domain.FeatureID) {
+	t.Helper()
+	for i, r := range m.rows {
+		if r.F.ID == id {
+			m.sel = i
+			return
+		}
+	}
+	t.Fatalf("row %s not found in %d rows", id, len(m.rows))
+}
+
+func TestBugInteractiveStagesOpenChat(t *testing.T) {
+	// enter on a bug at its interactive stages (triage/diagnose) opens
+	// the gummi chat pane, exactly like brainstorm/spec for features.
+	m, _ := chatWorkspace(t, agent.NewFake("Can you reproduce it?"))
+	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
+	m = typeString(t, m, "Login loops")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	for _, stage := range []domain.Stage{domain.StageTriage, domain.StageDiagnose} {
+		selectRow(t, m, "BG-002")
+		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		if m.rows[m.sel].F.Stage != stage {
+			t.Fatalf("setup: stage = %s, want %s", m.rows[m.sel].F.Stage, stage)
+		}
+		selectRow(t, m, "BG-002")
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if m.chat == nil {
+			t.Fatalf("enter at %s did not open the chat pane (notice: %q)", stage, m.notice.text)
+		}
+		if m.chat.feature != "BG-002" {
+			t.Fatalf("chat bound to %s, want BG-002", m.chat.feature)
+		}
+		s := m.engine.Get("BG-002")
+		if s == nil || !s.Interactive {
+			t.Fatalf("%s did not start an interactive session", stage)
+		}
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach for the next round
+	}
+}
+
 func TestDashboardActivityGolden(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{

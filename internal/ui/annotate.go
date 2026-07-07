@@ -146,3 +146,22 @@ func (m *Shell) openQuestionsBlockingGate(ctx context.Context, f domain.Feature)
 	}
 	return len(userOpenThreads(spec.Parse(string(raw))))
 }
+
+// openDiffCommentsBlockingGate returns the number of unresolved diff
+// annotations on an item — the diff-backend half of DESIGN §6.1's
+// "unresolved annotations block the gate" (openQuestionsBlockingGate is
+// the artifact half). Zero on any store error: like an unreadable
+// artifact, a failed read never wedges the gate shut.
+func (m *Shell) openDiffCommentsBlockingGate(ctx context.Context, id domain.FeatureID) int {
+	anns, err := m.store.ListDiffAnnotations(ctx, id)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, a := range anns {
+		if !a.Resolved {
+			n++
+		}
+	}
+	return n
+}

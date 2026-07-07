@@ -193,6 +193,13 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 				isErr: true,
 			}
 		}
+		// so do unresolved diff annotations, the gate's other backend
+		if n := m.openDiffCommentsBlockingGate(ctx, id); n > 0 {
+			return noticeMsg{
+				text:  fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, n),
+				isErr: true,
+			}
+		}
 		// Crossing from the design phase (todo / interactive) into the first
 		// worktree stage is the approval gate: it creates the worktree and
 		// commits the artifact (spec or bug report) to the branch. Bounces
