@@ -110,6 +110,11 @@ func runBoard() error {
 		notifyMode = notify.ParseMode(v)
 	}
 	shell.SetNotifier(notify.New(notifyMode, os.Stderr))
+	// GUMMI_COPILOT_HINT=off hides the status-bar Copilot quota pill
+	// (on by default; it needs an authenticated gh CLI to show anything).
+	if strings.EqualFold(os.Getenv("GUMMI_COPILOT_HINT"), "off") {
+		shell.SetCopilotHint(false)
+	}
 
 	_, err = tea.NewProgram(shell).Run()
 	return err

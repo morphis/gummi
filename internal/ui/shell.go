@@ -68,6 +68,12 @@ type Shell struct {
 	envelope     int                      // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier         // bell/desktop hook for needs-attention events
 
+	// Copilot quota hint (copilotquota.go): the latest reading shown as
+	// a status-bar pill, its enable flag, and the gh seam for tests.
+	copilot       copilotQuota
+	copilotHint   bool
+	ghCopilotUser func(context.Context) ([]byte, error)
+
 	// shared activity spinner (spinner.go): frame is the current cycle
 	// position; spinning guards the single live tick loop.
 	frame    int
@@ -86,6 +92,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		inbox:        newInbox(),
 		checks:       map[domain.FeatureID][]verify.Result{},
 		reviewRounds: map[domain.FeatureID]int{},
+		copilotHint:  true,
 	}
 }
 
@@ -111,6 +118,10 @@ func (m *Shell) SetEnvelope(credits int) { m.envelope = credits }
 // SetNotifier wires the needs-attention notification hook (bell/desktop).
 func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
 
+// SetCopilotHint toggles the status-bar Copilot quota pill (on by
+// default; it hides itself anyway when gh or a quota is absent).
+func (m *Shell) SetCopilotHint(on bool) { m.copilotHint = on }
+
 // raiseAttention adds a needs-attention item and, when it is a new alert
 // (not an update of an existing one), fires the notification hook.
 func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
@@ -133,6 +144,9 @@ func (m *Shell) Init() tea.Cmd {
 	}
 	if m.engine != nil {
 		cmds = append(cmds, m.listenEngine)
+	}
+	if m.copilotHint {
+		cmds = append(cmds, m.fetchCopilotQuota())
 	}
 	return tea.Batch(cmds...)
 }
@@ -242,6 +256,16 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadRows
 		}
 		return m, nil
+
+	case copilotQuotaMsg:
+		m.copilot = msg.quota
+		if msg.retry {
+			return m, copilotQuotaTick()
+		}
+		return m, nil
+
+	case copilotQuotaTickMsg:
+		return m, m.fetchCopilotQuota()
 
 	case commitDraftMsg:
 		m.drafting = false
@@ -921,6 +945,13 @@ func (m *Shell) statusView(w int) string {
 	}
 	if run := m.runCounts(); run != "" {
 		pills = append(pills, statusbar.Pill{Text: run, Kind: statusbar.KindNeutral})
+	}
+	if m.copilot.ok {
+		kind := statusbar.KindNeutral
+		if m.copilot.low() {
+			kind = statusbar.KindAlert
+		}
+		pills = append(pills, statusbar.Pill{Text: m.copilot.pill(), Kind: kind})
 	}
 	if m.ingestRun != nil {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
