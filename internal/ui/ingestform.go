@@ -57,6 +57,13 @@ func (d *textPromptDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// HandlePaste implements overlay.Paster.
+func (d *textPromptDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	d.input, _ = d.input.Update(msg)
+	d.errText = ""
+	return nil
+}
+
 // View implements overlay.Dialog.
 func (d *textPromptDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
@@ -140,6 +147,16 @@ func (d *ingestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.errText = ""
 	}
 	return false, nil
+}
+
+// HandlePaste implements overlay.Paster: pasted text goes into the
+// path while it's focused.
+func (d *ingestForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	if d.focus == ingestFieldPath {
+		d.path, _ = d.path.Update(msg)
+		d.errText = ""
+	}
+	return nil
 }
 
 func (d *ingestForm) setFocus(f int) {

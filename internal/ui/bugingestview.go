@@ -85,6 +85,18 @@ func (d *bugIngestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// HandlePaste implements overlay.Paster: pasted text goes into the
+// focused field (repo or label).
+func (d *bugIngestForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	switch d.focus {
+	case bugIngestFieldRepo:
+		d.repo, _ = d.repo.Update(msg)
+	case bugIngestFieldLabel:
+		d.label, _ = d.label.Update(msg)
+	}
+	return nil
+}
+
 func (d *bugIngestForm) setFocus(f int) {
 	d.focus = f
 	d.repo.Blur()

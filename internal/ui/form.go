@@ -102,6 +102,16 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// HandlePaste implements overlay.Paster: pasted text goes into the
+// description while it's focused.
+func (d *featureForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	if d.focus == fieldDesc {
+		d.desc, _ = d.desc.Update(msg)
+		d.errText = ""
+	}
+	return nil
+}
+
 func (d *featureForm) setFocus(f int) {
 	d.focus = f
 	if f == fieldDesc {

@@ -339,8 +339,27 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, m.handleKey(msg)
+
+	case tea.PasteMsg:
+		if consumed, cmd := m.Overlay.HandlePaste(msg); consumed {
+			return m, cmd
+		}
+		return m, m.handlePaste(msg)
 	}
 	return m, nil
+}
+
+// handlePaste routes bracketed-paste text to whichever pane input is
+// editing; a paste with no input focused is dropped.
+func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	if m.chat != nil {
+		return m.chat.handlePaste(msg)
+	}
+	if bv := m.bugIngest; bv != nil && bv.filtering {
+		bv.filter, _ = bv.filter.Update(msg)
+		bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
+	}
+	return nil
 }
 
 func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {

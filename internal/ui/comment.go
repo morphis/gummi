@@ -44,6 +44,12 @@ func (d *commentDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// HandlePaste implements overlay.Paster.
+func (d *commentDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	d.input, _ = d.input.Update(msg)
+	return nil
+}
+
 // View implements overlay.Dialog.
 func (d *commentDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder

@@ -80,6 +80,26 @@ func (st *Stack) HandleKey(key tea.KeyPressMsg) (consumed bool, cmd tea.Cmd) {
 	return true, cmd
 }
 
+// Paster is an optional Dialog extension: dialogs hosting a text input
+// implement it to receive bracketed-paste text.
+type Paster interface {
+	HandlePaste(msg tea.PasteMsg) tea.Cmd
+}
+
+// HandlePaste routes pasted text to the top dialog. It returns true
+// whenever a dialog is open — a paste never leaks past a modal, even
+// one with nothing to paste into.
+func (st *Stack) HandlePaste(msg tea.PasteMsg) (consumed bool, cmd tea.Cmd) {
+	top := st.Top()
+	if top == nil {
+		return false, nil
+	}
+	if p, ok := top.(Paster); ok {
+		return true, p.HandlePaste(msg)
+	}
+	return true, nil
+}
+
 // Draw dims the backdrop and paints every open dialog, bottom to top,
 // centered in area.
 func (st *Stack) Draw(scr uv.Screen, area uv.Rectangle, s *theme.Styles) {

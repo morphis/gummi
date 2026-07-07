@@ -249,6 +249,23 @@ func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send, answer str
 	return false, "", "", cmd
 }
 
+// handlePaste inserts bracketed-paste text into the message input.
+// While the option picker is up (and not in free-form) there is no
+// input to paste into, so the paste is dropped.
+func (c *chatPane) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	var ask *engine.Ask
+	if c.session != nil {
+		ask = c.session.Snapshot().PendingAsk
+	}
+	c.syncAsk(ask)
+	if ask != nil && !c.freeForm {
+		return nil
+	}
+	var cmd tea.Cmd
+	c.input, cmd = c.input.Update(msg)
+	return cmd
+}
+
 // handlePickerKey drives the inline option picker for an open ask.
 func (c *chatPane) handlePickerKey(msg tea.KeyPressMsg, ask *engine.Ask) (detach bool, send, answer string, cmd tea.Cmd) {
 	switch msg.String() {
