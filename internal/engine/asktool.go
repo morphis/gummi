@@ -145,7 +145,8 @@ func toolHint(stage domain.Stage) string {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return `You have two gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
-(faster for the user, cheaper); pass spec_anchor to have gummi record
+(faster for the user, cheaper); ask one question at a time (parallel
+ask_user calls are bounced); pass spec_anchor to have gummi record
 the answer into the artifact. spec_annotate: attach an open question to a
 line and let gummi place the %% marker with correct anchoring, instead
 of writing %% lines yourself.`
@@ -188,14 +189,21 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 }
 
 // handleAsk turns an ask_user call into a pending question (blocks the
-// agent's turn until Answer).
+// agent's turn until Answer). One question at a time: a parallel ask_user
+// while another is pending is bounced with an immediate result — letting
+// it displace the pending ask would orphan that call's blocked tool
+// handler, hanging the agent's turn until the session dies.
 func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	ask, err := parseAsk(tc.ID, tc.Args)
 	if err != nil {
 		e.resolveNow(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
 		return
 	}
-	s.setPendingAsk(ask)
+	if !s.trySetPendingAsk(ask) {
+		e.resolveNow(s, tc.ID, "the user is still answering your previous question — "+
+			"ask one question at a time; re-ask this after that answer arrives")
+		return
+	}
 	e.persist(s)
 	// the agent is waiting on the user, not the model; drop the busy spinner
 	s.setBusy(false)

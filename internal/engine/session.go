@@ -364,6 +364,20 @@ func (s *Session) setPendingAsk(a *Ask) {
 	s.pendingAsk = a
 }
 
+// trySetPendingAsk installs a as the open question only when none is
+// pending, reporting whether it was installed. The engine holds one open
+// ask at a time: overwriting would orphan the displaced call's blocked
+// tool handler and hang the agent's turn for good.
+func (s *Session) trySetPendingAsk(a *Ask) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingAsk != nil {
+		return false
+	}
+	s.pendingAsk = a
+	return true
+}
+
 func (s *Session) setVerdict(v string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

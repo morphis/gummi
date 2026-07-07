@@ -102,6 +102,77 @@ func TestAskUserSurfacesAndResolves(t *testing.T) {
 	}
 }
 
+func TestParallelAsksBounceExtras(t *testing.T) {
+	// the model fires two ask_user calls in one turn (parallel tool
+	// calls). The first becomes the pending question; the second must be
+	// bounced with an immediate result — displacing the first would
+	// orphan its blocked tool handler and hang the turn forever.
+	q1 := askArgs(t, Ask{Question: "Persist where?", Options: []AskOption{{Label: "per-device"}, {Label: "synced"}}})
+	q2 := askArgs(t, Ask{Question: "Which theme default?", Options: []AskOption{{Label: "system"}, {Label: "dark"}}})
+	ag := agent.NewFake("")
+	ag.Caps = agent.Capabilities{ClientTools: true, Interrupt: true}
+	first := true
+	ag.Responder = func(_ agent.SessionOpts, _ string) []agent.Event {
+		if first {
+			first = false
+			return []agent.Event{
+				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: q1}},
+				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-2", Name: "ask_user", Args: q2}},
+			}
+		}
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}
+	e := newEngine(t, ag)
+	ctx := context.Background()
+
+	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventQuestion)
+
+	// the first ask is the open question; the second was not allowed to
+	// displace it
+	snap := s.Snapshot()
+	if snap.PendingAsk == nil || snap.PendingAsk.Question != "Persist where?" {
+		t.Fatalf("pending ask = %+v, want the first question", snap.PendingAsk)
+	}
+
+	type resolver interface {
+		Resolved(string) (string, bool)
+	}
+	r, ok := s.agent().(resolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	// the second call was bounced with an immediate result so its handler
+	// never hangs (poll: the pump may still be delivering call-2)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got, done := r.Resolved("call-2"); done {
+			if !strings.Contains(got, "one question at a time") {
+				t.Errorf("second ask bounced with %q, want a one-question-at-a-time nudge", got)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second ask never bounced")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// answering resolves the first call — the one the picker showed
+	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+		t.Fatal(err)
+	}
+	if got, done := r.Resolved("call-1"); !done || got != "per-device" {
+		t.Errorf("first ask resolved with %q done=%v, want per-device", got, done)
+	}
+	if s.Snapshot().PendingAsk != nil {
+		t.Error("pending ask not cleared after answer")
+	}
+}
+
 func TestAskUserCapturesToSpec(t *testing.T) {
 	args := askArgs(t, Ask{
 		Question:   "Persist where?",
