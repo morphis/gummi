@@ -19,3 +19,5 @@
 # copilot CLI logs when dogfooding
 .copilot/
 
+# stray root binary from `go build .`
+/gummi
