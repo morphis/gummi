@@ -46,8 +46,12 @@ const (
 // picker can answer it); spec_annotate is offered to the interactive
 // architect; submit_verdict to the reviewer. The non-blocking tools
 // (annotate, verdict) are gummi-resolved immediately, so they are safe
-// on autonomous stages.
-func stageTools(stage domain.Stage) []agent.ToolDef {
+// on autonomous stages. The plan-critique pass reviews the plan and
+// files findings, so it gets both.
+func stageTools(stage domain.Stage, critique bool) []agent.ToolDef {
+	if critique {
+		return []agent.ToolDef{submitVerdictTool(), specAnnotateTool()}
+	}
 	switch stage {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return []agent.ToolDef{askUserTool(), specAnnotateTool()}
@@ -141,7 +145,15 @@ func submitVerdictTool() agent.ToolDef {
 
 // toolHint tells a client-tool-capable agent which gummi tools this
 // stage offers and when to use them.
-func toolHint(stage domain.Stage) string {
+func toolHint(stage domain.Stage, critique bool) string {
+	if critique {
+		return `You have two gummi tools. spec_annotate: attach each finding to the
+plan line it indicts and let gummi place the %% marker with correct
+anchoring, instead of writing %% lines yourself. submit_verdict: call it
+exactly once at the end of your critique (verdict "pass" or "changes")
+to drive gummi's critique→replan loop, instead of writing a VERDICT:
+line.`
+	}
 	switch stage {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return `You have two gummi tools. ask_user: put a decision to the user as a

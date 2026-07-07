@@ -50,8 +50,12 @@ func interactiveStage(s domain.Stage) bool { return workflow.Interactive(s) }
 // the %% marker grammar — plus its own job and completion gate
 // (DESIGN §3, §5). The workflow is compiled into gummi; so are its
 // conventions. Stating them here keeps sessions from burning turns
-// rediscovering them from the repo's docs.
-func stageHints(f domain.Feature, specPath string) []string {
+// rediscovering them from the repo's docs. critique selects the
+// plan-critique pass: same stage, reviewer's contract and job.
+func stageHints(f domain.Feature, specPath string, critique bool) []string {
+	if critique {
+		return []string{contractHint(f, specPath, agent.RoleReviewer), planCritiqueHint()}
+	}
 	role, _ := roleForStage(f.Stage)
 	hints := []string{contractHint(f, specPath, role)}
 
@@ -125,6 +129,36 @@ guessing.`))
 		hints = append(hints, verifyHint(f.Kind))
 	}
 	return hints
+}
+
+// planCritiqueHint is the plan-critique pass contract: Review's shape
+// transposed to design altitude. It runs fresh-context on the Plan
+// stage after the plan is written, tries to refute the plan before the
+// human approves it, and drives the automatic critique→replan loop
+// with the same verdict grammar as Review.
+func planCritiqueHint() string {
+	return strings.TrimSpace(`
+Stage: Plan critique (autonomous, fresh context). The implementation
+plan was just written into the spec's Implementation notes. Your job is
+to refute it before the user approves it — do not fix it yourself, and
+do not review code (none exists yet). Read the whole spec and judge the
+plan through three lenses:
+  security     — attack surface the approach opens: input handling,
+                 authz, secrets, injection, unsafe defaults
+  correctness  — edge cases, error paths, concurrency, invariants the
+                 plan breaks or forgets
+  completeness — does the plan actually cover the spec's Chosen
+                 approach, and does the Verification plan prove it?
+Write each finding as its own ` + "`%% @reviewer:`" + ` marker anchored to the
+plan line it indicts — one thread per finding, so gummi tracks the
+burn-down. If the Verification plan is missing a check that would catch
+one of your concerns, append that check to the Verification plan
+section. End your final message with a verdict on its own line, exactly
+one of:
+  VERDICT: pass       — plan is sound; ready for the user's approval
+  VERDICT: changes    — serious findings; the plan must be revised
+gummi parses this exact line to drive the automatic critique→replan
+loop; without it the loop stalls.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both

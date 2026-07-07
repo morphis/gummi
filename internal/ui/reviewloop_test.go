@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,6 +118,85 @@ func TestReviewUnclearVerdictEscalates(t *testing.T) {
 	}
 	if m.inbox.len() == 0 {
 		t.Error("unclear verdict did not escalate to the inbox")
+	}
+}
+
+// planAgent scripts the plan-critique loop: the architect writes the
+// plan, and each reviewer (critique) session answers with the next
+// verdict from the list (the last one repeats).
+func planAgent(counter *atomic.Int32, verdicts ...string) *agent.Fake {
+	return verdictAgent(func(opts agent.SessionOpts) string {
+		if !isReview(opts) {
+			return "plan written"
+		}
+		n := int(counter.Add(1)) - 1
+		if n >= len(verdicts) {
+			n = len(verdicts) - 1
+		}
+		return verdicts[n]
+	})
+}
+
+// runPlan advances the feature to Plan, runs it, and drains the
+// critique loop to completion.
+func runPlan(t *testing.T, ag *agent.Fake) *Shell {
+	t.Helper()
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StagePlan)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run plan
+	settleChat(t, eng)
+	return drainEngineLoop(t, m)
+}
+
+func TestPlanCritiqueChangesReplansThenPasses(t *testing.T) {
+	// the critique requests changes once, then passes: plan → critique →
+	// replan → critique → gate, all without leaving the Plan stage.
+	var critiques atomic.Int32
+	m := runPlan(t, planAgent(&critiques, "Missing authz check.\nVERDICT: changes", "Sound.\nVERDICT: pass"))
+
+	if got := critiques.Load(); got != 2 {
+		t.Errorf("critique ran %d times, want 2 (changes → replan → pass)", got)
+	}
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Errorf("critique loop moved the stage to %s", m.rows[0].F.Stage)
+	}
+	if m.planRounds["FD-001"] != 0 {
+		t.Errorf("rounds not reset after pass: %d", m.planRounds["FD-001"])
+	}
+	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnGate {
+		t.Fatalf("clean critique did not raise the approval gate: %+v", m.inbox.list())
+	}
+}
+
+func TestPlanCritiqueEscalatesAfterCap(t *testing.T) {
+	// a critique that never passes stops looping past the cap and hands
+	// the plan to the human.
+	var critiques atomic.Int32
+	m := runPlan(t, planAgent(&critiques, "Still broken.\nVERDICT: changes"))
+
+	if got := critiques.Load(); got != maxPlanRounds+1 {
+		t.Errorf("critique ran %d times, want %d (initial + %d replans)", got, maxPlanRounds+1, maxPlanRounds)
+	}
+	if m.planRounds["FD-001"] != 0 {
+		t.Errorf("rounds not reset after escalation: %d", m.planRounds["FD-001"])
+	}
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Errorf("escalation moved the stage to %s", m.rows[0].F.Stage)
+	}
+	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnGate {
+		t.Fatalf("capped critique did not escalate to the inbox: %+v", m.inbox.list())
+	}
+}
+
+func TestPlanCritiqueUnclearVerdictEscalates(t *testing.T) {
+	var critiques atomic.Int32
+	m := runPlan(t, planAgent(&critiques, "I have concerns."))
+
+	if got := critiques.Load(); got != 1 {
+		t.Errorf("unclear verdict looped: critique ran %d times", got)
+	}
+	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnGate {
+		t.Fatalf("unclear critique verdict did not escalate: %+v", m.inbox.list())
 	}
 }
 

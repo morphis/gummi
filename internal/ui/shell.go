@@ -64,6 +64,7 @@ type Shell struct {
 	inbox        *inbox    // needs-attention queue
 	checks       map[domain.FeatureID][]verify.Result
 	reviewRounds map[domain.FeatureID]int // automatic review→fix→review counter
+	planRounds   map[domain.FeatureID]int // automatic plan→critique→replan counter
 	profileNames []string                 // profile names for the new-feature form
 	envelope     int                      // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier         // bell/desktop hook for needs-attention events
@@ -92,6 +93,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		inbox:        newInbox(),
 		checks:       map[domain.FeatureID][]verify.Result{},
 		reviewRounds: map[domain.FeatureID]int{},
+		planRounds:   map[domain.FeatureID]int{},
 		copilotHint:  true,
 	}
 }
@@ -182,6 +184,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
 		m.reviewRounds[ev.Feature] = 0
+		m.planRounds[ev.Feature] = 0
 		m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
 		m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 	case engine.EventQuestion:

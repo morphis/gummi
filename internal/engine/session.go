@@ -86,6 +86,7 @@ type Snapshot struct {
 	Feature      domain.Feature
 	Role         agent.Role
 	Interactive  bool
+	Critique     bool // this is a plan-critique pass, not the plan writer
 	State        SessionState
 	AgentName    string         // backend running this session ("copilot", "opencode", …)
 	Model        string         // model resolved at spawn (Spend.Model is the reported one)
@@ -106,6 +107,10 @@ type Session struct {
 	Feature     domain.Feature
 	Role        agent.Role
 	Interactive bool
+	// Critique marks the plan-critique pass: a second, fresh-context
+	// session on the Plan stage that reviews the written plan (role:
+	// reviewer) instead of writing it. Set at construction, immutable.
+	Critique bool
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
@@ -146,6 +151,7 @@ func (s *Session) Snapshot() Snapshot {
 		Feature:      s.Feature,
 		Role:         s.Role,
 		Interactive:  s.Interactive,
+		Critique:     s.Critique,
 		State:        s.state,
 		AgentName:    s.agentName,
 		Model:        s.model,

@@ -86,7 +86,19 @@ Stage semantics:
   Gate: you mark the spec **Approved**. gummi commits the spec to the branch.
 - **Plan** *(autonomous or interactive, role: architect)* — line-level
   implementation plan derived from the spec. Gate: your approval (unless
-  the feature was created with the Plan skip flag).
+  the feature was created with the Plan skip flag). Before the gate is
+  raised, a **plan critique** runs: a fresh-context reviewer session
+  (same cross-model property as Review) that tries to refute the plan —
+  security, correctness, completeness — before any implementation
+  tokens are spent. Findings land as `%% @reviewer:` threads anchored
+  to the plan lines they indict, and missing checks are appended to the
+  spec's Verification plan so Verify proves them later. The critique
+  ends with the Review verdict grammar: *pass* raises your approval
+  gate; *changes* bounces to an automatic replan round (capped at 2,
+  then it escalates to you with the findings in the checklist). The
+  loop is invisible to the state machine — the feature never leaves
+  Plan — and it spends from the Plan stage's budget envelope. A feature
+  created with the Plan skip flag skips the critique with it.
 - **Implement** *(autonomous, role: implementer)* — agent works in the
   worktree with the spec + plan as context. Streams progress into the feature
   card. Pauses when it needs input (or on permission requests in `guarded`
@@ -638,7 +650,10 @@ Decided in the design interview (2026-07-03):
 4. **Review loop**: after the implementer addresses findings, a fresh
    review pass triggers automatically, capped (default 2–3 rounds, and
    bounded by the protected budget floor); past the cap it escalates to
-   the human instead of looping.
+   the human instead of looping. The **plan critique** is the same
+   pattern at design altitude: critique→replan, capped at 2 rounds,
+   then the human gate — catching design-level security/correctness
+   flaws before implementation tokens are spent.
 5. **Interactive stages are gummi-native chat** over SDK sessions; raw
    copilot attach is an escape hatch only.
 6. **The endgame is a verified branch.** No PR or merge automation —

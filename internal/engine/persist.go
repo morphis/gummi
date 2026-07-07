@@ -89,10 +89,18 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if !ok {
 			continue
 		}
+		// A plan-stage session persisted with the reviewer role was the
+		// plan-critique pass (the plan writer is the architect); the flag
+		// itself isn't persisted, so recover it from that pairing.
+		critique := f.Stage == domain.StagePlan && snap.Role == string(agent.RoleReviewer)
+		if critique {
+			role = agent.RoleReviewer
+		}
 		s := &Session{
 			Feature:     f,
 			Role:        role,
 			Interactive: interactiveStage(f.Stage),
+			Critique:    critique,
 			state:       restoredState(snap.State),
 			done:        make(chan struct{}),
 		}

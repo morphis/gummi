@@ -49,8 +49,11 @@ bug      BG-NNN   todo → triage → diagnose → fix ────────�
 Brainstorm and Spec (features) and Triage and Diagnose (bugs) are
 interactive — you talk to the architect in gummi's chat pane, and the
 durable artifact is a markdown spec (or bug report) that lives on the
-feature's branch. Plan gets your approval, then Implement/Fix runs
-autonomously in the worktree, streaming activity to the card. Review is
+feature's branch. Plan is critiqued by a fresh-context reviewer
+(security, correctness, completeness) before it reaches your approval
+gate — findings land as `%%` threads in the spec, serious ones trigger
+an automatic replan, capped. Then Implement/Fix runs autonomously in
+the worktree, streaming activity to the card. Review is
 a fresh session with no shared context (ideally a different model), and
 findings bounce the work back automatically, capped before it escalates
 to you. Verify runs the repo's configured checks plus the spec's own

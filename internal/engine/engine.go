@@ -200,7 +200,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	}
 
 	// interactive chat is human-paced: no budget cap.
-	sess, specPath, err := e.newAgentSession(ctx, f, role, 0)
+	sess, specPath, err := e.newAgentSession(ctx, f, role, 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -257,9 +257,30 @@ func (e *Engine) Run(f domain.Feature) error { return e.RunWith(f, "") }
 // "request changes" path for autonomous stages, which have no chat to
 // send a turn to (DESIGN §6.1).
 func (e *Engine) RunWith(f domain.Feature, note string) error {
+	return e.run(f, note, false)
+}
+
+// RunCritique runs the plan-critique pass: a fresh-context reviewer
+// session on the Plan stage that refutes the written plan (security,
+// correctness, completeness) before the human gate, writing findings
+// as %% marker threads and ending with a verdict. It replaces the done
+// plan session like any re-run; the state machine never sees it — the
+// feature stays at Plan throughout.
+func (e *Engine) RunCritique(f domain.Feature) error {
+	if f.Stage != domain.StagePlan {
+		return fmt.Errorf("critique runs on the plan stage, not %s", f.Stage)
+	}
+	return e.run(f, "", true)
+}
+
+// run is the shared autonomous-run path behind RunWith and RunCritique.
+func (e *Engine) run(f domain.Feature, note string, critique bool) error {
 	role, ok := roleForStage(f.Stage)
 	if !ok {
 		return fmt.Errorf("stage %s has no agent action", f.Stage)
+	}
+	if critique {
+		role = agent.RoleReviewer
 	}
 	if interactiveStage(f.Stage) {
 		return fmt.Errorf("stage %s is interactive; use Attach", f.Stage)
@@ -280,7 +301,7 @@ func (e *Engine) RunWith(f domain.Feature, note string) error {
 			return nil // already scheduled
 		}
 	}
-	s := &Session{Feature: f, Role: role, state: StateQueued, done: make(chan struct{}), kickoffNote: note}
+	s := &Session{Feature: f, Role: role, Critique: critique, state: StateQueued, done: make(chan struct{}), kickoffNote: note}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -335,7 +356,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.exhaust(s)
 		return
 	}
-	sess, specPath, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget)
+	sess, specPath, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.Critique)
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -472,13 +493,13 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 // the model/provider chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
 // Session (ask_user answer capture writes there).
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64) (agent.Session, string, error) {
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, critique bool) (agent.Session, string, error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, "", err
 	}
 	model, provider := e.resolveRole(f.Profile, role)
-	hints := stageHints(f, specPath)
+	hints := stageHints(f, specPath, critique)
 	// implementation runs carry any open diff review comments so a fix-up
 	// (bounce from the diff surface's "request changes") addresses each
 	// (DESIGN §6.1). The store is the source of truth, so this reaches
@@ -500,8 +521,8 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// text forms the stage hints already describe).
 	var tools []agent.ToolDef
 	if e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools {
-		tools = stageTools(f.Stage)
-		if h := toolHint(f.Stage); h != "" {
+		tools = stageTools(f.Stage, critique)
+		if h := toolHint(f.Stage, critique); h != "" {
 			hints = append(hints, h)
 		}
 	} else if interactiveStage(f.Stage) {
