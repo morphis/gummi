@@ -65,6 +65,11 @@ type Shell struct {
 	envelope     int                      // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier         // bell/desktop hook for needs-attention events
 
+	// shared activity spinner (spinner.go): frame is the current cycle
+	// position; spinning guards the single live tick loop.
+	frame    int
+	spinning bool
+
 	// now is injectable for deterministic tests.
 	now func() time.Time
 }
@@ -191,8 +196,28 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	return nil
 }
 
-// Update implements tea.Model.
+// Update implements tea.Model. It delegates to update, then keeps the
+// shared spinner clock alive: while anything on screen animates exactly
+// one tick loop runs, and it winds down on the first tick after the
+// last activity stops.
 func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(spinnerTickMsg); ok {
+		if !m.spinnerActive() {
+			m.spinning = false
+			return m, nil
+		}
+		m.frame++
+		return m, spinnerTick()
+	}
+	model, cmd := m.update(msg)
+	if !m.spinning && m.spinnerActive() {
+		m.spinning = true
+		cmd = tea.Batch(cmd, spinnerTick())
+	}
+	return model, cmd
+}
+
+func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -802,7 +827,7 @@ func (m *Shell) sendChat(text string) tea.Cmd {
 
 func (m *Shell) mainView(w, h int) string {
 	if m.chat != nil {
-		return m.chat.view(m.styles, w, h)
+		return m.chat.view(m.styles, w, h, m.spinner())
 	}
 	if m.spec != nil {
 		return m.specViewRender(w, h)
@@ -834,7 +859,7 @@ func (m *Shell) statusView(w int) string {
 		pills = append(pills, statusbar.Pill{Text: run, Kind: statusbar.KindNeutral})
 	}
 	if m.ingestRun != nil {
-		pills = append(pills, statusbar.Pill{Text: "⣾ ingest", Kind: statusbar.KindNeutral})
+		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
 	}
 	if n := m.inbox.len(); n > 0 {
 		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})

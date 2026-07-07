@@ -69,7 +69,7 @@ func (m *Shell) dashboardView(w, h int) string {
 		snap := sess.Snapshot()
 		title := s.Subtitle.Render("activity")
 		if snap.Busy {
-			title += "  " + s.Info.Render("⣾ running")
+			title += "  " + s.Info.Render(m.spinner()+" running")
 		}
 		line(title)
 		if meta := sessionMeta(snap); meta != "" {

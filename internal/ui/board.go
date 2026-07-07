@@ -66,7 +66,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 		switch sess.State() {
 		case engine.StateRunning:
 			if sess.Busy() {
-				glyph = s.Info.Render("⣾")
+				glyph = s.Info.Render(m.spinner())
 			}
 		case engine.StateQueued:
 			glyph = s.Warning.Render("◔")

@@ -49,8 +49,9 @@ func newChatInput() textarea.Model {
 	return in
 }
 
-// view renders the chat pane into the main area.
-func (c *chatPane) view(s *theme.Styles, w, h int) string {
+// view renders the chat pane into the main area. spin is the shell's
+// shared spinner frame for the busy marker.
+func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	snap := c.session.Snapshot()
 	var b strings.Builder
 
@@ -58,7 +59,7 @@ func (c *chatPane) view(s *theme.Styles, w, h int) string {
 		s.Base.Render("· "+string(snap.Feature.Stage)) + "  " +
 		s.ProfileTag.Render("["+string(snap.Role)+"]")
 	if snap.Busy {
-		head += "  " + s.Info.Render("⣾ thinking")
+		head += "  " + s.Info.Render(spin+" thinking")
 	}
 	if c.scroll > 0 {
 		head += "  " + s.Faint.Render("↑ scrolled — pgdn to latest")

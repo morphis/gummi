@@ -65,7 +65,7 @@ func (m *Shell) ingestRunRender(w, h int) string {
 	}
 	var b strings.Builder
 	head := s.Title.Render("ingest") + " " + s.Base.Render("· "+rv.source) +
-		"  " + s.Info.Render("⣾ decomposing")
+		"  " + s.Info.Render(m.spinner()+" decomposing")
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
