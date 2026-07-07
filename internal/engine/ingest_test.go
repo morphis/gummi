@@ -133,6 +133,37 @@ func TestIngestConventionPath(t *testing.T) {
 	assertSampleResult(t, res)
 }
 
+func TestIngestConventionPathStreamedThenCompleted(t *testing.T) {
+	// streaming adapters emit deltas AND the completed message they were
+	// streaming; the collector must treat the message as authoritative
+	// (replacing its deltas) — appending both doubles the fence and the
+	// greedy first-to-last-fence regex then captures garbage. Reasoning
+	// deltas must stay out of the reply text entirely.
+	reply := "Here it is:\n```gummi-propose\n" + sampleProposalJSON + "\n```\n"
+	ag := &agent.Fake{
+		Caps: agent.Capabilities{}, // no client tools → convention fallback
+		Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+			return []agent.Event{
+				{Kind: agent.EventReasoningDelta, Text: "thinking about slices"},
+				{Kind: agent.EventTextDelta, Text: reply[:len(reply)/2]},
+				{Kind: agent.EventTextDelta, Text: reply[len(reply)/2:]},
+				{Kind: agent.EventMessage, Text: reply},
+				{Kind: agent.EventIdle},
+			}
+		},
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	src := writeSource(t, wsRoot{ws.Root}, "streamy.md", "# Spec\nthings\n")
+	res, err := e.Ingest(context.Background(), src, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSampleResult(t, res)
+}
+
 func TestIngestNoProposalIsError(t *testing.T) {
 	ag := &agent.Fake{Reply: "I couldn't find anything to split."}
 	ws, store, wt := newRepo(t)
@@ -214,6 +245,7 @@ func TestIngestReportsProgress(t *testing.T) {
 		Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 			return []agent.Event{
 				{Kind: agent.EventToolCall, Tool: "read prd.md"},
+				{Kind: agent.EventReasoningDelta, Text: "weighing the seams"},
 				{Kind: agent.EventTextDelta, Text: "splitting into vertical slices"},
 				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "c1", Name: ingestToolName, Args: json.RawMessage(sampleProposalJSON)}},
 				{Kind: agent.EventIdle},
@@ -237,13 +269,15 @@ func TestIngestReportsProgress(t *testing.T) {
 	if steps[0].Kind != IngestStepNote || !strings.Contains(steps[0].Text, "architect") {
 		t.Errorf("first step should be the architect-started note, got %+v", steps[0])
 	}
-	var sawTool, sawDelta bool
+	var sawTool, sawDelta, sawThinking bool
 	for _, st := range steps {
 		sawTool = sawTool || (st.Kind == IngestStepTool && st.Text == "read prd.md")
 		sawDelta = sawDelta || (st.Kind == IngestStepDelta && strings.Contains(st.Text, "slices"))
+		sawThinking = sawThinking || (st.Kind == IngestStepDelta && strings.Contains(st.Text, "seams"))
 	}
-	if !sawTool || !sawDelta {
-		t.Errorf("tool/delta steps missing (tool=%v delta=%v): %+v", sawTool, sawDelta, steps)
+	if !sawTool || !sawDelta || !sawThinking {
+		t.Errorf("tool/delta/thinking steps missing (tool=%v delta=%v thinking=%v): %+v",
+			sawTool, sawDelta, sawThinking, steps)
 	}
 	if last := steps[len(steps)-1]; last.Kind != IngestStepNote || !strings.Contains(last.Text, "2 feature(s)") {
 		t.Errorf("last step should be the proposal-received note, got %+v", last)

@@ -75,9 +75,15 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	}
 	c.mu.Unlock()
 
+	// Deltas are opt-in: with Streaming unset the runtime defaults to
+	// non-streaming and assistant.message_delta / assistant.reasoning_delta
+	// events never arrive — sessions would look frozen until the first
+	// complete message.
+	streaming := true
 	cfg := &copilot.SessionConfig{
 		Model:            opts.Model,
 		WorkingDirectory: opts.WorkDir,
+		Streaming:        &streaming,
 	}
 	if len(opts.SystemHints) > 0 {
 		cfg.SystemMessage = &copilot.SystemMessageConfig{
@@ -115,10 +121,12 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	}
 
 	cs := &copilotSession{
-		raw:     make(chan Event, 256),
-		events:  make(chan Event),
-		stop:    make(chan struct{}),
-		pending: map[string]chan string{},
+		raw:          make(chan Event, 256),
+		events:       make(chan Event),
+		stop:         make(chan struct{}),
+		pending:      map[string]chan string{},
+		pendingUsage: map[string]Usage{},
+		meteredCalls: map[string]struct{}{},
 	}
 	// Register gummi's client tools with a handler that surfaces the call
 	// as an event and blocks until the orchestrator resolves it. The
@@ -180,6 +188,60 @@ type copilotSession struct {
 	mu      sync.Mutex
 	closed  bool
 	pending map[string]chan string // client-tool callID → answer channel
+
+	// Fallback metering for streamed BYOK calls, which never get an
+	// AssistantUsageData event (CLI gap): completed messages stash their
+	// per-call token counts here, the authoritative usage event (when it
+	// does come) claims its call, and idle flushes what remains.
+	pendingUsage map[string]Usage    // apiCallID → usage gleaned from messages
+	meteredCalls map[string]struct{} // apiCallIDs already covered by AssistantUsageData
+}
+
+// stashMessageUsage records a completed message's token count as the
+// fallback usage for its API call, unless the authoritative usage event
+// already covered that call. Multiple messages from one call carry the
+// same per-response count, so the latest wins rather than summing.
+func (s *copilotSession) stashMessageUsage(d *copilot.AssistantMessageData) {
+	if d.OutputTokens == nil || d.APICallID == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.meteredCalls[*d.APICallID]; ok {
+		return
+	}
+	u := Usage{OutputTokens: *d.OutputTokens}
+	if d.Model != nil {
+		u.Model = *d.Model
+	}
+	s.pendingUsage[*d.APICallID] = u
+}
+
+// markUsageMetered notes that apiCallID got its authoritative usage
+// event and discards any fallback stashed for it.
+func (s *copilotSession) markUsageMetered(apiCallID *string) {
+	if apiCallID == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.meteredCalls[*apiCallID] = struct{}{}
+	delete(s.pendingUsage, *apiCallID)
+}
+
+// takePendingUsage drains the fallback usage still unclaimed at idle.
+// Both maps reset per turn — usage events always land within their turn,
+// and per-call IDs never repeat, so carrying them over only leaks.
+func (s *copilotSession) takePendingUsage() []Usage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Usage, 0, len(s.pendingUsage))
+	for _, u := range s.pendingUsage {
+		out = append(out, u)
+	}
+	s.pendingUsage = map[string]Usage{}
+	s.meteredCalls = map[string]struct{}{}
+	return out
 }
 
 // toolHandler builds an SDK handler for a client tool: it emits an
@@ -253,13 +315,18 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 	switch d := ev.Data.(type) {
 	case *copilot.AssistantMessageDeltaData:
 		out = Event{Kind: EventTextDelta, Text: d.DeltaContent}
+	case *copilot.AssistantReasoningDeltaData:
+		out = Event{Kind: EventReasoningDelta, Text: d.DeltaContent}
+	case *copilot.ToolExecutionStartData:
+		out = Event{Kind: EventToolCall, Tool: d.ToolName}
 	case *copilot.AssistantMessageData:
 		// Usage is metered from AssistantUsageData (the authoritative
-		// per-call event) only; emitting it here too would double-count
-		// whenever the CLI sends both. Providers that report tokens only
-		// on the message and never send a usage event will undercount —
-		// dedup by APICallID is an M3 (cost) refinement.
+		// per-call event) when the CLI sends one; streamed BYOK calls
+		// don't get one (CLI gap), so the message's own token count is
+		// stashed and flushed at idle for calls still missing theirs —
+		// deduped by APICallID so both paths never double-count.
 		s.emit(Event{Kind: EventMessage, Text: d.Content})
+		s.stashMessageUsage(d)
 		return
 	case *copilot.AssistantUsageData:
 		u := Usage{Model: d.Model}
@@ -272,12 +339,18 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		if d.InputTokens != nil {
 			u.InputTokens = *d.InputTokens
 		}
+		s.markUsageMetered(d.APICallID)
 		out = Event{Kind: EventUsage, Usage: u}
 	case *copilot.SessionUsageInfoData:
 		// the SDK's live context-window occupancy: current tokens vs the
 		// model's limit.
 		out = Event{Kind: EventContext, Context: Context{Tokens: d.CurrentTokens, Limit: d.TokenLimit}}
 	case *copilot.SessionIdleData:
+		// meter calls whose authoritative usage event never came before
+		// reporting idle, so budget accounting sees the whole turn.
+		for _, u := range s.takePendingUsage() {
+			s.emit(Event{Kind: EventUsage, Usage: u})
+		}
 		out = Event{Kind: EventIdle}
 	case *copilot.SessionLimitsExhaustedRequestedData:
 		out = Event{Kind: EventBudgetExhausted, Usage: Usage{Credits: d.UsedAiCredits}}

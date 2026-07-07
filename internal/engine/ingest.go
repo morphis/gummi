@@ -59,7 +59,7 @@ const (
 	// adapter's display label, e.g. "read prd.md").
 	IngestStepTool IngestStepKind = "tool"
 	// IngestStepDelta is an incremental chunk of the architect's
-	// streamed commentary.
+	// streamed commentary (its reply text or its thinking).
 	IngestStepDelta IngestStepKind = "delta"
 	// IngestStepMessage is a completed commentary message (the
 	// authoritative text of what deltas were streaming).
@@ -199,16 +199,27 @@ func uniqueIngestName(dir, base string, content []byte) (string, error) {
 // without client tools, a gummi-propose block in the reply. Each visible
 // step is relayed to emit so the caller can show the pass working.
 func (e *Engine) collectProposal(ctx context.Context, sess agent.Session, emit func(IngestStepKind, string)) (domain.IngestResult, error) {
-	var b strings.Builder
+	var text assistantText
+	thinking := false // the tail of the streamed feed is reasoning
 	for {
 		select {
 		case ev, ok := <-sess.Events():
 			if !ok {
-				return proposalFromText(b.String())
+				return proposalFromText(text.String())
 			}
 			switch ev.Kind {
 			case agent.EventToolCall:
 				emit(IngestStepTool, ev.Tool)
+			case agent.EventReasoningDelta:
+				// thinking is visible progress but never reply text — it
+				// must not end up in the proposal parse. A blank line marks
+				// the switch between reply text and thinking so the two
+				// don't run together in the live feed.
+				if !thinking {
+					thinking = true
+					emit(IngestStepDelta, "\n\n")
+				}
+				emit(IngestStepDelta, ev.Text)
 			case agent.EventClientToolCall:
 				if ev.ToolCall == nil {
 					continue
@@ -226,13 +237,18 @@ func (e *Engine) collectProposal(ctx context.Context, sess agent.Session, emit f
 				resolve(ctx, sess, ev.ToolCall.ID, fmt.Sprintf("received %d features", len(res.Proposals)))
 				return res, nil
 			case agent.EventTextDelta:
-				b.WriteString(ev.Text)
+				if thinking {
+					thinking = false
+					emit(IngestStepDelta, "\n\n")
+				}
+				text.delta(ev.Text)
 				emit(IngestStepDelta, ev.Text)
 			case agent.EventMessage:
-				b.WriteString("\n" + ev.Text)
+				thinking = false
+				text.message(ev.Text)
 				emit(IngestStepMessage, ev.Text)
 			case agent.EventIdle:
-				return proposalFromText(b.String())
+				return proposalFromText(text.String())
 			case agent.EventError:
 				return domain.IngestResult{}, ev.Err
 			}

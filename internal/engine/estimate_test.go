@@ -27,6 +27,51 @@ func TestParseScribeEstimate(t *testing.T) {
 	}
 }
 
+func TestEstimateStreamedReplyNotDoubled(t *testing.T) {
+	// streaming adapters emit deltas and then the completed message they
+	// were streaming; the reply is collected once (message replaces its
+	// deltas) and reasoning stays out of the parse — a number mentioned
+	// while thinking must not become the estimate.
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventReasoningDelta, Text: "hmm, maybe ESTIMATE: 999?"},
+			{Kind: agent.EventTextDelta, Text: "Small change.\nESTIM"},
+			{Kind: agent.EventTextDelta, Text: "ATE: 40"},
+			{Kind: agent.EventMessage, Text: "Small change.\nESTIMATE: 40"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	got, err := e.Estimate(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 40 {
+		t.Errorf("Estimate = %v, want 40", got)
+	}
+
+	// a reply with no estimate stays no-estimate even when the thinking
+	// mentioned a number.
+	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventReasoningDelta, Text: "could be ESTIMATE: 999"},
+			{Kind: agent.EventMessage, Text: "I cannot estimate this."},
+			{Kind: agent.EventIdle},
+		}
+	}
+	got, err = e.Estimate(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("Estimate = %v, want 0 (thinking must not be parsed)", got)
+	}
+}
+
 func TestEstimateRunsScribe(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		if opts.Role != agent.RoleScribe {

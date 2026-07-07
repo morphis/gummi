@@ -699,6 +699,10 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	switch ev.Kind {
 	case agent.EventTextDelta:
 		s.appendDelta(ev.Text)
+	case agent.EventReasoningDelta:
+		// thinking is not transcript text and carries no state change;
+		// relaying it would only emit an EventUpdated per chunk.
+		return
 	case agent.EventMessage:
 		s.finishAssistant(ev.Text)
 		kind = EventMessage

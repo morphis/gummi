@@ -93,7 +93,7 @@ func TestStreaming(t *testing.T) {
 	}
 	var content strings.Builder
 	sc := bufio.NewScanner(resp.Body)
-	sawDone := false
+	sawDone, sawStop, sawUsage := false, false, false
 	for sc.Scan() {
 		line := sc.Text()
 		data, ok := strings.CutPrefix(line, "data: ")
@@ -106,18 +106,36 @@ func TestStreaming(t *testing.T) {
 		}
 		var chunk struct {
 			Choices []struct {
-				Delta map[string]any `json:"delta"`
+				Delta        map[string]any `json:"delta"`
+				FinishReason *string        `json:"finish_reason"`
 			} `json:"choices"`
+			Usage map[string]any `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			t.Fatal(err)
 		}
+		if chunk.Usage != nil {
+			sawUsage = true
+		}
+		// the trailing usage chunk carries no choices
+		if len(chunk.Choices) == 0 {
+			continue
+		}
 		if c, ok := chunk.Choices[0].Delta["content"].(string); ok {
 			content.WriteString(c)
+		}
+		if fr := chunk.Choices[0].FinishReason; fr != nil && *fr == "stop" {
+			sawStop = true
 		}
 	}
 	if !sawDone {
 		t.Error("stream did not terminate with [DONE]")
+	}
+	if !sawStop {
+		t.Error("no finish_reason=stop chunk (consumers refuse to finalize without one)")
+	}
+	if !sawUsage {
+		t.Error("no usage chunk in the stream")
 	}
 	if content.String() != "streamed reply" {
 		t.Errorf("streamed content = %q", content.String())

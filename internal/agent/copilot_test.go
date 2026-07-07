@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	copilot "github.com/github/copilot-sdk/go"
+
 	"github.com/morphis/gummi/internal/agent/fakeopenai"
 )
 
@@ -112,6 +114,102 @@ loop:
 	}
 	if reqs[0].Model != "fake-model" {
 		t.Errorf("provider called with model %q", reqs[0].Model)
+	}
+}
+
+// TestCopilotOnEventMapsStreamingEvents drives onEvent with synthetic
+// SDK events (no CLI needed) and checks the mid-turn events a live view
+// depends on — tool starts, reasoning deltas, text deltas — reach the
+// session stream instead of being dropped.
+func TestCopilotOnEventMapsStreamingEvents(t *testing.T) {
+	s := &copilotSession{raw: make(chan Event, 8), stop: make(chan struct{})}
+	s.onEvent(copilot.SessionEvent{Data: &copilot.ToolExecutionStartData{ToolName: "read"}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantReasoningDeltaData{DeltaContent: "hmm, "}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantMessageDeltaData{DeltaContent: "hello"}})
+
+	want := []Event{
+		{Kind: EventToolCall, Tool: "read"},
+		{Kind: EventReasoningDelta, Text: "hmm, "},
+		{Kind: EventTextDelta, Text: "hello"},
+	}
+	for i, w := range want {
+		select {
+		case got := <-s.raw:
+			if got.Kind != w.Kind || got.Text != w.Text || got.Tool != w.Tool {
+				t.Errorf("event %d = %+v, want %+v", i, got, w)
+			}
+		default:
+			t.Fatalf("event %d (%+v) was dropped", i, w)
+		}
+	}
+}
+
+// TestCopilotUsageFallback verifies per-call metering when the CLI never
+// sends the authoritative usage event (streamed BYOK calls): the
+// completed message's token count is flushed as usage at idle — and NOT
+// when the authoritative event did cover the call.
+func TestCopilotUsageFallback(t *testing.T) {
+	newSess := func() *copilotSession {
+		return &copilotSession{
+			raw:          make(chan Event, 16),
+			stop:         make(chan struct{}),
+			pendingUsage: map[string]Usage{},
+			meteredCalls: map[string]struct{}{},
+		}
+	}
+	drain := func(s *copilotSession) []Event {
+		var out []Event
+		for {
+			select {
+			case e := <-s.raw:
+				out = append(out, e)
+			default:
+				return out
+			}
+		}
+	}
+	toks := int64(42)
+	call := "chatcmpl-1"
+	model := "m"
+
+	// no authoritative usage → the message's count is metered at idle.
+	s := newSess()
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantMessageData{
+		Content: "hi", APICallID: &call, OutputTokens: &toks, Model: &model,
+	}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
+	var usages []Usage
+	var last EventKind
+	for _, e := range drain(s) {
+		if e.Kind == EventUsage {
+			usages = append(usages, e.Usage)
+		}
+		last = e.Kind
+	}
+	if len(usages) != 1 || usages[0].OutputTokens != 42 || usages[0].Model != "m" {
+		t.Errorf("fallback usage = %+v, want one with 42 output tokens", usages)
+	}
+	if last != EventIdle {
+		t.Errorf("last event = %v, want idle after the usage flush", last)
+	}
+
+	// authoritative usage present → exactly one usage event, no fallback.
+	s = newSess()
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantMessageData{
+		Content: "hi", APICallID: &call, OutputTokens: &toks, Model: &model,
+	}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantUsageData{
+		APICallID: &call, OutputTokens: &toks, Model: model,
+	}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
+	usages = nil
+	for _, e := range drain(s) {
+		if e.Kind == EventUsage {
+			usages = append(usages, e.Usage)
+		}
+	}
+	if len(usages) != 1 {
+		t.Errorf("got %d usage events, want exactly 1 (no double-count): %+v", len(usages), usages)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -62,21 +61,21 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 	if err := sess.Send(ctx, estimatePrompt); err != nil {
 		return 0, err
 	}
-	var b strings.Builder
+	var text assistantText
 	for {
 		select {
 		case ev, ok := <-sess.Events():
 			if !ok {
-				v, _ := parseScribeEstimate(b.String())
+				v, _ := parseScribeEstimate(text.String())
 				return v, nil
 			}
 			switch ev.Kind {
 			case agent.EventTextDelta:
-				b.WriteString(ev.Text)
+				text.delta(ev.Text)
 			case agent.EventMessage:
-				b.WriteString("\n" + ev.Text)
+				text.message(ev.Text)
 			case agent.EventIdle:
-				v, _ := parseScribeEstimate(b.String())
+				v, _ := parseScribeEstimate(text.String())
 				return v, nil
 			case agent.EventError:
 				return 0, ev.Err

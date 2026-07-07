@@ -31,6 +31,7 @@ import (
 // agent → gummi, one JSON object per line on stdout:
 //
 //	{"type":"text","text":"…"}      → EventTextDelta
+//	{"type":"reasoning","text":"…"} → EventReasoningDelta
 //	{"type":"message","text":"…"}   → EventMessage
 //	{"type":"tool","name":"…"}      → EventToolCall
 //	{"type":"usage","credits":N,"input":I,"output":O,"model":"…"} → EventUsage
@@ -277,6 +278,8 @@ func decodeHeadless(line []byte) (Event, bool) {
 	switch m.Type {
 	case "text":
 		return Event{Kind: EventTextDelta, Text: m.Text}, true
+	case "reasoning":
+		return Event{Kind: EventReasoningDelta, Text: m.Text}, true
 	case "message":
 		return Event{Kind: EventMessage, Text: m.Text}, true
 	case "tool":

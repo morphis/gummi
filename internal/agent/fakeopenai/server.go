@@ -134,7 +134,9 @@ func (s *Server) completion(model string) map[string]any {
 	}
 }
 
-// streamChat emits a minimal SSE stream: one content delta then [DONE].
+// streamChat emits a minimal SSE stream: role + content deltas, the
+// closing finish_reason chunk (consumers refuse to finalize a stream
+// without one), then [DONE].
 func (s *Server) streamChat(w http.ResponseWriter, model string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -143,19 +145,36 @@ func (s *Server) streamChat(w http.ResponseWriter, model string) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	chunk := func(delta map[string]any) {
+	chunk := func(delta map[string]any, finish any) {
 		payload := map[string]any{
 			"id":      "chatcmpl-fake",
 			"object":  "chat.completion.chunk",
 			"model":   model,
-			"choices": []map[string]any{{"index": 0, "delta": delta}},
+			"choices": []map[string]any{{"index": 0, "delta": delta, "finish_reason": finish}},
 		}
 		b, _ := json.Marshal(payload)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 		flusher.Flush()
 	}
-	chunk(map[string]any{"role": "assistant"})
-	chunk(map[string]any{"content": s.reply})
+	chunk(map[string]any{"role": "assistant"}, nil)
+	chunk(map[string]any{"content": s.reply}, nil)
+	chunk(map[string]any{}, "stop")
+	// streamed usage arrives in a trailing chunk with no choices (the
+	// stream_options.include_usage shape); send it unconditionally so
+	// metering works the same as the non-streaming path.
+	promptToks, replyToks := 8, len(strings.Fields(s.reply))
+	usage, _ := json.Marshal(map[string]any{
+		"id":      "chatcmpl-fake",
+		"object":  "chat.completion.chunk",
+		"model":   model,
+		"choices": []map[string]any{},
+		"usage": map[string]any{
+			"prompt_tokens":     promptToks,
+			"completion_tokens": replyToks,
+			"total_tokens":      promptToks + replyToks,
+		},
+	})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", usage)
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }

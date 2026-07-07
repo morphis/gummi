@@ -163,6 +163,11 @@ type EventKind string
 const (
 	// EventTextDelta is an incremental chunk of assistant text.
 	EventTextDelta EventKind = "text-delta"
+	// EventReasoningDelta is an incremental chunk of the assistant's
+	// reasoning ("thinking"). Display-only live progress: it is never
+	// part of the reply text, so consumers that accumulate a reply must
+	// not collect it.
+	EventReasoningDelta EventKind = "reasoning-delta"
 	// EventMessage is a complete assistant message.
 	EventMessage EventKind = "message"
 	// EventToolCall reports a tool invocation (name in Tool).
