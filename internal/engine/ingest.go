@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -165,7 +166,7 @@ func (e *Engine) stashIngestSource(srcPath string, content []byte) (relPath, abs
 		return "", "", err
 	}
 	dest := filepath.Join(dir, name)
-	if err := os.WriteFile(dest, content, 0o600); err != nil {
+	if err := atomicfile.Write(dest, content, 0o600); err != nil {
 		return "", "", fmt.Errorf("stashing source: %w", err)
 	}
 	return filepath.Join(".gummi", "ingest", name), dest, nil

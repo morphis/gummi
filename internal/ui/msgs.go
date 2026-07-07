@@ -9,7 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/workflow"
@@ -36,6 +38,14 @@ type rowsMsg struct {
 type noticeMsg struct {
 	text  string
 	isErr bool
+}
+
+// chatAttachedMsg carries the result of an interactive Attach that ran in
+// a command (backend spawn is slow); the Update loop opens the pane.
+type chatAttachedMsg struct {
+	feature domain.Feature
+	session *engine.Session
+	err     error
 }
 
 // loadRows reads all features, their histories, and worktree presence.
@@ -148,7 +158,7 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 		if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		if err := os.WriteFile(draft, []byte(content), 0o600); err != nil {
+		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
@@ -365,10 +375,20 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if ok {
-			// force: the branch has landed, so every committed change is
-			// already in main; only disposable untracked artifacts remain,
-			// and a non-force remove would abort on them. The confirm
-			// dialog spells this out.
+			// A "landed" branch can still be topologically indistinguishable
+			// from a fresh one that merely fell behind an advancing main, and
+			// a bounced-back feature may hold uncommitted rework the merged
+			// history doesn't contain. Refuse the force-remove when tracked
+			// files are modified — that's real work not in main — so cleanup
+			// only ever discards untracked build artifacts.
+			if dirty, err := m.wt.TrackedDirty(ctx, &f); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			} else if dirty {
+				return noticeMsg{text: string(f.ID) + " has uncommitted changes on its branch — commit or discard them before cleanup", isErr: true}
+			}
+			// force: only disposable untracked artifacts remain now, and a
+			// non-force remove would abort on them. The confirm dialog spells
+			// this out.
 			if err := m.wt.Remove(ctx, &f, true); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}

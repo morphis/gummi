@@ -103,6 +103,12 @@ type Engine struct {
 	running  int                       // autonomous sessions currently holding slots
 	released map[domain.FeatureID]bool // features whose reserve a top-up released
 	closed   bool
+
+	// persistMu serializes a session save against a delete of the same
+	// feature: it spans persist's finalized-check-and-write and
+	// persistDelete so an in-flight save can't land after the delete and
+	// resurrect a dropped row.
+	persistMu sync.Mutex
 }
 
 // New builds an engine. The caller owns cfg.Agent's lifetime.
@@ -210,10 +216,19 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	// a carried-over transcript means the interview is already underway,
 	// so reattaching stays silent.
 	fresh := len(s.transcript) == 0
-	s.attachAgent(sess)
+	// s is not yet reachable by Pause/Drop/Close (not in e.live), so
+	// attachAgent can't be racing a finalize here; the bool is checked for
+	// symmetry with the autonomous path.
+	if !s.attachAgent(sess) {
+		_ = sess.Close()
+		return nil, errors.New("engine is closed")
+	}
 	s.setState(StateInteractive)
 
-	e.replace(f.ID, s)
+	if !e.replace(f.ID, s) {
+		s.stop() // engine closed during startup: don't leave the agent live
+		return nil, errors.New("engine is closed")
+	}
 	go e.pump(s)
 	var ko string
 	if fresh {
@@ -257,7 +272,10 @@ func (e *Engine) RunWith(f domain.Feature, note string) error {
 	}
 	old := e.live[f.ID]
 	if old != nil {
-		if st := old.state; st == StateRunning || st == StateQueued {
+		// State() takes old.mu (state is written under it from pump
+		// goroutines); the engine's lock order is e.mu → s.mu, so taking it
+		// here while holding e.mu is safe.
+		if st := old.State(); st == StateRunning || st == StateQueued {
 			e.mu.Unlock()
 			return nil // already scheduled
 		}
@@ -289,7 +307,7 @@ func (e *Engine) schedule() {
 		id := e.queue[0]
 		e.queue = e.queue[1:]
 		s := e.live[id]
-		if s == nil || s.state != StateQueued {
+		if s == nil || s.State() != StateQueued {
 			e.mu.Unlock()
 			continue
 		}
@@ -327,7 +345,14 @@ func (e *Engine) startAutonomous(s *Session) {
 	}
 	s.setSpecPath(specPath)
 	s.setBudget(budget)
-	s.attachAgent(sess)
+	// Pause/Drop/Close may have finalized this session while newAgentSession
+	// was spawning the backend (seconds). If so, attachAgent refuses: close
+	// the orphaned agent and free the slot rather than run it unwatched.
+	if !s.attachAgent(sess) {
+		_ = sess.Close()
+		e.freeSlot(s)
+		return
+	}
 	go e.pump(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
 
@@ -353,10 +378,25 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 		}
 	}
 	if err := sess.Send(context.Background(), msg); err != nil {
-		s.setError(err)
-		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
-		e.freeSlot(s)
+		e.failRun(s, err)
 	}
+}
+
+// failRun records an unrecoverable autonomous-run failure: it sets the
+// error, moves the session to paused (so Run can retry it), frees its
+// attention slot, and promotes the queue. Without this a failed run would
+// hold its slot forever — and Run, seeing StateRunning, would treat the
+// feature as still scheduled and silently refuse to retry. Interactive
+// sessions hold no slot and keep their state; freeSlot is a no-op for
+// them. Idempotent via freeSlot's exactly-once latch.
+func (e *Engine) failRun(s *Session, err error) {
+	s.setError(err)
+	if !s.Interactive {
+		s.setState(StatePaused)
+	}
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
+	e.freeSlot(s)
 }
 
 // verifyStageTimeout bounds the gummi-side check run at the Verify stage
@@ -522,8 +562,7 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
 	if err := a.Send(ctx, msg); err != nil {
-		s.setError(err)
-		e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventError, Err: err})
+		e.failRun(s, err)
 		return err
 	}
 	return nil
@@ -595,9 +634,16 @@ func (e *Engine) removeFromQueue(id domain.FeatureID) {
 	}
 }
 
-// replace installs a session for a feature, stopping any prior one.
-func (e *Engine) replace(id domain.FeatureID, s *Session) {
+// replace installs a session for a feature, stopping any prior one. It
+// reports false without installing when the engine has since closed, so a
+// session created concurrently with Close isn't left live (and its agent
+// running) past shutdown — the caller then stops the orphan.
+func (e *Engine) replace(id domain.FeatureID, s *Session) bool {
 	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return false
+	}
 	old := e.live[id]
 	e.removeFromQueue(id)
 	e.live[id] = s
@@ -606,6 +652,7 @@ func (e *Engine) replace(id domain.FeatureID, s *Session) {
 		old.stop()
 		e.freeSlot(old)
 	}
+	return true
 }
 
 // freeSlot releases an autonomous session's attention slot and promotes
@@ -715,10 +762,15 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.setContext(ev.Context)
 	case agent.EventUsage:
 		s.addSpend(ev.Usage)
-		// accumulate the feature's running total across all stages
+		// accumulate the feature's running total across all stages. Persist
+		// the credit-equivalent (not raw credits): a BYOK stage reports
+		// tokens with zero credits, and storing that raw would make its spend
+		// invisible to the credits-denominated rollover once any hosted stage
+		// contributed credits. Hosted events already carry credits, so this
+		// leaves them unchanged and never double-counts.
 		if e.cfg.Persist && e.cfg.Store != nil {
 			_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
-				ev.Usage.Credits, ev.Usage.InputTokens, ev.Usage.OutputTokens)
+				s.creditEquivalent(ev.Usage), ev.Usage.InputTokens, ev.Usage.OutputTokens)
 		}
 		// budget awareness: on crossing a threshold, record a nudge and
 		// signal the UI (DESIGN §5.1 layer 2).
@@ -758,15 +810,17 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			return
 		}
 		kind = EventIdle
-		// an autonomous turn completing frees the slot
-		if !s.Interactive && s.State() == StateRunning {
-			s.setState(StateDone)
+		// an autonomous turn completing frees the slot (atomically, so a
+		// racing Pause isn't overwritten)
+		if !s.Interactive && s.finishRunning() {
 			e.freeSlot(s)
 		}
 	case agent.EventError:
-		s.setError(ev.Err)
-		e.persist(s)
-		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: ev.Err})
+		// a terminal error ends the turn with no trailing idle (the
+		// opencode/copilot failure paths emit only this), so recover the
+		// slot and mark the run failed here — otherwise it wedges the
+		// scheduler and Run refuses to retry the feature.
+		e.failRun(s, ev.Err)
 		return
 	}
 	// persist once per turn, at idle (which follows the finalized

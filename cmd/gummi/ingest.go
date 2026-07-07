@@ -81,9 +81,9 @@ func runIngest(args []string) error {
 	res, err := eng.Ingest(ctx, source, prof, func(st engine.IngestStep) {
 		switch st.Kind {
 		case engine.IngestStepNote:
-			fmt.Printf("  · %s\n", st.Text)
+			fmt.Printf("  · %s\n", clean(st.Text))
 		case engine.IngestStepTool:
-			fmt.Printf("  ✓ %s\n", st.Text)
+			fmt.Printf("  ✓ %s\n", clean(st.Text))
 		}
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func runIngest(args []string) error {
 
 	created, err := eng.Materialize(ctx, res, engine.MaterializeOpts{Profile: prof, Envelope: env})
 	for _, f := range created {
-		fmt.Printf("  %s  %s\n", f.ID, f.Title)
+		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))
 	}
 	if err != nil {
 		return fmt.Errorf("materialize (created %d before failing): %w", len(created), err)
@@ -126,15 +126,15 @@ func cmpOrDefault(s string) string {
 func renderProposal(w io.Writer, res domain.IngestResult) {
 	fmt.Fprintf(w, "\nProposed %d feature(s):\n", len(res.Proposals))
 	for i, p := range res.Proposals {
-		fmt.Fprintf(w, "\n  %2d. %s\n", i+1, p.Title)
+		fmt.Fprintf(w, "\n  %2d. %s\n", i+1, clean(p.Title))
 		if p.OneLiner != "" {
-			fmt.Fprintf(w, "      %s\n", p.OneLiner)
+			fmt.Fprintf(w, "      %s\n", clean(p.OneLiner))
 		}
 		if len(p.SourceRefs) > 0 {
-			fmt.Fprintf(w, "      from: %s\n", strings.Join(p.SourceRefs, ", "))
+			fmt.Fprintf(w, "      from: %s\n", clean(strings.Join(p.SourceRefs, ", ")))
 		}
 		if len(p.DependsOn) > 0 {
-			fmt.Fprintf(w, "      needs: %s\n", strings.Join(p.DependsOn, ", "))
+			fmt.Fprintf(w, "      needs: %s\n", clean(strings.Join(p.DependsOn, ", ")))
 		}
 		var tags []string
 		if p.Skip.Brainstorm {

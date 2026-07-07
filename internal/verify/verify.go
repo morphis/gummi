@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/morphis/gummi/internal/config"
@@ -59,6 +60,20 @@ func runOne(ctx context.Context, workDir string, ch config.Check) Result {
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
+	// Run the check in its own process group and kill the whole group on
+	// cancel/timeout: a compound check ("go build && go test") forks
+	// children, and killing only sh would leave them running, holding the
+	// output pipe open so cmd.Run would block on Wait forever — defeating
+	// the timeout both callers rely on. WaitDelay force-closes the pipes if a
+	// child lingers past the kill so Wait itself can't hang.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 2 * time.Second
 	err := cmd.Run()
 
 	res := Result{

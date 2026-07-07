@@ -96,6 +96,8 @@ func TestResolvedDetection(t *testing.T) {
 		"%% resolved ordering still unclear?": false,
 		"%% @a: unresolved worry":             false,
 		"%% is this resolved?":                false,
+		"%% @a: resolved-ish, still broken":   false, // hyphen joins a word, not a separator
+		"%% resolvedness unclear":             false,
 	}
 	for line, want := range cases {
 		d := Parse("anchor\n" + line)

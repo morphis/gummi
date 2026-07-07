@@ -78,7 +78,8 @@ func diffLineStyle(m *Shell, line string) string {
 func (dv *diffView) renderRead(m *Shell, w, h int) string {
 	var b strings.Builder
 	visible := max(h, 3)
-	off := min(dv.offset, max(len(dv.lines)-visible, 0))
+	dv.maxOffset = max(len(dv.lines)-visible, 0)
+	off := min(dv.offset, dv.maxOffset)
 	end := min(off+visible, len(dv.lines))
 	for i := off; i < end; i++ {
 		line := diffCell(dv.lines[i], w-1)
@@ -94,13 +95,17 @@ func (dv *diffView) renderRead(m *Shell, w, h int) string {
 // on annotated lines, the annotation blocks, and the line cursor.
 func (dv *diffView) renderAnnotate(m *Shell, w, h int) string {
 	s := m.styles
-	total := len(dv.lines)
-	visible := max(h, 3)
-	off := min(max(dv.cursor-1-(visible-1)/2, 0), max(total-visible, 0))
-	numW := len(strconv.Itoa(total))
-	var b strings.Builder
-	end := min(off+visible, total)
-	for i := off; i < end; i++ {
+	numW := len(strconv.Itoa(len(dv.lines)))
+	// Build every display line — each source line plus the annotation
+	// block(s) beneath it — and note where the cursor line lands. The
+	// window is then taken over these *rendered* lines, so the interleaved
+	// annotation blocks are counted in the height budget; the old math
+	// counted source lines only and let annotations push the cursor (and
+	// the bottom rows) off the clipped pane.
+	var rendered []string
+	cursorIdx := 0
+	push := func(str string) { rendered = append(rendered, strings.Split(str, "\n")...) }
+	for i := range dv.lines {
 		n := i + 1
 		num := fmt.Sprintf("%*d", numW, n)
 		gutter := " "
@@ -108,27 +113,32 @@ func (dv *diffView) renderAnnotate(m *Shell, w, h int) string {
 			gutter = s.Warning.Render("▍")
 		}
 		content := diffLineStyle(m, diffCell(dv.lines[i], w-numW-3))
-		var lineStr string
 		if n == dv.cursor {
-			lineStr = s.Cursor.Render("▸") + s.Selection.Render(num) + gutter + " " + content
+			cursorIdx = len(rendered)
+			push(s.Cursor.Render("▸") + s.Selection.Render(num) + gutter + " " + content)
 		} else {
-			lineStr = " " + s.Faint.Render(num) + gutter + " " + content
+			push(" " + s.Faint.Render(num) + gutter + " " + content)
 		}
-		b.WriteString(lineStr + "\n")
-		// annotation block(s) under the line
 		for _, ai := range dv.located[i] {
-			b.WriteString(dv.annBlock(m, dv.anns[ai], numW) + "\n")
+			push(dv.annBlock(m, dv.anns[ai], numW))
 		}
 	}
 	// orphaned annotations degrade to a footer, grouped by file
+	var footer []string
 	if len(dv.orphans) > 0 {
-		b.WriteString("\n" + s.Faint.Render("orphaned (line changed since comment):") + "\n")
+		footer = append(footer, "", s.Faint.Render("orphaned (line changed since comment):"))
 		for _, oi := range dv.orphans {
 			a := dv.anns[oi]
-			b.WriteString(dv.annBlock(m, a, numW) + s.Faint.Render(" — "+sanitize(a.File)) + "\n")
+			footer = append(footer, strings.Split(dv.annBlock(m, a, numW)+s.Faint.Render(" — "+sanitize(a.File)), "\n")...)
 		}
 	}
-	return strings.TrimRight(b.String(), "\n")
+	// Window the main content to keep the cursor visible, then append as
+	// much of the orphan footer as still fits.
+	win := append([]string(nil), windowLines(rendered, cursorIdx, h)...)
+	if room := h - len(win); room > 0 && len(footer) > 0 {
+		win = append(win, footer[:min(room, len(footer))]...)
+	}
+	return strings.Join(win, "\n")
 }
 
 // annBlock renders one annotation as an indented, tinted comment.

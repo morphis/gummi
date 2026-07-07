@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -179,13 +178,24 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 			stageBudget = b
 		}
 	}
+	// Honor the repo's permission mode from config.yaml. Without this the
+	// parsed value was inert and "permissions: guarded" silently ran allow-all.
+	perm := agent.PermissionAllowAll
+	if cfg, err := config.Load(ws.ConfigFile()); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+	} else if cfg.Guarded() {
+		perm = agent.PermissionGuarded
+	}
 	eng := engine.New(engine.Config{
 		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
 		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
-		Profiles: profiles, StageBudget: stageBudget,
+		Profiles: profiles, StageBudget: stageBudget, Permission: perm,
 	})
+	// Names() already orders the declared default first (the rest sorted) so
+	// index 0 is the intended default for the forms and the CLI --profile
+	// fallback. Re-sorting alphabetically here would silently pick the wrong
+	// default (e.g. "premium" ahead of the configured "thrifty").
 	names := profiles.Names()
-	sort.Strings(names)
 	return eng, ag, names
 }
 

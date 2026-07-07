@@ -360,6 +360,16 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case chatAttachedMsg:
+		// the attach ran in a command (spawning the backend can take
+		// seconds); open the pane now, on the Update goroutine.
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		m.chat = newChatPane(msg.feature.ID, msg.session)
+		return m, nil
+
 	case tea.KeyPressMsg:
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
 			return m, cmd
@@ -670,15 +680,15 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 }
 
 // attachChat opens the interactive chat pane for a feature, starting
-// (or reusing) its engine session.
+// (or reusing) its engine session. Attach spawns the agent backend, which
+// can take seconds, so it runs in a command (never in Update — see the
+// no-IO-in-Update contract above); the pane opens when chatAttachedMsg
+// lands.
 func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
-	s, err := m.engine.Attach(context.Background(), f)
-	if err != nil {
-		m.notice = noticeMsg{text: err.Error(), isErr: true}
-		return nil
+	return func() tea.Msg {
+		s, err := m.engine.Attach(context.Background(), f)
+		return chatAttachedMsg{feature: f, session: s, err: err}
 	}
-	m.chat = newChatPane(f.ID, s)
-	return nil
 }
 
 // runStage enqueues an autonomous run for a feature's stage; the engine
@@ -697,12 +707,14 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 			return nil
 		}
 	}
-	if err := m.engine.Run(f); err != nil {
-		m.notice = noticeMsg{text: err.Error(), isErr: true}
-		return nil
+	// Run schedules and spawns the backend synchronously; do it in a command
+	// so a slow agent launch can't freeze the TUI.
+	return func() tea.Msg {
+		if err := m.engine.Run(f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + " queued"}
 	}
-	m.notice = noticeMsg{text: string(f.ID) + " queued"}
-	return nil
 }
 
 // pauseRun stops a feature's autonomous session, freeing its slot.
@@ -711,12 +723,13 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 	if s == nil || s.Interactive {
 		return nil
 	}
-	if err := m.engine.Pause(context.Background(), f.ID); err != nil {
-		m.notice = noticeMsg{text: err.Error(), isErr: true}
-		return nil
+	// Pause interrupts the agent (IPC/network); run it in a command.
+	return func() tea.Msg {
+		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + " paused"}
 	}
-	m.notice = noticeMsg{text: string(f.ID) + " paused"}
-	return nil
 }
 
 // sessionFor returns the engine session bound to a feature, or nil.

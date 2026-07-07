@@ -14,6 +14,7 @@ import (
 	gstyles "charm.land/glamour/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 )
@@ -29,6 +30,11 @@ type specView struct {
 	annotate bool
 	cursor   int // 1-based source line (annotate mode)
 	offset   int // scroll offset (both modes)
+	// maxOffset is the largest useful read-mode offset, derived from the
+	// wrapped render (which only the renderer knows) and cached each frame
+	// so key handling can clamp to it instead of over-scrolling into a run
+	// of dead keypresses at the bottom.
+	maxOffset int
 }
 
 // specLoadedMsg delivers a (re)loaded spec document.
@@ -90,13 +96,23 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 		return nil
 	}
 	reload := m.reloadSpec()
+	path := sv.path
 	return func() tea.Msg {
 		date := m.now().Format("2006-01-02")
-		out, err := spec.AddComment(sv.content, line, "user", date, text)
+		// Serialize against the engine's annotate/answer-capture writers and
+		// re-read the current file (not the load-time copy) under the lock, so
+		// a concurrent marker isn't clobbered; write atomically.
+		unlock := spec.LockFile(path)
+		defer unlock()
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		if err := os.WriteFile(sv.path, []byte(out), 0o600); err != nil {
+		out, err := spec.AddComment(string(raw), line, "user", date, text)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
@@ -175,13 +191,13 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	if !sv.annotate {
 		switch key {
 		case "j", "down":
-			// loose upper bound (render clamps precisely per width);
-			// ×2 leaves room for glamour's wrapping to add lines
-			sv.offset = min(sv.offset+1, len(sv.doc.Lines)*2)
+			// clamp to the last render's real maximum so scrolling stops at
+			// the bottom instead of running into dead keypresses
+			sv.offset = min(sv.offset+1, sv.scrollMax())
 		case "k", "up":
 			sv.offset = max(sv.offset-1, 0)
 		case "pgdown":
-			sv.offset = min(sv.offset+m.mainPage(), len(sv.doc.Lines)*2)
+			sv.offset = min(sv.offset+m.mainPage(), sv.scrollMax())
 		case "pgup":
 			sv.offset = max(sv.offset-m.mainPage(), 0)
 		}
@@ -211,6 +227,15 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 
 func (sv *specView) setCursor(n int) {
 	sv.cursor = min(max(n, 1), len(sv.doc.Lines))
+}
+
+// scrollMax is the largest read-mode offset the last render allowed. Before
+// the first render it falls back to a loose bound so scrolling still works.
+func (sv *specView) scrollMax() int {
+	if sv.maxOffset > 0 {
+		return sv.maxOffset
+	}
+	return len(sv.doc.Lines)
 }
 
 // jumpMarker moves the cursor to the next/previous marker line.
@@ -299,8 +324,11 @@ func (sv *specView) renderRead(m *Shell, w, h int) string {
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	used := strings.Count(b.String(), "\n")
 	visible := max(h-used, 3)
-	// clamp locally — render must not mutate the stored offset
-	off := min(sv.offset, max(len(lines)-visible, 0))
+	// clamp locally — render must not mutate the stored offset — but cache
+	// the real maximum so key handling can bound scrolling to it.
+	maxOff := max(len(lines)-visible, 0)
+	sv.maxOffset = maxOff
+	off := min(sv.offset, maxOff)
 	end := min(off+visible, len(lines))
 	b.WriteString(strings.Join(lines[off:end], "\n"))
 	return b.String()

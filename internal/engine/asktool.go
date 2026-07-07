@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 )
@@ -222,6 +223,11 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 		return
 	}
 	path := s.SpecPath()
+	// Serialize the full read → annotate → write against the UI comment path
+	// and the answer-capture path, which touch the same file; and write
+	// atomically so a crash can't tear the artifact.
+	unlock := spec.LockFile(path)
+	defer unlock()
 	raw, err := os.ReadFile(path) //nolint:gosec // gummi-owned spec path
 	if err != nil {
 		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
@@ -237,7 +243,7 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, "could not annotate: "+err.Error())
 		return
 	}
-	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+	if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 		e.resolveNow(s, tc.ID, "could not write the spec: "+err.Error())
 		return
 	}
@@ -353,7 +359,7 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 	}
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
-		s.setPendingAsk(ask) // keep the question open; nothing was chosen
+		s.trySetPendingAsk(ask) // keep it open; don't clobber a newer ask
 		return fmt.Errorf("empty answer")
 	}
 
@@ -370,7 +376,14 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 	// deliver the answer as a normal turn (the convention path).
 	a := s.agent()
 	if r, ok := a.(agent.ToolResolver); ok && ask.CallID != "" {
-		return r.Resolve(ctx, ask.CallID, answer)
+		if err := r.Resolve(ctx, ask.CallID, answer); err != nil {
+			// Resolve failed: restore the question so the user can retry,
+			// rather than leaving the agent's blocked tool call orphaned to
+			// hang the turn. trySet avoids clobbering a newer ask.
+			s.trySetPendingAsk(ask)
+			return err
+		}
+		return nil
 	}
 	return e.Send(ctx, id, answer)
 }
@@ -388,6 +401,8 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	if path == "" {
 		return ""
 	}
+	unlock := spec.LockFile(path)
+	defer unlock()
 	raw, err := os.ReadFile(path) //nolint:gosec // gummi-owned spec path
 	if err != nil {
 		return "spec capture skipped: " + err.Error()
@@ -400,7 +415,7 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	if err != nil {
 		return "spec capture skipped: " + err.Error()
 	}
-	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+	if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 		return "spec capture failed: " + err.Error()
 	}
 	return "recorded your answer in the spec"

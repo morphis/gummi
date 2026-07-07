@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -182,10 +183,22 @@ func (m *Manager) CommitFile(ctx context.Context, f *domain.Feature, relPath, co
 	if dest != p && !strings.HasPrefix(dest, p+string(filepath.Separator)) {
 		return fmt.Errorf("refusing to write %s: escapes worktree %s", relPath, p)
 	}
+	// The lexical check above is not enough: a hostile repo can commit an
+	// intermediate path component (e.g. .gummi/specs) as a symlink, which
+	// `worktree add` checks out, so the resolved destination escapes the
+	// worktree. Verify the deepest existing ancestor resolves back inside
+	// the worktree before creating or writing anything through it.
+	if err := ensureContained(p, dest); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return err
 	}
-	if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
+	// Atomic write: a rename replaces a symlink sitting at dest rather than
+	// following it to write outside the repo (the case where git would
+	// otherwise stage nothing and this would falsely report success), and it
+	// never leaves a torn file.
+	if err := atomicfile.Write(dest, []byte(content), 0o600); err != nil {
 		return err
 	}
 	if _, err := runGit(ctx, p, "add", "--", dest); err != nil {
@@ -201,6 +214,38 @@ func (m *Manager) CommitFile(ctx context.Context, f *domain.Feature, relPath, co
 	}
 	if _, err := runGit(ctx, p, "commit", "-m", message, "--", dest); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ensureContained verifies that dest, once existing symlinks are resolved,
+// still lives inside root. It resolves the deepest already-existing
+// ancestor of dest (any symlinked component in the chain is dereferenced
+// there) and checks its real path against root's real path. This catches a
+// committed symlink anywhere along the path that would divert the write
+// outside the worktree.
+func ensureContained(root, dest string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	anc := dest
+	for {
+		if _, err := os.Lstat(anc); err == nil {
+			break
+		}
+		parent := filepath.Dir(anc)
+		if parent == anc {
+			break
+		}
+		anc = parent
+	}
+	realAnc, err := filepath.EvalSymlinks(anc)
+	if err != nil {
+		return err
+	}
+	if realAnc != realRoot && !strings.HasPrefix(realAnc, realRoot+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to write %s: resolves outside worktree %s", dest, root)
 	}
 	return nil
 }
@@ -251,6 +296,23 @@ func (m *Manager) Dirty(ctx context.Context, f *domain.Feature) (bool, error) {
 		return false, err
 	}
 	return out != "", nil
+}
+
+// TrackedDirty reports whether the worktree has uncommitted changes to
+// tracked files (staged or unstaged), ignoring untracked files. This is the
+// signal that force-removing the worktree would lose real work: untracked
+// files are the disposable build artifacts a landed-branch cleanup is meant
+// to discard, but modified tracked files are rework that isn't in main.
+func (m *Manager) TrackedDirty(ctx context.Context, f *domain.Feature) (bool, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	out, err := runGit(ctx, p, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // Landed reports whether the feature branch has merged into main, by

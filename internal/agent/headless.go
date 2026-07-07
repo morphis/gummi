@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -117,6 +119,21 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	// Copilot CLI, which takes a scrubbed allowlist — this passes the whole
 	// environment; the command is trusted operator config, not repo input.
 	cmd.Env = os.Environ()
+	// Run the child in its own process group and, on cancel/close, kill the
+	// whole group: an agent binary spawns tool subprocesses (bash, editors)
+	// that would otherwise orphan and keep the stdout pipe open, stalling
+	// read()'s EOF and burning Close's readDone timeout. WaitDelay force-
+	// closes the pipes if a grandchild lingers so Wait can't hang.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 2 * time.Second
+	stderr := &capWriter{max: 8 << 10}
+	cmd.Stderr = stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -136,6 +153,7 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		cmd:      cmd,
 		cancel:   cancel,
 		stdin:    stdin,
+		stderr:   stderr,
 		raw:      make(chan Event, 16),
 		events:   make(chan Event),
 		stop:     make(chan struct{}),
@@ -192,6 +210,7 @@ type headlessSession struct {
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
 	stdin  io.WriteCloser
+	stderr *capWriter // bounded tail of the child's stderr, for crash diagnostics
 
 	raw      chan Event
 	events   chan Event
@@ -200,6 +219,53 @@ type headlessSession struct {
 
 	wmu       sync.Mutex // serializes writes to stdin
 	closeOnce sync.Once
+	waitOnce  sync.Once // guards the single cmd.Wait() shared by read() and Close()
+	waitErr   error
+}
+
+// reap waits for the child exactly once (read() reaps a self-exited child;
+// Close reaps a killed one) and caches the exit status. Wait is safe here
+// because the only stdout reader — read() — is done before either caller
+// reaches it.
+func (s *headlessSession) reap() error {
+	s.waitOnce.Do(func() { s.waitErr = s.cmd.Wait() })
+	return s.waitErr
+}
+
+// stopping reports whether Close has begun tearing the session down, so a
+// kill-induced stdout EOF isn't misreported as a child crash.
+func (s *headlessSession) stopping() bool {
+	select {
+	case <-s.stop:
+		return true
+	default:
+		return false
+	}
+}
+
+// capWriter keeps at most the last max bytes written — a bounded tail of a
+// subprocess's stderr, enough to carry a panic/exit message without letting
+// a chatty child grow memory without bound.
+type capWriter struct {
+	mu  sync.Mutex
+	buf []byte
+	max int
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.max {
+		w.buf = append([]byte(nil), w.buf[len(w.buf)-w.max:]...)
+	}
+	return len(p), nil
+}
+
+func (w *capWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return string(w.buf)
 }
 
 func (s *headlessSession) Events() <-chan Event { return s.events }
@@ -244,11 +310,22 @@ func (s *headlessSession) read(stdout io.Reader) {
 			return
 		}
 	}
-	// stdout closed: the turn/session ended. Surface a scan error, else
-	// treat a clean EOF as idle so the orchestrator isn't left hanging.
+	// stdout closed: the child exited (a per-turn end is an explicit "idle"
+	// frame, not EOF — so EOF means the process is gone). Reap it for the
+	// exit status and diagnose: a scan error or a non-zero exit is a failed
+	// turn, not a finished one. Without this a child that panics or exits
+	// non-zero mid-turn produces a clean EOF that would be reported as a
+	// successful idle, and the orchestrator would advance on garbage output.
+	waitErr := s.reap()
 	final := Event{Kind: EventIdle}
 	if err := sc.Err(); err != nil {
 		final = Event{Kind: EventError, Err: fmt.Errorf("headless agent stream: %w", err)}
+	} else if waitErr != nil && !s.stopping() {
+		detail := strings.TrimSpace(s.stderr.String())
+		if detail == "" {
+			detail = waitErr.Error()
+		}
+		final = Event{Kind: EventError, Err: fmt.Errorf("headless agent exited abnormally: %s", detail)}
 	}
 	select {
 	case s.raw <- final:
@@ -299,14 +376,27 @@ func decodeHeadless(line []byte) (Event, bool) {
 	}
 }
 
+// headlessWriteTimeout bounds a single stdin write. A well-behaved child
+// always drains stdin promptly (the protocol is asynchronous), so this only
+// trips when the child has wedged — in which case a write that blocked
+// forever would hang the caller, including the pump goroutine's budget-stop
+// Interrupt. Failing the write instead lets teardown proceed.
+const headlessWriteTimeout = 10 * time.Second
+
 func (s *headlessSession) write(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
+	b = append(b, '\n')
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	if _, err := s.stdin.Write(append(b, '\n')); err != nil {
+	// The stdin pipe is an *os.File and supports write deadlines; bound the
+	// write so a child that stopped reading can't block us indefinitely.
+	if f, ok := s.stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = f.SetWriteDeadline(time.Now().Add(headlessWriteTimeout))
+	}
+	if _, err := s.stdin.Write(b); err != nil {
 		return err
 	}
 	return nil
@@ -338,7 +428,7 @@ func (s *headlessSession) Close() error {
 		case <-s.readDone:
 		case <-time.After(3 * time.Second):
 		}
-		_ = s.cmd.Wait() // reap
+		_ = s.reap() // reap (read() may already have)
 	})
 	return nil
 }

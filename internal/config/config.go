@@ -48,8 +48,18 @@ func Load(path string) (Config, error) {
 			c.Checks[i].Name = ch.Cmd
 		}
 	}
+	switch c.Permissions {
+	case "", "allow-all", "guarded":
+	default:
+		return Config{}, fmt.Errorf("%s: permissions must be \"allow-all\" or \"guarded\", got %q", path, c.Permissions)
+	}
 	return c, nil
 }
+
+// Guarded reports whether the config selects guarded permission mode
+// (agents' tool calls require approval). The default (empty or "allow-all")
+// is not guarded.
+func (c Config) Guarded() bool { return c.Permissions == "guarded" }
 
 // Template is the starter config.yaml written by `gummi init`. The
 // checks are commented out: a repo opts in explicitly, and until it

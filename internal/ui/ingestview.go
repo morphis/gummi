@@ -312,6 +312,7 @@ func (m *Shell) ingestViewRender(w, h int) string {
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
 	numW := len(fmt.Sprintf("%d", len(iv.props)))
+	rows := make([]string, len(iv.props))
 	for i, ip := range iv.props {
 		marker := "  "
 		title := ip.p.Title
@@ -329,16 +330,25 @@ func (m *Shell) ingestViewRender(w, h int) string {
 		num := s.Faint.Render(fmt.Sprintf("%*d.", numW, i+1))
 		line := marker + num + " " + style.Render(ansi.Truncate(title, max(w-numW-6, 8), "…"))
 		line += "  " + s.Faint.Render(proposalTags(ip.p))
+		rows[i] = line
+	}
+
+	// Render the detail and coverage first so the list can be windowed to
+	// whatever height is left — otherwise a long list pushes the selected
+	// row and the detail block off the bottom of the clipped pane.
+	var tail strings.Builder
+	if iv.cursor < len(iv.props) {
+		tail.WriteString("\n" + iv.renderDetail(s, w))
+	}
+	tail.WriteString("\n" + iv.renderCoverage(s, w))
+	tailLines := strings.Count(tail.String(), "\n") + 1
+
+	const headerLines = 3 // leading blank, head, separator
+	listBudget := max(h-headerLines-tailLines, 3)
+	for _, line := range windowLines(rows, iv.cursor, listBudget) {
 		b.WriteString(line + "\n")
 	}
-
-	// details for the cursor proposal
-	if iv.cursor < len(iv.props) {
-		b.WriteString("\n")
-		b.WriteString(iv.renderDetail(s, w))
-	}
-
-	b.WriteString("\n" + iv.renderCoverage(s, w))
+	b.WriteString(tail.String())
 
 	return clipLines(b.String(), h)
 }
@@ -456,4 +466,21 @@ func clipLines(s string, h int) string {
 		return s
 	}
 	return strings.Join(lines[:h], "\n")
+}
+
+// windowLines returns at most h entries from lines, scrolled so the entry at
+// cursor stays visible. Without this a selection past the fold would be
+// acted on while off-screen. Returns lines unchanged when it already fits.
+func windowLines(lines []string, cursor, h int) []string {
+	if h <= 0 || len(lines) <= h {
+		return lines
+	}
+	off := cursor - (h-1)/2
+	if off < 0 {
+		off = 0
+	}
+	if off > len(lines)-h {
+		off = len(lines) - h
+	}
+	return lines[off : off+h]
 }

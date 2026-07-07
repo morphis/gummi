@@ -150,7 +150,16 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	go cs.forward()
 	cs.unsub = sess.On(cs.onEvent)
 
+	// Re-check closed under the lock: Close may have run during the
+	// CreateSession RPC above, snapshotting c.sessions before this session
+	// existed. Without the re-check its forward goroutine would leak and its
+	// Events() channel would never close. (Headless does the same.)
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = cs.Close()
+		return nil, errors.New("copilot agent is closed")
+	}
 	c.sessions = append(c.sessions, cs)
 	c.mu.Unlock()
 	return cs, nil

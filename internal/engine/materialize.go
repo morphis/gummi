@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/workflow"
@@ -100,7 +101,7 @@ func (e *Engine) writeSeededDraft(f domain.Feature, seed domain.DraftSeed, prov 
 		return err
 	}
 	path := filepath.Join(dir, spec.DraftFilename(&f))
-	return os.WriteFile(path, []byte(spec.SeededTemplate(&f, seed, prov)), 0o600)
+	return atomicfile.Write(path, []byte(spec.SeededTemplate(&f, seed, prov)), 0o600)
 }
 
 // resolveDeps maps depends_on titles to "FD-NNN slug" labels where the

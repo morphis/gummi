@@ -64,8 +64,12 @@ const gummiIgnore = `# written by gummi init — machinery, never commit
 // has already run there.
 func Open(root string) (Workspace, error) {
 	w := Workspace{Root: root}
-	if _, err := os.Stat(w.GummiDir()); err != nil {
+	fi, err := os.Lstat(w.GummiDir())
+	if err != nil {
 		return Workspace{}, fmt.Errorf("no .gummi directory in %s (run `gummi init` first): %w", root, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return Workspace{}, fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", w.GummiDir())
 	}
 	return w, nil
 }
@@ -81,33 +85,33 @@ func Init(root string) (Workspace, error) {
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		return Workspace{}, fmt.Errorf("%s is not the root of a git repository (no .git); gummi manages worktrees and must run from the main checkout", root)
 	}
-	if err := os.MkdirAll(w.GummiDir(), 0o750); err != nil {
-		return Workspace{}, fmt.Errorf("creating .gummi: %w", err)
+	// A cloned repo can ship .gummi (or any of its subdirs) as a committed
+	// symlink pointing elsewhere, and a plain MkdirAll would follow it and
+	// write outside the repo. Check each directory for a symlink *before*
+	// creating it, in parent-before-child order so every parent is already
+	// verified when its child is checked. gummi must only ever write inside
+	// the repo's own .gummi.
+	dirs := []struct {
+		path string
+		perm os.FileMode
+	}{
+		{w.GummiDir(), 0o750},
+		{w.StateDir(), 0o700},
+		{w.DraftsDir(), 0o750},
+		{w.SpecsDir(), 0o750},
+		{w.BugsDir(), 0o750},
+		{w.WorktreesDir(), 0o750},
+		{w.IngestDir(), 0o750},
 	}
-	if err := os.MkdirAll(w.StateDir(), 0o700); err != nil {
-		return Workspace{}, fmt.Errorf("creating state dir: %w", err)
-	}
-	// A cloned repo can ship .gummi or .gummi/state as a committed
-	// symlink pointing elsewhere; MkdirAll follows it silently. Refuse:
-	// gummi must only ever write inside the repo's own .gummi.
-	for _, p := range []string{w.GummiDir(), w.StateDir()} {
-		fi, err := os.Lstat(p)
-		if err != nil {
-			return Workspace{}, fmt.Errorf("inspecting %s: %w", p, err)
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return Workspace{}, fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", p)
+	for _, d := range dirs {
+		if err := mkdirChecked(d.path, d.perm); err != nil {
+			return Workspace{}, err
 		}
 	}
 	// The dir may predate this run with looser permissions; state can
 	// hold transcripts, so enforce 0700 either way.
 	if err := os.Chmod(w.StateDir(), 0o700); err != nil { //nolint:gosec // directories need the execute bit; 0700 is owner-only
 		return Workspace{}, fmt.Errorf("securing state dir: %w", err)
-	}
-	for _, dir := range []string{w.DraftsDir(), w.SpecsDir(), w.BugsDir(), w.WorktreesDir(), w.IngestDir()} {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return Workspace{}, fmt.Errorf("creating %s: %w", dir, err)
-		}
 	}
 	ignore := filepath.Join(w.GummiDir(), ".gitignore")
 	if err := writeIfAbsent(ignore, gummiIgnore); err != nil {
@@ -117,6 +121,29 @@ func Init(root string) (Workspace, error) {
 		return Workspace{}, err
 	}
 	return w, nil
+}
+
+// mkdirChecked creates a gummi directory unless it already exists, but
+// first refuses a symlink or non-directory sitting at that path — the
+// committed-symlink escape a bare MkdirAll would silently follow. The
+// caller creates parents before children, so a verified parent means only
+// the leaf component here can be hostile.
+func mkdirChecked(path string, perm os.FileMode) error {
+	if fi, err := os.Lstat(path); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", path)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("%s exists and is not a directory", path)
+		}
+		return nil // already a real directory
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspecting %s: %w", path, err)
+	}
+	if err := os.MkdirAll(path, perm); err != nil {
+		return fmt.Errorf("creating %s: %w", path, err)
+	}
+	return nil
 }
 
 // writeIfAbsent creates path with content unless it already exists.

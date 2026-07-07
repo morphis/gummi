@@ -16,14 +16,15 @@ import (
 // comments anchored by content hash (DESIGN §6.1). Annotations live in
 // the store, not the diff, so they persist across reloads and rebases.
 type diffView struct {
-	f        domain.Feature
-	lines    []string                // the unified diff, split
-	anns     []domain.DiffAnnotation // this feature's annotations
-	located  map[int][]int           // diff line index → annotation indices anchored there
-	orphans  []int                   // annotation indices whose anchor no longer matches
-	annotate bool
-	cursor   int // 1-based diff line (annotate mode)
-	offset   int // scroll offset (both modes)
+	f         domain.Feature
+	lines     []string                // the unified diff, split
+	anns      []domain.DiffAnnotation // this feature's annotations
+	located   map[int][]int           // diff line index → annotation indices anchored there
+	orphans   []int                   // annotation indices whose anchor no longer matches
+	annotate  bool
+	cursor    int // 1-based diff line (annotate mode)
+	offset    int // scroll offset (both modes)
+	maxOffset int // largest useful read-mode offset from the last render
 }
 
 // diffLoadedMsg delivers a (re)loaded diff plus its annotations.
@@ -100,6 +101,15 @@ func (dv *diffView) openCount() int {
 
 func (dv *diffView) setCursor(n int) {
 	dv.cursor = min(max(n, 1), len(dv.lines))
+}
+
+// scrollMax is the largest read-mode offset the last render allowed,
+// falling back to a loose bound before the first render.
+func (dv *diffView) scrollMax() int {
+	if dv.maxOffset > 0 {
+		return dv.maxOffset
+	}
+	return max(len(dv.lines)-1, 0)
 }
 
 // jumpAnn moves the cursor to the next/previous annotated line.
@@ -247,11 +257,11 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 	if !dv.annotate {
 		switch key {
 		case "j", "down":
-			dv.offset = min(dv.offset+1, max(len(dv.lines)-1, 0))
+			dv.offset = min(dv.offset+1, dv.scrollMax())
 		case "k", "up":
 			dv.offset = max(dv.offset-1, 0)
 		case "pgdown":
-			dv.offset = min(dv.offset+m.mainPage(), max(len(dv.lines)-1, 0))
+			dv.offset = min(dv.offset+m.mainPage(), dv.scrollMax())
 		case "pgup":
 			dv.offset = max(dv.offset-m.mainPage(), 0)
 		}

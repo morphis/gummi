@@ -57,6 +57,32 @@ func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpencodeMapEventFlushesSegmentBeforeTool(t *testing.T) {
+	s := newOCSession()
+	var msg strings.Builder
+	// prose, then a tool call, then more prose: the tool call must flush the
+	// first segment as its own EventMessage (before the tool) and reset the
+	// accumulator, so the final message carries only the trailing segment —
+	// otherwise the whole turn's text is emitted once and duplicates the
+	// pre-tool prose in the transcript.
+	if evs := s.mapEvent([]byte(`{"type":"text","part":{"id":"p1","text":"Looking at the failure."}}`), &msg); len(evs) != 1 || evs[0].Kind != EventTextDelta {
+		t.Fatalf("text = %+v, want one EventTextDelta", evs)
+	}
+	evs := s.mapEvent([]byte(`{"type":"tool_use","part":{"type":"tool","tool":"read"}}`), &msg)
+	if len(evs) != 2 || evs[0].Kind != EventMessage || evs[0].Text != "Looking at the failure." || evs[1].Kind != EventToolCall {
+		t.Fatalf("tool = %+v, want [EventMessage(segment), EventToolCall]", evs)
+	}
+	if msg.String() != "" {
+		t.Errorf("accumulator = %q, want reset after flush", msg.String())
+	}
+	if evs := s.mapEvent([]byte(`{"type":"text","part":{"id":"p2","text":"Found it."}}`), &msg); len(evs) != 1 || evs[0].Text != "Found it." {
+		t.Fatalf("second text = %+v, want one delta 'Found it.'", evs)
+	}
+	if msg.String() != "Found it." {
+		t.Errorf("final accumulator = %q, want only the trailing segment", msg.String())
+	}
+}
+
 func TestOpencodeMapEventIgnoresLifecycle(t *testing.T) {
 	s := newOCSession()
 	var msg strings.Builder

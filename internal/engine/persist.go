@@ -25,6 +25,11 @@ func (e *Engine) persist(s *Session) {
 	if !e.cfg.Persist || e.cfg.Store == nil {
 		return
 	}
+	// Serialize the finalized-check-and-write against persistDelete: without
+	// this a save that passed the check before Drop finalized the session
+	// could land its upsert after the delete and resurrect the row.
+	e.persistMu.Lock()
+	defer e.persistMu.Unlock()
 	// A finalized (stopped/dropped) session must not write — a late
 	// pump-persist would otherwise resurrect a deleted row.
 	if s.finalizedState() {
@@ -55,6 +60,8 @@ func (e *Engine) persistDelete(id domain.FeatureID) {
 	if !e.cfg.Persist || e.cfg.Store == nil {
 		return
 	}
+	e.persistMu.Lock()
+	defer e.persistMu.Unlock()
 	_ = e.cfg.Store.DeleteSession(context.Background(), id)
 }
 

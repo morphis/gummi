@@ -324,7 +324,7 @@ func (c *chatPane) handlePickerKey(msg tea.KeyPressMsg, ask *engine.Ask) (detach
 			c.freeForm = true
 			c.input.Reset()
 		}
-	case " ":
+	case "space":
 		if ask.MultiPick {
 			c.picked[c.cursor] = !c.picked[c.cursor]
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -114,5 +115,5 @@ func (e *Engine) writeSeededBugDraft(f domain.Feature, p domain.BugProposal) err
 	}
 	path := filepath.Join(dir, spec.DraftFilename(&f))
 	content := spec.SeededBugTemplate(&f, p.Report, p.Provenance(), p.Severity)
-	return os.WriteFile(path, []byte(content), 0o600)
+	return atomicfile.Write(path, []byte(content), 0o600)
 }

@@ -439,7 +439,12 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	if len(vis) == 0 {
 		b.WriteString(s.Faint.Render("no bugs match the filter") + "\n")
 	}
+	// count the header lines emitted so far so the list can be windowed to
+	// whatever height remains.
+	headerLines := strings.Count(b.String(), "\n")
+
 	numW := len(fmt.Sprintf("%d", len(bv.props)))
+	rows := make([]string, len(vis))
 	for pos, i := range vis {
 		ip := bv.props[i]
 		marker := "  "
@@ -460,15 +465,28 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 		if tag := bugProposalTags(ip.p); tag != "" {
 			line += "  " + s.Faint.Render(tag)
 		}
-		b.WriteString(line + "\n")
+		rows[pos] = line
 	}
 
+	// Build the detail/skipped tail first, then window the list into the
+	// height left over, so a long import can't push the selected row or the
+	// detail block off the bottom of the clipped pane.
+	var tail strings.Builder
 	if bv.selected() >= 0 {
-		b.WriteString("\n" + bv.renderDetail(s, w))
+		tail.WriteString("\n" + bv.renderDetail(s, w))
 	}
 	if bv.skipped > 0 {
-		b.WriteString("\n" + s.Faint.Render(fmt.Sprintf("%d already on the board, skipped", bv.skipped)) + "\n")
+		tail.WriteString("\n" + s.Faint.Render(fmt.Sprintf("%d already on the board, skipped", bv.skipped)))
 	}
+	tailLines := 0
+	if tail.Len() > 0 {
+		tailLines = strings.Count(tail.String(), "\n") + 1
+	}
+	listBudget := max(h-headerLines-tailLines, 3)
+	for _, line := range windowLines(rows, bv.cursor, listBudget) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(tail.String())
 
 	return clipLines(b.String(), h)
 }

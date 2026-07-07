@@ -25,9 +25,29 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
+	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 )
+
+// fileLocks serializes read-modify-write cycles on a single spec artifact.
+// The agent-pump annotate path (engine) and the UI comment path (ui) both
+// do read → AddComment → write on the same file from different goroutines;
+// without a shared lock the two clobber each other's %% markers, and a lost
+// comment silently unblocks the approval gate it was meant to hold shut.
+var fileLocks sync.Map // cleaned path -> *sync.Mutex
+
+// LockFile acquires the per-path lock for a spec artifact and returns its
+// release func. Wrap a full read → modify → write cycle with it:
+//
+//	defer spec.LockFile(path)()
+func LockFile(path string) func() {
+	m, _ := fileLocks.LoadOrStore(filepath.Clean(path), &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // Marker is one parsed %% line.
 type Marker struct {
@@ -53,8 +73,13 @@ type Doc struct {
 }
 
 var (
-	markerRe   = regexp.MustCompile(`^\s*%%\s*(?:@([\w-]+)(?:\(([^)]*)\))?:\s*)?(.*)$`)
-	resolvedRe = regexp.MustCompile(`(?i)^resolved\s*($|[:—–-])`)
+	markerRe = regexp.MustCompile(`^\s*%%\s*(?:@([\w-]+)(?:\(([^)]*)\))?:\s*)?(.*)$`)
+	// A resolution is exactly "resolved", or "resolved" followed by a colon
+	// or em/en dash, or by a hyphen that is itself a separator (has
+	// whitespace or the line end after it). The trailing-hyphen guard keeps
+	// prose like "resolved-ish, still broken" from counting as a resolution
+	// and wrongly closing an open thread.
+	resolvedRe = regexp.MustCompile(`(?i)^resolved\s*(?:$|[:—–]|-(?:\s|$))`)
 )
 
 // IsMarkerLine reports whether a raw line is a %% marker.
@@ -422,7 +447,7 @@ func EnsureDraft(path string, f *domain.Feature) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(blankTemplate(f)), 0o600)
+	return atomicfile.Write(path, []byte(blankTemplate(f)), 0o600)
 }
 
 // blankTemplate is the initial artifact for a work item: a bug report

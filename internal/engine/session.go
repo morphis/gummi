@@ -191,12 +191,36 @@ func (s *Session) agent() agent.Session {
 	return s.agentSess
 }
 
-// attachAgent binds an agent session and marks it running.
-func (s *Session) attachAgent(a agent.Session) {
+// attachAgent binds an agent session and marks it running, reporting
+// whether it did. It refuses (returning false) when the session was
+// already finalized — a Pause/Drop/Close that landed while the backend
+// was still starting — so the caller closes the just-created agent rather
+// than leaving it running ungoverned with no way to stop it. Both this and
+// stop() take s.mu, so the two serialize: whichever runs second sees the
+// other's effect.
+func (s *Session) attachAgent(a agent.Session) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.finalized {
+		return false
+	}
 	s.agentSess = a
 	s.state = StateRunning
+	return true
+}
+
+// finishRunning atomically marks a running autonomous turn done, reporting
+// whether it did (false if the session was paused or stopped meanwhile).
+// Doing the check-and-set under one lock stops a racing Pause from being
+// silently overwritten by the completing turn.
+func (s *Session) finishRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateRunning {
+		return false
+	}
+	s.state = StateDone
+	return true
 }
 
 // takeSlot marks that this session holds an attention slot.
@@ -370,6 +394,19 @@ func (s *Session) setByokRate(r float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byokRate = r
+}
+
+// creditEquivalent prices one usage event as credits at this session's
+// provider rate: the metered credits for hosted usage, or a token-derived
+// value for BYOK (which reports tokens, never credits). Persisting this
+// keeps the feature's credit-denominated running total whole when its
+// stages mix hosted and BYOK providers.
+func (s *Session) creditEquivalent(u agent.Usage) float64 {
+	s.mu.Lock()
+	rate := s.byokRate
+	s.mu.Unlock()
+	return domain.Spend{Credits: u.Credits, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}.
+		CreditEquivalentAt(rate)
 }
 
 func (s *Session) setSpecPath(p string) {

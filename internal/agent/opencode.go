@@ -235,6 +235,16 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 	}
 	// process finished (or stdout closed): finalize the assistant message,
 	// then report idle — or an error if the run genuinely failed.
+	//
+	// If the scanner aborted for a reason other than a clean EOF (e.g. a
+	// stdout line over the 8 MiB buffer cap), the child may still be running
+	// and blocked writing to the now-undrained pipe. Cancel the context
+	// first so the process group is killed (bounded by WaitDelay) — otherwise
+	// Wait would deadlock against a child that can never make progress.
+	scanErr := sc.Err()
+	if scanErr != nil {
+		cancel()
+	}
 	waitErr := cmd.Wait()
 	cancel()
 	s.mu.Lock()
@@ -253,6 +263,12 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 	// already recorded why); only a non-zero exit we didn't cause is an error.
 	if aborted {
 		s.emit(Event{Kind: EventIdle})
+		return
+	}
+	// a truncated/aborted stream is a failed turn, not a clean idle: surface
+	// it so the orchestrator doesn't advance on partial output.
+	if scanErr != nil {
+		s.emit(Event{Kind: EventError, Err: fmt.Errorf("opencode run stream aborted: %w", scanErr)})
 		return
 	}
 	if waitErr != nil {
@@ -329,7 +345,17 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 		if e.Part.Tool == "" {
 			return nil
 		}
-		return []Event{{Kind: EventToolCall, Tool: e.Part.Tool}}
+		// Flush the prose accumulated so far as a finalized message BEFORE
+		// the tool line, then reset. Otherwise the whole turn's text (across
+		// every tool call) would be emitted as one final EventMessage and the
+		// engine would write it into the last streamed bubble, duplicating
+		// every pre-tool segment. Each segment now maps to its own bubble.
+		var out []Event
+		if text := strings.TrimSpace(msg.String()); text != "" {
+			out = append(out, Event{Kind: EventMessage, Text: text})
+		}
+		msg.Reset()
+		return append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool})
 	case "step_finish":
 		u := Usage{Model: s.model, InputTokens: e.Part.Tokens.Input, OutputTokens: e.Part.Tokens.Output}
 		// opencode cost is USD; gummi credits are $0.01 units.

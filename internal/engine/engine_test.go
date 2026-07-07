@@ -199,6 +199,51 @@ func TestAutonomousRunKicksOff(t *testing.T) {
 	}
 }
 
+// TestErrorFreesSlotAndUnwedgesQueue covers the scheduler-wedge fix: an
+// autonomous run that ends in a terminal EventError (no trailing idle) must
+// free its attention slot and move to a re-runnable state, so a second
+// queued feature starts rather than starving behind it forever.
+func TestErrorFreesSlotAndUnwedgesQueue(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(opts.WorkDir, "FD-001") {
+			return []agent.Event{{Kind: agent.EventError, Err: errorString("backend blew up")}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f1 := feature(1, "boom", domain.StageImplement)
+	f2 := feature(2, "fine", domain.StageImplement)
+	withWorktree(t, wt, f1)
+	withWorktree(t, wt, f2)
+
+	if err := e.Run(f1); err != nil {
+		t.Fatal(err)
+	}
+	// f1 fails: it must not stay Running holding the only slot.
+	waitState(t, e, "FD-001", StatePaused)
+	if s := e.Get("FD-001"); s.Snapshot().Err == nil {
+		t.Error("failed run recorded no error")
+	}
+
+	// with the slot freed, a newly queued feature runs to completion.
+	if err := e.Run(f2); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-002", StateDone)
+
+	// and the failed feature can be retried (Run no longer no-ops on it).
+	if err := e.Run(f1); err != nil {
+		t.Fatalf("re-running a failed feature should be allowed: %v", err)
+	}
+}
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
+
 func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
 	var mu sync.Mutex
 	var got string

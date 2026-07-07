@@ -211,7 +211,7 @@ func runBugNew(args []string) error {
 func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal) error {
 	created, err := be.eng.MaterializeBugs(ctx, props, engine.MaterializeOpts{Profile: be.profile, Envelope: be.env})
 	for _, f := range created {
-		fmt.Printf("  %s  %s\n", f.ID, f.Title)
+		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))
 	}
 	if err != nil {
 		return fmt.Errorf("materialize (created %d before failing): %w", len(created), err)
@@ -227,16 +227,16 @@ func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal
 func renderBugProposals(w io.Writer, res engine.BugIngestResult) {
 	fmt.Fprintf(w, "\nProposed %d bug(s):\n", len(res.Proposals))
 	for i, p := range res.Proposals {
-		fmt.Fprintf(w, "\n  %2d. %s\n", i+1, p.Title)
+		fmt.Fprintf(w, "\n  %2d. %s\n", i+1, clean(p.Title))
 		if p.OneLiner != "" {
-			fmt.Fprintf(w, "      %s\n", p.OneLiner)
+			fmt.Fprintf(w, "      %s\n", clean(p.OneLiner))
 		}
 		var tags []string
 		if p.Severity != "" {
 			tags = append(tags, "severity "+string(p.Severity))
 		}
 		if p.ExternalRef != "" {
-			tags = append(tags, p.ExternalRef)
+			tags = append(tags, clean(p.ExternalRef))
 		}
 		if len(tags) > 0 {
 			fmt.Fprintf(w, "      [%s]\n", strings.Join(tags, " · "))
