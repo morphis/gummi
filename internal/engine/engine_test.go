@@ -199,6 +199,39 @@ func TestAutonomousRunKicksOff(t *testing.T) {
 	}
 }
 
+func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
+	var mu sync.Mutex
+	var got string
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		got = msg
+		mu.Unlock()
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "planned", domain.StagePlan)
+	withWorktree(t, wt, f)
+	note := "Please address these review comments in the spec.\n\n- L12: split the migration"
+	if err := e.RunWith(f, note); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(got, kickoff) || !strings.Contains(got, "split the migration") {
+		t.Errorf("kickoff missing the review comments:\n%s", got)
+	}
+	// the combined kickoff is what the transcript records
+	snap := e.Get("FD-001").Snapshot()
+	if len(snap.Transcript) == 0 || snap.Transcript[0].Content != got {
+		t.Errorf("transcript kickoff differs from the sent one: %+v", snap.Transcript)
+	}
+}
+
 func TestSchedulerQueuesBeyondMaxActive(t *testing.T) {
 	// a responder that blocks until released, so slot 1 stays occupied
 	release := make(chan struct{})

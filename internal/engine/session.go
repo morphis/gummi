@@ -102,6 +102,10 @@ type Session struct {
 	Feature     domain.Feature
 	Role        agent.Role
 	Interactive bool
+	// kickoffNote is extra content appended to an autonomous run's stage
+	// kickoff — the user's review comments delivered via RunWith. Set at
+	// construction, immutable after (like Feature/Role).
+	kickoffNote string
 
 	done     chan struct{}
 	stopOnce sync.Once
@@ -152,6 +156,15 @@ func (s *Session) Snapshot() Snapshot {
 		Verdict:      s.verdict,
 		Err:          s.err,
 	}
+}
+
+// kickoffMessage returns the autonomous stage kickoff, with the user's
+// review comments appended when this run carries them (RunWith).
+func (s *Session) kickoffMessage() string {
+	if s.kickoffNote == "" {
+		return kickoff
+	}
+	return kickoff + "\n\n" + s.kickoffNote
 }
 
 // State returns the session's scheduling status.

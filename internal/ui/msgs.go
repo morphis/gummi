@@ -181,6 +181,18 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			// a bounce, not a forward move; g always goes forward.
 			next = nexts[0]
 		}
+		// unresolved user %% annotations block every human gate, not just
+		// spec approval — g re-gates only once they resolve (DESIGN §6.1).
+		if n := m.openQuestionsBlockingGate(ctx, f); n > 0 {
+			surface := "spec"
+			if f.Kind == domain.KindBug {
+				surface = "report"
+			}
+			return noticeMsg{
+				text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, n, surface),
+				isErr: true,
+			}
+		}
 		// Crossing from the design phase (todo / interactive) into the first
 		// worktree stage is the approval gate: it creates the worktree and
 		// commits the artifact (spec or bug report) to the branch. Bounces
@@ -195,17 +207,6 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			}
 		}
 		if enteringWorktree && !existed {
-			// unresolved %% annotations block approval (DESIGN §6.1)
-			if n := m.openQuestionsBlockingGate(ctx, f); n > 0 {
-				surface := "spec"
-				if f.Kind == domain.KindBug {
-					surface = "report"
-				}
-				return noticeMsg{
-					text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, n, surface),
-					isErr: true,
-				}
-			}
 			if _, err := m.wt.Create(ctx, &f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}

@@ -80,6 +80,79 @@ func TestTemplatePromptsDoNotBlock(t *testing.T) {
 	}
 }
 
+func TestUserAnnotationBlocksPlanGate(t *testing.T) {
+	// the plan gate (plan → implement) blocks on open user annotations
+	// just like spec approval — the worktree already exists here, so the
+	// check must read the worktree copy of the spec, not the retired draft.
+	m := specWorkspace(t)
+	for range 3 { // todo → brainstorm → spec → plan (worktree created)
+		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	}
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
+	}
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "the plan misses the migration step")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("open user annotation did not block the plan gate (stage=%s)", m.rows[0].F.Stage)
+	}
+	if !strings.Contains(m.notice.text, "open question") {
+		t.Errorf("notice = %q, want a blocking message", m.notice.text)
+	}
+
+	// resolve it, then the gate opens
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "resolved — added below")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("resolving the annotation did not unblock the gate (stage=%s)", m.rows[0].F.Stage)
+	}
+}
+
+func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
+	// R at an autonomous stage (plan) has no chat to send to: it re-runs
+	// the stage with the compiled comments appended to the kickoff.
+	m, eng := chatWorkspace(t, agent.NewFake("Tightened the plan."))
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → spec
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → plan (worktree created)
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
+	}
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "the plan misses the migration step")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	settleChat(t, eng)
+	if !strings.Contains(m.notice.text, "re-running plan") {
+		t.Errorf("notice = %q, want a re-run confirmation", m.notice.text)
+	}
+	s := m.engine.Get("FD-001")
+	if s == nil {
+		t.Fatal("request-changes did not re-run the plan stage")
+	}
+	snap := s.Snapshot()
+	if snap.Feature.Stage != domain.StagePlan || snap.Interactive {
+		t.Fatalf("wrong session: stage=%s interactive=%v", snap.Feature.Stage, snap.Interactive)
+	}
+	// the comments ride in the kickoff (the first user turn)
+	if len(snap.Transcript) == 0 || !strings.Contains(snap.Transcript[0].Content, "misses the migration step") {
+		t.Fatalf("kickoff missing the review comments: %+v", snap.Transcript)
+	}
+}
+
 func TestRequestChangesSendsToAgent(t *testing.T) {
 	// chatWorkspace wires an engine; its FD-001 is at brainstorm
 	m, eng := chatWorkspace(t, agent.NewFake("I'll address those."))

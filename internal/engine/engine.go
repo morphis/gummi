@@ -234,7 +234,14 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 
 // Run enqueues an autonomous stage for a feature and fills any free
 // slot. A no-op if the feature is already queued or running.
-func (e *Engine) Run(f domain.Feature) error {
+func (e *Engine) Run(f domain.Feature) error { return e.RunWith(f, "") }
+
+// RunWith is Run with the user's review comments attached: note (the
+// open %% annotations, compiled by the UI) is appended to the stage
+// kickoff so the fresh session starts by addressing them — the
+// "request changes" path for autonomous stages, which have no chat to
+// send a turn to (DESIGN §6.1).
+func (e *Engine) RunWith(f domain.Feature, note string) error {
 	role, ok := roleForStage(f.Stage)
 	if !ok {
 		return fmt.Errorf("stage %s has no agent action", f.Stage)
@@ -255,7 +262,7 @@ func (e *Engine) Run(f domain.Feature) error {
 			return nil // already scheduled
 		}
 	}
-	s := &Session{Feature: f, Role: role, state: StateQueued, done: make(chan struct{})}
+	s := &Session{Feature: f, Role: role, state: StateQueued, done: make(chan struct{}), kickoffNote: note}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -324,7 +331,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	go e.pump(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
 
-	s.appendUser(kickoff)
+	s.appendUser(s.kickoffMessage())
 	s.setBusy(true)
 	e.persist(s)
 	// The kickoff is sent off the scheduler goroutine: the Verify stage
@@ -339,10 +346,10 @@ func (e *Engine) startAutonomous(s *Session) {
 // feature-specific live checks and the write-up — no frontier model
 // shepherding `go test` output.
 func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
-	msg := kickoff
+	msg := s.kickoffMessage()
 	if s.Feature.Stage == domain.StageVerify && e.cfg.Permission != agent.PermissionGuarded {
 		if pre := e.runFixedChecks(s); pre != "" {
-			msg = pre + "\n\n" + kickoff
+			msg = pre + "\n\n" + msg
 		}
 	}
 	if err := sess.Send(context.Background(), msg); err != nil {
