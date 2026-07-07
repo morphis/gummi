@@ -413,7 +413,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "q":
 		return tea.Quit
 	case "?":
-		m.Overlay.Push(helpDialog{})
+		m.Overlay.Push(m.helpOverlay())
 		return nil
 	}
 	if !m.attached() {
@@ -873,14 +873,10 @@ func (m *Shell) statusView(w int) string {
 		}
 		pills = append(pills, statusbar.Pill{Text: m.notice.text, Kind: kind})
 	}
-	return statusbar.Render(m.styles, w, pills,
-		[]statusbar.Hint{
-			{Key: "n", Label: "new"},
-			{Key: "g", Label: "advance"},
-			{Key: "?", Label: "help"},
-			{Key: "q", Label: "quit"},
-		},
-	)
+	// the hint row tracks whichever surface owns the main pane, from the
+	// same tables the ? overlay renders (keymap.go)
+	_, bindings := m.activeSurface()
+	return statusbar.Render(m.styles, w, pills, barHints(bindings))
 }
 
 // runCounts summarizes live agent sessions for the status bar

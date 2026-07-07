@@ -240,6 +240,28 @@ func (bv *bugIngestView) setCursor(n int) {
 	}
 }
 
+// bindings is the bug-import surface's key table (see keymap.go),
+// split by filter focus like handleBugIngestKey routes.
+func (bv *bugIngestView) bindings() []binding {
+	if bv.filtering {
+		return []binding{
+			{key: "type", label: "filter", help: "type to filter the list", bar: true},
+			{key: "enter", label: "apply", help: "lock the filter in and return to the list", bar: true},
+			{key: "esc", label: "clear", help: "clear the filter and return to the full list", bar: true},
+		}
+	}
+	return []binding{
+		{key: "j/k", label: "select", help: "move over the bugs"},
+		{key: "/", label: "filter", bar: true},
+		{key: "r", label: "rename", help: "rename the bug (also c)", bar: true},
+		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
+		{key: "x", label: "drop", help: "drop/undrop the bug", bar: true},
+		{key: "A", label: "approve", help: "materialize the kept bugs into todo", bar: true},
+		{key: "esc", label: "discard", help: "discard the import — nothing created (also q)", bar: true},
+		{key: "?", label: "help", bar: true},
+	}
+}
+
 // handleBugIngestKey routes keys while the bug-import review surface is
 // open. While the filter is focused, keys type into it; otherwise they
 // navigate and act on the filtered list.
@@ -268,6 +290,9 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "esc", "q":
 		m.bugIngest = nil
 		m.notice = noticeMsg{text: "import discarded — nothing created"}
+		return nil
+	case "?":
+		m.Overlay.Push(m.helpOverlay())
 		return nil
 	case "/":
 		bv.filtering = true
@@ -438,19 +463,6 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	}
 	if bv.skipped > 0 {
 		b.WriteString("\n" + s.Faint.Render(fmt.Sprintf("%d already on the board, skipped", bv.skipped)) + "\n")
-	}
-
-	if bv.filtering {
-		b.WriteString("\n" + s.KeyHint.Render("type") + s.KeyLabel.Render(" filter") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("enter") + s.KeyLabel.Render(" apply") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" clear"))
-	} else {
-		b.WriteString("\n" + s.KeyHint.Render("/") + s.KeyLabel.Render(" filter") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("r") + s.KeyLabel.Render(" rename") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("o") + s.KeyLabel.Render(" one-liner") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("x") + s.KeyLabel.Render(" drop") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("A") + s.KeyLabel.Render(" approve") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" discard"))
 	}
 
 	return clipLines(b.String(), h)

@@ -4,12 +4,18 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// helpDialog is the ? overlay listing every key binding.
-type helpDialog struct{}
+// helpDialog is the ? overlay: the active surface's full key table,
+// built by helpOverlay (keymap.go) from the same bindings the status
+// bar hints render from.
+type helpDialog struct {
+	title string
+	rows  [][2]string
+}
 
 func (helpDialog) ID() string { return "help" }
 
@@ -21,44 +27,25 @@ func (helpDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (helpDialog) View(s *theme.Styles, w, h int) string {
-	rows := [][2]string{
-		{"j/k ↓↑", "select feature"},
-		{"1..9", "jump to feature"},
-		{"enter", "chat (brainstorm/spec) · run (autonomous)"},
-		{"p", "pause the running agent"},
-		{"tab", "cycle needs-attention queue"},
-		{"i", "open needs-attention inbox"},
-		{"g", "advance stage (gate)"},
-		{"b", "bounce back to implement/fix"},
-		{"r", "rebase branch onto main"},
-		{"c", "clean up a landed branch"},
-		{"n", "new feature"},
-		{"B", "new bug"},
-		{"I", "ingest a spec into features"},
-		{"G", "import bugs from GitHub"},
-		{"s", "spec (tab: read ⇄ annotate)"},
-		{"d", "diff (tab: read ⇄ annotate)"},
-		{"a", "raw-attach the agent CLI in the worktree"},
-		{"v", "run verify checks"},
-		{"x", "delete feature"},
-		{"?", "help"},
-		{"q", "quit"},
+func (d helpDialog) View(s *theme.Styles, w, h int) string {
+	keyW := 0
+	for _, r := range d.rows {
+		keyW = max(keyW, ansi.StringWidth(r[0]))
 	}
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("keys") + "\n\n")
-	for _, r := range rows {
-		b.WriteString(s.KeyHint.Render(padRight(r[0], 8)) + " " + s.Subtle.Render(r[1]) + "\n")
+	b.WriteString(s.DialogTitle.Render(d.title) + "\n\n")
+	for _, r := range d.rows {
+		b.WriteString(s.KeyHint.Render(padRight(r[0], keyW)) + "  " + s.Subtle.Render(r[1]) + "\n")
 	}
 	b.WriteString("\n" + s.Faint.Render("esc close"))
 	return s.DialogFrame.Render(b.String())
 }
 
 func padRight(str string, n int) string {
-	if len(str) >= n {
-		return str
+	if w := ansi.StringWidth(str); w < n {
+		return str + strings.Repeat(" ", n-w)
 	}
-	return str + strings.Repeat(" ", n-len(str))
+	return str
 }
 
 // confirmDialog asks a yes/no question before a destructive action.

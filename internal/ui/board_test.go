@@ -104,7 +104,7 @@ func TestDashboardShowsSelected(t *testing.T) {
 
 func TestHelpOverlay(t *testing.T) {
 	m := populatedShell(80, 24)
-	m.Overlay.Push(helpDialog{})
+	m.Overlay.Push(m.helpOverlay())
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 

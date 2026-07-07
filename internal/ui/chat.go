@@ -42,7 +42,7 @@ func newChatPane(feature domain.FeatureID, session *engine.Session) *chatPane {
 // newChatInput builds the message textarea (shared with tests).
 func newChatInput() textarea.Model {
 	in := textarea.New()
-	in.Placeholder = "message the agent…  (enter send · pgup/pgdn scroll · esc detach)"
+	in.Placeholder = "message the agent…"
 	in.CharLimit = 4000
 	in.ShowLineNumbers = false
 	in.SetHeight(3)
@@ -132,16 +132,47 @@ func (c *chatPane) pickerView(s *theme.Styles, ask *engine.Ask, w int) string {
 		}
 		b.WriteString(ansi.Truncate(label.Render(line), width, "…") + "\n")
 	}
-	hint := "↑↓ move · enter select"
-	if ask.MultiPick {
-		hint = "↑↓ move · space tick · enter submit"
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// bindings is the chat pane's key table (see keymap.go), split by
+// footer mode: the ask_user option picker, its free-form answer input,
+// or the plain message input.
+func (c *chatPane) bindings() []binding {
+	var ask *engine.Ask
+	if c.session != nil {
+		ask = c.session.Snapshot().PendingAsk
 	}
-	if ask.FreeForm {
-		hint += " · o type your own"
+	switch {
+	case ask != nil && !c.freeForm:
+		bs := []binding{
+			{key: "↑↓", label: "move", bar: true},
+			{key: "1..9", label: "pick", help: "jump to an option", bar: true},
+		}
+		if ask.MultiPick {
+			bs = append(bs,
+				binding{key: "space", label: "tick", bar: true},
+				binding{key: "enter", label: "submit", bar: true})
+		} else {
+			bs = append(bs, binding{key: "enter", label: "select", bar: true})
+		}
+		if ask.FreeForm {
+			bs = append(bs, binding{key: "o", label: "own answer", help: "type your own answer", bar: true})
+		}
+		return append(bs, binding{key: "esc", label: "detach", help: "detach — the question stays pending", bar: true})
+	case ask != nil && c.freeForm:
+		return []binding{
+			{key: "enter", label: "answer", bar: true},
+			{key: "pgup/pgdn", label: "scroll", bar: true},
+			{key: "esc", label: "picker", help: "back to the option picker", bar: true},
+		}
+	default:
+		return []binding{
+			{key: "enter", label: "send", bar: true},
+			{key: "pgup/pgdn", label: "scroll", bar: true},
+			{key: "esc", label: "detach", help: "detach — the session keeps running", bar: true},
+		}
 	}
-	hint += " · esc detach"
-	b.WriteString(s.Faint.Render(hint))
-	return b.String()
 }
 
 // transcript renders the conversation, tail-anchored to bodyH lines.

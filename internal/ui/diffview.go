@@ -202,6 +202,30 @@ func (m *Shell) toggleDiffResolved() tea.Cmd {
 	}
 }
 
+// bindings is the diff surface's key table (see keymap.go), split by
+// mode like handleDiffKey routes.
+func (dv *diffView) bindings() []binding {
+	if dv.annotate {
+		return []binding{
+			{key: "tab", label: "read", help: "switch to read mode", bar: true},
+			{key: "j/k", label: "line", help: "move the line cursor"},
+			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
+			{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
+			{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
+			{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
+			{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
+			{key: "?", label: "help", bar: true},
+		}
+	}
+	return []binding{
+		{key: "tab", label: "annotate", help: "switch to annotate mode", bar: true},
+		{key: "j/k", label: "scroll", bar: true},
+		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
+		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
+		{key: "?", label: "help", bar: true},
+	}
+}
+
 // handleDiffKey processes keys while the diff surface is open.
 func (m *Shell) handleDiffKey(key string) tea.Cmd {
 	dv := m.diff
@@ -211,6 +235,9 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 		return nil
 	case "tab":
 		dv.annotate = !dv.annotate
+		return nil
+	case "?":
+		m.Overlay.Push(m.helpOverlay())
 		return nil
 	case "R":
 		return m.requestDiffChanges(dv)

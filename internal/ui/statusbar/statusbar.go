@@ -60,19 +60,23 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 	for _, h := range hints {
 		hs = append(hs, s.KeyHint.Render(h.Key)+" "+s.KeyLabel.Render(h.Label))
 	}
-	rightStr := strings.Join(hs, s.Faint.Render(" · "))
 
-	lw, rw := ansi.StringWidth(leftStr), ansi.StringWidth(rightStr)
-	switch {
-	case lw+rw+1 <= width:
-		gap := width - lw - rw
-		return s.StatusBase.Render(leftStr + strings.Repeat(" ", gap) + rightStr)
-	case lw+1 <= width:
-		// keep the pills, drop hints from the right
-		rightStr = ansi.Truncate(rightStr, width-lw-1, "…")
-		gap := max(width-lw-ansi.StringWidth(rightStr), 1)
-		return s.StatusBase.Render(leftStr + strings.Repeat(" ", gap) + rightStr)
-	default:
+	lw := ansi.StringWidth(leftStr)
+	if lw+1 > width {
 		return s.StatusBase.Render(ansi.Truncate(leftStr, width, "…"))
 	}
+	// keep the pills; when the hints don't fit, drop whole hints rather
+	// than truncating mid-word. Hints arrive most-important-first except
+	// the last (help / the surface's escape hatch), which survives
+	// longest — so drop from the second-to-last backwards.
+	rightStr := strings.Join(hs, s.Faint.Render(" · "))
+	for len(hs) > 1 && lw+ansi.StringWidth(rightStr)+1 > width {
+		hs = append(hs[:len(hs)-2], hs[len(hs)-1])
+		rightStr = strings.Join(hs, s.Faint.Render(" · "))
+	}
+	if lw+ansi.StringWidth(rightStr)+1 > width {
+		rightStr = ""
+	}
+	gap := max(width-lw-ansi.StringWidth(rightStr), 1)
+	return s.StatusBase.Render(leftStr + strings.Repeat(" ", gap) + rightStr)
 }

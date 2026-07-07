@@ -115,18 +115,6 @@ func (m *Shell) dashboardView(w, h int) string {
 		line("")
 	}
 
-	hints := s.KeyHint.Render("g") + s.KeyLabel.Render(" advance") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("b") + s.KeyLabel.Render(" bounce")
-	if autonomousStage(f.Stage) {
-		if m.sessionFor(f.ID) != nil {
-			hints += s.Faint.Render(" · ") + s.KeyHint.Render("p") + s.KeyLabel.Render(" pause")
-		} else {
-			hints += s.Faint.Render(" · ") + s.KeyHint.Render("enter") + s.KeyLabel.Render(" run")
-		}
-	}
-	hints += s.Faint.Render(" · ") + s.KeyHint.Render("x") + s.KeyLabel.Render(" delete") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("n") + s.KeyLabel.Render(" new")
-	line(hints)
 	return b.String()
 }
 

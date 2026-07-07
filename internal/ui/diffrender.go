@@ -43,20 +43,13 @@ func (m *Shell) diffViewRender(w, h int) string {
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
-	body := h - 5
+	// keys live in the status bar (keymap.go), so the body gets the pane
+	// minus the three header lines (plus one line of slack).
+	body := h - 4
 	if dv.annotate {
 		b.WriteString(dv.renderAnnotate(m, w, body))
-		b.WriteString("\n" + s.KeyHint.Render("c") + s.KeyLabel.Render(" comment") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("x") + s.KeyLabel.Render(" resolve") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("n/p") + s.KeyLabel.Render(" annotations") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("R") + s.KeyLabel.Render(" request changes") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" back"))
 	} else {
 		b.WriteString(dv.renderRead(m, w, body))
-		b.WriteString("\n" + s.KeyHint.Render("tab") + s.KeyLabel.Render(" annotate") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("j/k") + s.KeyLabel.Render(" scroll") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("R") + s.KeyLabel.Render(" request changes") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" back"))
 	}
 	return b.String()
 }

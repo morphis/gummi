@@ -69,8 +69,9 @@ func (m *Shell) ingestRunRender(w, h int) string {
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
-	// budget the pane: header (3) + trailing blank + hint (2) are fixed;
-	// commentary gets up to a third of the rest, activity the remainder.
+	// budget the pane: header (3) + trailing watch-only line (2) are
+	// fixed; commentary gets up to a third of the rest, activity the
+	// remainder.
 	avail := max(h-5, 3)
 	tail := tailLines(rv.tail, max(w-2, 8), min(max(avail/3, 2), 8))
 	acts := rv.activity
@@ -94,9 +95,7 @@ func (m *Shell) ingestRunRender(w, h int) string {
 		b.WriteString("  " + s.Faint.Render("starting…") + "\n")
 	}
 
-	b.WriteString("\n" + s.Faint.Render("watch-only — the proposal opens here for review when the pass completes") +
-		"\n" + s.KeyHint.Render("esc") + s.KeyLabel.Render(" board") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("I") + s.KeyLabel.Render(" back to this view"))
+	b.WriteString("\n" + s.Faint.Render("watch-only — the proposal opens here for review when the pass completes"))
 
 	return clipLines(b.String(), h)
 }

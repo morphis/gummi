@@ -126,6 +126,31 @@ func (m *Shell) editSpec() tea.Cmd {
 	})
 }
 
+// bindings is the spec surface's key table (see keymap.go), split by
+// mode like handleSpecKey routes.
+func (sv *specView) bindings() []binding {
+	if sv.annotate {
+		return []binding{
+			{key: "tab", label: "read", help: "switch to read mode", bar: true},
+			{key: "j/k", label: "line", help: "move the line cursor"},
+			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
+			{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
+			{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
+			{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
+			{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
+			{key: "?", label: "help", bar: true},
+		}
+	}
+	return []binding{
+		{key: "tab", label: "annotate", help: "switch to annotate mode", bar: true},
+		{key: "j/k", label: "scroll", bar: true},
+		{key: "R", label: "request changes", help: "send the open %% questions to the architect"},
+		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line", bar: true},
+		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
+		{key: "?", label: "help", bar: true},
+	}
+}
+
 // handleSpecKey processes keys while the spec surface is open.
 func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	sv := m.spec
@@ -135,6 +160,9 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		return nil
 	case "tab":
 		sv.annotate = !sv.annotate
+		return nil
+	case "?":
+		m.Overlay.Push(m.helpOverlay())
 		return nil
 	case "e":
 		return m.editSpec()
@@ -221,20 +249,13 @@ func (m *Shell) specViewRender(w, h int) string {
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
-	body := h - 5
+	// keys live in the status bar (keymap.go), so the body gets the pane
+	// minus the three header lines (plus one line of slack).
+	body := h - 4
 	if sv.annotate {
 		b.WriteString(sv.renderAnnotate(m, w, body))
-		b.WriteString("\n" + s.KeyHint.Render("c") + s.KeyLabel.Render(" comment") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("n/p") + s.KeyLabel.Render(" markers") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("R") + s.KeyLabel.Render(" request changes") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("e") + s.KeyLabel.Render(" editor") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" back"))
 	} else {
 		b.WriteString(sv.renderRead(m, w, body))
-		b.WriteString("\n" + s.KeyHint.Render("tab") + s.KeyLabel.Render(" annotate") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("j/k") + s.KeyLabel.Render(" scroll") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("e") + s.KeyLabel.Render(" editor") +
-			s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" back"))
 	}
 	return b.String()
 }

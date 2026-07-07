@@ -101,6 +101,20 @@ func (iv *ingestView) mergeIntoPrev() bool {
 	return true
 }
 
+// bindings is the ingest review surface's key table (see keymap.go).
+func (iv *ingestView) bindings() []binding {
+	return []binding{
+		{key: "j/k", label: "select", help: "move over the proposals"},
+		{key: "r", label: "rename", help: "rename the proposal (also c)", bar: true},
+		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
+		{key: "x", label: "drop", help: "drop/undrop the proposal", bar: true},
+		{key: "m", label: "merge up", help: "fold the proposal into the one above", bar: true},
+		{key: "A", label: "approve", help: "materialize the kept proposals into todo", bar: true},
+		{key: "esc", label: "discard", help: "discard the ingest — nothing created (also q)", bar: true},
+		{key: "?", label: "help", bar: true},
+	}
+}
+
 // handleIngestKey routes keys while the ingest review surface is open.
 func (m *Shell) handleIngestKey(key string) tea.Cmd {
 	iv := m.ingest
@@ -108,6 +122,9 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 	case "esc", "q":
 		m.ingest = nil
 		m.notice = noticeMsg{text: "ingest discarded — nothing created"}
+		return nil
+	case "?":
+		m.Overlay.Push(m.helpOverlay())
 		return nil
 	case "j", "down":
 		iv.setCursor(iv.cursor + 1)
@@ -317,13 +334,6 @@ func (m *Shell) ingestViewRender(w, h int) string {
 	}
 
 	b.WriteString("\n" + iv.renderCoverage(s, w))
-
-	b.WriteString("\n" + s.KeyHint.Render("r") + s.KeyLabel.Render(" rename") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("o") + s.KeyLabel.Render(" one-liner") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("x") + s.KeyLabel.Render(" drop") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("m") + s.KeyLabel.Render(" merge up") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("A") + s.KeyLabel.Render(" approve") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" discard"))
 
 	return clipLines(b.String(), h)
 }
