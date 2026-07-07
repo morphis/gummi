@@ -105,6 +105,7 @@ func (iv *ingestView) mergeIntoPrev() bool {
 func (iv *ingestView) bindings() []binding {
 	return []binding{
 		{key: "j/k", label: "select", help: "move over the proposals"},
+		{key: "pgup/pgdn", label: "page", help: "move by a page over the proposals"},
 		{key: "r", label: "rename", help: "rename the proposal (also c)", bar: true},
 		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
 		{key: "x", label: "drop", help: "drop/undrop the proposal", bar: true},
@@ -130,6 +131,10 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 		iv.setCursor(iv.cursor + 1)
 	case "k", "up":
 		iv.setCursor(iv.cursor - 1)
+	case "pgdown":
+		iv.setCursor(iv.cursor + m.mainPage())
+	case "pgup":
+		iv.setCursor(iv.cursor - m.mainPage())
 	case "x":
 		if len(iv.props) > 0 {
 			iv.props[iv.cursor].dropped = !iv.props[iv.cursor].dropped

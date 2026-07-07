@@ -82,6 +82,7 @@ func (m *Shell) boardBindings() []binding {
 	}
 	return []binding{
 		{key: "j/k ↓↑", label: "select", help: "select feature"},
+		{key: "pgup/pgdn", label: "ends", help: "jump to the first/last card"},
 		{key: "1..9", label: "jump", help: "jump to feature"},
 		enter,
 		pause,

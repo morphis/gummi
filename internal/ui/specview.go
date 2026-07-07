@@ -133,6 +133,7 @@ func (sv *specView) bindings() []binding {
 		return []binding{
 			{key: "tab", label: "read", help: "switch to read mode", bar: true},
 			{key: "j/k", label: "line", help: "move the line cursor"},
+			{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
 			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 			{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
 			{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
@@ -144,6 +145,7 @@ func (sv *specView) bindings() []binding {
 	return []binding{
 		{key: "tab", label: "annotate", help: "switch to annotate mode", bar: true},
 		{key: "j/k", label: "scroll", bar: true},
+		{key: "pgup/pgdn", label: "page", help: "scroll by a page"},
 		{key: "R", label: "request changes", help: "send the open %% questions to the architect"},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
@@ -178,6 +180,10 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 			sv.offset = min(sv.offset+1, len(sv.doc.Lines)*2)
 		case "k", "up":
 			sv.offset = max(sv.offset-1, 0)
+		case "pgdown":
+			sv.offset = min(sv.offset+m.mainPage(), len(sv.doc.Lines)*2)
+		case "pgup":
+			sv.offset = max(sv.offset-m.mainPage(), 0)
 		}
 		return nil
 	}
@@ -186,6 +192,10 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		sv.setCursor(sv.cursor + 1)
 	case "k", "up":
 		sv.setCursor(sv.cursor - 1)
+	case "pgdown":
+		sv.setCursor(sv.cursor + m.mainPage())
+	case "pgup":
+		sv.setCursor(sv.cursor - m.mainPage())
 	case "n":
 		sv.jumpMarker(1)
 	case "p":

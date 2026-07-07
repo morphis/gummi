@@ -209,6 +209,7 @@ func (dv *diffView) bindings() []binding {
 		return []binding{
 			{key: "tab", label: "read", help: "switch to read mode", bar: true},
 			{key: "j/k", label: "line", help: "move the line cursor"},
+			{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
 			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 			{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
 			{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
@@ -220,6 +221,7 @@ func (dv *diffView) bindings() []binding {
 	return []binding{
 		{key: "tab", label: "annotate", help: "switch to annotate mode", bar: true},
 		{key: "j/k", label: "scroll", bar: true},
+		{key: "pgup/pgdn", label: "page", help: "scroll by a page"},
 		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 		{key: "?", label: "help", bar: true},
@@ -248,6 +250,10 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 			dv.offset = min(dv.offset+1, max(len(dv.lines)-1, 0))
 		case "k", "up":
 			dv.offset = max(dv.offset-1, 0)
+		case "pgdown":
+			dv.offset = min(dv.offset+m.mainPage(), max(len(dv.lines)-1, 0))
+		case "pgup":
+			dv.offset = max(dv.offset-m.mainPage(), 0)
 		}
 		return nil
 	}
@@ -256,6 +262,10 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 		dv.setCursor(dv.cursor + 1)
 	case "k", "up":
 		dv.setCursor(dv.cursor - 1)
+	case "pgdown":
+		dv.setCursor(dv.cursor + m.mainPage())
+	case "pgup":
+		dv.setCursor(dv.cursor - m.mainPage())
 	case "n":
 		dv.jumpAnn(1)
 	case "p":

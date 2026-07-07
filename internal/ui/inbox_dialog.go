@@ -39,6 +39,10 @@ func (d *inboxDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		if d.sel > 0 {
 			d.sel--
 		}
+	case "pgup":
+		d.sel = 0
+	case "pgdown":
+		d.sel = max(len(d.items)-1, 0)
 	case "enter":
 		if d.sel < len(d.items) {
 			return true, d.onJump(d.items[d.sel].Feature)

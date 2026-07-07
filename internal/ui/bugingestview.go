@@ -252,6 +252,7 @@ func (bv *bugIngestView) bindings() []binding {
 	}
 	return []binding{
 		{key: "j/k", label: "select", help: "move over the bugs"},
+		{key: "pgup/pgdn", label: "page", help: "move by a page over the bugs"},
 		{key: "/", label: "filter", bar: true},
 		{key: "r", label: "rename", help: "rename the bug (also c)", bar: true},
 		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
@@ -301,6 +302,10 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 		bv.setCursor(bv.cursor + 1)
 	case "k", "up":
 		bv.setCursor(bv.cursor - 1)
+	case "pgdown":
+		bv.setCursor(bv.cursor + m.mainPage())
+	case "pgup":
+		bv.setCursor(bv.cursor - m.mainPage())
 	case "x":
 		if i := bv.selected(); i >= 0 {
 			bv.props[i].dropped = !bv.props[i].dropped

@@ -456,6 +456,14 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.moveSel(1)
 	case "k", "up":
 		m.moveSel(-1)
+	case "pgup":
+		if order := m.displayOrder(); len(order) > 0 {
+			m.sel = order[0]
+		}
+	case "pgdown":
+		if order := m.displayOrder(); len(order) > 0 {
+			m.sel = order[len(order)-1]
+		}
 	case "n":
 		m.Overlay.Push(newFeatureForm(m.profileNames, m.createFeature))
 	case "B":
@@ -540,6 +548,12 @@ func (m *Shell) selected() (featureRow, bool) {
 		return featureRow{}, false
 	}
 	return m.rows[m.sel], true
+}
+
+// mainPage is the page-key scroll step for main-pane surfaces: most of
+// the body (the pane minus its header rows), with a line of overlap.
+func (m *Shell) mainPage() int {
+	return max(m.layout.Main.Dy()-5, 5)
 }
 
 // moveSel moves the selection through the board's display order.
