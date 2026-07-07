@@ -284,6 +284,30 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 	return err
 }
 
+// DeleteLandedBranch removes the feature's branch after its work landed
+// on main. It tries git's own -d safety first; when git refuses ("not
+// fully merged" — the squash-merge case, where the branch's commits are
+// not ancestors of main even though their content is in) it re-verifies
+// via the merge-tree content check and only then force-deletes. That
+// content check is stronger than git's ancestor test, so nothing
+// unlanded can slip through the -D.
+func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) error {
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return err
+	}
+	_, derr := runGit(ctx, m.root, "branch", "-d", "--", branch)
+	if derr == nil {
+		return nil
+	}
+	landed, err := m.squashLanded(ctx, branch)
+	if err != nil || !landed {
+		return derr
+	}
+	_, err = runGit(ctx, m.root, "branch", "-D", "--", branch)
+	return err
+}
+
 // Dirty reports whether the feature's worktree has uncommitted changes
 // (staged, unstaged, or untracked).
 func (m *Manager) Dirty(ctx context.Context, f *domain.Feature) (bool, error) {
@@ -309,6 +333,19 @@ func (m *Manager) TrackedDirty(ctx context.Context, f *domain.Feature) (bool, er
 		return false, err
 	}
 	out, err := runGit(ctx, p, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// MainTrackedDirty reports uncommitted changes to tracked files (staged
+// or unstaged) in the main checkout. A squash merge commits into main,
+// so anything already modified there would be swept into the merge
+// commit. Untracked files are ignored: git itself refuses a merge that
+// would overwrite one.
+func (m *Manager) MainTrackedDirty(ctx context.Context) (bool, error) {
+	out, err := runGit(ctx, m.root, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return false, err
 	}
@@ -434,6 +471,82 @@ func (m *Manager) conflictedFiles(ctx context.Context, wt string) []string {
 		return nil
 	}
 	return strings.Split(out, "\n")
+}
+
+// MergeConflictError reports that a squash merge stopped on conflicts
+// and was undone (the main checkout is left clean, at its original
+// HEAD). Files lists the paths that conflicted.
+type MergeConflictError struct {
+	Files []string
+}
+
+func (e *MergeConflictError) Error() string {
+	if len(e.Files) == 0 {
+		return "squash merge hit conflicts and was undone (main checkout clean)"
+	}
+	return "squash merge conflicts in " + strings.Join(e.Files, ", ") + " — undone, main checkout clean"
+}
+
+// SquashMerge lands the feature branch on the main checkout as a single
+// squash commit carrying message. It refuses when main has tracked
+// changes (they would be swept into the commit), when the branch has no
+// commits of its own, or when its content is already in main. A
+// conflicted merge is undone with reset --merge — a squash merge writes
+// no MERGE_HEAD, so merge --abort cannot — and reported as a
+// *MergeConflictError; main is left clean on every path short of a
+// failed reset.
+func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("refusing squash merge of %s: empty commit message", f.ID)
+	}
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return err
+	}
+	if ok, err := gitOK(ctx, m.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("feature %s has no branch %s", f.ID, branch)
+	}
+	if dirty, err := m.MainTrackedDirty(ctx); err != nil {
+		return err
+	} else if dirty {
+		return fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging")
+	}
+	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	if err != nil {
+		return err
+	}
+	if n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch); err != nil {
+		return err
+	} else if n == "0" {
+		return fmt.Errorf("branch %s has no commits to merge", branch)
+	}
+	if _, err := runGit(ctx, m.root, "merge", "--squash", branch); err != nil {
+		// capture what conflicted before the reset wipes the state
+		conflicts := m.conflictedFiles(ctx, m.root)
+		if _, resetErr := runGit(ctx, m.root, "reset", "--merge"); resetErr != nil {
+			return fmt.Errorf("squash merge failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
+		}
+		if len(conflicts) > 0 {
+			return &MergeConflictError{Files: conflicts}
+		}
+		return err
+	}
+	// "Already up to date" stages nothing: the branch's content is in
+	// main already, i.e. it landed some other way.
+	if clean, err := gitOK(ctx, m.root, "diff", "--cached", "--quiet"); err != nil {
+		return err
+	} else if clean {
+		return fmt.Errorf("nothing to merge — %s already landed on main", branch)
+	}
+	if _, err := runGit(ctx, m.root, "commit", "-m", message); err != nil {
+		if _, resetErr := runGit(ctx, m.root, "reset", "--merge"); resetErr != nil {
+			return fmt.Errorf("squash commit failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // Diff returns the unified diff of the feature branch against the point

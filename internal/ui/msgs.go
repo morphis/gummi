@@ -396,8 +396,11 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 		if ok, err := m.wt.BranchExists(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if ok {
-			// non-force: git's own merged-check is a backstop to Landed.
-			if err := m.wt.DeleteBranch(ctx, &f, false); err != nil {
+			// git's own merged-check (-d) still backstops regular merges;
+			// for a squash merge, whose commits aren't ancestors of main,
+			// the delete re-verifies with the merge-tree content check —
+			// stronger than the ancestor test — before forcing.
+			if err := m.wt.DeleteLandedBranch(ctx, &f); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}

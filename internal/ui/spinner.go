@@ -34,7 +34,7 @@ func (m *Shell) spinner() string {
 // keeps exactly one tick loop alive; when it goes false the loop stops
 // so an idle board schedules no wake-ups.
 func (m *Shell) spinnerActive() bool {
-	if m.ingestRun != nil {
+	if m.ingestRun != nil || m.drafting {
 		return true
 	}
 	if m.engine == nil {

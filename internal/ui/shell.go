@@ -56,6 +56,8 @@ type Shell struct {
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
 
+	drafting bool // a squash-merge commit message is being drafted (one at a time)
+
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
 	chat         *chatPane // non-nil while attached to an interactive session
@@ -239,6 +241,19 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.attached() {
 			return m, m.loadRows
 		}
+		return m, nil
+
+	case commitDraftMsg:
+		m.drafting = false
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		m.notice = noticeMsg{}
+		f := msg.f
+		m.Overlay.Push(newCommitMsgDialog(f, msg.draft, func(message string) tea.Cmd {
+			return m.squashMergeFeature(f, message)
+		}))
 		return m, nil
 
 	case specApprovedMsg:
@@ -519,6 +534,24 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "r":
 		if r, ok := m.selected(); ok {
 			return m.rebaseFeature(r.F)
+		}
+	case "m":
+		if r, ok := m.selected(); ok {
+			if !r.HasWorktree {
+				m.notice = noticeMsg{text: string(r.F.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+				return nil
+			}
+			if r.Landed {
+				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — press c to clean up", isErr: true}
+				return nil
+			}
+			if m.drafting {
+				m.notice = noticeMsg{text: "already drafting a commit message — wait for it", isErr: true}
+				return nil
+			}
+			m.drafting = true
+			m.notice = noticeMsg{text: string(r.F.ID) + ": drafting commit message…"}
+			return m.startMergeDraft(r.F)
 		}
 	case "c":
 		if r, ok := m.selected(); ok {
@@ -891,6 +924,9 @@ func (m *Shell) statusView(w int) string {
 	}
 	if m.ingestRun != nil {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
+	}
+	if m.drafting {
+		pills = append(pills, statusbar.Pill{Text: m.spinner() + " drafting", Kind: statusbar.KindNeutral})
 	}
 	if n := m.inbox.len(); n > 0 {
 		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})
