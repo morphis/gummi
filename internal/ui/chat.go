@@ -87,8 +87,10 @@ func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	footerH := lineCount(footer)
 
 	errH := 0
+	var errText string
 	if snap.Err != nil {
-		errH = 1
+		errText = wrapError(snap.Err.Error(), max(w-2, 4))
+		errH = lineCount(errText)
 	}
 	// header (3 lines) + trailing newline + optional error + footer; the
 	// transcript takes whatever is left, never overflowing the pane.
@@ -96,7 +98,7 @@ func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	b.WriteString(c.transcript(s, snap, w, bodyH))
 	b.WriteString("\n")
 	if snap.Err != nil {
-		b.WriteString(s.Error.Render("✗ "+ansi.Truncate(sanitize(snap.Err.Error()), max(w-2, 4), "…")) + "\n")
+		b.WriteString(s.Error.Render(errText) + "\n")
 	}
 	b.WriteString(footer)
 	return b.String()
@@ -178,7 +180,17 @@ func (c *chatPane) bindings() []binding {
 // transcript renders the conversation, tail-anchored to bodyH lines.
 func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH int) string {
 	var lines []string
-	for _, msg := range snap.Transcript {
+	for i, msg := range snap.Transcript {
+		// tool calls render as compact ticker lines, in order with the
+		// messages around them; consecutive ones group without blanks.
+		if msg.Author == engine.AuthorTool {
+			lines = append(lines, "  "+s.Success.Render("✓ ")+
+				s.Faint.Render(ansi.Truncate(sanitize(msg.Content), max(w-6, 8), "…")))
+			if i+1 == len(snap.Transcript) || snap.Transcript[i+1].Author != engine.AuthorTool {
+				lines = append(lines, "")
+			}
+			continue
+		}
 		var label string
 		style := s.Base
 		switch msg.Author {
@@ -408,6 +420,20 @@ func humanTokens(n int64) string {
 }
 
 func lineCount(s string) int { return strings.Count(s, "\n") + 1 }
+
+// errLines caps a wrapped error so it can't crowd out the transcript.
+const errLines = 6
+
+// wrapError wraps an error's full text to the pane width instead of
+// truncating it to one line — session-start failures (backend refusals,
+// provider errors) carry their diagnosis in the tail.
+func wrapError(msg string, w int) string {
+	lines := strings.Split(wrapText("✗ "+sanitize(msg), w), "\n")
+	if len(lines) > errLines {
+		lines = append(lines[:errLines], "…")
+	}
+	return strings.Join(lines, "\n")
+}
 
 // wrapText hard-wraps text to width on word boundaries (ANSI-safe).
 func wrapText(text string, width int) string {

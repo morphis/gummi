@@ -53,6 +53,56 @@ func TestTranscriptEmptyFinishKeepsStreamedContent(t *testing.T) {
 	}
 }
 
+func TestTranscriptInterleavesToolCalls(t *testing.T) {
+	s := &Session{}
+	// message → tool → tool → message: history must keep this order
+	s.appendDelta("I'll wire the toggle.")
+	s.finishAssistant("I'll wire the toggle.")
+	s.appendActivity("edit theme.go")
+	s.appendActivity("run go test ./...")
+	s.finishAssistant("Done, tests green.")
+	snap := s.Snapshot()
+	authors := make([]Author, len(snap.Transcript))
+	for i, m := range snap.Transcript {
+		authors[i] = m.Author
+	}
+	want := []Author{AuthorAssistant, AuthorTool, AuthorTool, AuthorAssistant}
+	if len(authors) != len(want) {
+		t.Fatalf("transcript = %+v, want %v", snap.Transcript, want)
+	}
+	for i := range want {
+		if authors[i] != want[i] {
+			t.Fatalf("transcript order = %v, want %v", authors, want)
+		}
+	}
+	if snap.Transcript[1].Content != "edit theme.go" {
+		t.Errorf("tool entry = %+v", snap.Transcript[1])
+	}
+	// the ticker still gets its flat copy for the dashboard
+	if len(snap.Activity) != 2 || snap.Activity[1] != "run go test ./..." {
+		t.Errorf("activity = %+v", snap.Activity)
+	}
+}
+
+func TestToolCallMidStreamClosesBubble(t *testing.T) {
+	s := &Session{}
+	// a tool call landing mid-stream closes the open bubble so the next
+	// delta starts a new one after the tool line, keeping order
+	s.appendDelta("Looking at the failure.")
+	s.appendActivity("read testdata/out.log")
+	s.appendDelta("Found it — off by one.")
+	snap := s.Snapshot()
+	if len(snap.Transcript) != 3 {
+		t.Fatalf("transcript = %+v, want 3 entries", snap.Transcript)
+	}
+	if snap.Transcript[0].Streaming {
+		t.Error("pre-tool bubble left streaming")
+	}
+	if snap.Transcript[2].Author != AuthorAssistant || !snap.Transcript[2].Streaming {
+		t.Errorf("post-tool delta = %+v, want a new streaming bubble", snap.Transcript[2])
+	}
+}
+
 func TestTranscriptFinishReplacesStreamedContent(t *testing.T) {
 	s := &Session{}
 	s.appendDelta("Hel")

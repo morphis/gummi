@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/morphis/gummi/internal/ui/statusbar"
+import (
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/statusbar"
+)
 
 // binding is one key → action pair. Each surface declares its keys as a
 // binding table next to its key handler — the single source of truth
@@ -67,17 +70,20 @@ func (m *Shell) helpOverlay() helpDialog {
 }
 
 // boardBindings is the board's key table. The bar subset adapts to the
-// selected card: enter reads "chat" or "run" by stage, and swaps for
-// "p pause" while that feature's agent is running.
+// selected card: enter reads "chat" or "run" by stage, becomes "watch"
+// while that feature's agent is running (attach the transcript), and
+// "p pause" joins the bar alongside it.
 func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
 	pause := binding{key: "p", label: "pause", help: "pause the running agent"}
 	if r, ok := m.selected(); ok && autonomousStage(r.F.Stage) {
-		if m.sessionFor(r.F.ID) != nil {
-			enter.bar = false
+		enter.label = "run"
+		if s := m.sessionFor(r.F.ID); s != nil {
+			if s.State() == engine.StateRunning {
+				enter.label = "watch"
+				enter.help = "watch the running agent (scrollable transcript)"
+			}
 			pause.bar = true
-		} else {
-			enter.label = "run"
 		}
 	}
 	return []binding{

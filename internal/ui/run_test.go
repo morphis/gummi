@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
@@ -125,6 +126,77 @@ func TestBugInteractiveStagesOpenChat(t *testing.T) {
 			t.Fatalf("%s did not start an interactive session", stage)
 		}
 		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach for the next round
+	}
+}
+
+func TestWatchAttachesRunningSession(t *testing.T) {
+	// no trailing idle: the session stays busy, so the run keeps going
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
+			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+		}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+
+	// first enter starts the run — no pane, activity goes to the dashboard
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.chat != nil {
+		t.Fatal("starting a run must not open the chat pane")
+	}
+	waitForActivity(t, eng)
+
+	// second enter attaches the observer pane over the running session
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.chat == nil {
+		t.Fatalf("enter on a running session did not attach (notice: %q)", m.notice.text)
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "Wiring the toggle.") || !strings.Contains(view, "edit theme.go") {
+		t.Errorf("watch pane missing transcript content:\n%s", view)
+	}
+
+	// the tool call is a transcript entry, ordered after the message
+	snap := m.chat.session.Snapshot()
+	var msgAt, toolAt int
+	for i, msg := range snap.Transcript {
+		switch {
+		case msg.Content == "Wiring the toggle.":
+			msgAt = i
+		case msg.Author == engine.AuthorTool:
+			toolAt = i
+		}
+	}
+	if toolAt <= msgAt {
+		t.Errorf("tool call not interleaved after its message: %+v", snap.Transcript)
+	}
+
+	// esc detaches; the run keeps going
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.chat != nil {
+		t.Fatal("esc did not detach the watch pane")
+	}
+	if s := eng.Get("FD-001"); s == nil || s.State() != engine.StateRunning {
+		t.Error("detaching stopped the run")
+	}
+}
+
+// waitForActivity polls until FD-001's session has a tool-call line.
+func waitForActivity(t *testing.T, eng *engine.Engine) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		if s := eng.Get("FD-001"); s != nil && len(s.Snapshot().Activity) > 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("no activity arrived")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

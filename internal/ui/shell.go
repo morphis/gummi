@@ -683,12 +683,14 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 
 // runStage enqueues an autonomous run for a feature's stage; the engine
 // schedules and kicks it off. Activity streams into the dashboard;
-// `p` pauses it.
+// `p` pauses it. On an already-running session, enter attaches the chat
+// pane as an observer: the full scrollable transcript, with steering
+// via the input (esc detaches, the run keeps going).
 func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 	if s := m.engine.Get(f.ID); s != nil {
 		switch s.State() {
 		case engine.StateRunning:
-			m.notice = noticeMsg{text: string(f.ID) + " is already running"}
+			m.chat = newChatPane(f.ID, s)
 			return nil
 		case engine.StateQueued:
 			m.notice = noticeMsg{text: string(f.ID) + " is queued"}

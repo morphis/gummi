@@ -68,6 +68,10 @@ const (
 	// AuthorSystem labels gummi-authored turns (stage kickoffs): sent to
 	// the agent like a user turn, rendered as gummi's own line.
 	AuthorSystem Author = "system"
+	// AuthorTool labels activity lines (tool calls, check results, budget
+	// nudges) recorded as transcript entries so history keeps them in
+	// order with the surrounding messages.
+	AuthorTool Author = "tool"
 )
 
 // Message is one transcript turn.
@@ -289,6 +293,10 @@ func (s *Session) replaceMessage(i int, content string) {
 	}
 }
 
+// appendActivity records a tool-call line twice: on the activity ticker
+// (the dashboard's recent-lines feed) and as an AuthorTool transcript
+// entry, so the full history keeps it ordered against the messages
+// around it.
 func (s *Session) appendActivity(tool string) {
 	// activity is stored newline-joined; keep labels single-line so they
 	// round-trip through persistence intact.
@@ -296,6 +304,12 @@ func (s *Session) appendActivity(tool string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activity = append(s.activity, tool)
+	// a tool call mid-stream also closes the streaming bubble: the next
+	// delta belongs to a new one (the agent spoke, acted, spoke again).
+	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming {
+		s.transcript[n-1].Streaming = false
+	}
+	s.transcript = append(s.transcript, Message{Author: AuthorTool, Content: tool})
 }
 
 func (s *Session) addSpend(u agent.Usage) {
