@@ -352,36 +352,63 @@ func (sv *specView) renderAnnotate(m *Shell, w, h int) string {
 	}
 
 	total := len(sv.doc.Lines)
-	visible := max(h, 3)
-	// the window is derived purely from the cursor (render must not
-	// mutate state): keep the cursor centered where possible
-	off := min(max(sv.cursor-1-(visible-1)/2, 0), max(total-visible, 0))
-
 	numW := len(strconv.Itoa(total))
-	var b strings.Builder
-	end := min(off+visible, total)
-	for i := off; i < end; i++ {
+	textW := max(w-numW-3, 4)
+
+	// Lines wider than the pane wrap into continuation rows (line number
+	// and gutter only on the first), so the window and cursor centering
+	// work in display rows rather than source lines.
+	type row struct {
+		n       int    // 1-based source line
+		content string // styled segment
+		first   bool   // first row of its source line
+	}
+	var rows []row
+	cursorRow := 0
+	for i, raw := range sv.doc.Lines {
 		n := i + 1
-		raw := sv.doc.Lines[i]
-		num := fmt.Sprintf("%*d", numW, n)
-		gutter := " "
-		if anchored[n] {
-			gutter = s.Warning.Render("▍")
-		}
-		var content string
-		switch {
-		case spec.IsMarkerLine(raw):
-			style := s.Warning
+		var segs []string
+		style := s.Base
+		if spec.IsMarkerLine(raw) {
+			style = s.Warning
 			if resolvedLine[n] {
 				style = s.Success
 			}
-			content = style.Render(ansi.Truncate("  "+strings.TrimSpace(raw), max(w-numW-3, 4), "…"))
-		default:
-			content = s.Base.Render(ansi.Truncate(raw, max(w-numW-3, 4), "…"))
+			segs = strings.Split(ansi.Wrap(strings.TrimSpace(raw), max(textW-2, 4), ""), "\n")
+			for j := range segs {
+				segs[j] = "  " + segs[j]
+			}
+		} else {
+			segs = strings.Split(ansi.Wrap(raw, textW, ""), "\n")
 		}
-		lineStr := s.Faint.Render(num) + gutter + " " + content
 		if n == sv.cursor {
-			lineStr = s.Selection.Render(ansi.Strip(num)) + gutter + " " + content
+			cursorRow = len(rows)
+		}
+		for j, seg := range segs {
+			rows = append(rows, row{n: n, content: style.Render(seg), first: j == 0})
+		}
+	}
+
+	visible := max(h, 3)
+	// the window is derived purely from the cursor (render must not
+	// mutate state): keep the cursor centered where possible
+	off := min(max(cursorRow-(visible-1)/2, 0), max(len(rows)-visible, 0))
+
+	var b strings.Builder
+	end := min(off+visible, len(rows))
+	for i := off; i < end; i++ {
+		r := rows[i]
+		num := strings.Repeat(" ", numW)
+		gutter := " "
+		if r.first {
+			num = fmt.Sprintf("%*d", numW, r.n)
+			if anchored[r.n] {
+				gutter = s.Warning.Render("▍")
+			}
+		}
+		lineStr := s.Faint.Render(num) + gutter + " " + r.content
+		if r.n == sv.cursor && r.first {
+			lineStr = s.Selection.Render(num) + gutter + " " + r.content
 			lineStr = s.Cursor.Render("▸") + lineStr
 		} else {
 			lineStr = " " + lineStr
