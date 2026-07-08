@@ -207,6 +207,7 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 // buildAgent selects the agent backend from GUMMI_AGENT:
 //
 //	copilot   (default) — the GitHub Copilot SDK adapter
+//	claude              — the Claude Code CLI adapter (GUMMI_CLAUDE_BIN overrides the binary)
 //	opencode            — the opencode CLI adapter (GUMMI_OPENCODE_BIN overrides the binary)
 //	headless            — a generic subprocess agent (GUMMI_AGENT_CMD is its command line)
 //
@@ -215,6 +216,8 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 // input); use a wrapper script for arguments containing spaces.
 func buildAgent() (agent.Agent, error) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT"))) {
+	case "claude":
+		return agent.NewClaudeCode(os.Getenv("GUMMI_CLAUDE_BIN"))
 	case "opencode":
 		return agent.NewOpencode(os.Getenv("GUMMI_OPENCODE_BIN"))
 	case "headless":
