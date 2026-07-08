@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -94,6 +95,24 @@ CREATE TABLE IF NOT EXISTS diff_annotations (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS diff_annotations_feature ON diff_annotations(feature_id);
+
+-- Realized spend rolled up per (feature, stage, model): the breakdown
+-- behind features.spend_* (which stays the fast feature-level total).
+-- Forward-only — transitions never carried cost, so rows begin at deploy.
+-- credits use the same credit-equivalent as the feature total, so the
+-- breakdown sums back to features.spend_credits.
+CREATE TABLE IF NOT EXISTS stage_spend (
+	feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	stage      TEXT    NOT NULL,
+	model      TEXT    NOT NULL,
+	role       TEXT    NOT NULL,
+	credits    REAL    NOT NULL DEFAULT 0,
+	input_tok  INTEGER NOT NULL DEFAULT 0,
+	cached_tok INTEGER NOT NULL DEFAULT 0,
+	output_tok INTEGER NOT NULL DEFAULT 0,
+	updated_at TEXT    NOT NULL,
+	PRIMARY KEY (feature_id, stage, model)
+);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.
@@ -232,6 +251,98 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits float
 		return fmt.Errorf("metering %s: %w", id, err)
 	}
 	return nil
+}
+
+// StageSpend is one (stage, model) rollup row from stage_spend: the
+// realized cost a stage incurred on a given model, in credits and tokens.
+type StageSpend struct {
+	Stage        domain.Stage
+	Model        string
+	Role         string
+	Credits      float64
+	InputTokens  int64
+	CachedTokens int64
+	OutputTokens int64
+	UpdatedAt    time.Time
+}
+
+// RecordStageSpend accumulates one usage sample onto the (feature, stage,
+// model) rollup behind features.spend_* — the per-stage/model breakdown.
+// credits is the same credit-equivalent AddSpend receives, so the
+// breakdown sums back to the feature total. Like AddSpend it is a cheap
+// metering side-channel (an UPSERT, no validation). An empty model is
+// stored as "unknown" so the row is never keyed on ” and the breakdown
+// still accounts for the spend.
+func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage domain.Stage, role, model string, credits float64, in, cached, out int64) error {
+	if model == "" {
+		model = "unknown"
+	}
+	now := time.Now().UTC().Format(timeFmt)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO stage_spend
+			(feature_id, stage, model, role, credits, input_tok, cached_tok, output_tok, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(feature_id, stage, model) DO UPDATE SET
+			credits    = credits    + excluded.credits,
+			input_tok  = input_tok  + excluded.input_tok,
+			cached_tok = cached_tok + excluded.cached_tok,
+			output_tok = output_tok + excluded.output_tok,
+			role       = excluded.role,
+			updated_at = excluded.updated_at`,
+		string(id), string(stage), model, role, credits, in, cached, out, now)
+	if err != nil {
+		return fmt.Errorf("metering stage %s/%s for %s: %w", stage, model, id, err)
+	}
+	return nil
+}
+
+// StageBreakdown returns a feature's per-stage/model spend rollup, ordered
+// by workflow stage position then descending credits (so each stage's
+// dominant model leads). It is the read behind the dashboard breakdown.
+func (s *Store) StageBreakdown(ctx context.Context, id domain.FeatureID) ([]StageSpend, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT stage, model, role, credits, input_tok, cached_tok, output_tok, updated_at
+		FROM stage_spend WHERE feature_id = ?`, string(id))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StageSpend
+	for rows.Next() {
+		var r StageSpend
+		var stage, updated string
+		if err := rows.Scan(&stage, &r.Model, &r.Role, &r.Credits,
+			&r.InputTokens, &r.CachedTokens, &r.OutputTokens, &updated); err != nil {
+			return nil, err
+		}
+		r.Stage = domain.Stage(stage)
+		if r.UpdatedAt, err = time.Parse(timeFmt, updated); err != nil {
+			return nil, fmt.Errorf("corrupt stage_spend timestamp %q: %w", updated, err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := stageOrder(out[i].Stage), stageOrder(out[j].Stage)
+		if si != sj {
+			return si < sj
+		}
+		return out[i].Credits > out[j].Credits
+	})
+	return out, nil
+}
+
+// stageOrder is a stage's position in domain.Stages (workflow order),
+// or a large sentinel for an unknown stage so it sorts last.
+func stageOrder(st domain.Stage) int {
+	for i, s := range domain.Stages {
+		if s == st {
+			return i
+		}
+	}
+	return len(domain.Stages)
 }
 
 // GetFeature loads one feature by ID.

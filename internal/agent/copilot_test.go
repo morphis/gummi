@@ -257,3 +257,85 @@ func TestCopilotCloseClosesSessionChannels(t *testing.T) {
 		t.Fatal("Events channel did not close after Agent.Close()")
 	}
 }
+
+// TestCopilotUsageCostPrecedence checks the cost source precedence and the
+// token folding in the AssistantUsageData mapping: the authoritative CAPI
+// figure (nano-AIU → credits) wins over the Experimental Cost; Cost is used
+// when CopilotUsage is absent; reasoning tokens fold into output; and cache
+// read tokens are captured.
+func TestCopilotUsageCostPrecedence(t *testing.T) {
+	sess := func() *copilotSession {
+		return &copilotSession{
+			raw:          make(chan Event, 8),
+			stop:         make(chan struct{}),
+			pendingUsage: map[string]Usage{},
+			meteredCalls: map[string]struct{}{},
+		}
+	}
+	usageFrom := func(d *copilot.AssistantUsageData) Usage {
+		s := sess()
+		s.onEvent(copilot.SessionEvent{Data: d})
+		select {
+		case e := <-s.raw:
+			if e.Kind != EventUsage {
+				t.Fatalf("event kind = %v, want usage", e.Kind)
+			}
+			return e.Usage
+		default:
+			t.Fatal("no usage event emitted")
+			return Usage{}
+		}
+	}
+	f64 := func(v float64) *float64 { return &v }
+	i64 := func(v int64) *int64 { return &v }
+
+	// CopilotUsage.TotalNanoAiu wins over the Experimental Cost.
+	u := usageFrom(&copilot.AssistantUsageData{
+		Model:        "gpt-5-codex",
+		Cost:         f64(9),
+		CopilotUsage: &copilot.AssistantUsageCopilotUsage{TotalNanoAiu: 42e9},
+	})
+	if u.Credits != 42 {
+		t.Errorf("credits = %v, want 42 (nano-AIU/1e9 over Cost)", u.Credits)
+	}
+
+	// no CopilotUsage → fall back to Cost.
+	u = usageFrom(&copilot.AssistantUsageData{Model: "m", Cost: f64(7)})
+	if u.Credits != 7 {
+		t.Errorf("credits = %v, want 7 (Cost fallback)", u.Credits)
+	}
+
+	// a zero TotalNanoAiu is not authoritative — fall through to Cost.
+	u = usageFrom(&copilot.AssistantUsageData{
+		Model:        "m",
+		Cost:         f64(3),
+		CopilotUsage: &copilot.AssistantUsageCopilotUsage{TotalNanoAiu: 0},
+	})
+	if u.Credits != 3 {
+		t.Errorf("credits = %v, want 3 (zero nano-AIU falls through to Cost)", u.Credits)
+	}
+
+	// neither cost source → 0 credits (token-priced downstream).
+	u = usageFrom(&copilot.AssistantUsageData{Model: "m", InputTokens: i64(100)})
+	if u.Credits != 0 {
+		t.Errorf("credits = %v, want 0 (no cost source)", u.Credits)
+	}
+
+	// reasoning folds into output; cache read captured; input passthrough.
+	u = usageFrom(&copilot.AssistantUsageData{
+		Model:           "m",
+		InputTokens:     i64(1000),
+		OutputTokens:    i64(200),
+		ReasoningTokens: i64(50),
+		CacheReadTokens: i64(300),
+	})
+	if u.InputTokens != 1000 {
+		t.Errorf("input = %d, want 1000", u.InputTokens)
+	}
+	if u.OutputTokens != 250 {
+		t.Errorf("output = %d, want 250 (200 output + 50 reasoning)", u.OutputTokens)
+	}
+	if u.CachedTokens != 300 {
+		t.Errorf("cached = %d, want 300 (cache read)", u.CachedTokens)
+	}
+}

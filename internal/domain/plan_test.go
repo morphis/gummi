@@ -166,3 +166,23 @@ func TestFeaturePlanUnaffectedByBugStages(t *testing.T) {
 		t.Errorf("feature implement budget = %v, want 210", got)
 	}
 }
+
+func TestFormatDollars(t *testing.T) {
+	cases := []struct {
+		credits float64
+		want    string
+	}{
+		{0, "$0.00"},
+		{-5, "$0.00"},          // clamped, never negative
+		{420, "$4.20"},         // whole total
+		{1, "$0.01"},           // exactly one cent
+		{425, "$4.25"},         // two-place total
+		{0.3, "$0.003"},        // sub-cent gains a place
+		{0.05, "0.05 credits"}, // below a tenth of a cent falls back to credits
+	}
+	for _, c := range cases {
+		if got := FormatDollars(c.credits); got != c.want {
+			t.Errorf("FormatDollars(%v) = %q, want %q", c.credits, got, c.want)
+		}
+	}
+}

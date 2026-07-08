@@ -790,8 +790,14 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// contributed credits. Hosted events already carry credits, so this
 		// leaves them unchanged and never double-counts.
 		if e.cfg.Persist && e.cfg.Store != nil {
+			credits := s.creditEquivalent(ev.Usage)
 			_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
-				s.creditEquivalent(ev.Usage), ev.Usage.InputTokens, ev.Usage.OutputTokens)
+				credits, ev.Usage.InputTokens, ev.Usage.OutputTokens)
+			// the same sample attributed to (stage, model) for the breakdown;
+			// same credit-equivalent, so stage_spend sums to spend_credits.
+			_ = e.cfg.Store.RecordStageSpend(context.Background(), s.Feature.ID,
+				s.Feature.Stage, string(s.Role), ev.Usage.Model,
+				credits, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
 		}
 		// budget awareness: on crossing a threshold, record a nudge and
 		// signal the UI (DESIGN §5.1 layer 2).
@@ -834,6 +840,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// an autonomous turn completing frees the slot (atomically, so a
 		// racing Pause isn't overwritten)
 		if !s.Interactive && s.finishRunning() {
+			e.stageReceipt(s)
 			e.freeSlot(s)
 		}
 	case agent.EventError:
@@ -850,6 +857,44 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		e.persist(s)
 	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: kind})
+}
+
+// stageReceipt appends a muted one-line spend receipt to the session's
+// activity feed as an autonomous stage completes — "review · $0.42 ·
+// gpt-5-codex" — read from the stage_spend rollup so it reports the same
+// realized cost the dashboard shows. Best-effort: with no store, a read
+// error, or a stage that recorded no spend, it simply adds nothing.
+func (e *Engine) stageReceipt(s *Session) {
+	if !e.cfg.Persist || e.cfg.Store == nil {
+		return
+	}
+	rows, err := e.cfg.Store.StageBreakdown(context.Background(), s.Feature.ID)
+	if err != nil {
+		return
+	}
+	var total float64
+	var dom state.StageSpend
+	models := 0
+	for _, r := range rows {
+		if r.Stage != s.Feature.Stage {
+			continue
+		}
+		total += r.Credits
+		// rows are ordered credits-desc within a stage, so the first match
+		// is the dominant model; guard on Model to also handle reordering.
+		if dom.Model == "" || r.Credits > dom.Credits {
+			dom = r
+		}
+		models++
+	}
+	if models == 0 {
+		return
+	}
+	line := fmt.Sprintf("%s · %s · %s", s.Feature.Stage, domain.FormatDollars(total), dom.Model)
+	if models > 1 {
+		line += fmt.Sprintf(" +%d more", models-1)
+	}
+	s.appendActivity(line)
 }
 
 func (e *Engine) emitStopped(s *Session) {

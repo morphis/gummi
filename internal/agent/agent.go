@@ -199,6 +199,11 @@ type Usage struct {
 	Credits      float64
 	InputTokens  int64
 	OutputTokens int64
+	// CachedTokens is the count read from the prompt cache (a subset of
+	// the input side, billed cheaper); metering-only, kept for the
+	// per-stage breakdown. Reasoning tokens are folded into OutputTokens
+	// (billed as output), so there is no separate reasoning field.
+	CachedTokens int64
 	Model        string
 }
 

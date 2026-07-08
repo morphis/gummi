@@ -339,14 +339,28 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		return
 	case *copilot.AssistantUsageData:
 		u := Usage{Model: d.Model}
-		if d.Cost != nil {
+		// Cost precedence: the authoritative CAPI figure (nano-AIU → credits)
+		// when present, else the Experimental Cost field, else 0 (a BYOK call
+		// with neither — priced from tokens by the engine's credit-equivalent).
+		switch {
+		case d.CopilotUsage != nil && d.CopilotUsage.TotalNanoAiu > 0:
+			u.Credits = d.CopilotUsage.TotalNanoAiu / 1e9
+		case d.Cost != nil:
 			u.Credits = *d.Cost
 		}
 		if d.OutputTokens != nil {
 			u.OutputTokens = *d.OutputTokens
 		}
+		// Reasoning tokens are billed as output; fold them in so token
+		// counts don't undercount on reasoning models.
+		if d.ReasoningTokens != nil {
+			u.OutputTokens += *d.ReasoningTokens
+		}
 		if d.InputTokens != nil {
 			u.InputTokens = *d.InputTokens
+		}
+		if d.CacheReadTokens != nil {
+			u.CachedTokens = *d.CacheReadTokens
 		}
 		s.markUsageMetered(d.APICallID)
 		out = Event{Kind: EventUsage, Usage: u}

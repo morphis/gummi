@@ -8,6 +8,8 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // dashboardView renders the selected feature's detail pane: identity,
@@ -59,6 +61,9 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 	if !f.Spend.Zero() {
 		line(s.Muted.Render("spent    ") + s.Base.Render(featureSpend(f.Spend)))
+		for _, l := range stageBreakdown(s, r.StageSpend) {
+			line(l)
+		}
 	}
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
@@ -209,10 +214,57 @@ func budgetSummary(f domain.Feature, reserveReleased bool) string {
 func featureSpend(sp domain.Spend) string {
 	parts := []string{}
 	if sp.Credits > 0 {
-		parts = append(parts, fmt.Sprintf("%g credits (≈$%.2f)", roundSpend(sp.Credits), sp.Credits*0.01))
+		parts = append(parts, fmt.Sprintf("%g credits (≈%s)", roundSpend(sp.Credits), money(sp.Credits)))
 	}
 	if sp.InputTokens+sp.OutputTokens > 0 {
 		parts = append(parts, fmt.Sprintf("%d in / %d out tokens", sp.InputTokens, sp.OutputTokens))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// money renders a credit figure as adaptive-precision dollars; see
+// domain.FormatDollars (shared with the engine's stage-exit receipt).
+func money(credits float64) string { return domain.FormatDollars(credits) }
+
+// stageBreakdown renders the per-stage/model spend rollup inline under the
+// spent line: one line per stage (its total + dominant model), and for a
+// multi-model stage the per-model split indented beneath. Rows arrive
+// ordered by workflow stage then descending credits, so the first row of
+// each group is its dominant model. Forward-only, so it's labelled "since
+// <first recorded>" rather than implying full history.
+func stageBreakdown(s *theme.Styles, rows []state.StageSpend) []string {
+	if len(rows) == 0 {
+		return nil
+	}
+	since := rows[0].UpdatedAt
+	for _, r := range rows {
+		if r.UpdatedAt.Before(since) {
+			since = r.UpdatedAt
+		}
+	}
+	out := []string{s.Muted.Render("stages   ") + s.Faint.Render("since "+since.Format("2006-01-02"))}
+	for i := 0; i < len(rows); {
+		j := i
+		var total float64
+		for j < len(rows) && rows[j].Stage == rows[i].Stage {
+			total += rows[j].Credits
+			j++
+		}
+		grp := rows[i:j]
+		dom := grp[0] // highest-credit model on this stage
+		head := "  " + s.Subtle.Render(fmt.Sprintf("%-9s", string(dom.Stage))) +
+			s.Base.Render(money(total)) + s.Faint.Render("  ·  "+dom.Model)
+		if len(grp) > 1 {
+			head += s.Faint.Render(fmt.Sprintf("  +%d more", len(grp)-1))
+		}
+		out = append(out, head)
+		if len(grp) > 1 {
+			for _, r := range grp {
+				out = append(out, "     "+s.Faint.Render(fmt.Sprintf("└ %-14s %s · %s/%s",
+					r.Model, money(r.Credits), humanTokens(r.InputTokens), humanTokens(r.OutputTokens))))
+			}
+		}
+		i = j
+	}
+	return out
 }

@@ -25,6 +25,7 @@ type featureRow struct {
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
+	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
 }
 
 // rowsMsg delivers a fresh load of the board content.
@@ -60,6 +61,9 @@ func (m *Shell) loadRows() tea.Msg {
 		row := featureRow{F: f}
 		if hist, err := m.store.History(ctx, f.ID); err == nil {
 			row.History = hist
+		}
+		if bd, err := m.store.StageBreakdown(ctx, f.ID); err == nil {
+			row.StageSpend = bd
 		}
 		if ok, err := m.wt.Exists(ctx, &f); err == nil {
 			row.HasWorktree = ok

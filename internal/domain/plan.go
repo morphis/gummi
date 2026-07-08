@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"math"
 	"sort"
 )
@@ -70,6 +71,28 @@ func PlanFor(kind Kind, envelope float64) SpendPlan {
 // spend (DESIGN §5.1). A single default rate; per-provider rates are a
 // later refinement. 0.5 credits/1K ≈ $0.005/1K, a mid local rate.
 const ByokCreditsPer1KTokens = 0.5
+
+// CreditsToDollars converts AI credits to USD: 1 credit = $0.01, the
+// Copilot usage-based rate in effect since 2026-06-01.
+const CreditsToDollars = 0.01
+
+// FormatDollars renders a credit figure as adaptive-precision USD. Whole
+// totals read as "$4.20"; a sub-cent figure that would collapse to "$0.00"
+// gains decimal places, and one below a tenth of a cent falls back to a
+// credit count so a stage's real cost never reads as free.
+func FormatDollars(credits float64) string {
+	d := credits * CreditsToDollars
+	switch {
+	case d <= 0:
+		return "$0.00"
+	case d >= 0.01:
+		return fmt.Sprintf("$%.2f", d)
+	case d >= 0.001:
+		return fmt.Sprintf("$%.3f", d)
+	default:
+		return fmt.Sprintf("%.2g credits", credits)
+	}
+}
 
 // CreditEquivalent returns the spend as a credit figure at the default
 // rate. See CreditEquivalentAt for a per-provider rate.
