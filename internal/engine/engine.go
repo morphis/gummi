@@ -769,6 +769,16 @@ func (e *Engine) pump(s *Session) {
 	}
 }
 
+// toolLine composes a tool-call event into one activity line: the tool
+// name, then its salient argument after a double space — the separator
+// the UI splits on to style name and detail differently.
+func toolLine(ev agent.Event) string {
+	if ev.Detail == "" {
+		return ev.Tool
+	}
+	return ev.Tool + "  " + ev.Detail
+}
+
 func (e *Engine) handle(s *Session, ev agent.Event) {
 	kind := EventUpdated
 	switch ev.Kind {
@@ -782,7 +792,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.finishAssistant(ev.Text)
 		kind = EventMessage
 	case agent.EventToolCall:
-		s.appendActivity(ev.Tool)
+		s.appendActivity(toolLine(ev))
 	case agent.EventClientToolCall:
 		e.handleClientTool(s, ev.ToolCall)
 		return

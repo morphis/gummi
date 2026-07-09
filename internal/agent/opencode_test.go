@@ -38,9 +38,14 @@ func TestOpencodeMapEventText(t *testing.T) {
 func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	s := newOCSession()
 	var msg strings.Builder
-	evs := s.mapEvent([]byte(`{"type":"tool_use","part":{"type":"tool","tool":"read","callID":"c1"}}`), &msg)
-	if len(evs) != 1 || evs[0].Kind != EventToolCall || evs[0].Tool != "read" {
-		t.Fatalf("tool = %+v, want EventToolCall read", evs)
+	evs := s.mapEvent([]byte(`{"type":"tool_use","part":{"type":"tool","tool":"read","callID":"c1","state":{"input":{"filePath":"internal/ui/chat.go"}}}}`), &msg)
+	if len(evs) != 1 || evs[0].Kind != EventToolCall || evs[0].Tool != "read" || evs[0].Detail != "internal/ui/chat.go" {
+		t.Fatalf("tool = %+v, want EventToolCall read internal/ui/chat.go", evs)
+	}
+	// args with no displayable value fall back to opencode's rendered title
+	evs = s.mapEvent([]byte(`{"type":"tool_use","part":{"type":"tool","tool":"todo","state":{"title":"3 todos","input":{"todos":[]}}}}`), &msg)
+	if len(evs) != 1 || evs[0].Detail != "3 todos" {
+		t.Fatalf("tool = %+v, want title fallback '3 todos'", evs)
 	}
 	evs = s.mapEvent([]byte(`{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":100,"output":20},"cost":0.05}}`), &msg)
 	// step_finish yields a usage event plus a context event (input≈context)

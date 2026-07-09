@@ -185,7 +185,7 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		// messages around them; consecutive ones group without blanks.
 		if msg.Author == engine.AuthorTool {
 			lines = append(lines, "  "+s.Success.Render("✓ ")+
-				s.Faint.Render(ansi.Truncate(sanitize(msg.Content), max(w-6, 8), "…")))
+				toolLineView(s, sanitize(msg.Content), max(w-6, 8)))
 			if i+1 == len(snap.Transcript) || snap.Transcript[i+1].Author != engine.AuthorTool {
 				lines = append(lines, "")
 			}
@@ -231,6 +231,20 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		visible = append([]string{""}, visible...)
 	}
 	return strings.Join(visible, "\n")
+}
+
+// toolLineView styles one activity-ticker line, truncated ANSI-aware to
+// width. A tool call arrives composed as "name  detail" (the engine's
+// toolLine, double-space separator): the name renders Muted and the
+// detail Faint, so a run of calls scans as a column of verbs with the
+// arguments receding behind them. Lines without that shape — check
+// results, budget nudges, notes — stay single-style Faint as before.
+func toolLineView(s *theme.Styles, content string, width int) string {
+	name, detail, ok := strings.Cut(content, "  ")
+	if !ok || name == "" || strings.Contains(name, " ") {
+		return s.Faint.Render(ansi.Truncate(content, width, "…"))
+	}
+	return ansi.Truncate(s.Muted.Render(name)+"  "+s.Faint.Render(detail), width, "…")
 }
 
 // syncAsk aligns the picker with the session's current pending ask,

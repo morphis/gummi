@@ -35,7 +35,8 @@ import (
 //	{"type":"text","text":"…"}      → EventTextDelta
 //	{"type":"reasoning","text":"…"} → EventReasoningDelta
 //	{"type":"message","text":"…"}   → EventMessage
-//	{"type":"tool","name":"…"}      → EventToolCall
+//	{"type":"tool","name":"…","detail":"…"} → EventToolCall (detail optional:
+//	                                  the salient argument, e.g. command or path)
 //	{"type":"usage","credits":N,"input":I,"output":O,"model":"…"} → EventUsage
 //	{"type":"ask","id":"…","ask":{…}} → EventClientToolCall (ask_user)
 //	{"type":"idle"}                 → EventIdle
@@ -338,6 +339,7 @@ type headlessEvent struct {
 	Type    string          `json:"type"`
 	Text    string          `json:"text"`
 	Name    string          `json:"name"`
+	Detail  string          `json:"detail"` // tool: salient argument (optional)
 	Message string          `json:"message"`
 	Credits float64         `json:"credits"`
 	Input   int64           `json:"input"`
@@ -360,7 +362,9 @@ func decodeHeadless(line []byte) (Event, bool) {
 	case "message":
 		return Event{Kind: EventMessage, Text: m.Text}, true
 	case "tool":
-		return Event{Kind: EventToolCall, Tool: m.Name}, true
+		// the child knows its own workdir and is expected to emit short,
+		// relative details; gummi only normalizes to one bounded line.
+		return Event{Kind: EventToolCall, Tool: m.Name, Detail: collapseDetail("", m.Detail)}, true
 	case "ask":
 		// the ask payload is passed through verbatim; the orchestrator
 		// parses it into a question (name defaults to ask_user).

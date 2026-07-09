@@ -100,8 +100,8 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	if strings.Join(kindStrings(kinds), ",") != strings.Join(kindStrings(want), ",") {
 		t.Fatalf("turn 1 kinds = %v, want %v", kinds, want)
 	}
-	if evs[3].Text != "hello" || evs[4].Tool != "Bash" {
-		t.Errorf("message/tool = %q/%q", evs[3].Text, evs[4].Tool)
+	if evs[3].Text != "hello" || evs[4].Tool != "Bash" || evs[4].Detail != "true" {
+		t.Errorf("message/tool = %q/%q(%q)", evs[3].Text, evs[4].Tool, evs[4].Detail)
 	}
 	mid, ctxEv, settle := evs[5].Usage, evs[6].Context, evs[7].Usage
 	if mid.Credits != 0 || mid.InputTokens != 10 || mid.OutputTokens != 20 || mid.Model != "claude-test-1" {

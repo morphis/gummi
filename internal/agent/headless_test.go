@@ -23,7 +23,7 @@ for line in sys.stdin:
     if t=="init":
         model=m.get("model",""); workdir=m.get("workdir","")
     elif t=="send":
-        print(json.dumps({"type":"tool","name":"read spec"}), flush=True)
+        print(json.dumps({"type":"tool","name":"read","detail":"docs/spec.md"}), flush=True)
         print(json.dumps({"type":"message","text":"model=%s cwd=%s text=%s"%(model, os.getcwd(), m.get("text",""))}), flush=True)
         print(json.dumps({"type":"usage","credits":2,"output":10,"model":model}), flush=True)
         print(json.dumps({"type":"idle"}), flush=True)
@@ -107,6 +107,9 @@ func TestHeadlessRoundTrip(t *testing.T) {
 	want := []EventKind{EventToolCall, EventMessage, EventUsage, EventIdle}
 	if strings.Join(kindStrings(kinds), ",") != strings.Join(kindStrings(want), ",") {
 		t.Fatalf("event kinds = %v, want %v", kinds, want)
+	}
+	if evs[0].Tool != "read" || evs[0].Detail != "docs/spec.md" {
+		t.Errorf("tool event = %+v, want read docs/spec.md", evs[0])
 	}
 	// the message proves init carried the model and the process ran in the
 	// worktree, and that the turn text arrived

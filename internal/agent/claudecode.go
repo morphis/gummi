@@ -155,6 +155,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		cancel:      cancel,
 		stdin:       stdin,
 		stderr:      stderr,
+		workdir:     opts.WorkDir,
 		raw:         make(chan Event, 64),
 		events:      make(chan Event),
 		stop:        make(chan struct{}),
@@ -190,10 +191,11 @@ func (c *ClaudeCode) Close() error {
 }
 
 type claudeSession struct {
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	stdin  io.WriteCloser
-	stderr *capWriter // bounded tail of the child's stderr, for crash diagnostics
+	cmd     *exec.Cmd
+	cancel  context.CancelFunc
+	workdir string // opts.WorkDir, for repo-relative tool-call details
+	stdin   io.WriteCloser
+	stderr  *capWriter // bounded tail of the child's stderr, for crash diagnostics
 
 	raw      chan Event
 	events   chan Event
@@ -369,9 +371,10 @@ type ccAPIUsage struct {
 type ccAssistantMessage struct {
 	Model   string `json:"model"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-		Name string `json:"name"` // tool_use
+		Type  string         `json:"type"`
+		Text  string         `json:"text"`
+		Name  string         `json:"name"`  // tool_use
+		Input map[string]any `json:"input"` // tool_use arguments
 	} `json:"content"`
 }
 
@@ -493,7 +496,7 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage) []Event {
 			}
 		case "tool_use":
 			if b.Name != "" {
-				out = append(out, Event{Kind: EventToolCall, Tool: b.Name})
+				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input)})
 			}
 		}
 	}

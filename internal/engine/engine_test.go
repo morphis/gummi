@@ -168,7 +168,7 @@ func TestInteractiveRoundTrip(t *testing.T) {
 func TestAutonomousRunKicksOff(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{
-			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+			{Kind: agent.EventToolCall, Tool: "edit", Detail: "theme.go"},
 			{Kind: agent.EventMessage, Text: "Implemented."},
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, OutputTokens: 40}},
 			{Kind: agent.EventIdle},
@@ -187,7 +187,9 @@ func TestAutonomousRunKicksOff(t *testing.T) {
 	waitState(t, e, "FD-001", StateDone)
 
 	snap := e.Get("FD-001").Snapshot()
-	if len(snap.Activity) != 1 || snap.Activity[0] != "edit theme.go" {
+	// tool name and detail compose double-space separated (the UI's
+	// split point for styling the two parts)
+	if len(snap.Activity) != 1 || snap.Activity[0] != "edit  theme.go" {
 		t.Errorf("activity = %+v", snap.Activity)
 	}
 	if snap.Spend.Credits != 2 {

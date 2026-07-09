@@ -123,19 +123,22 @@ loop:
 // session stream instead of being dropped.
 func TestCopilotOnEventMapsStreamingEvents(t *testing.T) {
 	s := &copilotSession{raw: make(chan Event, 8), stop: make(chan struct{})}
-	s.onEvent(copilot.SessionEvent{Data: &copilot.ToolExecutionStartData{ToolName: "read"}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.ToolExecutionStartData{
+		ToolName:  "read",
+		Arguments: map[string]any{"path": "internal/ui/chat.go"},
+	}})
 	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantReasoningDeltaData{DeltaContent: "hmm, "}})
 	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantMessageDeltaData{DeltaContent: "hello"}})
 
 	want := []Event{
-		{Kind: EventToolCall, Tool: "read"},
+		{Kind: EventToolCall, Tool: "read", Detail: "internal/ui/chat.go"},
 		{Kind: EventReasoningDelta, Text: "hmm, "},
 		{Kind: EventTextDelta, Text: "hello"},
 	}
 	for i, w := range want {
 		select {
 		case got := <-s.raw:
-			if got.Kind != w.Kind || got.Text != w.Text || got.Tool != w.Tool {
+			if got.Kind != w.Kind || got.Text != w.Text || got.Tool != w.Tool || got.Detail != w.Detail {
 				t.Errorf("event %d = %+v, want %+v", i, got, w)
 			}
 		default:

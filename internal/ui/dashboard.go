@@ -85,7 +85,7 @@ func (m *Shell) dashboardView(w, h int) string {
 			acts = acts[len(acts)-6:]
 		}
 		for _, a := range acts {
-			line("  " + s.Success.Render("✓ ") + s.Subtle.Render(sanitize(a)))
+			line("  " + s.Success.Render("✓ ") + toolLineView(s, sanitize(a), max(w-6, 8)))
 		}
 		last := lastAssistant(snap)
 		if last != "" {

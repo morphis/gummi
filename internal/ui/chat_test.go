@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -278,5 +280,30 @@ func TestChatNoEngine(t *testing.T) {
 	}
 	if !m.notice.isErr {
 		t.Error("no notice when attaching without an engine")
+	}
+}
+
+func TestToolLineView(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+
+	// a composed tool line splits at the double space: name Muted,
+	// detail Faint
+	got := toolLineView(s, "bash  go test ./...", 80)
+	want := s.Muted.Render("bash") + "  " + s.Faint.Render("go test ./...")
+	if got != want {
+		t.Errorf("tool line = %q, want %q", got, want)
+	}
+
+	// non-tool activity (check results, notes — spaces before any double
+	// space, or none at all) stays a single Faint line
+	for _, plain := range []string{"check gofmt: ok", "budget exhausted — stage stopped for review"} {
+		if got := toolLineView(s, plain, 80); got != s.Faint.Render(plain) {
+			t.Errorf("plain line %q = %q, want single Faint", plain, got)
+		}
+	}
+
+	// long lines truncate ANSI-aware to the given width
+	if w := ansi.StringWidth(toolLineView(s, "bash  "+strings.Repeat("x", 100), 20)); w != 20 {
+		t.Errorf("truncated width = %d, want 20", w)
 	}
 }

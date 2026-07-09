@@ -294,12 +294,16 @@ type ocEvent struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
 	Part      struct {
-		ID     string  `json:"id"`
-		Type   string  `json:"type"`
-		Text   string  `json:"text"`
-		Tool   string  `json:"tool"`
-		Cost   float64 `json:"cost"`
-		Error  string  `json:"error"`
+		ID    string  `json:"id"`
+		Type  string  `json:"type"`
+		Text  string  `json:"text"`
+		Tool  string  `json:"tool"`
+		Cost  float64 `json:"cost"`
+		Error string  `json:"error"`
+		State struct {
+			Title string         `json:"title"`
+			Input map[string]any `json:"input"`
+		} `json:"state"` // tool parts: arguments and a pre-rendered title
 		Tokens struct {
 			Input  int64 `json:"input"`
 			Output int64 `json:"output"`
@@ -355,7 +359,13 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 			out = append(out, Event{Kind: EventMessage, Text: text})
 		}
 		msg.Reset()
-		return append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool})
+		// the salient argument from the part's input, falling back to
+		// opencode's own rendered title when the args carry nothing.
+		detail := toolDetail(s.workdir, e.Part.State.Input)
+		if detail == "" {
+			detail = collapseDetail(s.workdir, e.Part.State.Title)
+		}
+		return append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail})
 	case "step_finish":
 		u := Usage{Model: s.model, InputTokens: e.Part.Tokens.Input, OutputTokens: e.Part.Tokens.Output}
 		// opencode cost is USD; gummi credits are $0.01 units.

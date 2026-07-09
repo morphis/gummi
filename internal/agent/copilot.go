@@ -121,6 +121,7 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	}
 
 	cs := &copilotSession{
+		workdir:      opts.WorkDir,
 		raw:          make(chan Event, 256),
 		events:       make(chan Event),
 		stop:         make(chan struct{}),
@@ -185,7 +186,8 @@ func (c *Copilot) Close() error {
 }
 
 type copilotSession struct {
-	sdk *copilot.Session
+	sdk     *copilot.Session
+	workdir string // opts.WorkDir, for repo-relative tool-call details
 	// raw carries events from the SDK's event goroutine to the
 	// forwarder; events is the consumer-facing stream, owned solely by
 	// the forwarder so it can close it exactly once.
@@ -327,7 +329,8 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 	case *copilot.AssistantReasoningDeltaData:
 		out = Event{Kind: EventReasoningDelta, Text: d.DeltaContent}
 	case *copilot.ToolExecutionStartData:
-		out = Event{Kind: EventToolCall, Tool: d.ToolName}
+		args, _ := d.Arguments.(map[string]any)
+		out = Event{Kind: EventToolCall, Tool: d.ToolName, Detail: toolDetail(s.workdir, args)}
 	case *copilot.AssistantMessageData:
 		// Usage is metered from AssistantUsageData (the authoritative
 		// per-call event) when the CLI sends one; streamed BYOK calls

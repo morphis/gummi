@@ -203,8 +203,8 @@ func waitForActivity(t *testing.T, eng *engine.Engine) {
 func TestDashboardActivityGolden(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{
-			{Kind: agent.EventToolCall, Tool: "edit palette.go"},
-			{Kind: agent.EventToolCall, Tool: "go test ./..."},
+			{Kind: agent.EventToolCall, Tool: "edit", Detail: "palette.go"},
+			{Kind: agent.EventToolCall, Tool: "bash", Detail: "go test ./..."},
 			{Kind: agent.EventMessage, Text: "Done: toggle wired, tests green."},
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 2, OutputTokens: 88}},
 			{Kind: agent.EventIdle},

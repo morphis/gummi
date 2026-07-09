@@ -219,6 +219,7 @@ type Event struct {
 	Kind     EventKind
 	Text     string    // text for deltas/messages
 	Tool     string    // tool name for tool-call/permission events
+	Detail   string    // tool-call salient argument (command, path, …); may be empty
 	ToolCall *ToolCall // populated for EventClientToolCall
 	Usage    Usage     // populated for EventUsage
 	Context  Context   // populated for EventContext
