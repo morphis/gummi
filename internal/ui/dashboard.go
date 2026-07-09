@@ -40,7 +40,14 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 	line(s.Separator.Render(strings.Repeat("─", max(min(w, 60), 0))))
 
-	line(s.Muted.Render("stage    ") + s.StagePill(f.Stage).Render(string(f.Stage)) + "  " + s.Faint.Render(string(f.Stage.SuperState())))
+	stageLine := s.Muted.Render("stage    ") + s.StagePill(f.Stage).Render(string(f.Stage)) + "  " + s.Faint.Render(string(f.Stage.SuperState()))
+	if rr := m.reviewRounds[f.ID]; rr > 0 {
+		stageLine += s.Faint.Render("  ·  review round " + itoa(rr) + "/" + itoa(maxReviewRounds))
+	}
+	line(stageLine)
+	if loop := m.planLoopLine(f); loop != "" {
+		line(s.Muted.Render("loop     ") + loop)
+	}
 	skips := skipSummary(f)
 	if skips != "" {
 		line(s.Muted.Render("skips    ") + s.Faint.Render(skips))
@@ -74,7 +81,7 @@ func (m *Shell) dashboardView(w, h int) string {
 		snap := sess.Snapshot()
 		title := s.Subtitle.Render("activity")
 		if snap.Busy {
-			title += "  " + s.Info.Render(m.spinner()+" running")
+			title += "  " + s.Info.Render(m.spinner()+" "+m.runningLabel(snap))
 		}
 		line(title)
 		if meta := sessionMeta(snap); meta != "" {

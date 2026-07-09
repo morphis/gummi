@@ -25,6 +25,10 @@ type attnItem struct {
 	Feature domain.FeatureID
 	Kind    attnKind
 	Text    string
+	// Escalated marks a gate an automatic loop gave up on (round cap,
+	// unclear verdict) rather than finished clean, so surfaces can tint
+	// it as needs-you instead of ready-to-approve.
+	Escalated bool
 }
 
 // inbox is the needs-attention queue (DESIGN §4.2): gates, failures,
@@ -43,19 +47,35 @@ func newInbox() *inbox {
 	return &inbox{items: map[domain.FeatureID]attnItem{}}
 }
 
-// add upserts an item for a feature, keeping insertion order.
 // add upserts a feature's attention item, returning true when the feature
 // had no prior item (a genuinely new alert, worth a notification) and
 // false when it merely updated an existing one.
 func (b *inbox) add(id domain.FeatureID, kind attnKind, text string) bool {
+	return b.put(attnItem{Feature: id, Kind: kind, Text: text})
+}
+
+// addEscalated is add with the escalation flag set.
+func (b *inbox) addEscalated(id domain.FeatureID, kind attnKind, text string) bool {
+	return b.put(attnItem{Feature: id, Kind: kind, Text: text, Escalated: true})
+}
+
+func (b *inbox) put(it attnItem) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_, existed := b.items[id]
+	_, existed := b.items[it.Feature]
 	if !existed {
-		b.order = append(b.order, id)
+		b.order = append(b.order, it.Feature)
 	}
-	b.items[id] = attnItem{Feature: id, Kind: kind, Text: text}
+	b.items[it.Feature] = it
 	return !existed
+}
+
+// get returns a feature's pending attention item, if any.
+func (b *inbox) get(id domain.FeatureID) (attnItem, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	it, ok := b.items[id]
+	return it, ok
 }
 
 // remove clears a feature's item (it has been attended to).

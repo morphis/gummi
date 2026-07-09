@@ -132,6 +132,15 @@ func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) 
 	}
 }
 
+// raiseEscalation is raiseAttention for gates an automatic loop gave up
+// on (round cap, unclear verdict): the item carries the escalation flag
+// so surfaces tint it as needs-you rather than finished-clean.
+func (m *Shell) raiseEscalation(id domain.FeatureID, kind attnKind, text string) {
+	if m.inbox.addEscalated(id, kind, text) {
+		m.notifier.Alert(string(id) + ": " + text)
+	}
+}
+
 // Styles exposes the derived style set to panes.
 func (m *Shell) Styles() *theme.Styles { return m.styles }
 

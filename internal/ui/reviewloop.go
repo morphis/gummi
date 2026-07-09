@@ -102,7 +102,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	case verdictChanges:
 		if m.reviewRounds[id] >= maxReviewRounds {
 			m.reviewRounds[id] = 0
-			m.raiseAttention(id, attnGate, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
+			m.raiseEscalation(id, attnGate, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
 			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
 			return nil
 		}
@@ -112,7 +112,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
 		m.reviewRounds[id] = 0
-		m.raiseAttention(id, attnGate, "review finished with no clear verdict — review manually")
+		m.raiseEscalation(id, attnGate, "review finished with no clear verdict — review manually")
 		return nil
 	}
 }
@@ -154,7 +154,7 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 	case verdictChanges:
 		if m.planRounds[id] >= maxPlanRounds {
 			m.planRounds[id] = 0
-			m.raiseAttention(id, attnGate, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
+			m.raiseEscalation(id, attnGate, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
 			m.notice = noticeMsg{text: string(id) + " plan critique escalated after " + itoa(maxPlanRounds) + " rounds", isErr: true}
 			return nil
 		}
@@ -164,7 +164,7 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
 		m.planRounds[id] = 0
-		m.raiseAttention(id, attnGate, "plan critique finished with no clear verdict — review the plan manually")
+		m.raiseEscalation(id, attnGate, "plan critique finished with no clear verdict — review the plan manually")
 		return nil
 	}
 }

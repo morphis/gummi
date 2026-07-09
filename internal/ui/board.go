@@ -61,12 +61,17 @@ func (m *Shell) boardView(w int) string {
 func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) string {
 	s := m.styles
 	glyph := s.Stage(r.F.Stage).Render(stageGlyph(r.F.Stage))
-	// a live agent session marks the card by scheduling state
+	// a live agent session marks the card by scheduling state; a plan-loop
+	// session also names its leg (the stage alone can't distinguish them)
+	loop := ""
 	if sess := m.sessionFor(r.F.ID); sess != nil {
 		switch sess.State() {
 		case engine.StateRunning:
 			if sess.Busy() {
 				glyph = s.Info.Render(m.spinner())
+			}
+			if word := m.planLoopWord(sess); word != "" {
+				loop = " " + s.Faint.Render(word)
 			}
 		case engine.StateQueued:
 			glyph = s.Warning.Render("◔")
@@ -101,7 +106,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if !r.F.Spend.Zero() {
 		cost = " " + s.Faint.Render(spendTick(r.F.Spend))
 	}
-	line := cursor + num + " " + glyph + " " + id + " " + title + tag + wtMark + landed + cost
+	line := cursor + num + " " + glyph + " " + id + " " + title + loop + tag + wtMark + landed + cost
 	return ansi.Truncate(line, w, "…")
 }
 
