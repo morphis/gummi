@@ -99,8 +99,11 @@ func (dv *diffView) openCount() int {
 	return n
 }
 
+// setCursor clamps the cursor to the addressable positions: the diff
+// lines plus one slot per orphaned annotation in the footer (so x/D can
+// reach a comment whose line changed).
 func (dv *diffView) setCursor(n int) {
-	dv.cursor = min(max(n, 1), len(dv.lines))
+	dv.cursor = min(max(n, 1), len(dv.lines)+len(dv.orphans))
 }
 
 // scrollMax is the largest read-mode offset the last render allowed,
@@ -112,11 +115,15 @@ func (dv *diffView) scrollMax() int {
 	return max(len(dv.lines)-1, 0)
 }
 
-// jumpAnn moves the cursor to the next/previous annotated line.
+// jumpAnn moves the cursor to the next/previous annotated position —
+// anchored diff lines and the orphan footer slots.
 func (dv *diffView) jumpAnn(dir int) {
 	var ls []int
 	for idx := range dv.located {
 		ls = append(ls, idx+1) // to 1-based
+	}
+	for k := range dv.orphans {
+		ls = append(ls, dv.orphanRowPos(k))
 	}
 	if len(ls) == 0 {
 		return
@@ -155,9 +162,13 @@ func (dv *diffView) jumpAnn(dir int) {
 	}
 }
 
-// annAtCursor returns the first annotation anchored at the cursor line, or
-// -1. Used by `x` (toggle resolved).
+// annAtCursor returns the annotation at the cursor — the first one
+// anchored at the cursor line, or the orphan the cursor addresses in the
+// footer — or -1. Used by `x` (toggle resolved) and `D` (delete).
 func (dv *diffView) annAtCursor() int {
+	if k := dv.cursor - len(dv.lines) - 1; k >= 0 && k < len(dv.orphans) {
+		return dv.orphans[k]
+	}
 	if idxs := dv.located[dv.cursor-1]; len(idxs) > 0 {
 		return idxs[0]
 	}
@@ -172,6 +183,8 @@ func (m *Shell) addDiffComment(text string) tea.Cmd {
 	}
 	idx := dv.cursor - 1
 	if idx < 0 || idx >= len(dv.lines) {
+		// the orphan footer: nothing to anchor a new comment to
+		m.notice = noticeMsg{text: "move to a diff line to comment"}
 		return nil
 	}
 	ann := domain.DiffAnnotation{
@@ -212,6 +225,29 @@ func (m *Shell) toggleDiffResolved() tea.Cmd {
 	}
 }
 
+// deleteDiffAnnotation removes the annotation at the cursor from the
+// store and reloads — the escape hatch for a mistyped comment (`x` only
+// resolves, which keeps it visible).
+func (m *Shell) deleteDiffAnnotation() tea.Cmd {
+	dv := m.diff
+	if dv == nil {
+		return nil
+	}
+	i := dv.annAtCursor()
+	if i < 0 {
+		m.notice = noticeMsg{text: "no annotation on this line"}
+		return nil
+	}
+	ann := dv.anns[i]
+	reload := m.reloadDiff()
+	return func() tea.Msg {
+		if err := m.store.DeleteDiffAnnotation(context.Background(), ann.ID); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return reload()
+	}
+}
+
 // bindings is the diff surface's key table (see keymap.go), split by
 // mode like handleDiffKey routes.
 func (dv *diffView) bindings() []binding {
@@ -222,6 +258,7 @@ func (dv *diffView) bindings() []binding {
 			{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
 			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 			{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
+			{key: "D", label: "delete", help: "delete the annotation at the cursor"},
 			{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
 			{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 			{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
@@ -282,6 +319,8 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 		dv.jumpAnn(-1)
 	case "x":
 		return m.toggleDiffResolved()
+	case "D":
+		return m.deleteDiffAnnotation()
 	case "c":
 		m.Overlay.Push(newCommentDialog(func(text string) tea.Cmd {
 			return m.addDiffComment(text)

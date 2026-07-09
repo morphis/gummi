@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -57,38 +58,55 @@ func (m *Shell) diffViewRender(w, h int) string {
 // diffLineStyle colors a unified-diff line by its role. The line must be
 // already sanitized (see diffCell).
 func diffLineStyle(m *Shell, line string) string {
+	return diffStyleFor(m, line).Render(line)
+}
+
+// diffStyleFor picks the style for a unified-diff line by its role, so
+// wrapped continuation rows (which lose the +/- prefix) keep the color
+// of the line they belong to.
+func diffStyleFor(m *Shell, line string) lipgloss.Style {
 	s := m.styles
 	switch {
 	case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-		return s.Subtitle.Render(line)
+		return s.Subtitle
 	case strings.HasPrefix(line, "diff --git") || strings.HasPrefix(line, "index "):
-		return s.Faint.Render(line)
+		return s.Faint
 	case strings.HasPrefix(line, "@@"):
-		return s.Info.Render(line)
+		return s.Info
 	case strings.HasPrefix(line, "+"):
-		return s.Success.Render(line)
+		return s.Success
 	case strings.HasPrefix(line, "-"):
-		return s.Error.Render(line)
+		return s.Error
 	default:
-		return s.Base.Render(line)
+		return s.Base
 	}
 }
 
-// renderRead shows the colorized unified diff scrolled to the offset.
+// renderRead shows the colorized unified diff scrolled to the offset,
+// with annotation blocks interleaved under their anchored lines (and the
+// orphan footer at the bottom), so comments are visible without
+// switching to annotate mode.
 func (dv *diffView) renderRead(m *Shell, w, h int) string {
-	var b strings.Builder
-	visible := max(h, 3)
-	dv.maxOffset = max(len(dv.lines)-visible, 0)
-	off := min(dv.offset, dv.maxOffset)
-	end := min(off+visible, len(dv.lines))
-	for i := off; i < end; i++ {
-		line := diffCell(dv.lines[i], w-1)
-		b.WriteString(diffLineStyle(m, line))
-		if i < end-1 {
-			b.WriteString("\n")
+	var display []string
+	push := func(str string) { display = append(display, strings.Split(str, "\n")...) }
+	for i := range dv.lines {
+		push(diffLineStyle(m, diffCell(dv.lines[i], w-1)))
+		for _, ai := range dv.located[i] {
+			push(dv.annBlock(m, dv.anns[ai], 2, w))
 		}
 	}
-	return b.String()
+	if len(dv.orphans) > 0 {
+		push("")
+		push(m.styles.Faint.Render("orphaned (line changed since comment):"))
+		for _, oi := range dv.orphans {
+			push(strings.Join(dv.orphanRows(m, dv.anns[oi], 2, w), "\n"))
+		}
+	}
+	visible := max(h, 3)
+	dv.maxOffset = max(len(display)-visible, 0)
+	off := min(dv.offset, dv.maxOffset)
+	end := min(off+visible, len(display))
+	return strings.Join(display[off:end], "\n")
 }
 
 // renderAnnotate shows the source diff with line numbers, gutter markers
@@ -96,64 +114,98 @@ func (dv *diffView) renderRead(m *Shell, w, h int) string {
 func (dv *diffView) renderAnnotate(m *Shell, w, h int) string {
 	s := m.styles
 	numW := len(strconv.Itoa(len(dv.lines)))
-	// Build every display line — each source line plus the annotation
-	// block(s) beneath it — and note where the cursor line lands. The
-	// window is then taken over these *rendered* lines, so the interleaved
-	// annotation blocks are counted in the height budget; the old math
-	// counted source lines only and let annotations push the cursor (and
-	// the bottom rows) off the clipped pane.
+	textW := max(w-numW-3, 4)
+	// Build every display row — each source line (wrapped into
+	// continuation rows when wider than the pane, number and gutter only
+	// on the first) plus the annotation block(s) beneath it — and note
+	// where the cursor line lands. The window is then taken over these
+	// *rendered* rows, so wrapping and interleaved annotation blocks are
+	// counted in the height budget and can't push the cursor off-screen.
 	var rendered []string
 	cursorIdx := 0
 	push := func(str string) { rendered = append(rendered, strings.Split(str, "\n")...) }
 	for i := range dv.lines {
 		n := i + 1
-		num := fmt.Sprintf("%*d", numW, n)
 		gutter := " "
 		if idxs, ok := dv.located[i]; ok && len(idxs) > 0 {
 			gutter = s.Warning.Render("▍")
 		}
-		content := diffLineStyle(m, diffCell(dv.lines[i], w-numW-3))
+		raw := sanitize(dv.lines[i])
+		style := diffStyleFor(m, raw)
+		segs := strings.Split(ansi.Wrap(raw, textW, ""), "\n")
 		if n == dv.cursor {
 			cursorIdx = len(rendered)
-			push(s.Cursor.Render("▸") + s.Selection.Render(num) + gutter + " " + content)
-		} else {
-			push(" " + s.Faint.Render(num) + gutter + " " + content)
+		}
+		for j, seg := range segs {
+			content := style.Render(seg)
+			switch {
+			case j == 0 && n == dv.cursor:
+				push(s.Cursor.Render("▸") + s.Selection.Render(fmt.Sprintf("%*d", numW, n)) + gutter + " " + content)
+			case j == 0:
+				push(" " + s.Faint.Render(fmt.Sprintf("%*d", numW, n)) + gutter + " " + content)
+			default:
+				push(" " + strings.Repeat(" ", numW) + " " + " " + content)
+			}
 		}
 		for _, ai := range dv.located[i] {
-			push(dv.annBlock(m, dv.anns[ai], numW))
+			push(dv.annBlock(m, dv.anns[ai], numW+3, w))
 		}
 	}
-	// orphaned annotations degrade to a footer, grouped by file
-	var footer []string
+	// Orphaned annotations degrade to a footer. Its entries stay
+	// cursor-addressable (positions past the last diff line, see
+	// annAtCursor) so x/D can still resolve or delete a comment whose
+	// line changed.
 	if len(dv.orphans) > 0 {
-		footer = append(footer, "", s.Faint.Render("orphaned (line changed since comment):"))
-		for _, oi := range dv.orphans {
-			a := dv.anns[oi]
-			footer = append(footer, strings.Split(dv.annBlock(m, a, numW)+s.Faint.Render(" — "+sanitize(a.File)), "\n")...)
+		push("")
+		push(s.Faint.Render("orphaned (line changed since comment):"))
+		for k, oi := range dv.orphans {
+			rows := dv.orphanRows(m, dv.anns[oi], numW+3, w)
+			if dv.orphanRowPos(k) == dv.cursor {
+				cursorIdx = len(rendered)
+				rows[0] = s.Cursor.Render("▸") + rows[0][1:]
+			}
+			push(strings.Join(rows, "\n"))
 		}
 	}
-	// Window the main content to keep the cursor visible, then append as
-	// much of the orphan footer as still fits.
-	win := append([]string(nil), windowLines(rendered, cursorIdx, h)...)
-	if room := h - len(win); room > 0 && len(footer) > 0 {
-		win = append(win, footer[:min(room, len(footer))]...)
-	}
-	return strings.Join(win, "\n")
+	return strings.Join(windowLines(rendered, cursorIdx, h), "\n")
 }
 
-// annBlock renders one annotation as an indented, tinted comment.
-func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, numW int) string {
+// orphanRows renders one orphaned annotation: its comment block plus a
+// faint file row beneath (the anchor no longer names a diff line, so the
+// file is the only location left).
+func (dv *diffView) orphanRows(m *Shell, a domain.DiffAnnotation, pad, w int) []string {
+	rows := strings.Split(dv.annBlock(m, a, pad, w), "\n")
+	file := ansi.Truncate("— "+sanitize(a.File), max(w-pad-2, 8), "…")
+	return append(rows, strings.Repeat(" ", pad+2)+m.styles.Faint.Render(file))
+}
+
+// orphanRowPos is the cursor position addressing the k-th orphan: the
+// positions directly past the last diff line (see setCursor/annAtCursor).
+func (dv *diffView) orphanRowPos(k int) int {
+	return len(dv.lines) + 1 + k
+}
+
+// annBlock renders one annotation as an indented, tinted comment,
+// wrapped to the pane (continuation rows align under the first).
+func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) string {
 	s := m.styles
-	pad := strings.Repeat(" ", numW+3)
+	prefix := strings.Repeat(" ", pad)
 	mark := s.Warning.Render("✎")
-	body := sanitize(a.Comment)
+	style := s.Subtle
 	if a.Resolved {
 		mark = s.Success.Render("✓")
-		body = s.Faint.Render(sanitize(a.Comment))
-	} else {
-		body = s.Subtle.Render(body)
+		style = s.Faint
 	}
-	return pad + mark + " " + body
+	segs := strings.Split(ansi.Wrap(sanitize(a.Comment), max(w-pad-2, 4), ""), "\n")
+	rows := make([]string, 0, len(segs))
+	for j, seg := range segs {
+		lead := prefix + "  "
+		if j == 0 {
+			lead = prefix + mark + " "
+		}
+		rows = append(rows, lead+style.Render(seg))
+	}
+	return strings.Join(rows, "\n")
 }
 
 // requestDiffChanges sends the open diff annotations to the implementer

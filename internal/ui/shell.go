@@ -345,7 +345,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// case the diff shrank (e.g. after a fix-up run).
 			dv.annotate = m.diff.annotate
 			dv.offset = min(m.diff.offset, max(len(dv.lines)-1, 0))
-			dv.cursor = min(max(m.diff.cursor, 1), len(dv.lines))
+			dv.setCursor(m.diff.cursor)
 		}
 		m.diff = dv
 		return m, nil
