@@ -227,8 +227,10 @@ build/test/lint commands and run them yourself.)`)
 // carry different sections but the same %% marker grammar.
 func contractHint(f domain.Feature, specPath string, role agent.Role) string {
 	noun, artifact, sections := "feature", "spec (the design doc)", featureSections
+	short := "spec"
 	if f.Kind == domain.KindBug {
 		noun, artifact, sections = "bug", "bug report", bugSections
+		short = "bug report"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are the %s for %s %s: %s.\n", role, noun, f.ID, f.Title)
@@ -254,6 +256,14 @@ anchor). Consecutive marker lines share that anchor and form ONE
 thread, so give each independent question its own anchor line —
 markers stacked together collapse into a single checklist item. gummi
 parses unresolved threads into the user's open-question checklist and
-gates stage advancement on them.`)
+gates stage advancement on them.
+
+All of this vocabulary is gummi-internal. NEVER reference gummi, its
+stages or phases (brainstorm, spec, plan, implement, review, verify),
+review rounds, %% markers, or the ` + short + ` in anything committed
+to the repo outside the ` + short + ` file itself — not in code, code
+comments, identifiers, commit messages, test names, or docs. Committed
+work must read as if a developer wrote it for the repo with no
+knowledge of gummi.`)
 	return b.String()
 }

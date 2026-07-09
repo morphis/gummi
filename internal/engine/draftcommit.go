@@ -19,6 +19,9 @@ const maxDraftDiffBytes = 48 * 1024
 const draftCommitPrompt = `Draft the squash-merge commit message for landing this feature branch on main.
 Format: a first line "%s: <imperative summary>" of at most 72 characters, then a
 blank line, then a short body (2-6 lines or bullets) saying what changed and why.
+Write it as a normal repository commit: describe the change itself, and never
+mention gummi, its workflow stages or phases (spec, plan, implement, review,
+verify), review rounds, or the spec/bug-report file.
 Reply with the commit message text only — no preamble, no code fences.
 
 Feature: %s — %s
