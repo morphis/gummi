@@ -1,43 +1,53 @@
 # gummi
 
 > A meta-harness for coding agents. Drive a fleet of agents through a
-> spec-driven workflow across git worktrees, from one beautiful TUI.
+> spec-driven workflow across git worktrees, from one TUI.
 
-Working on several features at once with coding agents usually means
-juggling terminals, worktrees, and your own memory of which agent is
-doing what and which one is stuck waiting for you. gummi replaces that
-with one board. Every unit of work is a card that moves through a fixed,
-compiled-in workflow; every card gets its own git worktree and branch;
-every stage is performed by an agent whose model you choose per feature.
-gummi's job ends at a **verified branch** — land it with the built-in
-one-key squash-merge or however you like; PRs and releasing stay in
-your hands.
+![the gummi board: features at different stages, a spec, a diff, and a new feature advancing](docs/assets/demo.gif)
 
-## The core concept
+**The bottleneck in agentic coding isn't the agents anymore. It's you.**
 
-gummi solves three problems at once:
+One coding agent is a pair programmer. Five are a management problem:
+a pile of terminals, worktrees you have to keep straight in your head,
+and an agent that has been silently blocked on a question for the last
+twenty minutes. Meanwhile every step burns frontier-model tokens whether
+it needs frontier intelligence or not, and nothing stops an agent from
+jumping straight to code without a spec or shipping unreviewed work.
 
-1. **Orchestration** — many features in flight, each isolated in its own
-   worktree under `.gummi/worktrees/`, each at a known stage. The
-   parallelism model is *attention-based, not throughput-based*: you are
-   the scarce resource, so by default one autonomous agent runs at a
-   time while the rest queue, and everything that needs a human — gates,
-   agent questions, failures, exhausted budgets — lands in a single
-   needs-attention inbox.
+gummi replaces the pile of terminals with one board. Every unit of work
+is a card moving through a fixed workflow; every card gets its own git
+worktree and branch; every stage is performed by an agent whose model
+*you* choose. gummi's job ends at a **verified branch** — land it with
+the built-in one-key squash-merge or however you like; PRs and releasing
+stay in your hands.
 
-2. **Quality** — a spec-driven state machine with gates. No
-   implementation without an approved spec, no merge without review and
-   verification. The workflow is never configurable; the only degrees of
-   freedom are skip flags for the early design stages and automatic
-   rerun transitions (fix → re-review). Review and Verify can never be
-   skipped.
+## Three ideas
 
-3. **Cost** — per-stage model routing. Stages are performed by *roles*
-   (`architect`, `implementer`, `reviewer`, `scribe`), and a *profile*
-   maps roles to concrete models — frontier models for design and
-   review, cheap or local models for mechanical steps. Each feature
-   carries a credit envelope split into per-stage allocations with
-   rollover, a protected review floor, and human gates on exhaustion.
+**You are the scarce resource.** gummi's parallelism is attention-based,
+not throughput-based. By default one autonomous agent runs at a time
+while the rest queue, and everything that needs a human — gates, agent
+questions, failures, exhausted budgets — lands in a single
+needs-attention inbox. The point isn't to run ten agents at once; it's
+to make context-switching between features cheap and to never leave an
+agent waiting on you without you knowing.
+
+**The process is fixed; only the spend is yours to choose.** The
+workflow is compiled in, never configurable: no implementation without
+an approved spec, no merge without review and verification. The only
+degrees of freedom are skip flags for the early design stages and
+automatic rerun transitions (fix → re-review). Review and Verify can
+never be skipped. You can't accidentally configure the quality floor
+away, because there is no configuration.
+
+**Frontier models only where they earn it.** Stages are performed by
+*roles* (`architect`, `implementer`, `reviewer`, `scribe`), and a
+*profile* maps roles to concrete models — a frontier model for design
+and review, a cheap or local model for mechanical steps. Each feature
+carries a credit envelope split into per-stage allocations with
+rollover, a protected review floor, and human gates on exhaustion. Same
+process every time; spend chosen per feature.
+
+## The workflow
 
 Two kinds of work item share the machinery:
 
@@ -46,24 +56,25 @@ feature  FD-NNN   todo → brainstorm → spec → plan → implement → review
 bug      BG-NNN   todo → triage → diagnose → fix ──────────────↗ (same quality floor)
 ```
 
-Brainstorm and Spec (features) and Triage and Diagnose (bugs) are
-interactive — you talk to the architect in gummi's chat pane, and the
-durable artifact is a markdown spec (or bug report) that lives on the
-feature's branch. Plan is critiqued by a fresh-context reviewer
-(security, correctness, completeness) before it reaches your approval
-gate — findings land as `%%` threads in the spec, serious ones trigger
-an automatic replan, capped. Then Implement/Fix runs autonomously in
-the worktree, streaming activity to the card. Review is
-a fresh session with no shared context (ideally a different model), and
-findings bounce the work back automatically, capped before it escalates
-to you. Verify runs the repo's configured checks plus the spec's own
-verification plan. The spec — not the transcript — is the context
-carrier between stages, which keeps token windows small.
-
-Agents can ask you bounded questions mid-turn via a built-in `ask_user`
-tool: the question renders as an inline picker in the chat pane, the
-blocked turn spends no tokens while it waits, and answers anchored to a
-spec line are written back into the spec as resolved `%%` markers.
+- **Design is a conversation.** Brainstorm and Spec (Triage and Diagnose
+  for bugs) are interactive — you talk to the architect in gummi's chat
+  pane, and the durable artifact is a markdown spec that lives on the
+  feature's branch. The spec — not the transcript — is the context
+  carrier between stages, which keeps token windows small.
+- **Plans get an adversarial read.** Before a plan reaches your approval
+  gate, a fresh-context reviewer critiques it for security, correctness,
+  and completeness. Findings land as `%%` threads in the spec; serious
+  ones trigger an automatic replan, capped.
+- **Implementation runs alone.** Implement/Fix runs autonomously in the
+  feature's worktree, streaming activity to the card. Agents can ask you
+  bounded questions mid-turn via a built-in `ask_user` tool — the
+  question renders as an inline picker, the blocked turn spends no
+  tokens while it waits, and answers anchored to a spec line are written
+  back into the spec.
+- **Review has no shared context.** Review is a fresh session (ideally a
+  different model) with nothing but the spec and the diff. Findings
+  bounce the work back automatically, capped before it escalates to you.
+  Verify runs the repo's checks plus the spec's own verification plan.
 
 ## Install
 
@@ -221,6 +232,10 @@ make ci             # build + test + lint
 ```
 
 `docs/DESIGN.md` is the design document — its Decisions list is binding.
+
+`scripts/record-demo.sh` regenerates the README demo GIF (needs tmux,
+[vhs](https://github.com/charmbracelet/vhs), ttyd, and ffmpeg): it seeds
+a throwaway repo through the real TUI and records a scripted drive.
 
 ## License
 
