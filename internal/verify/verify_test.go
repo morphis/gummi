@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestRunPassAndFail(t *testing.T) {
 	dir := t.TempDir()
-	checks := []config.Check{
+	checks := []domain.Check{
 		{Name: "ok", Cmd: "echo hello"},
 		{Name: "fail", Cmd: "echo boom >&2; exit 3"},
 		{Name: "pwd", Cmd: "pwd"},
@@ -41,7 +41,7 @@ func TestRunAllOKVacuous(t *testing.T) {
 }
 
 func TestRunTruncatesOutput(t *testing.T) {
-	res := Run(context.Background(), t.TempDir(), []config.Check{
+	res := Run(context.Background(), t.TempDir(), []domain.Check{
 		{Name: "loud", Cmd: "yes x | head -c 20000"},
 	})
 	if len(res[0].Output) > maxOutput+32 {
@@ -55,7 +55,7 @@ func TestRunTruncatesOutput(t *testing.T) {
 func TestRunStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	res := Run(ctx, t.TempDir(), []config.Check{{Name: "x", Cmd: "echo hi"}})
+	res := Run(ctx, t.TempDir(), []domain.Check{{Name: "x", Cmd: "echo hi"}})
 	if len(res) != 0 {
 		t.Errorf("cancelled context should run no checks, got %+v", res)
 	}

@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -387,14 +388,14 @@ func (e *Engine) startAutonomous(s *Session) {
 }
 
 // sendKickoff delivers the stage kickoff. For the Verify stage in
-// allow-all mode it first runs the repo's fixed checks gummi-side and
-// prepends their results, so the scribe only does the spec's
-// feature-specific live checks and the write-up — no frontier model
-// shepherding `go test` output.
+// allow-all mode it first runs the artifact's gummi-checks commands
+// gummi-side and prepends their results, so the scribe only does the
+// spec's feature-specific live checks and the write-up — no frontier
+// model shepherding `go test` output.
 func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 	msg := s.kickoffMessage()
 	if s.Feature.Stage == domain.StageVerify && e.cfg.Permission != agent.PermissionGuarded {
-		if pre := e.runFixedChecks(s); pre != "" {
+		if pre := e.runSpecChecks(s); pre != "" {
 			msg = pre + "\n\n" + msg
 		}
 	}
@@ -424,22 +425,27 @@ func (e *Engine) failRun(s *Session, err error) {
 // (mirrors the manual verify dialog's cap).
 const verifyStageTimeout = 10 * time.Minute
 
-// runFixedChecks executes the repo's config.yaml checks in the feature's
-// worktree, records each outcome in the activity feed, and returns a
-// compact summary to hand the scribe (empty when there are no checks or
-// the config can't be read — the scribe then runs them itself, as before).
-func (e *Engine) runFixedChecks(s *Session) string {
-	cfg, err := config.Load(e.cfg.Workspace.ConfigFile())
-	if err != nil || len(cfg.Checks) == 0 {
+// runSpecChecks executes the artifact's gummi-checks commands in the
+// feature's worktree, records each outcome in the activity feed, and
+// returns a compact summary to hand the scribe (empty when the artifact
+// carries no checks or can't be read — the scribe then discovers and
+// runs them itself, per its stage hint).
+func (e *Engine) runSpecChecks(s *Session) string {
+	raw, err := os.ReadFile(s.SpecPath()) //nolint:gosec // gummi-owned spec path
+	if err != nil {
+		return ""
+	}
+	checks, _ := spec.ParseChecks(string(raw))
+	if len(checks) == 0 {
 		return ""
 	}
 	workDir := filepath.Join(e.cfg.Worktrees.Root(), s.Feature.WorktreePath())
 	ctx, cancel := context.WithTimeout(context.Background(), verifyStageTimeout)
 	defer cancel()
-	results := verify.Run(ctx, workDir, cfg.Checks)
+	results := verify.Run(ctx, workDir, checks)
 
 	var b strings.Builder
-	b.WriteString("gummi already ran the repo's fixed checks in this worktree — do NOT re-run them:\n")
+	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		status := "pass"
 		if !r.OK {

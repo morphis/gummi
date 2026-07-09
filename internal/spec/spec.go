@@ -210,7 +210,7 @@ const (
 	promptChosen       = "%% @gummi: converge on one during the spec stage"
 	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
 	promptReview       = "%% @gummi: reviewer findings land here; the implementer resolves each one"
-	promptVerification = "%% @gummi: repo checks always run; what feature-specific live checks prove this works?"
+	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered); add the feature-specific live checks that prove this works"
 )
 
 // Template renders the initial (blank) spec draft for a feature.
@@ -338,8 +338,8 @@ const (
 	promptBugReview    = "%% @gummi: reviewer findings land here; the fix addresses each one"
 	// The verify contract for a bug: the deterministic quality floor plus
 	// the bug-specific proof (repro gone + regression test).
-	promptBugVerify = "%% @gummi: repo checks always run. The reproduction above must no longer " +
-		"reproduce, and a regression test must lock the fix in."
+	promptBugVerify = "%% @gummi: the discovered gummi-checks commands always run. The reproduction " +
+		"above must no longer reproduce, and a regression test must lock the fix in."
 )
 
 // BugTemplate renders the initial (blank) bug report for a bug.

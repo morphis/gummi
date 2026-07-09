@@ -75,8 +75,9 @@ one approach — convergence is the Spec stage's job.`))
 Stage: Spec (interactive; the user is in gummi's chat pane). Your job:
 converge with the user on exactly one approach, then complete the
 spec: Chosen approach, Implementation notes, and the Verification plan
-(repo checks always run; add the feature-specific live checks that
-prove this works). Work the open marker threads one decision at a
+(gummi discovers the repo's build/test/lint commands into a
+gummi-checks block there at approval; add the feature-specific live
+checks that prove this works). Work the open marker threads one decision at a
 time, resolving each once the user decides. The user approves the spec
 to advance — do not start implementing.`))
 	case domain.StagePlan:
@@ -91,7 +92,9 @@ Stage: Implement (autonomous). Implement the feature in this worktree
 using the spec and plan as context. Make focused edits, run the
 relevant checks as you go, and keep changes reviewable. Keep the
 spec's Progress section current: what's done, what's left, where to
-resume. If you are addressing review findings, resolve each thread in
+resume. If your changes alter how the repo is built, tested, or linted,
+update the gummi-checks block in the Verification plan — the Verify
+stage runs exactly those commands. If you are addressing review findings, resolve each thread in
 the Review section with how you fixed it. If you need a decision or
 hit a blocker, stop and say so clearly rather than guessing.`))
 	case domain.StageTriage:
@@ -153,7 +156,8 @@ Write each finding as its own ` + "`%% @reviewer:`" + ` marker anchored to the
 plan line it indicts — one thread per finding, so gummi tracks the
 burn-down. If the Verification plan is missing a check that would catch
 one of your concerns, append that check to the Verification plan
-section. End your final message with a verdict on its own line, exactly
+section (machine-run commands go in its gummi-checks block; live-proof
+steps read as prose). End your final message with a verdict on its own line, exactly
 one of:
   VERDICT: pass       — plan is sound; ready for the user's approval
   VERDICT: changes    — serious findings; the plan must be revised
@@ -189,24 +193,25 @@ review→%s→review loop; without it the loop stalls.`, artifact, artifact, bou
 func verifyHint(kind domain.Kind) string {
 	if kind == domain.KindBug {
 		return strings.TrimSpace(`
-Stage: Verify (autonomous). gummi runs the repo's fixed check commands
-(from .gummi/config.yaml) for you and gives you their results in the
+Stage: Verify (autonomous). gummi runs the check commands from the
+report's gummi-checks block for you and gives you their results in the
 kickoff — do not re-run them. Then prove the bug is fixed: run the
 Reproduction steps from the bug report and confirm it no longer
 reproduces, and confirm the regression test covers it (it should fail
 without the fix). Record all results in the report's Verification
 section and report pass or fail plainly with the evidence. (If the
-kickoff carries no check results — e.g. guarded mode — run the repo
-commands yourself.)`)
+kickoff carries no check results — e.g. guarded mode, or no block —
+discover the repo's build/test/lint commands and run them yourself.)`)
 	}
 	return strings.TrimSpace(`
-Stage: Verify (autonomous). gummi runs the repo's fixed check commands
-(from .gummi/config.yaml) for you and gives you their results in the
+Stage: Verify (autonomous). gummi runs the check commands from the
+spec's gummi-checks block for you and gives you their results in the
 kickoff — do not re-run them. Your job is the spec's Verification plan:
 the feature-specific live checks. Record all results in the spec (the
 Verification plan section, with a summary line in Progress) and report
 pass or fail plainly with the evidence. (If the kickoff carries no
-check results — e.g. guarded mode — run the repo commands yourself.)`)
+check results — e.g. guarded mode, or no block — discover the repo's
+build/test/lint commands and run them yourself.)`)
 }
 
 // contractHint is the stage-independent contract: the authoritative

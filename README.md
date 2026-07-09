@@ -174,12 +174,14 @@ worktrees, and gates all still work.
 
 Two files in `.gummi/`, both scaffolded on first run:
 
-- **`config.yaml`** — the Verify stage's check commands (build / test /
-  lint; commented out until the repo opts in — gummi surfaces them in
-  the TUI before first run, since they come from the repository), and
-  the permission mode: `allow-all` (default — gummi assumes it runs in
-  a sandbox, and warns once on a bare host) or `guarded` (agent tool
-  calls need approval through the inbox).
+- **`config.yaml`** — the permission mode: `allow-all` (default — gummi
+  assumes it runs in a sandbox, and warns once on a bare host) or
+  `guarded` (agent tool calls need approval through the inbox). The
+  Verify stage's check commands are not configured here: gummi
+  auto-discovers the repo's build/test/lint commands at approval into
+  each spec's Verification plan (a `gummi-checks` block), where you
+  review and edit them — and the TUI still surfaces the exact commands
+  before running them.
 - **`profiles.yaml`** — role → model maps per profile (`premium`,
   `thrifty`, …) with a declared default. BYOK per role via a `byok`
   block; API keys are referenced by environment-variable name, never

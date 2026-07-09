@@ -283,11 +283,18 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}))
 		return m, nil
 
-	case specApprovedMsg:
-		// show the transition notice, reload, and refine the envelope with
-		// a scribe pass in the background.
+	case worktreeEnteredMsg:
+		// show the transition notice, reload, and run the background
+		// one-shot passes: check discovery and/or the envelope estimate.
 		m.notice = noticeMsg{text: msg.note}
-		return m, tea.Batch(m.loadRows, m.scribeEstimate(msg.id))
+		cmds := []tea.Cmd{m.loadRows}
+		if msg.discover {
+			cmds = append(cmds, m.discoverChecks(msg.id))
+		}
+		if msg.estimate {
+			cmds = append(cmds, m.scribeEstimate(msg.id))
+		}
+		return m, tea.Batch(cmds...)
 
 	case specLoadedMsg:
 		if msg.err != nil {

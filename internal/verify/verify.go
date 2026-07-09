@@ -1,6 +1,8 @@
-// Package verify runs the repo's fixed Verify-stage check commands in a
-// feature's worktree and reports pass/fail with output. The commands
-// come from .gummi/config.yaml — repo-controlled input (DESIGN §4.4).
+// Package verify runs a feature's Verify-stage check commands in its
+// worktree and reports pass/fail with output. The commands come from
+// the artifact's gummi-checks block (internal/spec): auto-discovered at
+// approval, then ordinary spec content — human-gated by the approval
+// gates and versioned with the branch (DESIGN §4.4).
 //
 // Two callers, two safety stories: the manual verify dialog surfaces the
 // commands and runs on confirmation (a bare host may be watching); the
@@ -18,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // Result is the outcome of one check.
@@ -40,9 +42,9 @@ const maxOutput = 8 << 10
 // otherwise runs every check even if an earlier one fails.
 //
 // The commands run through `sh -c`, which is the one deliberate shell
-// exception in gummi (DESIGN §4.4): they are repo-authored and MUST be
-// surfaced to the user before Run is called.
-func Run(ctx context.Context, workDir string, checks []config.Check) []Result {
+// exception in gummi (DESIGN §4.4): they come from the human-gated
+// artifact and MUST be surfaced to the user before Run is called.
+func Run(ctx context.Context, workDir string, checks []domain.Check) []Result {
 	out := make([]Result, 0, len(checks))
 	for _, ch := range checks {
 		if ctx.Err() != nil {
@@ -53,9 +55,9 @@ func Run(ctx context.Context, workDir string, checks []config.Check) []Result {
 	return out
 }
 
-func runOne(ctx context.Context, workDir string, ch config.Check) Result {
+func runOne(ctx context.Context, workDir string, ch domain.Check) Result {
 	start := time.Now()
-	cmd := exec.CommandContext(ctx, "sh", "-c", ch.Cmd) //nolint:gosec // repo-authored, surfaced before running (DESIGN §4.4)
+	cmd := exec.CommandContext(ctx, "sh", "-c", ch.Cmd) //nolint:gosec // from the human-gated artifact, surfaced before running (DESIGN §4.4)
 	cmd.Dir = workDir
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

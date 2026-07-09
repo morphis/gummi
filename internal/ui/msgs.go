@@ -249,21 +249,51 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		}
 		m.dropSession(id) // the old stage's session is stale now
 		note := fmt.Sprintf("%s → %s", id, next) + estimate
-		// on spec approval, follow the historical estimate with a scribe
-		// agent pass over the now-committed spec (only in estimation mode —
-		// an explicit GUMMI_ENVELOPE wins).
-		if fromSpec && m.envelope == 0 {
-			return specApprovedMsg{id: id, note: note}
+		// Approval kicks off the background one-shot passes: check
+		// discovery whenever a fresh worktree was created (both kinds),
+		// and the scribe envelope pass on spec approval in estimation
+		// mode only (an explicit GUMMI_ENVELOPE wins).
+		discover := enteringWorktree && !existed
+		est := fromSpec && m.envelope == 0
+		if discover || est {
+			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est}
 		}
 		return noticeMsg{text: note}
 	}
 }
 
-// specApprovedMsg is emitted when a feature's spec is approved (leaves
-// spec) in estimation mode, so the shell can kick off the scribe pass.
-type specApprovedMsg struct {
-	id   domain.FeatureID
-	note string
+// worktreeEnteredMsg is emitted when an approval gate moves a feature
+// into its first worktree stage, so the shell can kick off the
+// background passes over the now-committed artifact.
+type worktreeEnteredMsg struct {
+	id       domain.FeatureID
+	note     string
+	discover bool // run check auto-discovery
+	estimate bool // run the scribe envelope pass
+}
+
+// discoverChecks runs a one-shot scribe pass that surveys the fresh
+// worktree and records the repo's build/test/lint commands in the
+// artifact's Verification section as a gummi-checks block (skipped when
+// a block is already there). Best-effort: on failure the block stays
+// absent and the Verify agent discovers the commands itself.
+func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return nil
+		}
+		checks, err := m.engine.DiscoverChecks(ctx, f)
+		if err != nil || len(checks) == 0 {
+			return nil
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check(s) into the %s",
+			id, len(checks), artifactNoun(f.Kind))}
+	}
 }
 
 // scribeEstimate runs a scribe-agent pass over the approved spec and, if

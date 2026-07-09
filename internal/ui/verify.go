@@ -3,14 +3,15 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
 )
@@ -22,26 +23,39 @@ type verifyResultMsg struct {
 	err     error
 }
 
-// runChecks surfaces the repo's verify commands, then (on confirm) runs
-// them in the feature's worktree. The surface-before-run step is the
-// safety for repo-controlled commands (DESIGN §4.4 threat list).
+// runChecks surfaces the artifact's gummi-checks commands, then (on
+// confirm) runs them in the feature's worktree. The surface-before-run
+// step is the safety for artifact-carried commands (DESIGN §4.4 threat
+// list) — the dialog shows exactly what will execute.
 func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
-	cfg, err := config.Load(m.ws.ConfigFile())
+	workDir := filepath.Join(m.wt.Root(), f.WorktreePath())
+	raw, err := os.ReadFile(filepath.Join(workDir, f.ArtifactPath())) //nolint:gosec // gummi-owned spec path
+	if os.IsNotExist(err) {
+		m.notice = noticeMsg{text: "no checks yet — gummi discovers them into the " + artifactNoun(f.Kind) + " at approval"}
+		return nil
+	}
 	if err != nil {
-		// the error may quote repo-controlled config bytes
 		m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 		return nil
 	}
-	if len(cfg.Checks) == 0 {
-		m.notice = noticeMsg{text: "no checks in .gummi/config.yaml — add build/test/lint to run verify"}
+	checks, _ := spec.ParseChecks(string(raw))
+	if len(checks) == 0 {
+		m.notice = noticeMsg{text: "no gummi-checks block in the " + artifactNoun(f.Kind) +
+			" — discovery runs at approval, or add the block by hand"}
 		return nil
 	}
-	root := m.wt.Root()
-	workDir := filepath.Join(root, f.WorktreePath())
-	m.Overlay.Push(newVerifyDialog(f, cfg.Checks, func() tea.Cmd {
-		return m.execChecks(f, workDir, cfg.Checks)
+	m.Overlay.Push(newVerifyDialog(f, checks, func() tea.Cmd {
+		return m.execChecks(f, workDir, checks)
 	}))
 	return nil
+}
+
+// artifactNoun names the design artifact for notices.
+func artifactNoun(k domain.Kind) string {
+	if k == domain.KindBug {
+		return "bug report"
+	}
+	return "spec"
 }
 
 // verifyTimeout bounds a whole verify run so a hung repo command can't
@@ -49,7 +63,7 @@ func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
 const verifyTimeout = 10 * time.Minute
 
 // execChecks runs the checks in a command (off the UI goroutine).
-func (m *Shell) execChecks(f domain.Feature, workDir string, checks []config.Check) tea.Cmd {
+func (m *Shell) execChecks(f domain.Feature, workDir string, checks []domain.Check) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 		defer cancel()
@@ -62,11 +76,11 @@ func (m *Shell) execChecks(f domain.Feature, workDir string, checks []config.Che
 // before running them.
 type verifyDialog struct {
 	feature domain.FeatureID
-	checks  []config.Check
+	checks  []domain.Check
 	onRun   func() tea.Cmd
 }
 
-func newVerifyDialog(f domain.Feature, checks []config.Check, onRun func() tea.Cmd) *verifyDialog {
+func newVerifyDialog(f domain.Feature, checks []domain.Check, onRun func() tea.Cmd) *verifyDialog {
 	return &verifyDialog{feature: f.ID, checks: checks, onRun: onRun}
 }
 

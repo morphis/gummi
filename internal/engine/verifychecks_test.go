@@ -2,21 +2,32 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/worktree"
 )
+
+// writeSpecChecks drops a spec carrying a gummi-checks block into the
+// feature's worktree, where the Verify stage reads it.
+func writeSpecChecks(t *testing.T, wt *worktree.Manager, f domain.Feature, checksYAML string) {
+	t.Helper()
+	p := filepath.Join(wt.Root(), f.WorktreePath(), f.ArtifactPath())
+	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	content := "# " + string(f.ID) + "\n\n## Verification plan\n\n```gummi-checks\n" + checksYAML + "```\n"
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestVerifyStageRunsChecksGummiSide(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	// a passing and a failing check
-	cfg := "checks:\n  - name: pass-check\n    cmd: \"true\"\n  - name: fail-check\n    cmd: \"echo boom; exit 3\"\n"
-	if err := os.WriteFile(ws.ConfigFile(), []byte(cfg), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
 	var mu sync.Mutex
 	var got string
@@ -31,6 +42,8 @@ func TestVerifyStageRunsChecksGummiSide(t *testing.T) {
 
 	f := feature(1, "verify me", domain.StageVerify)
 	withWorktree(t, wt, f)
+	// a passing and a failing check in the spec's gummi-checks block
+	writeSpecChecks(t, wt, f, "- name: pass-check\n  cmd: \"true\"\n- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +65,6 @@ func TestVerifyStageRunsChecksGummiSide(t *testing.T) {
 
 func TestVerifyStageGuardedSkipsGummiSide(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	cfg := "checks:\n  - name: pass-check\n    cmd: \"true\"\n"
-	if err := os.WriteFile(ws.ConfigFile(), []byte(cfg), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	var mu sync.Mutex
 	var got string
 	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
@@ -64,12 +73,13 @@ func TestVerifyStageGuardedSkipsGummiSide(t *testing.T) {
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
-	// guarded mode: gummi does not auto-run repo commands; the agent does
+	// guarded mode: gummi does not auto-run the spec's commands; the agent does
 	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
 	withWorktree(t, wt, f)
+	writeSpecChecks(t, wt, f, "- name: pass-check\n  cmd: \"true\"\n")
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}

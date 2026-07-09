@@ -7,7 +7,7 @@
                                  [38;2;58;57;67m│[m [38;2;232;254;150m  ☐ [38;2;191;188;200mconverge on one during the spec stage[38;2;96;95;107m  L13[m
                                  [38;2;58;57;67m│[m [38;2;232;254;150m  ☐ [38;2;191;188;200mimplement checkpoints here — what's done, what's left, …[38;2;96;95;107m  L19[m
                                  [38;2;58;57;67m│[m [38;2;232;254;150m  ☐ [38;2;191;188;200mreviewer findings land here; the implementer resolves e…[38;2;96;95;107m  L23[m
-                                 [38;2;58;57;67m│[m [38;2;232;254;150m  ☐ [38;2;191;188;200mrepo checks always run; what feature-specific live chec…[38;2;96;95;107m  L27[m
+                                 [38;2;58;57;67m│[m [38;2;232;254;150m  ☐ [38;2;191;188;200mthe repo's build/test/lint commands land here as a gumm…[38;2;96;95;107m  L27[m
                                  [38;2;58;57;67m│[m
                                  [38;2;58;57;67m│[m
                                  [38;2;58;57;67m│[m   [38;5;228;48;5;63;1m FD-001: Dark mode [38;5;252;49;22m                                         [m

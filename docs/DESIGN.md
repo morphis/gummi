@@ -111,10 +111,14 @@ Stage semantics:
   bounded by the protected budget floor); past the cap it escalates to you
   instead of looping.
 - **Verify** *(autonomous, role: implementer or scribe)* — two parts:
-  the repo's fixed check commands from `.gummi/config.yaml`
-  (build/test/lint) always run, and the spec's verification plan adds
-  feature-specific live checks the agent executes. Results recorded in
-  the spec. Deterministic floor, adaptive ceiling.
+  the repo's check commands (build/test/lint) always run, and the spec's
+  verification plan adds feature-specific live checks the agent
+  executes. The commands live in the spec itself — a `gummi-checks`
+  block in the Verification plan, auto-discovered by a one-shot scribe
+  pass when approval creates the worktree, then human-gated and edited
+  like any other spec content (the implementer updates it when a change
+  alters how the repo builds/tests). Results recorded in the spec.
+  Deterministic floor, adaptive ceiling.
 - **Done** — gummi's job ends at a verified branch. Integration (PR,
   merge, release) is yours; gummi detects when the branch lands on main
   and offers worktree cleanup + spec archival.
@@ -660,9 +664,11 @@ Decided in the design interview (2026-07-03):
    gummi's job ends when Verify passes; integration is yours. gummi
    detects when a feature branch has landed on main and offers worktree
    cleanup.
-7. **Verify = repo config + spec plan**: fixed check commands from
-   `.gummi/config.yaml` (build/test/lint) always run; the spec's
-   verification plan adds feature-specific live checks the agent executes.
+7. **Verify = discovered checks + spec plan**: the repo's build/test/lint
+   commands always run, from the spec's `gummi-checks` block —
+   auto-discovered into the Verification plan at approval and
+   human-gated with the rest of the spec; the verification plan adds
+   feature-specific live checks the agent executes.
 8. **First-class providers**: GitHub Copilot Pro/Pro+ (premium-request
    pool) and OpenAI-compatible BYOK endpoints (llama.cpp, vLLM, hosted).
    Profiles are designed around exactly these two paths.
