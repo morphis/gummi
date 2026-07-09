@@ -94,7 +94,7 @@ func (m *Shell) boardBindings() []binding {
 		pause,
 		{key: "s", label: "spec", help: "spec (tab: read ⇄ annotate)", bar: true},
 		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)", bar: true},
-		{key: "g", label: "advance", help: "advance stage (gate)", bar: true},
+		{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true},
 		{key: "b", label: "bounce", help: "bounce back to implement/fix"},
 		{key: "v", label: "verify", help: "run verify checks"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},

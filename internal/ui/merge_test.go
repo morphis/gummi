@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
 
@@ -178,17 +179,35 @@ func TestSquashMergeRefusedWhenLanded(t *testing.T) {
 	}
 }
 
-func TestSquashMergeRefusedDirtyBranch(t *testing.T) {
-	m, _, wt := mergeFixture(t)
+func TestSquashMergeCommitsDirtyBranchAsFinalCheckpoint(t *testing.T) {
+	m, root, wt := mergeFixture(t)
+	// uncommitted rework plus a brand-new untracked file: gummi owns the
+	// branch's commits, so both are swept into a final checkpoint and merge
 	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x // rework\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m = pressMerge(t, m)
-	if !m.notice.isErr || !strings.Contains(m.notice.text, "uncommitted changes on its branch") {
-		t.Fatalf("notice = %q (err=%v), want a dirty-branch refusal", m.notice.text, m.notice.isErr)
+	if err := os.WriteFile(filepath.Join(wt, "extra.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if m.Overlay.Top() != nil {
-		t.Fatal("dialog opened despite dirty branch")
+	m = pressMerge(t, m)
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("dirty branch did not auto-checkpoint into the dialog (notice %q)", m.notice.text)
+	}
+	if got := gitOut(t, wt, "log", "-1", "--format=%s"); got != "FD-001: final checkpoint" {
+		t.Errorf("branch tip = %q, want the final checkpoint", got)
+	}
+	if out := gitOut(t, wt, "status", "--porcelain"); out != "" {
+		t.Errorf("worktree still dirty after checkpoint:\n%s", out)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
+		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "feat.go")); err != nil || !strings.Contains(string(got), "rework") {
+		t.Errorf("rework missing from main: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "extra.go")); err != nil {
+		t.Errorf("untracked file missing from main: %v", err)
 	}
 }
 
@@ -209,6 +228,99 @@ func TestSquashMergeReentryRefused(t *testing.T) {
 	m = pressMerge(t, m)
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "already drafting") {
 		t.Fatalf("notice = %q (err=%v), want a re-entry refusal", m.notice.text, m.notice.isErr)
+	}
+}
+
+// atVerify walks the fixture feature's record to the verify stage so g
+// exercises the verify→done gate.
+func atVerify(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	ctx := context.Background()
+	for _, st := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+		if _, err := m.store.Transition(ctx, "FD-001", st, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return pump(t, m, m.loadRows)
+}
+
+func TestAdvanceToDoneRoutesThroughMerge(t *testing.T) {
+	m, root, _ := mergeFixture(t)
+	m = atVerify(t, m)
+	m.sel = 0
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if !strings.Contains(m.notice.text, "→ done") || m.notice.isErr {
+		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	f, _ := m.store.GetFeature(context.Background(), "FD-001")
+	if f.Stage != domain.StageDone {
+		t.Errorf("stage = %s, want done", f.Stage)
+	}
+	if _, err := os.Stat(filepath.Join(root, "feat.go")); err != nil {
+		t.Errorf("feature work missing from main: %v", err)
+	}
+}
+
+func TestAdvanceToDoneCancelledStaysAtVerify(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	m = atVerify(t, m)
+	m.sel = 0
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.Overlay.Top() == nil {
+		t.Fatal("g at verify did not open the commit-message dialog")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	f, _ := m.store.GetFeature(context.Background(), "FD-001")
+	if f.Stage != domain.StageVerify {
+		t.Errorf("stage after cancelled merge = %s, want verify", f.Stage)
+	}
+}
+
+func TestAdvanceToDoneLandedBranchSkipsMerge(t *testing.T) {
+	m, root, wt := rebaseFeatureFixture(t)
+	landFeature(t, root, wt) // commits + merges --no-ff into main
+	m = atVerify(t, m)
+	m.sel = 0
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.Overlay.Top() != nil {
+		t.Fatal("landed branch still opened the merge dialog")
+	}
+	f, _ := m.store.GetFeature(context.Background(), "FD-001")
+	if f.Stage != domain.StageDone {
+		t.Errorf("stage = %s, want done (notice %q)", f.Stage, m.notice.text)
+	}
+}
+
+func TestAdvanceToDoneMergeConflictStaysAtVerify(t *testing.T) {
+	m, root, wt := mergeFixture(t)
+	// conflicting README.md edits on both sides
+	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("feature version\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "add", ".")
+	git(t, wt, "commit", "-qm", "feature readme")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "-qm", "main readme")
+	m = atVerify(t, m)
+	m.sel = 0
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.Overlay.Top() == nil {
+		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if !m.notice.isErr || !strings.Contains(m.notice.text, "README.md") {
+		t.Fatalf("conflict notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	f, _ := m.store.GetFeature(context.Background(), "FD-001")
+	if f.Stage != domain.StageVerify {
+		t.Errorf("stage after conflicted merge = %s, want verify", f.Stage)
 	}
 }
 

@@ -72,8 +72,9 @@ transitions** (fix → re-review). Review and Verify can never be skipped.
             │ pausable)     │ fresh context)│ build/test/lint
             └──────────┘    └──────────┘    │ + live check)
                                             └──────────┘
-        ──▶ Done: verified branch, handed to you ──▶ (you merge/PR it;
-                                                      gummi offers cleanup)
+        ──▶ gate: you accept ──▶ Done: landed on main as one squash
+                                 commit (you approve the message;
+                                 gummi offers worktree cleanup)
 ```
 
 Stage semantics:
@@ -102,7 +103,12 @@ Stage semantics:
 - **Implement** *(autonomous, role: implementer)* — agent works in the
   worktree with the spec + plan as context. Streams progress into the feature
   card. Pauses when it needs input (or on permission requests in `guarded`
-  mode) → feature jumps into your "needs attention" queue.
+  mode) → feature jumps into your "needs attention" queue. gummi owns the
+  branch's commits: the agent commits as it goes, and gummi
+  checkpoint-commits whatever a stage leaves uncommitted (turn end, budget
+  exhaustion), so work on the branch is never stranded in the working tree.
+  Checkpoint granularity never reaches main — the branch lands as one
+  squash commit.
 - **Review** *(autonomous, role: reviewer)* — **fresh session, no shared
   context with the implementer**, ideally a *different model* (cross-model
   review catches more). Findings written into the spec's review section;
@@ -119,9 +125,11 @@ Stage semantics:
   like any other spec content (the implementer updates it when a change
   alters how the repo builds/tests). Results recorded in the spec.
   Deterministic floor, adaptive ceiling.
-- **Done** — gummi's job ends at a verified branch. Integration (PR,
-  merge, release) is yours; gummi detects when the branch lands on main
-  and offers worktree cleanup + spec archival.
+- **Done** — you decide the feature is done: advancing out of Verify
+  squash-merges the branch into main as a single commit whose message you
+  approve (drafted by a scribe pass over the branch diff). A branch that
+  already landed some other way (manual merge, PR) skips straight to
+  Done. gummi then offers worktree cleanup + spec archival.
 
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.
@@ -580,8 +588,9 @@ several widths, so visual regressions fail CI, not eyes. Demo GIFs via
 - Not a general agent framework — it orchestrates *existing* coding agents.
 - Not a cloud service — single-binary local tool, state in your repo.
 - Not tmux — gummi owns its sessions; raw attach is the escape hatch.
-- Not a merge pipeline — the deliverable is a verified branch; PRs,
-  merging, and releasing stay in your hands.
+- Not a merge pipeline — the one integration gummi does is the squash
+  merge onto local main when you accept a feature; PRs, pushing, and
+  releasing stay in your hands.
 - Not a process editor — one workflow, compiled in. If the workflow needs
   changing, that's a gummi release, not a config file.
 
@@ -660,10 +669,11 @@ Decided in the design interview (2026-07-03):
    flaws before implementation tokens are spent.
 5. **Interactive stages are gummi-native chat** over SDK sessions; raw
    copilot attach is an escape hatch only.
-6. **The endgame is a verified branch.** No PR or merge automation —
-   gummi's job ends when Verify passes; integration is yours. gummi
-   detects when a feature branch has landed on main and offers worktree
-   cleanup.
+6. **The endgame is a squash commit on main.** When you accept a
+   verified feature, gummi lands its branch on local main as one squash
+   commit with a message you approve — no PR or push automation; sharing
+   the result is yours. gummi detects when a branch landed outside this
+   flow and offers worktree cleanup either way.
 7. **Verify = discovered checks + spec plan**: the repo's build/test/lint
    commands always run, from the spec's `gummi-checks` block —
    auto-discovered into the Verification plan at approval and

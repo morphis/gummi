@@ -214,6 +214,23 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 				isErr: true,
 			}
 		}
+		// Advancing out of Verify is the user's "this feature is done"
+		// decision: the branch lands on main as one squash commit before the
+		// record moves to Done. The merge flow (draft → confirm → merge)
+		// finishes the transition itself. A branch that already landed — or
+		// is already gone (merged and cleaned up outside gummi) — skips
+		// straight to the transition.
+		if next == domain.StageDone {
+			if exists, err := m.wt.BranchExists(ctx, &f); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			} else if exists {
+				if landed, err := m.wt.Landed(ctx, &f); err != nil {
+					return noticeMsg{text: sanitize(err.Error()), isErr: true}
+				} else if !landed {
+					return mergeThenDoneMsg{f: f}
+				}
+			}
+		}
 		// Crossing from the design phase (todo / interactive) into the first
 		// worktree stage is the approval gate: it creates the worktree and
 		// commits the artifact (spec or bug report) to the branch. Bounces

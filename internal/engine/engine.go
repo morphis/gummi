@@ -718,6 +718,7 @@ func (e *Engine) exhaust(s *Session) {
 	if !s.markExhausted() {
 		return // already checkpointed; a re-raised event must not duplicate the gate
 	}
+	e.checkpoint(s) // partial work survives on the branch across the gate
 	s.appendActivity("budget exhausted — stage stopped for review")
 	s.setState(StateDone)
 	e.persist(s)
@@ -846,6 +847,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// an autonomous turn completing frees the slot (atomically, so a
 		// racing Pause isn't overwritten)
 		if !s.Interactive && s.finishRunning() {
+			e.checkpoint(s)
 			e.stageReceipt(s)
 			e.freeSlot(s)
 		}
@@ -863,6 +865,35 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		e.persist(s)
 	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: kind})
+}
+
+// checkpointTimeout bounds the checkpoint's git work; a commit is local
+// and fast, so a hang here is pathological and must not wedge the pump.
+const checkpointTimeout = 30 * time.Second
+
+// checkpoint commits whatever the stage left in the feature's worktree
+// to its branch, so agent work is never stranded uncommitted (DESIGN:
+// gummi owns the branch's commits; the user lands it as one squash
+// commit, so checkpoint granularity never reaches main's history). It
+// runs as an autonomous turn completes and at the budget-exhaustion
+// gate. Best-effort: a failure surfaces in the activity feed but never
+// fails the run — the work is still on disk and the merge flow commits
+// leftovers itself.
+func (e *Engine) checkpoint(s *Session) {
+	if s.Interactive || interactiveStage(s.Feature.Stage) {
+		return // design-phase chats run in the main checkout; never auto-commit there
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
+	defer cancel()
+	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
+	committed, err := e.cfg.Worktrees.CommitAll(ctx, &s.Feature, msg)
+	if err != nil {
+		s.appendActivity("checkpoint commit failed: " + err.Error())
+		return
+	}
+	if committed {
+		s.appendActivity("worktree committed: " + msg)
+	}
 }
 
 // stageReceipt appends a muted one-line spend receipt to the session's

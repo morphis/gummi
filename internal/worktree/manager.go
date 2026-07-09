@@ -218,6 +218,37 @@ func (m *Manager) CommitFile(ctx context.Context, f *domain.Feature, relPath, co
 	return nil
 }
 
+// CommitAll stages everything in the feature's worktree — tracked edits
+// and new files alike — and commits it to the feature branch with
+// message, reporting whether a commit was made (a clean worktree is a
+// no-op). This is the checkpoint behind gummi-owned commits: agent work
+// is committed as stages complete, and the branch later lands on main as
+// a single squash commit, so checkpoint granularity never reaches main's
+// history.
+func (m *Manager) CommitAll(ctx context.Context, f *domain.Feature, message string) (bool, error) {
+	if strings.TrimSpace(message) == "" {
+		return false, fmt.Errorf("refusing checkpoint commit for %s: empty message", f.ID)
+	}
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	if _, err := runGit(ctx, p, "add", "-A"); err != nil {
+		return false, err
+	}
+	staged, err := runGit(ctx, p, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(staged) == "" {
+		return false, nil
+	}
+	if _, err := runGit(ctx, p, "commit", "-m", message); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // ensureContained verifies that dest, once existing symlinks are resolved,
 // still lives inside root. It resolves the deepest already-existing
 // ancestor of dest (any symlinked component in the chain is dereferenced

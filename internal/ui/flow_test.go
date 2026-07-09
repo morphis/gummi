@@ -154,12 +154,27 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Fatalf("worktree not checked out: %v", err)
 	}
 
-	// walk to done: plan→implement→review→verify→done
-	for _, want := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageVerify, domain.StageDone} {
+	// walk to verify: plan→implement→review→verify
+	for _, want := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageVerify} {
 		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 		if m.rows[0].F.Stage != want {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
 		}
+	}
+
+	// g at verify is the "done" decision: it routes through the squash
+	// merge — commit-message dialog, then land on main and move to done
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.rows[0].F.Stage != domain.StageDone {
+		t.Fatalf("stage after merge = %s, want done (notice %q)", m.rows[0].F.Stage, m.notice.text)
+	}
+	f := m.rows[0].F
+	if landed, err := m.wt.Landed(context.Background(), &f); !landed || err != nil {
+		t.Errorf("Landed after done = %v, %v; want true", landed, err)
 	}
 	// g on done is a no-op with a notice
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
@@ -226,12 +241,26 @@ func TestBugLifecycleFlow(t *testing.T) {
 		t.Fatalf("bug report not committed in worktree: %v", err)
 	}
 
-	// walk to done: fix → review → verify → done
-	for _, want := range []domain.Stage{domain.StageReview, domain.StageVerify, domain.StageDone} {
+	// walk to verify: fix → review → verify
+	for _, want := range []domain.Stage{domain.StageReview, domain.StageVerify} {
 		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 		if m.rows[0].F.Stage != want {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
 		}
+	}
+
+	// g at verify routes through the squash merge before done
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.rows[0].F.Stage != domain.StageDone {
+		t.Fatalf("stage after merge = %s, want done (notice %q)", m.rows[0].F.Stage, m.notice.text)
+	}
+	// the squash commit carries the bug report onto main
+	if _, err := os.Stat(filepath.Join(root, ".gummi", "bugs", "BG-001-login-loops.md")); err != nil {
+		t.Errorf("bug report missing from main after merge: %v", err)
 	}
 }
 

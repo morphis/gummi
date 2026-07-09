@@ -277,11 +277,22 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.notice = noticeMsg{}
-		f := msg.f
+		f, thenDone := msg.f, msg.thenDone
 		m.Overlay.Push(newCommitMsgDialog(f, msg.draft, func(message string) tea.Cmd {
-			return m.squashMergeFeature(f, message)
+			return m.squashMergeFeature(f, message, thenDone)
 		}))
 		return m, nil
+
+	case mergeThenDoneMsg:
+		// the verify→done gate routes through the merge flow: reuse the
+		// draft pipeline, then land + transition on ctrl+s.
+		if m.drafting {
+			m.notice = noticeMsg{text: "already drafting a commit message — wait for it", isErr: true}
+			return m, nil
+		}
+		m.drafting = true
+		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main — drafting commit message…"}
+		return m, m.startMergeDraft(msg.f, true)
 
 	case worktreeEnteredMsg:
 		// show the transition notice, reload, and run the background
@@ -585,7 +596,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			m.drafting = true
 			m.notice = noticeMsg{text: string(r.F.ID) + ": drafting commit message…"}
-			return m.startMergeDraft(r.F)
+			return m.startMergeDraft(r.F, false)
 		}
 	case "c":
 		if r, ok := m.selected(); ok {

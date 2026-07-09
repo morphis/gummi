@@ -90,7 +90,11 @@ plan is written; the user approves it.`))
 		hints = append(hints, strings.TrimSpace(`
 Stage: Implement (autonomous). Implement the feature in this worktree
 using the spec and plan as context. Make focused edits, run the
-relevant checks as you go, and keep changes reviewable. Keep the
+relevant checks as you go, and keep changes reviewable. Commit your
+work to this branch with focused git commits as you complete each
+coherent piece — the branch lands on main as a single squash commit
+when the user accepts the feature, and gummi checkpoint-commits
+anything you leave uncommitted when the stage ends. Keep the
 spec's Progress section current: what's done, what's left, where to
 resume. If your changes alter how the repo is built, tested, or linted,
 update the gummi-checks block in the Verification plan — the Verify
@@ -121,7 +125,10 @@ fixing.`))
 Stage: Fix (autonomous). Implement the fix in this worktree, guided by
 the bug report's Root cause. Make the smallest change that resolves the
 bug, and ADD A REGRESSION TEST that fails before your change and passes
-after — the Verify stage requires it. Keep the report's Fix section
+after — the Verify stage requires it. Commit your work to this branch
+with git as you go — the branch lands on main as a single squash commit
+when the user accepts the fix, and gummi checkpoint-commits anything
+you leave uncommitted when the stage ends. Keep the report's Fix section
 current: what you changed and why. If you are addressing review
 findings, resolve each thread in the Review section with how you fixed
 it. If you hit a blocker or need a decision, stop and say so rather than
