@@ -37,7 +37,7 @@ context-switching between features cheap.
 | Concept | Description |
 |---|---|
 | **Feature** | One unit of work. Has an ID (`FD-042`), a spec file, a worktree + branch, a workflow state, and a profile. The kanban card. |
-| **Spec (FD)** | Markdown feature design doc, lives *in the repo* (`.gummi/specs/FD-042-dark-mode.md`). Problem, considered solutions, chosen approach, implementation notes, verification plan. The durable artifact agents read and write. |
+| **Spec (FD)** | Markdown feature design doc, lives *in the repo* (`.gummi/specs/FD-042-dark-mode.md`). Problem, out of scope, considered solutions, chosen approach, implementation notes, verification plan. The durable artifact agents read and write. |
 | **Workflow** | The single, fixed state machine of stages a feature moves through. Never configurable — only skip flags (early phases, set at creation) and rerun transitions (e.g. re-review after fixes). |
 | **Stage** | One node in the workflow. Declares: agent action, interaction mode (`interactive` / `autonomous` / `manual`), completion gate, and which *role* performs it. |
 | **Role** | A named agent capability slot: `architect`, `implementer`, `reviewer`, `scribe`. Workflows reference roles, never concrete models. |
@@ -85,8 +85,9 @@ Stage semantics:
   (schipper convention) that gummi surfaces as a checklist.
 - **Spec** *(interactive, role: architect)* — converge on one approach.
   Gate: you mark the spec **Approved**. gummi commits the spec to the branch.
-- **Plan** *(autonomous or interactive, role: architect)* — line-level
-  implementation plan derived from the spec. Gate: your approval (unless
+- **Plan** *(autonomous or interactive, role: architect)* — numbered,
+  tracer-bullet-ordered implementation plan derived from the spec, one
+  line per step so critique markers can anchor. Gate: your approval (unless
   the feature was created with the Plan skip flag). Before the gate is
   raised, a **plan critique** runs: a fresh-context reviewer session
   (same cross-model property as Review) that tries to refute the plan —

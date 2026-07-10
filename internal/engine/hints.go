@@ -13,7 +13,7 @@ import (
 // to rediscover the template's shape; they mirror the two templates in
 // internal/spec.
 const (
-	featureSections = "Problem · Considered approaches · Chosen approach · " +
+	featureSections = "Problem · Out of scope · Considered approaches · Chosen approach · " +
 		"Implementation notes · Progress · Review · Verification plan"
 	bugSections = "Summary · Reproduction · Expected vs actual · Environment · " +
 		"Root cause · Fix · Review · Verification"
@@ -68,32 +68,54 @@ func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 		hints = append(hints, strings.TrimSpace(`
 Stage: Brainstorm (interactive; the user is in gummi's chat pane).
 Your job: interview the user, and write what you learn into the spec —
-a sharp Problem section, and two or more candidate approaches with
-tradeoffs under Considered approaches. Lead the conversation: open
-with the two or three highest-leverage questions, keep turns short (no
-monologues), and update the spec incrementally as answers arrive. Flag
-every unresolved decision as its own marker thread. Do not converge on
-one approach — convergence is the Spec stage's job.`))
+a sharp Problem section, scope boundaries under Out of scope as they
+surface, and two or more candidate approaches with tradeoffs under
+Considered approaches. Approaches must be structurally different —
+different seam placement, different architecture — not variations on
+one shape. Lead the interview: ask exactly one question per turn, with
+your recommended answer attached so the user can accept it in a word,
+and walk decisions in dependency order (upstream decisions first). If
+a fact can be found by exploring the repo, look it up instead of
+asking; the decisions are the user's — put each one to them. Keep
+turns short (no monologues), update the spec incrementally as answers
+arrive, and flag every unresolved decision as its own marker thread.
+Do not converge on one approach — convergence is the Spec stage's
+job.`))
 	case domain.StageSpec:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Spec (interactive; the user is in gummi's chat pane). Your job:
 converge with the user on exactly one approach, then complete the
-spec: Chosen approach, Implementation notes, and the Verification plan
-(gummi discovers the repo's build/test/lint commands into a
-gummi-checks block there at approval; add the feature-specific live
-checks that prove this works). Work the open marker threads one decision at a
-time, resolving each once the user decides. The user approves the spec
-to advance — do not start implementing.`))
+spec: Chosen approach, Out of scope (what this feature deliberately
+won't do — implementer and reviewer treat it as binding),
+Implementation notes, and the Verification plan (gummi discovers the
+repo's build/test/lint commands into a gummi-checks block there at
+approval; add the feature-specific live checks that prove this works —
+each check symptom-asserting (it proves the feature's behavior, not
+merely "runs without erroring"), deterministic, fast, and runnable by
+an agent). The test surface is a decision: put to the user which
+interfaces the tests will exercise, preferring seams the repo already
+has. Work the open marker threads one decision at a time — recommend
+an answer with each question, look up facts in the repo yourself, and
+resolve each thread once the user decides. Write the sections that
+outlive implementation (Problem, Out of scope, Chosen approach) as
+behavior and contracts — types, signatures, invariants — never file
+paths or line numbers, which go stale; file-level detail belongs in
+Implementation notes. The user approves the spec to advance — do not
+start implementing.`))
 	case domain.StagePlan:
 		hints = append(hints, strings.TrimSpace(`
-Stage: Plan (autonomous). Derive a line-level implementation plan from
-the approved spec and write it into the spec's Implementation notes:
-files to touch, functions, test surface. Be concrete. Stop when the
-plan is written; the user approves it.`))
+Stage: Plan (autonomous). Derive a concrete implementation plan from
+the approved spec and write it into the spec's Implementation notes as
+numbered steps — one line per step, so review markers can anchor to
+it — each step naming the files and functions it touches and the tests
+that prove it. Order the steps as tracer bullets: the first step cuts
+a thin complete path through the system, later steps widen it. Stop
+when the plan is written; the user approves it.`))
 	case domain.StageImplement:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Implement (autonomous). Implement the feature in this worktree
-using the spec and plan as context. Make focused edits, run the
+using the spec and plan as context. The spec's Out of scope section is
+binding — build nothing past it. Make focused edits, run the
 relevant checks as you go, and keep changes reviewable. Commit your
 work to this branch with focused git commits as you complete each
 coherent piece — the branch lands on main as a single squash commit
@@ -108,32 +130,51 @@ hit a blocker, stop and say so clearly rather than guessing.`))
 	case domain.StageTriage:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Triage (interactive; the user is in gummi's chat pane). Your job:
-confirm the bug is real and reproduce it. Pin down exact reproduction
-steps, the expected vs actual behavior, the environment, and a severity,
-and write them into the bug report (Reproduction, Expected vs actual,
-Environment). Lead the conversation: open with the highest-leverage
-questions, keep turns short. Flag anything still uncertain as its own
-marker thread. Do NOT diagnose the root cause yet — that is the Diagnose
-stage's job.`))
+confirm the bug is real and reproduce it. Verify the claim first: try
+to reproduce it from the report and the repo before interviewing, and
+tell the user what you found — reproduced, could not reproduce, or
+insufficient detail. Then pin down exact reproduction steps, the
+expected vs actual behavior, the environment, and a severity, and
+write them into the bug report (Reproduction, Expected vs actual,
+Environment). Ask exactly one question per turn — specific and
+actionable, with your recommended answer attached — and keep turns
+short. Flag anything still uncertain as its own marker thread. Do NOT
+diagnose the root cause yet — that is the Diagnose stage's job.`))
 	case domain.StageDiagnose:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Diagnose (interactive; the user is in gummi's chat pane). Your
 job: find and confirm the root cause, working from the reproduction, and
 record it in the bug report's Root cause section — where in the code,
-why it happens, and the shape of the fix (not the fix itself). Put open
-questions to the user one decision at a time and resolve each thread as
-they decide. The user approves the diagnosis to advance — do not start
-fixing.`))
+why it happens, and the shape of the fix (not the fix itself). Build
+the feedback loop first: before any hypothesizing, produce one
+red-capable command — run it at least once and keep the output — that
+asserts the user's exact symptom, deterministically, in seconds, and
+write it into the Reproduction section (Verify reruns it). No
+red-capable command, no hypotheses: if you cannot build one, stop and
+tell the user what you tried and what you need (a captured artifact,
+environment access, or permission to add temporary instrumentation).
+Then rank 3-5 falsifiable hypotheses — "if X is the cause, changing Y
+makes the bug disappear" — and put the ranking to the user before
+testing them. Probe one variable at a time, and tag any temporary
+debug logs with [DEBUG-xxxx] so cleanup is a single grep. Put open
+questions to the user one decision at a time — recommended answer
+attached — and resolve each thread as they decide. The user approves
+the diagnosis to advance — do not start fixing.`))
 	case domain.StageFix:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Fix (autonomous). Implement the fix in this worktree, guided by
 the bug report's Root cause. Make the smallest change that resolves the
-bug, and ADD A REGRESSION TEST that fails before your change and passes
-after — the Verify stage requires it. Commit your work to this branch
-with git as you go — the branch lands on main as a single squash commit
-when the user accepts the fix, and gummi checkpoint-commits anything
-you leave uncommitted when the stage ends. Keep the report's Fix section
-current: what you changed and why. If you are addressing review
+bug, and add a regression test at a correct seam — one that exercises
+the real bug pattern as it occurs at its call site — failing before
+your change and passing after; the Verify stage requires it. If no
+correct seam exists, record that in the Fix section: the missing seam
+is itself a finding, and it stands in for the test. Commit your work
+to this branch with git as you go, stating the confirmed root cause in
+the commit message body — the branch lands on main as a single squash
+commit when the user accepts the fix, and gummi checkpoint-commits
+anything you leave uncommitted when the stage ends. Keep the report's
+Fix section current: what you changed and why. Before you finish, grep
+for [DEBUG- and delete any temporary logs. If you are addressing review
 findings, resolve each thread in the Review section with how you fixed
 it. If you hit a blocker or need a decision, stop and say so rather than
 guessing.`))
@@ -204,20 +245,35 @@ your final message explaining which conflict and why.`)
 // "changes" verdict bounces to differ by kind.
 func reviewHint(kind domain.Kind) string {
 	artifact, bounce := "spec", "implement"
+	scopeRef := "the spec's Out of scope section"
 	if kind == domain.KindBug {
 		artifact, bounce = "bug report", "fix"
+		scopeRef = "the fix's mandate — the smallest change that resolves the bug"
 	}
 	return strings.TrimSpace(fmt.Sprintf(`
 Stage: Review (autonomous, fresh context). Review the worktree diff
-against the %s. Write each finding into the %s's Review section as
-one line describing it, followed by its own `+"`%%%% @reviewer:`"+` marker
-detailing what must change — one thread per finding, so gummi tracks
-the fix burn-down. Be specific and actionable. End your final message
-with a verdict on its own line, exactly one of:
-  VERDICT: pass       — no changes needed; ready to verify
-  VERDICT: changes    — serious findings; bounce back to %s
+against the %s. If the %s's Review section carries resolved threads
+from a prior round, start there: verify each resolution against the
+diff before reviewing fresh. Then review through two lenses, reported
+separately — never merged or reranked, so one cannot mask the other:
+  conformance — requirements missing, partial, or implemented wrong
+                (quote the %s line each finding violates), and scope
+                creep: behavior in the diff nobody asked for, judged
+                against %s
+  standards   — code quality as labelled judgment calls ("possible
+                duplication"), never hard rules; skip anything the
+                repo's tooling already enforces
+Write each finding into the %s's Review section as one line naming
+its lens and severity — blocking or nit — followed by its own
+`+"`%%%% @reviewer:`"+` marker detailing what must change; one thread per
+finding, so gummi tracks the fix burn-down. Be specific and
+actionable. End your final message with a verdict on its own line,
+exactly one of:
+  VERDICT: pass       — no blocking findings (nits alone pass); ready to verify
+  VERDICT: changes    — at least one blocking finding; bounce back to %s
 gummi parses this exact line to drive the automatic
-review→%s→review loop; without it the loop stalls.`, artifact, artifact, bounce, bounce))
+review→%s→review loop; without it the loop stalls.`,
+		artifact, artifact, artifact, scopeRef, artifact, bounce, bounce))
 }
 
 // verifyHint is the Verify stage contract. The deterministic repo-check
@@ -231,7 +287,9 @@ func verifyHint(kind domain.Kind) string {
 	// with "which should be done next?" — a question no one will answer.
 	const verdict = `
 You are autonomous: no one can answer questions, so never end with one.
-Make the call, record the evidence, and end your final message with a
+A check you record as SKIPPED is an unmet check, not a pass, unless
+the verification plan explicitly allows skipping it. Make the call,
+record the evidence, and end your final message with a
 verdict on its own line, exactly one of:
   VERDICT: pass       — everything verified; ready to land on main
   VERDICT: fail       — verification found real problems
@@ -253,7 +311,10 @@ them yourself.)` + verdict)
 Stage: Verify (autonomous). gummi runs the check commands from the
 spec's gummi-checks block for you and gives you their results in the
 kickoff — do not re-run them. Your job is the spec's Verification plan:
-the feature-specific live checks. Record all results in the spec (the
+the feature-specific live checks. Hold each to the rubric: run it
+yourself, and it must prove the feature's behavior — the symptom the
+spec promises, not merely "runs without erroring" — deterministically.
+Record all results in the spec (the
 Verification plan section, with a summary line in Progress). (If the
 kickoff carries no check results — e.g. guarded mode, or no block —
 discover the repo's build/test/lint commands and run them yourself.)` + verdict)

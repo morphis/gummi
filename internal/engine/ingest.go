@@ -30,8 +30,10 @@ const ingestToolName = "propose_features"
 // granularity/coverage rules live in the system hints; this is the
 // go-ahead.
 const ingestPrompt = "Read the source document you were pointed at, then decompose it into a set " +
-	"of features. Aim for PR-sized vertical slices: each feature should be one branch that can be " +
-	"implemented, reviewed, and verified on its own. Cover the whole document — every requirement " +
+	"of features. Aim for PR-sized vertical slices: each feature cuts a narrow but complete path " +
+	"through every layer, is demoable or verifiable on its own as one branch, and fits a single " +
+	"fresh agent context window; prefactoring that several slices depend on is its own feature " +
+	"the others depend on. Cover the whole document — every requirement " +
 	"maps to a feature or is explicitly marked out of scope. For each feature give a title, a " +
 	"one-line summary, the source sections it came from, its dependencies on other features, the " +
 	"problem it solves, constraints, acceptance criteria, and any open questions. Then submit the " +

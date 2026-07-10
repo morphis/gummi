@@ -206,6 +206,7 @@ func AddComment(content string, line int, author, date, text string) (string, er
 // where ingestion supplied it (DESIGN §11.2).
 const (
 	promptProblem      = "%% @gummi: what hurts today? who feels it?"
+	promptOutOfScope   = "%% @gummi: what this feature deliberately won't do — scope boundaries prevent gold-plating"
 	promptConsidered   = "%% @gummi: at least two candidates, with tradeoffs"
 	promptChosen       = "%% @gummi: converge on one during the spec stage"
 	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
@@ -268,6 +269,7 @@ func renderDraft(f *domain.Feature, seed domain.DraftSeed, prov domain.DraftProv
 		b.WriteString("\n")
 	}
 
+	section(&b, "Out of scope", "", promptOutOfScope)
 	section(&b, "Considered approaches", "", promptConsidered)
 	section(&b, "Chosen approach", "", promptChosen)
 	section(&b, "Implementation notes", neutralizeMarkers(seed.Constraints), "")

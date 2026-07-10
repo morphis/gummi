@@ -219,7 +219,8 @@ line.`
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return `You have two gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
-(faster for the user, cheaper); ask one question at a time (parallel
+(faster for the user, cheaper); lead with your recommended option,
+marked as such in its label; ask one question at a time (parallel
 ask_user calls are bounced); pass spec_anchor to have gummi record
 the answer into the artifact. spec_annotate: attach an open question to a
 line and let gummi place the %% marker with correct anchoring, instead

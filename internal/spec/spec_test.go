@@ -175,8 +175,15 @@ func TestTemplateParsesWithOpenQuestions(t *testing.T) {
 		t.Error("template missing header bits")
 	}
 	d := Parse(tpl)
-	if got := len(d.OpenQuestions()); got != 6 {
-		t.Errorf("template has %d open questions, want 6", got)
+	if got := len(d.OpenQuestions()); got != 7 {
+		t.Errorf("template has %d open questions, want 7", got)
+	}
+	// scope boundaries live between the problem and the approaches
+	problem := strings.Index(tpl, "## Problem")
+	scope := strings.Index(tpl, "## Out of scope")
+	considered := strings.Index(tpl, "## Considered approaches")
+	if scope < 0 || !(problem < scope && scope < considered) {
+		t.Errorf("Out of scope section misplaced: problem=%d scope=%d considered=%d", problem, scope, considered)
 	}
 	if DraftFilename(f) != "FD-007-search.md" {
 		t.Errorf("draft filename = %s", DraftFilename(f))

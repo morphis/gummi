@@ -17,12 +17,12 @@
                                  [38;2;58;57;67m│[m
                                  [38;2;58;57;67m│[m
                                  [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m
                                  [38;2;58;57;67m│[m [38;2;96;95;107mgummi[m
                                  [38;2;58;57;67m│[m   [38;2;96;95;107mThe user just opened the brainstorm chat. Read the spec[m
                                  [38;2;58;57;67m│[m   [38;2;96;95;107mdraft, then open the interview: state the problem as you[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107munderstand it in a sentence or two and ask the user the two[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107mor three highest-leverage questions. Keep it short.[m
+                                 [38;2;58;57;67m│[m   [38;2;96;95;107munderstand it in a sentence or two and ask the single[m
+                                 [38;2;58;57;67m│[m   [38;2;96;95;107mhighest-leverage question, with your recommended answer.[m
+                                 [38;2;58;57;67m│[m   [38;2;96;95;107mKeep it short.[m
                                  [38;2;58;57;67m│[m
                                  [38;2;58;57;67m│[m [38;2;255;96;255;1mFD-001 asks[m  [38;2;247;246;251mPersist where?[m
                                  [38;2;58;57;67m│[m [38;2;247;246;251m  1. per-device[38;2;96;95;107m — localStorage[m

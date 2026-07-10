@@ -60,10 +60,10 @@ func interactiveKickoff(s domain.Stage) string {
 			"then drive convergence: recommend one approach with your reasoning, and put the " +
 			"most consequential open question to the user first. Keep it short."
 	case domain.StageTriage:
-		return "The user just opened the triage chat. Read the bug report, then start " +
-			"reproducing: state the bug as you understand it in a sentence, and ask the two or " +
-			"three questions you most need to reproduce it (steps, environment, expected vs " +
-			"actual). Keep it short."
+		return "The user just opened the triage chat. Read the bug report, try to reproduce " +
+			"the bug from it, and report what you found. Then ask the single question you most " +
+			"need to reproduce it (steps, environment, expected vs actual), with your " +
+			"recommended answer. Keep it short."
 	case domain.StageDiagnose:
 		return "The user just opened the diagnose chat. Read the bug report and its " +
 			"reproduction, then drive toward root cause: state your leading hypothesis with your " +
@@ -71,7 +71,7 @@ func interactiveKickoff(s domain.Stage) string {
 	default:
 		return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
 			"interview: state the problem as you understand it in a sentence or two and ask the " +
-			"user the two or three highest-leverage questions. Keep it short."
+			"single highest-leverage question, with your recommended answer. Keep it short."
 	}
 }
 
