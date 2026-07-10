@@ -6,16 +6,23 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	copilot "github.com/github/copilot-sdk/go"
+	copilotrpc "github.com/github/copilot-sdk/go/rpc"
 )
 
 // cliMinCredits is the CLI's minimum accepted session credit cap; below
 // it the CLI rejects session.create, so gummi enforces the budget itself.
 const cliMinCredits = 30
+
+// settleTimeout bounds the usage.getMetrics RPC at idle; past it the
+// turn settles from the message fallback instead of stalling the idle.
+const settleTimeout = 10 * time.Second
 
 // Copilot is an Agent backed by the GitHub Copilot CLI via the official
 // Go SDK. It runs one CLI server process (the client) and opens one SDK
@@ -129,6 +136,7 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		pending:      map[string]chan string{},
 		pendingUsage: map[string]Usage{},
 		meteredCalls: map[string]struct{}{},
+		settled:      map[string]Usage{},
 	}
 	// Register gummi's client tools with a handler that surfaces the call
 	// as an event and blocks until the orchestrator resolves it. The
@@ -149,6 +157,7 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		return nil, fmt.Errorf("creating copilot session: %w", err)
 	}
 	cs.sdk = sess
+	cs.getMetrics = sess.RPC.Usage.GetMetrics
 	go cs.forward()
 	cs.unsub = sess.On(cs.onEvent)
 
@@ -201,12 +210,63 @@ type copilotSession struct {
 	closed  bool
 	pending map[string]chan string // client-tool callID → answer channel
 
-	// Fallback metering for streamed BYOK calls, which never get an
-	// AssistantUsageData event (CLI gap): completed messages stash their
-	// per-call token counts here, the authoritative usage event (when it
-	// does come) claims its call, and idle flushes what remains.
+	// Fallback metering for streamed calls, which the CLI never covers
+	// with an AssistantUsageData event (CLI gap, hosted and BYOK alike):
+	// completed messages stash their per-call token counts here, the
+	// authoritative usage event (when it does come) claims its call, and
+	// the idle settle flushes what remains if the metrics RPC fails.
 	pendingUsage map[string]Usage    // apiCallID → usage gleaned from messages
 	meteredCalls map[string]struct{} // apiCallIDs already covered by AssistantUsageData
+
+	// settled is the per-model usage already emitted to the engine — by
+	// prior idle settles, AssistantUsageData events, or fallback flushes.
+	// The idle settle emits the CLI's cumulative session.usage.getMetrics
+	// figures minus this, so every path stays additive and none double-
+	// counts another; a fallback estimate is corrected by the next
+	// successful settle rather than standing forever.
+	settled map[string]Usage // model → cumulative usage emitted
+
+	// getMetrics fetches the CLI's cumulative usage (the sdk RPC in
+	// production; a stub in tests). nil settles from the fallback stash.
+	getMetrics func(context.Context) (*copilotrpc.UsageGetMetricsResult, error)
+}
+
+// addSettled folds one emitted usage sample into the per-model settled
+// total. Caller holds s.mu.
+func (s *copilotSession) addSettled(u Usage) {
+	if s.settled == nil {
+		s.settled = map[string]Usage{}
+	}
+	t := s.settled[u.Model]
+	t.Model = u.Model
+	t.Credits += u.Credits
+	t.InputTokens += u.InputTokens
+	t.CachedTokens += u.CachedTokens
+	t.OutputTokens += u.OutputTokens
+	s.settled[u.Model] = t
+}
+
+// cumulativeUsage flattens one model's getMetrics entry into gummi's
+// usage vocabulary: credits from nano-AIU (1e9 nano-AIU = 1 AI credit,
+// the CLI's billing unit), input split into fresh vs cache-read tokens
+// (the SDK's inputTokens includes cache reads; tokenDetails carries the
+// split). Reasoning tokens are already inside outputTokens — verified
+// against GitHub's published per-token rates — so they are not re-added.
+func cumulativeUsage(model string, m copilotrpc.UsageMetricsModelMetric) Usage {
+	u := Usage{Model: model}
+	if m.TotalNanoAiu != nil {
+		u.Credits = *m.TotalNanoAiu / 1e9
+	}
+	if td, ok := m.TokenDetails["input"]; ok {
+		u.InputTokens = td.TokenCount
+		u.CachedTokens = m.TokenDetails["cache_read"].TokenCount
+		u.OutputTokens = m.TokenDetails["output"].TokenCount
+		return u
+	}
+	u.InputTokens = m.Usage.InputTokens - m.Usage.CacheReadTokens
+	u.CachedTokens = m.Usage.CacheReadTokens
+	u.OutputTokens = m.Usage.OutputTokens
+	return u
 }
 
 // stashMessageUsage records a completed message's token count as the
@@ -254,6 +314,67 @@ func (s *copilotSession) takePendingUsage() []Usage {
 	s.pendingUsage = map[string]Usage{}
 	s.meteredCalls = map[string]struct{}{}
 	return out
+}
+
+// settleIdle meters the finished turn and then reports idle. Primary
+// source is the CLI's cumulative session.usage.getMetrics RPC — the
+// authoritative per-model AI-credit (nano-AIU) and token accounting the
+// CLI keeps but never pushes as assistant.usage events to SDK sessions
+// (CLI gap). Each model emits its cumulative figure minus what was
+// already settled, so credits arrive provider-metered instead of the
+// engine's tokens×rate estimate. When the RPC fails (older CLI, timeout)
+// the turn falls back to the stashed per-message output-token counts, and
+// the next successful settle corrects the difference.
+func (s *copilotSession) settleIdle() {
+	var res *copilotrpc.UsageGetMetricsResult
+	var err error
+	if s.getMetrics != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), settleTimeout)
+		defer cancel()
+		res, err = s.getMetrics(ctx)
+	}
+	var evs []Usage
+	if err == nil && res != nil && len(res.ModelMetrics) > 0 {
+		models := make([]string, 0, len(res.ModelMetrics))
+		for m := range res.ModelMetrics {
+			models = append(models, m)
+		}
+		sort.Strings(models) // deterministic emission order
+		s.mu.Lock()
+		if s.settled == nil {
+			s.settled = map[string]Usage{}
+		}
+		// the authoritative figures supersede this turn's fallback stash
+		s.pendingUsage = map[string]Usage{}
+		s.meteredCalls = map[string]struct{}{}
+		for _, model := range models {
+			cum := cumulativeUsage(model, res.ModelMetrics[model])
+			prev := s.settled[model]
+			d := Usage{
+				Model:        model,
+				Credits:      cum.Credits - prev.Credits,
+				InputTokens:  cum.InputTokens - prev.InputTokens,
+				CachedTokens: cum.CachedTokens - prev.CachedTokens,
+				OutputTokens: cum.OutputTokens - prev.OutputTokens,
+			}
+			s.settled[model] = cum
+			if d.Credits != 0 || d.InputTokens != 0 || d.CachedTokens != 0 || d.OutputTokens != 0 {
+				evs = append(evs, d)
+			}
+		}
+		s.mu.Unlock()
+	} else {
+		evs = s.takePendingUsage()
+		s.mu.Lock()
+		for _, u := range evs {
+			s.addSettled(u)
+		}
+		s.mu.Unlock()
+	}
+	for _, u := range evs {
+		s.emit(Event{Kind: EventUsage, Usage: u})
+	}
+	s.emit(Event{Kind: EventIdle})
 }
 
 // toolHandler builds an SDK handler for a client tool: it emits an
@@ -373,18 +494,24 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 			u.CachedTokens = *d.CacheReadTokens
 		}
 		s.markUsageMetered(d.APICallID)
+		// count this emission toward the model's settled total so the
+		// idle settle's cumulative-minus-settled delta excludes it.
+		s.mu.Lock()
+		s.addSettled(u)
+		s.mu.Unlock()
 		out = Event{Kind: EventUsage, Usage: u}
 	case *copilot.SessionUsageInfoData:
 		// the SDK's live context-window occupancy: current tokens vs the
 		// model's limit.
 		out = Event{Kind: EventContext, Context: Context{Tokens: d.CurrentTokens, Limit: d.TokenLimit}}
 	case *copilot.SessionIdleData:
-		// meter calls whose authoritative usage event never came before
-		// reporting idle, so budget accounting sees the whole turn.
-		for _, u := range s.takePendingUsage() {
-			s.emit(Event{Kind: EventUsage, Usage: u})
-		}
-		out = Event{Kind: EventIdle}
+		// Settle the turn's spend before reporting idle (the engine
+		// persists at idle). The settle's RPC round-trip runs off the
+		// SDK's event-dispatch goroutine — blocking dispatch on a
+		// request/response cycle risks deadlock — so it owns emitting
+		// the trailing idle after the usage events.
+		go s.settleIdle()
+		return
 	case *copilot.SessionLimitsExhaustedRequestedData:
 		out = Event{Kind: EventBudgetExhausted, Usage: Usage{Credits: d.UsedAiCredits}}
 	case *copilot.SessionErrorData:

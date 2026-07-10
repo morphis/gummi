@@ -12,7 +12,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260527151214-009e6338d40d
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
-	github.com/github/copilot-sdk/go v1.0.5
+	github.com/github/copilot-sdk/go v1.0.6
 	github.com/rivo/uniseg v0.4.7
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0

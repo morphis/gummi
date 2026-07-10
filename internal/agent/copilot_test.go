@@ -9,6 +9,7 @@ import (
 	"time"
 
 	copilot "github.com/github/copilot-sdk/go"
+	copilotrpc "github.com/github/copilot-sdk/go/rpc"
 
 	"github.com/morphis/gummi/internal/agent/fakeopenai"
 )
@@ -298,17 +299,6 @@ func TestCopilotUsageFallback(t *testing.T) {
 			meteredCalls: map[string]struct{}{},
 		}
 	}
-	drain := func(s *copilotSession) []Event {
-		var out []Event
-		for {
-			select {
-			case e := <-s.raw:
-				out = append(out, e)
-			default:
-				return out
-			}
-		}
-	}
 	toks := int64(42)
 	call := "chatcmpl-1"
 	model := "m"
@@ -321,7 +311,7 @@ func TestCopilotUsageFallback(t *testing.T) {
 	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
 	var usages []Usage
 	var last EventKind
-	for _, e := range drain(s) {
+	for _, e := range collectUntilIdle(t, s) {
 		if e.Kind == EventUsage {
 			usages = append(usages, e.Usage)
 		}
@@ -344,7 +334,7 @@ func TestCopilotUsageFallback(t *testing.T) {
 	}})
 	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
 	usages = nil
-	for _, e := range drain(s) {
+	for _, e := range collectUntilIdle(t, s) {
 		if e.Kind == EventUsage {
 			usages = append(usages, e.Usage)
 		}
@@ -352,6 +342,101 @@ func TestCopilotUsageFallback(t *testing.T) {
 	if len(usages) != 1 {
 		t.Errorf("got %d usage events, want exactly 1 (no double-count): %+v", len(usages), usages)
 	}
+}
+
+// collectUntilIdle reads raw events through the trailing EventIdle. The
+// idle settle runs on its own goroutine, so the events land shortly
+// after onEvent(SessionIdleData) returns rather than synchronously.
+func collectUntilIdle(t *testing.T, s *copilotSession) []Event {
+	t.Helper()
+	var out []Event
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-s.raw:
+			out = append(out, e)
+			if e.Kind == EventIdle {
+				return out
+			}
+		case <-deadline:
+			t.Fatalf("no idle event; got %+v", out)
+		}
+	}
+}
+
+// TestCopilotSettleFromMetrics verifies the primary metering path: at
+// idle the session pulls the CLI's cumulative per-model usage metrics
+// and emits only the delta since the last settle — provider-metered
+// credits from nano-AIU, input split into fresh vs cache-read tokens —
+// superseding the per-message fallback stash for the same turn.
+func TestCopilotSettleFromMetrics(t *testing.T) {
+	nano1, nano2 := 500_000_000.0, 800_000_000.0 // 0.5 then 0.8 credits
+	metrics := func(nano float64, in, cached, out int64) *copilotrpc.UsageGetMetricsResult {
+		return &copilotrpc.UsageGetMetricsResult{
+			ModelMetrics: map[string]copilotrpc.UsageMetricsModelMetric{
+				"m": {
+					TotalNanoAiu: &nano,
+					TokenDetails: map[string]copilotrpc.UsageMetricsModelMetricTokenDetail{
+						"input":      {TokenCount: in},
+						"cache_read": {TokenCount: cached},
+						"output":     {TokenCount: out},
+					},
+				},
+			},
+		}
+	}
+	cum := metrics(nano1, 100, 4000, 50)
+	s := &copilotSession{
+		raw:          make(chan Event, 16),
+		stop:         make(chan struct{}),
+		pendingUsage: map[string]Usage{},
+		meteredCalls: map[string]struct{}{},
+		settled:      map[string]Usage{},
+		getMetrics: func(context.Context) (*copilotrpc.UsageGetMetricsResult, error) {
+			return cum, nil
+		},
+	}
+
+	// turn 1: a stashed message fallback must be superseded by the metrics.
+	toks, call, model := int64(50), "chatcmpl-1", "m"
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantMessageData{
+		Content: "hi", APICallID: &call, OutputTokens: &toks, Model: &model,
+	}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
+	var usages []Usage
+	for _, e := range collectUntilIdle(t, s) {
+		if e.Kind == EventUsage {
+			usages = append(usages, e.Usage)
+		}
+	}
+	want := Usage{Model: "m", Credits: 0.5, InputTokens: 100, CachedTokens: 4000, OutputTokens: 50}
+	if len(usages) != 1 || usages[0] != want {
+		t.Fatalf("turn 1 usage = %+v, want [%+v]", usages, want)
+	}
+
+	// turn 2: only the delta beyond turn 1's cumulative figure is emitted.
+	cum = metrics(nano2, 150, 9000, 80)
+	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
+	usages = nil
+	for _, e := range collectUntilIdle(t, s) {
+		if e.Kind == EventUsage {
+			usages = append(usages, e.Usage)
+		}
+	}
+	want = Usage{Model: "m", Credits: 0.3, InputTokens: 50, CachedTokens: 5000, OutputTokens: 30}
+	if len(usages) != 1 || !usageClose(usages[0], want) {
+		t.Fatalf("turn 2 usage = %+v, want [%+v]", usages, want)
+	}
+}
+
+// usageClose compares usage samples with float tolerance on credits.
+func usageClose(a, b Usage) bool {
+	d := a.Credits - b.Credits
+	if d < 0 {
+		d = -d
+	}
+	return d < 1e-9 && a.Model == b.Model && a.InputTokens == b.InputTokens &&
+		a.CachedTokens == b.CachedTokens && a.OutputTokens == b.OutputTokens
 }
 
 // TestCopilotCloseClosesSessionChannels verifies Agent.Close() closes
