@@ -12,7 +12,7 @@ import (
 func TestCritiqueHintsAndTools(t *testing.T) {
 	f := feature(1, "Dark mode", domain.StagePlan)
 
-	joined := strings.Join(stageHints(f, "spec.md", true), "\n")
+	joined := strings.Join(stageHints(f, "spec.md", flavorCritique), "\n")
 	if !strings.Contains(joined, "Stage: Plan critique") {
 		t.Error("critique hints missing the critique stage contract")
 	}
@@ -22,22 +22,22 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 	if !strings.Contains(joined, "VERDICT:") {
 		t.Error("critique hints missing the verdict fallback grammar")
 	}
-	if plain := strings.Join(stageHints(f, "spec.md", false), "\n"); strings.Contains(plain, "Plan critique") {
+	if plain := strings.Join(stageHints(f, "spec.md", flavorStage), "\n"); strings.Contains(plain, "Plan critique") {
 		t.Error("plan-writer hints leaked the critique contract")
 	}
 
 	var names []string
-	for _, td := range stageTools(domain.StagePlan, true) {
+	for _, td := range stageTools(domain.StagePlan, flavorCritique) {
 		names = append(names, td.Name)
 	}
 	got := strings.Join(names, ",")
 	if !strings.Contains(got, "submit_verdict") || !strings.Contains(got, "spec_annotate") {
 		t.Errorf("critique tools = %s, want submit_verdict + spec_annotate", got)
 	}
-	if stageTools(domain.StagePlan, false) != nil {
+	if stageTools(domain.StagePlan, flavorStage) != nil {
 		t.Error("plan writer unexpectedly offered client tools")
 	}
-	if toolHint(domain.StagePlan, true) == "" {
+	if toolHint(domain.StagePlan, flavorCritique) == "" {
 		t.Error("critique tool hint empty")
 	}
 }

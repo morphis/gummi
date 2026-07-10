@@ -107,7 +107,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
 		{key: "tab", label: "attention", help: "cycle needs-attention queue"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
-		{key: "r", label: "rebase", help: "rebase branch onto main"},
+		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},
 		{key: "m", label: "merge", help: "squash-merge branch into main (drafted message)"},
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
 		{key: "n", label: "new", help: "new feature", bar: true},

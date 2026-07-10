@@ -34,6 +34,22 @@ import (
 // hints already tell the agent what to do.
 const kickoff = "Proceed with this stage per your instructions and the spec."
 
+// rebaseKickoff opens a rebase-resolve session; the run's kickoff note
+// carries the target commit and the files expected to conflict.
+const rebaseKickoff = "Proceed with the rebase per your instructions."
+
+// runFlavor selects what an autonomous session does: the stage's own
+// work, the plan-critique pass (RunCritique), or the rebase-resolve
+// pass (RunRebase). The latter two borrow a stage without advancing it —
+// the state machine never sees them.
+type runFlavor int
+
+const (
+	flavorStage runFlavor = iota
+	flavorCritique
+	flavorRebase
+)
+
 // interactiveKickoff opens a fresh interactive session with the agent
 // leading — the user shouldn't have to know what to say to start an
 // interview (DESIGN §3: brainstorm develops a one-line description).
@@ -208,7 +224,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	}
 
 	// interactive chat is human-paced: no budget cap.
-	sess, specPath, err := e.newAgentSession(ctx, f, role, 0, false)
+	sess, specPath, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +281,7 @@ func (e *Engine) Run(f domain.Feature) error { return e.RunWith(f, "") }
 // "request changes" path for autonomous stages, which have no chat to
 // send a turn to (DESIGN §6.1).
 func (e *Engine) RunWith(f domain.Feature, note string) error {
-	return e.run(f, note, false)
+	return e.run(f, note, flavorStage)
 }
 
 // RunCritique runs the plan-critique pass: a fresh-context reviewer
@@ -278,17 +294,40 @@ func (e *Engine) RunCritique(f domain.Feature) error {
 	if f.Stage != domain.StagePlan {
 		return fmt.Errorf("critique runs on the plan stage, not %s", f.Stage)
 	}
-	return e.run(f, "", true)
+	return e.run(f, "", flavorCritique)
 }
 
-// run is the shared autonomous-run path behind RunWith and RunCritique.
-func (e *Engine) run(f domain.Feature, note string, critique bool) error {
+// RunRebase runs the rebase-resolve pass: an implementer session in the
+// feature's worktree that rebases the branch onto main and resolves the
+// conflicts a plain rebase stopped on — the agent hand-off behind the
+// UI's rebase key when RebaseOnMain aborts. files names the paths that
+// conflicted, so the kickoff can point the agent at them. Like the
+// critique, it borrows the current stage without advancing it; the
+// caller judges success by the resulting git state, not the transcript.
+func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string) error {
+	head, err := e.cfg.Worktrees.MainHead(ctx)
+	if err != nil {
+		return err
+	}
+	note := "Rebase this branch onto main's current HEAD: run `git rebase " + head + "`."
+	if len(files) > 0 {
+		note += "\nExpect conflicts in: " + strings.Join(files, ", ") + "."
+	}
+	return e.run(f, note, flavorRebase)
+}
+
+// run is the shared autonomous-run path behind RunWith, RunCritique,
+// and RunRebase.
+func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	role, ok := roleForStage(f.Stage)
 	if !ok {
 		return fmt.Errorf("stage %s has no agent action", f.Stage)
 	}
-	if critique {
+	switch flavor {
+	case flavorCritique:
 		role = agent.RoleReviewer
+	case flavorRebase:
+		role = agent.RoleImplementer
 	}
 	if interactiveStage(f.Stage) {
 		return fmt.Errorf("stage %s is interactive; use Attach", f.Stage)
@@ -309,7 +348,7 @@ func (e *Engine) run(f domain.Feature, note string, critique bool) error {
 			return nil // already scheduled
 		}
 	}
-	s := &Session{Feature: f, Role: role, Critique: critique, state: StateQueued, done: make(chan struct{}), kickoffNote: note}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, state: StateQueued, done: make(chan struct{}), kickoffNote: note}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -364,7 +403,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.exhaust(s)
 		return
 	}
-	sess, specPath, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.Critique)
+	sess, specPath, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor())
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -401,7 +440,9 @@ func (e *Engine) startAutonomous(s *Session) {
 // model shepherding `go test` output.
 func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 	msg := s.kickoffMessage()
-	if s.Feature.Stage == domain.StageVerify && e.cfg.Permission != agent.PermissionGuarded {
+	// only the stage's own run gets the pre-run check results: a rebase
+	// session borrowing the Verify stage isn't verifying anything yet.
+	if s.Feature.Stage == domain.StageVerify && !s.Rebase && e.cfg.Permission != agent.PermissionGuarded {
 		if pre := e.runSpecChecks(s); pre != "" {
 			msg = pre + "\n\n" + msg
 		}
@@ -506,18 +547,18 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 // the model/provider chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
 // Session (ask_user answer capture writes there).
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, critique bool) (agent.Session, string, error) {
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor) (agent.Session, string, error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, "", err
 	}
 	model, provider := e.resolveRole(f.Profile, role)
-	hints := stageHints(f, specPath, critique)
+	hints := stageHints(f, specPath, flavor)
 	// implementation runs carry any open diff review comments so a fix-up
 	// (bounce from the diff surface's "request changes") addresses each
 	// (DESIGN §6.1). The store is the source of truth, so this reaches
 	// every implement run, not just the one that triggered it.
-	if f.Stage == domain.StageImplement || f.Stage == domain.StageFix {
+	if flavor == flavorStage && (f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
 		hints = append(hints, e.diffReviewHints(ctx, f.ID)...)
 	}
 	var maxCredits float64
@@ -534,8 +575,8 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// text forms the stage hints already describe).
 	var tools []agent.ToolDef
 	if e.ClientTools() {
-		tools = stageTools(f.Stage, critique)
-		if h := toolHint(f.Stage, critique); h != "" {
+		tools = stageTools(f.Stage, flavor)
+		if h := toolHint(f.Stage, flavor); h != "" {
 			hints = append(hints, h)
 		}
 	} else if interactiveStage(f.Stage) {
@@ -725,7 +766,7 @@ func (e *Engine) exhaust(s *Session) {
 	if !s.markExhausted() {
 		return // already checkpointed; a re-raised event must not duplicate the gate
 	}
-	e.checkpoint(s) // partial work survives on the branch across the gate
+	e.settle(s) // partial work survives on the branch across the gate
 	s.appendActivity("budget exhausted — stage stopped for review")
 	s.setState(StateDone)
 	e.persist(s)
@@ -875,7 +916,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// an autonomous turn completing frees the slot (atomically, so a
 		// racing Pause isn't overwritten)
 		if !s.Interactive && s.finishRunning() {
-			e.checkpoint(s)
+			e.settle(s)
 			e.stageReceipt(s)
 			e.freeSlot(s)
 		}
@@ -898,6 +939,29 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 // checkpointTimeout bounds the checkpoint's git work; a commit is local
 // and fast, so a hang here is pathological and must not wedge the pump.
 const checkpointTimeout = 30 * time.Second
+
+// settle runs a finishing autonomous session's git epilogue: the
+// checkpoint commit for stage work, or — for a rebase session, which
+// must never CommitAll (a mid-rebase commit would capture conflict
+// markers onto a detached HEAD) — the abort of anything the agent left
+// mid-rebase, restoring the worktree's never-at-rest-mid-rebase
+// invariant.
+func (e *Engine) settle(s *Session) {
+	if !s.Rebase {
+		e.checkpoint(s)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
+	defer cancel()
+	aborted, err := e.cfg.Worktrees.AbortRebase(ctx, &s.Feature)
+	if err != nil {
+		s.appendActivity("rebase cleanup failed: " + err.Error())
+		return
+	}
+	if aborted {
+		s.appendActivity("rebase left mid-flight — aborted, worktree restored")
+	}
+}
 
 // checkpoint commits whatever the stage left in the feature's worktree
 // to its branch, so agent work is never stranded uncommitted (DESIGN:

@@ -144,7 +144,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `n` / `B` | new feature / new bug |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
 | `a` | raw-attach the agent CLI in the worktree (escape hatch) |
-| `r` / `m` | rebase onto main / squash-merge into main (drafted commit message) |
+| `r` / `m` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafted commit message) |
 | `c` / `x` | clean up a landed branch / delete |
 
 ## Bringing in existing work

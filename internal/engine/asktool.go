@@ -51,10 +51,14 @@ const (
 // stages because comments can also arrive mid-run as a live turn). The
 // non-blocking tools (annotate, verdict, resolve) are gummi-resolved
 // immediately, so they are safe on autonomous stages. The plan-critique
-// pass reviews the plan and files findings, so it gets both.
-func stageTools(stage domain.Stage, critique bool) []agent.ToolDef {
-	if critique {
+// pass reviews the plan and files findings, so it gets both; the
+// rebase-resolve pass is judged by git state alone and gets none.
+func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
+	switch flavor {
+	case flavorCritique:
 		return []agent.ToolDef{submitVerdictTool(), specAnnotateTool()}
+	case flavorRebase:
+		return nil
 	}
 	switch stage {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
@@ -199,8 +203,11 @@ func resolveAnnotationTool() agent.ToolDef {
 // hint here: resolve_annotation is explained by the diff-comments turn
 // itself (CompileDiffComments), which only exists when there are
 // comments to resolve.
-func toolHint(stage domain.Stage, critique bool) string {
-	if critique {
+func toolHint(stage domain.Stage, flavor runFlavor) string {
+	if flavor == flavorRebase {
+		return "" // no gummi tools: the rebase outcome is read from git state
+	}
+	if flavor == flavorCritique {
 		return `You have two gummi tools. spec_annotate: attach each finding to the
 plan line it indicts and let gummi place the %% marker with correct
 anchoring, instead of writing %% lines yourself. submit_verdict: call it

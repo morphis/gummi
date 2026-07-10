@@ -369,6 +369,87 @@ func TestRebaseConflictAbortsCleanly(t *testing.T) {
 	}
 }
 
+// conflictedWorktree builds a feature worktree whose branch conflicts
+// with main on README.md, returning the manager, feature, and worktree
+// path — the setup behind every agent-rebase helper test.
+func conflictedWorktree(t *testing.T) (*Manager, *domain.Feature, string) {
+	t.Helper()
+	root := newRepo(t)
+	m, err := NewManager(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := feature(11, "Helper")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "README.md", "feature version\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "feature edit")
+	writeFile(t, root, "README.md", "main version\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "main edit")
+	return m, f, p
+}
+
+func TestRebaseInProgressAndAbort(t *testing.T) {
+	m, f, p := conflictedWorktree(t)
+
+	if in, err := m.RebaseInProgress(ctx, f); in || err != nil {
+		t.Fatalf("fresh worktree mid-rebase: %v %v", in, err)
+	}
+	if aborted, err := m.AbortRebase(ctx, f); aborted || err != nil {
+		t.Fatalf("abort with nothing in flight: %v %v", aborted, err)
+	}
+
+	// start a rebase that stops on the conflict, leaving it in flight
+	head, err := m.MainHead(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGit(ctx, p, "rebase", head); err == nil {
+		t.Fatal("conflicting rebase did not stop")
+	}
+	if in, err := m.RebaseInProgress(ctx, f); !in || err != nil {
+		t.Fatalf("stopped rebase not reported in progress: %v %v", in, err)
+	}
+
+	if aborted, err := m.AbortRebase(ctx, f); !aborted || err != nil {
+		t.Fatalf("AbortRebase = %v, %v; want true", aborted, err)
+	}
+	if in, err := m.RebaseInProgress(ctx, f); in || err != nil {
+		t.Errorf("still mid-rebase after abort: %v %v", in, err)
+	}
+	if dirty, err := m.Dirty(ctx, f); dirty || err != nil {
+		t.Errorf("worktree dirty after abort: %v %v", dirty, err)
+	}
+}
+
+func TestRebasedOnMain(t *testing.T) {
+	m, f, p := conflictedWorktree(t)
+
+	if ok, err := m.RebasedOnMain(ctx, f); ok || err != nil {
+		t.Fatalf("diverged branch reads rebased: %v %v", ok, err)
+	}
+
+	// resolve the conflict the way an agent would: rebase, fix, continue
+	head, err := m.MainHead(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGit(ctx, p, "rebase", head); err == nil {
+		t.Fatal("conflicting rebase did not stop")
+	}
+	writeFile(t, p, "README.md", "merged version\n")
+	mustGit(t, p, "add", "README.md")
+	mustGit(t, p, "-c", "core.editor=true", "rebase", "--continue")
+
+	if ok, err := m.RebasedOnMain(ctx, f); !ok || err != nil {
+		t.Errorf("completed rebase not detected: %v %v", ok, err)
+	}
+}
+
 func TestLandedSquashMerge(t *testing.T) {
 	root := newRepo(t)
 	m, _ := NewManager(ctx, root)

@@ -385,9 +385,9 @@ func (m *Shell) estimateEnvelope(ctx context.Context, f *domain.Feature) string 
 
 // rebaseFeature rebases a feature's branch onto main from the TUI
 // (DESIGN §9 M4). It refuses a dirty worktree (so nothing uncommitted is
-// risked), reports the conflicted files when the rebase can't apply
-// cleanly (the rebase self-aborts, leaving the worktree untouched), and
-// confirms success otherwise.
+// risked), and when the rebase can't apply cleanly (it self-aborts,
+// leaving the worktree untouched) it offers the agent hand-off — or,
+// with no engine, reports the conflicted files to resolve by hand.
 func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -395,6 +395,12 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		} else if !ok {
 			return noticeMsg{text: string(f.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+		}
+		// a rebase stranded mid-flight (a crash, a killed agent session)
+		// blocks any new rebase and reads as dirty; abort it first so r
+		// always recovers the worktree before retrying.
+		if _, err := m.wt.AbortRebase(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
@@ -404,6 +410,9 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 		if err := m.wt.RebaseOnMain(ctx, &f); err != nil {
 			var ce *worktree.RebaseConflictError
 			if errors.As(err, &ce) {
+				if m.engine != nil {
+					return rebaseConflictMsg{f: f, files: ce.Files}
+				}
 				// ce carries git-derived file names; sanitize like every
 				// other notice before it reaches the terminal.
 				return noticeMsg{text: sanitize(string(f.ID) + ": " + ce.Error() + " — resolve on the branch, then retry"), isErr: true}

@@ -50,11 +50,15 @@ func interactiveStage(s domain.Stage) bool { return workflow.Interactive(s) }
 // the %% marker grammar — plus its own job and completion gate
 // (DESIGN §3, §5). The workflow is compiled into gummi; so are its
 // conventions. Stating them here keeps sessions from burning turns
-// rediscovering them from the repo's docs. critique selects the
-// plan-critique pass: same stage, reviewer's contract and job.
-func stageHints(f domain.Feature, specPath string, critique bool) []string {
-	if critique {
+// rediscovering them from the repo's docs. The flavor selects the
+// borrowed-stage passes: the plan critique (reviewer's contract and
+// job) and the rebase resolve (implementer's contract, rebase job).
+func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
+	switch flavor {
+	case flavorCritique:
 		return []string{contractHint(f, specPath, agent.RoleReviewer), planCritiqueHint()}
+	case flavorRebase:
+		return []string{contractHint(f, specPath, agent.RoleImplementer), rebaseHint()}
 	}
 	role, _ := roleForStage(f.Stage)
 	hints := []string{contractHint(f, specPath, role)}
@@ -170,6 +174,29 @@ one of:
   VERDICT: changes    — serious findings; the plan must be revised
 gummi parses this exact line to drive the automatic critique→replan
 loop; without it the loop stalls.`)
+}
+
+// rebaseHint is the rebase-resolve pass contract: rebase the branch
+// onto main and reconcile the conflicts a plain rebase stopped on. The
+// kickoff note names the exact target commit and the files expected to
+// conflict; gummi judges the outcome from the git state afterwards (and
+// aborts anything left mid-rebase), so there is no verdict grammar.
+func rebaseHint() string {
+	return strings.TrimSpace(`
+Task: Rebase onto main (autonomous). This branch no longer applies
+cleanly on main — a plain rebase stops on conflicts, and your job is to
+resolve them. Run the rebase command from the kickoff. For each
+conflicted file, reconcile BOTH sides: keep this branch's intent (the
+design artifact is the reference) and the changes that landed on main —
+never resolve by discarding one side wholesale. Stage each resolved
+file and run ` + "`git rebase --continue`" + ` until the rebase completes; when
+files were deleted or renamed on one side, honor main's structure and
+carry this branch's changes into it. Never use ` + "`git rebase --skip`" + `
+(it drops this branch's commits), never force-push, and never touch the
+main checkout. When the rebase completes, run a quick build/test check
+if the repo has one and fix fallout your resolution caused, then stop.
+If a conflict cannot be reconciled, run ` + "`git rebase --abort`" + ` and end
+your final message explaining which conflict and why.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both

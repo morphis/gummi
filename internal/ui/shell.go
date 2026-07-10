@@ -221,6 +221,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		if s == nil || s.Interactive || s.State() != engine.StateDone {
 			return nil
 		}
+		// a finished rebase-resolve session is judged by the git state it
+		// left, never by the verdict loop of the stage it borrowed.
+		if s.Snapshot().Rebase {
+			return m.judgeRebase(ev.Feature)
+		}
 		// review/implement completions may drive the automatic loop;
 		// anything the loop doesn't consume becomes a generic gate item.
 		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
@@ -311,6 +316,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.drafting = true
 		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main — drafting commit message…"}
 		return m, m.startMergeDraft(msg.f, true)
+
+	case rebaseConflictMsg:
+		m.offerAgentRebase(msg)
+		return m, nil
+
+	case rebaseSettledMsg:
+		return m, m.rebaseSettled(msg)
 
 	case worktreeEnteredMsg:
 		// show the transition notice, reload, and run the background

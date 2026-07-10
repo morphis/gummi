@@ -494,6 +494,59 @@ func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
 	return nil
 }
 
+// MainHead returns the main checkout's current HEAD commit id — the
+// commit RebaseOnMain rebases onto, exposed so an agent-driven rebase
+// can be pointed at the exact same target.
+func (m *Manager) MainHead(ctx context.Context) (string, error) {
+	return runGit(ctx, m.root, "rev-parse", "HEAD")
+}
+
+// RebaseInProgress reports whether the feature's worktree has a rebase
+// in flight (stopped on conflicts, or otherwise unfinished).
+func (m *Manager) RebaseInProgress(ctx context.Context, f *domain.Feature) (bool, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	return m.rebaseInProgress(ctx, p), nil
+}
+
+// AbortRebase aborts an in-flight rebase in the feature's worktree,
+// restoring it to its pre-rebase tip; with none in flight it is a no-op
+// and reports false. This is the safety net behind the agent-driven
+// rebase: whatever a session leaves mid-rebase is aborted, so a worktree
+// is never at rest mid-rebase.
+func (m *Manager) AbortRebase(ctx context.Context, f *domain.Feature) (bool, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	if !m.rebaseInProgress(ctx, p) {
+		return false, nil
+	}
+	if _, err := runGit(ctx, p, "rebase", "--abort"); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RebasedOnMain reports whether the feature branch's history now
+// includes the main checkout's HEAD — the success test for a completed
+// rebase. A conflicted, aborted, or never-started rebase leaves main's
+// HEAD outside the branch (assuming main has moved since the branch was
+// cut; a branch already at main's HEAD trivially passes).
+func (m *Manager) RebasedOnMain(ctx context.Context, f *domain.Feature) (bool, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	mainHead, err := m.MainHead(ctx)
+	if err != nil {
+		return false, err
+	}
+	return gitOK(ctx, p, "merge-base", "--is-ancestor", mainHead, "HEAD")
+}
+
 // conflictedFiles lists the unmerged paths in wt (empty on any error, so
 // callers still get a useful conflict error even if the list is missing).
 func (m *Manager) conflictedFiles(ctx context.Context, wt string) []string {

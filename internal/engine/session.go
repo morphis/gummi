@@ -108,6 +108,7 @@ type Snapshot struct {
 	Role        agent.Role
 	Interactive bool
 	Critique    bool // this is a plan-critique pass, not the plan writer
+	Rebase      bool // this is a rebase-resolve pass, not the stage's work
 	State       SessionState
 	AgentName   string // backend running this session ("copilot", "opencode", …)
 	// AgentSessionID is the backend's own session id (agent.Identified),
@@ -135,6 +136,11 @@ type Session struct {
 	// session on the Plan stage that reviews the written plan (role:
 	// reviewer) instead of writing it. Set at construction, immutable.
 	Critique bool
+	// Rebase marks the rebase-resolve pass: an implementer session that
+	// rebases the branch onto main and resolves the conflicts, borrowing
+	// the current stage without doing its work. Set at construction,
+	// immutable.
+	Rebase bool
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
@@ -177,6 +183,7 @@ func (s *Session) Snapshot() Snapshot {
 		Role:           s.Role,
 		Interactive:    s.Interactive,
 		Critique:       s.Critique,
+		Rebase:         s.Rebase,
 		State:          s.state,
 		AgentName:      s.agentName,
 		AgentSessionID: s.agentSessionID,
@@ -195,12 +202,29 @@ func (s *Session) Snapshot() Snapshot {
 }
 
 // kickoffMessage returns the autonomous stage kickoff, with the user's
-// review comments appended when this run carries them (RunWith).
+// review comments appended when this run carries them (RunWith). A
+// rebase session opens with its own go-ahead; its note carries the
+// rebase target and expected conflicts (RunRebase).
 func (s *Session) kickoffMessage() string {
-	if s.kickoffNote == "" {
-		return kickoff
+	base := kickoff
+	if s.Rebase {
+		base = rebaseKickoff
 	}
-	return kickoff + "\n\n" + s.kickoffNote
+	if s.kickoffNote == "" {
+		return base
+	}
+	return base + "\n\n" + s.kickoffNote
+}
+
+// flavor recovers which autonomous pass this session runs (see runFlavor).
+func (s *Session) flavor() runFlavor {
+	switch {
+	case s.Critique:
+		return flavorCritique
+	case s.Rebase:
+		return flavorRebase
+	}
+	return flavorStage
 }
 
 // State returns the session's scheduling status.

@@ -342,11 +342,11 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 // The verify stage gets its own submit_verdict flavor (pass|fail) and a
 // "fail" verdict is recorded like any other.
 func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
-	tools := stageTools(domain.StageVerify, false)
+	tools := stageTools(domain.StageVerify, flavorStage)
 	if len(tools) != 1 || tools[0].Name != "submit_verdict" {
 		t.Fatalf("verify tools = %+v, want submit_verdict only", tools)
 	}
-	if toolHint(domain.StageVerify, false) == "" {
+	if toolHint(domain.StageVerify, flavorStage) == "" {
 		t.Error("verify has no tool hint")
 	}
 

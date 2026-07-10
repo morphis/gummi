@@ -91,18 +91,28 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		// A plan-stage session persisted with the reviewer role was the
-		// plan-critique pass (the plan writer is the architect); the flag
-		// itself isn't persisted, so recover it from that pairing.
+		// The pass flags aren't persisted; recover them from role/stage
+		// pairings the stage's own run can't produce. A plan-stage session
+		// with the reviewer role was the plan-critique pass (the plan
+		// writer is the architect); an implementer-role session on a stage
+		// whose own role isn't implementer was the rebase-resolve pass.
 		critique := f.Stage == domain.StagePlan && snap.Role == string(agent.RoleReviewer)
 		if critique {
 			role = agent.RoleReviewer
+		}
+		rebase := snap.Role == string(agent.RoleImplementer) && role != agent.RoleImplementer
+		if rebase {
+			role = agent.RoleImplementer
+			// a crash mid-session can strand the worktree mid-rebase; abort
+			// so it comes back clean (best-effort, like the live settle).
+			_, _ = e.cfg.Worktrees.AbortRebase(ctx, &f)
 		}
 		s := &Session{
 			Feature:     f,
 			Role:        role,
 			Interactive: interactiveStage(f.Stage),
 			Critique:    critique,
+			Rebase:      rebase,
 			state:       restoredState(snap.State),
 			done:        make(chan struct{}),
 		}
