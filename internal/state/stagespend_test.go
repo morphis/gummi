@@ -33,7 +33,7 @@ func TestRecordStageSpendAccumulates(t *testing.T) {
 	}
 	var wantTotal float64
 	for _, x := range samples {
-		if err := s.RecordStageSpend(ctx, f.ID, x.stage, x.role, x.model, x.credits, x.in, x.cd, x.out); err != nil {
+		if err := s.RecordStageSpend(ctx, f.ID, x.stage, x.role, x.model, x.credits, 0, x.in, x.cd, x.out); err != nil {
 			t.Fatal(err)
 		}
 		wantTotal += x.credits
@@ -79,6 +79,32 @@ func TestRecordStageSpendAccumulates(t *testing.T) {
 	}
 }
 
+// TestRecordStageSpendEstimated checks the estimated accumulator: a
+// token-derived sample and a metered one on the same (stage, model) keep
+// the estimated portion separate, so displays can label the row.
+func TestRecordStageSpendEstimated(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Dark mode")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	// token-derived (estimated == credits), then provider-metered (0)
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5-codex", 6, 6, 0, 0, 12000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5-codex", 30, 0, 1200, 300, 400); err != nil {
+		t.Fatal(err)
+	}
+	bd, err := s.StageBreakdown(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bd) != 1 || bd[0].Credits != 36 || bd[0].EstimatedCredits != 6 {
+		t.Fatalf("breakdown = %+v, want one row of 36 credits with 6 estimated", bd)
+	}
+}
+
 // TestRecordStageSpendEmptyModel stores an unnamed model under a stable
 // "unknown" key rather than dropping the spend or keying on ”.
 func TestRecordStageSpendEmptyModel(t *testing.T) {
@@ -88,7 +114,7 @@ func TestRecordStageSpendEmptyModel(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageFix, "implementer", "", 5, 10, 0, 20); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageFix, "implementer", "", 5, 0, 10, 0, 20); err != nil {
 		t.Fatal(err)
 	}
 	bd, err := s.StageBreakdown(ctx, f.ID)
@@ -127,7 +153,7 @@ func TestRecordStageSpendCascades(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5", 1, 1, 0, 1); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5", 1, 0, 1, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteFeature(ctx, f.ID); err != nil {

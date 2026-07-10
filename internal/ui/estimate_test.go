@@ -20,7 +20,7 @@ func TestEstimateEnvelopeFromHistory(t *testing.T) {
 	if err := m.store.CreateFeature(ctx, done); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.store.AddSpend(ctx, done.ID, 100, 0, 0); err != nil {
+	if err := m.store.AddSpend(ctx, done.ID, 100, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,7 +57,7 @@ func TestEstimateEnvelopeRespectsExplicitEnvelope(t *testing.T) {
 	if err := m.store.CreateFeature(ctx, done); err != nil {
 		t.Fatal(err)
 	}
-	_ = m.store.AddSpend(ctx, done.ID, 120, 0, 0)
+	_ = m.store.AddSpend(ctx, done.ID, 120, 0, 0, 0)
 	// ...but this feature was given an explicit envelope, which must win
 	f := &domain.Feature{
 		ID: "FD-002", Num: 2, Title: "New", Slug: "new",
@@ -86,7 +86,7 @@ func TestEstimateEnvelopeNoHistoryLeavesDefault(t *testing.T) {
 	if err := m.store.CreateFeature(ctx, other); err != nil {
 		t.Fatal(err)
 	}
-	_ = m.store.AddSpend(ctx, other.ID, 50, 0, 0)
+	_ = m.store.AddSpend(ctx, other.ID, 50, 0, 0, 0)
 
 	f := &domain.Feature{
 		ID: "FD-002", Num: 2, Title: "New", Slug: "new",

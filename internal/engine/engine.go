@@ -819,13 +819,20 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// leaves them unchanged and never double-counts.
 		if e.cfg.Persist && e.cfg.Store != nil {
 			credits := s.creditEquivalent(ev.Usage)
+			// an event without provider-reported credits was priced from its
+			// tokens — an estimate, not a metered cost; carry the split so
+			// displays can label it instead of presenting it as real.
+			var estimated float64
+			if ev.Usage.Credits <= 0 {
+				estimated = credits
+			}
 			_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
-				credits, ev.Usage.InputTokens, ev.Usage.OutputTokens)
+				credits, estimated, ev.Usage.InputTokens, ev.Usage.OutputTokens)
 			// the same sample attributed to (stage, model) for the breakdown;
 			// same credit-equivalent, so stage_spend sums to spend_credits.
 			_ = e.cfg.Store.RecordStageSpend(context.Background(), s.Feature.ID,
 				s.Feature.Stage, string(s.Role), ev.Usage.Model,
-				credits, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
+				credits, estimated, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
 		}
 		// budget awareness: on crossing a threshold, record a nudge and
 		// signal the UI (DESIGN §5.1 layer 2).
@@ -930,7 +937,7 @@ func (e *Engine) stageReceipt(s *Session) {
 	if err != nil {
 		return
 	}
-	var total float64
+	var total, estimated float64
 	var dom state.StageSpend
 	models := 0
 	for _, r := range rows {
@@ -938,6 +945,7 @@ func (e *Engine) stageReceipt(s *Session) {
 			continue
 		}
 		total += r.Credits
+		estimated += r.EstimatedCredits
 		// rows are ordered credits-desc within a stage, so the first match
 		// is the dominant model; guard on Model to also handle reordering.
 		if dom.Model == "" || r.Credits > dom.Credits {
@@ -948,7 +956,11 @@ func (e *Engine) stageReceipt(s *Session) {
 	if models == 0 {
 		return
 	}
-	line := fmt.Sprintf("%s · %s · %s", s.Feature.Stage, domain.FormatDollars(total), dom.Model)
+	cost := domain.FormatDollars(total)
+	if estimated > 0 {
+		cost = "~" + cost
+	}
+	line := fmt.Sprintf("%s · %s · %s", s.Feature.Stage, cost, dom.Model)
 	if models > 1 {
 		line += fmt.Sprintf(" +%d more", models-1)
 	}

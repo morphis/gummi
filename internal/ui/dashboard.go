@@ -238,7 +238,7 @@ func budgetSummary(f domain.Feature, reserveReleased bool) string {
 	env := float64(f.Budget.Envelope)
 	spent := f.Spend.CreditEquivalent()
 	plan := domain.DefaultPlan(env)
-	s := fmt.Sprintf("%g / %g credits", roundSpend(spent), env)
+	s := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
 	if cap := plan.StageBudget(f.Stage, spent, reserveReleased); cap > 0 {
 		s += fmt.Sprintf("  ·  %s stage cap %g", f.Stage, roundSpend(cap))
 	}
@@ -252,16 +252,35 @@ func budgetSummary(f domain.Feature, reserveReleased bool) string {
 	return s
 }
 
-// featureSpend formats the full metered cost for the dashboard.
+// featureSpend formats the full metered cost for the dashboard. A credit
+// figure with a token-derived component is prefixed "~" and labelled
+// "est." — it is a tokens×rate estimate, not a provider-metered cost.
 func featureSpend(sp domain.Spend) string {
 	parts := []string{}
 	if sp.Credits > 0 {
-		parts = append(parts, fmt.Sprintf("%g credits (≈%s)", roundSpend(sp.Credits), money(sp.Credits)))
+		parts = append(parts, fmt.Sprintf("%s%g credits (%s≈%s)",
+			estMark(sp), roundSpend(sp.Credits), estLabel(sp), money(sp.Credits)))
 	}
 	if sp.InputTokens+sp.OutputTokens > 0 {
 		parts = append(parts, fmt.Sprintf("%d in / %d out tokens", sp.InputTokens, sp.OutputTokens))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// estMark returns the "~" prefix for a spend whose credits are (partly)
+// token-derived estimates, and estLabel the matching "est. " tag.
+func estMark(sp domain.Spend) string {
+	if sp.Estimated() {
+		return "~"
+	}
+	return ""
+}
+
+func estLabel(sp domain.Spend) string {
+	if sp.Estimated() {
+		return "est. "
+	}
+	return ""
 }
 
 // money renders a credit figure as adaptive-precision dollars; see
@@ -284,18 +303,26 @@ func stageBreakdown(s *theme.Styles, rows []state.StageSpend) []string {
 			since = r.UpdatedAt
 		}
 	}
-	out := []string{s.Muted.Render("stages   ") + s.Faint.Render("since "+since.Format("2006-01-02"))}
+	legend := "since " + since.Format("2006-01-02")
+	for _, r := range rows {
+		if r.EstimatedCredits > 0 {
+			legend += "  ·  ~ estimated from tokens, not provider-metered"
+			break
+		}
+	}
+	out := []string{s.Muted.Render("stages   ") + s.Faint.Render(legend)}
 	for i := 0; i < len(rows); {
 		j := i
-		var total float64
+		var total, estimated float64
 		for j < len(rows) && rows[j].Stage == rows[i].Stage {
 			total += rows[j].Credits
+			estimated += rows[j].EstimatedCredits
 			j++
 		}
 		grp := rows[i:j]
 		dom := grp[0] // highest-credit model on this stage
 		head := "  " + s.Subtle.Render(fmt.Sprintf("%-9s", string(dom.Stage))) +
-			s.Base.Render(money(total)) + s.Faint.Render("  ·  "+dom.Model)
+			s.Base.Render(estPrefix(estimated)+money(total)) + s.Faint.Render("  ·  "+dom.Model)
 		if len(grp) > 1 {
 			head += s.Faint.Render(fmt.Sprintf("  +%d more", len(grp)-1))
 		}
@@ -303,10 +330,20 @@ func stageBreakdown(s *theme.Styles, rows []state.StageSpend) []string {
 		if len(grp) > 1 {
 			for _, r := range grp {
 				out = append(out, "     "+s.Faint.Render(fmt.Sprintf("└ %-14s %s · %s/%s",
-					r.Model, money(r.Credits), humanTokens(r.InputTokens), humanTokens(r.OutputTokens))))
+					r.Model, estPrefix(r.EstimatedCredits)+money(r.Credits),
+					humanTokens(r.InputTokens), humanTokens(r.OutputTokens))))
 			}
 		}
 		i = j
 	}
 	return out
+}
+
+// estPrefix marks a money figure with a token-derived component as an
+// estimate.
+func estPrefix(estimated float64) string {
+	if estimated > 0 {
+		return "~"
+	}
+	return ""
 }

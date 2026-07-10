@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS features (
 	budget_envelope INTEGER NOT NULL DEFAULT 0,
 	budget_spent    INTEGER NOT NULL DEFAULT 0,
 	spend_credits   REAL NOT NULL DEFAULT 0,
+	spend_est       REAL NOT NULL DEFAULT 0,
 	spend_in        INTEGER NOT NULL DEFAULT 0,
 	spend_out       INTEGER NOT NULL DEFAULT 0,
 	created_at      TEXT NOT NULL,
@@ -109,11 +110,12 @@ CREATE TABLE IF NOT EXISTS stage_spend (
 	stage      TEXT    NOT NULL,
 	model      TEXT    NOT NULL,
 	role       TEXT    NOT NULL,
-	credits    REAL    NOT NULL DEFAULT 0,
-	input_tok  INTEGER NOT NULL DEFAULT 0,
-	cached_tok INTEGER NOT NULL DEFAULT 0,
-	output_tok INTEGER NOT NULL DEFAULT 0,
-	updated_at TEXT    NOT NULL,
+	credits     REAL    NOT NULL DEFAULT 0,
+	est_credits REAL    NOT NULL DEFAULT 0,
+	input_tok   INTEGER NOT NULL DEFAULT 0,
+	cached_tok  INTEGER NOT NULL DEFAULT 0,
+	output_tok  INTEGER NOT NULL DEFAULT 0,
+	updated_at  TEXT    NOT NULL,
 	PRIMARY KEY (feature_id, stage, model)
 );
 `
@@ -161,6 +163,8 @@ var migrations = []string{
 	`ALTER TABLE sessions ADD COLUMN agent_session TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE session_messages ADD COLUMN tool_status TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE session_messages ADD COLUMN tool_output TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN spend_est REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE stage_spend ADD COLUMN est_credits REAL NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.
@@ -208,7 +212,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 
 const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
-	budget_envelope, budget_spent, spend_credits, spend_in, spend_out,
+	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose`
 
@@ -220,7 +224,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
 		&f.Budget.Envelope, &f.Budget.Spent,
-		&f.Spend.Credits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
+		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
 		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose)
 	if err != nil {
@@ -244,15 +248,19 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 }
 
 // AddSpend accumulates a usage sample onto a feature's running total.
-// It is a metering side-channel (does not touch updated_at or require
-// full-feature validation), so it stays cheap and lock-light.
-func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits float64, in, out int64) error {
+// estimated is the token-derived portion of credits (the whole sample when
+// the provider reported no cost, zero when it did), kept as its own
+// accumulator so displays can label estimates. It is a metering
+// side-channel (does not touch updated_at or require full-feature
+// validation), so it stays cheap and lock-light.
+func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits, estimated float64, in, out int64) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE features SET
 			spend_credits = spend_credits + ?,
+			spend_est = spend_est + ?,
 			spend_in = spend_in + ?,
 			spend_out = spend_out + ?
-		WHERE id = ?`, credits, in, out, string(id))
+		WHERE id = ?`, credits, estimated, in, out, string(id))
 	if err != nil {
 		return fmt.Errorf("metering %s: %w", id, err)
 	}
@@ -262,14 +270,15 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits float
 // StageSpend is one (stage, model) rollup row from stage_spend: the
 // realized cost a stage incurred on a given model, in credits and tokens.
 type StageSpend struct {
-	Stage        domain.Stage
-	Model        string
-	Role         string
-	Credits      float64
-	InputTokens  int64
-	CachedTokens int64
-	OutputTokens int64
-	UpdatedAt    time.Time
+	Stage            domain.Stage
+	Model            string
+	Role             string
+	Credits          float64
+	EstimatedCredits float64 // token-derived subset of Credits
+	InputTokens      int64
+	CachedTokens     int64
+	OutputTokens     int64
+	UpdatedAt        time.Time
 }
 
 // RecordStageSpend accumulates one usage sample onto the (feature, stage,
@@ -279,23 +288,24 @@ type StageSpend struct {
 // metering side-channel (an UPSERT, no validation). An empty model is
 // stored as "unknown" so the row is never keyed on ” and the breakdown
 // still accounts for the spend.
-func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage domain.Stage, role, model string, credits float64, in, cached, out int64) error {
+func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage domain.Stage, role, model string, credits, estimated float64, in, cached, out int64) error {
 	if model == "" {
 		model = "unknown"
 	}
 	now := time.Now().UTC().Format(timeFmt)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO stage_spend
-			(feature_id, stage, model, role, credits, input_tok, cached_tok, output_tok, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?)
+			(feature_id, stage, model, role, credits, est_credits, input_tok, cached_tok, output_tok, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(feature_id, stage, model) DO UPDATE SET
-			credits    = credits    + excluded.credits,
-			input_tok  = input_tok  + excluded.input_tok,
-			cached_tok = cached_tok + excluded.cached_tok,
-			output_tok = output_tok + excluded.output_tok,
-			role       = excluded.role,
-			updated_at = excluded.updated_at`,
-		string(id), string(stage), model, role, credits, in, cached, out, now)
+			credits     = credits     + excluded.credits,
+			est_credits = est_credits + excluded.est_credits,
+			input_tok   = input_tok   + excluded.input_tok,
+			cached_tok  = cached_tok  + excluded.cached_tok,
+			output_tok  = output_tok  + excluded.output_tok,
+			role        = excluded.role,
+			updated_at  = excluded.updated_at`,
+		string(id), string(stage), model, role, credits, estimated, in, cached, out, now)
 	if err != nil {
 		return fmt.Errorf("metering stage %s/%s for %s: %w", stage, model, id, err)
 	}
@@ -307,7 +317,7 @@ func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage
 // dominant model leads). It is the read behind the dashboard breakdown.
 func (s *Store) StageBreakdown(ctx context.Context, id domain.FeatureID) ([]StageSpend, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT stage, model, role, credits, input_tok, cached_tok, output_tok, updated_at
+		SELECT stage, model, role, credits, est_credits, input_tok, cached_tok, output_tok, updated_at
 		FROM stage_spend WHERE feature_id = ?`, string(id))
 	if err != nil {
 		return nil, err
@@ -317,7 +327,7 @@ func (s *Store) StageBreakdown(ctx context.Context, id domain.FeatureID) ([]Stag
 	for rows.Next() {
 		var r StageSpend
 		var stage, updated string
-		if err := rows.Scan(&stage, &r.Model, &r.Role, &r.Credits,
+		if err := rows.Scan(&stage, &r.Model, &r.Role, &r.Credits, &r.EstimatedCredits,
 			&r.InputTokens, &r.CachedTokens, &r.OutputTokens, &updated); err != nil {
 			return nil, err
 		}

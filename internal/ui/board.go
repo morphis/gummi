@@ -111,10 +111,11 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 }
 
 // spendTick is the compact cost marker on a card: Copilot credits when
-// any were metered, else BYOK tokens.
+// any were metered, else BYOK tokens. A "~" prefix flags a credit figure
+// with a token-derived (estimated) component.
 func spendTick(sp domain.Spend) string {
 	if sp.Credits > 0 {
-		return fmt.Sprintf("%gcr", roundSpend(sp.Credits))
+		return fmt.Sprintf("%s%gcr", estMark(sp), roundSpend(sp.Credits))
 	}
 	tk := sp.InputTokens + sp.OutputTokens
 	if tk >= 1000 {

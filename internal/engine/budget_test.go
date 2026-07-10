@@ -158,7 +158,7 @@ func TestSpendPlanDrivesStageBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 40 credits already spent in earlier stages
-	if err := store.AddSpend(context.Background(), f.ID, 40, 0, 0); err != nil {
+	if err := store.AddSpend(context.Background(), f.ID, 40, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	withWorktree(t, wt, f)
@@ -187,7 +187,7 @@ func TestTopUpReleasesReserve(t *testing.T) {
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddSpend(context.Background(), f.ID, 285, 0, 0); err != nil { // at the 95% cap
+	if err := store.AddSpend(context.Background(), f.ID, 285, 0, 0, 0); err != nil { // at the 95% cap
 		t.Fatal(err)
 	}
 	withWorktree(t, wt, f)

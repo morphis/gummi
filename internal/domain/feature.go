@@ -80,10 +80,15 @@ type Budget struct {
 // Spend is a feature's metered cost, accumulated across every stage's
 // agent sessions. Credits meter Copilot-hosted usage; tokens meter BYOK
 // (each convertible to display dollars in a later milestone).
+// EstimatedCredits is the portion of Credits that was derived from token
+// counts (a usage event that carried no provider-reported cost) rather
+// than metered by the provider — displays label such figures as estimates
+// instead of presenting them as real cost.
 type Spend struct {
-	Credits      float64
-	InputTokens  int64
-	OutputTokens int64
+	Credits          float64
+	EstimatedCredits float64 // token-derived subset of Credits
+	InputTokens      int64
+	OutputTokens     int64
 }
 
 // Add accumulates another usage sample.
@@ -92,6 +97,10 @@ func (s *Spend) Add(credits float64, in, out int64) {
 	s.InputTokens += in
 	s.OutputTokens += out
 }
+
+// Estimated reports whether any of the credit figure is token-derived
+// rather than provider-metered.
+func (s Spend) Estimated() bool { return s.EstimatedCredits > 0 }
 
 // Zero reports whether nothing has been metered.
 func (s Spend) Zero() bool {
