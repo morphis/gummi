@@ -39,15 +39,19 @@ type AskOption struct {
 const (
 	annotateToolName = "spec_annotate"
 	verdictToolName  = "submit_verdict"
+	resolveToolName  = "resolve_annotation"
 )
 
 // stageTools returns the gummi-owned client tools offered on a stage.
 // ask_user is interactive-only (it blocks on a human, and only the chat
 // picker can answer it); spec_annotate is offered to the interactive
-// architect; submit_verdict to the reviewer. The non-blocking tools
-// (annotate, verdict) are gummi-resolved immediately, so they are safe
-// on autonomous stages. The plan-critique pass reviews the plan and
-// files findings, so it gets both.
+// architect; submit_verdict to the reviewer; resolve_annotation to the
+// implementer/fixer so it can mark diff review comments addressed
+// (DESIGN §6.1's resolve event for diffs — always registered on those
+// stages because comments can also arrive mid-run as a live turn). The
+// non-blocking tools (annotate, verdict, resolve) are gummi-resolved
+// immediately, so they are safe on autonomous stages. The plan-critique
+// pass reviews the plan and files findings, so it gets both.
 func stageTools(stage domain.Stage, critique bool) []agent.ToolDef {
 	if critique {
 		return []agent.ToolDef{submitVerdictTool(), specAnnotateTool()}
@@ -57,6 +61,8 @@ func stageTools(stage domain.Stage, critique bool) []agent.ToolDef {
 		return []agent.ToolDef{askUserTool(), specAnnotateTool()}
 	case domain.StageReview:
 		return []agent.ToolDef{submitVerdictTool()}
+	case domain.StageImplement, domain.StageFix:
+		return []agent.ToolDef{resolveAnnotationTool()}
 	default:
 		return nil
 	}
@@ -143,8 +149,31 @@ func submitVerdictTool() agent.ToolDef {
 	}
 }
 
+func resolveAnnotationTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: resolveToolName,
+		Description: "Mark a diff review comment as addressed. Call it once per comment, " +
+			"right after you make the edit the comment asks for — the id is the [N] marker " +
+			"on the comment's line in your instructions. Unresolved comments keep the " +
+			"changes-requested gate blocked.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{
+					"type":        "integer",
+					"description": "The comment's numeric id, from its [N] marker.",
+				},
+			},
+			"required": []any{"id"},
+		},
+	}
+}
+
 // toolHint tells a client-tool-capable agent which gummi tools this
-// stage offers and when to use them.
+// stage offers and when to use them. Implement/fix stages return no
+// hint here: resolve_annotation is explained by the diff-comments turn
+// itself (CompileDiffComments), which only exists when there are
+// comments to resolve.
 func toolHint(stage domain.Stage, critique bool) string {
 	if critique {
 		return `You have two gummi tools. spec_annotate: attach each finding to the
@@ -196,6 +225,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleAnnotate(s, tc)
 	case verdictToolName:
 		e.handleVerdict(s, tc)
+	case resolveToolName:
+		e.handleResolveAnnotation(s, tc)
 	default:
 		e.resolveNow(s, tc.ID, fmt.Sprintf("unknown tool %q — proceed without it", tc.Name))
 	}
@@ -262,6 +293,58 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 	s.appendActivity("annotated spec: " + a.Note)
 	e.persist(s)
 	e.resolveNow(s, tc.ID, "annotation added to the spec")
+}
+
+// handleResolveAnnotation flips a diff review comment to resolved and
+// resolves the call immediately — a mechanical store write, no human
+// involved. The id must belong to this feature, so an agent can never
+// resolve another feature's comments.
+func (e *Engine) handleResolveAnnotation(s *Session, tc *agent.ToolCall) {
+	var a struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(tc.Args, &a); err != nil || a.ID == 0 {
+		e.resolveNow(s, tc.ID, "resolve_annotation needs the comment's numeric id (its [N] marker)")
+		return
+	}
+	if e.cfg.Store == nil {
+		e.resolveNow(s, tc.ID, "no annotation store — nothing to resolve")
+		return
+	}
+	ctx := context.Background()
+	anns, err := e.cfg.Store.ListDiffAnnotations(ctx, s.Feature.ID)
+	if err != nil {
+		e.resolveNow(s, tc.ID, "could not read diff comments: "+err.Error())
+		return
+	}
+	var ann *domain.DiffAnnotation
+	open := 0
+	for i := range anns {
+		if !anns[i].Resolved {
+			open++
+		}
+		if anns[i].ID == a.ID {
+			ann = &anns[i]
+		}
+	}
+	if ann == nil {
+		e.resolveNow(s, tc.ID, fmt.Sprintf("no diff comment with id %d on this feature", a.ID))
+		return
+	}
+	if ann.Resolved {
+		e.resolveNow(s, tc.ID, fmt.Sprintf("comment [%d] was already resolved", a.ID))
+		return
+	}
+	if err := e.cfg.Store.SetDiffAnnotationResolved(ctx, a.ID, true); err != nil {
+		e.resolveNow(s, tc.ID, "could not resolve the comment: "+err.Error())
+		return
+	}
+	open--
+	s.appendActivity(fmt.Sprintf("resolved diff comment [%d]: %s", a.ID, ann.Comment))
+	e.persist(s)
+	// nudge the UI: open-count badges on the card and diff surface burn down
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventAnnotations})
+	e.resolveNow(s, tc.ID, fmt.Sprintf("comment [%d] resolved — %d still open", a.ID, open))
 }
 
 // handleVerdict records a review verdict and resolves immediately. The

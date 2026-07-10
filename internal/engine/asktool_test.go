@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -335,6 +336,152 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 	}
 	if !noted {
 		t.Errorf("verdict summary not in activity: %+v", snap.Activity)
+	}
+}
+
+func TestResolveAnnotationMarksResolved(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	ctx := context.Background()
+	if err := store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	annID, err := store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
+		Feature: f.ID, File: "main.go", Excerpt: "x := 1", Comment: "name this better",
+	}, fixedNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ag := toolCallFake("resolve_annotation", json.RawMessage(fmt.Sprintf(`{"id":%d}`, annID)))
+	var hints []string
+	inner := ag.Responder
+	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		hints = opts.SystemHints
+		return inner(opts, msg)
+	}
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	// the run's hints carried the comment with its [id] and the resolve
+	// instruction (the client-tool form of diffReviewHints)
+	joined := strings.Join(hints, "\n")
+	if !strings.Contains(joined, fmt.Sprintf("- [%d] main.go — x := 1: name this better", annID)) {
+		t.Errorf("hints missing the [id]-tagged comment:\n%s", joined)
+	}
+	if !strings.Contains(joined, "resolve_annotation") {
+		t.Errorf("hints missing the resolve_annotation instruction:\n%s", joined)
+	}
+
+	// the store now shows the comment resolved
+	anns, err := store.ListDiffAnnotations(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anns) != 1 || !anns[0].Resolved {
+		t.Errorf("annotation not resolved in store: %+v", anns)
+	}
+
+	// the tool call was answered with the burn-down count
+	type resolver interface {
+		Resolved(string) (string, bool)
+	}
+	r, ok := e.Get("FD-001").agent().(resolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	if got, done := r.Resolved("c1"); !done || !strings.Contains(got, "0 still open") {
+		t.Errorf("tool resolved with %q done=%v, want a burn-down confirmation", got, done)
+	}
+
+	// and the resolution is in the activity feed
+	var noted bool
+	for _, a := range e.Get("FD-001").Snapshot().Activity {
+		if strings.Contains(a, "resolved diff comment") && strings.Contains(a, "name this better") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Error("resolution not noted in activity")
+	}
+}
+
+func TestResolveAnnotationRejectsForeignID(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	ctx := context.Background()
+	// the only annotation belongs to a different feature — the agent must
+	// not be able to resolve it from FD-001's session
+	other := feature(2, "other", domain.StageImplement)
+	if err := store.CreateFeature(ctx, &other); err != nil {
+		t.Fatal(err)
+	}
+	annID, err := store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
+		Feature: other.ID, File: "a.go", Comment: "not yours",
+	}, fixedNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ag := toolCallFake("resolve_annotation", json.RawMessage(fmt.Sprintf(`{"id":%d}`, annID)))
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	type resolver interface {
+		Resolved(string) (string, bool)
+	}
+	r, ok := e.Get("FD-001").agent().(resolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	if got, done := r.Resolved("c1"); !done || !strings.Contains(got, "no diff comment") {
+		t.Errorf("foreign id bounced with %q done=%v, want a not-found result", got, done)
+	}
+	anns, err := store.ListDiffAnnotations(ctx, other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anns) != 1 || anns[0].Resolved {
+		t.Errorf("foreign annotation must stay open: %+v", anns)
+	}
+}
+
+func TestCompileDiffComments(t *testing.T) {
+	anns := []domain.DiffAnnotation{
+		{ID: 3, File: "a.go", Excerpt: "x := 1", Comment: "rename"},
+		{ID: 4, File: "b.go", Comment: "already handled", Resolved: true},
+	}
+	withTool := CompileDiffComments(anns, true)
+	if !strings.Contains(withTool, "- [3] a.go — x := 1: rename") {
+		t.Errorf("tool form missing [id] line:\n%s", withTool)
+	}
+	if !strings.Contains(withTool, "resolve_annotation") {
+		t.Errorf("tool form missing resolve instruction:\n%s", withTool)
+	}
+	if strings.Contains(withTool, "b.go") {
+		t.Errorf("resolved comment leaked into the turn:\n%s", withTool)
+	}
+	plain := CompileDiffComments(anns, false)
+	if strings.Contains(plain, "[3]") || strings.Contains(plain, "resolve_annotation") {
+		t.Errorf("plain form must not mention ids or the tool:\n%s", plain)
+	}
+	if !strings.Contains(plain, "- a.go — x := 1: rename") {
+		t.Errorf("plain form missing the comment line:\n%s", plain)
+	}
+	if got := CompileDiffComments([]domain.DiffAnnotation{{ID: 1, Resolved: true}}, true); got != "" {
+		t.Errorf("all-resolved must compile to empty, got %q", got)
 	}
 }
 

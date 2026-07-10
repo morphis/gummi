@@ -32,6 +32,10 @@ const (
 	// EventQuestion fires when the agent asks the user a question via the
 	// ask_user client tool (Snapshot.PendingAsk populated).
 	EventQuestion EventKind = "question"
+	// EventAnnotations fires when the agent resolves a diff review comment
+	// via the resolve_annotation client tool — an open diff surface should
+	// re-read its annotations so the open-count burns down live.
+	EventAnnotations EventKind = "annotations"
 )
 
 // Event is one item in the engine's UI-facing stream.

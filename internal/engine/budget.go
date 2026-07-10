@@ -66,6 +66,21 @@ func (e *Engine) diffReviewHints(ctx context.Context, id domain.FeatureID) []str
 	if err != nil {
 		return nil
 	}
+	turn := CompileDiffComments(anns, e.ClientTools())
+	if turn == "" {
+		return nil
+	}
+	return []string{turn}
+}
+
+// CompileDiffComments builds the fix-up instruction listing a feature's
+// open diff annotations — folded into a fresh implement/fix run's hints
+// (diffReviewHints) and sent by the UI as a live turn to a running
+// session. With resolveTool, each comment carries its [id] and the agent
+// is told to mark it resolved via the resolve_annotation client tool
+// (DESIGN §6.1's resolve event for diffs); without, the ids are omitted
+// and resolution stays manual. Empty when nothing is open.
+func CompileDiffComments(anns []domain.DiffAnnotation, resolveTool bool) string {
 	var lines []string
 	for _, a := range anns {
 		if a.Resolved {
@@ -75,15 +90,22 @@ func (e *Engine) diffReviewHints(ctx context.Context, id domain.FeatureID) []str
 		if a.Excerpt != "" {
 			loc += " — " + a.Excerpt
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", loc, a.Comment))
+		if resolveTool {
+			lines = append(lines, fmt.Sprintf("- [%d] %s: %s", a.ID, loc, a.Comment))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s: %s", loc, a.Comment))
+		}
 	}
 	if len(lines) == 0 {
-		return nil
+		return ""
 	}
-	return []string{
-		"Address these diff review comments from the last review; make the " +
-			"edits and keep the change minimal:\n" + strings.Join(lines, "\n"),
+	turn := "Address these diff review comments; make the edits and keep " +
+		"the change minimal:\n" + strings.Join(lines, "\n")
+	if resolveTool {
+		turn += "\nAfter addressing each comment, call the resolve_annotation " +
+			"tool with its [id]; unresolved comments keep the gate blocked."
 	}
+	return turn
 }
 
 // budgetHint is the session-start system instruction telling the model

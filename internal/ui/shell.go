@@ -210,6 +210,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			}
 		}
 		m.raiseAttention(ev.Feature, attnQuestion, q)
+	case engine.EventAnnotations:
+		// the agent resolved a diff comment — refresh an open diff surface
+		// so its open-count and gutter markers burn down live
+		if m.diff != nil && m.diff.f.ID == ev.Feature {
+			return m.reloadDiff()
+		}
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
 		if s == nil || s.Interactive || s.State() != engine.StateDone {

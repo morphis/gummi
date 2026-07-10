@@ -135,6 +135,13 @@ func New(cfg Config) *Engine {
 	return e
 }
 
+// ClientTools reports whether the configured backend supports gummi's
+// client tools, so hint compilers (engine- and UI-side) only mention a
+// tool the agent can actually call.
+func (e *Engine) ClientTools() bool {
+	return e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools
+}
+
 // Events is the UI-facing stream. It stays open for the engine's life
 // and closes on Close.
 func (e *Engine) Events() <-chan Event { return e.events }
@@ -526,7 +533,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// spec_annotate and submit_verdict degrade to the %% and VERDICT:
 	// text forms the stage hints already describe).
 	var tools []agent.ToolDef
-	if e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools {
+	if e.ClientTools() {
 		tools = stageTools(f.Stage, critique)
 		if h := toolHint(f.Stage, critique); h != "" {
 			hints = append(hints, h)

@@ -238,7 +238,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	}
 	f := dv.f
 	n := dv.openCount()
-	turn := compileDiffComments(dv.anns)
+	turn := engine.CompileDiffComments(dv.anns, m.engine.ClientTools())
 	m.diff = nil // close the surface; the fix runs on the board
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -275,27 +275,4 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the implementer", f.ID, n)}
 	}
-}
-
-// compileDiffComments builds a fix-up turn from the open diff
-// annotations — the same shape the engine folds into a fresh
-// implement/fix run's hints (diffReviewHints), for delivery to a
-// session that is already running.
-func compileDiffComments(anns []domain.DiffAnnotation) string {
-	var lines []string
-	for _, a := range anns {
-		if a.Resolved {
-			continue
-		}
-		loc := a.File
-		if a.Excerpt != "" {
-			loc += " — " + a.Excerpt
-		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", loc, a.Comment))
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return "Address these diff review comments; make the edits and keep " +
-		"the change minimal:\n" + strings.Join(lines, "\n")
 }
