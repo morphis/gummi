@@ -198,6 +198,18 @@ review→%s→review loop; without it the loop stalls.`, artifact, artifact, bou
 // spec's verification plan, a bug proves the reproduction is gone and a
 // regression test locks the fix in.
 func verifyHint(kind domain.Kind) string {
+	// the verdict contract mirrors reviewHint's: a machine-parseable
+	// outcome so the UI can tell pass from fail from "shrugged". The
+	// no-questions rule exists because weaker models end autonomous runs
+	// with "which should be done next?" — a question no one will answer.
+	const verdict = `
+You are autonomous: no one can answer questions, so never end with one.
+Make the call, record the evidence, and end your final message with a
+verdict on its own line, exactly one of:
+  VERDICT: pass       — everything verified; ready to land on main
+  VERDICT: fail       — verification found real problems
+gummi parses this exact line; without it the stage escalates to the
+human as unclear.`
 	if kind == domain.KindBug {
 		return strings.TrimSpace(`
 Stage: Verify (autonomous). gummi runs the check commands from the
@@ -206,19 +218,18 @@ kickoff — do not re-run them. Then prove the bug is fixed: run the
 Reproduction steps from the bug report and confirm it no longer
 reproduces, and confirm the regression test covers it (it should fail
 without the fix). Record all results in the report's Verification
-section and report pass or fail plainly with the evidence. (If the
-kickoff carries no check results — e.g. guarded mode, or no block —
-discover the repo's build/test/lint commands and run them yourself.)`)
+section. (If the kickoff carries no check results — e.g. guarded mode,
+or no block — discover the repo's build/test/lint commands and run
+them yourself.)` + verdict)
 	}
 	return strings.TrimSpace(`
 Stage: Verify (autonomous). gummi runs the check commands from the
 spec's gummi-checks block for you and gives you their results in the
 kickoff — do not re-run them. Your job is the spec's Verification plan:
 the feature-specific live checks. Record all results in the spec (the
-Verification plan section, with a summary line in Progress) and report
-pass or fail plainly with the evidence. (If the kickoff carries no
-check results — e.g. guarded mode, or no block — discover the repo's
-build/test/lint commands and run them yourself.)`)
+Verification plan section, with a summary line in Progress). (If the
+kickoff carries no check results — e.g. guarded mode, or no block —
+discover the repo's build/test/lint commands and run them yourself.)` + verdict)
 }
 
 // contractHint is the stage-independent contract: the authoritative

@@ -19,10 +19,14 @@ type inboxDialog struct {
 	onJump  func(domain.FeatureID) tea.Cmd
 	onClear func(domain.FeatureID)
 	onTopUp func(domain.FeatureID) tea.Cmd
+	// suggest returns the selected item's ranked next actions
+	// (nextsteps.go); the top one renders under the list so the inbox
+	// says what to do, not just what happened. Optional.
+	suggest func(domain.FeatureID) []nextAction
 }
 
-func newInboxDialog(items []attnItem, onJump func(domain.FeatureID) tea.Cmd, onClear func(domain.FeatureID), onTopUp func(domain.FeatureID) tea.Cmd) *inboxDialog {
-	return &inboxDialog{items: items, onJump: onJump, onClear: onClear, onTopUp: onTopUp}
+func newInboxDialog(items []attnItem, onJump func(domain.FeatureID) tea.Cmd, onClear func(domain.FeatureID), onTopUp func(domain.FeatureID) tea.Cmd, suggest func(domain.FeatureID) []nextAction) *inboxDialog {
+	return &inboxDialog{items: items, onJump: onJump, onClear: onClear, onTopUp: onTopUp, suggest: suggest}
 }
 
 func (d *inboxDialog) ID() string { return "inbox" }
@@ -87,6 +91,14 @@ func (d *inboxDialog) View(s *theme.Styles, w, h int) string {
 		line := cursor + icon + " " + s.CardID.Render(string(it.Feature)) + " " +
 			row.Render(ansi.Truncate(sanitize(it.Text), max(width-14, 6), "…"))
 		b.WriteString(line + "\n")
+	}
+	// the selected item's recommended action: what to press once there
+	if d.suggest != nil && d.sel < len(d.items) {
+		if acts := d.suggest(d.items[d.sel].Feature); len(acts) > 0 {
+			a := acts[0]
+			b.WriteString("\n  " + s.Faint.Render("↳ ") + s.KeyHint.Render(a.key) + " " +
+				s.Subtle.Render(a.label) + s.Faint.Render(ansi.Truncate(" — "+sanitize(a.why), max(width-len(a.key)-len(a.label)-6, 6), "…")) + "\n")
+		}
 	}
 	hint := "\n" + s.KeyHint.Render("enter") + s.KeyLabel.Render(" go")
 	if d.sel < len(d.items) && d.items[d.sel].Kind == attnBudget {

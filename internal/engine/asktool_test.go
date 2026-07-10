@@ -339,6 +339,50 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 	}
 }
 
+// The verify stage gets its own submit_verdict flavor (pass|fail) and a
+// "fail" verdict is recorded like any other.
+func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
+	tools := stageTools(domain.StageVerify, false)
+	if len(tools) != 1 || tools[0].Name != "submit_verdict" {
+		t.Fatalf("verify tools = %+v, want submit_verdict only", tools)
+	}
+	if toolHint(domain.StageVerify, false) == "" {
+		t.Error("verify has no tool hint")
+	}
+
+	args := json.RawMessage(`{"verdict":"fail","summary":"rock build broken"}`)
+	ag := toolCallFake("submit_verdict", args)
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify", domain.StageVerify)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	if got := e.Get("FD-001").Snapshot().Verdict; got != "fail" {
+		t.Errorf("verdict = %q, want fail", got)
+	}
+}
+
+// The verify hint carries the verdict contract and the no-dangling-
+// questions rule for both kinds, so convention backends (no client
+// tools) still produce a parseable outcome.
+func TestVerifyHintCarriesVerdictContract(t *testing.T) {
+	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
+		h := verifyHint(kind)
+		if !strings.Contains(h, "VERDICT: pass") || !strings.Contains(h, "VERDICT: fail") {
+			t.Errorf("%s verify hint missing the verdict contract:\n%s", kind, h)
+		}
+		if !strings.Contains(h, "never end with one") {
+			t.Errorf("%s verify hint missing the no-questions rule", kind)
+		}
+	}
+}
+
 func TestResolveAnnotationMarksResolved(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	f := feature(1, "impl", domain.StageImplement)

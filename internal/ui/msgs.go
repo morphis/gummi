@@ -26,6 +26,10 @@ type featureRow struct {
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
 	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
+	// gate blockers (DESIGN §6.1), snapshotted at load so the dashboard's
+	// next block can explain why g would bounce without doing IO per frame
+	OpenSpecQs       int // open user %% threads in the artifact
+	OpenDiffComments int // unresolved diff annotations
 }
 
 // rowsMsg delivers a fresh load of the board content.
@@ -75,6 +79,8 @@ func (m *Shell) loadRows() tea.Msg {
 				}
 			}
 		}
+		row.OpenSpecQs = m.openQuestionsBlockingGate(ctx, f)
+		row.OpenDiffComments = m.openDiffCommentsBlockingGate(ctx, f.ID)
 		rows = append(rows, row)
 	}
 	return rowsMsg{rows: rows}

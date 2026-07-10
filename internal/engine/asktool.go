@@ -61,6 +61,8 @@ func stageTools(stage domain.Stage, critique bool) []agent.ToolDef {
 		return []agent.ToolDef{askUserTool(), specAnnotateTool()}
 	case domain.StageReview:
 		return []agent.ToolDef{submitVerdictTool()}
+	case domain.StageVerify:
+		return []agent.ToolDef{verifyVerdictTool()}
 	case domain.StageImplement, domain.StageFix:
 		return []agent.ToolDef{resolveAnnotationTool()}
 	default:
@@ -149,6 +151,29 @@ func submitVerdictTool() agent.ToolDef {
 	}
 }
 
+// verifyVerdictTool is submit_verdict with the Verify stage's outcome
+// vocabulary: verification either held up (pass) or it didn't (fail) —
+// there is no reviewer to negotiate changes with.
+func verifyVerdictTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: verdictToolName,
+		Description: "Submit your verification verdict. Call this exactly once at the end, " +
+			"after recording the evidence in the design artifact — gummi gates on it.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"verdict": map[string]any{
+					"type":        "string",
+					"enum":        []any{"pass", "fail"},
+					"description": "pass = everything verified, ready to land; fail = verification found real problems.",
+				},
+				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
+			},
+			"required": []any{"verdict"},
+		},
+	}
+}
+
 func resolveAnnotationTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: resolveToolName,
@@ -196,6 +221,9 @@ of writing %% lines yourself.`
 		return `Call the submit_verdict tool exactly once at the end of your review
 (verdict "pass" or "changes") to drive gummi's review loop, instead of
 writing a VERDICT: line.`
+	case domain.StageVerify:
+		return `Call the submit_verdict tool exactly once at the end (verdict "pass"
+or "fail") instead of writing a VERDICT: line — gummi gates on it.`
 	default:
 		return ""
 	}
@@ -359,8 +387,8 @@ func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
 		return
 	}
 	verdict := strings.ToLower(strings.TrimSpace(v.Verdict))
-	if verdict != "pass" && verdict != "changes" {
-		e.resolveNow(s, tc.ID, `verdict must be "pass" or "changes"`)
+	if verdict != "pass" && verdict != "changes" && verdict != "fail" {
+		e.resolveNow(s, tc.ID, `verdict must be "pass", "changes", or "fail"`)
 		return
 	}
 	s.setVerdict(verdict)

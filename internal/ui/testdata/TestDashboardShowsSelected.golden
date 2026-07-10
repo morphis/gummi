@@ -6,6 +6,9 @@
 [38;2;133;131;146mworktree [m[38;2;247;246;251m.gummi/worktrees/FD-042[m
 [38;2;133;131;146mcreated  [m[38;2;96;95;107m2026-07-03 12:00[m
 
+[1;38;2;191;188;200mnext[m
+  [38;2;191;188;200menter[m  [38;2;247;246;251mrun implement[m  [38;2;96;95;107mno active run — start (or restart) the stage[m
+
 [1;38;2;191;188;200mhistory[m
   [38;2;107;80;255m▸[m [38;2;96;95;107mtodo → [m[38;2;191;188;200mbrainstorm[m[38;2;96;95;107m · user[m
   [38;2;0;164;255m▸[m [38;2;96;95;107mbrainstorm → [m[38;2;191;188;200mspec[m[38;2;96;95;107m · user[m

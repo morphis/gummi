@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ func TestParseVerdict(t *testing.T) {
 		"no verdict here":                                  verdictUnclear,
 		"VERDICT: pass\nthen later\nVERDICT: changes":      verdictChanges, // last wins
 		"the word verdict: pass appears mid-sentence only": verdictUnclear, // not on its own line
+		"rock build broken\nVERDICT: fail":                 verdictFail,
+		"VERDICT: FAIL":                                    verdictFail,
 	}
 	for in, want := range cases {
 		if got := parseVerdict(in); got != want {
@@ -118,6 +121,96 @@ func TestReviewUnclearVerdictEscalates(t *testing.T) {
 	}
 	if m.inbox.len() == 0 {
 		t.Error("unclear verdict did not escalate to the inbox")
+	}
+}
+
+// runVerify drives a feature through review (which passes and
+// auto-runs verify) with the given verify-stage reply, and drains the
+// loop until the verify gate is raised.
+func runVerify(t *testing.T, verifyReply string) *Shell {
+	t.Helper()
+	ag := verdictAgent(func(opts agent.SessionOpts) string {
+		switch opts.Role {
+		case agent.RoleReviewer:
+			return "No issues.\nVERDICT: pass"
+		case agent.RoleScribe: // the verify stage's role
+			return verifyReply
+		default:
+			return "done"
+		}
+	})
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageReview)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run review → auto verify
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m)
+	if m.rows[0].F.Stage != domain.StageVerify {
+		t.Fatalf("flow did not reach verify (at %s)", m.rows[0].F.Stage)
+	}
+	return m
+}
+
+// verifyGate returns the feature's single gate item, failing the test
+// when the inbox holds anything else.
+func verifyGate(t *testing.T, m *Shell) attnItem {
+	t.Helper()
+	items := m.inbox.list()
+	if len(items) != 1 || items[0].Kind != attnGate {
+		t.Fatalf("verify did not raise exactly one gate: %+v", items)
+	}
+	return items[0]
+}
+
+func TestVerifyPassRaisesCleanGate(t *testing.T) {
+	m := runVerify(t, "All checks green.\nVERDICT: pass")
+	it := verifyGate(t, m)
+	if it.Escalated {
+		t.Error("a passing verify escalated instead of gating clean")
+	}
+	if !strings.Contains(it.Text, "passed") {
+		t.Errorf("gate text does not say it passed: %q", it.Text)
+	}
+	acts := nextActions(m.nextInputFor(m.rows[0]))
+	if keysOf(acts) != "g d b" {
+		t.Fatalf("pass suggestions = %q, want g d b", keysOf(acts))
+	}
+	if !strings.Contains(acts[0].why, "verify passed") {
+		t.Errorf("landing why does not carry the verdict: %q", acts[0].why)
+	}
+}
+
+func TestVerifyFailEscalates(t *testing.T) {
+	m := runVerify(t, "Rock build broken.\nVERDICT: fail")
+	it := verifyGate(t, m)
+	if !it.Escalated {
+		t.Error("a failing verify raised a clean gate instead of escalating")
+	}
+	if !strings.Contains(it.Text, "FAILED") {
+		t.Errorf("gate text does not say it failed: %q", it.Text)
+	}
+	acts := nextActions(m.nextInputFor(m.rows[0]))
+	if keysOf(acts) != "s b g" {
+		t.Fatalf("fail suggestions = %q, want s b g (read evidence first)", keysOf(acts))
+	}
+}
+
+// The FD-003 moment: a verify session that ends on a question instead
+// of a verdict escalates as unclear rather than gating as finished.
+func TestVerifyUnclearVerdictEscalates(t *testing.T) {
+	m := runVerify(t, "Two options remain. Which should be done next?")
+	it := verifyGate(t, m)
+	if !it.Escalated {
+		t.Error("a verdict-less verify raised a clean gate instead of escalating")
+	}
+	if !strings.Contains(it.Text, "no clear verdict") {
+		t.Errorf("gate text does not flag the missing verdict: %q", it.Text)
+	}
+	acts := nextActions(m.nextInputFor(m.rows[0]))
+	if keysOf(acts) != "s b g" {
+		t.Fatalf("unclear suggestions = %q, want s b g", keysOf(acts))
+	}
+	if !strings.Contains(acts[0].why, "no clear verdict") {
+		t.Errorf("unclear why does not explain itself: %q", acts[0].why)
 	}
 }
 

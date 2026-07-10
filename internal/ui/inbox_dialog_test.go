@@ -18,6 +18,7 @@ func TestInboxDialogTopUpOnlyBudgetItems(t *testing.T) {
 		func(domain.FeatureID) tea.Cmd { return nil },
 		func(domain.FeatureID) {},
 		func(id domain.FeatureID) tea.Cmd { toppedUp = id; return nil },
+		nil,
 	)
 
 	// 'u' on the budget item invokes top-up and closes the dialog.
@@ -32,6 +33,7 @@ func TestInboxDialogTopUpOnlyBudgetItems(t *testing.T) {
 		func(domain.FeatureID) tea.Cmd { return nil },
 		func(domain.FeatureID) {},
 		func(id domain.FeatureID) tea.Cmd { toppedUp = id; return nil },
+		nil,
 	)
 	d2.sel = 1 // the attnGate item
 	closed, _ = d2.HandleKey(tea.KeyPressMsg{Code: 'u', Text: "u"})

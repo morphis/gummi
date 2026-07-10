@@ -59,8 +59,8 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 	line(s.Muted.Render("worktree ") + s.Base.Render(wt))
 	if r.Landed {
-		line(s.Muted.Render("         ") + s.Success.Render("↑ landed on main") +
-			s.Faint.Render("  · press c to clean up"))
+		// the "press c" instruction lives in the next block below
+		line(s.Muted.Render("         ") + s.Success.Render("↑ landed on main"))
 	}
 	if f.Budget.Envelope > 0 {
 		released := m.engine != nil && m.engine.ReserveReleased(f.ID)
@@ -74,6 +74,25 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
+
+	// next: ranked concrete actions for the feature's current state
+	// (nextsteps.go). The first entry is the recommendation.
+	if steps := nextActions(m.nextInputFor(r)); len(steps) > 0 {
+		line(s.Subtitle.Render("next"))
+		keyW, labelW := 0, 0
+		for _, a := range steps {
+			keyW, labelW = max(keyW, len(a.key)), max(labelW, len(a.label))
+		}
+		for i, a := range steps {
+			label := s.Subtle
+			if i == 0 {
+				label = s.Base
+			}
+			line("  " + s.KeyHint.Render(padRight(a.key, keyW)) + "  " +
+				label.Render(padRight(a.label, labelW)) + "  " + s.Faint.Render(a.why))
+		}
+		line("")
+	}
 
 	// live activity: shown when an engine session is running for this
 	// feature (an autonomous stage in progress).

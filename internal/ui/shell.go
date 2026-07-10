@@ -227,6 +227,9 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			return cmd
 		}
 		m.raiseAttention(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
+		// the session may have edited the artifact or committed; reload so
+		// the gate's row state (landed, open-comment counts) is fresh
+		return m.loadRows
 	}
 	return nil
 }
@@ -867,7 +870,19 @@ func (m *Shell) openInbox() {
 		},
 		m.inbox.remove,
 		m.topUpBudget,
+		m.suggestFor,
 	))
+}
+
+// suggestFor derives a feature's ranked next actions for the inbox
+// overlay (the dashboard's next block does the same via nextInputFor).
+func (m *Shell) suggestFor(id domain.FeatureID) []nextAction {
+	for _, r := range m.rows {
+		if r.F.ID == id {
+			return nextActions(m.nextInputFor(r))
+		}
+	}
+	return nil
 }
 
 // topUpBudget releases a feature's reserve and resumes its exhausted

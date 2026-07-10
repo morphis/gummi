@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -28,10 +29,11 @@ type reviewVerdict int
 const (
 	verdictUnclear reviewVerdict = iota
 	verdictPass
-	verdictChanges
+	verdictChanges // review/critique: findings to bounce back
+	verdictFail    // verify: verification found real problems
 )
 
-var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes)\s*$`)
+var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes|fail)\s*$`)
 
 // verdictFromTool maps a submit_verdict tool result to a reviewVerdict.
 func verdictFromTool(v string) reviewVerdict {
@@ -40,6 +42,8 @@ func verdictFromTool(v string) reviewVerdict {
 		return verdictPass
 	case "changes":
 		return verdictChanges
+	case "fail":
+		return verdictFail
 	default:
 		return verdictUnclear
 	}
@@ -56,8 +60,20 @@ func parseVerdict(text string) reviewVerdict {
 		return verdictPass
 	case "changes":
 		return verdictChanges
+	case "fail":
+		return verdictFail
 	}
 	return verdictUnclear
+}
+
+// sessionVerdict reads a session's outcome, preferring the structured
+// submit_verdict tool result and falling back to the VERDICT: line for
+// backends/agents that didn't use it.
+func sessionVerdict(snap engine.Snapshot) reviewVerdict {
+	if v := verdictFromTool(snap.Verdict); v != verdictUnclear {
+		return v
+	}
+	return parseVerdict(lastAssistant(snap))
 }
 
 // onAutonomousDone drives the review loop when an autonomous session
@@ -71,6 +87,8 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 		return true, m.onReviewDone(id)
 	case domain.StagePlan:
 		return true, m.onPlanDone(id)
+	case domain.StageVerify:
+		return true, m.onVerifyDone(id)
 	case domain.StageImplement, domain.StageFix:
 		// only auto-continue work stages that are part of a review loop
 		if m.reviewRounds[id] > 0 {
@@ -88,14 +106,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	// prefer the structured submit_verdict tool result; fall back to
-	// parsing the VERDICT: line for backends/agents that didn't use it.
-	snap := s.Snapshot()
-	verdict := verdictFromTool(snap.Verdict)
-	if verdict == verdictUnclear {
-		verdict = parseVerdict(lastAssistant(snap))
-	}
-	switch verdict {
+	switch sessionVerdict(s.Snapshot()) {
 	case verdictPass:
 		m.reviewRounds[id] = 0
 		return m.autoStep(id, domain.StageVerify, "review passed → verify")
@@ -115,6 +126,28 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 		m.raiseEscalation(id, attnGate, "review finished with no clear verdict — review manually")
 		return nil
 	}
+}
+
+// onVerifyDone reads the verify verdict and raises the landing gate.
+// Verify never auto-advances — landing on main is the human's call —
+// but the gate says whether verification held up: a clean pass is
+// ready-to-approve, a fail or a shrug is an escalation.
+func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
+	s := m.engine.Get(id)
+	if s == nil {
+		return nil
+	}
+	switch sessionVerdict(s.Snapshot()) {
+	case verdictPass:
+		m.raiseAttention(id, attnGate, "verify passed — review & land on main")
+	case verdictFail, verdictChanges:
+		m.raiseEscalation(id, attnGate, "verify FAILED — read the evidence and bounce or overrule")
+	default:
+		m.raiseEscalation(id, attnGate, "verify finished with no clear verdict — check the results manually")
+	}
+	// the session edited the artifact and committed; reload so the gate's
+	// row state (landed, open-comment counts) is fresh
+	return m.loadRows
 }
 
 // replanNote is the kickoff for a replan run: the critique's findings
@@ -142,11 +175,7 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 		// raising the approval gate.
 		return m.planStep(id, true, "plan written → critiquing")
 	}
-	verdict := verdictFromTool(snap.Verdict)
-	if verdict == verdictUnclear {
-		verdict = parseVerdict(lastAssistant(snap))
-	}
-	switch verdict {
+	switch sessionVerdict(snap) {
 	case verdictPass:
 		m.planRounds[id] = 0
 		m.raiseAttention(id, attnGate, "plan critiqued: clean — review & approve")
