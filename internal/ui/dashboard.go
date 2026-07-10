@@ -36,7 +36,9 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 	line(header)
 	if f.OneLiner != "" {
-		line(s.Subtle.Render(f.OneLiner))
+		for _, l := range strings.Split(wrapText(f.OneLiner, max(w, 8)), "\n") {
+			line(s.Subtle.Render(l))
+		}
 	}
 	line(s.Separator.Render(strings.Repeat("─", max(min(w, 60), 0))))
 
