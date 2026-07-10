@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	copilot "github.com/github/copilot-sdk/go"
 )
@@ -300,6 +301,10 @@ func (s *copilotSession) Resolve(_ context.Context, callID, result string) error
 
 func (s *copilotSession) Events() <-chan Event { return s.events }
 
+// SessionID implements Identified: the CLI's session id, under which it
+// keeps the full event log (~/.copilot/session-state/<id>/events.jsonl).
+func (s *copilotSession) SessionID() string { return s.sdk.SessionID }
+
 // forward is the only writer to s.events: it relays raw events until
 // the session stops, then closes the stream. Concentrating ownership in
 // one goroutine removes any send-on-closed race.
@@ -330,7 +335,9 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		out = Event{Kind: EventReasoningDelta, Text: d.DeltaContent}
 	case *copilot.ToolExecutionStartData:
 		args, _ := d.Arguments.(map[string]any)
-		out = Event{Kind: EventToolCall, Tool: d.ToolName, Detail: toolDetail(s.workdir, args)}
+		out = Event{Kind: EventToolCall, Tool: d.ToolName, Detail: toolDetail(s.workdir, args), CallID: d.ToolCallID}
+	case *copilot.ToolExecutionCompleteData:
+		out = Event{Kind: EventToolResult, CallID: d.ToolCallID, Result: toolResult(d)}
 	case *copilot.AssistantMessageData:
 		// Usage is metered from AssistantUsageData (the authoritative
 		// per-call event) when the CLI sends one; streamed BYOK calls
@@ -386,6 +393,52 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		return
 	}
 	s.emit(out)
+}
+
+// toolResult converts an SDK completion into gummi's ToolResult: the
+// failure message (if any) leads, followed by the tool's output —
+// DetailedContent (the SDK's full for-display text) when present, else
+// Content (the concise model-facing text) — tail-bounded at the source.
+func toolResult(d *copilot.ToolExecutionCompleteData) *ToolResult {
+	var parts []string
+	if d.Error != nil && d.Error.Message != "" {
+		parts = append(parts, d.Error.Message)
+	}
+	if d.Result != nil {
+		text := d.Result.Content
+		if d.Result.DetailedContent != nil && *d.Result.DetailedContent != "" {
+			text = *d.Result.DetailedContent
+		}
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return &ToolResult{OK: d.Success, Output: boundTail(strings.Join(parts, "\n"), d.Success)}
+}
+
+// Output caps for captured tool results: failures keep a longer tail
+// (they are what post-hoc debugging needs), successes a short one.
+const (
+	toolOutputCapOK   = 4 << 10
+	toolOutputCapFail = 16 << 10
+)
+
+// boundTail truncates output to its status's cap, keeping the tail —
+// errors and final verdicts land at the end of a command's output.
+func boundTail(s string, ok bool) string {
+	limit := toolOutputCapFail
+	if ok {
+		limit = toolOutputCapOK
+	}
+	if len(s) <= limit {
+		return s
+	}
+	// cut on a rune boundary so the marker never splits a character
+	cut := len(s) - limit
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return "…(truncated)\n" + s[cut:]
 }
 
 // emit hands an event to the forwarder, applying backpressure

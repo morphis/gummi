@@ -103,6 +103,44 @@ func TestToolCallMidStreamClosesBubble(t *testing.T) {
 	}
 }
 
+func TestResolveToolResultMarksMatchingCall(t *testing.T) {
+	s := &Session{}
+	s.appendToolCall("c1", "bash  rockcraft pack")
+	s.appendActivity("budget nudge") // no call id: outcome stays unknown
+	s.appendToolCall("c2", "bash  tox -e static")
+	s.resolveToolResult("c1", false, "error: device already exists\nfull log")
+	s.resolveToolResult("c2", true, "all green")
+	s.resolveToolResult("missing", true, "dropped") // unknown ids are ignored
+
+	tr := s.Snapshot().Transcript
+	if tr[0].ToolStatus != ToolFail || tr[0].ToolOutput != "error: device already exists\nfull log" {
+		t.Errorf("failed call = %+v, want fail + captured output", tr[0])
+	}
+	if tr[1].ToolStatus != ToolPending || tr[1].ToolOutput != "" {
+		t.Errorf("note entry = %+v, want no outcome", tr[1])
+	}
+	if tr[2].ToolStatus != ToolOK || tr[2].ToolOutput != "all green" {
+		t.Errorf("passing call = %+v", tr[2])
+	}
+	// the multi-line output must not leak into the one-line ticker copy
+	if act := s.Snapshot().Activity; act[0] != "bash  rockcraft pack" {
+		t.Errorf("activity line = %q", act[0])
+	}
+}
+
+func TestAppendToolDoneRecordsOutcomeUpfront(t *testing.T) {
+	s := &Session{}
+	s.appendToolDone("check unit: FAIL (exit 1)", false, "--- FAIL: TestX")
+	s.appendToolDone("check lint: pass", true, "")
+	tr := s.Snapshot().Transcript
+	if tr[0].ToolStatus != ToolFail || tr[0].ToolOutput != "--- FAIL: TestX" {
+		t.Errorf("failed check = %+v", tr[0])
+	}
+	if tr[1].ToolStatus != ToolOK {
+		t.Errorf("passing check = %+v", tr[1])
+	}
+}
+
 func TestTranscriptFinishReplacesStreamedContent(t *testing.T) {
 	s := &Session{}
 	s.appendDelta("Hel")

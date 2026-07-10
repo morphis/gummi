@@ -22,9 +22,10 @@ type chatPane struct {
 	input   textarea.Model
 	width   int // last width the input was sized to
 
-	scroll     int // lines scrolled up from the bottom (0 = latest)
-	bodyH      int // transcript viewport height, from the last render
-	totalLines int // total transcript lines, from the last render
+	scroll     int  // lines scrolled up from the bottom (0 = latest)
+	bodyH      int  // transcript viewport height, from the last render
+	totalLines int  // total transcript lines, from the last render
+	showOutput bool // expand every captured tool output (ctrl+o); failures always show a tail
 
 	// picker state, live while the agent has an open ask_user question
 	askID    string       // pending ask CallID the picker is bound to
@@ -172,6 +173,7 @@ func (c *chatPane) bindings() []binding {
 		return []binding{
 			{key: "enter", label: "send", bar: true},
 			{key: "pgup/pgdn", label: "scroll", bar: true},
+			{key: "ctrl+o", label: "outputs", help: "expand/collapse captured tool outputs", bar: true},
 			{key: "esc", label: "detach", help: "detach — the session keeps running", bar: true},
 		}
 	}
@@ -184,8 +186,9 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		// tool calls render as compact ticker lines, in order with the
 		// messages around them; consecutive ones group without blanks.
 		if msg.Author == engine.AuthorTool {
-			lines = append(lines, "  "+s.Success.Render("✓ ")+
+			lines = append(lines, "  "+toolMarker(s, msg.ToolStatus)+
 				toolLineView(s, sanitize(msg.Content), max(w-6, 8)))
+			lines = append(lines, c.toolOutputLines(s, msg, w)...)
 			if i+1 == len(snap.Transcript) || snap.Transcript[i+1].Author != engine.AuthorTool {
 				lines = append(lines, "")
 			}
@@ -231,6 +234,47 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		visible = append([]string{""}, visible...)
 	}
 	return strings.Join(visible, "\n")
+}
+
+// failTailLines is how much of a failed tool's output shows inline
+// without expanding — enough to read the error, not flood the pane.
+const failTailLines = 8
+
+// toolOutputLines renders a tool entry's captured output: a failure
+// always shows its tail (the error is the point), and ctrl+o expands
+// every entry's full output. Indented and faint so it reads as detail
+// behind the tool line above it.
+func (c *chatPane) toolOutputLines(s *theme.Styles, msg engine.Message, w int) []string {
+	if msg.ToolOutput == "" {
+		return nil
+	}
+	show := c.showOutput || msg.ToolStatus == engine.ToolFail
+	if !show {
+		return nil
+	}
+	body := strings.Split(wrapText(sanitize(msg.ToolOutput), max(w-8, 8)), "\n")
+	if !c.showOutput && len(body) > failTailLines {
+		body = append([]string{"…"}, body[len(body)-failTailLines:]...)
+	}
+	out := make([]string, 0, len(body))
+	for _, l := range body {
+		out = append(out, "      "+s.Faint.Render(l))
+	}
+	return out
+}
+
+// toolMarker is the outcome glyph before a tool line: confirmed success,
+// confirmed failure, or a neutral dot when the outcome is unknown (notes
+// and backends that don't report results) — never a dishonest ✓.
+func toolMarker(s *theme.Styles, st engine.ToolStatus) string {
+	switch st {
+	case engine.ToolOK:
+		return s.Success.Render("✓ ")
+	case engine.ToolFail:
+		return s.Error.Render("✗ ")
+	default:
+		return s.Faint.Render("· ")
+	}
 }
 
 // toolLineView styles one activity-ticker line, truncated ANSI-aware to
@@ -301,6 +345,9 @@ func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send, answer str
 		return false, "", "", nil
 	case "pgdown", "ctrl+d":
 		c.scrollBy(-c.page())
+		return false, "", "", nil
+	case "ctrl+o":
+		c.showOutput = !c.showOutput
 		return false, "", "", nil
 	}
 	c.input, cmd = c.input.Update(msg)

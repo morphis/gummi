@@ -35,7 +35,9 @@ func TestAutonomousTurnCheckpointsWorktree(t *testing.T) {
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}
-	waitState(t, e, "FD-001", StateDone)
+	// EventIdle follows the checkpoint commit; waitState(Done) would return
+	// mid-commit and race git on the repo's index.lock.
+	waitFor(t, e, EventIdle)
 
 	ctx := context.Background()
 	if dirty, err := wt.Dirty(ctx, &f); dirty || err != nil {
@@ -76,7 +78,7 @@ func TestCleanTurnAddsNoCheckpoint(t *testing.T) {
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}
-	waitState(t, e, "FD-001", StateDone)
+	waitFor(t, e, EventIdle) // idle follows any checkpoint work
 
 	snap := e.Get("FD-001").Snapshot()
 	for _, a := range snap.Activity {

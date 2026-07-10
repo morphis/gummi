@@ -11,8 +11,12 @@ import (
 
 // SessionMessage is one persisted transcript turn.
 type SessionMessage struct {
-	Author  string // "user" | "assistant"
+	Author  string // "user" | "assistant" | "system" | "tool"
 	Content string
+	// Tool-authored turns only: the call's outcome ("", "ok", "fail")
+	// and its captured output, so the evidence survives a restart.
+	ToolStatus string
+	ToolOutput string
 }
 
 // SessionSnapshot is the durable record of a feature's agent session,
@@ -23,6 +27,7 @@ type SessionSnapshot struct {
 	Stage        domain.Stage
 	Role         string
 	State        string
+	AgentSession string // backend session id (its on-disk log), "" if none
 	SpendCredits float64
 	SpendIn      int64
 	SpendOut     int64
@@ -45,15 +50,16 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 	defer tx.Rollback() //nolint:errcheck // no-op after commit
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO sessions (feature_id, stage, role, state,
+		INSERT INTO sessions (feature_id, stage, role, state, agent_session,
 			spend_credits, spend_in, spend_out, spend_model, activity, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(feature_id) DO UPDATE SET
 			stage=excluded.stage, role=excluded.role, state=excluded.state,
+			agent_session=excluded.agent_session,
 			spend_credits=excluded.spend_credits, spend_in=excluded.spend_in,
 			spend_out=excluded.spend_out, spend_model=excluded.spend_model,
 			activity=excluded.activity, updated_at=excluded.updated_at`,
-		string(snap.Feature), string(snap.Stage), snap.Role, snap.State,
+		string(snap.Feature), string(snap.Stage), snap.Role, snap.State, snap.AgentSession,
 		snap.SpendCredits, snap.SpendIn, snap.SpendOut, snap.SpendModel,
 		strings.Join(snap.Activity, activitySep), time.Now().UTC().Format(timeFmt)); err != nil {
 		return fmt.Errorf("saving session %s: %w", snap.Feature, err)
@@ -65,8 +71,9 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 	}
 	for i, m := range snap.Transcript {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO session_messages (feature_id, ord, author, content) VALUES (?,?,?,?)`,
-			string(snap.Feature), i, m.Author, m.Content); err != nil {
+			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output)
+			VALUES (?,?,?,?,?,?)`,
+			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput); err != nil {
 			return err
 		}
 	}
@@ -83,7 +90,7 @@ func (s *Store) DeleteSession(ctx context.Context, id domain.FeatureID) error {
 // ordered by feature number.
 func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.feature_id, s.stage, s.role, s.state,
+		SELECT s.feature_id, s.stage, s.role, s.state, s.agent_session,
 			s.spend_credits, s.spend_in, s.spend_out, s.spend_model, s.activity
 		FROM sessions s JOIN features f ON f.id = s.feature_id
 		ORDER BY f.num`)
@@ -96,7 +103,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 	for rows.Next() {
 		var snap SessionSnapshot
 		var fid, stage, activity string
-		if err := rows.Scan(&fid, &stage, &snap.Role, &snap.State,
+		if err := rows.Scan(&fid, &stage, &snap.Role, &snap.State, &snap.AgentSession,
 			&snap.SpendCredits, &snap.SpendIn, &snap.SpendOut, &snap.SpendModel, &activity); err != nil {
 			return nil, err
 		}
@@ -123,7 +130,8 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 
 func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]SessionMessage, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT author, content FROM session_messages WHERE feature_id = ? ORDER BY ord`, string(id))
+		`SELECT author, content, tool_status, tool_output
+		FROM session_messages WHERE feature_id = ? ORDER BY ord`, string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +139,7 @@ func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]Sessio
 	var out []SessionMessage
 	for rows.Next() {
 		var m SessionMessage
-		if err := rows.Scan(&m.Author, &m.Content); err != nil {
+		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

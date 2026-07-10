@@ -458,7 +458,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		if !r.OK {
 			status = fmt.Sprintf("FAIL (exit %d)", r.ExitCode)
 		}
-		s.appendActivity(fmt.Sprintf("check %s: %s", r.Name, status))
+		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
@@ -799,7 +799,11 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.finishAssistant(ev.Text)
 		kind = EventMessage
 	case agent.EventToolCall:
-		s.appendActivity(toolLine(ev))
+		s.appendToolCall(ev.CallID, toolLine(ev))
+	case agent.EventToolResult:
+		if ev.Result != nil {
+			s.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)
+		}
 	case agent.EventClientToolCall:
 		e.handleClientTool(s, ev.ToolCall)
 		return

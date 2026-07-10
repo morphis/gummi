@@ -41,6 +41,7 @@ func (e *Engine) persist(s *Session) {
 		Stage:        snap.Feature.Stage,
 		Role:         string(snap.Role),
 		State:        string(snap.State),
+		AgentSession: snap.AgentSessionID,
 		SpendCredits: snap.Spend.Credits,
 		SpendIn:      snap.Spend.InputTokens,
 		SpendOut:     snap.Spend.OutputTokens,
@@ -50,6 +51,7 @@ func (e *Engine) persist(s *Session) {
 	for _, m := range snap.Transcript {
 		rec.Transcript = append(rec.Transcript, state.SessionMessage{
 			Author: string(m.Author), Content: m.Content,
+			ToolStatus: string(m.ToolStatus), ToolOutput: m.ToolOutput,
 		})
 	}
 	_ = e.cfg.Store.SaveSession(context.Background(), rec)
@@ -107,10 +109,12 @@ func (e *Engine) Restore(ctx context.Context) error {
 		for _, m := range snap.Transcript {
 			s.transcript = append(s.transcript, Message{
 				Author: Author(m.Author), Content: m.Content,
+				ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
 			})
 		}
 		s.activity = append(s.activity, snap.Activity...)
 		s.spend = usageFrom(snap)
+		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
 		e.live[snap.Feature] = s
 	}

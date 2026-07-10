@@ -78,32 +78,52 @@ const (
 	AuthorTool Author = "tool"
 )
 
+// ToolStatus is an AuthorTool entry's known outcome. It stays
+// ToolPending for gummi's own notes (nudges, checkpoints) and for
+// backends that never report tool results.
+type ToolStatus string
+
+const (
+	ToolPending ToolStatus = ""
+	ToolOK      ToolStatus = "ok"
+	ToolFail    ToolStatus = "fail"
+)
+
 // Message is one transcript turn.
 type Message struct {
 	Author    Author
 	Content   string
 	Streaming bool // true while assistant text is still arriving
+
+	// AuthorTool entries only: the call's outcome once the backend
+	// reports it, and the captured output (bounded at the adapter).
+	ToolStatus ToolStatus
+	ToolOutput string
+	callID     string // backend call id awaiting its result; cleared on resolve
 }
 
 // Snapshot is an immutable view of a session's state, safe to render.
 type Snapshot struct {
-	Feature      domain.Feature
-	Role         agent.Role
-	Interactive  bool
-	Critique     bool // this is a plan-critique pass, not the plan writer
-	State        SessionState
-	AgentName    string         // backend running this session ("copilot", "opencode", …)
-	Model        string         // model resolved at spawn (Spend.Model is the reported one)
-	Provider     agent.Provider // BYOK endpoint; zero means native routing
-	Transcript   []Message
-	Activity     []string // recent tool-call lines
-	Spend        agent.Usage
-	SpentCredits float64       // Spend as a credit-equivalent at the provider's rate
-	Context      agent.Context // latest context-window occupancy
-	Busy         bool          // agent is mid-turn
-	PendingAsk   *Ask          // the agent's open ask_user question, if any
-	Verdict      string        // review verdict via submit_verdict, if submitted
-	Err          error
+	Feature     domain.Feature
+	Role        agent.Role
+	Interactive bool
+	Critique    bool // this is a plan-critique pass, not the plan writer
+	State       SessionState
+	AgentName   string // backend running this session ("copilot", "opencode", …)
+	// AgentSessionID is the backend's own session id (agent.Identified),
+	// pointing at its on-disk log; empty for backends without one.
+	AgentSessionID string
+	Model          string         // model resolved at spawn (Spend.Model is the reported one)
+	Provider       agent.Provider // BYOK endpoint; zero means native routing
+	Transcript     []Message
+	Activity       []string // recent tool-call lines
+	Spend          agent.Usage
+	SpentCredits   float64       // Spend as a credit-equivalent at the provider's rate
+	Context        agent.Context // latest context-window occupancy
+	Busy           bool          // agent is mid-turn
+	PendingAsk     *Ask          // the agent's open ask_user question, if any
+	Verdict        string        // review verdict via submit_verdict, if submitted
+	Err            error
 }
 
 // Session is one live agent conversation bound to a feature + stage.
@@ -123,28 +143,29 @@ type Session struct {
 	done     chan struct{}
 	stopOnce sync.Once
 
-	mu         sync.Mutex
-	agentSess  agent.Session // nil while queued
-	agentName  string        // backend identity, for display
-	model      string        // model resolved at spawn
-	provider   agent.Provider
-	specPath   string // resolved spec/draft path (for ask_user capture)
-	state      SessionState
-	transcript []Message
-	activity   []string
-	spend      agent.Usage
-	context    agent.Context
-	busy       bool
-	pendingAsk *Ask
-	verdict    string // review verdict from submit_verdict ("pass"/"changes")
-	err        error
-	stopped    bool
-	finalized  bool    // stopped; must not be persisted (may be dropped)
-	heldSlot   bool    // true between taking and releasing an attention slot
-	budget     float64 // stage credit budget (0 = none)
-	byokRate   float64 // provider token→credit rate (0 = default)
-	threshold  int     // highest budget threshold crossed (%)
-	exhausted  bool    // hit the credit cap
+	mu             sync.Mutex
+	agentSess      agent.Session // nil while queued
+	agentName      string        // backend identity, for display
+	agentSessionID string        // backend session id (agent.Identified), "" if none
+	model          string        // model resolved at spawn
+	provider       agent.Provider
+	specPath       string // resolved spec/draft path (for ask_user capture)
+	state          SessionState
+	transcript     []Message
+	activity       []string
+	spend          agent.Usage
+	context        agent.Context
+	busy           bool
+	pendingAsk     *Ask
+	verdict        string // review verdict from submit_verdict ("pass"/"changes")
+	err            error
+	stopped        bool
+	finalized      bool    // stopped; must not be persisted (may be dropped)
+	heldSlot       bool    // true between taking and releasing an attention slot
+	budget         float64 // stage credit budget (0 = none)
+	byokRate       float64 // provider token→credit rate (0 = default)
+	threshold      int     // highest budget threshold crossed (%)
+	exhausted      bool    // hit the credit cap
 }
 
 // Snapshot returns a render-safe copy of the session's state.
@@ -152,23 +173,24 @@ func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Snapshot{
-		Feature:      s.Feature,
-		Role:         s.Role,
-		Interactive:  s.Interactive,
-		Critique:     s.Critique,
-		State:        s.state,
-		AgentName:    s.agentName,
-		Model:        s.model,
-		Provider:     s.provider,
-		Transcript:   append([]Message(nil), s.transcript...),
-		Activity:     append([]string(nil), s.activity...),
-		Spend:        s.spend,
-		SpentCredits: s.spentForBudgetLocked(),
-		Context:      s.context,
-		Busy:         s.busy,
-		PendingAsk:   s.pendingAsk,
-		Verdict:      s.verdict,
-		Err:          s.err,
+		Feature:        s.Feature,
+		Role:           s.Role,
+		Interactive:    s.Interactive,
+		Critique:       s.Critique,
+		State:          s.state,
+		AgentName:      s.agentName,
+		AgentSessionID: s.agentSessionID,
+		Model:          s.model,
+		Provider:       s.provider,
+		Transcript:     append([]Message(nil), s.transcript...),
+		Activity:       append([]string(nil), s.activity...),
+		Spend:          s.spend,
+		SpentCredits:   s.spentForBudgetLocked(),
+		Context:        s.context,
+		Busy:           s.busy,
+		PendingAsk:     s.pendingAsk,
+		Verdict:        s.verdict,
+		Err:            s.err,
 	}
 }
 
@@ -215,8 +237,19 @@ func (s *Session) attachAgent(a agent.Session) bool {
 		return false
 	}
 	s.agentSess = a
+	if id, ok := a.(agent.Identified); ok {
+		s.agentSessionID = id.SessionID()
+	}
 	s.state = StateRunning
 	return true
+}
+
+// setAgentSessionID restores a persisted backend session id (Restore
+// has no live agent to ask).
+func (s *Session) setAgentSessionID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentSessionID = id
 }
 
 // finishRunning atomically marks a running autonomous turn done, reporting
@@ -327,23 +360,69 @@ func (s *Session) replaceMessage(i int, content string) {
 	}
 }
 
-// appendActivity records a tool-call line twice: on the activity ticker
+// appendActivity records a gummi-authored note (nudges, checkpoint
+// lines) as an AuthorTool entry with no outcome semantics.
+func (s *Session) appendActivity(tool string) {
+	s.appendTool(Message{Author: AuthorTool, Content: tool})
+}
+
+// appendToolCall records an agent tool invocation, keeping the backend
+// call id so a later resolveToolResult can attach the outcome.
+func (s *Session) appendToolCall(callID, line string) {
+	s.appendTool(Message{Author: AuthorTool, Content: line, callID: callID})
+}
+
+// appendToolDone records a tool line whose outcome is already known —
+// gummi-run checks, whose pass/fail and output exist before the entry.
+func (s *Session) appendToolDone(line string, ok bool, output string) {
+	st := ToolOK
+	if !ok {
+		st = ToolFail
+	}
+	s.appendTool(Message{Author: AuthorTool, Content: line, ToolStatus: st, ToolOutput: output})
+}
+
+// appendTool records a tool-call line twice: on the activity ticker
 // (the dashboard's recent-lines feed) and as an AuthorTool transcript
 // entry, so the full history keeps it ordered against the messages
 // around it.
-func (s *Session) appendActivity(tool string) {
+func (s *Session) appendTool(m Message) {
 	// activity is stored newline-joined; keep labels single-line so they
 	// round-trip through persistence intact.
-	tool = strings.ReplaceAll(strings.ReplaceAll(tool, "\n", " "), "\r", " ")
+	m.Content = strings.ReplaceAll(strings.ReplaceAll(m.Content, "\n", " "), "\r", " ")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.activity = append(s.activity, tool)
+	s.activity = append(s.activity, m.Content)
 	// a tool call mid-stream also closes the streaming bubble: the next
 	// delta belongs to a new one (the agent spoke, acted, spoke again).
 	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming {
 		s.transcript[n-1].Streaming = false
 	}
-	s.transcript = append(s.transcript, Message{Author: AuthorTool, Content: tool})
+	s.transcript = append(s.transcript, m)
+}
+
+// resolveToolResult attaches a backend-reported outcome to the pending
+// AuthorTool entry with the matching call id. Unknown ids are dropped
+// (a result for a call gummi never displayed, e.g. one from before a
+// restart).
+func (s *Session) resolveToolResult(callID string, ok bool, output string) {
+	if callID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.transcript) - 1; i >= 0; i-- {
+		if s.transcript[i].callID != callID {
+			continue
+		}
+		s.transcript[i].callID = ""
+		s.transcript[i].ToolStatus = ToolOK
+		if !ok {
+			s.transcript[i].ToolStatus = ToolFail
+		}
+		s.transcript[i].ToolOutput = output
+		return
+	}
 }
 
 func (s *Session) addSpend(u agent.Usage) {

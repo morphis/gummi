@@ -528,6 +528,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.runChecks(r.F)
 		}
+	case "t":
+		if r, ok := m.selected(); ok {
+			m.openTranscript(r.F)
+		}
 	case "s":
 		if r, ok := m.selected(); ok {
 			return m.openSpec(r.F)
@@ -811,6 +815,20 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 		}
 		return noticeMsg{text: string(f.ID) + " queued"}
 	}
+}
+
+// openTranscript attaches the chat pane to a feature's existing session
+// in whatever state it is — running, done, paused — so the full
+// scrollable transcript (tool calls with captured outputs, messages) can
+// be read after the fact, e.g. to see why a verify run failed. Unlike
+// enter it never starts or re-runs anything.
+func (m *Shell) openTranscript(f domain.Feature) {
+	s := m.sessionFor(f.ID)
+	if s == nil {
+		m.notice = noticeMsg{text: string(f.ID) + " has no session transcript", isErr: true}
+		return
+	}
+	m.chat = newChatPane(f.ID, s)
 }
 
 // pauseRun stops a feature's autonomous session, freeing its slot.

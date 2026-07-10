@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	stage         TEXT NOT NULL,
 	role          TEXT NOT NULL,
 	state         TEXT NOT NULL,
+	agent_session TEXT NOT NULL DEFAULT '',
 	spend_credits REAL NOT NULL DEFAULT 0,
 	spend_in      INTEGER NOT NULL DEFAULT 0,
 	spend_out     INTEGER NOT NULL DEFAULT 0,
@@ -73,11 +74,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 	updated_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_messages (
-	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-	feature_id TEXT NOT NULL REFERENCES sessions(feature_id) ON DELETE CASCADE,
-	ord        INTEGER NOT NULL,
-	author     TEXT NOT NULL,
-	content    TEXT NOT NULL
+	seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+	feature_id  TEXT NOT NULL REFERENCES sessions(feature_id) ON DELETE CASCADE,
+	ord         INTEGER NOT NULL,
+	author      TEXT NOT NULL,
+	content     TEXT NOT NULL,
+	tool_status TEXT NOT NULL DEFAULT '',
+	tool_output TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS session_messages_feature ON session_messages(feature_id);
 
@@ -155,6 +158,9 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN skip_triage INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN skip_diagnose INTEGER NOT NULL DEFAULT 0`,
 	`CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref)`,
+	`ALTER TABLE sessions ADD COLUMN agent_session TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE session_messages ADD COLUMN tool_status TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE session_messages ADD COLUMN tool_output TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

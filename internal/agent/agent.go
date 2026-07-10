@@ -92,6 +92,14 @@ type ToolResolver interface {
 	Resolve(ctx context.Context, callID, result string) error
 }
 
+// Identified is implemented by sessions whose backend assigns a durable
+// session id — e.g. the Copilot CLI, which keeps a full event log under
+// ~/.copilot/session-state/<id>/. The orchestrator surfaces the id so
+// the user can find that log after the session is gone.
+type Identified interface {
+	SessionID() string
+}
+
 // SessionOpts configures one agent session.
 type SessionOpts struct {
 	// WorkDir is the feature's worktree; the agent's cwd.
@@ -172,6 +180,10 @@ const (
 	EventMessage EventKind = "message"
 	// EventToolCall reports a tool invocation (name in Tool).
 	EventToolCall EventKind = "tool-call"
+	// EventToolResult reports a tool invocation finishing (Result
+	// populated), correlated to its EventToolCall by CallID. Only some
+	// backends emit it; without one a tool call's outcome stays unknown.
+	EventToolResult EventKind = "tool-result"
 	// EventClientToolCall reports the model invoking a gummi-owned client
 	// tool (ToolCall populated). The call blocks until the orchestrator
 	// answers via ToolResolver.Resolve.
@@ -214,14 +226,25 @@ type Context struct {
 	Limit  int64
 }
 
+// ToolResult is the outcome of one tool execution (EventToolResult).
+// Output is bounded at the source (boundTail) so a chatty tool can't
+// blow up transcripts or the state db; failures keep a longer tail than
+// successes because they are the forensic case.
+type ToolResult struct {
+	OK     bool
+	Output string // captured output (failure message first when it failed)
+}
+
 // Event is one item in a session's activity stream.
 type Event struct {
 	Kind     EventKind
-	Text     string    // text for deltas/messages
-	Tool     string    // tool name for tool-call/permission events
-	Detail   string    // tool-call salient argument (command, path, …); may be empty
-	ToolCall *ToolCall // populated for EventClientToolCall
-	Usage    Usage     // populated for EventUsage
-	Context  Context   // populated for EventContext
-	Err      error     // populated for EventError
+	Text     string      // text for deltas/messages
+	Tool     string      // tool name for tool-call/permission events
+	Detail   string      // tool-call salient argument (command, path, …); may be empty
+	CallID   string      // backend tool-call id, pairing tool-result to tool-call
+	ToolCall *ToolCall   // populated for EventClientToolCall
+	Result   *ToolResult // populated for EventToolResult
+	Usage    Usage       // populated for EventUsage
+	Context  Context     // populated for EventContext
+	Err      error       // populated for EventError
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,143 @@ func TestCopilotOnEventMapsStreamingEvents(t *testing.T) {
 		default:
 			t.Fatalf("event %d (%+v) was dropped", i, w)
 		}
+	}
+}
+
+// TestCopilotToolResultRoundTrip drives the real CLI end to end through
+// a tool execution: the scripted BYOK model requests a shell command,
+// the CLI runs it, and the adapter must surface both the tool call and
+// its captured result (output + call-id pairing) — the events the
+// transcript's forensic view is built on.
+func TestCopilotToolResultRoundTrip(t *testing.T) {
+	cli := findCopilot(t)
+
+	srv := fakeopenai.New(
+		fakeopenai.WithReply("command ran"),
+		fakeopenai.WithToolCall("bash", `{"command":"echo gummi-tool-e2e"}`))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	ag, err := NewCopilot(ctx, CopilotOptions{CLIPath: cli, LogLevel: "error"})
+	if err != nil {
+		t.Skipf("cannot start copilot CLI (no session/network?): %v", err)
+	}
+	defer ag.Close()
+
+	wd := t.TempDir()
+	sess, err := ag.NewSession(ctx, SessionOpts{
+		WorkDir:    wd,
+		Role:       RoleImplementer,
+		Model:      "fake-model",
+		Permission: PermissionAllowAll,
+		Provider:   Provider{Type: "openai", BaseURL: srv.BaseURL()},
+	})
+	if err != nil {
+		t.Fatalf("create BYOK session: %v", err)
+	}
+	defer sess.Close()
+
+	if id, ok := sess.(Identified); !ok || id.SessionID() == "" {
+		t.Error("copilot session does not expose its session id")
+	}
+
+	if err := sess.Send(ctx, "Run the echo command."); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	var call, result *Event
+	deadline := time.After(60 * time.Second)
+loop:
+	for {
+		select {
+		case ev, ok := <-sess.Events():
+			if !ok {
+				break loop
+			}
+			switch ev.Kind {
+			case EventToolCall:
+				e := ev
+				call = &e
+			case EventToolResult:
+				e := ev
+				result = &e
+			case EventError:
+				t.Fatalf("session error: %v", ev.Err)
+			case EventIdle:
+				break loop
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the agent")
+		}
+	}
+
+	if call == nil || call.CallID == "" {
+		t.Fatalf("no tool call observed (call=%+v)", call)
+	}
+	if result == nil {
+		t.Fatal("no tool result observed — completions are being dropped")
+	}
+	if result.CallID != call.CallID {
+		t.Errorf("result call id %q != call id %q", result.CallID, call.CallID)
+	}
+	if result.Result == nil || !result.Result.OK {
+		t.Errorf("result = %+v, want OK", result.Result)
+	}
+	if !strings.Contains(result.Result.Output, "gummi-tool-e2e") {
+		t.Errorf("captured output %q missing the command's stdout", result.Result.Output)
+	}
+}
+
+// TestCopilotOnEventMapsToolResults verifies tool completions reach the
+// stream as EventToolResult — the failure message leading the output and
+// the call id carried through, so the engine can attach the outcome to
+// the tool line it already displayed.
+func TestCopilotOnEventMapsToolResults(t *testing.T) {
+	s := &copilotSession{raw: make(chan Event, 8), stop: make(chan struct{})}
+	detailed := "full build log"
+	s.onEvent(copilot.SessionEvent{Data: &copilot.ToolExecutionCompleteData{
+		ToolCallID: "call-ok", Success: true,
+		Result: &copilot.ToolExecutionCompleteResult{Content: "concise", DetailedContent: &detailed},
+	}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.ToolExecutionCompleteData{
+		ToolCallID: "call-fail", Success: false,
+		Error:  &copilot.ToolExecutionCompleteError{Message: "device already exists"},
+		Result: &copilot.ToolExecutionCompleteResult{Content: "lxc launch output"},
+	}})
+
+	ok := <-s.raw
+	if ok.Kind != EventToolResult || ok.CallID != "call-ok" ||
+		ok.Result == nil || !ok.Result.OK || ok.Result.Output != "full build log" {
+		t.Errorf("success event = %+v (result %+v), want detailed content preferred", ok, ok.Result)
+	}
+	fail := <-s.raw
+	if fail.Kind != EventToolResult || fail.CallID != "call-fail" ||
+		fail.Result == nil || fail.Result.OK {
+		t.Fatalf("failure event = %+v (result %+v)", fail, fail.Result)
+	}
+	if fail.Result.Output != "device already exists\nlxc launch output" {
+		t.Errorf("failure output = %q, want the error message leading the output", fail.Result.Output)
+	}
+}
+
+// TestBoundTailKeepsFailureTail verifies output bounding keeps the end
+// of the text (where errors land) and marks the cut.
+func TestBoundTailKeepsFailureTail(t *testing.T) {
+	long := strings.Repeat("x", toolOutputCapFail) + "the error"
+	got := boundTail(long, false)
+	if len(got) > toolOutputCapFail+len("…(truncated)\n") {
+		t.Errorf("failure output len = %d, want ≤ cap", len(got))
+	}
+	if !strings.HasPrefix(got, "…(truncated)\n") || !strings.HasSuffix(got, "the error") {
+		t.Errorf("bounded output lost the tail: %q…%q", got[:20], got[len(got)-20:])
+	}
+	if s := boundTail("short", true); s != "short" {
+		t.Errorf("short output changed: %q", s)
+	}
+	if ok := boundTail(strings.Repeat("y", toolOutputCapOK+1), true); len(ok) > toolOutputCapOK+len("…(truncated)\n") {
+		t.Errorf("success output len = %d, want the tighter cap", len(ok))
 	}
 }
 

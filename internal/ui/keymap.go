@@ -76,12 +76,18 @@ func (m *Shell) helpOverlay() helpDialog {
 func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
 	pause := binding{key: "p", label: "pause", help: "pause the running agent"}
+	transcript := binding{key: "t", label: "transcript", help: "read the session transcript (tool calls and their outputs)"}
 	if r, ok := m.selected(); ok && autonomousStage(r.F.Stage) {
 		enter.label = "run"
 		if s := m.sessionFor(r.F.ID); s != nil {
-			if s.State() == engine.StateRunning {
+			switch s.State() {
+			case engine.StateRunning:
 				enter.label = "watch"
 				enter.help = "watch the running agent (scrollable transcript)"
+			case engine.StateDone, engine.StatePaused:
+				// a finished/paused run: reading what happened is the
+				// draw, so surface it (enter would re-run the stage)
+				transcript.bar = true
 			}
 			pause.bar = true
 		}
@@ -92,6 +98,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "1..9", label: "jump", help: "jump to feature"},
 		enter,
 		pause,
+		transcript,
 		{key: "s", label: "spec", help: "spec (tab: read ⇄ annotate)", bar: true},
 		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)", bar: true},
 		{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true},

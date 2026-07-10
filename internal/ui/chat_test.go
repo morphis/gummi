@@ -307,3 +307,48 @@ func TestToolLineView(t *testing.T) {
 		t.Errorf("truncated width = %d, want 20", w)
 	}
 }
+
+func TestToolMarkerHonest(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	if got := toolMarker(s, engine.ToolOK); got != s.Success.Render("✓ ") {
+		t.Errorf("ok marker = %q", got)
+	}
+	if got := toolMarker(s, engine.ToolFail); got != s.Error.Render("✗ ") {
+		t.Errorf("fail marker = %q", got)
+	}
+	// unknown outcomes must not claim success
+	if got := toolMarker(s, engine.ToolPending); got != s.Faint.Render("· ") {
+		t.Errorf("pending marker = %q", got)
+	}
+}
+
+func TestToolOutputLines(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	c := &chatPane{}
+	fail := engine.Message{
+		Author: engine.AuthorTool, ToolStatus: engine.ToolFail,
+		ToolOutput: strings.Repeat("line\n", 20) + "Error: device eth0 already exists",
+	}
+	okMsg := engine.Message{Author: engine.AuthorTool, ToolStatus: engine.ToolOK, ToolOutput: "all green"}
+
+	// a failure shows its tail unprompted, elided to failTailLines
+	got := c.toolOutputLines(s, fail, 80)
+	if len(got) != failTailLines+1 { // "…" + tail
+		t.Fatalf("failure shows %d lines, want %d", len(got), failTailLines+1)
+	}
+	if !strings.Contains(got[len(got)-1], "device eth0 already exists") {
+		t.Errorf("failure tail lost the error: %q", got[len(got)-1])
+	}
+	// successes stay collapsed until ctrl+o
+	if got := c.toolOutputLines(s, okMsg, 80); got != nil {
+		t.Errorf("collapsed success rendered output: %q", got)
+	}
+	c.showOutput = true
+	if got := c.toolOutputLines(s, okMsg, 80); len(got) != 1 || !strings.Contains(got[0], "all green") {
+		t.Errorf("expanded success = %q", got)
+	}
+	// expanded failures show everything, not just the tail
+	if got := c.toolOutputLines(s, fail, 80); len(got) != 21 {
+		t.Errorf("expanded failure shows %d lines, want all 21", len(got))
+	}
+}

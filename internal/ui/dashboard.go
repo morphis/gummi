@@ -106,12 +106,12 @@ func (m *Shell) dashboardView(w, h int) string {
 		if meta := sessionMeta(snap); meta != "" {
 			line("  " + s.Faint.Render(meta))
 		}
-		acts := snap.Activity
-		if len(acts) > 6 {
-			acts = acts[len(acts)-6:]
+		if snap.AgentSessionID != "" {
+			line("  " + s.Faint.Render("session "+snap.AgentSessionID))
 		}
+		acts := recentTools(snap, 6)
 		for _, a := range acts {
-			line("  " + s.Success.Render("✓ ") + toolLineView(s, sanitize(a), max(w-6, 8)))
+			line("  " + toolMarker(s, a.ToolStatus) + toolLineView(s, sanitize(a.Content), max(w-6, 8)))
 		}
 		last := lastAssistant(snap)
 		if last != "" {
@@ -147,6 +147,22 @@ func (m *Shell) dashboardView(w, h int) string {
 	}
 
 	return b.String()
+}
+
+// recentTools returns the last n AuthorTool transcript entries — the
+// dashboard's activity ticker. The transcript (not snap.Activity, its
+// plain-string twin) carries each call's outcome, so markers stay honest.
+func recentTools(snap engine.Snapshot, n int) []engine.Message {
+	var out []engine.Message
+	for _, m := range snap.Transcript {
+		if m.Author == engine.AuthorTool {
+			out = append(out, m)
+		}
+	}
+	if len(out) > n {
+		out = out[len(out)-n:]
+	}
+	return out
 }
 
 // lastAssistant returns the most recent assistant message text.
