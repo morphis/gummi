@@ -222,7 +222,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		}
 		// Advancing out of Verify is the user's "this feature is done"
 		// decision: the branch lands on main as one squash commit before the
-		// record moves to Done. The merge flow (draft → confirm → merge)
+		// record moves to Done. The merge flow (user-written message → merge)
 		// finishes the transition itself. A branch that already landed — or
 		// is already gone (merged and cleaned up outside gummi) — skips
 		// straight to the transition.

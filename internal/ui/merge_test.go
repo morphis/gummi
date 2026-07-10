@@ -39,40 +39,41 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 }
 
 // pressMerge presses m on the selected row and returns the shell with
-// the draft pumped through (dialog open on success).
+// the preconditions pumped through (dialog open on success).
 func pressMerge(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	m.sel = 0
 	return press(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
 }
 
-func TestSquashMergeFlowWithScribeDraft(t *testing.T) {
+// typeMessage writes the landing commit message into the open dialog —
+// it opens empty, the message is the user's to provide.
+func typeMessage(t *testing.T, m *Shell, msg string) {
+	t.Helper()
+	d, ok := m.Overlay.Top().(*commitMsgDialog)
+	if !ok {
+		t.Fatalf("commit-message dialog not open (notice %q)", m.notice.text)
+	}
+	d.input.SetValue(msg)
+}
+
+func TestSquashMergeFlow(t *testing.T) {
 	m, root, _ := mergeFixture(t)
-	draft := "FD-001: rebase me\n\nAdds feat.go with the feature work."
-	eng := engine.New(engine.Config{
-		Agent: &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-			if !strings.Contains(msg, "feature work") {
-				t.Errorf("draft prompt does not carry the branch diff:\n%s", msg)
-			}
-			return []agent.Event{{Kind: agent.EventMessage, Text: draft}, {Kind: agent.EventIdle}}
-		}},
-		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
-	})
-	t.Cleanup(func() { eng.Close() })
-	m.AttachEngine(eng)
+	message := "FD-001: rebase me\n\nAdds feat.go with the feature work."
 
 	m = pressMerge(t, m)
 	d, ok := m.Overlay.Top().(*commitMsgDialog)
 	if !ok {
 		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
-	if d.input.Value() != draft {
-		t.Fatalf("dialog prefill = %q, want the scribe draft %q", d.input.Value(), draft)
+	if d.input.Value() != "" {
+		t.Fatalf("dialog prefill = %q, want empty — the user writes the message", d.input.Value())
 	}
-	if m.drafting {
-		t.Error("drafting flag still set with the dialog open")
+	if m.mergePrep {
+		t.Error("mergePrep flag still set with the dialog open")
 	}
 
+	d.input.SetValue(message)
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
@@ -82,8 +83,8 @@ func TestSquashMergeFlowWithScribeDraft(t *testing.T) {
 	if landed, err := m.wt.Landed(ctx, &f); !landed || err != nil {
 		t.Errorf("Landed after merge = %v, %v; want true", landed, err)
 	}
-	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != draft {
-		t.Errorf("main HEAD message = %q, want %q", got, draft)
+	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != message {
+		t.Errorf("main HEAD message = %q, want %q", got, message)
 	}
 
 	// the landed row now cleans up via c — the squash-merged branch is not
@@ -103,22 +104,32 @@ func TestSquashMergeFlowWithScribeDraft(t *testing.T) {
 	}
 }
 
-func TestSquashMergeNoEngineFallsBackToTemplate(t *testing.T) {
+func TestSquashMergeEngineNeverDrafts(t *testing.T) {
 	m, root, _ := mergeFixture(t)
+	eng := engine.New(engine.Config{
+		Agent: &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+			t.Errorf("merge spawned an agent session (role %s) — the user writes the message", opts.Role)
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}},
+		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
+	})
+	t.Cleanup(func() { eng.Close() })
+	m.AttachEngine(eng)
 
 	m = pressMerge(t, m)
 	d, ok := m.Overlay.Top().(*commitMsgDialog)
 	if !ok {
 		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
-	if d.input.Value() != "FD-001: Rebase me" {
-		t.Fatalf("dialog prefill = %q, want the ID+title template", d.input.Value())
+	if d.input.Value() != "" {
+		t.Fatalf("dialog prefill = %q, want empty — the user writes the message", d.input.Value())
 	}
+	d.input.SetValue("FD-001: rebase me")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
 	}
-	if got := gitOut(t, root, "log", "-1", "--format=%s"); got != "FD-001: Rebase me" {
+	if got := gitOut(t, root, "log", "-1", "--format=%s"); got != "FD-001: rebase me" {
 		t.Errorf("main HEAD subject = %q", got)
 	}
 }
@@ -199,6 +210,7 @@ func TestSquashMergeCommitsDirtyBranchAsFinalCheckpoint(t *testing.T) {
 	if out := gitOut(t, wt, "status", "--porcelain"); out != "" {
 		t.Errorf("worktree still dirty after checkpoint:\n%s", out)
 	}
+	typeMessage(t, m, "FD-001: rework and extras")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
@@ -224,9 +236,9 @@ func TestSquashMergeRefusedDirtyMain(t *testing.T) {
 
 func TestSquashMergeReentryRefused(t *testing.T) {
 	m, _, _ := mergeFixture(t)
-	m.drafting = true
+	m.mergePrep = true
 	m = pressMerge(t, m)
-	if !m.notice.isErr || !strings.Contains(m.notice.text, "already drafting") {
+	if !m.notice.isErr || !strings.Contains(m.notice.text, "already preparing") {
 		t.Fatalf("notice = %q (err=%v), want a re-entry refusal", m.notice.text, m.notice.isErr)
 	}
 }
@@ -252,6 +264,7 @@ func TestAdvanceToDoneRoutesThroughMerge(t *testing.T) {
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
+	typeMessage(t, m, "FD-001: rebase me")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !strings.Contains(m.notice.text, "→ done") || m.notice.isErr {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
@@ -314,6 +327,7 @@ func TestAdvanceToDoneMergeConflictStaysAtVerify(t *testing.T) {
 	if m.Overlay.Top() == nil {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
+	typeMessage(t, m, "FD-001: rebase me")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "README.md") {
 		t.Fatalf("conflict notice = %q (err=%v)", m.notice.text, m.notice.isErr)
@@ -342,6 +356,7 @@ func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 	if m.Overlay.Top() == nil {
 		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
+	typeMessage(t, m, "FD-001: rebase me")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "README.md") || !strings.Contains(m.notice.text, "rebase (r)") {
 		t.Fatalf("conflict notice = %q (err=%v)", m.notice.text, m.notice.isErr)

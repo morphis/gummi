@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"errors"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -11,58 +10,41 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// draftTimeout bounds the scribe pass so a hung agent can't wedge the
-// merge flow; on expiry the editor opens with the plain template.
-const draftTimeout = 90 * time.Second
-
-// commitDraftMsg carries the drafted (or fallback) commit message for a
-// pending squash merge, or the guard error that stops the merge.
+// mergeReadyMsg carries a squash merge that passed its preconditions and
+// awaits the user's commit message, or the guard error that stops it.
 // thenDone marks a merge launched from the verify→done gate: landing it
 // also moves the feature to Done.
-type commitDraftMsg struct {
+type mergeReadyMsg struct {
 	f        domain.Feature
-	draft    string
 	thenDone bool
 	err      error
 }
 
-// startMergeDraft checks the merge preconditions off the render loop and
-// drafts the squash-commit message: a scribe pass over the branch diff
-// when an engine is wired, a plain "<ID>: <title>" template otherwise —
-// drafting is a convenience and never blocks the merge. Anything still
-// uncommitted in the worktree (including untracked files — new source
-// files are agent work like any other) is committed as a final
-// checkpoint first: gummi owns the branch's commits, and only committed
-// work merges.
-func (m *Shell) startMergeDraft(f domain.Feature, thenDone bool) tea.Cmd {
+// prepareMerge checks the merge preconditions off the render loop. The
+// landing commit's message is the user's to write — gummi never
+// generates it — so on success the shell opens an empty editor.
+// Anything still uncommitted in the worktree (including untracked files
+// — new source files are agent work like any other) is committed as a
+// final checkpoint first: gummi owns the branch's commits, and only
+// committed work merges.
+func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
-			return commitDraftMsg{err: err}
+			return mergeReadyMsg{err: err}
 		}
 		if dirty, err := m.wt.MainTrackedDirty(ctx); err != nil {
-			return commitDraftMsg{err: err}
+			return mergeReadyMsg{err: err}
 		} else if dirty {
-			return commitDraftMsg{err: errors.New("main checkout has uncommitted changes — commit or stash them before merging")}
+			return mergeReadyMsg{err: errors.New("main checkout has uncommitted changes — commit or stash them before merging")}
 		}
 		// stale-row safety: the board flag may predate an outside merge
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
-			return commitDraftMsg{err: err}
+			return mergeReadyMsg{err: err}
 		} else if landed {
-			return commitDraftMsg{err: errors.New(string(f.ID) + " already landed on main — press c to clean up")}
+			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on main — press c to clean up")}
 		}
-		var draft string
-		if m.engine != nil {
-			dctx, cancel := context.WithTimeout(ctx, draftTimeout)
-			defer cancel()
-			if d, err := m.engine.DraftCommitMessage(dctx, f); err == nil {
-				draft = d
-			}
-		}
-		if draft == "" {
-			draft = string(f.ID) + ": " + f.Title
-		}
-		return commitDraftMsg{f: f, draft: draft, thenDone: thenDone}
+		return mergeReadyMsg{f: f, thenDone: thenDone}
 	}
 }
 
@@ -101,7 +83,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 }
 
 // mergeThenDoneMsg asks the shell to run the merge flow as the
-// verify→done gate: draft the commit message, confirm it with the user,
+// verify→done gate: collect the commit message from the user,
 // squash-merge, and only then move the feature to Done.
 type mergeThenDoneMsg struct {
 	f domain.Feature

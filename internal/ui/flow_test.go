@@ -163,11 +163,13 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	}
 
 	// g at verify is the "done" decision: it routes through the squash
-	// merge — commit-message dialog, then land on main and move to done
+	// merge — commit-message dialog (the user writes the message), then
+	// land on main and move to done
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
+	typeMessage(t, m, "FD-001: land the feature")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.rows[0].F.Stage != domain.StageDone {
 		t.Fatalf("stage after merge = %s, want done (notice %q)", m.rows[0].F.Stage, m.notice.text)
@@ -254,6 +256,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
+	typeMessage(t, m, "BG-001: fix the login loop")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.rows[0].F.Stage != domain.StageDone {
 		t.Fatalf("stage after merge = %s, want done (notice %q)", m.rows[0].F.Stage, m.notice.text)

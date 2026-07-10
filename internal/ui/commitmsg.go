@@ -10,10 +10,10 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// commitMsgDialog reviews the squash-merge commit message before the
-// merge runs: it opens prefilled with the scribe's draft (or a plain
-// template when drafting was unavailable) and merges on ctrl+s, so a
-// plain enter stays free for editing multi-line messages.
+// commitMsgDialog collects the squash-merge commit message before the
+// merge runs: it opens empty — the landing commit's message is the
+// user's to write, never generated — and merges on ctrl+s, so a plain
+// enter stays free for editing multi-line messages.
 type commitMsgDialog struct {
 	feature  domain.FeatureID
 	branch   string
@@ -21,15 +21,13 @@ type commitMsgDialog struct {
 	onSubmit func(message string) tea.Cmd
 }
 
-func newCommitMsgDialog(f domain.Feature, draft string, onSubmit func(string) tea.Cmd) *commitMsgDialog {
+func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd) *commitMsgDialog {
 	in := textarea.New()
 	in.Placeholder = "commit message"
 	in.CharLimit = 4000
 	in.ShowLineNumbers = false
 	in.SetWidth(64)
 	in.SetHeight(8)
-	in.SetValue(draft)
-	in.MoveToEnd()
 	in.Focus()
 	return &commitMsgDialog{feature: f.ID, branch: f.BranchName(), input: in, onSubmit: onSubmit}
 }

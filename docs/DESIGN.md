@@ -127,7 +127,7 @@ Stage semantics:
   Deterministic floor, adaptive ceiling.
 - **Done** — you decide the feature is done: advancing out of Verify
   squash-merges the branch into main as a single commit whose message you
-  approve (drafted by a scribe pass over the branch diff). A branch that
+  write yourself (gummi never generates it). A branch that
   already landed some other way (manual merge, PR) skips straight to
   Done. gummi then offers worktree cleanup + spec archival.
 

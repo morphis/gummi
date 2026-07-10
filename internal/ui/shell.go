@@ -56,7 +56,7 @@ type Shell struct {
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
 
-	drafting bool // a squash-merge commit message is being drafted (one at a time)
+	mergePrep bool // a squash merge's preconditions are being checked (one at a time)
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -293,29 +293,29 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copilotQuotaTickMsg:
 		return m, m.fetchCopilotQuota()
 
-	case commitDraftMsg:
-		m.drafting = false
+	case mergeReadyMsg:
+		m.mergePrep = false
 		if msg.err != nil {
 			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 			return m, nil
 		}
 		m.notice = noticeMsg{}
 		f, thenDone := msg.f, msg.thenDone
-		m.Overlay.Push(newCommitMsgDialog(f, msg.draft, func(message string) tea.Cmd {
+		m.Overlay.Push(newCommitMsgDialog(f, func(message string) tea.Cmd {
 			return m.squashMergeFeature(f, message, thenDone)
 		}))
 		return m, nil
 
 	case mergeThenDoneMsg:
-		// the verify→done gate routes through the merge flow: reuse the
-		// draft pipeline, then land + transition on ctrl+s.
-		if m.drafting {
-			m.notice = noticeMsg{text: "already drafting a commit message — wait for it", isErr: true}
+		// the verify→done gate routes through the merge flow: collect the
+		// user's commit message, then land + transition on ctrl+s.
+		if m.mergePrep {
+			m.notice = noticeMsg{text: "already preparing a merge — wait for it", isErr: true}
 			return m, nil
 		}
-		m.drafting = true
-		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main — drafting commit message…"}
-		return m, m.startMergeDraft(msg.f, true)
+		m.mergePrep = true
+		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main…"}
+		return m, m.prepareMerge(msg.f, true)
 
 	case rebaseConflictMsg:
 		m.offerAgentRebase(msg)
@@ -624,13 +624,13 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — press c to clean up", isErr: true}
 				return nil
 			}
-			if m.drafting {
-				m.notice = noticeMsg{text: "already drafting a commit message — wait for it", isErr: true}
+			if m.mergePrep {
+				m.notice = noticeMsg{text: "already preparing a merge — wait for it", isErr: true}
 				return nil
 			}
-			m.drafting = true
-			m.notice = noticeMsg{text: string(r.F.ID) + ": drafting commit message…"}
-			return m.startMergeDraft(r.F, false)
+			m.mergePrep = true
+			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing merge…"}
+			return m.prepareMerge(r.F, false)
 		}
 	case "c":
 		if r, ok := m.selected(); ok {
@@ -1037,8 +1037,8 @@ func (m *Shell) statusView(w int) string {
 	if m.ingestRun != nil {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
 	}
-	if m.drafting {
-		pills = append(pills, statusbar.Pill{Text: m.spinner() + " drafting", Kind: statusbar.KindNeutral})
+	if m.mergePrep {
+		pills = append(pills, statusbar.Pill{Text: m.spinner() + " merging", Kind: statusbar.KindNeutral})
 	}
 	if n := m.inbox.len(); n > 0 {
 		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})
