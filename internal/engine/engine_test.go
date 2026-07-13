@@ -101,6 +101,28 @@ func waitState(t *testing.T, e *Engine, id domain.FeatureID, want SessionState) 
 	}
 }
 
+// waitActivity waits until the session's activity feed contains one of
+// the wanted substrings. Used to wait out the git epilogue: the state
+// flips Done before settle's checkpoint commit, so a test that tears
+// its repo down right at Done races the commit.
+func waitActivity(t *testing.T, e *Engine, id domain.FeatureID, wants ...string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		acts := strings.Join(e.Get(id).Snapshot().Activity, "\n")
+		for _, w := range wants {
+			if strings.Contains(acts, w) {
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%s activity never showed %q:\n%s", id, wants, acts)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // newEngine builds a single-slot engine (MaxActive 1); multi-slot tests
 // construct New directly.
 func newEngine(t *testing.T, ag agent.Agent) *Engine {

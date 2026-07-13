@@ -92,6 +92,11 @@ func kickoffAfterVerify(t *testing.T, seed func(store *state.Store, f domain.Fea
 		t.Fatal(err)
 	}
 	waitState(t, e, "FD-001", StateDone)
+	// Done flips before the checkpoint commit runs (settle follows
+	// finishRunning), so returning at Done lets TempDir cleanup race the
+	// git write. The spec file guarantees a dirty worktree, so the
+	// checkpoint always leaves an activity line to wait for.
+	waitActivity(t, e, "FD-001", "worktree committed", "checkpoint commit failed")
 	mu.Lock()
 	defer mu.Unlock()
 	return got
