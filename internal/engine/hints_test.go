@@ -47,10 +47,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"smallest change that resolves the bug", "bounce back to fix",
 		}},
 		{domain.StageVerify, domain.KindFeature, []string{
-			"runs without erroring", "SKIPPED", "VERDICT: fail",
+			"runs without erroring", "SKIPPED", "VERDICT: fail", "VERDICT: blocked",
 		}},
 		{domain.StageVerify, domain.KindBug, []string{
-			"no longer\nreproduces", "SKIPPED",
+			"no longer\nreproduces", "SKIPPED", "VERDICT: blocked",
 		}},
 	}
 	for _, tc := range cases {

@@ -24,6 +24,8 @@ func TestParseVerdict(t *testing.T) {
 		"the word verdict: pass appears mid-sentence only": verdictUnclear, // not on its own line
 		"rock build broken\nVERDICT: fail":                 verdictFail,
 		"VERDICT: FAIL":                                    verdictFail,
+		"no pip in this sandbox\nVERDICT: blocked":         verdictBlocked,
+		"VERDICT: BLOCKED":                                 verdictBlocked,
 	}
 	for in, want := range cases {
 		if got := parseVerdict(in); got != want {
@@ -192,6 +194,30 @@ func TestVerifyFailEscalates(t *testing.T) {
 	acts := nextActions(m.nextInputFor(m.rows[0]))
 	if keysOf(acts) != "s b g" {
 		t.Fatalf("fail suggestions = %q, want s b g (read evidence first)", keysOf(acts))
+	}
+}
+
+// The FD-004 moment: verify can't execute the plan (missing deps, no
+// live service). blocked escalates like fail, but the guidance steers
+// at the environment — the bounce is not among the suggestions.
+func TestVerifyBlockedEscalatesWithoutBounce(t *testing.T) {
+	m := runVerify(t, "No pytest in this workspace.\nVERDICT: blocked")
+	it := verifyGate(t, m)
+	if !it.Escalated {
+		t.Error("a blocked verify raised a clean gate instead of escalating")
+	}
+	if !strings.Contains(it.Text, "BLOCKED") {
+		t.Errorf("gate text does not say it is blocked: %q", it.Text)
+	}
+	if !strings.Contains(it.Text, "re-implementing won't help") {
+		t.Errorf("gate text does not warn off the bounce: %q", it.Text)
+	}
+	acts := nextActions(m.nextInputFor(m.rows[0]))
+	if keysOf(acts) != "s enter g" {
+		t.Fatalf("blocked suggestions = %q, want s enter g (no bounce)", keysOf(acts))
+	}
+	if !strings.Contains(acts[0].why, "environment") {
+		t.Errorf("blocked why does not name the environment: %q", acts[0].why)
 	}
 }
 

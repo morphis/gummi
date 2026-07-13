@@ -299,9 +299,16 @@ the verification plan explicitly allows skipping it. Make the call,
 record the evidence, and end your final message with a
 verdict on its own line, exactly one of:
   VERDICT: pass       — everything verified; ready to land on main
-  VERDICT: fail       — verification found real problems
-gummi parses this exact line; without it the stage escalates to the
-human as unclear.`
+  VERDICT: fail       — verification found real problems in this
+                        feature's changes
+  VERDICT: blocked    — the environment cannot execute the verification
+                        plan (missing dependencies, unreachable services,
+                        sandbox limits); name each missing prerequisite
+                        in the Verification section
+Never use blocked for real failures, and never use fail for environment
+gaps — a fail invites re-implementing, which cannot fix a missing
+dependency. gummi parses this exact line; without it the stage
+escalates to the human as unclear.`
 	if kind == domain.KindBug {
 		return strings.TrimSpace(`
 Stage: Verify (autonomous). gummi runs the check commands from the

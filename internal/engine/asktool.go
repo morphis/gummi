@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -183,8 +184,9 @@ func critiqueVerdictTool() agent.ToolDef {
 }
 
 // verifyVerdictTool is submit_verdict with the Verify stage's outcome
-// vocabulary: verification either held up (pass) or it didn't (fail) —
-// there is no reviewer to negotiate changes with.
+// vocabulary: verification held up (pass), it didn't (fail), or the
+// environment couldn't execute the plan at all (blocked) — there is no
+// reviewer to negotiate changes with.
 func verifyVerdictTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: verdictToolName,
@@ -194,9 +196,12 @@ func verifyVerdictTool() agent.ToolDef {
 			"type": "object",
 			"properties": map[string]any{
 				"verdict": map[string]any{
-					"type":        "string",
-					"enum":        []any{"pass", "fail"},
-					"description": "pass = everything verified, ready to land; fail = verification found real problems.",
+					"type": "string",
+					"enum": []any{"pass", "fail", "blocked"},
+					"description": "pass = everything verified, ready to land; fail = verification " +
+						"found real problems in this feature's changes; blocked = the environment " +
+						"cannot execute the verification plan — name each missing prerequisite in " +
+						"your summary and in the artifact.",
 				},
 				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
 			},
@@ -257,8 +262,9 @@ of writing %% lines yourself.`
 (verdict "pass" or "changes") to drive gummi's review loop, instead of
 writing a VERDICT: line.`
 	case domain.StageVerify:
-		return `Call the submit_verdict tool exactly once at the end (verdict "pass"
-or "fail") instead of writing a VERDICT: line — gummi gates on it.`
+		return `Call the submit_verdict tool exactly once at the end (verdict "pass",
+"fail", or "blocked") instead of writing a VERDICT: line — gummi gates
+on it.`
 	default:
 		return ""
 	}
@@ -410,6 +416,23 @@ func (e *Engine) handleResolveAnnotation(s *Session, tc *agent.ToolCall) {
 	e.resolveNow(s, tc.ID, fmt.Sprintf("comment [%d] resolved — %d still open", a.ID, open))
 }
 
+// allowedVerdicts is the verdict vocabulary of the session's contract:
+// critique and review negotiate changes; verify reports pass/fail and
+// may declare the environment unable to run the plan (blocked). Scoping
+// per session keeps one stage's vocabulary from leaking into another's
+// loop — a review "blocked" or a verify "changes" is a contract
+// violation, bounced back to the agent to retry.
+func allowedVerdicts(s *Session) []string {
+	switch {
+	case s.Critique:
+		return []string{"pass", "changes"}
+	case s.Feature.Stage == domain.StageVerify:
+		return []string{"pass", "fail", "blocked"}
+	default:
+		return []string{"pass", "changes", "fail"}
+	}
+}
+
 // handleVerdict records a review verdict and resolves immediately. The
 // review loop prefers this structured verdict over parsing prose.
 func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
@@ -422,8 +445,9 @@ func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
 		return
 	}
 	verdict := strings.ToLower(strings.TrimSpace(v.Verdict))
-	if verdict != "pass" && verdict != "changes" && verdict != "fail" {
-		e.resolveNow(s, tc.ID, `verdict must be "pass", "changes", or "fail"`)
+	allowed := allowedVerdicts(s)
+	if !slices.Contains(allowed, verdict) {
+		e.resolveNow(s, tc.ID, `verdict must be one of "`+strings.Join(allowed, `", "`)+`"`)
 		return
 	}
 	s.setVerdict(verdict)

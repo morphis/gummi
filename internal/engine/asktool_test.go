@@ -339,8 +339,8 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 	}
 }
 
-// The verify stage gets its own submit_verdict flavor (pass|fail) and a
-// "fail" verdict is recorded like any other.
+// The verify stage gets its own submit_verdict flavor
+// (pass|fail|blocked) and a "fail" verdict is recorded like any other.
 func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
 	tools := stageTools(domain.StageVerify, flavorStage)
 	if len(tools) != 1 || tools[0].Name != "submit_verdict" {
@@ -368,13 +368,57 @@ func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
 	}
 }
 
+// A verify agent may declare the environment unable to run the plan;
+// the blocked verdict is recorded like any other.
+func TestVerifyVerdictBlockedRecorded(t *testing.T) {
+	args := json.RawMessage(`{"verdict":"blocked","summary":"no pytest in this workspace"}`)
+	ag := toolCallFake("submit_verdict", args)
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify", domain.StageVerify)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	if got := e.Get("FD-001").Snapshot().Verdict; got != "blocked" {
+		t.Errorf("verdict = %q, want blocked", got)
+	}
+}
+
+// blocked belongs to verify's vocabulary only: a review agent
+// submitting it is bounced (verdict stays empty) rather than recorded,
+// so the review loop never sees a verdict outside its contract.
+func TestReviewVerdictRejectsBlocked(t *testing.T) {
+	args := json.RawMessage(`{"verdict":"blocked","summary":"cannot run this"}`)
+	ag := toolCallFake("submit_verdict", args)
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "review", domain.StageReview)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	if got := e.Get("FD-001").Snapshot().Verdict; got != "" {
+		t.Errorf("review recorded out-of-vocabulary verdict %q, want rejection", got)
+	}
+}
+
 // The verify hint carries the verdict contract and the no-dangling-
 // questions rule for both kinds, so convention backends (no client
 // tools) still produce a parseable outcome.
 func TestVerifyHintCarriesVerdictContract(t *testing.T) {
 	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
 		h := verifyHint(kind)
-		if !strings.Contains(h, "VERDICT: pass") || !strings.Contains(h, "VERDICT: fail") {
+		if !strings.Contains(h, "VERDICT: pass") || !strings.Contains(h, "VERDICT: fail") ||
+			!strings.Contains(h, "VERDICT: blocked") {
 			t.Errorf("%s verify hint missing the verdict contract:\n%s", kind, h)
 		}
 		if !strings.Contains(h, "never end with one") {

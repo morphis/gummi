@@ -217,6 +217,17 @@ func nextActions(in nextInput) []nextAction {
 				{"b", "bounce to " + string(work), "if the failure is the implementation's fault"},
 			}
 		}
+		// blocked: the environment can't run the plan, so rework can't
+		// help — steer at the environment, not the bounce. (Session gone
+		// drops this to the fail arm below, same degradation as fail; the
+		// inbox gate text still says BLOCKED.)
+		if in.verdict == verdictBlocked {
+			return []nextAction{
+				{"s", "read the blockers", "verify is blocked on the environment — the missing prerequisites are in the " + artifactNoun(in.kind)},
+				{"enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"},
+				{"g", "land on main", "only if you verified it by hand — verify never proved this build"},
+			}
+		}
 		// a verify gate carries a verdict (or, session gone, at least the
 		// escalation flag): recommend landing only on a clean pass.
 		if in.verdict == verdictFail || in.verdict == verdictChanges ||

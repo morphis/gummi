@@ -31,9 +31,10 @@ const (
 	verdictPass
 	verdictChanges // review/critique: findings to bounce back
 	verdictFail    // verify: verification found real problems
+	verdictBlocked // verify: the environment can't run the plan
 )
 
-var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes|fail)\s*$`)
+var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes|fail|blocked)\s*$`)
 
 // verdictFromTool maps a submit_verdict tool result to a reviewVerdict.
 func verdictFromTool(v string) reviewVerdict {
@@ -44,6 +45,8 @@ func verdictFromTool(v string) reviewVerdict {
 		return verdictChanges
 	case "fail":
 		return verdictFail
+	case "blocked":
+		return verdictBlocked
 	default:
 		return verdictUnclear
 	}
@@ -62,6 +65,8 @@ func parseVerdict(text string) reviewVerdict {
 		return verdictChanges
 	case "fail":
 		return verdictFail
+	case "blocked":
+		return verdictBlocked
 	}
 	return verdictUnclear
 }
@@ -140,6 +145,9 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	switch sessionVerdict(s.Snapshot()) {
 	case verdictPass:
 		m.raiseAttention(id, attnGate, "verify passed — review & land on main")
+	case verdictBlocked:
+		m.raiseEscalation(id, attnGate, "verify BLOCKED — the environment can't run the verification plan; "+
+			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
 	case verdictFail, verdictChanges:
 		m.raiseEscalation(id, attnGate, "verify FAILED — read the evidence and bounce or overrule")
 	default:
