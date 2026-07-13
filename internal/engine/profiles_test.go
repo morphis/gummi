@@ -85,9 +85,9 @@ func TestResolveRoleFallback(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 
-	// premium has no scribe role; verify (scribe) falls back to Model
+	// thrifty has no reviewer role; verify (reviewer) falls back to Model
 	f := feature(3, "verify", domain.StageVerify)
-	f.Profile = "premium"
+	f.Profile = "thrifty"
 	withWorktree(t, wt, f)
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)
@@ -95,6 +95,33 @@ func TestResolveRoleFallback(t *testing.T) {
 	waitState(t, e, "FD-003", StateDone)
 	if got := rec.opts(); got.Model != "fallback-model" {
 		t.Errorf("uncovered role model = %q, want the fallback", got.Model)
+	}
+}
+
+// Verify is reviewer work (adversarial judgment gating the landing) —
+// pin the mapping and that a profile's reviewer model carries over.
+func TestVerifyStageUsesReviewerRole(t *testing.T) {
+	if role, ok := roleForStage(domain.StageVerify); !ok || role != agent.RoleReviewer {
+		t.Fatalf("roleForStage(verify) = %s/%v, want reviewer", role, ok)
+	}
+
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{
+		Agent: rec, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
+	})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(5, "verify", domain.StageVerify)
+	f.Profile = "premium"
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-005", StateDone)
+	if got := rec.opts(); got.Model != "gpt-5-codex" || got.Role != agent.RoleReviewer {
+		t.Errorf("premium verify = %q (role %s), want gpt-5-codex reviewer", got.Model, got.Role)
 	}
 }
 

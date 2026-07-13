@@ -22,7 +22,10 @@ const (
 // roleForStage maps a workflow stage to the agent role that performs it
 // (DESIGN §3). The bug workflow's design-side stages (triage, diagnose)
 // are architect work like brainstorm/spec; fix is implementer work like
-// implement. Stages with no agent action return ok=false.
+// implement. Verify is reviewer work: adversarial judgment of the built
+// artifact, and the verdict it produces is the landing gate — the
+// scribe tier is reserved for the cheap one-shot passes (estimation,
+// check discovery). Stages with no agent action return ok=false.
 func roleForStage(s domain.Stage) (agent.Role, bool) {
 	switch s {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
@@ -30,10 +33,8 @@ func roleForStage(s domain.Stage) (agent.Role, bool) {
 		return agent.RoleArchitect, true
 	case domain.StageImplement, domain.StageFix:
 		return agent.RoleImplementer, true
-	case domain.StageReview:
+	case domain.StageReview, domain.StageVerify:
 		return agent.RoleReviewer, true
-	case domain.StageVerify:
-		return agent.RoleScribe, true
 	default:
 		return "", false
 	}

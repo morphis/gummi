@@ -437,7 +437,7 @@ func (e *Engine) startAutonomous(s *Session) {
 
 // sendKickoff delivers the stage kickoff. For the Verify stage in
 // allow-all mode it first runs the artifact's gummi-checks commands
-// gummi-side and prepends their results, so the scribe only does the
+// gummi-side and prepends their results, so the verify agent only does the
 // spec's feature-specific live checks and the write-up — no frontier
 // model shepherding `go test` output.
 func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
@@ -477,8 +477,8 @@ const verifyStageTimeout = 10 * time.Minute
 
 // runSpecChecks executes the artifact's gummi-checks commands in the
 // feature's worktree, records each outcome in the activity feed, and
-// returns a compact summary to hand the scribe (empty when the artifact
-// carries no checks or can't be read — the scribe then discovers and
+// returns a compact summary to hand the verify agent (empty when the artifact
+// carries no checks or can't be read — the verify agent then discovers and
 // runs them itself, per its stage hint).
 func (e *Engine) runSpecChecks(s *Session) string {
 	raw, err := os.ReadFile(s.SpecPath()) //nolint:gosec // gummi-owned spec path

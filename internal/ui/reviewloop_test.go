@@ -48,6 +48,13 @@ func verdictAgent(reply func(opts agent.SessionOpts) string) *agent.Fake {
 
 func isReview(opts agent.SessionOpts) bool { return opts.Role == agent.RoleReviewer }
 
+// isVerify spots the verify session by its stage hint — review and
+// verify share the reviewer role, so the role alone no longer
+// distinguishes them.
+func isVerify(opts agent.SessionOpts) bool {
+	return strings.Contains(strings.Join(opts.SystemHints, "\n"), "Stage: Verify")
+}
+
 // advanceTo drives g until the feature reaches the target stage.
 func advanceTo(t *testing.T, m *Shell, target domain.Stage) *Shell {
 	t.Helper()
@@ -133,11 +140,11 @@ func TestReviewUnclearVerdictEscalates(t *testing.T) {
 func runVerify(t *testing.T, verifyReply string) *Shell {
 	t.Helper()
 	ag := verdictAgent(func(opts agent.SessionOpts) string {
-		switch opts.Role {
-		case agent.RoleReviewer:
-			return "No issues.\nVERDICT: pass"
-		case agent.RoleScribe: // the verify stage's role
+		switch {
+		case isVerify(opts): // before isReview: verify runs as reviewer too
 			return verifyReply
+		case isReview(opts):
+			return "No issues.\nVERDICT: pass"
 		default:
 			return "done"
 		}
