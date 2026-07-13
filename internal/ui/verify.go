@@ -38,7 +38,11 @@ func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
 		m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 		return nil
 	}
-	checks, _ := spec.ParseChecks(string(raw))
+	checks, _, err := spec.ParseChecks(string(raw))
+	if err != nil {
+		m.notice = noticeMsg{text: sanitize(err.Error()) + " — fix the block in the " + artifactNoun(f.Kind), isErr: true}
+		return nil
+	}
 	if len(checks) == 0 {
 		m.notice = noticeMsg{text: "no gummi-checks block in the " + artifactNoun(f.Kind) +
 			" — discovery runs at approval, or add the block by hand"}
@@ -113,6 +117,26 @@ func (d *verifyDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString("\n" + s.KeyHint.Render("enter") + s.KeyLabel.Render(" run") +
 		s.Faint.Render(" · ") + s.KeyHint.Render("esc") + s.KeyLabel.Render(" cancel"))
 	return s.DialogFrame.Render(b.String())
+}
+
+// baselineNotice summarizes a baseline run: quiet on all-green, loud on
+// a failing command — at approval the block is still the architect's to
+// fix, and a failure here is a bad command or pre-existing breakage,
+// never the feature's fault.
+func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
+	for _, r := range results {
+		if r.OK {
+			continue
+		}
+		reason := fmt.Sprintf("FAILS on the fresh branch (exit %d) — pre-existing failure or wrong command", r.ExitCode)
+		if r.ExitCode == -1 {
+			reason = "could not run — malformed command"
+		}
+		return noticeMsg{isErr: true, text: fmt.Sprintf(
+			"%s: baseline — check '%s' %s; fix the gummi-checks block or it reads FAIL (pre-existing) at verify",
+			id, sanitize(r.Name), reason)}
+	}
+	return noticeMsg{text: fmt.Sprintf("%s: baseline — all %d repo check(s) pass on the fresh branch", id, len(results))}
 }
 
 // verifySummary renders the last verify results for the dashboard.

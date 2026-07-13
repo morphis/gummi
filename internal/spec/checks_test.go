@@ -13,9 +13,12 @@ func TestParseChecks(t *testing.T) {
 		"- cmd: go test ./...\n" + // name defaults to cmd
 		"- name: empty\n" + // no cmd: dropped
 		"```\n\nprose after\n"
-	checks, found := ParseChecks(doc)
+	checks, found, err := ParseChecks(doc)
 	if !found {
 		t.Fatal("block not found")
+	}
+	if err != nil {
+		t.Fatalf("well-formed block errored: %v", err)
 	}
 	if len(checks) != 2 {
 		t.Fatalf("checks = %+v", checks)
@@ -29,19 +32,22 @@ func TestParseChecks(t *testing.T) {
 }
 
 func TestParseChecksAbsent(t *testing.T) {
-	if _, found := ParseChecks("# spec\n\n## Verification plan\n"); found {
+	if _, found, _ := ParseChecks("# spec\n\n## Verification plan\n"); found {
 		t.Error("found a block in a doc without one")
 	}
 }
 
 func TestParseChecksMalformedYAMLStillFound(t *testing.T) {
 	doc := "```gummi-checks\n\t: not yaml [\n```\n"
-	checks, found := ParseChecks(doc)
+	checks, found, err := ParseChecks(doc)
 	if !found {
 		t.Error("a malformed block still exists — found should be true")
 	}
 	if len(checks) != 0 {
 		t.Errorf("malformed block yielded checks: %+v", checks)
+	}
+	if err == nil {
+		t.Error("malformed YAML should surface an error, not read as empty")
 	}
 }
 
@@ -50,7 +56,7 @@ func TestRenderParseRoundTrip(t *testing.T) {
 		{Name: "build", Cmd: "go build ./..."},
 		{Name: "tricky", Cmd: `sh -c "echo 'a: b' && exit 1"`},
 	}
-	out, found := ParseChecks(RenderChecks(in))
+	out, found, _ := ParseChecks(RenderChecks(in))
 	if !found || len(out) != 2 {
 		t.Fatalf("round trip lost checks: %+v", out)
 	}
@@ -73,7 +79,7 @@ func TestUpsertChecksInsertsUnderVerification(t *testing.T) {
 	if idx == -1 || blk == -1 || blk < idx {
 		t.Fatalf("block not inserted under the Verification section:\n%s", out)
 	}
-	checks, found := ParseChecks(out)
+	checks, found, _ := ParseChecks(out)
 	if !found || len(checks) != 1 || checks[0].Cmd != "go test ./..." {
 		t.Fatalf("parse-back = %+v (found=%v)", checks, found)
 	}
@@ -89,7 +95,7 @@ func TestUpsertChecksBugReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checks, found := ParseChecks(out); !found || len(checks) != 1 {
+	if checks, found, _ := ParseChecks(out); !found || len(checks) != 1 {
 		t.Fatalf("parse-back = %+v (found=%v)", checks, found)
 	}
 }
@@ -107,7 +113,7 @@ func TestUpsertChecksReplacesExisting(t *testing.T) {
 	if strings.Count(out, "```gummi-checks") != 1 {
 		t.Fatalf("upsert duplicated the block:\n%s", out)
 	}
-	checks, _ := ParseChecks(out)
+	checks, _, _ := ParseChecks(out)
 	if len(checks) != 1 || checks[0].Name != "new" {
 		t.Errorf("old block not replaced: %+v", checks)
 	}

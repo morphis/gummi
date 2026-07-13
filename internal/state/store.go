@@ -118,6 +118,21 @@ CREATE TABLE IF NOT EXISTS stage_spend (
 	updated_at  TEXT    NOT NULL,
 	PRIMARY KEY (feature_id, stage, model)
 );
+
+-- Baseline outcome of the artifact's gummi-checks, captured once on
+-- the fresh worktree at approval, before any feature changes. Verify
+-- diffs live results against it so pre-existing failures read as
+-- FAIL (pre-existing) and only regressions count against the feature.
+CREATE TABLE IF NOT EXISTS check_baseline (
+	feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	name       TEXT    NOT NULL,
+	cmd        TEXT    NOT NULL,
+	ok         INTEGER NOT NULL,
+	exit_code  INTEGER NOT NULL DEFAULT 0,
+	output     TEXT    NOT NULL DEFAULT '',
+	ran_at     TEXT    NOT NULL,
+	PRIMARY KEY (feature_id, name)
+);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.
@@ -359,6 +374,71 @@ func stageOrder(st domain.Stage) int {
 		}
 	}
 	return len(domain.Stages)
+}
+
+// CheckResult is one gummi-check outcome in a feature's baseline: how
+// the command fared on the fresh worktree before any feature changes.
+type CheckResult struct {
+	Name     string
+	Cmd      string
+	OK       bool
+	ExitCode int
+	Output   string
+	RanAt    time.Time
+}
+
+// SetCheckBaseline replaces the feature's whole check baseline in one
+// transaction (delete + insert), so a re-baseline never leaves stale
+// rows behind renamed or removed checks.
+func (s *Store) SetCheckBaseline(ctx context.Context, id domain.FeatureID, results []CheckResult) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("baselining checks for %s: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM check_baseline WHERE feature_id = ?`, string(id)); err != nil {
+		return fmt.Errorf("baselining checks for %s: %w", id, err)
+	}
+	for _, r := range results {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO check_baseline (feature_id, name, cmd, ok, exit_code, output, ran_at)
+			VALUES (?,?,?,?,?,?,?)`,
+			string(id), r.Name, r.Cmd, r.OK, r.ExitCode, r.Output,
+			r.RanAt.UTC().Format(timeFmt)); err != nil {
+			return fmt.Errorf("baselining check %s for %s: %w", r.Name, id, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("baselining checks for %s: %w", id, err)
+	}
+	return nil
+}
+
+// CheckBaseline returns the feature's check baseline, empty when none
+// was ever taken (older features, guarded mode) — callers degrade to
+// treating every failure as live.
+func (s *Store) CheckBaseline(ctx context.Context, id domain.FeatureID) ([]CheckResult, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT name, cmd, ok, exit_code, output, ran_at
+		FROM check_baseline WHERE feature_id = ? ORDER BY name`, string(id))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CheckResult
+	for rows.Next() {
+		var r CheckResult
+		var ranAt string
+		if err := rows.Scan(&r.Name, &r.Cmd, &r.OK, &r.ExitCode, &r.Output, &ranAt); err != nil {
+			return nil, err
+		}
+		if r.RanAt, err = time.Parse(timeFmt, ranAt); err != nil {
+			return nil, fmt.Errorf("corrupt check_baseline timestamp %q: %w", ranAt, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // GetFeature loads one feature by ID.

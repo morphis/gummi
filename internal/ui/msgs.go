@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -30,6 +31,7 @@ type featureRow struct {
 	// next block can explain why g would bounce without doing IO per frame
 	OpenSpecQs       int // open user %% threads in the artifact
 	OpenDiffComments int // unresolved diff annotations
+	BaselineFails    int // gummi-checks already failing on the fresh branch
 }
 
 // rowsMsg delivers a fresh load of the board content.
@@ -81,6 +83,13 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 		row.OpenSpecQs = m.openQuestionsBlockingGate(ctx, f)
 		row.OpenDiffComments = m.openDiffCommentsBlockingGate(ctx, f.ID)
+		if bl, err := m.store.CheckBaseline(ctx, f.ID); err == nil {
+			for _, r := range bl {
+				if !r.OK {
+					row.BaselineFails++
+				}
+			}
+		}
 		rows = append(rows, row)
 	}
 	return rowsMsg{rows: rows}
@@ -295,11 +304,27 @@ type worktreeEnteredMsg struct {
 	estimate bool // run the scribe envelope pass
 }
 
+// checksDiscoveredMsg follows the check auto-discovery pass, whether or
+// not it wrote anything: the shell chains the baseline run off it, and
+// a hand-authored block (discovery no-ops) deserves a baseline too.
+type checksDiscoveredMsg struct {
+	id domain.FeatureID
+	n  int // checks discovered; 0 when the block pre-existed or discovery failed
+}
+
+// baselineDoneMsg carries the baseline run's outcome back to the shell.
+type baselineDoneMsg struct {
+	id      domain.FeatureID
+	results []verify.Result
+	err     error // malformed block or run/persist failure
+}
+
 // discoverChecks runs a one-shot scribe pass that surveys the fresh
 // worktree and records the repo's build/test/lint commands in the
 // artifact's Verification section as a gummi-checks block (skipped when
 // a block is already there). Best-effort: on failure the block stays
-// absent and the Verify agent discovers the commands itself.
+// absent and the Verify agent discovers the commands itself. Always
+// resolves to checksDiscoveredMsg so the baseline run chains behind it.
 func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
 	if m.engine == nil {
 		return nil
@@ -308,14 +333,33 @@ func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
-			return nil
+			return checksDiscoveredMsg{id: id}
 		}
 		checks, err := m.engine.DiscoverChecks(ctx, f)
-		if err != nil || len(checks) == 0 {
-			return nil
+		if err != nil {
+			return checksDiscoveredMsg{id: id}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check(s) into the %s",
-			id, len(checks), artifactNoun(f.Kind))}
+		return checksDiscoveredMsg{id: id, n: len(checks)}
+	}
+}
+
+// baselineChecks runs the artifact's gummi-checks once on the fresh
+// worktree and persists the outcomes as the feature's baseline, so a
+// malformed or already-failing command surfaces now — at approval,
+// while the architect can still fix the block — instead of reading as
+// the feature's fault at verify.
+func (m *Shell) baselineChecks(id domain.FeatureID) tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return baselineDoneMsg{id: id, err: err}
+		}
+		results, err := m.engine.BaselineChecks(ctx, f)
+		return baselineDoneMsg{id: id, results: results, err: err}
 	}
 }
 

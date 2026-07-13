@@ -63,8 +63,9 @@ type Shell struct {
 	chat         *chatPane // non-nil while attached to an interactive session
 	inbox        *inbox    // needs-attention queue
 	checks       map[domain.FeatureID][]verify.Result
-	reviewRounds map[domain.FeatureID]int // automatic review→fix→review counter
-	planRounds   map[domain.FeatureID]int // automatic plan→critique→replan counter
+	baselining   map[domain.FeatureID]bool // a baseline check run is in flight
+	reviewRounds map[domain.FeatureID]int  // automatic review→fix→review counter
+	planRounds   map[domain.FeatureID]int  // automatic plan→critique→replan counter
 	profileNames []string                 // profile names for the new-feature form
 	envelope     int                      // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier         // bell/desktop hook for needs-attention events
@@ -92,6 +93,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		now:          time.Now,
 		inbox:        newInbox(),
 		checks:       map[domain.FeatureID][]verify.Result{},
+		baselining:   map[domain.FeatureID]bool{},
 		reviewRounds: map[domain.FeatureID]int{},
 		planRounds:   map[domain.FeatureID]int{},
 		copilotHint:  true,
@@ -336,6 +338,30 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.scribeEstimate(msg.id))
 		}
 		return m, tea.Batch(cmds...)
+
+	case checksDiscoveredMsg:
+		// discovery settled (wrote a block, found one already there, or
+		// failed): baseline whatever block the artifact now carries.
+		if msg.n > 0 {
+			m.notice = noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check(s) into the %s",
+				msg.id, msg.n, artifactNoun(msg.id.Kind()))}
+		}
+		m.baselining[msg.id] = true
+		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
+
+	case baselineDoneMsg:
+		delete(m.baselining, msg.id)
+		switch {
+		case msg.err != nil:
+			m.notice = noticeMsg{text: string(msg.id) + ": gummi-checks baseline failed — " + sanitize(msg.err.Error()), isErr: true}
+		case len(msg.results) > 0:
+			// the results live in the store (BaselineFails via loadRows), not
+			// in m.checks — that map is manual verify runs, and a baseline
+			// bleeding into it would mislabel the dashboard and the
+			// failed-check guidance at verify.
+			m.notice = baselineNotice(msg.id, msg.results)
+		}
+		return m, m.loadRows
 
 	case specLoadedMsg:
 		if msg.err != nil {

@@ -1,14 +1,17 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -60,6 +63,100 @@ func TestVerifyStageRunsChecksGummiSide(t *testing.T) {
 	acts := strings.Join(e.Get("FD-001").Snapshot().Activity, "\n")
 	if !strings.Contains(acts, "check pass-check: pass") || !strings.Contains(acts, "check fail-check: FAIL") {
 		t.Errorf("check outcomes not in activity:\n%s", acts)
+	}
+}
+
+// kickoffAfterVerify runs the Verify stage against the given checks
+// block and returns the kickoff message the verify agent received.
+func kickoffAfterVerify(t *testing.T, seed func(store *state.Store, f domain.Feature), checksYAML string) string {
+	t.Helper()
+	ws, store, wt := newRepo(t)
+	var mu sync.Mutex
+	var got string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		got = msg
+		mu.Unlock()
+		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify me", domain.StageVerify)
+	if seed != nil {
+		seed(store, f)
+	}
+	withWorktree(t, wt, f)
+	writeSpecChecks(t, wt, f, checksYAML)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+	mu.Lock()
+	defer mu.Unlock()
+	return got
+}
+
+// A check that already failed at baseline (same command) is labeled
+// pre-existing, and the kickoff tells the agent only regressions count.
+func TestVerifyKickoffLabelsPreexistingFail(t *testing.T) {
+	got := kickoffAfterVerify(t, func(store *state.Store, f domain.Feature) {
+		ctx := context.Background()
+		if err := store.CreateFeature(ctx, &f); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetCheckBaseline(ctx, f.ID, []state.CheckResult{
+			{Name: "fail-check", Cmd: "echo boom; exit 3", OK: false, ExitCode: 3, RanAt: time.Now()},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}, "- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
+
+	if !strings.Contains(got, "fail-check: FAIL (pre-existing, exit 3)") {
+		t.Errorf("kickoff missing the pre-existing label:\n%s", got)
+	}
+	if !strings.Contains(got, "only regressions count") {
+		t.Errorf("kickoff missing the only-regressions rule:\n%s", got)
+	}
+}
+
+// A check that passed at baseline and fails now is a regression: the
+// plain FAIL label, no pre-existing softening.
+func TestVerifyKickoffRegressionWhenBaselinePassed(t *testing.T) {
+	got := kickoffAfterVerify(t, func(store *state.Store, f domain.Feature) {
+		ctx := context.Background()
+		if err := store.CreateFeature(ctx, &f); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetCheckBaseline(ctx, f.ID, []state.CheckResult{
+			{Name: "fail-check", Cmd: "echo boom; exit 3", OK: true, RanAt: time.Now()},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}, "- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
+
+	if !strings.Contains(got, "fail-check: FAIL (exit 3)") || strings.Contains(got, "pre-existing") {
+		t.Errorf("regression must carry the plain FAIL label:\n%s", got)
+	}
+}
+
+// A baseline row for an edited command says nothing about the new one:
+// the old run's failure must not soften a live failure.
+func TestVerifyKickoffChangedCmdIgnoresBaseline(t *testing.T) {
+	got := kickoffAfterVerify(t, func(store *state.Store, f domain.Feature) {
+		ctx := context.Background()
+		if err := store.CreateFeature(ctx, &f); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetCheckBaseline(ctx, f.ID, []state.CheckResult{
+			{Name: "fail-check", Cmd: "some old command", OK: false, ExitCode: 1, RanAt: time.Now()},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}, "- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
+
+	if !strings.Contains(got, "fail-check: FAIL (exit 3)") || strings.Contains(got, "pre-existing") {
+		t.Errorf("edited command must not inherit the old baseline:\n%s", got)
 	}
 }
 

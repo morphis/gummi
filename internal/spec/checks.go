@@ -29,16 +29,18 @@ var checksFenceRe = regexp.MustCompile("(?s)```gummi-checks\\s*\\n(.*?)```")
 // ParseChecks extracts the artifact's gummi-checks block. found reports
 // whether a block exists at all — even one that yields no usable checks —
 // so callers can distinguish "never discovered" from "present but empty".
+// err is non-nil only when a block exists but its YAML does not parse:
+// a malformed block is a defect worth surfacing, not an empty one.
 // Entries without a cmd are dropped; a missing name defaults to the cmd,
 // mirroring how checks are displayed.
-func ParseChecks(content string) (checks []domain.Check, found bool) {
+func ParseChecks(content string) (checks []domain.Check, found bool, err error) {
 	m := checksFenceRe.FindStringSubmatch(content)
 	if m == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	var raw []domain.Check
 	if err := yaml.Unmarshal([]byte(m[1]), &raw); err != nil {
-		return nil, true
+		return nil, true, fmt.Errorf("gummi-checks block does not parse: %w", err)
 	}
 	for _, c := range raw {
 		if strings.TrimSpace(c.Cmd) == "" {
@@ -49,7 +51,7 @@ func ParseChecks(content string) (checks []domain.Check, found bool) {
 		}
 		checks = append(checks, c)
 	}
-	return checks, true
+	return checks, true, nil
 }
 
 // RenderChecks renders the canonical fenced block for a check list.

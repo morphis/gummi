@@ -54,7 +54,7 @@ func TestDiscoverChecksWritesBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, found := spec.ParseChecks(string(raw))
+	got, found, _ := spec.ParseChecks(string(raw))
 	if !found || len(got) != 1 || got[0].Cmd != "go test ./..." {
 		t.Fatalf("spec block = %+v (found=%v):\n%s", got, found, raw)
 	}
@@ -88,7 +88,7 @@ func TestDiscoverChecksSkipsWhenBlockExists(t *testing.T) {
 	if n := atomic.LoadInt32(sessions); n != 0 {
 		t.Errorf("discovery spawned %d session(s) despite an existing block", n)
 	}
-	got, _ := spec.ParseChecks(readFile(t, p))
+	got, _, _ := spec.ParseChecks(readFile(t, p))
 	if len(got) != 1 || got[0].Name != "mine" {
 		t.Errorf("hand-authored block clobbered: %+v", got)
 	}
@@ -100,7 +100,7 @@ func TestDiscoverChecksUnusableReplyIsSoft(t *testing.T) {
 	if err != nil || checks != nil {
 		t.Fatalf("unusable reply should be (nil, nil), got (%+v, %v)", checks, err)
 	}
-	if _, found := spec.ParseChecks(readFile(t, p)); found {
+	if _, found, _ := spec.ParseChecks(readFile(t, p)); found {
 		t.Error("unusable reply still wrote a block")
 	}
 }

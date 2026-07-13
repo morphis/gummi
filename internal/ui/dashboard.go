@@ -74,6 +74,10 @@ func (m *Shell) dashboardView(w, h int) string {
 			line(l)
 		}
 	}
+	if r.BaselineFails > 0 && !r.Landed {
+		line(s.Muted.Render("baseline ") + s.Warning.Render(
+			fmt.Sprintf("%d check(s) already failing on the fresh branch — verify labels them pre-existing", r.BaselineFails)))
+	}
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
 

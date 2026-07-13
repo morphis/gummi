@@ -49,7 +49,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		return nil, err
 	}
 	if raw, err := os.ReadFile(specPath); err == nil { //nolint:gosec // gummi-owned spec path
-		if _, found := spec.ParseChecks(string(raw)); found {
+		if _, found, _ := spec.ParseChecks(string(raw)); found {
 			return nil, nil
 		}
 	}
@@ -96,7 +96,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 // artifact's Verification section, re-checking under the file lock that
 // no block landed meanwhile (an agent session writes the same file).
 func (e *Engine) recordChecks(specPath, reply string) ([]domain.Check, error) {
-	checks, _ := spec.ParseChecks(reply)
+	checks, _, _ := spec.ParseChecks(reply)
 	if len(checks) == 0 {
 		return nil, nil
 	}
@@ -106,7 +106,7 @@ func (e *Engine) recordChecks(specPath, reply string) ([]domain.Check, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, found := spec.ParseChecks(string(raw)); found {
+	if _, found, _ := spec.ParseChecks(string(raw)); found {
 		return nil, nil
 	}
 	out, err := spec.UpsertChecks(string(raw), checks)

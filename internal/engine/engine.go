@@ -485,7 +485,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	if err != nil {
 		return ""
 	}
-	checks, _ := spec.ParseChecks(string(raw))
+	checks, _, _ := spec.ParseChecks(string(raw))
 	if len(checks) == 0 {
 		return ""
 	}
@@ -494,18 +494,41 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	defer cancel()
 	results := verify.Run(ctx, workDir, checks)
 
+	// The approval-time baseline separates failures the feature caused
+	// from ones the branch was born with. A baseline entry speaks for a
+	// live check only when the command is unchanged — an edited command
+	// invalidates what the old run proved. No baseline (older features,
+	// guarded mode) degrades to today's unlabeled FAIL.
+	baseline := map[string]state.CheckResult{}
+	if rows, err := e.cfg.Store.CheckBaseline(ctx, s.Feature.ID); err == nil {
+		for _, r := range rows {
+			baseline[r.Name] = r
+		}
+	}
+
 	var b strings.Builder
+	preexisting := false
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		status := "pass"
 		if !r.OK {
-			status = fmt.Sprintf("FAIL (exit %d)", r.ExitCode)
+			if base, ok := baseline[r.Name]; ok && base.Cmd == r.Cmd && !base.OK {
+				status = fmt.Sprintf("FAIL (pre-existing, exit %d)", r.ExitCode)
+				preexisting = true
+			} else {
+				status = fmt.Sprintf("FAIL (exit %d)", r.ExitCode)
+			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
 		}
+	}
+	if preexisting {
+		b.WriteString("\nChecks marked pre-existing already failed on the freshly created " +
+			"branch before this feature changed anything: report them, but do not fail " +
+			"verification because of them — only regressions count against this feature.\n")
 	}
 	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +
 		"checks), record all results in the spec's Verification plan and a summary " +
