@@ -289,12 +289,14 @@ func (e *Engine) RunWith(f domain.Feature, note string) error {
 // correctness, completeness) before the human gate, writing findings
 // as %% marker threads and ending with a verdict. It replaces the done
 // plan session like any re-run; the state machine never sees it — the
-// feature stays at Plan throughout.
-func (e *Engine) RunCritique(f domain.Feature) error {
+// feature stays at Plan throughout. note is appended to the kickoff;
+// the UI uses it on re-critique rounds to point the fresh session at
+// the prior round's resolved threads.
+func (e *Engine) RunCritique(f domain.Feature, note string) error {
 	if f.Stage != domain.StagePlan {
 		return fmt.Errorf("critique runs on the plan stage, not %s", f.Stage)
 	}
-	return e.run(f, "", flavorCritique)
+	return e.run(f, note, flavorCritique)
 }
 
 // RunRebase runs the rebase-resolve pass: an implementer session in the

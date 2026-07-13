@@ -56,7 +56,7 @@ const (
 func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	switch flavor {
 	case flavorCritique:
-		return []agent.ToolDef{submitVerdictTool(), specAnnotateTool()}
+		return []agent.ToolDef{critiqueVerdictTool(), specAnnotateTool()}
 	case flavorRebase:
 		return nil
 	}
@@ -146,7 +146,34 @@ func submitVerdictTool() agent.ToolDef {
 				"verdict": map[string]any{
 					"type":        "string",
 					"enum":        []any{"pass", "changes"},
-					"description": "pass = ready to verify; changes = serious findings, bounce back to implement.",
+					"description": "pass = no blocking findings (nits alone pass), ready to verify; " +
+						"changes = at least one blocking finding, bounce back to implement.",
+				},
+				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
+			},
+			"required": []any{"verdict"},
+		},
+	}
+}
+
+// critiqueVerdictTool is submit_verdict with the plan-critique's
+// outcome vocabulary: there is no code to bounce to yet — "changes"
+// sends the plan back for a replan round, "pass" hands it to the
+// human's approval gate. Only blocking findings justify "changes";
+// nit-level threads ride along to the gate on a pass.
+func critiqueVerdictTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: verdictToolName,
+		Description: "Submit your critique verdict. Call this exactly once at the end of your " +
+			"critique to drive gummi's automatic critique→replan loop.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"verdict": map[string]any{
+					"type": "string",
+					"enum": []any{"pass", "changes"},
+					"description": "pass = no blocking findings (nits alone pass), ready for the " +
+						"user's approval; changes = at least one blocking finding, the plan must be revised.",
 				},
 				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
 			},

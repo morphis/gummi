@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -258,6 +259,45 @@ func TestPlanCritiqueChangesReplansThenPasses(t *testing.T) {
 	}
 	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnGate {
 		t.Fatalf("clean critique did not raise the approval gate: %+v", m.inbox.list())
+	}
+}
+
+func TestReCritiqueKickoffPointsAtPriorThreads(t *testing.T) {
+	// the second critique round burns down the first round's threads
+	// instead of re-judging from scratch: its kickoff carries the
+	// re-critique note; the first round's does not.
+	var mu sync.Mutex
+	var kickoffs []string
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		reply := "plan written"
+		if isReview(opts) {
+			mu.Lock()
+			kickoffs = append(kickoffs, msg)
+			n := len(kickoffs)
+			mu.Unlock()
+			if n == 1 {
+				reply = "Missing authz check.\nVERDICT: changes"
+			} else {
+				reply = "Sound.\nVERDICT: pass"
+			}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: reply},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	runPlan(t, ag)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(kickoffs) != 2 {
+		t.Fatalf("critique ran %d times, want 2", len(kickoffs))
+	}
+	if strings.Contains(kickoffs[0], "re-critique") {
+		t.Errorf("first critique kickoff carries the re-critique note: %q", kickoffs[0])
+	}
+	if !strings.Contains(kickoffs[1], "re-critique") {
+		t.Errorf("re-critique kickoff missing the note: %q", kickoffs[1])
 	}
 }
 

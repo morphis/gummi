@@ -194,25 +194,32 @@ guessing.`))
 func planCritiqueHint() string {
 	return strings.TrimSpace(`
 Stage: Plan critique (autonomous, fresh context). The implementation
-plan was just written into the spec's Implementation notes. Your job is
-to refute it before the user approves it — do not fix it yourself, and
-do not review code (none exists yet). Read the whole spec and judge the
-plan through three lenses:
+plan was just written (or revised after a prior critique) into the
+spec's Implementation notes. Your job is to refute it before the user
+approves it — do not fix it yourself, and do not review code (none
+exists yet). Read the whole spec and judge the plan through three
+lenses:
   security     — attack surface the approach opens: input handling,
                  authz, secrets, injection, unsafe defaults
   correctness  — edge cases, error paths, concurrency, invariants the
                  plan breaks or forgets
   completeness — does the plan actually cover the spec's Chosen
                  approach, and does the Verification plan prove it?
-Write each finding as its own ` + "`%% @reviewer:`" + ` marker anchored to the
-plan line it indicts — one thread per finding, so gummi tracks the
+Label each finding blocking or nit: blocking means implementing the
+plan as written would fail, violate the spec's Chosen approach, or
+ship one of the risks above unmitigated; everything else — style,
+preference, could-be-tighter — is a nit. Write each finding as its own
+` + "`%% @reviewer:`" + ` marker anchored to the plan line it indicts, opening
+with its label — one thread per finding, so gummi tracks the
 burn-down. If the Verification plan is missing a check that would catch
 one of your concerns, append that check to the Verification plan
 section (machine-run commands go in its gummi-checks block; live-proof
 steps read as prose). End your final message with a verdict on its own line, exactly
 one of:
-  VERDICT: pass       — plan is sound; ready for the user's approval
-  VERDICT: changes    — serious findings; the plan must be revised
+  VERDICT: pass       — no blocking findings (nits alone pass); the
+                        user sees your open threads at the approval gate
+  VERDICT: changes    — at least one blocking finding; the plan must
+                        be revised
 gummi parses this exact line to drive the automatic critique→replan
 loop; without it the loop stalls.`)
 }

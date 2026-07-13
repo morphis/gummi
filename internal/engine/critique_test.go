@@ -48,7 +48,7 @@ func TestRunCritiqueOnlyOnPlanStage(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	for _, stage := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageSpec} {
-		if err := e.RunCritique(feature(1, "x", stage)); err == nil {
+		if err := e.RunCritique(feature(1, "x", stage), ""); err == nil {
 			t.Errorf("critique allowed on %s stage", stage)
 		}
 	}
@@ -74,7 +74,7 @@ func TestCritiqueRunsAsReviewer(t *testing.T) {
 	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	if err := e.RunCritique(f); err != nil {
+	if err := e.RunCritique(f, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, e, f.ID, StateDone)
@@ -106,7 +106,7 @@ func TestRestoreRecoversCritiqueFlag(t *testing.T) {
 	withWorktree(t, wt, f)
 
 	e1 := persistEngine(t, agent.NewFake("Sound.\nVERDICT: pass"), ws, store, wt)
-	if err := e1.RunCritique(f); err != nil {
+	if err := e1.RunCritique(f, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, e1, f.ID, StateDone)

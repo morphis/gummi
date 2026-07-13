@@ -157,6 +157,15 @@ const replanNote = "The plan critique found issues. Address each open `%% @revie
 	"thread in the spec: revise the plan in Implementation notes accordingly and " +
 	"mark each thread resolved with a line like `%% @architect: resolved — <how>`."
 
+// reCritiqueNote is the kickoff for a critique after a replan round:
+// burn down the prior round's threads instead of re-judging the plan
+// from scratch, so the loop converges rather than churning out fresh
+// findings every round.
+const reCritiqueNote = "This is a re-critique: a prior round's findings were addressed " +
+	"and the plan revised. Start from the resolved `%% @reviewer:` threads and verify " +
+	"each resolution against the revised plan — reopen a thread only if its resolution " +
+	"does not hold. Raise a new finding only if it is blocking."
+
 // onPlanDone drives the plan-critique loop when a Plan-stage session
 // finishes. A finished plan writer triggers the critique pass; a
 // finished critique either clears the gate (pass), bounces to a replan
@@ -202,6 +211,13 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 // pass (critique=true) or a replan addressing its findings — with no
 // stage transition; autoStep's analog inside a single stage.
 func (m *Shell) planStep(id domain.FeatureID, critique bool, note string) tea.Cmd {
+	// the kickoff is decided here, on the update loop, not in the cmd
+	// goroutine: planRounds > 0 means this critique follows a replan, so
+	// it burns down the prior threads instead of re-judging from scratch.
+	var kickoff string
+	if critique && m.planRounds[id] > 0 {
+		kickoff = reCritiqueNote
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed session is stale
@@ -210,7 +226,7 @@ func (m *Shell) planStep(id domain.FeatureID, critique bool, note string) tea.Cm
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if critique {
-			err = m.engine.RunCritique(f)
+			err = m.engine.RunCritique(f, kickoff)
 		} else {
 			err = m.engine.RunWith(f, replanNote)
 		}
