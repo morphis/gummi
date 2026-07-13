@@ -3,6 +3,7 @@ package ui
 import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -39,9 +40,26 @@ type nextInput struct {
 	verdict reviewVerdict
 
 	reviewRound      int    // automatic review→fix rounds burned so far
+	verifyBounces    int    // verify→work bounces already burned (each one a failed verify)
 	failedCheck      string // first failing manual `v` check, "" if none
 	openSpecQs       int    // open user %% threads in the artifact (block gates)
 	openDiffComments int    // unresolved diff annotations (block gates)
+}
+
+// verifyBounces counts verify→work bounce edges in a feature's history:
+// each one is a verify failure someone sent back for rework. Derived
+// from the transitions table, so the count survives restarts. Verify
+// re-runs without a bounce leave no transition, making this a floor —
+// it can undercount, never over-warn.
+func verifyBounces(hist []state.TransitionRecord, kind domain.Kind) int {
+	work := workflow.WorkStage(kind)
+	n := 0
+	for _, tr := range hist {
+		if tr.From == domain.StageVerify && tr.To == work {
+			n++
+		}
+	}
+	return n
 }
 
 // nextInputFor assembles a feature's nextInput from board and session
@@ -52,6 +70,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		kind:             r.F.Kind,
 		landed:           r.Landed,
 		reviewRound:      m.reviewRounds[r.F.ID],
+		verifyBounces:    verifyBounces(r.History, r.F.Kind),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
 	}
@@ -235,6 +254,17 @@ func nextActions(in nextInput) []nextAction {
 			why := "verify reported failure — the evidence is in the " + artifactNoun(in.kind)
 			if in.verdict == verdictUnclear {
 				why = "verify gave no clear verdict — judge the results in the " + artifactNoun(in.kind)
+			}
+			// repeat failures: each bounce already bought a full
+			// implement→review→verify round that changed nothing, so the
+			// bounce drops to last with a warning — the FD-004 loop-breaker.
+			if in.verifyBounces >= 1 {
+				n := itoa(in.verifyBounces + 1)
+				return []nextAction{
+					{"s", "read the verify results", "verify has failed " + n + " times — the evidence is in the " + artifactNoun(in.kind)},
+					{"g", "land on main", "overrule if the failures don't hold up"},
+					{"b", "bounce to " + string(work), "unlikely to help after " + n + " failed verifies — check the environment and the verification plan first"},
+				}
 			}
 			return []nextAction{
 				{"s", "read the verify results", why},

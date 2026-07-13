@@ -11,6 +11,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 func TestParseVerdict(t *testing.T) {
@@ -245,6 +246,94 @@ func TestVerifyUnclearVerdictEscalates(t *testing.T) {
 	}
 	if !strings.Contains(acts[0].why, "no clear verdict") {
 		t.Errorf("unclear why does not explain itself: %q", acts[0].why)
+	}
+}
+
+// verifyBounces counts only verify→work edges — the review loop's own
+// bounces and forward moves must not inflate the failure count.
+func TestVerifyBounces(t *testing.T) {
+	tr := func(from, to domain.Stage) state.TransitionRecord {
+		return state.TransitionRecord{From: from, To: to}
+	}
+	cases := []struct {
+		name string
+		hist []state.TransitionRecord
+		kind domain.Kind
+		want int
+	}{
+		{"no history", nil, domain.KindFeature, 0},
+		{"forward only", []state.TransitionRecord{
+			tr(domain.StageImplement, domain.StageReview),
+			tr(domain.StageReview, domain.StageVerify),
+		}, domain.KindFeature, 0},
+		{"review bounces don't count", []state.TransitionRecord{
+			tr(domain.StageReview, domain.StageImplement),
+			tr(domain.StageReview, domain.StageImplement),
+		}, domain.KindFeature, 0},
+		{"two verify bounces", []state.TransitionRecord{
+			tr(domain.StageVerify, domain.StageImplement),
+			tr(domain.StageImplement, domain.StageReview),
+			tr(domain.StageReview, domain.StageVerify),
+			tr(domain.StageVerify, domain.StageImplement),
+		}, domain.KindFeature, 2},
+		{"bug bounces target fix", []state.TransitionRecord{
+			tr(domain.StageVerify, domain.StageFix),
+		}, domain.KindBug, 1},
+		{"kind mismatch doesn't count", []state.TransitionRecord{
+			tr(domain.StageVerify, domain.StageFix),
+		}, domain.KindFeature, 0},
+	}
+	for _, tc := range cases {
+		if got := verifyBounces(tc.hist, tc.kind); got != tc.want {
+			t.Errorf("%s: verifyBounces = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// After a prior bounce, the fail suggestions drop the bounce to last
+// with a warning — pure nextActions table check.
+func TestVerifyRepeatedFailDeemphasizesBounce(t *testing.T) {
+	in := nextInput{
+		stage: domain.StageVerify, kind: domain.KindFeature,
+		attn: attnGate, escalated: true,
+		verdict: verdictFail, verifyBounces: 2,
+	}
+	acts := nextActions(in)
+	if keysOf(acts) != "s g b" {
+		t.Fatalf("repeat-fail suggestions = %q, want s g b (bounce last)", keysOf(acts))
+	}
+	if !strings.Contains(acts[2].why, "unlikely to help") {
+		t.Errorf("bounce why does not warn: %q", acts[2].why)
+	}
+	if !strings.Contains(acts[0].why, "3 times") {
+		t.Errorf("read why does not count the failures: %q", acts[0].why)
+	}
+}
+
+// The loop-breaker end to end: fail verify, bounce, fail again — the
+// second gate warns that re-implementing is unlikely to help.
+func TestVerifyLoopBreakerWarnsOnSecondFailure(t *testing.T) {
+	m := runVerify(t, "Rock build broken.\nVERDICT: fail")
+	it := verifyGate(t, m)
+	if strings.Contains(it.Text, "unlikely to help") {
+		t.Fatalf("first failure already warns: %q", it.Text)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"}) // bounce to implement
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("bounce did not reach implement (at %s)", m.rows[0].F.Stage)
+	}
+	m = advanceTo(t, m, domain.StageVerify) // implement → review → verify by hand
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = drainEngineLoop(t, m)
+
+	it = verifyGate(t, m)
+	if !strings.Contains(it.Text, "2nd time") || !strings.Contains(it.Text, "unlikely to help") {
+		t.Errorf("second failure gate does not warn: %q", it.Text)
+	}
+	acts := nextActions(m.nextInputFor(m.rows[0]))
+	if keysOf(acts) != "s g b" {
+		t.Fatalf("second-failure suggestions = %q, want s g b", keysOf(acts))
 	}
 }
 

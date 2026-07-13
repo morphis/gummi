@@ -149,7 +149,22 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		m.raiseEscalation(id, attnGate, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
 	case verdictFail, verdictChanges:
-		m.raiseEscalation(id, attnGate, "verify FAILED — read the evidence and bounce or overrule")
+		// repeat failures warn off the bounce: each prior one bought a
+		// full rework round that changed nothing (m.rows is at most one
+		// bounce stale here — fine for a warning).
+		bounces := 0
+		for _, r := range m.rows {
+			if r.F.ID == id {
+				bounces = verifyBounces(r.History, r.F.Kind)
+				break
+			}
+		}
+		if bounces >= 1 {
+			m.raiseEscalation(id, attnGate, "verify FAILED for the "+ordinal(bounces+1)+" time — "+
+				"re-implementing is unlikely to help; check the environment and the verification plan before bouncing")
+		} else {
+			m.raiseEscalation(id, attnGate, "verify FAILED — read the evidence and bounce or overrule")
+		}
 	default:
 		m.raiseEscalation(id, attnGate, "verify finished with no clear verdict — check the results manually")
 	}
@@ -267,3 +282,19 @@ func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note string) tea.
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// ordinal renders 2 → "2nd", 3 → "3rd" for the repeat-failure warning.
+func ordinal(n int) string {
+	suffix := "th"
+	if n%100 < 11 || n%100 > 13 {
+		switch n % 10 {
+		case 1:
+			suffix = "st"
+		case 2:
+			suffix = "nd"
+		case 3:
+			suffix = "rd"
+		}
+	}
+	return itoa(n) + suffix
+}
