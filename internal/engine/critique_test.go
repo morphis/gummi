@@ -22,6 +22,9 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 	if !strings.Contains(joined, "VERDICT:") {
 		t.Error("critique hints missing the verdict fallback grammar")
 	}
+	if !strings.Contains(joined, "executability") || !strings.Contains(joined, "[CI-only]") {
+		t.Error("critique hints missing the executability lens / allowed-skip tags")
+	}
 	if plain := strings.Join(stageHints(f, "spec.md", flavorStage), "\n"); strings.Contains(plain, "Plan critique") {
 		t.Error("plan-writer hints leaked the critique contract")
 	}

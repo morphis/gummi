@@ -93,7 +93,10 @@ repo's build/test/lint commands into a gummi-checks block there at
 approval; add the feature-specific live checks that prove this works —
 each check symptom-asserting (it proves the feature's behavior, not
 merely "runs without erroring"), deterministic, fast, and runnable by
-an agent). The test surface is a decision: put to the user which
+an agent. Tag any step that needs environment the agent may lack with
+[env: <prereq>] naming the dependency or service, or [CI-only] if it
+can never run locally — untagged steps are promises the verify agent
+will hold you to). The test surface is a decision: put to the user which
 interfaces the tests will exercise, preferring seams the repo already
 has. Work the open marker threads one decision at a time — recommend
 an answer with each question, look up facts in the repo yourself, and
@@ -198,14 +201,27 @@ Stage: Plan critique (autonomous, fresh context). The implementation
 plan was just written (or revised after a prior critique) into the
 spec's Implementation notes. Your job is to refute it before the user
 approves it — do not fix it yourself, and do not review code (none
-exists yet). Read the whole spec and judge the plan through three
+exists yet). Read the whole spec and judge the plan through four
 lenses:
-  security     — attack surface the approach opens: input handling,
-                 authz, secrets, injection, unsafe defaults
-  correctness  — edge cases, error paths, concurrency, invariants the
-                 plan breaks or forgets
-  completeness — does the plan actually cover the spec's Chosen
-                 approach, and does the Verification plan prove it?
+  security      — attack surface the approach opens: input handling,
+                  authz, secrets, injection, unsafe defaults
+  correctness   — edge cases, error paths, concurrency, invariants the
+                  plan breaks or forgets
+  completeness  — does the plan actually cover the spec's Chosen
+                  approach, and does the Verification plan prove it?
+  executability — can the Verification plan run HERE? Probe each live
+                  check's prerequisites in this worktree cheaply
+                  (imports resolve, tools on PATH, services it names
+                  reachable) — do not run the full plan. Confirm the
+                  gummi-checks block parses and each command is
+                  well-formed as written. A step that cannot run
+                  locally is a blocking finding unless it carries an
+                  allowed-skip tag: [CI-only] (never runs locally) or
+                  [env: <prereq>] (runs only when <prereq> is
+                  present). Fix it by adding the right tag or
+                  rewriting the step so the verify agent can execute
+                  it — an unrunnable plan strands verify in a fail
+                  loop no re-implementation can exit.
 Label each finding blocking or nit: blocking means implementing the
 plan as written would fail, violate the spec's Chosen approach, or
 ship one of the risks above unmitigated; everything else — style,
@@ -215,7 +231,8 @@ with its label — one thread per finding, so gummi tracks the
 burn-down. If the Verification plan is missing a check that would catch
 one of your concerns, append that check to the Verification plan
 section (machine-run commands go in its gummi-checks block; live-proof
-steps read as prose). End your final message with a verdict on its own line, exactly
+steps read as prose, tagged [CI-only] or [env: <prereq>] where they
+cannot run locally). End your final message with a verdict on its own line, exactly
 one of:
   VERDICT: pass       — no blocking findings (nits alone pass); the
                         user sees your open threads at the approval gate
@@ -296,9 +313,14 @@ func verifyHint(kind domain.Kind) string {
 	const verdict = `
 You are autonomous: no one can answer questions, so never end with one.
 A check you record as SKIPPED is an unmet check, not a pass, unless
-the verification plan explicitly allows skipping it. Make the call,
-record the evidence, and end your final message with a
-verdict on its own line, exactly one of:
+the verification plan explicitly allows skipping it: a step tagged
+[CI-only] may always be skipped, and a step tagged [env: <prereq>] may
+be skipped only when that prerequisite is genuinely absent — record
+each as SKIPPED (allowed: <tag>) with the reason. If every live check
+is blocked by missing environment rather than by the code, the verdict
+is blocked, not pass and not fail — a plan that proved nothing did not
+pass. Make the call, record the evidence, and end your final message
+with a verdict on its own line, exactly one of:
   VERDICT: pass       — everything verified; ready to land on main
   VERDICT: fail       — verification found real problems in this
                         feature's changes

@@ -23,6 +23,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StageSpec, domain.KindFeature, []string{
 			"Out of scope", "test surface is a decision", "runs without erroring",
+			"[env: <prereq>]", "[CI-only]",
 		}},
 		{domain.StagePlan, domain.KindFeature, []string{
 			"numbered steps", "tracer bullets",
@@ -48,9 +49,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StageVerify, domain.KindFeature, []string{
 			"runs without erroring", "SKIPPED", "VERDICT: fail", "VERDICT: blocked",
+			"[CI-only]", "allowed:",
 		}},
 		{domain.StageVerify, domain.KindBug, []string{
-			"no longer\nreproduces", "SKIPPED", "VERDICT: blocked",
+			"no longer\nreproduces", "SKIPPED", "VERDICT: blocked", "[CI-only]",
 		}},
 	}
 	for _, tc := range cases {

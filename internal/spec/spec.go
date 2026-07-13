@@ -211,7 +211,7 @@ const (
 	promptChosen       = "%% @gummi: converge on one during the spec stage"
 	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
 	promptReview       = "%% @gummi: reviewer findings land here; the implementer resolves each one"
-	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered); add the feature-specific live checks that prove this works"
+	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered and baselined); add the feature-specific live checks that prove this works — tag steps that can't run in the local worktree with [CI-only] or [env: <prereq>]"
 )
 
 // Template renders the initial (blank) spec draft for a feature.
