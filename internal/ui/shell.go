@@ -187,7 +187,9 @@ type (
 // command for any automatic follow-up (review→fix→review), or nil.
 func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	switch ev.Kind {
-	case engine.EventError:
+	case engine.EventError, engine.EventEscape:
+		// an escape (agent wrote outside its worktree) is a failed run
+		// with a gummi-authored description; both land as failure items.
 		if ev.Err != nil {
 			// engine/provider errors may embed model-controlled bytes
 			text := sanitize(ev.Err.Error())

@@ -79,7 +79,7 @@ func runBoard() error {
 		return err
 	}
 	defer store.Close()
-	wt, err := worktree.NewManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd)
 	if err != nil {
 		return err
 	}
@@ -227,6 +227,23 @@ func buildAgent() (agent.Agent, error) {
 		return agent.NewHeadless(strings.Fields(cmd))
 	}
 	return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
+}
+
+// newManager binds the worktree manager to cwd and keeps .gummi out of
+// the product repo's tracking (exclude + untrack-if-tracked) before any
+// agent session can touch the repo. Exclusion problems warn rather than
+// block the launch: the board still works, and the escape guard remains.
+func newManager(ctx context.Context, cwd string) (*worktree.Manager, error) {
+	wt, err := worktree.NewManager(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	if untracked, err := wt.EnsureGummiExcluded(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi: excluding .gummi from tracking:", err)
+	} else if untracked {
+		fmt.Fprintln(os.Stderr, "gummi: .gummi was tracked in this repo — untracked it (index only; the removal rides into your next commit)")
+	}
+	return wt, nil
 }
 
 // ensureWorkspace returns the .gummi workspace at cwd, creating it (and

@@ -33,7 +33,7 @@ await() {
 }
 
 tmux -L "$sock" new-session -d -x 120 -y 34 "cd '$dir' && '$bin'"
-await "no features yet"
+await "nothing on the board yet"
 
 # create a feature through the real form
 k n; k 'Demo feature'; k Enter
@@ -73,7 +73,7 @@ await "DONE"
 
 # delete: confirm dialog → worktree, branch, and record gone
 k x; k y
-await "no features yet"
+await "nothing on the board yet"
 git -C "$dir" worktree list | grep -q "FD-001" && fail "worktree survived delete"
 git -C "$dir" branch --list 'gummi/FD-001-*' | grep -q gummi && fail "branch survived delete"
 

@@ -12,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // runBugs implements `gummi bugs …`: bug ingestion from GitHub issues and
@@ -57,7 +56,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wt, err := worktree.NewManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd)
 	if err != nil {
 		_ = store.Close()
 		return nil, err

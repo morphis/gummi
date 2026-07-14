@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 func TestInboxOps(t *testing.T) {
@@ -90,6 +92,17 @@ func TestInboxErrorItem(t *testing.T) {
 	m = pumpEngine(t, m)
 	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnFailure {
 		t.Fatalf("error did not raise a failure item: %+v", m.inbox.list())
+	}
+}
+
+func TestInboxEscapeItem(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.handleEngineEvent(engine.Event{
+		Feature: "FD-001", Kind: engine.EventEscape,
+		Err: fakeErr("agent wrote outside its worktree — main checkout reverted"),
+	})
+	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnFailure {
+		t.Fatalf("escape did not raise a failure item: %+v", m.inbox.list())
 	}
 }
 

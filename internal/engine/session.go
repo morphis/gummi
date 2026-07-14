@@ -6,6 +6,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // EventKind classifies an engine Event.
@@ -36,6 +37,10 @@ const (
 	// via the resolve_annotation client tool — an open diff surface should
 	// re-read its annotations so the open-count burns down live.
 	EventAnnotations EventKind = "annotations"
+	// EventEscape fires when a turn wrote to the main checkout instead of
+	// its worktree (Err describes it, including whether the write was
+	// auto-reverted). The run is failed; never silent.
+	EventEscape EventKind = "escape"
 )
 
 // Event is one item in the engine's UI-facing stream.
@@ -172,6 +177,12 @@ type Session struct {
 	byokRate       float64 // provider token→credit rate (0 = default)
 	threshold      int     // highest budget threshold crossed (%)
 	exhausted      bool    // hit the credit cap
+
+	// mainSnap/mainGen are the escape guard: the main checkout's state
+	// (and sanctioned-mutation generation) captured as this turn was
+	// dispatched, compared at idle to catch writes outside the worktree.
+	mainSnap *worktree.MainState
+	mainGen  uint64
 }
 
 // Snapshot returns a render-safe copy of the session's state.
@@ -579,6 +590,33 @@ func (s *Session) setSpawnInfo(agentName, model string, provider agent.Provider)
 	s.agentName = agentName
 	s.model = model
 	s.provider = provider
+}
+
+// armMainGuard records the main checkout's pre-turn state, unless a
+// guard from an earlier dispatch of the same in-flight turn is already
+// armed (a steering Send mid-turn must not move the baseline forward
+// past writes the turn already made).
+func (s *Session) armMainGuard(st worktree.MainState, gen uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mainSnap != nil {
+		return
+	}
+	s.mainSnap = &st
+	s.mainGen = gen
+}
+
+// takeMainGuard returns and clears the armed escape guard, reporting
+// whether one was armed — so each guard is checked exactly once.
+func (s *Session) takeMainGuard() (worktree.MainState, uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mainSnap == nil {
+		return worktree.MainState{}, 0, false
+	}
+	st := *s.mainSnap
+	s.mainSnap = nil
+	return st, s.mainGen, true
 }
 
 // isExhausted reports whether the session has hit its budget.

@@ -13,7 +13,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // runIngest implements `gummi ingest <spec-file>` (DESIGN §11): an
@@ -51,7 +50,7 @@ func runIngest(args []string) error {
 		return err
 	}
 	defer store.Close()
-	wt, err := worktree.NewManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd)
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
@@ -18,6 +19,12 @@ import (
 // command runs.
 type Manager struct {
 	root string // absolute physical path of the main checkout
+
+	// mainMu serializes gummi-initiated mutations of the main checkout
+	// (squash merges, escape reverts) and guards mainGen, the sanctioned
+	// mutation counter the escape check reads (see primary.go).
+	mainMu  sync.Mutex
+	mainGen uint64
 }
 
 // NewManager binds a manager to the repo rooted at root. It verifies
@@ -201,7 +208,10 @@ func (m *Manager) CommitFile(ctx context.Context, f *domain.Feature, relPath, co
 	if err := atomicfile.Write(dest, []byte(content), 0o600); err != nil {
 		return err
 	}
-	if _, err := runGit(ctx, p, "add", "--", dest); err != nil {
+	// force past the repo-wide .gummi exclusion (EnsureGummiExcluded):
+	// artifacts are the one .gummi content gummi itself commits, so the
+	// spec travels with its branch while agents' bulk adds skip .gummi.
+	if _, err := runGit(ctx, p, "add", "-f", "--", dest); err != nil {
 		return err
 	}
 	// idempotent: identical content means nothing staged, nothing to do
@@ -374,9 +384,12 @@ func (m *Manager) TrackedDirty(ctx context.Context, f *domain.Feature) (bool, er
 // or unstaged) in the main checkout. A squash merge commits into main,
 // so anything already modified there would be swept into the merge
 // commit. Untracked files are ignored: git itself refuses a merge that
-// would overwrite one.
+// would overwrite one. .gummi is also ignored: its index state is
+// gummi's own machinery (notably the staged deletions EnsureGummiExcluded
+// leaves after untracking a once-committed .gummi) and must never
+// deadlock a land.
 func (m *Manager) MainTrackedDirty(ctx context.Context) (bool, error) {
-	out, err := runGit(ctx, m.root, "status", "--porcelain", "--untracked-files=no")
+	out, err := runGit(ctx, m.root, "status", "--porcelain", "--untracked-files=no", "--", ":(exclude).gummi")
 	if err != nil {
 		return false, err
 	}
@@ -583,6 +596,13 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("refusing squash merge of %s: empty commit message", f.ID)
 	}
+	// A land is a sanctioned main-checkout mutation: take the mutation
+	// lock for its duration and bump the generation up front, so an escape
+	// check overlapping the merge reads a moved generation and never
+	// misattributes (or reverts) the landing commit (see primary.go).
+	m.mainMu.Lock()
+	defer m.mainMu.Unlock()
+	m.mainGen++
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return err
