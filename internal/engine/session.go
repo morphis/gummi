@@ -49,7 +49,8 @@ type Event struct {
 	Stage     domain.Stage
 	Kind      EventKind
 	Err       error
-	Threshold int // budget % for EventBudget
+	Threshold int  // budget % for EventBudget
+	Committed bool // EventExhausted: the stage's work was committed (not stranded)
 }
 
 // SessionState is a session's scheduling status.

@@ -48,6 +48,9 @@ func (e *Engine) persist(s *Session) {
 		SpendModel:   snap.Spend.Model,
 		Activity:     snap.Activity,
 	}
+	if snap.Err != nil {
+		rec.Error = snap.Err.Error()
+	}
 	for _, m := range snap.Transcript {
 		rec.Transcript = append(rec.Transcript, state.SessionMessage{
 			Author: string(m.Author), Content: m.Content,
@@ -124,12 +127,21 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 		s.activity = append(s.activity, snap.Activity...)
 		s.spend = usageFrom(snap)
+		if snap.Error != "" {
+			s.err = restoredErr(snap.Error)
+		}
 		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
 		e.live[snap.Feature] = s
 	}
 	return nil
 }
+
+// restoredErr rebuilds a session error from its persisted text (the
+// original error type is not preserved; the message is what surfaces).
+type restoredErr string
+
+func (e restoredErr) Error() string { return string(e) }
 
 // restoredState maps a persisted state to the state a reloaded session
 // resumes in: a running/queued session was interrupted by the restart,

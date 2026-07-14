@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	spend_out     INTEGER NOT NULL DEFAULT 0,
 	spend_model   TEXT NOT NULL DEFAULT '',
 	activity      TEXT NOT NULL DEFAULT '',
+	error         TEXT NOT NULL DEFAULT '',
 	updated_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_messages (
@@ -254,6 +255,7 @@ var migrations = []string{
 	`ALTER TABLE session_messages ADD COLUMN tool_output TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN spend_est REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE stage_spend ADD COLUMN est_credits REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

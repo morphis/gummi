@@ -806,17 +806,50 @@ func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 
 // exhaust checkpoints and stops a session that hit its credit budget —
 // whether the CLI reported it or gummi-side enforcement tripped first —
-// moving it to the needs-attention queue (never a silent death).
+// moving it to the needs-attention queue (never a silent death). When the
+// budget is reached at a stage that already committed its work (a
+// wrap-up exhaustion — the cap arithmetic tips over after the deliverable
+// is on the branch), the park says so instead of reading like lost work:
+// the top-up affordance stays, but the message reflects that nothing was
+// stranded.
 func (e *Engine) exhaust(s *Session) {
 	if !s.markExhausted() {
 		return // already checkpointed; a re-raised event must not duplicate the gate
 	}
 	e.settle(s) // partial work survives on the branch across the gate
-	s.appendActivity("budget exhausted — stage stopped for review")
+	committed := e.stageWorkCommitted(s)
+	if committed {
+		s.appendActivity("budget reached — stage work committed, ready to review")
+	} else {
+		s.appendActivity("budget exhausted — stage stopped for review")
+	}
 	s.setState(StateDone)
 	e.persist(s)
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted})
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted, Committed: committed})
 	e.freeSlot(s)
+}
+
+// stageWorkCommitted reports whether the exhausted stage left its work
+// safely committed — a submitted review verdict, or (after settle's
+// checkpoint) committed branch commits with a clean worktree. Best-effort
+// and conservative: any uncertainty (a git error, a rebase pass, an
+// interactive stage) reports false, so the park keeps its cautious
+// "stopped for review" wording rather than falsely claiming work is safe.
+func (e *Engine) stageWorkCommitted(s *Session) bool {
+	if s.Interactive || s.Rebase {
+		return false
+	}
+	if s.Snapshot().Verdict != "" {
+		return true // review/critique delivered its verdict
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
+	defer cancel()
+	dirty, err := e.cfg.Worktrees.Dirty(ctx, &s.Feature)
+	if err != nil || dirty {
+		return false // uncommitted work remains, or can't tell
+	}
+	ahead, err := e.cfg.Worktrees.BranchAhead(ctx, &s.Feature)
+	return err == nil && ahead
 }
 
 // Close stops every session and closes the event stream.

@@ -126,6 +126,46 @@ func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
 // default; it hides itself anyway when gh or a quota is absent).
 func (m *Shell) SetCopilotHint(on bool) { m.copilotHint = on }
 
+// reconstructInbox rebuilds the needs-attention queue from the engine's
+// restored sessions at startup — the queue is otherwise in-memory and a
+// restart drops parked gates, budget stops, and failures (a parked budget
+// item's only top-up path is the inbox, so losing it stranded the card).
+// Derived from durable session state: a failed run (paused with a stored
+// error) → failure; a settled autonomous stage → a budget park if its
+// activity recorded an exhaustion, else a review-&-advance gate. Live
+// events refine these as they arrive; this only seeds what a restart lost.
+func (m *Shell) reconstructInbox() {
+	if m.engine == nil {
+		return
+	}
+	for id, s := range m.engine.Sessions() {
+		snap := s.Snapshot()
+		switch {
+		case snap.Err != nil:
+			m.inbox.add(id, attnFailure, sanitize(snap.Err.Error()))
+		case snap.State != engine.StateDone || !autonomousStage(snap.Feature.Stage):
+			// running/queued/interactive sessions raise their own items live
+			continue
+		case exhaustedActivity(snap.Activity):
+			m.inbox.add(id, attnBudget, string(snap.Feature.Stage)+" hit its budget — u top up (release reserve) or x park")
+		default:
+			m.inbox.add(id, attnGate, string(snap.Feature.Stage)+" finished — review & advance")
+		}
+	}
+}
+
+// exhaustedActivity reports whether a restored session's activity feed
+// records a budget stop (the marker exhaust writes), so the reconstructed
+// item is a budget park rather than a plain gate.
+func exhaustedActivity(activity []string) bool {
+	for _, a := range activity {
+		if strings.Contains(a, "budget exhausted") || strings.Contains(a, "budget reached") {
+			return true
+		}
+	}
+	return false
+}
+
 // raiseAttention adds a needs-attention item and, when it is a new alert
 // (not an update of an existing one), fires the notification hook.
 func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
@@ -158,6 +198,10 @@ func (m *Shell) Init() tea.Cmd {
 		cmds = append(cmds, m.loadRows)
 	}
 	if m.engine != nil {
+		// rebuild the needs-attention queue from the sessions the engine
+		// restored, so a parked budget gate (and its top-up path) survives a
+		// restart instead of vanishing until re-triggered.
+		m.reconstructInbox()
 		cmds = append(cmds, m.listenEngine)
 	}
 	if m.copilotHint {
@@ -204,8 +248,16 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
 		m.reviewRounds[ev.Feature] = 0
 		m.planRounds[ev.Feature] = 0
-		m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
-		m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
+		if ev.Committed {
+			// wrap-up exhaustion: the stage's work is committed, so this
+			// reads as ready-to-advance with top-up as the alternative —
+			// not lost work.
+			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" reached its budget with work committed — g advance, or u top up for more")
+			m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
+		} else {
+			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
+			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
+		}
 	case engine.EventQuestion:
 		// the agent asked something. When you're attached to this feature
 		// the inline picker already shows it; otherwise queue it so you can

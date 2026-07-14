@@ -349,6 +349,26 @@ func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) err
 	return err
 }
 
+// BranchAhead reports whether the feature branch carries commits of its
+// own beyond where it forked from the main checkout — i.e. the stage has
+// committed work on the branch. Used to tell a budget park that stopped
+// with work committed (nothing lost) from one that stopped mid-edit.
+func (m *Manager) BranchAhead(ctx context.Context, f *domain.Feature) (bool, error) {
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return false, err
+	}
+	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	if err != nil {
+		return false, err
+	}
+	n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch)
+	if err != nil {
+		return false, err
+	}
+	return n != "0", nil
+}
+
 // Dirty reports whether the feature's worktree has uncommitted changes
 // (staged, unstaged, or untracked).
 func (m *Manager) Dirty(ctx context.Context, f *domain.Feature) (bool, error) {
