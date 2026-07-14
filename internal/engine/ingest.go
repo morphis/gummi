@@ -102,6 +102,10 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 		return domain.IngestResult{}, err
 	}
 
+	// one-shot passes dispatch agent turns outside the Session machinery,
+	// so they carry their own escape guard (judged when the pass returns).
+	// Ingest runs in the main checkout and is bound to no feature yet.
+	defer e.armOneShotGuard("", "")()
 	model, provider := e.resolveRole(profile, agent.RoleArchitect)
 	caps := e.cfg.Agent.Capabilities()
 	// point the agent at the absolute stashed path (like Estimate does with

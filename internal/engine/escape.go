@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -44,29 +45,74 @@ func (e *Engine) armEscapeGuard(s *Session) {
 
 // checkEscape compares the main checkout against the turn's pre-dispatch
 // snapshot. On an escape it reverts the delta when that is safe (see
-// below), fails the run, and raises EventEscape — visible, never silent.
-// Returns true when the turn escaped, so the caller skips the normal
-// turn-settled path.
+// judgeMain), fails the run, and raises EventEscape — visible, never
+// silent. Returns true when the turn escaped, so the caller skips the
+// normal turn-settled path.
 func (e *Engine) checkEscape(s *Session) bool {
 	snap, gen, armed := s.takeMainGuard()
 	if !armed {
 		return false
 	}
-	ctx := context.Background()
-	cur, err := e.cfg.Worktrees.MainSnapshot(ctx)
+	escape, err := e.judgeMain(snap, gen)
 	if err != nil {
 		s.appendActivity("main-checkout escape check failed: " + err.Error())
 		return false
 	}
-	// Generation read after the git state (mirror of armEscapeGuard): any
+	if escape == nil {
+		return false
+	}
+	s.appendActivity(escape.Error())
+	s.setError(escape)
+	if !s.Interactive {
+		s.setState(StatePaused)
+	}
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventEscape, Err: escape})
+	e.freeSlot(s)
+	return true
+}
+
+// armOneShotGuard is the escape guard for the one-shot passes
+// (DiscoverChecks, Estimate, Ingest), which dispatch agent turns inline
+// rather than through a Session/pump. Arm at the call site with
+// `defer e.armOneShotGuard(id, stage)()`: the snapshot is taken now, the
+// judgement runs when the pass returns, and an escape is raised as
+// EventEscape (id may be empty for passes not bound to a feature).
+func (e *Engine) armOneShotGuard(id domain.FeatureID, stage domain.Stage) func() {
+	gen := e.cfg.Worktrees.MainGen()
+	snap, err := e.cfg.Worktrees.MainSnapshot(context.Background())
+	if err != nil {
+		return func() {}
+	}
+	return func() {
+		escape, err := e.judgeMain(snap, gen)
+		if err != nil || escape == nil {
+			return
+		}
+		e.send(Event{Feature: id, Stage: stage, Kind: EventEscape, Err: escape})
+	}
+}
+
+// judgeMain compares the main checkout against a pre-dispatch snapshot,
+// reverting the delta when it is unambiguously agent work. It returns
+// the escape to report (nil when the checkout is unchanged, or when the
+// delta cannot be attributed to the agent because gummi itself sanctioned
+// a mutation mid-turn), and checkErr when the comparison could not run.
+func (e *Engine) judgeMain(snap worktree.MainState, gen uint64) (escape, checkErr error) {
+	ctx := context.Background()
+	cur, err := e.cfg.Worktrees.MainSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Generation read after the git state (mirror of the arm side): any
 	// move means gummi itself mutated the main checkout mid-turn (a land,
 	// or another session's revert), so the delta cannot be attributed to
 	// this agent — stand down for this turn.
 	if e.cfg.Worktrees.MainGen() != gen {
-		return false
+		return nil, nil
 	}
 	if cur.Equal(snap) {
-		return false
+		return nil, nil
 	}
 
 	// Escape confirmed. Revert only when the delta is unambiguously the
@@ -86,16 +132,7 @@ func (e *Engine) checkEscape(s *Session) bool {
 			}
 		}
 	}
-	err = fmt.Errorf("agent wrote outside its worktree (%s) — main checkout %s", describeEscape(snap, cur), verdict)
-	s.appendActivity(err.Error())
-	s.setError(err)
-	if !s.Interactive {
-		s.setState(StatePaused)
-	}
-	e.persist(s)
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventEscape, Err: err})
-	e.freeSlot(s)
-	return true
+	return fmt.Errorf("agent wrote outside its worktree (%s) — main checkout %s", describeEscape(snap, cur), verdict), nil
 }
 
 // describeEscape says what moved, for the failure message.

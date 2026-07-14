@@ -194,7 +194,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// engine/provider errors may embed model-controlled bytes
 			text := sanitize(ev.Err.Error())
 			m.notice = noticeMsg{text: text, isErr: true}
-			m.raiseAttention(ev.Feature, attnFailure, text)
+			// a one-shot pass not bound to a feature (ingest) has no card
+			// to queue behind; the notice alone carries it
+			if ev.Feature != "" {
+				m.raiseAttention(ev.Feature, attnFailure, text)
+			}
 		}
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.

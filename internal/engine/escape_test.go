@@ -165,8 +165,50 @@ func TestSanctionedMainMutationNotFlagged(t *testing.T) {
 	}
 }
 
+// TestOneShotPassEscapeReverted covers the dispatch path outside the
+// Session machinery: the one-shot scribe passes (check discovery at spec
+// approval, the envelope estimate) run their own event loop, so they
+// carry their own guard.
+func TestOneShotPassEscapeReverted(t *testing.T) {
+	root := gitRepo(t)
+	base := escGit(t, root, "rev-parse", "HEAD")
+	ws, store, wt := workspaceAt(t, root)
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		escWrite(t, filepath.Join(root, "rogue.txt"), "rogue\n")
+		escGit(t, root, "add", "rogue.txt")
+		escGit(t, root, "commit", "-q", "-m", "rogue")
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "no checks found"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.DiscoverChecks(context.Background(), f)
+		done <- err
+	}()
+	ev := waitFor(t, e, EventEscape)
+	if ev.Err == nil || !strings.Contains(ev.Err.Error(), "reverted") {
+		t.Fatalf("one-shot escape not reported/reverted: %v", ev.Err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("DiscoverChecks: %v", err)
+	}
+	if head := escGit(t, root, "rev-parse", "HEAD"); head != base {
+		t.Errorf("main HEAD not restored: %s want %s", head, base)
+	}
+	if _, err := os.Stat(filepath.Join(root, "rogue.txt")); !os.IsNotExist(err) {
+		t.Error("the escape commit's file survived")
+	}
+}
+
 // gitRepo creates a bare-bones repo like newRepo but returns only the
-// root, letting the test wire the workspace afterwards via newRepoAt.
+// root, letting the test wire the workspace afterwards via workspaceAt.
 func gitRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
