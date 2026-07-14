@@ -217,6 +217,16 @@ type Usage struct {
 	// (billed as output), so there is no separate reasoning field.
 	CachedTokens int64
 	Model        string
+	// Estimate marks Credits as adapter-derived (tokens × a realized
+	// rate) rather than provider-metered: a live mid-turn figure a later
+	// Settled event reconciles. Displays label it, and the reconciliation
+	// clears it — it never lingers as real cost.
+	Estimate bool
+	// Settled marks a provider-metered reconciliation for Model: Credits
+	// is the (signed) correction that brings the model's cumulative spend
+	// to the provider's actual figure, superseding every estimate emitted
+	// for it so far. An event with Settled set never carries tokens.
+	Settled bool
 }
 
 // Context is the conversation's context-window occupancy: Tokens

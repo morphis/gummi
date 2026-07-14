@@ -440,3 +440,62 @@ func TestBudgetExhaustedRaisesCheckpoint(t *testing.T) {
 		t.Errorf("exhausted session state = %s, want done (slot freed)", snap.State)
 	}
 }
+
+func TestStageCapFlooredAtTurnReserve(t *testing.T) {
+	// enforcement runs between turns, so a sliver of remaining budget
+	// (here 5 credits) cannot be held as a cap — the first turn would
+	// blow through it and poison the rollover math. The cap is floored
+	// at one turn's reserve instead.
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	f.Budget.Envelope = 300
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	// implement's cumulative cap is 70% of 300 = 210; leave 5 remaining
+	if err := store.AddSpend(context.Background(), f.ID, 205, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	if got := e.Get("FD-001").Budget(); got != domain.TurnReserveCredits {
+		t.Errorf("stage budget = %v, want the %v-credit turn reserve", got, float64(domain.TurnReserveCredits))
+	}
+	if mc := rec.opts().MaxCredits; mc != domain.TurnReserveCredits*capHeadroom {
+		t.Errorf("MaxCredits = %v, want %v (turn reserve × headroom)", mc, domain.TurnReserveCredits*capHeadroom)
+	}
+}
+
+func TestExhaustedPlanStillGatesDespiteFloor(t *testing.T) {
+	// the turn-reserve floor applies to positive caps only: a plan with
+	// nothing left still returns 0 and gates before a session opens.
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	f.Budget.Envelope = 300
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSpend(context.Background(), f.ID, 210, 0, 0, 0); err != nil { // exactly at cap
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventExhausted)
+	if rec.opts().MaxCredits != 0 {
+		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
+	}
+}

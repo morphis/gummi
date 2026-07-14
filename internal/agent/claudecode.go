@@ -468,6 +468,7 @@ func (s *claudeSession) mapStreamEvent(raw json.RawMessage) []Event {
 		if s.rate > 0 {
 			est := float64(total) * s.rate * 100 // credits are $0.01 units
 			ev.Credits = est
+			ev.Estimate = true // rate-derived; the result's settle reconciles it
 			s.estimated[model] += est
 		}
 		return []Event{{Kind: EventUsage, Usage: ev}}
@@ -534,8 +535,11 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 			cumTokens += mu.InputTokens + mu.OutputTokens + mu.CacheReadInputTokens + mu.CacheCreationInputTokens
 			delta := (mu.CostUSD-s.prevCostUSD[m])*100 - s.estimated[m]
 			s.prevCostUSD[m] = mu.CostUSD
-			if delta != 0 {
-				out = append(out, Event{Kind: EventUsage, Usage: Usage{Credits: delta, Model: m}})
+			// A settle goes out even when the correction is zero if this
+			// model had mid-turn estimates: the flag is what tells the
+			// engine the turn's estimates are now provider-metered.
+			if delta != 0 || s.estimated[m] != 0 {
+				out = append(out, Event{Kind: EventUsage, Usage: Usage{Credits: delta, Model: m, Settled: true}})
 			}
 		}
 		s.estimated = map[string]float64{}

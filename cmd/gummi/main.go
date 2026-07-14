@@ -16,6 +16,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/state"
@@ -99,6 +100,10 @@ func runBoard() error {
 	// into per-stage allocations with rollover and a protected review floor.
 	if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if float64(n) < domain.TurnReserveCredits {
+				fmt.Fprintf(os.Stderr, "gummi: GUMMI_ENVELOPE=%d is below one agent turn (~%d credits); "+
+					"stage caps will be floored at a turn and overshoot the envelope\n", n, int(domain.TurnReserveCredits))
+			}
 			shell.SetEnvelope(n)
 		}
 	}
@@ -183,6 +188,14 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 			stageBudget = b
 		}
 	}
+	// one turn's credits, the floor for plan-derived stage caps
+	// (default domain.TurnReserveCredits; override for unusual models)
+	var turnReserve float64
+	if v := os.Getenv("GUMMI_TURN_RESERVE"); v != "" {
+		if b, err := strconv.ParseFloat(v, 64); err == nil && b > 0 {
+			turnReserve = b
+		}
+	}
 	// Honor the repo's permission mode from config.yaml. Without this the
 	// parsed value was inert and "permissions: guarded" silently ran allow-all.
 	perm := agent.PermissionAllowAll
@@ -194,7 +207,8 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 	eng := engine.New(engine.Config{
 		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
 		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
-		Profiles: profiles, StageBudget: stageBudget, Permission: perm,
+		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
+		Permission: perm,
 	})
 	// Names() already orders the declared default first (the rest sorted) so
 	// index 0 is the intended default for the forms and the CLI --profile

@@ -21,12 +21,30 @@ var budgetThresholds = []int{50, 80, 95}
 // A feature with a spend-plan envelope (layer 3) gets its per-stage
 // allocation with rollover and the protected review/verify floor; one
 // without falls back to the flat config value (layer 1/2 behavior).
+//
+// A positive plan-derived cap is floored at one agent turn: enforcement
+// runs between turns (a turn is a whole agentic loop), so a smaller cap
+// cannot be held anyway — the turn overshoots it and the overshoot then
+// poisons the rollover math of every later stage. Exhaustion semantics
+// are unchanged: a plan with nothing left still returns 0 and gates.
 func (e *Engine) stageBudget(f domain.Feature, byokRate float64) float64 {
 	if f.Budget.Envelope > 0 {
-		return domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
+		b := domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
 			StageBudget(f.Stage, e.featureSpent(f, byokRate), false)
+		if reserve := e.turnReserve(); b > 0 && b < reserve {
+			b = reserve
+		}
+		return b
 	}
 	return e.cfg.StageBudget
+}
+
+// turnReserve is the one-turn credit reserve stage caps are floored at.
+func (e *Engine) turnReserve() float64 {
+	if e.cfg.TurnReserve > 0 {
+		return e.cfg.TurnReserve
+	}
+	return domain.TurnReserveCredits
 }
 
 // featureSpent returns the feature's credit-equivalent spend so far,

@@ -102,3 +102,87 @@ func TestFeatureSpendTokenDerivedIsEstimated(t *testing.T) {
 		t.Errorf("stage breakdown = %+v, want one fully-estimated row", bd)
 	}
 }
+
+// TestSettledUsageClearsEstimates replays the claude adapter's metering
+// shape: token-only events before a rate is known (the engine prices
+// them), rate-derived estimates mid-turn, then a settle event carrying
+// the provider's actual cost. After the settle, the stage rollup must
+// hold exactly the metered figure with no estimated remainder — the
+// dashboard then says "provider-metered" instead of "~ estimated".
+func TestSettledUsageClearsEstimates(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			// turn one, rate unknown: tokens only → engine token-prices it
+			{Kind: agent.EventUsage, Usage: agent.Usage{InputTokens: 1000, OutputTokens: 1000, Model: "m"}},
+			// mid-turn adapter estimate at a realized rate
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 4, Model: "m", Estimate: true}},
+			// the result settles: real cost 10; the correction is
+			// 10 − 4 (the adapter subtracts its own estimates)
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 6, Model: "m", Settled: true}},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	got, err := store.GetFeature(ctx, "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2000 tokens at the 0.5/1K default = 1 estimated credit, retired by
+	// the settle along with the adapter's 4: total = 1+4+(6−1) = 10 real.
+	if got.Spend.Credits != 10 {
+		t.Errorf("settled spend = %v, want 10 (provider-metered)", got.Spend.Credits)
+	}
+	if got.Spend.Estimated() {
+		t.Errorf("settled spend still flagged estimated: %+v", got.Spend)
+	}
+	rows, err := store.StageBreakdown(ctx, "FD-001")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("breakdown rows = %+v (%v)", rows, err)
+	}
+	if rows[0].Credits != 10 || rows[0].EstimatedCredits != 0 {
+		t.Errorf("stage row = %+v, want credits 10, estimated 0", rows[0])
+	}
+}
+
+// TestUnsettledEstimatesStayLabeled: a backend that never settles (token
+// fallback all the way) keeps its estimated label — only a settle event
+// may clear it.
+func TestUnsettledEstimatesStayLabeled(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{InputTokens: 1000, OutputTokens: 3000, Model: "m"}},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	got, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Spend.Estimated() || got.Spend.Credits != 2 {
+		t.Errorf("token-derived spend = %+v, want 2 estimated credits", got.Spend)
+	}
+}

@@ -307,11 +307,21 @@ func stageBreakdown(s *theme.Styles, rows []state.StageSpend) []string {
 		}
 	}
 	legend := "since " + since.Format("2006-01-02")
+	// adapters reconcile their live estimates to the provider's actual
+	// cost as each turn settles, so rows with no estimated remainder are
+	// real metered spend and say so; the tilde note appears only while
+	// estimates are outstanding (mid-turn, or token-priced backends).
+	estimated := false
 	for _, r := range rows {
 		if r.EstimatedCredits > 0 {
-			legend += "  ·  ~ estimated from tokens, not provider-metered"
+			estimated = true
 			break
 		}
+	}
+	if estimated {
+		legend += "  ·  ~ estimated from tokens, not provider-metered"
+	} else {
+		legend += "  ·  provider-metered"
 	}
 	out := []string{s.Muted.Render("stages   ") + s.Faint.Render(legend)}
 	for i := 0; i < len(rows); {

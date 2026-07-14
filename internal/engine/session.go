@@ -183,6 +183,13 @@ type Session struct {
 	// dispatched, compared at idle to catch writes outside the worktree.
 	mainSnap *worktree.MainState
 	mainGen  uint64
+
+	// Outstanding estimated spend per model, awaiting a settle event
+	// that reconciles it to the provider-metered figure: pendingTokenEst
+	// is what the engine priced from raw tokens (no adapter cost at
+	// all), pendingAdapterEst what the adapter estimated mid-turn.
+	pendingTokenEst   map[string]float64
+	pendingAdapterEst map[string]float64
 }
 
 // Snapshot returns a render-safe copy of the session's state.
@@ -590,6 +597,31 @@ func (s *Session) setSpawnInfo(agentName, model string, provider agent.Provider)
 	s.agentName = agentName
 	s.model = model
 	s.provider = provider
+}
+
+// notePendingEst accumulates a usage sample's estimated credits against
+// its model, split by origin: tokenEst was priced by the engine from raw
+// tokens, adapterEst by the adapter from a realized rate. A later settle
+// event for the model retires both (takePendingEst).
+func (s *Session) notePendingEst(model string, tokenEst, adapterEst float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingTokenEst == nil {
+		s.pendingTokenEst = map[string]float64{}
+		s.pendingAdapterEst = map[string]float64{}
+	}
+	s.pendingTokenEst[model] += tokenEst
+	s.pendingAdapterEst[model] += adapterEst
+}
+
+// takePendingEst returns and clears a model's outstanding estimates.
+func (s *Session) takePendingEst(model string) (tokenEst, adapterEst float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tokenEst, adapterEst = s.pendingTokenEst[model], s.pendingAdapterEst[model]
+	delete(s.pendingTokenEst, model)
+	delete(s.pendingAdapterEst, model)
+	return tokenEst, adapterEst
 }
 
 // armMainGuard records the main checkout's pre-turn state, unless a

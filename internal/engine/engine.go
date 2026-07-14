@@ -99,6 +99,10 @@ type Config struct {
 	// feature with an envelope uses per-stage allocations instead (§5.1
 	// layer 3, see stageBudget).
 	StageBudget float64
+	// TurnReserve is one agent turn's worth of credits, the floor for
+	// every plan-derived stage cap (0 = domain.TurnReserveCredits).
+	// Enforcement runs between turns, so smaller caps cannot be held.
+	TurnReserve float64
 }
 
 // Engine orchestrates all live sessions and the autonomous run queue.
@@ -588,7 +592,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	}
 	var maxCredits float64
 	// autonomous stages get a budget cap + budget-aware hint (interactive
-	// chat is human-paced, so it isn't capped).
+	// chat is human-paced, so it isn't capped). Plan-derived budgets
+	// arrive already floored at one turn's reserve (stageBudget), so the
+	// enforced cap is never the un-holdable sliver that poisons rollover.
 	if budget > 0 && !interactiveStage(f.Stage) {
 		maxCredits = budget * capHeadroom
 		hints = append(hints, budgetHint(budget))
@@ -899,20 +905,37 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// leaves them unchanged and never double-counts.
 		if e.cfg.Persist && e.cfg.Store != nil {
 			credits := s.creditEquivalent(ev.Usage)
-			// an event without provider-reported credits was priced from its
-			// tokens — an estimate, not a metered cost; carry the split so
-			// displays can label it instead of presenting it as real.
+			// estimated is the token/rate-derived portion of credits, kept as
+			// its own accumulator so displays can label live figures instead
+			// of presenting them as real. A settle event retires the model's
+			// outstanding estimates: the adapter's own mid-turn estimates are
+			// already inside its signed correction, while the engine's
+			// token-priced fallback (recorded before the adapter knew a rate)
+			// is not — so that portion comes off the credit total here too,
+			// leaving exactly the provider-metered figure.
 			var estimated float64
-			if ev.Usage.Credits <= 0 {
+			switch {
+			case ev.Usage.Settled:
+				credits = ev.Usage.Credits // signed correction; never token-priced
+				tokenEst, adapterEst := s.takePendingEst(ev.Usage.Model)
+				credits -= tokenEst
+				estimated = -(tokenEst + adapterEst)
+			case ev.Usage.Credits <= 0:
 				estimated = credits
+				s.notePendingEst(ev.Usage.Model, credits, 0)
+			case ev.Usage.Estimate:
+				estimated = credits
+				s.notePendingEst(ev.Usage.Model, 0, credits)
 			}
-			_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
-				credits, estimated, ev.Usage.InputTokens, ev.Usage.OutputTokens)
-			// the same sample attributed to (stage, model) for the breakdown;
-			// same credit-equivalent, so stage_spend sums to spend_credits.
-			_ = e.cfg.Store.RecordStageSpend(context.Background(), s.Feature.ID,
-				s.Feature.Stage, string(s.Role), ev.Usage.Model,
-				credits, estimated, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
+			if credits != 0 || estimated != 0 || ev.Usage.InputTokens != 0 || ev.Usage.OutputTokens != 0 {
+				_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
+					credits, estimated, ev.Usage.InputTokens, ev.Usage.OutputTokens)
+				// the same sample attributed to (stage, model) for the breakdown;
+				// same credit-equivalent, so stage_spend sums to spend_credits.
+				_ = e.cfg.Store.RecordStageSpend(context.Background(), s.Feature.ID,
+					s.Feature.Stage, string(s.Role), ev.Usage.Model,
+					credits, estimated, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
+			}
 		}
 		// budget awareness: on crossing a threshold, record a nudge and
 		// signal the UI (DESIGN §5.1 layer 2).

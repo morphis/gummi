@@ -117,6 +117,15 @@ func (s Spend) CreditEquivalentAt(ratePer1K float64) float64 {
 // still finishes without a top-up.
 const estimateHeadroom = 1.25
 
+// TurnReserveCredits is one agent turn's worth of credits (sized to a
+// mid-tier agentic turn — a whole tool-using loop, not one completion).
+// Budget enforcement runs between turns, so a cap below this cannot be
+// held: the first turn blows through it, and the overshoot then poisons
+// every downstream stage-cap and top-up computation. Stage caps are
+// floored at it and top-ups raise by at least it. Overridable per engine
+// (Config.TurnReserve); this is the default.
+const TurnReserveCredits = 30
+
 // MinEnvelope floors every estimated envelope. Estimation signals skew
 // low — a scribe guesses from the spec without seeing the agent's real
 // exploration cost, and a thin history medians over unrepresentative
@@ -216,8 +225,9 @@ func (p SpendPlan) capThrough(s Stage, reserveReleased bool) float64 {
 // The rederive term guarantees the raised cumulative cap through s is
 // at least spent × estimateHeadroom, so the resumed stage's budget is
 // ≥ (estimateHeadroom−1) × spent and a top-up can never re-gate on the
-// spot. The result never shrinks the envelope, and is rounded up to a
-// tidy 10.
+// spot. The raise is at least one agent turn (TurnReserveCredits) — a
+// sliver of a raise would just re-gate after the next turn — the result
+// never shrinks the envelope, and is rounded up to a tidy 10.
 func (p SpendPlan) RaisedEnvelope(s Stage, spent float64) float64 {
 	if p.Envelope <= 0 {
 		return p.Envelope // unbudgeted stays unbudgeted
@@ -229,6 +239,7 @@ func (p SpendPlan) RaisedEnvelope(s Stage, spent float64) float64 {
 	if through > 0 {
 		raised = math.Max(raised, spent*estimateHeadroom/through)
 	}
+	raised = math.Max(raised, p.Envelope+TurnReserveCredits)
 	return roundUpTo10(math.Max(p.Envelope, raised))
 }
 

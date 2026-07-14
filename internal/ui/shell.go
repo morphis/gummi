@@ -310,6 +310,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.notice = noticeMsg{}
+		if msg.warn != "" {
+			// non-blocking caution (provenance in branch commits): shown
+			// while the commit-message dialog collects the landing message
+			m.notice = noticeMsg{text: sanitize(msg.warn), isErr: true}
+		}
 		f, thenDone := msg.f, msg.thenDone
 		m.Overlay.Push(newCommitMsgDialog(f, func(message string) tea.Cmd {
 			return m.squashMergeFeature(f, message, thenDone)
