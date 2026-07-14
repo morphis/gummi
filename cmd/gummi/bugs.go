@@ -59,7 +59,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	}
 	wt, err := worktree.NewManager(context.Background(), cwd)
 	if err != nil {
-		store.Close()
+		_ = store.Close()
 		return nil, err
 	}
 	// Bug ingestion and materialization are deterministic (gh + the store),
@@ -89,7 +89,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 			if ag != nil {
 				_ = ag.Close()
 			}
-			store.Close()
+			_ = store.Close()
 		},
 	}, nil
 }

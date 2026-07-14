@@ -14,8 +14,8 @@ func loopShell() *Shell {
 	return NewShell(theme.GummiDark(), "v0-test")
 }
 
-func planFeature(id domain.FeatureID) domain.Feature {
-	return domain.Feature{ID: id, Stage: domain.StagePlan}
+func planFeature() domain.Feature {
+	return domain.Feature{ID: "FD-001", Stage: domain.StagePlan}
 }
 
 func TestPlanLoopLegQuietWithoutActivity(t *testing.T) {
@@ -23,7 +23,7 @@ func TestPlanLoopLegQuietWithoutActivity(t *testing.T) {
 	if _, _, ok := m.planLoopLeg("FD-001"); ok {
 		t.Error("leg reported with no session and no gate")
 	}
-	if line := m.planLoopLine(planFeature("FD-001")); line != "" {
+	if line := m.planLoopLine(planFeature()); line != "" {
 		t.Errorf("loop line rendered with nothing in flight: %q", line)
 	}
 }
@@ -38,7 +38,7 @@ func TestPlanLoopLegApproveOnGate(t *testing.T) {
 	if escalated {
 		t.Error("clean gate reported as escalated")
 	}
-	line := m.planLoopLine(planFeature("FD-001"))
+	line := m.planLoopLine(planFeature())
 	if !strings.Contains(line, "approve") || !strings.Contains(line, "plan ✓") {
 		t.Errorf("approve breadcrumb missing done/active legs: %q", line)
 	}
@@ -63,7 +63,7 @@ func TestPlanLoopLineOtherStageEmpty(t *testing.T) {
 
 func TestRunningLabelNamesPlanLegs(t *testing.T) {
 	m := loopShell()
-	f := planFeature("FD-001")
+	f := planFeature()
 	cases := []struct {
 		name   string
 		snap   engine.Snapshot
@@ -87,7 +87,7 @@ func TestPlanLoopRoundCounterInBreadcrumb(t *testing.T) {
 	m := loopShell()
 	m.inbox.add("FD-001", attnGate, "escalated")
 	m.planRounds["FD-001"] = 1
-	line := m.planLoopLine(planFeature("FD-001"))
+	line := m.planLoopLine(planFeature())
 	if !strings.Contains(line, "replan") || !strings.Contains(line, "round 1/2") {
 		t.Errorf("bounced loop breadcrumb missing replan/round: %q", line)
 	}
@@ -100,7 +100,7 @@ func TestPlanLoopEscalatedGateTintsApprove(t *testing.T) {
 	if !ok || !escalated {
 		t.Fatalf("escalated gate not reported: escalated=%v ok=%v", escalated, ok)
 	}
-	line := m.planLoopLine(planFeature("FD-001"))
+	line := m.planLoopLine(planFeature())
 	if !strings.Contains(line, "escalated") {
 		t.Errorf("escalated breadcrumb missing the marker: %q", line)
 	}

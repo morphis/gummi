@@ -118,7 +118,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	case verdictChanges:
 		if m.reviewRounds[id] >= maxReviewRounds {
 			m.reviewRounds[id] = 0
-			m.raiseEscalation(id, attnGate, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
+			m.raiseEscalation(id, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
 			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
 			return nil
 		}
@@ -128,7 +128,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
 		m.reviewRounds[id] = 0
-		m.raiseEscalation(id, attnGate, "review finished with no clear verdict — review manually")
+		m.raiseEscalation(id, "review finished with no clear verdict — review manually")
 		return nil
 	}
 }
@@ -146,7 +146,7 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	case verdictPass:
 		m.raiseAttention(id, attnGate, "verify passed — review & land on main")
 	case verdictBlocked:
-		m.raiseEscalation(id, attnGate, "verify BLOCKED — the environment can't run the verification plan; "+
+		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
 	case verdictFail, verdictChanges:
 		// repeat failures warn off the bounce: each prior one bought a
@@ -160,13 +160,13 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 			}
 		}
 		if bounces >= 1 {
-			m.raiseEscalation(id, attnGate, "verify FAILED for the "+ordinal(bounces+1)+" time — "+
+			m.raiseEscalation(id, "verify FAILED for the "+ordinal(bounces+1)+" time — "+
 				"re-implementing is unlikely to help; check the environment and the verification plan before bouncing")
 		} else {
-			m.raiseEscalation(id, attnGate, "verify FAILED — read the evidence and bounce or overrule")
+			m.raiseEscalation(id, "verify FAILED — read the evidence and bounce or overrule")
 		}
 	default:
-		m.raiseEscalation(id, attnGate, "verify finished with no clear verdict — check the results manually")
+		m.raiseEscalation(id, "verify finished with no clear verdict — check the results manually")
 	}
 	// the session edited the artifact and committed; reload so the gate's
 	// row state (landed, open-comment counts) is fresh
@@ -215,7 +215,7 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 	case verdictChanges:
 		if m.planRounds[id] >= maxPlanRounds {
 			m.planRounds[id] = 0
-			m.raiseEscalation(id, attnGate, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
+			m.raiseEscalation(id, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
 			m.notice = noticeMsg{text: string(id) + " plan critique escalated after " + itoa(maxPlanRounds) + " rounds", isErr: true}
 			return nil
 		}
@@ -225,7 +225,7 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
 		m.planRounds[id] = 0
-		m.raiseEscalation(id, attnGate, "plan critique finished with no clear verdict — review the plan manually")
+		m.raiseEscalation(id, "plan critique finished with no clear verdict — review the plan manually")
 		return nil
 	}
 }

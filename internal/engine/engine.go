@@ -16,10 +16,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
-
-	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -479,7 +478,7 @@ const verifyStageTimeout = 10 * time.Minute
 // carries no checks or can't be read — the verify agent then discovers and
 // runs them itself, per its stage hint).
 func (e *Engine) runSpecChecks(s *Session) string {
-	raw, err := os.ReadFile(s.SpecPath()) //nolint:gosec // gummi-owned spec path
+	raw, err := os.ReadFile(s.SpecPath())
 	if err != nil {
 		return ""
 	}

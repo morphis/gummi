@@ -18,6 +18,8 @@ linters:
     errcheck:
       # Close/Remove in defer or error paths: failure is either
       # unactionable or already surfaced by the operation that matters.
+      # fmt.Fprint* here is CLI report rendering to stdout, where a
+      # write failure is equally unactionable.
       exclude-functions:
         - (*database/sql.Rows).Close
         - (*database/sql.DB).Close
@@ -25,6 +27,9 @@ linters:
         - (io.ReadCloser).Close
         - os.Remove
         - (*github.com/morphis/gummi/internal/state.Store).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
   exclusions:
     generated: lax
     presets:

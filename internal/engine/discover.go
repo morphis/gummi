@@ -48,7 +48,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 	if err != nil {
 		return nil, err
 	}
-	if raw, err := os.ReadFile(specPath); err == nil { //nolint:gosec // gummi-owned spec path
+	if raw, err := os.ReadFile(specPath); err == nil {
 		if _, found, _ := spec.ParseChecks(string(raw)); found {
 			return nil, nil
 		}
@@ -102,7 +102,7 @@ func (e *Engine) recordChecks(specPath, reply string) ([]domain.Check, error) {
 	}
 	unlock := spec.LockFile(specPath)
 	defer unlock()
-	raw, err := os.ReadFile(specPath) //nolint:gosec // gummi-owned spec path
+	raw, err := os.ReadFile(specPath)
 	if err != nil {
 		return nil, err
 	}

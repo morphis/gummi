@@ -182,7 +182,7 @@ func TestTemplateParsesWithOpenQuestions(t *testing.T) {
 	problem := strings.Index(tpl, "## Problem")
 	scope := strings.Index(tpl, "## Out of scope")
 	considered := strings.Index(tpl, "## Considered approaches")
-	if scope < 0 || !(problem < scope && scope < considered) {
+	if scope < 0 || (problem >= scope || scope >= considered) {
 		t.Errorf("Out of scope section misplaced: problem=%d scope=%d considered=%d", problem, scope, considered)
 	}
 	if DraftFilename(f) != "FD-007-search.md" {

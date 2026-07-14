@@ -72,8 +72,12 @@ func legalForBug(skip domain.SkipFlags) map[edge]bool {
 func allSkipCombos() []domain.SkipFlags {
 	return []domain.SkipFlags{
 		{},
-		{Brainstorm: true}, {Plan: true}, {Brainstorm: true, Plan: true},
-		{Triage: true}, {Diagnose: true}, {Triage: true, Diagnose: true},
+		{Brainstorm: true},
+		{Plan: true},
+		{Brainstorm: true, Plan: true},
+		{Triage: true},
+		{Diagnose: true},
+		{Triage: true, Diagnose: true},
 	}
 }
 

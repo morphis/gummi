@@ -90,10 +90,12 @@ func (g GitHubSource) Fetch(ctx context.Context) ([]domain.BugProposal, error) {
 	if state == "" {
 		state = "open"
 	}
-	args := []string{"issue", "list",
+	args := []string{
+		"issue", "list",
 		"--state", state,
 		"--limit", fmt.Sprintf("%d", limit),
-		"--json", "number,title,body,url,state,labels,author"}
+		"--json", "number,title,body,url,state,labels,author",
+	}
 	if g.Repo != "" {
 		args = append(args, "--repo", g.Repo)
 	}
@@ -134,7 +136,8 @@ func (g GitHubSource) Fetch(ctx context.Context) ([]domain.BugProposal, error) {
 // severity, so "P0"/"sev1"/"critical" labels seed the report header.
 func severityFromLabels(labels []struct {
 	Name string `json:"name"`
-}) domain.Severity {
+},
+) domain.Severity {
 	for _, l := range labels {
 		if s := domain.NormalizeSeverity(l.Name); s != "" {
 			return s

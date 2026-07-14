@@ -14,8 +14,10 @@ import (
 // from regressions.
 func TestBaselineChecksPersists(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{
+		Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+	})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -54,8 +56,10 @@ func TestBaselineChecksPersists(t *testing.T) {
 // is skipped, not taken.
 func TestBaselineChecksGuardedNoop(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
+	e := New(Config{
+		Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded,
+	})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -79,8 +83,10 @@ func TestBaselineChecksGuardedNoop(t *testing.T) {
 // not an empty block to shrug at.
 func TestBaselineChecksMalformedYAMLErrors(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{
+		Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+	})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()

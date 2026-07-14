@@ -90,7 +90,7 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 	if e.cfg.Agent == nil {
 		return domain.IngestResult{}, fmt.Errorf("no agent configured; cannot ingest")
 	}
-	raw, err := os.ReadFile(sourcePath) //nolint:gosec // operator-supplied path
+	raw, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return domain.IngestResult{}, fmt.Errorf("reading source: %w", err)
 	}
@@ -185,7 +185,7 @@ func uniqueIngestName(dir, base string, content []byte) (string, error) {
 		if i > 1 {
 			name = fmt.Sprintf("%s-%d%s", stem, i, ext)
 		}
-		existing, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // gummi-owned ingest dir
+		existing, err := os.ReadFile(filepath.Join(dir, name))
 		switch {
 		case os.IsNotExist(err):
 			return name, nil

@@ -33,7 +33,7 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(specPath) //nolint:gosec // gummi-owned spec path
+	raw, err := os.ReadFile(specPath)
 	if err != nil {
 		return nil, err
 	}

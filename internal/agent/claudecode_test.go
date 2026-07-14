@@ -20,7 +20,7 @@ func writeFakeClaude(t *testing.T, body string) string {
 		t.Skip("python3 not available")
 	}
 	path := filepath.Join(t.TempDir(), "claude")
-	if err := os.WriteFile(path, []byte("#!/usr/bin/env python3\n"+body), 0o700); err != nil { //nolint:gosec // test helper
+	if err := os.WriteFile(path, []byte("#!/usr/bin/env python3\n"+body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

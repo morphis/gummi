@@ -29,7 +29,7 @@ type verifyResultMsg struct {
 // list) — the dialog shows exactly what will execute.
 func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
 	workDir := filepath.Join(m.wt.Root(), f.WorktreePath())
-	raw, err := os.ReadFile(filepath.Join(workDir, f.ArtifactPath())) //nolint:gosec // gummi-owned spec path
+	raw, err := os.ReadFile(filepath.Join(workDir, f.ArtifactPath()))
 	if os.IsNotExist(err) {
 		m.notice = noticeMsg{text: "no checks yet — gummi discovers them into the " + artifactNoun(f.Kind) + " at approval"}
 		return nil

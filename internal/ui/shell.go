@@ -66,9 +66,9 @@ type Shell struct {
 	baselining   map[domain.FeatureID]bool // a baseline check run is in flight
 	reviewRounds map[domain.FeatureID]int  // automatic review→fix→review counter
 	planRounds   map[domain.FeatureID]int  // automatic plan→critique→replan counter
-	profileNames []string                 // profile names for the new-feature form
-	envelope     int                      // default spend-plan envelope for new features (0 = none)
-	notifier     *notify.Notifier         // bell/desktop hook for needs-attention events
+	profileNames []string                  // profile names for the new-feature form
+	envelope     int                       // default spend-plan envelope for new features (0 = none)
+	notifier     *notify.Notifier          // bell/desktop hook for needs-attention events
 
 	// Copilot quota hint (copilotquota.go): the latest reading shown as
 	// a status-bar pill, its enable flag, and the gh seam for tests.
@@ -136,9 +136,11 @@ func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) 
 
 // raiseEscalation is raiseAttention for gates an automatic loop gave up
 // on (round cap, unclear verdict): the item carries the escalation flag
-// so surfaces tint it as needs-you rather than finished-clean.
-func (m *Shell) raiseEscalation(id domain.FeatureID, kind attnKind, text string) {
-	if m.inbox.addEscalated(id, kind, text) {
+// so surfaces tint it as needs-you rather than finished-clean. Every
+// escalation is a gate — the loop stopped at a decision only the human
+// can take.
+func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
+	if m.inbox.addEscalated(id, attnGate, text) {
 		m.notifier.Alert(string(id) + ": " + text)
 	}
 }

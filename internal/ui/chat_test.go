@@ -230,7 +230,7 @@ func TestChatPickerAnswers(t *testing.T) {
 	waitAsk(t, eng)
 
 	// selecting option 1 (per-device) answers the question
-	m = press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
+	press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
 	deadline := time.After(3 * time.Second)
 	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
 		select {

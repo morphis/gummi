@@ -96,7 +96,7 @@ func (m *Shell) judgeRebase(id domain.FeatureID) tea.Cmd {
 func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	id := msg.f.ID
 	if !msg.ok {
-		m.raiseEscalation(id, attnGate, "agent rebase failed — "+msg.problem+"; read the transcript (t), then resolve on the branch")
+		m.raiseEscalation(id, "agent rebase failed — "+msg.problem+"; read the transcript (t), then resolve on the branch")
 		m.notice = noticeMsg{text: string(id) + ": agent rebase failed — " + msg.problem, isErr: true}
 		return m.loadRows
 	}

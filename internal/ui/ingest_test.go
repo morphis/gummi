@@ -127,7 +127,7 @@ func TestIngestSingleInFlight(t *testing.T) {
 	}
 
 	// delivering the result clears the in-flight run and opens the surface
-	m, _ = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
+	m = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
 	if m.ingestRun != nil {
 		t.Error("in-flight run should clear when the result arrives")
 	}
@@ -193,9 +193,9 @@ func TestIngestRunFeedShowsProgress(t *testing.T) {
 }
 
 // update is a thin Update helper returning the concrete Shell.
-func update(m *Shell, msg tea.Msg) (*Shell, tea.Cmd) {
-	model, cmd := m.Update(msg)
-	return model.(*Shell), cmd
+func update(m *Shell, msg tea.Msg) *Shell {
+	model, _ := m.Update(msg)
+	return model.(*Shell)
 }
 
 func mustDecode(t *testing.T) domain.IngestResult {
@@ -207,7 +207,7 @@ func TestIngestResultTakesForegroundOverSpecPane(t *testing.T) {
 	m, _ := chatWorkspace(t, fakeProposer())
 	// a spec pane is open when the ingest result lands
 	m.spec = &specView{}
-	m, _ = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
+	m = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
 	if m.spec != nil {
 		t.Error("spec pane should be cleared so the review surface isn't hidden")
 	}

@@ -99,12 +99,16 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 // comments block the gate (DESIGN §6.1), or nil when g is clear.
 func blockedGate(in nextInput) *nextAction {
 	if in.openSpecQs > 0 {
-		return &nextAction{"s", "resolve open comments",
-			itoa(in.openSpecQs) + " open in the " + artifactNoun(in.kind) + " block the gate — R requests changes"}
+		return &nextAction{
+			"s", "resolve open comments",
+			itoa(in.openSpecQs) + " open in the " + artifactNoun(in.kind) + " block the gate — R requests changes",
+		}
 	}
 	if in.openDiffComments > 0 {
-		return &nextAction{"d", "resolve diff comments",
-			itoa(in.openDiffComments) + " open block the gate — R requests changes, x resolves"}
+		return &nextAction{
+			"d", "resolve diff comments",
+			itoa(in.openDiffComments) + " open block the gate — R requests changes, x resolves",
+		}
 	}
 	return nil
 }
@@ -226,8 +230,10 @@ func nextActions(in nextInput) []nextAction {
 			return []nextAction{{"enter", "run verify", "no active run — runs the checks and the verification plan"}}
 		}
 		if b := blockedGate(in); b != nil {
-			return []nextAction{*b,
-				{"b", "bounce to " + string(work), "or send the open items back as rework"}}
+			return []nextAction{
+				*b,
+				{"b", "bounce to " + string(work), "or send the open items back as rework"},
+			}
 		}
 		if in.failedCheck != "" {
 			return []nextAction{

@@ -152,10 +152,14 @@ func TestEstimatedSpendGolden(t *testing.T) {
 	m.sel = 1
 	m.rows[1].F.Spend = domain.Spend{Credits: 163.8, EstimatedCredits: 163.8, OutputTokens: 327539}
 	m.rows[1].StageSpend = []state.StageSpend{
-		{Stage: domain.StageImplement, Model: "claude-sonnet-4.6", Role: "implementer",
-			Credits: 61.6, EstimatedCredits: 61.6, OutputTokens: 123219, UpdatedAt: time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC)},
-		{Stage: domain.StageReview, Model: "claude-sonnet-4.6", Role: "reviewer",
-			Credits: 11.1, EstimatedCredits: 11.1, OutputTokens: 22266, UpdatedAt: time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)},
+		{
+			Stage: domain.StageImplement, Model: "claude-sonnet-4.6", Role: "implementer",
+			Credits: 61.6, EstimatedCredits: 61.6, OutputTokens: 123219, UpdatedAt: time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			Stage: domain.StageReview, Model: "claude-sonnet-4.6", Role: "reviewer",
+			Credits: 11.1, EstimatedCredits: 11.1, OutputTokens: 22266, UpdatedAt: time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC),
+		},
 	}
 	golden.RequireEqual(t, []byte(populatedShellView(m)))
 }

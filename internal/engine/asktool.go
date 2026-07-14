@@ -145,8 +145,8 @@ func submitVerdictTool() agent.ToolDef {
 			"type": "object",
 			"properties": map[string]any{
 				"verdict": map[string]any{
-					"type":        "string",
-					"enum":        []any{"pass", "changes"},
+					"type": "string",
+					"enum": []any{"pass", "changes"},
 					"description": "pass = no blocking findings (nits alone pass), ready to verify; " +
 						"changes = at least one blocking finding, bounce back to implement.",
 				},
@@ -340,7 +340,7 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 	// atomically so a crash can't tear the artifact.
 	unlock := spec.LockFile(path)
 	defer unlock()
-	raw, err := os.ReadFile(path) //nolint:gosec // gummi-owned spec path
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
 		return
@@ -585,7 +585,7 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	}
 	unlock := spec.LockFile(path)
 	defer unlock()
-	raw, err := os.ReadFile(path) //nolint:gosec // gummi-owned spec path
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "spec capture skipped: " + err.Error()
 	}
