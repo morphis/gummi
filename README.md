@@ -171,6 +171,12 @@ The agent layer is pluggable, selected with `GUMMI_AGENT`:
   visibility, client tools, session resume, and per-session BYOK env —
   an OpenAI-compatible endpoint (llama.cpp, vLLM, hosted) works without
   GitHub authentication.
+- **claude** — the Claude Code CLI in streaming print mode
+  (`GUMMI_CLAUDE_BIN` overrides the binary). Requires
+  `permissions: allow-all` — guarded mode is rejected because the CLI's
+  default permission mode silently auto-denies tools. BYOK provider
+  blocks are not supported; Claude Code manages its own endpoint
+  routing (Anthropic-shaped env such as `ANTHROPIC_BASE_URL`).
 - **opencode** — the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
   binary). Provider/model config is owned by opencode itself.
 - **headless** — a generic subprocess adapter for any agent binary
@@ -202,8 +208,9 @@ Environment variables:
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | backend: `copilot` (default) · `opencode` · `headless` |
+| `GUMMI_AGENT` | backend: `copilot` (default) · `claude` · `opencode` · `headless` |
 | `GUMMI_AGENT_CMD` | headless adapter's command line |
+| `GUMMI_CLAUDE_BIN` | claude backend's binary (default `claude` on PATH) |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_PROVIDER_BASE_URL` / `_TYPE` / `_KEY_ENV` | ad-hoc BYOK endpoint without editing profiles |
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
