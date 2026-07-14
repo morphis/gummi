@@ -963,10 +963,18 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			if credits != 0 || estimated != 0 || ev.Usage.InputTokens != 0 || ev.Usage.OutputTokens != 0 {
 				_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
 					credits, estimated, ev.Usage.InputTokens, ev.Usage.OutputTokens)
-				// the same sample attributed to (stage, model) for the breakdown;
-				// same credit-equivalent, so stage_spend sums to spend_credits.
+				// the same sample attributed to (stage, model, role) for the
+				// breakdown; same credit-equivalent, so stage_spend sums to
+				// spend_credits. A backend's internal side-model call is booked
+				// to the helper role, not the stage role it ran under — else a
+				// token-less title/summary call inflates and mis-attributes the
+				// working role's row.
+				role := s.Role
+				if ev.Usage.Helper {
+					role = agent.RoleHelper
+				}
 				_ = e.cfg.Store.RecordStageSpend(context.Background(), s.Feature.ID,
-					s.Feature.Stage, string(s.Role), ev.Usage.Model,
+					s.Feature.Stage, string(role), ev.Usage.Model,
 					credits, estimated, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
 			}
 		}

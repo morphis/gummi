@@ -600,5 +600,11 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 		return "spec capture failed: " + err.Error()
 	}
-	return "recorded your answer in the spec"
+	return AnswerCapturedNote
 }
+
+// AnswerCapturedNote is the activity note captureAnswer records when an
+// ask_user answer with a spec_anchor lands as a resolved %% marker. The
+// chat surface folds it into the answer's own bubble rather than showing
+// both the answer and this note (the answer would otherwise read twice).
+const AnswerCapturedNote = "recorded your answer in the spec"

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,5 +121,35 @@ func TestReconstructInboxAfterRestart(t *testing.T) {
 	}
 	if got[fFail.ID] != attnFailure {
 		t.Errorf("failed run reconstructed as %q, want failure", got[fFail.ID])
+	}
+}
+
+// TestCreateFeatureDerivesTitle: a long creation description becomes a
+// concise card title with the full text kept as the one-liner, so the
+// title slot isn't the whole first line (the drive's F12 finding).
+func TestCreateFeatureDerivesTitle(t *testing.T) {
+	ws, store, wt := uiRepo(t)
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.now = func() time.Time { return time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC) }
+	m.Attach(store, wt, ws)
+
+	long := "Add a healthz endpoint. It returns status and version so the load balancer can check liveness."
+	if msg := m.createFeature(formResult{Title: long})(); msg != nil {
+		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
+			t.Fatalf("create failed: %s", nm.text)
+		}
+	}
+	f, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Title != "Add a healthz endpoint" {
+		t.Errorf("card title = %q, want the concise first sentence", f.Title)
+	}
+	if f.OneLiner != strings.Join(strings.Fields(long), " ") {
+		t.Errorf("one-liner lost the full description: %q", f.OneLiner)
+	}
+	if f.Slug != "add-a-healthz-endpoint" {
+		t.Errorf("slug = %q, want it derived from the concise title", f.Slug)
 	}
 }

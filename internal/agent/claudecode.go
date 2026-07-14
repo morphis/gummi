@@ -537,9 +537,14 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 			s.prevCostUSD[m] = mu.CostUSD
 			// A settle goes out even when the correction is zero if this
 			// model had mid-turn estimates: the flag is what tells the
-			// engine the turn's estimates are now provider-metered.
+			// engine the turn's estimates are now provider-metered. A model
+			// other than the session's own is a CLI-internal helper (title,
+			// summary) — real cost, but not the role's work, so tag it so
+			// metering keeps it out of the role's stage row.
 			if delta != 0 || s.estimated[m] != 0 {
-				out = append(out, Event{Kind: EventUsage, Usage: Usage{Credits: delta, Model: m, Settled: true}})
+				out = append(out, Event{Kind: EventUsage, Usage: Usage{
+					Credits: delta, Model: m, Settled: true, Helper: m != s.mainModel,
+				}})
 			}
 		}
 		s.estimated = map[string]float64{}

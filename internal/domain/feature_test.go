@@ -170,3 +170,36 @@ func TestStageSuperState(t *testing.T) {
 		t.Error(`Stage("bogus").Valid() = true, want false`)
 	}
 }
+
+func TestDeriveTitle(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Dark mode toggle", "Dark mode toggle"},
+		{"Add a healthz endpoint. It returns status and version.", "Add a healthz endpoint"},
+		{"  spaced   out   words  ", "spaced out words"},
+		{"Support idempotency keys on transfers so retried requests never double-charge the account", "Support idempotency keys on transfers so retried requests…"},
+		{"Bump to v1.2.3 across the board", "Bump to v1.2.3 across the board"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := DeriveTitle(c.in); got != c.want {
+			t.Errorf("DeriveTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if len(DeriveTitle(c.in)) > maxTitleLen+len("…") {
+			t.Errorf("DeriveTitle(%q) too long: %q", c.in, DeriveTitle(c.in))
+		}
+	}
+}
+
+func TestSplitDescription(t *testing.T) {
+	// a short description is its own title with no separate one-liner
+	title, oneLiner := SplitDescription("Dark mode toggle")
+	if title != "Dark mode toggle" || oneLiner != "" {
+		t.Errorf("short desc split = (%q, %q)", title, oneLiner)
+	}
+	// a long one keeps the full text as the one-liner
+	full := "Add a healthz endpoint. It returns status and version for the load balancer."
+	title, oneLiner = SplitDescription(full)
+	if title != "Add a healthz endpoint" || oneLiner != full {
+		t.Errorf("long desc split = (%q, %q)", title, oneLiner)
+	}
+}

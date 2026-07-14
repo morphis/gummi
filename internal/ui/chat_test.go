@@ -352,3 +352,47 @@ func TestToolOutputLines(t *testing.T) {
 		t.Errorf("expanded failure shows %d lines, want all 21", len(got))
 	}
 }
+
+// TestChatDedupesCapturedAnswer: an ask_user answer captured into the
+// spec as a resolved marker shows once — as the answer bubble tagged
+// "recorded in the spec" — not as the bubble plus a separate note line.
+func TestChatDedupesCapturedAnswer(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	c := &chatPane{}
+	snap := engine.Snapshot{
+		Role: "architect",
+		Transcript: []engine.Message{
+			{Author: engine.AuthorUser, Content: "per-device"},
+			{Author: engine.AuthorTool, Content: engine.AnswerCapturedNote},
+		},
+	}
+	out := stripANSI(c.transcript(s, snap, 80, 40))
+	// the answer appears once, and the standalone full "recorded your
+	// answer in the spec" note line is gone — folded into the bubble's
+	// label as a short "recorded in the spec" tag
+	if strings.Count(out, "per-device") != 1 {
+		t.Fatalf("answer should appear exactly once:\n%s", out)
+	}
+	if strings.Contains(out, engine.AnswerCapturedNote) {
+		t.Errorf("standalone capture note not deduped:\n%s", out)
+	}
+	if !strings.Contains(out, "recorded in the spec") {
+		t.Errorf("captured answer not tagged on its bubble:\n%s", out)
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for _, r := range s {
+		switch {
+		case r == '\x1b':
+			inEsc = true
+		case inEsc && (r == 'm'):
+			inEsc = false
+		case !inEsc:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

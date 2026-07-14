@@ -101,11 +101,17 @@ CREATE TABLE IF NOT EXISTS diff_annotations (
 );
 CREATE INDEX IF NOT EXISTS diff_annotations_feature ON diff_annotations(feature_id);
 
--- Realized spend rolled up per (feature, stage, model): the breakdown
--- behind features.spend_* (which stays the fast feature-level total).
--- Forward-only — transitions never carried cost, so rows begin at deploy.
--- credits use the same credit-equivalent as the feature total, so the
--- breakdown sums back to features.spend_credits.
+-- Realized spend rolled up per (feature, stage, model, role): the
+-- breakdown behind features.spend_* (which stays the fast feature-level
+-- total). Forward-only — transitions never carried cost, so rows begin at
+-- deploy. credits use the same credit-equivalent as the feature total, so
+-- the breakdown sums back to features.spend_credits.
+--
+-- This is also the durable record of role→model routing: the sessions
+-- table is cleared as each stage completes, so a finished feature's
+-- routing (which model served which role at which stage) survives only
+-- here. The helper role captures a backend's internal side-model calls
+-- so they don't mis-attribute to the stage's working role.
 CREATE TABLE IF NOT EXISTS stage_spend (
 	feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
 	stage      TEXT    NOT NULL,

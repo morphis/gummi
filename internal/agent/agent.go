@@ -18,6 +18,10 @@ const (
 	RoleImplementer Role = "implementer"
 	RoleReviewer    Role = "reviewer"
 	RoleScribe      Role = "scribe"
+	// RoleHelper attributes a backend's internal side-model spend (a
+	// title/summary call the CLI makes on its own model) in the per-stage
+	// breakdown, keeping it out of the working role's row.
+	RoleHelper Role = "helper"
 )
 
 // Permission is the policy a session applies to tool calls. gummi's
@@ -227,6 +231,12 @@ type Usage struct {
 	// to the provider's actual figure, superseding every estimate emitted
 	// for it so far. An event with Settled set never carries tokens.
 	Settled bool
+	// Helper marks spend on a model the backend used internally (title
+	// generation, summarization) rather than the session's working model —
+	// real cost, but not the role's stage work. Metering attributes it to a
+	// helper slot so a token-less helper call doesn't inflate or
+	// mis-attribute the stage role's own row.
+	Helper bool
 }
 
 // Context is the conversation's context-window occupancy: Tokens

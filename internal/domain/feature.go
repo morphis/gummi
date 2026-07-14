@@ -198,6 +198,65 @@ func (f *Feature) Validate() error {
 
 const maxSlugLen = 40
 
+// maxTitleLen bounds a derived card title so a long description doesn't
+// become the whole title (the full text is kept in OneLiner).
+const maxTitleLen = 60
+
+// DeriveTitle reduces a free-text description to a concise card title:
+// its first sentence, or the first maxTitleLen characters on a word
+// boundary if that runs long, whichever is shorter. The full description
+// is preserved separately (a feature's OneLiner). A short description is
+// returned unchanged, so it is its own title with no OneLiner needed
+// (SplitDescription reports when the two differ).
+func DeriveTitle(desc string) string {
+	desc = strings.TrimSpace(strings.Join(strings.Fields(desc), " "))
+	if desc == "" {
+		return ""
+	}
+	// first sentence: cut at the first ., !, or ? followed by space or end
+	if i := firstSentenceEnd(desc); i > 0 && i < len(desc) {
+		desc = strings.TrimRight(strings.TrimSpace(desc[:i]), ".!?")
+	}
+	if len(desc) <= maxTitleLen {
+		return desc
+	}
+	// too long: truncate on a word boundary within the budget, adding an
+	// ellipsis so the cut is visible
+	cut := desc[:maxTitleLen]
+	if sp := strings.LastIndexByte(cut, ' '); sp > maxTitleLen/2 {
+		cut = cut[:sp]
+	}
+	return strings.TrimRight(cut, " ,;:-") + "…"
+}
+
+// SplitDescription derives a card title and reports the full description
+// as a one-liner only when it carries more than the title does — so a
+// short, single-sentence description isn't stored twice.
+func SplitDescription(desc string) (title, oneLiner string) {
+	desc = strings.TrimSpace(strings.Join(strings.Fields(desc), " "))
+	title = DeriveTitle(desc)
+	if title != desc {
+		oneLiner = desc
+	}
+	return title, oneLiner
+}
+
+// firstSentenceEnd returns the index just past the first sentence
+// terminator (., !, ?) that is followed by whitespace or the string end,
+// or -1 when there is none. A terminator glued to the next character
+// (a decimal, a version, "e.g.") does not end the sentence.
+func firstSentenceEnd(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '.', '!', '?':
+			if i+1 == len(s) || s[i+1] == ' ' {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
 var (
 	slugRe      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	nonSlugRune = regexp.MustCompile(`[^a-z0-9]+`)

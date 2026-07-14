@@ -6,6 +6,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 func TestFeatureSpendMeteredAcrossStages(t *testing.T) {
@@ -184,5 +185,58 @@ func TestUnsettledEstimatesStayLabeled(t *testing.T) {
 	}
 	if !got.Spend.Estimated() || got.Spend.Credits != 2 {
 		t.Errorf("token-derived spend = %+v, want 2 estimated credits", got.Spend)
+	}
+}
+
+// TestHelperSpendAttributedToHelperRole: a backend's internal side-model
+// call (a title/summary on a different model than the session's) is
+// booked to the helper role in the breakdown, not the stage's working
+// role — so it neither inflates nor mis-attributes that role's row. Its
+// credits still count toward the feature total.
+func TestHelperSpendAttributedToHelperRole(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			// the session's own working model does the stage work
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 10, InputTokens: 500, OutputTokens: 500, Model: "sonnet"}},
+			// a token-less internal helper call on a side model
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 0.2, Model: "haiku", Settled: true, Helper: true}},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "sonnet", MaxActive: 1, Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "plan", domain.StagePlan)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	rows, err := store.StageBreakdown(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stageRole, helperRole *state.StageSpend
+	for i := range rows {
+		switch rows[i].Role {
+		case "helper":
+			helperRole = &rows[i]
+		case string(agent.RoleArchitect):
+			stageRole = &rows[i]
+		}
+	}
+	if stageRole == nil || stageRole.Model != "sonnet" {
+		t.Fatalf("stage work not attributed to the architect/sonnet row: %+v", rows)
+	}
+	if helperRole == nil || helperRole.Model != "haiku" {
+		t.Fatalf("helper call not attributed to the helper role: %+v", rows)
+	}
+	// the helper's cost still reaches the feature total
+	got, _ := store.GetFeature(context.Background(), "FD-001")
+	if got.Spend.Credits != 10.2 {
+		t.Errorf("feature total = %v, want 10.2 (stage + helper)", got.Spend.Credits)
 	}
 }

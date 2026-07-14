@@ -619,6 +619,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "enter":
 		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
 			m.inbox.remove(r.F.ID)
 			return m.attachOrRun(r.F)
 		}
@@ -633,14 +634,17 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "t":
 		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
 			m.openTranscript(r.F)
 		}
 	case "s":
 		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
 			return m.openSpec(r.F)
 		}
 	case "d":
 		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
 			return m.openDiff(r.F)
 		}
 	case "a":
@@ -755,6 +759,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
+// clearTransientNotice drops a routine status notice on a view change so
+// stale text (a lingering "critiquing", a "queued") doesn't follow the
+// user into an unrelated surface. Error notices are kept — they carry
+// something the user still needs to read (and long ones show in the band).
+func (m *Shell) clearTransientNotice() {
+	if !m.notice.isErr {
+		m.notice = noticeMsg{}
+	}
+}
+
 // selected returns the selected row, if any.
 func (m *Shell) selected() (featureRow, bool) {
 	if m.sel < 0 || m.sel >= len(m.rows) {
@@ -854,13 +868,54 @@ func (m *Shell) draw(scr uv.Screen) {
 		sep := strings.TrimSuffix(strings.Repeat(s.Separator.Render("│")+"\n", l.Main.Dy()), "\n")
 		uv.NewStyledString(sep).Draw(scr, uv.Rect(l.Main.Min.X, 0, 1, l.Main.Dy()))
 	}
-	main := m.mainView(max(l.Main.Dx()-3, 0), l.Main.Dy())
-	mainArea := uv.Rect(l.Main.Min.X+2, l.Main.Min.Y, max(l.Main.Dx()-2, 0), l.Main.Dy())
+	// a long error/remedy is wrapped into a band above the status bar
+	// rather than truncated into a one-line pill ("set permiss…"); it
+	// borrows the bottom rows of the main pane. Short notices stay pills.
+	band := m.noticeBand(max(l.Main.Dx()-3, 0))
+	mainH := l.Main.Dy()
+	if len(band) > 0 {
+		mainH = max(mainH-len(band)-1, 0)
+	}
+	main := m.mainView(max(l.Main.Dx()-3, 0), mainH)
+	mainArea := uv.Rect(l.Main.Min.X+2, l.Main.Min.Y, max(l.Main.Dx()-2, 0), mainH)
 	uv.NewStyledString(main).Draw(scr, mainArea)
+
+	if len(band) > 0 {
+		y := l.Status.Min.Y - len(band)
+		uv.NewStyledString(strings.Join(band, "\n")).
+			Draw(scr, uv.Rect(l.Main.Min.X+2, y, max(l.Main.Dx()-2, 0), len(band)))
+	}
 
 	uv.NewStyledString(m.statusView(l.Status.Dx())).Draw(scr, l.Status)
 
 	m.Overlay.Draw(scr, l.Area, s)
+}
+
+// noticeThreshold is the notice length above which it moves from a
+// one-line status pill to the wrappable band (a truncated pill drops the
+// tail of a multi-step remedy, e.g. "set permissions: allow-all in …").
+const noticeThreshold = 48
+
+// noticeBand renders a long error notice as wrapped lines for the band
+// above the status bar, or nil when the notice is short enough to ride as
+// a status pill. Only error/remedy notices get the band — routine status
+// stays a quiet pill.
+func (m *Shell) noticeBand(w int) []string {
+	if m.notice.text == "" || !m.notice.isErr || len(m.notice.text) <= noticeThreshold || w < 8 {
+		return nil
+	}
+	wrapped := wrapText(sanitize(m.notice.text), w)
+	var out []string
+	for _, l := range strings.Split(wrapped, "\n") {
+		out = append(out, m.styles.Error.Render(l))
+	}
+	return out
+}
+
+// noticeInBand reports whether the current notice is being shown in the
+// band (so statusView omits its pill and doesn't double it).
+func (m *Shell) noticeInBand() bool {
+	return m.notice.text != "" && m.notice.isErr && len(m.notice.text) > noticeThreshold
 }
 
 // attachOrRun handles `enter`: interactive stages open the chat pane;
@@ -1153,7 +1208,7 @@ func (m *Shell) statusView(w int) string {
 	if n := m.inbox.len(); n > 0 {
 		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})
 	}
-	if m.notice.text != "" {
+	if m.notice.text != "" && !m.noticeInBand() {
 		kind := statusbar.KindNeutral
 		if m.notice.isErr {
 			kind = statusbar.KindAlert

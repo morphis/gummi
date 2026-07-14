@@ -320,15 +320,36 @@ func (sv *specView) renderRead(m *Shell, w, h int) string {
 	s := m.styles
 	var b strings.Builder
 
-	if open := sv.doc.OpenQuestions(); len(open) > 0 {
-		b.WriteString(s.Subtitle.Render("open questions") + "\n")
-		for _, t := range open {
-			q := t.Markers[0].Text
-			b.WriteString(s.Warning.Render("  ☐ ") + s.Subtle.Render(ansi.Truncate(q, max(w-8, 4), "…")) +
-				s.Faint.Render("  L"+strconv.Itoa(t.Markers[0].Line)) + "\n")
+	// open threads split by who they wait on: an unresolved @user comment
+	// blocks the approval gate (DESIGN §6.1); agent-authored threads
+	// (questions, reviewer findings) are informational here and don't gate
+	// — the gate math counts only the user threads, so surfacing them under
+	// one "open questions" header misread the agent's threads as blockers.
+	var blocking, informational []spec.Thread
+	for _, t := range sv.doc.OpenQuestions() {
+		if userMarker(t) != nil {
+			blocking = append(blocking, t)
+		} else {
+			informational = append(informational, t)
+		}
+	}
+	renderThreadGroup := func(label string, threads []spec.Thread) {
+		if len(threads) == 0 {
+			return
+		}
+		b.WriteString(s.Subtitle.Render(label) + "\n")
+		for _, t := range threads {
+			mk := t.Markers[0]
+			if u := userMarker(t); u != nil {
+				mk = *u
+			}
+			b.WriteString(s.Warning.Render("  ☐ ") + s.Subtle.Render(ansi.Truncate(mk.Text, max(w-8, 4), "…")) +
+				s.Faint.Render("  L"+strconv.Itoa(mk.Line)) + "\n")
 		}
 		b.WriteString("\n")
 	}
+	renderThreadGroup("blocks approval (you)", blocking)
+	renderThreadGroup("informational (agent)", informational)
 
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle(gstyles.DarkStyle),

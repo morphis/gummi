@@ -12,7 +12,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // openSpecFor drives 's' on the selected feature and settles commands.
@@ -196,5 +198,43 @@ func TestSpecEditorRequiresEDITOR(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'e', Text: "e"})
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "EDITOR") {
 		t.Fatalf("notice = %+v, want $EDITOR error", m.notice)
+	}
+}
+
+// TestSpecViewSeparatesBlockingThreads: a spec with both an open @user
+// comment (blocks approval) and an agent thread renders them under
+// distinct headers, so an agent question isn't misread as a blocker.
+func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
+	content := "## Problem\n\nThe toggle persists via localStorage.\n" +
+		"%% @user(2026-07-14): should this sync to the account?\n\n" +
+		"It defaults to on for new installs.\n" +
+		"%% @architect: is that the right default?\n"
+	id, _ := domain.NewFeatureID(1)
+	sv := &specView{
+		f:       domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StageSpec},
+		path:    "p.md",
+		content: content,
+		doc:     spec.Parse(content),
+		cursor:  1,
+	}
+	m := NewShell(theme.GummiDark(), "t")
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = model.(*Shell)
+	m.spec = sv
+	out := stripANSI(sv.renderRead(m, 90, 24))
+	if !strings.Contains(out, "blocks approval (you)") {
+		t.Errorf("missing blocking-thread header:\n%s", out)
+	}
+	if !strings.Contains(out, "should this sync to the account?") {
+		t.Errorf("user thread not listed as blocking:\n%s", out)
+	}
+	// the architect-only thread is informational, not a blocker
+	bi := strings.Index(out, "blocks approval")
+	ii := strings.Index(out, "informational (agent)")
+	if ii < 0 || bi < 0 || ii < bi {
+		t.Errorf("informational group missing or misordered (blocks=%d info=%d):\n%s", bi, ii, out)
+	}
+	if !strings.Contains(out, "is that the right default?") {
+		t.Errorf("agent thread not listed as informational:\n%s", out)
 	}
 }

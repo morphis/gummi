@@ -108,7 +108,11 @@ type formResult struct {
 func (m *Shell) createFeature(res formResult) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		slug, err := domain.Slugify(res.Title)
+		// the form takes one free-text line; a long line becomes a concise
+		// card title with the full text kept as the one-liner (the card body),
+		// so the title slot isn't the whole description.
+		title, oneLiner := domain.SplitDescription(res.Title)
+		slug, err := domain.Slugify(title)
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
@@ -122,7 +126,7 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 		}
 		now := m.now()
 		f := domain.Feature{
-			ID: id, Num: num, Title: res.Title,
+			ID: id, Num: num, Title: title, OneLiner: oneLiner,
 			Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
 			CreatedAt: now, UpdatedAt: now,

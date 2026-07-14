@@ -186,6 +186,12 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		// tool calls render as compact ticker lines, in order with the
 		// messages around them; consecutive ones group without blanks.
 		if msg.Author == engine.AuthorTool {
+			// the spec-capture note is folded into the answer bubble above
+			// it (see AuthorUser), so an answer isn't recorded twice — once
+			// as its own chat message and again as this note.
+			if msg.Content == engine.AnswerCapturedNote && i > 0 && snap.Transcript[i-1].Author == engine.AuthorUser {
+				continue
+			}
 			lines = append(lines, "  "+toolMarker(s, msg.ToolStatus)+
 				toolLineView(s, sanitize(msg.Content), max(w-6, 8)))
 			lines = append(lines, c.toolOutputLines(s, msg, w)...)
@@ -199,6 +205,12 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 		switch msg.Author {
 		case engine.AuthorUser:
 			label = s.KeyHint.Render("you")
+			// an answer captured into the spec is marked in place instead of
+			// trailed by a separate "recorded…" note (deduped above)
+			if i+1 < len(snap.Transcript) && snap.Transcript[i+1].Author == engine.AuthorTool &&
+				snap.Transcript[i+1].Content == engine.AnswerCapturedNote {
+				label += " " + s.Faint.Render("· recorded in the spec")
+			}
 		case engine.AuthorSystem:
 			label = s.Faint.Render("gummi")
 			style = s.Faint

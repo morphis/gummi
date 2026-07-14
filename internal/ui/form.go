@@ -65,7 +65,9 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.errText = "description must not be empty"
 			return false, nil
 		}
-		if _, err := domain.Slugify(desc); err != nil {
+		// validate the slug of the derived title (what creation will use),
+		// not the whole description
+		if _, err := domain.Slugify(domain.DeriveTitle(desc)); err != nil {
 			d.errText = err.Error()
 			return false, nil
 		}

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -185,3 +186,44 @@ func TestMeteredSpendGolden(t *testing.T) {
 }
 
 func populatedShellView(m *Shell) string { return m.View().Content }
+
+// TestLongErrorNoticeUsesBand: a long error/remedy renders wrapped in the
+// band above the status bar (not truncated to a one-line pill), and is
+// omitted from the pill row so it isn't shown twice.
+func TestLongErrorNoticeUsesBand(t *testing.T) {
+	m := populatedShell(120, 34)
+	remedy := "guarded mode denied the write — set permissions: allow-all in .gummi/config.yaml, or approve the request from the inbox, then re-run the stage"
+	m.notice = noticeMsg{text: remedy, isErr: true}
+	if !m.noticeInBand() {
+		t.Fatal("a long error notice should render in the band")
+	}
+	band := m.noticeBand(90)
+	if len(band) < 2 {
+		t.Fatalf("band should wrap to multiple lines, got %d", len(band))
+	}
+	joined := stripANSI(strings.Join(band, " "))
+	if !strings.Contains(joined, "allow-all in .gummi/config.yaml") {
+		t.Errorf("band dropped the middle of the remedy:\n%s", joined)
+	}
+	// a short notice stays a pill, not the band
+	m.notice = noticeMsg{text: "FD-001 queued"}
+	if m.noticeInBand() {
+		t.Error("a short notice should stay a status pill")
+	}
+}
+
+// TestClearTransientNoticeOnViewChange: a routine status notice clears
+// when the user opens another surface; an error notice is kept.
+func TestClearTransientNoticeOnViewChange(t *testing.T) {
+	m := populatedShell(120, 34)
+	m.notice = noticeMsg{text: "critiquing"}
+	m.clearTransientNotice()
+	if m.notice.text != "" {
+		t.Errorf("transient status not cleared: %q", m.notice.text)
+	}
+	m.notice = noticeMsg{text: "merge failed", isErr: true}
+	m.clearTransientNotice()
+	if m.notice.text == "" {
+		t.Error("an error notice must survive a view change")
+	}
+}
