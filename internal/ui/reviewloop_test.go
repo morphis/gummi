@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -420,6 +422,66 @@ func TestReCritiqueKickoffPointsAtPriorThreads(t *testing.T) {
 	}
 	if !strings.Contains(kickoffs[1], "re-critique") {
 		t.Errorf("re-critique kickoff missing the note: %q", kickoffs[1])
+	}
+}
+
+func TestRunStageResumesCritique(t *testing.T) {
+	// a transient backend error during the plan critique pauses the
+	// critique session; re-running the stage must resume the critique
+	// leg — the plan is already written — not restart the plan writer.
+	var mu sync.Mutex
+	var planRuns, critiqueRuns int
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		joined := strings.Join(opts.SystemHints, "\n")
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.Contains(joined, "Stage: Plan critique"):
+			critiqueRuns++
+			if critiqueRuns == 1 {
+				return []agent.Event{{Kind: agent.EventError, Err: errors.New("transient api error")}}
+			}
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "Sound.\nVERDICT: pass"},
+				{Kind: agent.EventIdle},
+			}
+		case strings.Contains(joined, "Stage: Plan"):
+			planRuns++
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "plan written"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StagePlan)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run the plan writer
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m) // writer idles → critique starts → errors
+
+	// the failed critique is paused with its pass flag intact
+	s := eng.Get("FD-001")
+	if s == nil || s.State() != engine.StatePaused || !s.Snapshot().Critique {
+		t.Fatal("want a paused critique session before the re-run")
+	}
+	mu.Lock()
+	if planRuns != 1 || critiqueRuns != 1 {
+		mu.Unlock()
+		t.Fatalf("plan/critique runs = %d/%d, want 1/1 before the re-run", planRuns, critiqueRuns)
+	}
+	mu.Unlock()
+
+	// re-run the stage: the critique leg resumes, the plan writer does not
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleChat(t, eng)
+	drainEngineLoop(t, m)
+	mu.Lock()
+	defer mu.Unlock()
+	if planRuns != 1 {
+		t.Errorf("plan writer ran %d times, want 1 (re-run must not restart it)", planRuns)
+	}
+	if critiqueRuns != 2 {
+		t.Errorf("critique ran %d times, want 2 (the resumed leg)", critiqueRuns)
 	}
 }
 

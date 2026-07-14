@@ -844,6 +844,19 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 			m.notice = noticeMsg{text: string(f.ID) + " is queued"}
 			return nil
 		}
+		// An interrupted plan critique resumes as a critique: the plan is
+		// already written, so restarting the plan writer would burn a full
+		// plan pass to redo finished work. (The critique itself still starts
+		// over — mid-transcript resume and persisting planRounds across
+		// restarts are deferred.)
+		if f.Stage == domain.StagePlan && s.Snapshot().Critique {
+			return func() tea.Msg {
+				if err := m.engine.RunCritique(f, ""); err != nil {
+					return noticeMsg{text: sanitize(err.Error()), isErr: true}
+				}
+				return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)"}
+			}
+		}
 	}
 	// Run schedules and spawns the backend synchronously; do it in a command
 	// so a slow agent launch can't freeze the TUI.
