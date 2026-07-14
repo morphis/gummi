@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS stage_spend (
 	cached_tok  INTEGER NOT NULL DEFAULT 0,
 	output_tok  INTEGER NOT NULL DEFAULT 0,
 	updated_at  TEXT    NOT NULL,
-	PRIMARY KEY (feature_id, stage, model)
+	PRIMARY KEY (feature_id, stage, model, role)
 );
 
 -- Baseline outcome of the artifact's gummi-checks, captured once on
@@ -162,7 +162,81 @@ func OpenStore(dbPath string) (*Store, error) {
 			return nil, fmt.Errorf("migrating state db: %w", err)
 		}
 	}
+	// After the column migrations: the rebuild copies every current
+	// column, so est_credits must already exist on an old DB.
+	if err := rebuildStageSpendPK(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// rebuildStageSpendPK migrates stage_spend rows keyed (feature_id,
+// stage, model) to the four-column key that includes role. One session
+// can emit usage for several models under one role while another role
+// works the same stage and model, and with role outside the key the
+// upsert's role overwrite clobbered the earlier attribution. SQLite
+// cannot alter a primary key in place, so this is the standard
+// transactional table rebuild; the old key is a strict subset of the
+// new one, so every existing row is admitted unchanged. Idempotent: a
+// table whose key already includes role is left alone.
+func rebuildStageSpendPK(db *sql.DB) error {
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx,
+		`SELECT name FROM pragma_table_info('stage_spend') WHERE pk > 0`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	roleKeyed := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == "role" {
+			roleKeyed = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if roleKeyed {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	for _, stmt := range []string{
+		`CREATE TABLE stage_spend_new (
+			feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+			stage      TEXT    NOT NULL,
+			model      TEXT    NOT NULL,
+			role       TEXT    NOT NULL,
+			credits     REAL    NOT NULL DEFAULT 0,
+			est_credits REAL    NOT NULL DEFAULT 0,
+			input_tok   INTEGER NOT NULL DEFAULT 0,
+			cached_tok  INTEGER NOT NULL DEFAULT 0,
+			output_tok  INTEGER NOT NULL DEFAULT 0,
+			updated_at  TEXT    NOT NULL,
+			PRIMARY KEY (feature_id, stage, model, role)
+		)`,
+		`INSERT INTO stage_spend_new
+			(feature_id, stage, model, role, credits, est_credits,
+			 input_tok, cached_tok, output_tok, updated_at)
+		 SELECT feature_id, stage, model, role, credits, est_credits,
+			 input_tok, cached_tok, output_tok, updated_at
+		 FROM stage_spend`,
+		`DROP TABLE stage_spend`,
+		`ALTER TABLE stage_spend_new RENAME TO stage_spend`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // migrations are idempotent ADD COLUMN statements applied on open.
@@ -297,12 +371,14 @@ type StageSpend struct {
 }
 
 // RecordStageSpend accumulates one usage sample onto the (feature, stage,
-// model) rollup behind features.spend_* — the per-stage/model breakdown.
+// model, role) rollup behind features.spend_* — the per-stage breakdown.
 // credits is the same credit-equivalent AddSpend receives, so the
 // breakdown sums back to the feature total. Like AddSpend it is a cheap
 // metering side-channel (an UPSERT, no validation). An empty model is
 // stored as "unknown" so the row is never keyed on ” and the breakdown
-// still accounts for the spend.
+// still accounts for the spend. Role is part of the key: one model can
+// serve two roles on the same stage (e.g. a critique pass reusing the
+// plan stage), and each keeps its own attribution.
 func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage domain.Stage, role, model string, credits, estimated float64, in, cached, out int64) error {
 	if model == "" {
 		model = "unknown"
@@ -312,13 +388,12 @@ func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage
 		INSERT INTO stage_spend
 			(feature_id, stage, model, role, credits, est_credits, input_tok, cached_tok, output_tok, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(feature_id, stage, model) DO UPDATE SET
+		ON CONFLICT(feature_id, stage, model, role) DO UPDATE SET
 			credits     = credits     + excluded.credits,
 			est_credits = est_credits + excluded.est_credits,
 			input_tok   = input_tok   + excluded.input_tok,
 			cached_tok  = cached_tok  + excluded.cached_tok,
 			output_tok  = output_tok  + excluded.output_tok,
-			role        = excluded.role,
 			updated_at  = excluded.updated_at`,
 		string(id), string(stage), model, role, credits, estimated, in, cached, out, now)
 	if err != nil {

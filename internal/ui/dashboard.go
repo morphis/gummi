@@ -332,8 +332,14 @@ func stageBreakdown(s *theme.Styles, rows []state.StageSpend) []string {
 		out = append(out, head)
 		if len(grp) > 1 {
 			for _, r := range grp {
+				// rows are keyed per role, so one model can appear twice on
+				// a stage — the role disambiguates them
+				name := r.Model
+				if r.Role != "" {
+					name += " (" + r.Role + ")"
+				}
 				out = append(out, "     "+s.Faint.Render(fmt.Sprintf("└ %-14s %s · %s/%s",
-					r.Model, estPrefix(r.EstimatedCredits)+money(r.Credits),
+					name, estPrefix(r.EstimatedCredits)+money(r.Credits),
 					humanTokens(r.InputTokens), humanTokens(r.OutputTokens))))
 			}
 		}
