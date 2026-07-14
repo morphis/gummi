@@ -97,6 +97,7 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 	}
 	reload := m.reloadSpec()
 	path := sv.path
+	f := sv.f
 	return func() tea.Msg {
 		date := m.now().Format("2006-01-02")
 		// Serialize against the engine's annotate/answer-capture writers and
@@ -114,6 +115,11 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 		}
 		if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		// still under the lock, so the committed snapshot is exactly the
+		// content just written
+		if notice := m.commitUserAmendment(context.Background(), f, out); notice != "" {
+			return tea.BatchMsg{func() tea.Msg { return noticeMsg{text: notice} }, reload}
 		}
 		return reload()
 	}
@@ -133,10 +139,24 @@ func (m *Shell) editSpec() tea.Cmd {
 		}
 	}
 	reload := m.reloadSpec()
-	cmd := exec.CommandContext(context.Background(), editor, sv.path) //nolint:gosec // $EDITOR is the user's own trusted setting
+	path := sv.path
+	f := sv.f
+	cmd := exec.CommandContext(context.Background(), editor, path) //nolint:gosec // $EDITOR is the user's own trusted setting
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return noticeMsg{text: fmt.Sprintf("editor: %v", err), isErr: true}
+		}
+		// Commit whatever the editor left, under the same lock the other
+		// artifact writers take, so the snapshot is a coherent read.
+		unlock := spec.LockFile(path)
+		raw, rerr := os.ReadFile(path)
+		var notice string
+		if rerr == nil {
+			notice = m.commitUserAmendment(context.Background(), f, string(raw))
+		}
+		unlock()
+		if notice != "" {
+			return tea.BatchMsg{func() tea.Msg { return noticeMsg{text: notice} }, reload}
 		}
 		return reload()
 	})
