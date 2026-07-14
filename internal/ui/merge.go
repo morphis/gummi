@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -17,7 +18,10 @@ import (
 type mergeReadyMsg struct {
 	f        domain.Feature
 	thenDone bool
-	err      error
+	// warn carries a non-blocking pre-land caution (agent attribution
+	// found in branch commit messages); the merge still proceeds.
+	warn string
+	err  error
 }
 
 // prepareMerge checks the merge preconditions off the render loop. The
@@ -44,7 +48,14 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		} else if landed {
 			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on main — press c to clean up")}
 		}
-		return mergeReadyMsg{f: f, thenDone: thenDone}
+		// pre-land provenance scan: warn (never block) when branch commits
+		// carry agent attribution — the squash discards their messages, but
+		// the user should know before landing, not after
+		var warn string
+		if leaks, err := m.wt.ProvenanceWarnings(ctx, &f); err == nil && len(leaks) > 0 {
+			warn = string(f.ID) + ": branch commits carry agent attribution — " + strings.Join(leaks, ", ")
+		}
+		return mergeReadyMsg{f: f, thenDone: thenDone, warn: warn}
 	}
 }
 
