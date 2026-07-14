@@ -18,6 +18,25 @@ const estimatePrompt = "Estimate the total cost to implement this feature, in cr
 
 var estimateRe = regexp.MustCompile(`(?i)ESTIMATE:\s*\$?\s*([0-9]+(?:\.[0-9]+)?)`)
 
+// backendCostFactor scales the scribe's raw estimate per agent backend.
+// The scribe prices work in credits as if a mid-tier hosted model were
+// doing it; backends that run heavier models with side-calls burn a
+// multiple of that for the same feature, and an envelope sized to the
+// raw guess gates almost immediately.
+var backendCostFactor = map[string]float64{"claude": 2.5}
+
+// costFactor returns the configured backend's estimate multiplier
+// (1 when unknown or unconfigured).
+func (e *Engine) costFactor() float64 {
+	if e.cfg.Agent == nil {
+		return 1
+	}
+	if f, ok := backendCostFactor[e.cfg.Agent.Name()]; ok {
+		return f
+	}
+	return 1
+}
+
 // parseScribeEstimate extracts the credits from a scribe's reply (the last
 // ESTIMATE: line wins), or (0,false) if none is present.
 func parseScribeEstimate(text string) (float64, bool) {
@@ -67,7 +86,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 		case ev, ok := <-sess.Events():
 			if !ok {
 				v, _ := parseScribeEstimate(text.String())
-				return v, nil
+				return v * e.costFactor(), nil
 			}
 			switch ev.Kind {
 			case agent.EventTextDelta:
@@ -76,7 +95,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 				text.message(ev.Text)
 			case agent.EventIdle:
 				v, _ := parseScribeEstimate(text.String())
-				return v, nil
+				return v * e.costFactor(), nil
 			case agent.EventError:
 				return 0, ev.Err
 			}

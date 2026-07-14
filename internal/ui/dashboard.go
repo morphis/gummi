@@ -65,8 +65,7 @@ func (m *Shell) dashboardView(w, h int) string {
 		line(s.Muted.Render("         ") + s.Success.Render("↑ landed on main"))
 	}
 	if f.Budget.Envelope > 0 {
-		released := m.engine != nil && m.engine.ReserveReleased(f.ID)
-		line(s.Muted.Render("budget   ") + s.Base.Render(budgetSummary(f, released)))
+		line(s.Muted.Render("budget   ") + s.Base.Render(budgetSummary(f)))
 	}
 	if !f.Spend.Zero() {
 		line(s.Muted.Render("spent    ") + s.Base.Render(featureSpend(f.Spend)))
@@ -239,21 +238,19 @@ func skipSummary(f domain.Feature) string {
 
 // budgetSummary formats the spend plan: spend against the envelope, plus
 // the current stage's cap (allocation + rollover) and the protected
-// reserve, so the card shows where this stage's money comes from.
-func budgetSummary(f domain.Feature, reserveReleased bool) string {
+// reserve, so the card shows where this stage's money comes from. A
+// top-up raises the envelope itself (durably, in the store), so these
+// figures already reflect it.
+func budgetSummary(f domain.Feature) string {
 	env := float64(f.Budget.Envelope)
 	spent := f.Spend.CreditEquivalent()
 	plan := domain.DefaultPlan(env)
 	s := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
-	if cap := plan.StageBudget(f.Stage, spent, reserveReleased); cap > 0 {
+	if cap := plan.StageBudget(f.Stage, spent, false); cap > 0 {
 		s += fmt.Sprintf("  ·  %s stage cap %g", f.Stage, roundSpend(cap))
 	}
 	if r := env * plan.Reserve; r > 0 {
-		if reserveReleased {
-			s += fmt.Sprintf("  ·  %g reserve released", roundSpend(r))
-		} else {
-			s += fmt.Sprintf("  ·  %g reserve", roundSpend(r))
-		}
+		s += fmt.Sprintf("  ·  %g reserve", roundSpend(r))
 	}
 	return s
 }

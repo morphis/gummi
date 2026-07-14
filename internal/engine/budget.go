@@ -24,7 +24,7 @@ var budgetThresholds = []int{50, 80, 95}
 func (e *Engine) stageBudget(f domain.Feature, byokRate float64) float64 {
 	if f.Budget.Envelope > 0 {
 		return domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
-			StageBudget(f.Stage, e.featureSpent(f, byokRate), e.reserveReleased(f.ID))
+			StageBudget(f.Stage, e.featureSpent(f, byokRate), false)
 	}
 	return e.cfg.StageBudget
 }
@@ -42,18 +42,6 @@ func (e *Engine) featureSpent(f domain.Feature, byokRate float64) float64 {
 	}
 	return sp.CreditEquivalentAt(byokRate)
 }
-
-// reserveReleased reports whether a top-up has released the feature's
-// held reserve into its stage caps.
-func (e *Engine) reserveReleased(id domain.FeatureID) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.released[id]
-}
-
-// ReserveReleased reports whether a feature's reserve has been released by
-// a top-up, so the UI can show its stage cap with the extra headroom.
-func (e *Engine) ReserveReleased(id domain.FeatureID) bool { return e.reserveReleased(id) }
 
 // diffReviewHints turns a feature's open diff annotations into system
 // hints for an implement run (DESIGN §6.1). Empty when the store is

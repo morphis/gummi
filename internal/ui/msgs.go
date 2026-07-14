@@ -382,6 +382,11 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 			return nil
 		}
 		blended := int(domain.BlendEstimate(float64(f.Budget.Envelope), scribe))
+		// a user-chosen GUMMI_ENVELOPE is a floor: the blend may raise it
+		// for an expensive-looking feature, never silently undercut it
+		if m.envelope > 0 && blended < m.envelope {
+			blended = m.envelope
+		}
 		if blended == f.Budget.Envelope {
 			return nil
 		}

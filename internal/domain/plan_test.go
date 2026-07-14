@@ -74,8 +74,8 @@ func TestEstimateEnvelope(t *testing.T) {
 	if env, n := EstimateEnvelope([]Spend{{}, {}}); env != 0 || n != 0 {
 		t.Errorf("zero-spend history = (%v,%d), want (0,0)", env, n)
 	}
-	// median 100 × 1.25 = 125 → round up to 130; a runaway 900 doesn't
-	// drag the median (that's why median, not mean).
+	// a runaway 900 doesn't drag the median (that's why median, not mean);
+	// the padded median lands under MinEnvelope, so the floor applies.
 	hist := []Spend{
 		{Credits: 80}, {Credits: 100}, {Credits: 120}, {Credits: 900},
 	}
@@ -83,14 +83,20 @@ func TestEstimateEnvelope(t *testing.T) {
 	if n != 4 {
 		t.Errorf("samples = %d, want 4", n)
 	}
-	// median of [80,100,120,900] = (100+120)/2 = 110 → ×1.25 = 137.5 → 140
-	if env != 140 {
-		t.Errorf("estimate = %v, want 140", env)
+	// median of [80,100,120,900] = (100+120)/2 = 110 → ×1.25 = 137.5 →
+	// 140, floored at MinEnvelope 150
+	if env != 150 {
+		t.Errorf("estimate = %v, want 150 (MinEnvelope floor)", env)
+	}
+	// a history rich enough to clear the floor is used as-is
+	rich := []Spend{{Credits: 200}, {Credits: 240}, {Credits: 280}}
+	if env, _ := EstimateEnvelope(rich); env != 300 { // 240 × 1.25 = 300
+		t.Errorf("rich estimate = %v, want 300", env)
 	}
 	// BYOK token-only spend converts to credits before estimating
 	tok := []Spend{{OutputTokens: 200000}} // 200k tok × 0.5/1k = 100 credits
-	if env, _ := EstimateEnvelope(tok); env != 130 {
-		t.Errorf("byok estimate = %v, want 130 (100 credits × 1.25 → 130)", env)
+	if env, _ := EstimateEnvelope(tok); env != 150 {
+		t.Errorf("byok estimate = %v, want 150 (100 × 1.25 = 125 → floor)", env)
 	}
 }
 
@@ -125,11 +131,62 @@ func TestBlendEstimate(t *testing.T) {
 	if got := BlendEstimate(0, 175); got != 180 { // scribe only, round up to 10
 		t.Errorf("blend(0,175) = %v, want 180", got)
 	}
-	if got := BlendEstimate(130, 0); got != 130 { // historical only
-		t.Errorf("blend(130,0) = %v, want 130", got)
+	// every non-zero blend is floored at MinEnvelope — an undersized
+	// estimate gates a stage instantly
+	if got := BlendEstimate(0, 40); got != 150 { // scribe only, under the floor
+		t.Errorf("blend(0,40) = %v, want 150 (MinEnvelope floor)", got)
 	}
-	if got := BlendEstimate(0, 0); got != 0 {
+	if got := BlendEstimate(130, 0); got != 150 { // historical only, under the floor
+		t.Errorf("blend(130,0) = %v, want 150 (MinEnvelope floor)", got)
+	}
+	if got := BlendEstimate(60, 80); got != 150 { // both signals, under the floor
+		t.Errorf("blend(60,80) = %v, want 150 (MinEnvelope floor)", got)
+	}
+	if got := BlendEstimate(300, 0); got != 300 { // historical only, over the floor
+		t.Errorf("blend(300,0) = %v, want 300", got)
+	}
+	if got := BlendEstimate(0, 0); got != 0 { // unbudgeted stays unbudgeted
 		t.Errorf("blend(0,0) = %v, want 0", got)
+	}
+}
+
+func TestRaisedEnvelope(t *testing.T) {
+	// verify at its cap: refill = 285 + 300×0.15 = 330, rederive =
+	// 285×1.25/0.95 = 375 → 380. The rederive term wins when the spend
+	// shows the whole envelope was undersized.
+	if got := DefaultPlan(300).RaisedEnvelope(StageVerify, 285); got != 380 {
+		t.Errorf("raised(300, 285, verify) = %v, want 380", got)
+	}
+	// a 3× underestimate caught at plan: rederive = 120×1.25/0.25 = 600.
+	if got := DefaultPlan(40).RaisedEnvelope(StagePlan, 120); got != 600 {
+		t.Errorf("raised(40, 120, plan) = %v, want 600", got)
+	}
+	// never shrinks: barely-any-spend still keeps the original envelope
+	if got := DefaultPlan(300).RaisedEnvelope(StageImplement, 10); got < 300 {
+		t.Errorf("raised(300, 10, implement) = %v, must not shrink below 300", got)
+	}
+	// guarantee: whatever the shortfall, the raised plan gives the gated
+	// stage a real budget — a top-up can never re-gate on the spot.
+	for _, tc := range []struct {
+		env, spent float64
+		stage      Stage
+	}{
+		{300, 285, StageVerify},
+		{40, 120, StagePlan},
+		{40, 200, StageImplement},
+		{150, 149, StageReview},
+		{10, 500, StageVerify},
+	} {
+		p := DefaultPlan(tc.env)
+		raised := DefaultPlan(p.RaisedEnvelope(tc.stage, tc.spent))
+		if got := raised.StageBudget(tc.stage, tc.spent, false); got <= 0 {
+			t.Errorf("raised plan (env %v, spent %v, %s) leaves stage budget %v, want > 0",
+				tc.env, tc.spent, tc.stage, got)
+		}
+	}
+	// unbudgeted stays unbudgeted
+	if got := DefaultPlan(0).RaisedEnvelope(StageVerify, 100); got != 0 {
+		t.Errorf("raised(0, ...) = %v, want 0", got)
 	}
 }
 

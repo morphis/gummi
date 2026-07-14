@@ -72,6 +72,36 @@ func TestEstimateStreamedReplyNotDoubled(t *testing.T) {
 	}
 }
 
+// claudeNamed presents a fake backend under the claude backend's name,
+// so the estimate multiplier keys off it.
+type claudeNamed struct{ *agent.Fake }
+
+func (claudeNamed) Name() string { return "claude" }
+
+func TestEstimateAppliesBackendCostFactor(t *testing.T) {
+	// the scribe's raw guess is scaled by the backend's cost factor —
+	// claude sessions burn a multiple of the mid-tier price the scribe
+	// assumes, so the raw number would gate almost immediately.
+	ag := claudeNamed{&agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Medium.\nESTIMATE: 100"},
+			{Kind: agent.EventIdle},
+		}
+	}}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	got, err := e.Estimate(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 250 {
+		t.Errorf("Estimate = %v, want 250 (100 × 2.5 claude factor)", got)
+	}
+}
+
 func TestEstimateRunsScribe(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		if opts.Role != agent.RoleScribe {

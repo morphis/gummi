@@ -114,12 +114,11 @@ type Engine struct {
 	events  chan Event
 	stopped chan struct{}
 
-	mu       sync.Mutex
-	live     map[domain.FeatureID]*Session
-	queue    []domain.FeatureID        // autonomous features awaiting a slot, FIFO
-	running  int                       // autonomous sessions currently holding slots
-	released map[domain.FeatureID]bool // features whose reserve a top-up released
-	closed   bool
+	mu      sync.Mutex
+	live    map[domain.FeatureID]*Session
+	queue   []domain.FeatureID // autonomous features awaiting a slot, FIFO
+	running int                // autonomous sessions currently holding slots
+	closed  bool
 
 	// persistMu serializes a session save against a delete of the same
 	// feature: it spans persist's finalized-check-and-write and
@@ -145,7 +144,6 @@ func New(cfg Config) *Engine {
 		events:    make(chan Event),
 		stopped:   make(chan struct{}),
 		live:      map[domain.FeatureID]*Session{},
-		released:  map[domain.FeatureID]bool{},
 	}
 	go e.forward()
 	return e
@@ -706,10 +704,6 @@ func (e *Engine) Drop(id domain.FeatureID) {
 	e.mu.Lock()
 	s := e.live[id]
 	e.dropLocked(id)
-	// a deleted feature's reserve-release state is gone for good; clean it
-	// here (not in dropLocked, which also fires on a TopUp's re-Run and
-	// would drop the flag it just set).
-	delete(e.released, id)
 	e.mu.Unlock()
 	if s != nil {
 		s.stop()
@@ -770,16 +764,30 @@ func (e *Engine) freeSlot(s *Session) {
 	e.schedule()
 }
 
-// TopUp releases a feature's held reserve into its stage caps and resumes
-// the exhausted stage from its checkpoint with the extra headroom — the
-// "top up" action of a budget-exhaustion gate (DESIGN §5.1 layer 3).
+// TopUp durably raises a feature's envelope and resumes the exhausted
+// stage from its checkpoint — the "top up" action of a budget-exhaustion
+// gate (DESIGN §5.1 layer 3). The raise is persisted to the store, so it
+// survives stage advances and gummi restarts; RaisedEnvelope sizes it so
+// the resumed stage always has real headroom rather than a sliver.
+//
+// The spend is priced at the default credit rate here; a BYOK provider
+// with a much higher per-token rate can still re-gate after a top-up,
+// since the stage-budget math at session start prices spend at that
+// provider's rate.
 func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
-	e.mu.Lock()
-	e.released[id] = true
-	e.mu.Unlock()
 	f, err := e.cfg.Store.GetFeature(ctx, id)
 	if err != nil {
 		return err
+	}
+	if f.Budget.Envelope > 0 {
+		raised := domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
+			RaisedEnvelope(f.Stage, f.Spend.CreditEquivalent())
+		if int(raised) > f.Budget.Envelope {
+			f.Budget.Envelope = int(raised)
+			if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
+				return err
+			}
+		}
 	}
 	return e.Run(f)
 }

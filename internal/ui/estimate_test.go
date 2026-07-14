@@ -33,15 +33,15 @@ func TestEstimateEnvelopeFromHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	suffix := m.estimateEnvelope(ctx, f)
-	// 100 median × 1.25 = 125 → round up to 130
-	if f.Budget.Envelope != 130 {
-		t.Errorf("estimated envelope = %d, want 130", f.Budget.Envelope)
+	// 100 median × 1.25 = 125 → 130, floored at MinEnvelope 150
+	if f.Budget.Envelope != 150 {
+		t.Errorf("estimated envelope = %d, want 150", f.Budget.Envelope)
 	}
-	if !strings.Contains(suffix, "estimated at 130") || !strings.Contains(suffix, "1 metered") {
+	if !strings.Contains(suffix, "estimated at 150") || !strings.Contains(suffix, "1 metered") {
 		t.Errorf("suffix = %q", suffix)
 	}
 	// persisted to the store
-	if got, _ := m.store.GetFeature(ctx, "FD-002"); got.Budget.Envelope != 130 {
+	if got, _ := m.store.GetFeature(ctx, "FD-002"); got.Budget.Envelope != 150 {
 		t.Errorf("envelope not persisted: %d", got.Budget.Envelope)
 	}
 }

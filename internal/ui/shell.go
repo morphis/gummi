@@ -941,18 +941,24 @@ func (m *Shell) suggestFor(id domain.FeatureID) []nextAction {
 	return nil
 }
 
-// topUpBudget releases a feature's reserve and resumes its exhausted
-// stage (the "top up" action of a budget gate).
+// topUpBudget durably raises a feature's envelope and resumes its
+// exhausted stage (the "top up" action of a budget gate).
 func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 	m.inbox.remove(id)
 	if m.engine == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		if err := m.engine.TopUp(context.Background(), id); err != nil {
+		ctx := context.Background()
+		if err := m.engine.TopUp(ctx, id); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: string(id) + " topped up — reserve released, resuming"}
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: string(id) + " topped up — resuming"}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s topped up — envelope raised to %d credits, resuming",
+			id, f.Budget.Envelope)}
 	}
 }
 

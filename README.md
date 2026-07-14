@@ -214,7 +214,7 @@ Environment variables:
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_PROVIDER_BASE_URL` / `_TYPE` / `_KEY_ENV` | ad-hoc BYOK endpoint without editing profiles |
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
-| `GUMMI_ENVELOPE` | default credit envelope for new features |
+| `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_THEME` | `dark` (default) · `light` · `neon` |
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default) · `desktop` · `off` |

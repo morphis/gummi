@@ -117,6 +117,14 @@ func (s Spend) CreditEquivalentAt(ratePer1K float64) float64 {
 // still finishes without a top-up.
 const estimateHeadroom = 1.25
 
+// MinEnvelope floors every estimated envelope. Estimation signals skew
+// low — a scribe guesses from the spec without seeing the agent's real
+// exploration cost, and a thin history medians over unrepresentative
+// features — and an undersized envelope gates a stage instantly, which
+// costs a human round-trip. Estimates only; an explicit envelope the
+// user chose is honored as given, and (0,0) still means unbudgeted.
+const MinEnvelope = 150
+
 // EstimateEnvelope proposes a feature's credit envelope from the actual
 // spend of previously completed features — the historical-spend signal
 // of plan-time estimation (DESIGN §5.1). It takes the median
@@ -140,7 +148,7 @@ func EstimateEnvelope(history []Spend) (envelope float64, samples int) {
 	if len(vals)%2 == 0 {
 		med = (vals[len(vals)/2-1] + vals[len(vals)/2]) / 2
 	}
-	return roundUpTo10(med * estimateHeadroom), len(vals)
+	return math.Max(roundUpTo10(med*estimateHeadroom), MinEnvelope), len(vals)
 }
 
 // roundUpTo10 rounds a credit figure up to a tidy multiple of 10.
@@ -149,16 +157,33 @@ func roundUpTo10(v float64) float64 { return math.Ceil(v/10) * 10 }
 // BlendEstimate combines the historical-spend envelope with a scribe
 // agent's plan-time estimate (DESIGN §5.1). With both signals it averages
 // them (the history grounds the guess, the scribe reflects this specific
-// plan); with one, it uses that; with neither, 0. Rounded to a tidy 10.
+// plan); with one, it uses that; with neither, 0. Rounded to a tidy 10
+// and floored at MinEnvelope — any non-zero blend is an estimate.
 func BlendEstimate(historical, scribe float64) float64 {
 	switch {
 	case historical > 0 && scribe > 0:
-		return roundUpTo10((historical + scribe) / 2)
+		return math.Max(roundUpTo10((historical+scribe)/2), MinEnvelope)
 	case scribe > 0:
-		return roundUpTo10(scribe)
+		return math.Max(roundUpTo10(scribe), MinEnvelope)
+	case historical > 0:
+		return math.Max(roundUpTo10(historical), MinEnvelope)
 	default:
-		return roundUpTo10(historical) // 0 stays 0
+		return 0
 	}
+}
+
+// fracThrough returns the fraction of the envelope allocated to every
+// stage at or before s in workflow order — the cumulative-allocation
+// share behind capThrough and RaisedEnvelope.
+func (p SpendPlan) fracThrough(s Stage) float64 {
+	var frac float64
+	for _, st := range Stages {
+		frac += p.Alloc[st]
+		if st == s {
+			break
+		}
+	}
+	return frac
 }
 
 // capThrough returns the cumulative credit cap available up to and
@@ -170,17 +195,41 @@ func (p SpendPlan) capThrough(s Stage, reserveReleased bool) float64 {
 	if p.Envelope <= 0 {
 		return 0
 	}
-	var frac float64
-	for _, st := range Stages {
-		frac += p.Alloc[st]
-		if st == s {
-			break
-		}
-	}
+	frac := p.fracThrough(s)
 	if reserveReleased {
 		frac += p.Reserve
 	}
 	return p.Envelope * frac
+}
+
+// RaisedEnvelope returns the envelope a top-up at stage s should raise
+// the plan to, given the feature's total spend so far. It takes the
+// larger of two corrections:
+//
+//   - refill: the spend to date plus the original shares of stage s and
+//     everything after it — restores the current and remaining stages to
+//     their as-planned size on top of what's already gone.
+//   - rederive: what the envelope would have been estimated at had the
+//     spend been foreseen — spent, padded with headroom, scaled up by
+//     the share of the envelope stage s's cumulative cap represents.
+//
+// The rederive term guarantees the raised cumulative cap through s is
+// at least spent × estimateHeadroom, so the resumed stage's budget is
+// ≥ (estimateHeadroom−1) × spent and a top-up can never re-gate on the
+// spot. The result never shrinks the envelope, and is rounded up to a
+// tidy 10.
+func (p SpendPlan) RaisedEnvelope(s Stage, spent float64) float64 {
+	if p.Envelope <= 0 {
+		return p.Envelope // unbudgeted stays unbudgeted
+	}
+	through := p.fracThrough(s)
+	before := through - p.Alloc[s]
+	refill := spent + p.Envelope*(1-before)
+	raised := refill
+	if through > 0 {
+		raised = math.Max(raised, spent*estimateHeadroom/through)
+	}
+	return roundUpTo10(math.Max(p.Envelope, raised))
 }
 
 // StageBudget returns the credits available to stage s given the credits

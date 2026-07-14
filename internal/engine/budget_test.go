@@ -174,9 +174,11 @@ func TestSpendPlanDrivesStageBudget(t *testing.T) {
 	}
 }
 
-func TestTopUpReleasesReserve(t *testing.T) {
-	// a verify stage at its 95% cap has nothing left and gates immediately;
-	// a top-up releases the 5% reserve and resumes with that headroom.
+func TestTopUpRaisesEnvelopeDurably(t *testing.T) {
+	// a verify stage at its 95% cap has nothing left and gates
+	// immediately; a top-up raises the envelope itself — persisted to the
+	// store, so it survives stage advances and restarts — and resumes
+	// with real headroom.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -200,14 +202,65 @@ func TestTopUpReleasesReserve(t *testing.T) {
 		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
 	}
 
-	// top up: reserve (15 credits) released, stage resumes with a cap.
+	// top up: envelope raised (285 × 1.25 / 0.95 = 375 → 380), persisted.
 	if err := e.TopUp(context.Background(), f.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, e, "FD-001", StateDone)
-	// 15 credit budget × 0.9 headroom = 13.5.
-	if got := rec.opts().MaxCredits; got < 13.4 || got > 13.6 {
-		t.Errorf("resumed MaxCredits = %v, want ~13.5 (reserve released)", got)
+	got, err := store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget.Envelope != 380 {
+		t.Errorf("stored envelope = %d, want 380 (durable raise)", got.Budget.Envelope)
+	}
+	// stage budget 380×0.95 − 285 = 76 → MaxCredits 76 × 0.9 = 68.4.
+	if mc := rec.opts().MaxCredits; mc < 68.3 || mc > 68.5 {
+		t.Errorf("resumed MaxCredits = %v, want ~68.4 (raised envelope)", mc)
+	}
+}
+
+func TestTopUpOverTightEnvelopeNoRegate(t *testing.T) {
+	// a 3× underestimated envelope: the spend already dwarfs it, so a
+	// reserve-sized release could never resume the stage — the raise must
+	// rederive the envelope from the real spend and leave usable headroom.
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "plan", domain.StagePlan)
+	f.Budget.Envelope = 40
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSpend(context.Background(), f.ID, 120, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventExhausted)
+	if rec.opts().MaxCredits != 0 {
+		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
+	}
+
+	// top up: rederived envelope 120 × 1.25 / 0.25 = 600; the stage
+	// resumes and completes with budget 600×0.25 − 120 = 30 → cap 27.
+	if err := e.TopUp(context.Background(), f.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+	got, err := store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget.Envelope != 600 {
+		t.Errorf("stored envelope = %d, want 600 (rederived from spend)", got.Budget.Envelope)
+	}
+	if mc := rec.opts().MaxCredits; mc < 26.9 || mc > 27.1 {
+		t.Errorf("resumed MaxCredits = %v, want ~27", mc)
 	}
 }
 
