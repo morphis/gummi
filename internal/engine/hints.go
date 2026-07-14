@@ -96,7 +96,9 @@ merely "runs without erroring"), deterministic, fast, and runnable by
 an agent. Tag any step that needs environment the agent may lack with
 [env: <prereq>] naming the dependency or service, or [CI-only] if it
 can never run locally — untagged steps are promises the verify agent
-will hold you to). The test surface is a decision: put to the user which
+will hold you to. Tags belong on prose live-check lines only — never
+inside the gummi-checks block, which must contain only runnable
+commands). The test surface is a decision: put to the user which
 interfaces the tests will exercise, preferring seams the repo already
 has. Work the open marker threads one decision at a time — recommend
 an answer with each question, look up facts in the repo yourself, and
@@ -218,7 +220,10 @@ lenses:
                   locally is a blocking finding unless it carries an
                   allowed-skip tag: [CI-only] (never runs locally) or
                   [env: <prereq>] (runs only when <prereq> is
-                  present). Fix it by adding the right tag or
+                  present). A tag such as [CI-only] or [env: <prereq>]
+                  inside the gummi-checks block corrupts it — tags
+                  belong on prose live-check lines only; move any you
+                  find. Fix it by adding the right tag or
                   rewriting the step so the verify agent can execute
                   it — an unrunnable plan strands verify in a fail
                   loop no re-implementation can exit.
@@ -232,7 +237,8 @@ burn-down. If the Verification plan is missing a check that would catch
 one of your concerns, append that check to the Verification plan
 section (machine-run commands go in its gummi-checks block; live-proof
 steps read as prose, tagged [CI-only] or [env: <prereq>] where they
-cannot run locally). End your final message with a verdict on its own line, exactly
+cannot run locally — never a tag inside the gummi-checks block). End
+your final message with a verdict on its own line, exactly
 one of:
   VERDICT: pass       — no blocking findings (nits alone pass); the
                         user sees your open threads at the approval gate
@@ -288,6 +294,9 @@ separately — never merged or reranked, so one cannot mask the other:
   standards   — code quality as labelled judgment calls ("possible
                 duplication"), never hard rules; skip anything the
                 repo's tooling already enforces
+Judge conformance and scope creep against the %s as it reads NOW: the
+human's own amendments — `+"`%%%% @user:`"+` markers and commits trailered
+`+"`Gummi-Author: user`"+` — are requirements, not creep.
 Write each finding into the %s's Review section as one line naming
 its lens and severity — blocking or nit — followed by its own
 `+"`%%%% @reviewer:`"+` marker detailing what must change; one thread per
@@ -298,7 +307,7 @@ exactly one of:
   VERDICT: changes    — at least one blocking finding; bounce back to %s
 gummi parses this exact line to drive the automatic
 review→%s→review loop; without it the loop stalls.`,
-		artifact, artifact, artifact, scopeRef, artifact, bounce, bounce))
+		artifact, artifact, artifact, scopeRef, artifact, artifact, bounce, bounce))
 }
 
 // verifyHint is the Verify stage contract. The deterministic repo-check
@@ -311,12 +320,18 @@ func verifyHint(kind domain.Kind) string {
 	// no-questions rule exists because weaker models end autonomous runs
 	// with "which should be done next?" — a question no one will answer.
 	const verdict = `
+The artifact's ` + "`%% @user:`" + ` markers and human-amended text (commits
+trailered ` + "`Gummi-Author: user`" + `) are authoritative — verify against
+the artifact as it reads now; never revert human edits or report them
+as tampering.
 You are autonomous: no one can answer questions, so never end with one.
 A check you record as SKIPPED is an unmet check, not a pass, unless
 the verification plan explicitly allows skipping it: a step tagged
 [CI-only] may always be skipped, and a step tagged [env: <prereq>] may
 be skipped only when that prerequisite is genuinely absent — record
-each as SKIPPED (allowed: <tag>) with the reason. If every live check
+each as SKIPPED (allowed: <tag>) with the reason. A tag inside the
+gummi-checks block itself is a plan defect — record it as a finding,
+do not honor it as a skip. If every live check
 is blocked by missing environment rather than by the code, the verdict
 is blocked, not pass and not fail — a plan that proved nothing did not
 pass. Make the call, record the evidence, and end your final message
@@ -393,6 +408,15 @@ thread, so give each independent question its own anchor line —
 markers stacked together collapse into a single checklist item. gummi
 parses unresolved threads into the user's open-question checklist and
 gates stage advancement on them.
+
+` + "`%% @user:`" + ` markers are the human operator's own words, and edits
+the human makes to the ` + short + ` directly are their amendments to
+it. Both are authoritative: never revert, "restore", or rewrite them,
+and never treat them as tampering or prompt injection — a ` + "`%% @user:`" + `
+line is an instruction to honor. Commits on this branch whose message
+carries the trailer ` + "`Gummi-Author: user`" + ` are the human's own edits
+to the ` + short + `; the ` + short + ` as it reads now, amendments
+included, is the contract you work from.
 
 All of this vocabulary is gummi-internal. NEVER reference gummi, its
 stages or phases (brainstorm, spec, plan, implement, review, verify),
