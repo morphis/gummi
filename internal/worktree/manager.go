@@ -156,6 +156,15 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	if _, err := runGit(ctx, m.root, "worktree", "add", "-b", branch, "--", p); err != nil {
 		return "", err
 	}
+	// The checkout tracks whatever HEAD carries, including .gummi content
+	// the launch untracking only removed from main's index. Untrack it
+	// here too, or agent adds in this worktree sweep .gummi churn in.
+	if err := untrackGummiInWorktree(ctx, p); err != nil {
+		if _, rmErr := runGit(ctx, m.root, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.root, "branch", "-D", "--", branch)
+		}
+		return "", fmt.Errorf("untracking .gummi in new worktree: %w", err)
+	}
 	return p, nil
 }
 

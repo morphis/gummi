@@ -96,6 +96,135 @@ func TestLandAfterUntrack(t *testing.T) {
 	}
 }
 
+// TestCreateUntracksGummiInWorktree: when main's HEAD still carries
+// .gummi content (the launch untracking is index-only, so HEAD keeps it
+// until the user's next commit), a fresh worktree checks those files out
+// tracked in its own index — where the info/exclude rule is powerless.
+// Create must untrack them there too, without touching disk, and leave
+// the worktree clean.
+func TestCreateUntracksGummiInWorktree(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, ".gummi/seq", "3\n")
+	writeFile(t, root, ".gummi/config.yaml", "cfg\n")
+	mustGit(t, root, "add", "-f", ".gummi")
+	mustGit(t, root, "commit", "-q", "-m", "poisoned")
+
+	m, err := NewManager(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f := feature(5, "Fresh worktree")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := mustGit(t, p, "ls-files", "--", ".gummi"); out != "" {
+		t.Errorf(".gummi tracked in new worktree: %q", out)
+	}
+	if out := mustGit(t, p, "status", "--porcelain"); out != "" {
+		t.Errorf("new worktree not clean: %q", out)
+	}
+	// index-only, exactly like the launch pass: the checkout's files stay
+	if _, err := os.Stat(filepath.Join(p, ".gummi", "seq")); err != nil {
+		t.Errorf("worktree .gummi/seq removed from disk: %v", err)
+	}
+	// a modified .gummi file no longer reaches an agent's bulk add
+	writeFile(t, p, ".gummi/seq", "4\n")
+	mustGit(t, p, "add", "-A")
+	if out := mustGit(t, p, "status", "--porcelain"); out != "" {
+		t.Errorf(".gummi churn swept in by add -A: %q", out)
+	}
+	// spec artifacts still force past the exclusion afterwards
+	rel := filepath.Join(".gummi", "specs", "FD-005-fresh-worktree.md")
+	if err := m.CommitFile(ctx, f, rel, "# spec\n", "FD-005: spec"); err != nil {
+		t.Fatal(err)
+	}
+	if committed, err := m.FileCommitted(ctx, f, rel); err != nil || !committed {
+		t.Fatalf("spec artifact not committed past the exclusion: %v %v", committed, err)
+	}
+}
+
+// TestLandAfterWorktreeUntrack: the untrack commit Create leaves on the
+// branch must merge cleanly against main's own staged .gummi deletion —
+// both sides agree the files stop being tracked — and main's on-disk
+// .gummi (the live workspace) must survive the land.
+func TestLandAfterWorktreeUntrack(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, ".gummi/seq", "1\n")
+	mustGit(t, root, "add", "-f", ".gummi")
+	mustGit(t, root, "commit", "-q", "-m", "poisoned")
+
+	m, err := NewManager(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f := feature(6, "Land after untrack")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "work.txt", "feature work\n")
+	if made, err := m.CommitAll(ctx, f, "checkpoint"); err != nil || !made {
+		t.Fatalf("checkpoint: made=%v err=%v", made, err)
+	}
+	if err := m.SquashMerge(ctx, f, "land feature"); err != nil {
+		t.Fatalf("land failed: %v", err)
+	}
+	if out := mustGit(t, root, "ls-files", "--", ".gummi"); out != "" {
+		t.Errorf(".gummi still tracked in main after land: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".gummi", "seq")); err != nil {
+		t.Errorf("live .gummi/seq removed from main by the land: %v", err)
+	}
+}
+
+// TestRebaseAfterWorktreeUntrack: once main commits its own .gummi
+// deletion and advances, the branch's untrack commit becomes empty and a
+// rebase onto main must pass through it cleanly.
+func TestRebaseAfterWorktreeUntrack(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, ".gummi/seq", "1\n")
+	mustGit(t, root, "add", "-f", ".gummi")
+	mustGit(t, root, "commit", "-q", "-m", "poisoned")
+
+	m, err := NewManager(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f := feature(7, "Rebase after untrack")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "work.txt", "feature work\n")
+	if _, err := m.CommitAll(ctx, f, "checkpoint"); err != nil {
+		t.Fatal(err)
+	}
+	// main commits the staged deletion and moves on
+	mustGit(t, root, "commit", "-q", "-m", "user commit carrying the untracking")
+	writeFile(t, root, "main.txt", "main work\n")
+	mustGit(t, root, "add", "main.txt")
+	mustGit(t, root, "commit", "-q", "-m", "main advances")
+	if err := m.RebaseOnMain(ctx, f); err != nil {
+		t.Fatalf("rebase failed: %v", err)
+	}
+	if ok, err := m.RebasedOnMain(ctx, f); err != nil || !ok {
+		t.Fatalf("branch not rebased on main: ok=%v err=%v", ok, err)
+	}
+	if out := mustGit(t, p, "ls-files", "--", ".gummi"); out != "" {
+		t.Errorf(".gummi re-entered worktree tracking via the rebase: %q", out)
+	}
+}
+
 // TestCommitFileForcesPastExclusion: gummi's own artifact commits (the
 // spec on the feature branch) must survive the repo-wide exclusion.
 func TestCommitFileForcesPastExclusion(t *testing.T) {
