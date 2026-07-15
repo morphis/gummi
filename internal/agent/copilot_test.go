@@ -436,7 +436,104 @@ func usageClose(a, b Usage) bool {
 		d = -d
 	}
 	return d < 1e-9 && a.Model == b.Model && a.InputTokens == b.InputTokens &&
-		a.CachedTokens == b.CachedTokens && a.OutputTokens == b.OutputTokens
+		a.CachedTokens == b.CachedTokens && a.OutputTokens == b.OutputTokens &&
+		a.Metered == b.Metered
+}
+
+// TestCopilotSettleConsistentWithUsageEvents replays the failure that
+// corrupted spend on cache-heavy sessions: the per-call usage event
+// reports a cache-inclusive input count while the metrics RPC reports
+// the split. Both feed the settled ledger, so they must share one token
+// convention — mixed conventions sent the idle settle's cumulative-
+// minus-settled delta negative by roughly the cache size, and downstream
+// pricing turned that into large negative credits.
+func TestCopilotSettleConsistentWithUsageEvents(t *testing.T) {
+	nano := 11_435_250_000.0 // 11.43525 credits
+	cum := &copilotrpc.UsageGetMetricsResult{
+		ModelMetrics: map[string]copilotrpc.UsageMetricsModelMetric{
+			"m": {
+				TotalNanoAiu: &nano,
+				TokenDetails: map[string]copilotrpc.UsageMetricsModelMetricTokenDetail{
+					"input":       {TokenCount: 240},
+					"cache_read":  {TokenCount: 58475},
+					"cache_write": {TokenCount: 12608},
+					"output":      {TokenCount: 3254},
+				},
+			},
+		},
+	}
+	s := &copilotSession{
+		metered:      true,
+		raw:          make(chan Event, 16),
+		stop:         make(chan struct{}),
+		pendingUsage: map[string]Usage{},
+		meteredCalls: map[string]struct{}{},
+		settled:      map[string]Usage{},
+		getMetrics: func(context.Context) (*copilotrpc.UsageGetMetricsResult, error) {
+			return cum, nil
+		},
+	}
+
+	// one per-call event covers the whole turn: cache-inclusive input
+	// (240 fresh + 58475 cache reads + 12608 cache writes), credits equal
+	// to the cumulative figure.
+	call := "chatcmpl-1"
+	in, cached, out := int64(71323), int64(58475), int64(3254)
+	s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantUsageData{
+		Model: "m", APICallID: &call,
+		InputTokens: &in, CacheReadTokens: &cached, OutputTokens: &out,
+		CopilotUsage: &copilot.AssistantUsageCopilotUsage{TotalNanoAiu: nano},
+	}})
+	s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
+
+	var usages []Usage
+	for _, e := range collectUntilIdle(t, s) {
+		if e.Kind == EventUsage {
+			usages = append(usages, e.Usage)
+		}
+	}
+	// The event's split input (71323 − 58475 = 12848) equals the metrics'
+	// fresh + cache-write (240 + 12608), so the ledger matches the
+	// cumulative figures exactly and the settle has nothing left to emit
+	// — one usage event, provider-metered, and no negative correction.
+	want := Usage{Model: "m", Credits: 11.43525, InputTokens: 12848,
+		CachedTokens: 58475, OutputTokens: 3254, Metered: true}
+	if len(usages) != 1 || !usageClose(usages[0], want) {
+		t.Fatalf("usages = %+v, want exactly [%+v]", usages, want)
+	}
+}
+
+// TestCopilotMeteredStamp: hosted (credits-metered) sessions mark every
+// usage sample Metered so the engine records the credits as-is; BYOK
+// sessions must not — their token-only samples still need the engine's
+// token-priced fallback.
+func TestCopilotMeteredStamp(t *testing.T) {
+	nano := 2e9
+	for _, metered := range []bool{true, false} {
+		s := &copilotSession{
+			metered:      metered,
+			raw:          make(chan Event, 16),
+			stop:         make(chan struct{}),
+			pendingUsage: map[string]Usage{},
+			meteredCalls: map[string]struct{}{},
+			settled:      map[string]Usage{},
+			getMetrics: func(context.Context) (*copilotrpc.UsageGetMetricsResult, error) {
+				return &copilotrpc.UsageGetMetricsResult{
+					ModelMetrics: map[string]copilotrpc.UsageMetricsModelMetric{
+						"m": {TotalNanoAiu: &nano},
+					},
+				}, nil
+			},
+		}
+		s.onEvent(copilot.SessionEvent{Data: &copilot.AssistantUsageData{Model: "m"}})
+		s.onEvent(copilot.SessionEvent{Data: &copilot.SessionIdleData{}})
+		for _, e := range collectUntilIdle(t, s) {
+			if e.Kind == EventUsage && e.Usage.Metered != metered {
+				t.Errorf("metered=%v session emitted usage with Metered=%v: %+v",
+					metered, e.Usage.Metered, e.Usage)
+			}
+		}
+	}
 }
 
 // TestCopilotCloseClosesSessionChannels verifies Agent.Close() closes
@@ -547,7 +644,9 @@ func TestCopilotUsageCostPrecedence(t *testing.T) {
 		t.Errorf("credits = %v, want 0 (no cost source)", u.Credits)
 	}
 
-	// reasoning folds into output; cache read captured; input passthrough.
+	// reasoning folds into output; cache reads split out of the input
+	// count (the event's inputTokens aggregates them) so the per-call
+	// path shares cumulativeUsage's convention.
 	u = usageFrom(&copilot.AssistantUsageData{
 		Model:           "m",
 		InputTokens:     i64(1000),
@@ -555,13 +654,23 @@ func TestCopilotUsageCostPrecedence(t *testing.T) {
 		ReasoningTokens: i64(50),
 		CacheReadTokens: i64(300),
 	})
-	if u.InputTokens != 1000 {
-		t.Errorf("input = %d, want 1000", u.InputTokens)
+	if u.InputTokens != 700 {
+		t.Errorf("input = %d, want 700 (1000 minus 300 cache reads)", u.InputTokens)
 	}
 	if u.OutputTokens != 250 {
 		t.Errorf("output = %d, want 250 (200 output + 50 reasoning)", u.OutputTokens)
 	}
 	if u.CachedTokens != 300 {
 		t.Errorf("cached = %d, want 300 (cache read)", u.CachedTokens)
+	}
+
+	// a CLI reporting fresh-only input must not go negative on the split.
+	u = usageFrom(&copilot.AssistantUsageData{
+		Model:           "m",
+		InputTokens:     i64(100),
+		CacheReadTokens: i64(300),
+	})
+	if u.InputTokens != 0 {
+		t.Errorf("input = %d, want 0 (clamped, not negative)", u.InputTokens)
 	}
 }

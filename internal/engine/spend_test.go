@@ -188,6 +188,47 @@ func TestUnsettledEstimatesStayLabeled(t *testing.T) {
 	}
 }
 
+// TestMeteredUsageNeverTokenPriced: a credits-metering backend's samples
+// are authoritative even at zero credits (a free model, or a settle
+// residual). Pricing their tokens at the BYOK rate would invent spend the
+// provider never charged — and a later settle delta, which carries the
+// real credits for those same tokens, would then double-count it.
+func TestMeteredUsageNeverTokenPriced(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			// a zero-credit metered sample with hefty token counts
+			{Kind: agent.EventUsage, Usage: agent.Usage{InputTokens: 4000, OutputTokens: 2000, Model: "m", Metered: true}},
+			// the settle delta carrying the provider's actual figure
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1.5, InputTokens: 100, Model: "m", Metered: true}},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	got, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// only the metered 1.5 credits — no 3 token-derived credits on top —
+	// and nothing labeled estimated; the tokens are still recorded.
+	if got.Spend.Credits != 1.5 || got.Spend.InputTokens != 4100 {
+		t.Errorf("metered spend = %+v, want 1.5 credits and 4100 input tokens", got.Spend)
+	}
+	if got.Spend.Estimated() {
+		t.Errorf("metered spend flagged estimated: %+v", got.Spend)
+	}
+}
+
 // TestHelperSpendAttributedToHelperRole: a backend's internal side-model
 // call (a title/summary on a different model than the session's) is
 // booked to the helper role in the breakdown, not the stage's working

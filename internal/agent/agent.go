@@ -212,7 +212,12 @@ const (
 // Usage is the spend for one model call. Credits meter Copilot-hosted
 // usage; Tokens meter BYOK. Either may be zero.
 type Usage struct {
-	Credits      float64
+	Credits float64
+	// InputTokens counts the uncached input side: fresh input plus any
+	// prompt-cache writes. Cache reads live in CachedTokens — adapters
+	// whose upstream reports a cache-inclusive input count must split it,
+	// so every metering path shares one convention and cumulative-minus-
+	// settled deltas never go negative.
 	InputTokens  int64
 	OutputTokens int64
 	// CachedTokens is the count read from the prompt cache (a subset of
@@ -231,6 +236,13 @@ type Usage struct {
 	// to the provider's actual figure, superseding every estimate emitted
 	// for it so far. An event with Settled set never carries tokens.
 	Settled bool
+	// Metered marks Credits as the provider's metered figure for this
+	// sample, authoritative even at zero: the engine records it as-is and
+	// must not re-price the tokens or book the sample as an estimate.
+	// Credits-metering sessions (hosted Copilot) set it on every sample;
+	// BYOK and rate-less backends leave it unset so the engine's
+	// token-priced fallback still covers them.
+	Metered bool
 	// Helper marks spend on a model the backend used internally (title
 	// generation, summarization) rather than the session's working model —
 	// real cost, but not the role's stage work. Metering attributes it to a

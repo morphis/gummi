@@ -953,6 +953,12 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 				tokenEst, adapterEst := s.takePendingEst(ev.Usage.Model)
 				credits -= tokenEst
 				estimated = -(tokenEst + adapterEst)
+			case ev.Usage.Metered:
+				// the provider's metered figure, authoritative even at zero:
+				// token-pricing it would invent spend the provider never
+				// charged (and a later settle delta would then double-count
+				// it), so it passes through signed with no estimate booked.
+				credits = ev.Usage.Credits
 			case ev.Usage.Credits <= 0:
 				estimated = credits
 				s.notePendingEst(ev.Usage.Model, credits, 0)

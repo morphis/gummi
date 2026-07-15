@@ -129,7 +129,11 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	}
 
 	cs := &copilotSession{
-		workdir:      opts.WorkDir,
+		workdir: opts.WorkDir,
+		// hosted sessions are credits-metered by the CLI; their usage
+		// samples are authoritative as-is. BYOK reports tokens only, so
+		// the engine's token-priced fallback must stay in charge there.
+		metered:      opts.Provider.BaseURL == "",
 		raw:          make(chan Event, 256),
 		events:       make(chan Event),
 		stop:         make(chan struct{}),
@@ -198,6 +202,7 @@ func (c *Copilot) Close() error {
 type copilotSession struct {
 	sdk     *copilot.Session
 	workdir string // opts.WorkDir, for repo-relative tool-call details
+	metered bool   // hosted (credits-metered) session; stamped on usage events
 	// raw carries events from the SDK's event goroutine to the
 	// forwarder; events is the consumer-facing stream, owned solely by
 	// the forwarder so it can close it exactly once.
@@ -210,8 +215,8 @@ type copilotSession struct {
 	closed  bool
 	pending map[string]chan string // client-tool callID → answer channel
 
-	// Fallback metering for streamed calls, which the CLI never covers
-	// with an AssistantUsageData event (CLI gap, hosted and BYOK alike):
+	// Fallback metering for calls the CLI doesn't cover with an
+	// AssistantUsageData event (streamed calls, depending on CLI version):
 	// completed messages stash their per-call token counts here, the
 	// authoritative usage event (when it does come) claims its call, and
 	// the idle settle flushes what remains if the metrics RPC fails.
@@ -248,17 +253,19 @@ func (s *copilotSession) addSettled(u Usage) {
 
 // cumulativeUsage flattens one model's getMetrics entry into gummi's
 // usage vocabulary: credits from nano-AIU (1e9 nano-AIU = 1 AI credit,
-// the CLI's billing unit), input split into fresh vs cache-read tokens
-// (the SDK's inputTokens includes cache reads; tokenDetails carries the
-// split). Reasoning tokens are already inside outputTokens — verified
-// against GitHub's published per-token rates — so they are not re-added.
+// the CLI's billing unit), and tokens in Usage's convention — cache
+// reads split out of the input side, cache writes kept in it (the SDK's
+// inputTokens aggregates fresh + cache reads + cache writes; tokenDetails
+// carries the full split). Reasoning tokens are already inside
+// outputTokens — verified against GitHub's published per-token rates —
+// so they are not re-added.
 func cumulativeUsage(model string, m copilotrpc.UsageMetricsModelMetric) Usage {
 	u := Usage{Model: model}
 	if m.TotalNanoAiu != nil {
 		u.Credits = *m.TotalNanoAiu / 1e9
 	}
 	if td, ok := m.TokenDetails["input"]; ok {
-		u.InputTokens = td.TokenCount
+		u.InputTokens = td.TokenCount + m.TokenDetails["cache_write"].TokenCount
 		u.CachedTokens = m.TokenDetails["cache_read"].TokenCount
 		u.OutputTokens = m.TokenDetails["output"].TokenCount
 		return u
@@ -319,8 +326,8 @@ func (s *copilotSession) takePendingUsage() []Usage {
 // settleIdle meters the finished turn and then reports idle. Primary
 // source is the CLI's cumulative session.usage.getMetrics RPC — the
 // authoritative per-model AI-credit (nano-AIU) and token accounting the
-// CLI keeps but never pushes as assistant.usage events to SDK sessions
-// (CLI gap). Each model emits its cumulative figure minus what was
+// CLI keeps but doesn't reliably push as assistant.usage events to SDK
+// sessions. Each model emits its cumulative figure minus what was
 // already settled, so credits arrive provider-metered instead of the
 // engine's tokens×rate estimate. When the RPC fails (older CLI, timeout)
 // the turn falls back to the stashed per-message output-token counts, and
@@ -372,6 +379,9 @@ func (s *copilotSession) settleIdle() {
 		s.mu.Unlock()
 	}
 	for _, u := range evs {
+		// hosted samples are authoritative as-is — even a zero-credit
+		// delta must not be re-priced from tokens downstream.
+		u.Metered = s.metered
 		s.emit(Event{Kind: EventUsage, Usage: u})
 	}
 	s.emit(Event{Kind: EventIdle})
@@ -461,15 +471,16 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		out = Event{Kind: EventToolResult, CallID: d.ToolCallID, Result: toolResult(d)}
 	case *copilot.AssistantMessageData:
 		// Usage is metered from AssistantUsageData (the authoritative
-		// per-call event) when the CLI sends one; streamed BYOK calls
-		// don't get one (CLI gap), so the message's own token count is
-		// stashed and flushed at idle for calls still missing theirs —
-		// deduped by APICallID so both paths never double-count.
+		// per-call event) when the CLI sends one; not every call gets one
+		// (streamed calls, depending on CLI version), so the message's own
+		// token count is stashed and flushed at idle for calls still
+		// missing theirs — deduped by APICallID so both paths never
+		// double-count.
 		s.emit(Event{Kind: EventMessage, Text: d.Content})
 		s.stashMessageUsage(d)
 		return
 	case *copilot.AssistantUsageData:
-		u := Usage{Model: d.Model}
+		u := Usage{Model: d.Model, Metered: s.metered}
 		// Cost precedence: the authoritative CAPI figure (nano-AIU → credits)
 		// when present, else the Experimental Cost field, else 0 (a BYOK call
 		// with neither — priced from tokens by the engine's credit-equivalent).
@@ -490,8 +501,17 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 		if d.InputTokens != nil {
 			u.InputTokens = *d.InputTokens
 		}
+		// The event's inputTokens aggregates cache reads; split them out to
+		// match cumulativeUsage's convention — the two feed one settled
+		// ledger, and mixing conventions there sent the idle settle's
+		// cumulative-minus-settled delta hugely negative on cache-heavy
+		// sessions. Clamp in case a CLI version reports fresh-only input.
 		if d.CacheReadTokens != nil {
 			u.CachedTokens = *d.CacheReadTokens
+			u.InputTokens -= *d.CacheReadTokens
+			if u.InputTokens < 0 {
+				u.InputTokens = 0
+			}
 		}
 		s.markUsageMetered(d.APICallID)
 		// count this emission toward the model's settled total so the
