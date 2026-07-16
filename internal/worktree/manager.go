@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -187,56 +186,6 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 	return nil
 }
 
-// CommitFile writes content to relPath inside the feature's worktree
-// and commits it to the feature branch. relPath is verified to stay
-// inside the worktree.
-func (m *Manager) CommitFile(ctx context.Context, f *domain.Feature, relPath, content, message string) error {
-	p, err := m.requireWorktree(f)
-	if err != nil {
-		return err
-	}
-	dest := filepath.Clean(filepath.Join(p, relPath))
-	if dest != p && !strings.HasPrefix(dest, p+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to write %s: escapes worktree %s", relPath, p)
-	}
-	// The lexical check above is not enough: a hostile repo can commit an
-	// intermediate path component (e.g. .gummi/specs) as a symlink, which
-	// `worktree add` checks out, so the resolved destination escapes the
-	// worktree. Verify the deepest existing ancestor resolves back inside
-	// the worktree before creating or writing anything through it.
-	if err := ensureContained(p, dest); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
-		return err
-	}
-	// Atomic write: a rename replaces a symlink sitting at dest rather than
-	// following it to write outside the repo (the case where git would
-	// otherwise stage nothing and this would falsely report success), and it
-	// never leaves a torn file.
-	if err := atomicfile.Write(dest, []byte(content), 0o600); err != nil {
-		return err
-	}
-	// force past the repo-wide .gummi exclusion (EnsureGummiExcluded):
-	// artifacts are the one .gummi content gummi itself commits, so the
-	// spec travels with its branch while agents' bulk adds skip .gummi.
-	if _, err := runGit(ctx, p, "add", "-f", "--", dest); err != nil {
-		return err
-	}
-	// idempotent: identical content means nothing staged, nothing to do
-	status, err := runGit(ctx, p, "status", "--porcelain", "--", dest)
-	if err != nil {
-		return err
-	}
-	if status == "" {
-		return nil
-	}
-	if _, err := runGit(ctx, p, "commit", "-m", message, "--", dest); err != nil {
-		return err
-	}
-	return nil
-}
-
 // CommitAll stages everything in the feature's worktree — tracked edits
 // and new files alike — and commits it to the feature branch with
 // message, reporting whether a commit was made (a clean worktree is a
@@ -266,48 +215,6 @@ func (m *Manager) CommitAll(ctx context.Context, f *domain.Feature, message stri
 		return false, err
 	}
 	return true, nil
-}
-
-// ensureContained verifies that dest, once existing symlinks are resolved,
-// still lives inside root. It resolves the deepest already-existing
-// ancestor of dest (any symlinked component in the chain is dereferenced
-// there) and checks its real path against root's real path. This catches a
-// committed symlink anywhere along the path that would divert the write
-// outside the worktree.
-func ensureContained(root, dest string) error {
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return err
-	}
-	anc := dest
-	for {
-		if _, err := os.Lstat(anc); err == nil {
-			break
-		}
-		parent := filepath.Dir(anc)
-		if parent == anc {
-			break
-		}
-		anc = parent
-	}
-	realAnc, err := filepath.EvalSymlinks(anc)
-	if err != nil {
-		return err
-	}
-	if realAnc != realRoot && !strings.HasPrefix(realAnc, realRoot+string(filepath.Separator)) {
-		return fmt.Errorf("refusing to write %s: resolves outside worktree %s", dest, root)
-	}
-	return nil
-}
-
-// FileCommitted reports whether relPath inside the feature's worktree
-// is tracked by git (i.e. has been committed or staged).
-func (m *Manager) FileCommitted(ctx context.Context, f *domain.Feature, relPath string) (bool, error) {
-	p, err := m.requireWorktree(f)
-	if err != nil {
-		return false, err
-	}
-	return gitOK(ctx, p, "ls-files", "--error-unmatch", "--", filepath.Join(p, relPath))
 }
 
 // BranchExists reports whether the feature's branch ref exists.

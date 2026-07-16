@@ -23,13 +23,13 @@ const gummiExcludeLine = "/.gummi/"
 // It reports whether anything was untracked, so the caller can warn.
 //
 // The exclusion covers every worktree of the repo (info/exclude lives in
-// the common git dir), including the feature worktrees. gummi's own
-// artifact commits there (specs, bug reports — content that must travel
-// with the branch, DESIGN §10.11) force-add past it (CommitFile); an
-// agent's casual `git add .`/`git add -A` no longer sweeps .gummi in.
-// Exclusion only governs untracked files, though: .gummi content still
-// tracked at HEAD reappears tracked in every new worktree's index, which
-// Create handles separately (untrackGummiInWorktree).
+// the common git dir), including the feature worktrees, so an agent's
+// casual `git add .`/`git add -A` never sweeps .gummi in — gummi itself
+// commits nothing under .gummi (artifacts live in the main checkout's
+// workspace, DESIGN §10.11). Exclusion only governs untracked files,
+// though: .gummi content still tracked at HEAD reappears tracked in
+// every new worktree's index, which Create handles separately
+// (untrackGummiInWorktree).
 func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err error) {
 	common, err := runGit(ctx, m.root, "rev-parse", "--git-common-dir")
 	if err != nil {
@@ -67,8 +67,7 @@ func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err 
 // deletion is committed immediately so the worktree starts clean (a
 // dirty worktree refuses rebases, and the deletion would otherwise smear
 // into the first agent checkpoint). The commit rebases away or merges
-// cleanly once main's own untracking lands, and CommitFile's add -f
-// still re-tracks the branch's spec artifacts afterwards.
+// cleanly once main's own untracking lands.
 func untrackGummiInWorktree(ctx context.Context, wt string) error {
 	tracked, err := runGit(ctx, wt, "ls-files", "--", ".gummi")
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -132,13 +131,12 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 // report). These block every stage gate (DESIGN §6.1: unresolved
 // annotations block the gate). The template's own `@gummi` prompts and
 // unattributed notes do not block — only the human's review comments do.
-// It reads the worktree copy once one exists (the artifact migrates
-// there at approval), the draft before then; zero for an unreadable
-// artifact.
-func (m *Shell) openQuestionsBlockingGate(ctx context.Context, f domain.Feature) int {
-	path := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
-	if ok, err := m.wt.Exists(ctx, &f); err == nil && ok {
-		path = filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath())
+// It reads wherever the artifact lives right now (workspace home, draft,
+// or legacy worktree copy); zero for a missing or unreadable artifact.
+func (m *Shell) openQuestionsBlockingGate(f domain.Feature) int {
+	path := m.artifactFile(&f)
+	if path == "" {
+		return 0
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

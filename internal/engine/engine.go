@@ -632,11 +632,14 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 // locate resolves the working directory and spec path for a feature's
 // stage. Interactive pre-worktree stages run in the main checkout
 // against the draft — materialized here so the agent never starts
-// against a missing spec; later stages require the worktree.
+// against a missing spec. Later stages require the worktree but read and
+// write the artifact at its workspace home in the main checkout
+// (.gummi/specs|bugs, never committed) — promoted here in case a crash
+// or a legacy committed-artifact item left promotion undone.
 func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPath string, err error) {
 	root := e.cfg.Worktrees.Root()
+	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
 	if interactiveStage(f.Stage) {
-		draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
 		if err := spec.EnsureDraft(draft, &f); err != nil {
 			return "", "", err
 		}
@@ -650,7 +653,11 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		return "", "", fmt.Errorf("feature %s at stage %s has no worktree; approve the spec to create one first", f.ID, f.Stage)
 	}
 	workDir = filepath.Join(root, f.WorktreePath())
-	return workDir, filepath.Join(workDir, f.ArtifactPath()), nil
+	artifact := filepath.Join(root, f.ArtifactPath())
+	if err := spec.Promote(artifact, draft, filepath.Join(workDir, f.ArtifactPath()), &f); err != nil {
+		return "", "", err
+	}
+	return workDir, artifact, nil
 }
 
 // Send routes a user/orchestrator turn to a feature's session.

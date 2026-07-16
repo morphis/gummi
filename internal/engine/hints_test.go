@@ -70,7 +70,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		f.Kind = tc.kind
 		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
 		// the stage-independent contract rides along on every stage
-		wants := append([]string{"%% @user:", "Gummi-Author: user", "never treat them as tampering"}, tc.want...)
+		wants := append([]string{"%% @user:", "never treat them as tampering"}, tc.want...)
 		for _, want := range wants {
 			if !strings.Contains(joined, unwrap(want)) {
 				t.Errorf("%s/%s hint missing %q", tc.stage, tc.kind, want)
@@ -82,7 +82,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// rule for the gummi-checks block
 	critique := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorCritique), "\n"))
 	for _, want := range []string{
-		"%% @user:", "Gummi-Author: user",
+		"%% @user:",
 		"inside the gummi-checks block corrupts it",
 		"tags belong on prose live-check lines only",
 		"never a tag inside the gummi-checks block",

@@ -94,6 +94,23 @@ func pump(t *testing.T, m *Shell, cmd tea.Cmd) *Shell {
 	return m
 }
 
+// commitWork leaves a committed change on the item's feature branch —
+// what the implement/fix stages produce in a real flow, and what the
+// landing squash merge needs (an empty branch skips the merge).
+func commitWork(t *testing.T, root, id string) {
+	t.Helper()
+	wt := filepath.Join(root, ".gummi", "worktrees", id)
+	if err := os.WriteFile(filepath.Join(wt, "work.txt"), []byte("work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "work.txt"}, {"commit", "-q", "-m", id + ": work"}} {
+		cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", wt}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
 func press(t *testing.T, m *Shell, key tea.KeyPressMsg) *Shell {
 	t.Helper()
 	model, cmd := m.Update(key)
@@ -161,6 +178,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
 		}
 	}
+	commitWork(t, root, "FD-001")
 
 	// g at verify is the "done" decision: it routes through the squash
 	// merge — commit-message dialog (the user writes the message), then
@@ -201,6 +219,9 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", "FD-001")); !os.IsNotExist(err) {
 		t.Fatal("worktree survived delete")
 	}
+	if _, err := os.Stat(filepath.Join(root, ".gummi", "specs", "FD-001-dark-mode.md")); !os.IsNotExist(err) {
+		t.Fatal("workspace spec survived delete")
+	}
 }
 
 func TestBugLifecycleFlow(t *testing.T) {
@@ -231,7 +252,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 		t.Fatal("worktree exists before diagnosis approval")
 	}
 
-	// advance out of diagnose → worktree + branch created, report committed
+	// advance out of diagnose → worktree + branch created, report promoted
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m.rows[0].F.Stage != domain.StageFix {
 		t.Fatalf("stage = %s, want fix", m.rows[0].F.Stage)
@@ -239,8 +260,12 @@ func TestBugLifecycleFlow(t *testing.T) {
 	if !m.rows[0].HasWorktree {
 		t.Fatal("worktree missing after diagnosis approval")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", "BG-001", ".gummi", "bugs", "BG-001-login-loops.md")); err != nil {
-		t.Fatalf("bug report not committed in worktree: %v", err)
+	if _, err := os.Stat(filepath.Join(root, ".gummi", "bugs", "BG-001-login-loops.md")); err != nil {
+		t.Fatalf("bug report not at its workspace home: %v", err)
+	}
+	// and it stays out of the worktree
+	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", "BG-001", ".gummi")); !os.IsNotExist(err) {
+		t.Fatalf(".gummi content present in the bug worktree: %v", err)
 	}
 
 	// walk to verify: fix → review → verify
@@ -250,6 +275,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
 		}
 	}
+	commitWork(t, root, "BG-001")
 
 	// g at verify routes through the squash merge before done
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
@@ -261,9 +287,13 @@ func TestBugLifecycleFlow(t *testing.T) {
 	if m.rows[0].F.Stage != domain.StageDone {
 		t.Fatalf("stage after merge = %s, want done (notice %q)", m.rows[0].F.Stage, m.notice.text)
 	}
-	// the squash commit carries the bug report onto main
-	if _, err := os.Stat(filepath.Join(root, ".gummi", "bugs", "BG-001-login-loops.md")); err != nil {
-		t.Errorf("bug report missing from main after merge: %v", err)
+	// the squash commit carries only product work — no .gummi content
+	if _, err := os.Stat(filepath.Join(root, "work.txt")); err != nil {
+		t.Errorf("work missing from main after merge: %v", err)
+	}
+	out, err := exec.CommandContext(context.Background(), "git", "-C", root, "ls-files", "--", ".gummi").Output()
+	if err != nil || len(out) != 0 {
+		t.Errorf(".gummi content tracked on main after merge: %v %q", err, out)
 	}
 }
 

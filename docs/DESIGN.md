@@ -84,7 +84,8 @@ Stage semantics:
   appended to the spec draft. Unresolved questions flagged with `%%` markers
   (schipper convention) that gummi surfaces as a checklist.
 - **Spec** *(interactive, role: architect)* — converge on one approach.
-  Gate: you mark the spec **Approved**. gummi commits the spec to the branch.
+  Gate: you mark the spec **Approved**. gummi promotes the spec to its
+  workspace home (`.gummi/specs/`).
 - **Plan** *(autonomous or interactive, role: architect)* — numbered,
   tracer-bullet-ordered implementation plan derived from the spec, one
   line per step so critique markers can anchor. Gate: your approval (unless
@@ -689,9 +690,11 @@ Decided in the design interview (2026-07-03):
     scope by design, not deferred.
 11. **Spec drafts** live in `.gummi/state/drafts/` during Brainstorm/Spec
     (no worktree exists yet); at spec approval the worktree + branch are
-    created and the spec is committed there as
-    `.gummi/specs/FD-NNN-slug.md`, so the spec travels with its feature
-    branch.
+    created and the spec is promoted to `.gummi/specs/FD-NNN-slug.md` in
+    the main checkout — its workspace home for the rest of the feature's
+    life. The artifact is gummi workspace content: it never enters the
+    worktree and is never committed, so the feature branch (and the
+    squash commit that lands it) carries only product changes.
 
 Still open:
 

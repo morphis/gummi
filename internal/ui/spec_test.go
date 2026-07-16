@@ -148,7 +148,7 @@ func TestSpecCommentFlow(t *testing.T) {
 	}
 }
 
-func TestSpecMigratesToWorktreeAtApproval(t *testing.T) {
+func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
 	m := specWorkspace(t)
 	// advance to spec, open the draft, annotate it
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
@@ -166,28 +166,35 @@ func TestSpecMigratesToWorktreeAtApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	// approve the spec (leave Spec) → worktree + committed spec
+	// approve the spec (leave Spec) → worktree + promoted spec
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = openSpecFor(t, m)
 	if m.spec.path == draftPath {
 		t.Fatalf("spec still reads the draft after approval: %s", m.spec.path)
 	}
-	if !strings.Contains(m.spec.path, filepath.Join(".gummi", "worktrees", "FD-001")) {
-		t.Fatalf("spec path not in worktree: %s", m.spec.path)
+	if !strings.Contains(m.spec.path, filepath.Join(".gummi", "specs", "FD-001-dark-mode.md")) {
+		t.Fatalf("spec path not at its workspace home: %s", m.spec.path)
 	}
-	// annotations travel with the migrated spec
+	if strings.Contains(m.spec.path, filepath.Join(".gummi", "worktrees")) {
+		t.Fatalf("spec path leaked into the worktree: %s", m.spec.path)
+	}
+	// annotations travel with the promoted spec
 	if !strings.Contains(m.spec.content, "keep me") {
-		t.Fatal("draft annotations lost in migration")
+		t.Fatal("draft annotations lost in promotion")
 	}
 	// the draft is retired
 	if _, err := os.Stat(draftPath); !os.IsNotExist(err) {
-		t.Fatal("draft still present after migration")
+		t.Fatal("draft still present after promotion")
 	}
-	// and the spec is committed on the feature branch
-	wtDir := filepath.Dir(filepath.Dir(filepath.Dir(m.spec.path))) // …/worktrees/FD-001
-	out, err := exec.CommandContext(context.Background(), "git", "-C", wtDir, "log", "--oneline", "-1").Output()
-	if err != nil || !strings.Contains(string(out), "docs(spec): FD-001") {
-		t.Fatalf("spec commit missing: %v %q", err, out)
+	// and nothing about the spec entered the feature branch: the worktree
+	// carries no .gummi content and no artifact commit
+	wtDir := filepath.Join(m.wt.Root(), ".gummi", "worktrees", "FD-001")
+	if _, err := os.Stat(filepath.Join(wtDir, ".gummi")); !os.IsNotExist(err) {
+		t.Fatalf(".gummi content present in the worktree: %v", err)
+	}
+	out, err := exec.CommandContext(context.Background(), "git", "-C", wtDir, "log", "--oneline").Output()
+	if err != nil || strings.Contains(string(out), "docs(spec)") {
+		t.Fatalf("artifact commit found on the branch: %v %q", err, out)
 	}
 }
 

@@ -58,9 +58,9 @@ bug      BG-NNN   todo → triage → diagnose → fix ────────�
 
 - **Design is a conversation.** Brainstorm and Spec (Triage and Diagnose
   for bugs) are interactive — you talk to the architect in gummi's chat
-  pane, and the durable artifact is a markdown spec that lives on the
-  feature's branch. The spec — not the transcript — is the context
-  carrier between stages, which keeps token windows small.
+  pane, and the durable artifact is a markdown spec that lives in the
+  repo's `.gummi` workspace. The spec — not the transcript — is the
+  context carrier between stages, which keeps token windows small.
 - **Plans get an adversarial read.** Before a plan reaches your approval
   gate, a fresh-context reviewer critiques it for security, correctness,
   and completeness. Findings land as `%%` threads in the spec; serious
@@ -120,8 +120,8 @@ and the ignore rules that keep it all out of your repo's history. Then:
    chat pane. Open questions are tracked as a `%%` checklist in the
    spec (`s` to view it; `tab` toggles a PR-style annotate mode).
 3. Press `g` to advance through gates: approving the spec creates the
-   worktree and branch and commits the spec to it; approving the plan
-   launches the autonomous implementer.
+   worktree and branch and settles the spec into `.gummi/specs/`;
+   approving the plan launches the autonomous implementer.
 4. Watch the running agent (`enter`), review the diff (`d`), and let the
    review/verify loop run. `b` bounces work back with your annotations.
 5. Done means a verified branch. Press `m` to squash-merge it into main:

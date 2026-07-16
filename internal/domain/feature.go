@@ -157,8 +157,9 @@ func (f *Feature) SpecPath() string {
 
 // ArtifactPath is the item's durable design artifact relative to the
 // repo root: a feature's spec (.gummi/specs/…) or a bug's report
-// (.gummi/bugs/…). Both travel with the item's branch and are what the
-// stage agents read and write.
+// (.gummi/bugs/…). Both live in the main checkout's gummi workspace —
+// never in the worktree, never committed — and are what the stage
+// agents read and write.
 func (f *Feature) ArtifactPath() string {
 	if f.kind() == KindBug {
 		return path.Join(".gummi", "bugs", string(f.ID)+"-"+f.Slug+".md")

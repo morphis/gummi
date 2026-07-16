@@ -81,7 +81,7 @@ func (m *Shell) loadRows() tea.Msg {
 				}
 			}
 		}
-		row.OpenSpecQs = m.openQuestionsBlockingGate(ctx, f)
+		row.OpenSpecQs = m.openQuestionsBlockingGate(f)
 		row.OpenDiffComments = m.openDiffCommentsBlockingGate(ctx, f.ID)
 		if bl, err := m.store.CheckBaseline(ctx, f.ID); err == nil {
 			for _, r := range bl {
@@ -216,7 +216,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		}
 		// unresolved user %% annotations block every human gate, not just
 		// spec approval — g re-gates only once they resolve (DESIGN §6.1).
-		if n := m.openQuestionsBlockingGate(ctx, f); n > 0 {
+		if n := m.openQuestionsBlockingGate(f); n > 0 {
 			surface := "spec"
 			if f.Kind == domain.KindBug {
 				surface = "report"
@@ -236,9 +236,10 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		// Advancing out of Verify is the user's "this feature is done"
 		// decision: the branch lands on main as one squash commit before the
 		// record moves to Done. The merge flow (user-written message → merge)
-		// finishes the transition itself. A branch that already landed — or
-		// is already gone (merged and cleaned up outside gummi) — skips
-		// straight to the transition.
+		// finishes the transition itself. A branch that already landed, is
+		// already gone (merged and cleaned up outside gummi), or never got
+		// any commits of its own (nothing to land — the artifact lives in
+		// the workspace, not on the branch) skips straight to the transition.
 		if next == domain.StageDone {
 			if exists, err := m.wt.BranchExists(ctx, &f); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
@@ -246,15 +247,19 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 				if landed, err := m.wt.Landed(ctx, &f); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				} else if !landed {
-					return mergeThenDoneMsg{f: f}
+					if ahead, err := m.wt.BranchAhead(ctx, &f); err != nil {
+						return noticeMsg{text: sanitize(err.Error()), isErr: true}
+					} else if ahead {
+						return mergeThenDoneMsg{f: f}
+					}
 				}
 			}
 		}
 		// Crossing from the design phase (todo / interactive) into the first
 		// worktree stage is the approval gate: it creates the worktree and
-		// commits the artifact (spec or bug report) to the branch. Bounces
-		// (review/verify → work stage) already have a worktree, so this
-		// fires exactly once, whichever design stage is being left.
+		// promotes the artifact (spec or bug report) to its workspace home.
+		// Bounces (review/verify → work stage) already have a worktree, so
+		// this fires exactly once, whichever design stage is being left.
 		enteringWorktree := next != domain.StageTodo && !workflow.Interactive(next)
 		existed := true
 		if enteringWorktree {
@@ -267,9 +272,9 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			if _, err := m.wt.Create(ctx, &f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			// approval commits the artifact to the branch and retires the
-			// draft (DESIGN §10.11)
-			if err := m.migrateDraft(ctx, &f); err != nil {
+			// approval promotes the draft to the artifact's workspace home
+			// (DESIGN §10.11)
+			if err := m.migrateDraft(&f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
 			// plan-time estimation is feature-specific (spec approval): size
@@ -538,40 +543,35 @@ func (m *Shell) dropSession(id domain.FeatureID) {
 	}
 }
 
-// migrateDraft moves the artifact draft (spec or bug report) into the
-// item's worktree as a committed file. An item that never had a draft
-// gets one from its template — the branch always carries its artifact.
-// Idempotent, keyed on git tracking (a merely-present uncommitted file is
-// not migrated).
-func (m *Shell) migrateDraft(ctx context.Context, f *domain.Feature) error {
-	artifact := f.ArtifactPath()
-	draftPath := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f))
-	if tracked, err := m.wt.FileCommitted(ctx, f, artifact); err != nil {
-		return err
-	} else if tracked {
-		return os.RemoveAll(draftPath)
+// migrateDraft promotes the artifact draft (spec or bug report) to its
+// workspace home under .gummi/specs|bugs in the main checkout. The
+// artifact is gummi workspace content: it never enters the worktree and
+// is never committed. An item that never had a draft gets a fresh
+// template — the artifact always exists from approval on.
+func (m *Shell) migrateDraft(f *domain.Feature) error {
+	return spec.Promote(
+		filepath.Join(m.wt.Root(), f.ArtifactPath()),
+		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)),
+		filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath()),
+		f,
+	)
+}
+
+// artifactFile resolves where the item's design artifact lives right
+// now: its workspace home once promoted, the draft before then, or the
+// worktree copy of an item mid-flight from the committed-artifact era.
+// Empty when none exists yet.
+func (m *Shell) artifactFile(f *domain.Feature) string {
+	for _, p := range []string{
+		filepath.Join(m.wt.Root(), f.ArtifactPath()),
+		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)),
+		filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath()),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
 	}
-	// content preference: the draft; else a stray uncommitted worktree
-	// copy (e.g. a crashed earlier migration); else a fresh template
-	wtArtifact := filepath.Join(m.wt.Root(), f.WorktreePath(), artifact)
-	content := spec.Template(f)
-	commitKind := "spec"
-	if f.Kind == domain.KindBug {
-		content = spec.BugTemplate(f)
-		commitKind = "bug"
-	}
-	if raw, err := os.ReadFile(draftPath); err == nil {
-		content = string(raw)
-	} else if !os.IsNotExist(err) {
-		return err
-	} else if raw, err := os.ReadFile(wtArtifact); err == nil {
-		content = string(raw)
-	}
-	if err := m.wt.CommitFile(ctx, f, artifact, content,
-		fmt.Sprintf("docs(%s): %s %s", commitKind, f.ID, f.Title)); err != nil {
-		return err
-	}
-	return os.RemoveAll(draftPath)
+	return ""
 }
 
 // bounceStage sends a review/verify feature back to implement (the
@@ -621,6 +621,10 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		if err := m.store.DeleteFeature(ctx, id); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		// the artifact and its draft are workspace files keyed to the
+		// record — they go with it (best effort: an orphan is only clutter)
+		_ = os.RemoveAll(filepath.Join(m.wt.Root(), f.ArtifactPath()))
+		_ = os.RemoveAll(filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f)))
 		m.dropSession(id)
 		return noticeMsg{text: fmt.Sprintf("%s deleted", id)}
 	}

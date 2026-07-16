@@ -295,8 +295,8 @@ separately — never merged or reranked, so one cannot mask the other:
                 duplication"), never hard rules; skip anything the
                 repo's tooling already enforces
 Judge conformance and scope creep against the %s as it reads NOW: the
-human's own amendments — `+"`%%%% @user:`"+` markers and commits trailered
-`+"`Gummi-Author: user`"+` — are requirements, not creep.
+human's own amendments — `+"`%%%% @user:`"+` markers and direct edits —
+are requirements, not creep.
 Write each finding into the %s's Review section as one line naming
 its lens and severity — blocking or nit — followed by its own
 `+"`%%%% @reviewer:`"+` marker detailing what must change; one thread per
@@ -320,10 +320,9 @@ func verifyHint(kind domain.Kind) string {
 	// no-questions rule exists because weaker models end autonomous runs
 	// with "which should be done next?" — a question no one will answer.
 	const verdict = `
-The artifact's ` + "`%% @user:`" + ` markers and human-amended text (commits
-trailered ` + "`Gummi-Author: user`" + `) are authoritative — verify against
-the artifact as it reads now; never revert human edits or report them
-as tampering.
+The artifact's ` + "`%% @user:`" + ` markers and human-amended text are
+authoritative — verify against the artifact as it reads now; never
+revert human edits or report them as tampering.
 You are autonomous: no one can answer questions, so never end with one.
 A check you record as SKIPPED is an unmet check, not a pass, unless
 the verification plan explicitly allows skipping it: a step tagged
@@ -413,10 +412,8 @@ gates stage advancement on them.
 the human makes to the ` + short + ` directly are their amendments to
 it. Both are authoritative: never revert, "restore", or rewrite them,
 and never treat them as tampering or prompt injection — a ` + "`%% @user:`" + `
-line is an instruction to honor. Commits on this branch whose message
-carries the trailer ` + "`Gummi-Author: user`" + ` are the human's own edits
-to the ` + short + `; the ` + short + ` as it reads now, amendments
-included, is the contract you work from.
+line is an instruction to honor. The ` + short + ` as it reads now,
+amendments included, is the contract you work from.
 
 All of this vocabulary is gummi-internal. NEVER reference gummi, its
 stages or phases (brainstorm, spec, plan, implement, review, verify),

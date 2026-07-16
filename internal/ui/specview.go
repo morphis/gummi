@@ -45,21 +45,22 @@ type specLoadedMsg struct {
 	err     error
 }
 
-// openSpec resolves the feature's spec file — the worktree copy once
-// one exists, the draft under .gummi/state/drafts/ before then
-// (created from the template on first open).
+// openSpec resolves the feature's spec file — the workspace copy under
+// .gummi/specs|bugs once the feature has a worktree, the draft under
+// .gummi/state/drafts/ before then (created from the template on first
+// open).
 func (m *Shell) openSpec(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		// Once the worktree exists the spec travels with the feature
-		// branch: ensure it is committed there (idempotent) and read
-		// that copy. Before then, it is a draft under state/drafts/.
+		// Once the worktree exists the artifact lives at its workspace
+		// home: ensure it was promoted there (idempotent) and read that
+		// copy. Before then, it is a draft under state/drafts/.
 		var path string
 		if ok, err := m.wt.Exists(ctx, &f); err == nil && ok {
-			if err := m.migrateDraft(ctx, &f); err != nil {
+			if err := m.migrateDraft(&f); err != nil {
 				return specLoadedMsg{err: err}
 			}
-			path = filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath())
+			path = filepath.Join(m.wt.Root(), f.ArtifactPath())
 		} else {
 			path = filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
 			if err := spec.EnsureDraft(path, &f); err != nil {
@@ -97,7 +98,6 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 	}
 	reload := m.reloadSpec()
 	path := sv.path
-	f := sv.f
 	return func() tea.Msg {
 		date := m.now().Format("2006-01-02")
 		// Serialize against the engine's annotate/answer-capture writers and
@@ -115,11 +115,6 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 		}
 		if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		// still under the lock, so the committed snapshot is exactly the
-		// content just written
-		if notice := m.commitUserAmendment(context.Background(), f, out); notice != "" {
-			return tea.BatchMsg{func() tea.Msg { return noticeMsg{text: notice} }, reload}
 		}
 		return reload()
 	}
@@ -140,23 +135,10 @@ func (m *Shell) editSpec() tea.Cmd {
 	}
 	reload := m.reloadSpec()
 	path := sv.path
-	f := sv.f
 	cmd := exec.CommandContext(context.Background(), editor, path) //nolint:gosec // $EDITOR is the user's own trusted setting
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return noticeMsg{text: fmt.Sprintf("editor: %v", err), isErr: true}
-		}
-		// Commit whatever the editor left, under the same lock the other
-		// artifact writers take, so the snapshot is a coherent read.
-		unlock := spec.LockFile(path)
-		raw, rerr := os.ReadFile(path)
-		var notice string
-		if rerr == nil {
-			notice = m.commitUserAmendment(context.Background(), f, string(raw))
-		}
-		unlock()
-		if notice != "" {
-			return tea.BatchMsg{func() tea.Msg { return noticeMsg{text: notice} }, reload}
 		}
 		return reload()
 	})

@@ -20,8 +20,8 @@ import (
 //
 // The block is written by check auto-discovery at approval and is
 // ordinary spec content afterwards: the architect and implementer edit
-// it like prose, it rides the approval gates, and it travels with the
-// branch. The Verify stage runs exactly what it lists.
+// it like prose, and it rides the approval gates. The Verify stage runs
+// exactly what it lists.
 
 // checksFenceRe matches one ```gummi-checks … ``` block (the first wins).
 var checksFenceRe = regexp.MustCompile("(?s)```gummi-checks\\s*\\n(.*?)```")

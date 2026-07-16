@@ -29,7 +29,7 @@ func discoverFixture(t *testing.T, reply string) (*Engine, domain.Feature, strin
 
 	f := feature(1, "discover me", domain.StagePlan)
 	withWorktree(t, wt, f)
-	p := filepath.Join(wt.Root(), f.WorktreePath(), f.ArtifactPath())
+	p := filepath.Join(wt.Root(), f.ArtifactPath())
 	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 		t.Fatal(err)
 	}

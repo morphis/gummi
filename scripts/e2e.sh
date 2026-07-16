@@ -41,30 +41,32 @@ await "FD-001"
 [ -f "$dir/.gummi/state/gummi.db" ] || fail "state db missing"
 
 # open the spec surface, leave a comment through the annotate popover
-k s; await "open questions"
+k s; await "informational (agent)"
 k Tab; k n; k c; k 'noted in e2e'; k Enter
 grep -q "noted in e2e" "$dir/.gummi/state/drafts/FD-001-demo-feature.md" \
     || fail "annotation not persisted to draft"
 
-# advance to spec, then try to approve — the open user annotation blocks it
+# try to advance — the open user annotation blocks every gate
 k Escape
-k g; k g          # todo→brainstorm→spec
-k g; sleep 0.3    # spec→plan blocked by the open annotation
-pane | grep -q "block" || fail "open annotation did not block spec approval"
+k g; sleep 0.3
+pane | grep -q "block" || fail "open annotation did not block the gate"
 git -C "$dir" worktree list | grep -q "FD-001" && fail "worktree created despite blocked approval"
 
-# resolve the annotation (navigate to its marker first), then approval proceeds
+# resolve the annotation (navigate to its marker first), then advancing proceeds
 k s; k Tab; k n; k c; k 'resolved — acknowledged'; k Enter; k Escape
 
-# advance spec→plan: worktree + branch + committed spec
+# walk the design stages (todo→brainstorm→spec); approving the spec creates
+# the worktree + branch and promotes the spec to its workspace home
+k g; k g
 k g; sleep 0.5
 git -C "$dir" worktree list | grep -q "FD-001" || fail "worktree not created at spec approval"
 git -C "$dir" branch --list 'gummi/FD-001-*' | grep -q gummi || fail "branch missing"
-spec_file="$dir/.gummi/worktrees/FD-001/.gummi/specs/FD-001-demo-feature.md"
-[ -f "$spec_file" ] || fail "spec not in worktree"
-grep -q "noted in e2e" "$spec_file" || fail "annotation lost in spec migration"
-git -C "$dir/.gummi/worktrees/FD-001" log --oneline -1 | grep -q "docs(spec): FD-001" \
-    || fail "spec commit missing"
+spec_file="$dir/.gummi/specs/FD-001-demo-feature.md"
+[ -f "$spec_file" ] || fail "spec not at its workspace home"
+grep -q "noted in e2e" "$spec_file" || fail "annotation lost in spec promotion"
+[ ! -e "$dir/.gummi/worktrees/FD-001/.gummi" ] || fail ".gummi content leaked into the worktree"
+git -C "$dir/.gummi/worktrees/FD-001" log --oneline | grep -q "docs(spec)" \
+    && fail "spec commit found on the branch"
 [ ! -f "$dir/.gummi/state/drafts/FD-001-demo-feature.md" ] || fail "draft not retired"
 
 # walk to done: plan→implement→review→verify→done
@@ -76,6 +78,7 @@ k x; k y
 await "nothing on the board yet"
 git -C "$dir" worktree list | grep -q "FD-001" && fail "worktree survived delete"
 git -C "$dir" branch --list 'gummi/FD-001-*' | grep -q gummi && fail "branch survived delete"
+[ ! -f "$spec_file" ] || fail "workspace spec survived delete"
 
 k q
 echo "e2e PASS"

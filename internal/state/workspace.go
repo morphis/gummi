@@ -24,11 +24,11 @@ func (w Workspace) StateDir() string { return filepath.Join(w.GummiDir(), "state
 // DraftsDir holds spec drafts before a feature has a worktree.
 func (w Workspace) DraftsDir() string { return filepath.Join(w.StateDir(), "drafts") }
 
-// SpecsDir holds approved specs (committed with the feature branch).
+// SpecsDir holds approved specs — the artifact's workspace home from
+// spec approval on. Workspace content, never committed.
 func (w Workspace) SpecsDir() string { return filepath.Join(w.GummiDir(), "specs") }
 
-// BugsDir holds bug reports (committed with the bug's branch), the
-// bug-workflow analog of SpecsDir.
+// BugsDir holds bug reports, the bug-workflow analog of SpecsDir.
 func (w Workspace) BugsDir() string { return filepath.Join(w.GummiDir(), "bugs") }
 
 // WorktreesDir holds the nested per-feature git worktrees.

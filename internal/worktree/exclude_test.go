@@ -137,14 +137,6 @@ func TestCreateUntracksGummiInWorktree(t *testing.T) {
 	if out := mustGit(t, p, "status", "--porcelain"); out != "" {
 		t.Errorf(".gummi churn swept in by add -A: %q", out)
 	}
-	// spec artifacts still force past the exclusion afterwards
-	rel := filepath.Join(".gummi", "specs", "FD-005-fresh-worktree.md")
-	if err := m.CommitFile(ctx, f, rel, "# spec\n", "FD-005: spec"); err != nil {
-		t.Fatal(err)
-	}
-	if committed, err := m.FileCommitted(ctx, f, rel); err != nil || !committed {
-		t.Fatalf("spec artifact not committed past the exclusion: %v %v", committed, err)
-	}
 }
 
 // TestLandAfterWorktreeUntrack: the untrack commit Create leaves on the
@@ -222,30 +214,5 @@ func TestRebaseAfterWorktreeUntrack(t *testing.T) {
 	}
 	if out := mustGit(t, p, "ls-files", "--", ".gummi"); out != "" {
 		t.Errorf(".gummi re-entered worktree tracking via the rebase: %q", out)
-	}
-}
-
-// TestCommitFileForcesPastExclusion: gummi's own artifact commits (the
-// spec on the feature branch) must survive the repo-wide exclusion.
-func TestCommitFileForcesPastExclusion(t *testing.T) {
-	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
-		t.Fatal(err)
-	}
-	f := feature(4, "Spec carrier")
-	if _, err := m.Create(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	rel := filepath.Join(".gummi", "specs", "FD-004-spec-carrier.md")
-	if err := m.CommitFile(ctx, f, rel, "# spec\n", "FD-004: spec"); err != nil {
-		t.Fatal(err)
-	}
-	committed, err := m.FileCommitted(ctx, f, rel)
-	if err != nil || !committed {
-		t.Fatalf("spec artifact not committed past the exclusion: %v %v", committed, err)
 	}
 }

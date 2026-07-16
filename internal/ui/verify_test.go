@@ -37,15 +37,15 @@ func fakeResults() []verify.Result {
 }
 
 // writeWorktreeChecks upserts a gummi-checks block into the feature's
-// worktree spec (which exists once the feature enters its first
-// worktree stage).
+// promoted artifact (which sits at its workspace home once the feature
+// enters its first worktree stage).
 func writeWorktreeChecks(t *testing.T, m *Shell, id domain.FeatureID, checks []domain.Check) {
 	t.Helper()
 	f, err := m.store.GetFeature(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath())
+	p := filepath.Join(m.wt.Root(), f.ArtifactPath())
 	raw, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
