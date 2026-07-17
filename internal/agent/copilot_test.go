@@ -159,7 +159,8 @@ func TestCopilotToolResultRoundTrip(t *testing.T) {
 
 	srv := fakeopenai.New(
 		fakeopenai.WithReply("command ran"),
-		fakeopenai.WithToolCall("bash", `{"command":"echo gummi-tool-e2e"}`))
+		fakeopenai.WithToolCall("bash", `{"command":"echo gummi-tool-e2e"}`),
+	)
 	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -496,8 +497,10 @@ func TestCopilotSettleConsistentWithUsageEvents(t *testing.T) {
 	// fresh + cache-write (240 + 12608), so the ledger matches the
 	// cumulative figures exactly and the settle has nothing left to emit
 	// — one usage event, provider-metered, and no negative correction.
-	want := Usage{Model: "m", Credits: 11.43525, InputTokens: 12848,
-		CachedTokens: 58475, OutputTokens: 3254, Metered: true}
+	want := Usage{
+		Model: "m", Credits: 11.43525, InputTokens: 12848,
+		CachedTokens: 58475, OutputTokens: 3254, Metered: true,
+	}
 	if len(usages) != 1 || !usageClose(usages[0], want) {
 		t.Fatalf("usages = %+v, want exactly [%+v]", usages, want)
 	}
