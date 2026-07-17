@@ -191,6 +191,45 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 	}
 }
 
+// duplicateFeature mints a fresh card from an existing one: same title,
+// one-liner, kind, skip flags, profile, and budget envelope, starting
+// over in todo with nothing spent. The original stays untouched — the
+// copy is how a feature restarts from scratch without rewinding the
+// workflow or losing the original's history and cost record. Nothing
+// else carries over: the external ref stays on the original (re-ingest
+// dedupe resolves items by ref, which must stay unambiguous) and the
+// copy has no artifacts — a blank template is seeded when it enters
+// design (spec.EnsureDraft). The shared slug is safe: branch, worktree,
+// and artifact paths are all keyed by ID.
+func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		src, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		newID, err := domain.NewID(src.Kind, num)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		now := m.now()
+		f := domain.Feature{
+			ID: newID, Num: num, Kind: src.Kind, Title: src.Title, OneLiner: src.OneLiner,
+			Slug: src.Slug, Stage: workflow.Initial(src.Kind), Skip: src.Skip,
+			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := m.store.CreateFeature(ctx, &f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s created — fresh copy of %s", newID, id)}
+	}
+}
+
 // advanceStage moves the feature along its primary forward edge. When
 // the feature leaves Spec (spec approval, DESIGN §10.11) its worktree
 // and branch are created first.

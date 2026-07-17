@@ -144,6 +144,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
 | `a` | raw-attach the agent CLI in the worktree (escape hatch) |
 | `r` / `m` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (you write the commit message) |
+| `y` | duplicate — a fresh copy starts over in todo, the original stays |
 | `c` / `x` | clean up a landed branch / delete |
 
 ## Bringing in existing work

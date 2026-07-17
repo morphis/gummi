@@ -741,6 +741,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				onConfirm: func() tea.Cmd { return m.cleanupLanded(f) },
 			})
 		}
+	case "y":
+		if r, ok := m.selected(); ok {
+			f := r.F
+			m.Overlay.Push(&confirmDialog{
+				id:        "confirm-duplicate",
+				question:  "duplicate " + string(f.ID) + "?",
+				detail:    f.Title + " — fresh copy in todo (same skips, profile, envelope); this card stays",
+				onConfirm: func() tea.Cmd { return m.duplicateFeature(f.ID) },
+			})
+		}
 	case "x":
 		if r, ok := m.selected(); ok {
 			f := r.F
