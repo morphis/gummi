@@ -20,10 +20,8 @@ type Manager struct {
 	root string // absolute physical path of the main checkout
 
 	// mainMu serializes gummi-initiated mutations of the main checkout
-	// (squash merges, escape reverts) and guards mainGen, the sanctioned
-	// mutation counter the escape check reads (see primary.go).
-	mainMu  sync.Mutex
-	mainGen uint64
+	// (squash merges).
+	mainMu sync.Mutex
 }
 
 // NewManager binds a manager to the repo rooted at root. It verifies
@@ -532,13 +530,8 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("refusing squash merge of %s: empty commit message", f.ID)
 	}
-	// A land is a sanctioned main-checkout mutation: take the mutation
-	// lock for its duration and bump the generation up front, so an escape
-	// check overlapping the merge reads a moved generation and never
-	// misattributes (or reverts) the landing commit (see primary.go).
 	m.mainMu.Lock()
 	defer m.mainMu.Unlock()
-	m.mainGen++
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return err

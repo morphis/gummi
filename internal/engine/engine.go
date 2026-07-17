@@ -450,9 +450,6 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			msg = pre + "\n\n" + msg
 		}
 	}
-	// snapshot the main checkout right before the agent starts working, so
-	// the post-turn escape check judges exactly this turn's delta.
-	e.armEscapeGuard(s)
 	if err := sess.Send(context.Background(), msg); err != nil {
 		e.failRun(s, err)
 	}
@@ -674,10 +671,6 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	// a user turn to an autonomous session (steering, fix-up comments)
-	// dispatches agent work like a kickoff does; arm the escape guard
-	// unless the in-flight turn already holds one.
-	e.armEscapeGuard(s)
 	if err := a.Send(ctx, msg); err != nil {
 		e.failRun(s, err)
 		return err
@@ -1013,12 +1006,6 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		return
 	case agent.EventIdle:
 		s.setBusy(false)
-		// post-turn escape check first: a turn that wrote to the main
-		// checkout fails here — reverted when safe, loud either way —
-		// before any settled-turn handling can treat it as good work.
-		if e.checkEscape(s) {
-			return
-		}
 		// a turn that already exhausted its budget has raised the
 		// budget gate and freed its slot; the trailing idle must not
 		// downgrade that gate to a generic "finished" one.

@@ -246,7 +246,7 @@ func buildAgent() (agent.Agent, error) {
 // newManager binds the worktree manager to cwd and keeps .gummi out of
 // the product repo's tracking (exclude + untrack-if-tracked) before any
 // agent session can touch the repo. Exclusion problems warn rather than
-// block the launch: the board still works, and the escape guard remains.
+// block the launch: the board still works.
 func newManager(ctx context.Context, cwd string) (*worktree.Manager, error) {
 	wt, err := worktree.NewManager(ctx, cwd)
 	if err != nil {

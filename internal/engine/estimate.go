@@ -64,9 +64,6 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 	if err != nil {
 		return 0, err
 	}
-	// one-shot passes dispatch agent turns outside the Session machinery,
-	// so they carry their own escape guard (judged when the pass returns)
-	defer e.armOneShotGuard(f.ID, f.Stage)()
 	model, provider := e.resolveRole(f.Profile, agent.RoleScribe)
 	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
