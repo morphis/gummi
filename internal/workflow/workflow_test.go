@@ -75,6 +75,9 @@ func allSkipCombos() []domain.SkipFlags {
 		{Brainstorm: true},
 		{Plan: true},
 		{Brainstorm: true, Plan: true},
+		// the quick route: the same two skips plus the marker, which must
+		// not change the legal edge set (it only flavors the Spec stage)
+		domain.QuickRoute(),
 		{Triage: true},
 		{Diagnose: true},
 		{Triage: true, Diagnose: true},
@@ -105,6 +108,32 @@ func TestTransitionTableExhaustive(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestQuickRouteTwoGates: a quick feature runs todo → spec → implement —
+// one design conversation, one approval — and then the unchanged
+// review/verify tail.
+func TestQuickRouteTwoGates(t *testing.T) {
+	quick := domain.QuickRoute()
+	path := []domain.Stage{
+		domain.StageTodo, domain.StageSpec, domain.StageImplement,
+		domain.StageReview, domain.StageVerify, domain.StageDone,
+	}
+	for i := 1; i < len(path); i++ {
+		if err := CanTransition(domain.KindFeature, path[i-1], path[i], quick); err != nil {
+			t.Errorf("quick route: %s → %s should be legal, got %v", path[i-1], path[i], err)
+		}
+	}
+	// clearing the plan skip (the P escalation) closes the spec → implement
+	// shortcut and re-opens the plan gate
+	loosened := quick
+	loosened.Plan, loosened.Quick = false, false
+	if err := CanTransition(domain.KindFeature, domain.StageSpec, domain.StageImplement, loosened); err == nil {
+		t.Error("spec → implement still legal after the plan skip was cleared")
+	}
+	if err := CanTransition(domain.KindFeature, domain.StageSpec, domain.StagePlan, loosened); err != nil {
+		t.Errorf("spec → plan should be legal after escalation, got %v", err)
 	}
 }
 

@@ -103,6 +103,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)", bar: true},
 		{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true},
 		{key: "b", label: "bounce", help: "bounce back to implement/fix"},
+		{key: "P", label: "add plan", help: "restore the plan stage on a quick/skip-plan feature (design phase only)"},
 		{key: "v", label: "verify", help: "run verify checks"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
 		{key: "tab", label: "attention", help: "cycle needs-attention queue"},

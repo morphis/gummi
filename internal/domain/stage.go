@@ -94,9 +94,25 @@ func (s Stage) SuperState() SuperState {
 // Brainstorm/Plan gate the feature workflow; Triage/Diagnose gate the bug
 // workflow; each workflow ignores the other's flags. Review and Verify
 // have no flags in either workflow: they can never be skipped.
+//
+// Quick is not a skip of its own but a route marker: a quick feature is
+// created with Brainstorm and Plan both skipped (QuickRoute), and the
+// marker tells the Spec stage to draft the whole design in one pass
+// instead of converging on a prior brainstorm. Skip flags may loosen
+// after creation in one direction only: clearing a flag (restoring a
+// stage) is always safe, setting one mid-flight is not.
 type SkipFlags struct {
 	Brainstorm bool // feature
 	Plan       bool // feature
 	Triage     bool // bug
 	Diagnose   bool // bug
+	Quick      bool // feature: one-pass spec route
+}
+
+// QuickRoute is the quick feature route: brainstorm and plan skipped,
+// with the marker that selects the one-pass spec flavor. Creators use
+// this instead of assembling the trio by hand, so a Quick flag never
+// exists without the skips it implies.
+func QuickRoute() SkipFlags {
+	return SkipFlags{Brainstorm: true, Plan: true, Quick: true}
 }

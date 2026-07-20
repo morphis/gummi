@@ -61,6 +61,13 @@ bug      BG-NNN   todo → triage → diagnose → fix ────────�
   pane, and the durable artifact is a markdown spec that lives in the
   repo's `.gummi` workspace. The spec — not the transcript — is the
   context carrier between stages, which keeps token windows small.
+- **The quick route trades gates, never artifacts.** For well-understood
+  work, `q` on the creation form picks the quick route: brainstorm and
+  plan are skipped, and the spec stage drafts the complete spec —
+  implementation steps included — in one pass for you to steer and
+  approve. Same spec, same review/verify tail; one conversation and one
+  gate instead of three. If it outgrows quick, `P` restores the plan
+  stage — loosening a skip is always allowed, tightening one never is.
 - **Plans get an adversarial read.** Before a plan reaches your approval
   gate, a fresh-context reviewer critiques it for security, correctness,
   and completeness. Findings land as `%%` threads in the spec; serious

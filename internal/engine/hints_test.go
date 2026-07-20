@@ -93,9 +93,45 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}
 	}
 
+	// the quick spec flavor: one-pass drafting with the plan folded into
+	// Implementation notes, and the same verification-plan rubric as the
+	// standard flavor — the route trades gates, never artifact rigor
+	qf := feature(1, "Dark mode", domain.StageSpec)
+	qf.Skip = domain.QuickRoute()
+	quick := unwrap(strings.Join(stageHints(qf, "spec.md", flavorStage), "\n"))
+	for _, want := range []string{
+		"quick route", "one pass", "two or three clarifying questions",
+		"Implementation notes as the implementation plan",
+		"runs without erroring", "[env: <prereq>]", "[CI-only]",
+		"never inside the gummi-checks block",
+		"do not start implementing",
+	} {
+		if !strings.Contains(quick, unwrap(want)) {
+			t.Errorf("quick spec hint missing %q", want)
+		}
+	}
+	// and the standard flavor's convergence contract must not leak in
+	if strings.Contains(quick, "converge with the user on exactly one approach") {
+		t.Error("quick spec hint carries the standard convergence contract")
+	}
+
 	// the contract's section list matches the template's new shape
 	joined := strings.Join(stageHints(feature(1, "x", domain.StageBrainstorm), "spec.md", flavorStage), "\n")
 	if !strings.Contains(joined, "Problem · Out of scope · Considered approaches") {
 		t.Error("contract hint section list missing Out of scope")
+	}
+}
+
+// TestInteractiveKickoffQuickSpec: the spec-chat opener flips with the
+// route — a quick card's agent leads by drafting, a standard card's by
+// converging the open threads.
+func TestInteractiveKickoffQuickSpec(t *testing.T) {
+	f := feature(1, "Dark mode", domain.StageSpec)
+	if got := interactiveKickoff(f); !strings.Contains(got, "drive convergence") {
+		t.Errorf("standard spec kickoff = %q, want the convergence opener", got)
+	}
+	f.Skip = domain.QuickRoute()
+	if got := interactiveKickoff(f); !strings.Contains(got, "draft the complete spec") {
+		t.Errorf("quick spec kickoff = %q, want the one-pass opener", got)
 	}
 }

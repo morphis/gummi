@@ -52,9 +52,16 @@ const (
 // interactiveKickoff opens a fresh interactive session with the agent
 // leading — the user shouldn't have to know what to say to start an
 // interview (DESIGN §3: brainstorm develops a one-line description).
-func interactiveKickoff(s domain.Stage) string {
-	switch s {
+func interactiveKickoff(f domain.Feature) string {
+	switch f.Stage {
 	case domain.StageSpec:
+		if f.Skip.Quick {
+			return "The user just opened the quick spec chat. Read the spec draft, explore the " +
+				"repo, and either put your few design-changing clarifying questions to the user " +
+				"(recommended answers attached) or — if the description already decides them — " +
+				"draft the complete spec now and present it for review. Keep chat turns short; " +
+				"the detail belongs in the spec."
+		}
 		return "The user just opened the spec chat. Read the spec and its open %% threads, " +
 			"then drive convergence: recommend one approach with your reasoning, and put the " +
 			"most consequential open question to the user first. Keep it short."
@@ -257,7 +264,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	go e.pump(s)
 	var ko string
 	if fresh {
-		ko = interactiveKickoff(f.Stage)
+		ko = interactiveKickoff(f)
 		s.appendSystem(ko)
 		s.setBusy(true)
 	}

@@ -94,8 +94,18 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.profile = (d.profile + 1) % len(d.profiles)
 		case "b":
 			d.skip.Brainstorm = !d.skip.Brainstorm
+			d.skip.Quick = false
 		case "p":
 			d.skip.Plan = !d.skip.Plan
+			d.skip.Quick = false
+		case "q":
+			// the quick route is a preset, not a fourth flag: one keystroke
+			// in, one keystroke back to the full workflow
+			if d.skip.Quick {
+				d.skip = domain.SkipFlags{}
+			} else {
+				d.skip = domain.QuickRoute()
+			}
 		}
 	case fieldDesc:
 		d.desc, _ = d.desc.Update(key)
@@ -126,6 +136,8 @@ func (d *featureForm) setFocus(f int) {
 // skipLabel names the workflow route the skip flags select.
 func (d *featureForm) skipLabel() string {
 	switch {
+	case d.skip.Quick:
+		return "quick — spec in one pass, then implement"
 	case d.skip.Brainstorm && d.skip.Plan:
 		return "skip brainstorm+plan"
 	case d.skip.Brainstorm:
@@ -161,7 +173,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	}
 	hint := "enter create · tab options · esc cancel"
 	if d.focus == fieldOpts {
-		hint = "←/→ profile · b/p toggle skips · enter create · esc cancel"
+		hint = "←/→ profile · q quick · b/p toggle skips · enter create · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

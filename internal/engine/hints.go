@@ -83,31 +83,7 @@ arrive, and flag every unresolved decision as its own marker thread.
 Do not converge on one approach — convergence is the Spec stage's
 job.`))
 	case domain.StageSpec:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Spec (interactive; the user is in gummi's chat pane). Your job:
-converge with the user on exactly one approach, then complete the
-spec: Chosen approach, Out of scope (what this feature deliberately
-won't do — implementer and reviewer treat it as binding),
-Implementation notes, and the Verification plan (gummi discovers the
-repo's build/test/lint commands into a gummi-checks block there at
-approval; add the feature-specific live checks that prove this works —
-each check symptom-asserting (it proves the feature's behavior, not
-merely "runs without erroring"), deterministic, fast, and runnable by
-an agent. Tag any step that needs environment the agent may lack with
-[env: <prereq>] naming the dependency or service, or [CI-only] if it
-can never run locally — untagged steps are promises the verify agent
-will hold you to. Tags belong on prose live-check lines only — never
-inside the gummi-checks block, which must contain only runnable
-commands). The test surface is a decision: put to the user which
-interfaces the tests will exercise, preferring seams the repo already
-has. Work the open marker threads one decision at a time — recommend
-an answer with each question, look up facts in the repo yourself, and
-resolve each thread once the user decides. Write the sections that
-outlive implementation (Problem, Out of scope, Chosen approach) as
-behavior and contracts — types, signatures, invariants — never file
-paths or line numbers, which go stale; file-level detail belongs in
-Implementation notes. The user approves the spec to advance — do not
-start implementing.`))
+		hints = append(hints, specHint(f.Skip.Quick))
 	case domain.StagePlan:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Plan (autonomous). Derive a concrete implementation plan from
@@ -190,6 +166,70 @@ guessing.`))
 		hints = append(hints, verifyHint(f.Kind))
 	}
 	return hints
+}
+
+// verificationPlanHint is the Verification plan rubric, shared by both
+// Spec stage flavors: what a live check must prove and how env-bound
+// steps are tagged.
+const verificationPlanHint = `the Verification plan (gummi discovers the
+repo's build/test/lint commands into a gummi-checks block there at
+approval; add the feature-specific live checks that prove this works —
+each check symptom-asserting (it proves the feature's behavior, not
+merely "runs without erroring"), deterministic, fast, and runnable by
+an agent. Tag any step that needs environment the agent may lack with
+[env: <prereq>] naming the dependency or service, or [CI-only] if it
+can never run locally — untagged steps are promises the verify agent
+will hold you to. Tags belong on prose live-check lines only — never
+inside the gummi-checks block, which must contain only runnable
+commands)`
+
+// specHint is the Spec stage contract. The quick flavor is the whole
+// design phase in one conversation: no brainstorm preceded it and no
+// plan follows, so the agent drafts the complete spec — implementation
+// steps included — in one pass and refines it with the user, instead of
+// converging decision-by-decision on a prior brainstorm.
+func specHint(quick bool) string {
+	if quick {
+		return strings.TrimSpace(`
+Stage: Spec (interactive, quick route; the user is in gummi's chat
+pane). This item skips brainstorm and plan: this one conversation
+takes it from a one-line description to an implementable spec, and
+approval goes straight to implementation. Your job: draft the complete
+spec in one pass, then refine it with the user. Explore the repo for
+facts first — ask at most two or three clarifying questions up front,
+only where the answer genuinely changes the design, each with your
+recommended answer attached so the user can accept it in a word. Then
+write the whole spec: a sharp Problem; Out of scope (what this feature
+deliberately won't do — implementer and reviewer treat it as binding);
+Considered approaches kept brief — the alternatives you rejected and
+why, a line or two each; Chosen approach as behavior and contracts —
+types, signatures, invariants — never file paths or line numbers,
+which go stale; Implementation notes as the implementation plan
+itself, since no Plan stage follows — numbered steps, one line per
+step, each naming the files and functions it touches and the tests
+that prove it, ordered as tracer bullets (the first step cuts a thin
+complete path, later steps widen it); and ` + verificationPlanHint + `.
+Flag anything you are genuinely unsure about as its own %% marker
+thread with a recommended answer, rather than interviewing the user
+decision by decision. The user approves the spec to advance — do not
+start implementing.`)
+	}
+	return strings.TrimSpace(`
+Stage: Spec (interactive; the user is in gummi's chat pane). Your job:
+converge with the user on exactly one approach, then complete the
+spec: Chosen approach, Out of scope (what this feature deliberately
+won't do — implementer and reviewer treat it as binding),
+Implementation notes, and ` + verificationPlanHint + `. The test
+surface is a decision: put to the user which
+interfaces the tests will exercise, preferring seams the repo already
+has. Work the open marker threads one decision at a time — recommend
+an answer with each question, look up facts in the repo yourself, and
+resolve each thread once the user decides. Write the sections that
+outlive implementation (Problem, Out of scope, Chosen approach) as
+behavior and contracts — types, signatures, invariants — never file
+paths or line numbers, which go stale; file-level detail belongs in
+Implementation notes. The user approves the spec to advance — do not
+start implementing.`)
 }
 
 // planCritiqueHint is the plan-critique pass contract: Review's shape

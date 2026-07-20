@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS features (
 	kind            TEXT NOT NULL DEFAULT 'feature',
 	external_ref    TEXT NOT NULL DEFAULT '',
 	skip_triage     INTEGER NOT NULL DEFAULT 0,
-	skip_diagnose   INTEGER NOT NULL DEFAULT 0
+	skip_diagnose   INTEGER NOT NULL DEFAULT 0,
+	quick           INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
@@ -262,6 +263,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN spend_est REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE stage_spend ADD COLUMN est_credits REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN quick INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.
@@ -294,13 +296,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, budget_spent, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose)
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -311,7 +313,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose`
+	kind, external_ref, skip_triage, skip_diagnose, quick`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -323,7 +325,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Budget.Envelope, &f.Budget.Spent,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick)
 	if err != nil {
 		return f, err
 	}
@@ -588,11 +590,11 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE features SET title=?, one_liner=?, slug=?,
-			skip_brainstorm=?, skip_plan=?, skip_triage=?, skip_diagnose=?, profile=?,
+			skip_brainstorm=?, skip_plan=?, skip_triage=?, skip_diagnose=?, quick=?, profile=?,
 			budget_envelope=?, budget_spent=?, updated_at=?
 		WHERE id=?`,
 		f.Title, f.OneLiner, f.Slug,
-		f.Skip.Brainstorm, f.Skip.Plan, f.Skip.Triage, f.Skip.Diagnose, f.Profile,
+		f.Skip.Brainstorm, f.Skip.Plan, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
 		now.Format(timeFmt), string(f.ID))
 	if err != nil {

@@ -230,6 +230,41 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 	}
 }
 
+// routeViaPlan restores the Plan stage on a feature created with it
+// skipped (the quick route, or an explicit plan skip): the escalation
+// path when the spec reveals the work is bigger than the route assumed.
+// Loosening a skip only ever adds a stage back, so it is safe after
+// creation — the reverse (skipping a stage mid-flight) never is.
+// Clearing Quick with it keeps the flag invariant (quick implies both
+// skips): the card simply becomes a skip-brainstorm feature, and a
+// fresh spec session picks up the standard convergence contract.
+func (m *Shell) routeViaPlan(id domain.FeatureID) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if f.Kind == domain.KindBug {
+			return noticeMsg{text: fmt.Sprintf("%s: plan is a feature stage — bugs route triage → diagnose → fix", id), isErr: true}
+		}
+		if !f.Skip.Plan {
+			return noticeMsg{text: fmt.Sprintf("%s already routes through plan", id), isErr: true}
+		}
+		// past Spec the plan stage is already behind the feature; there is
+		// nothing left to restore it in front of.
+		if f.Stage != domain.StageTodo && f.Stage != domain.StageBrainstorm && f.Stage != domain.StageSpec {
+			return noticeMsg{text: fmt.Sprintf("%s is in %s — the plan stage is already behind it", id, f.Stage), isErr: true}
+		}
+		f.Skip.Plan = false
+		f.Skip.Quick = false
+		if err := m.store.UpdateFeature(ctx, &f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s will route through plan — spec approval now leads there", id)}
+	}
+}
+
 // advanceStage moves the feature along its primary forward edge. When
 // the feature leaves Spec (spec approval, DESIGN §10.11) its worktree
 // and branch are created first.

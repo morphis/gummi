@@ -26,6 +26,7 @@ type nextInput struct {
 	stage  domain.Stage
 	kind   domain.Kind
 	landed bool
+	quick  bool // the quick route: one-pass spec, approval goes straight to implement
 
 	sess   engine.SessionState // "" when the feature has no live session
 	busy   bool                // agent mid-turn
@@ -69,6 +70,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		stage:            r.F.Stage,
 		kind:             r.F.Kind,
 		landed:           r.Landed,
+		quick:            r.F.Skip.Quick,
 		reviewRound:      m.reviewRounds[r.F.ID],
 		verifyBounces:    verifyBounces(r.History, r.F.Kind),
 		openSpecQs:       r.OpenSpecQs,
@@ -178,10 +180,17 @@ func nextActions(in nextInput) []nextAction {
 		acts := []nextAction{
 			{"enter", "chat with the architect", "shape the " + artifactNoun(in.kind) + " until it convinces you"},
 		}
+		if in.quick {
+			acts[0].why = "quick route — it drafts the whole spec in one pass; steer and refine"
+		}
 		if b := blockedGate(in); b != nil {
 			return append([]nextAction{*b}, acts...)
 		}
-		return append(acts, nextAction{"g", "approve", "creates the worktree and starts the agent stages"})
+		gate := nextAction{"g", "approve", "creates the worktree and starts the agent stages"}
+		if in.quick {
+			gate.why = "creates the worktree and starts implementing — P first if it outgrew quick"
+		}
+		return append(acts, gate)
 
 	case domain.StagePlan:
 		if !finished {

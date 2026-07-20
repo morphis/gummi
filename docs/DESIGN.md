@@ -60,6 +60,17 @@ The only degrees of freedom: **skip flags** (Brainstorm and/or Plan can be
 marked skip at feature creation for small, obvious work) and **rerun
 transitions** (fix → re-review). Review and Verify can never be skipped.
 
+The **quick route** is a named preset over those flags, not a third
+workflow: created with both skips plus a marker that flips the Spec
+stage into a one-pass flavor — the architect asks its few clarifying
+questions up front, then drafts the whole spec (implementation steps
+folded into Implementation notes, since no Plan stage follows) for the
+user to steer and approve. It skips gates, never artifacts: the spec is
+a normal spec, so a quick item that turns out bigger than it looked
+escalates for free — restoring the Plan stage (`P`) re-routes approval
+through plan. Skip flags loosen in one direction only: clearing a flag
+(adding a stage back) is always legal, setting one mid-flight never is.
+
 ```
             ┌──────────┐    ┌──────────┐    ┌──────────┐
   todo ───▶ │ Brainstorm│──▶│   Spec    │──▶│   Plan   │──▶ gate: you approve plan
@@ -659,9 +670,11 @@ Decided in the design interview (2026-07-03):
    retry-on-conflict.
 3. **One strict workflow, never configurable.** No workflow YAML, ever. The
    only flexibility: *skip flags* — Brainstorm and Plan can be marked skip
-   at feature creation for small/obvious work — and *rerun transitions*
-   (e.g. re-review after fixes). Review and Verify are never skippable;
-   the quality floor is non-negotiable.
+   at feature creation for small/obvious work, with the quick route as a
+   named preset over them (both skips + the one-pass spec flavor) — and
+   *rerun transitions* (e.g. re-review after fixes). Skip flags may be
+   cleared after creation (restoring a stage is safe), never set. Review
+   and Verify are never skippable; the quality floor is non-negotiable.
 4. **Review loop**: after the implementer addresses findings, a fresh
    review pass triggers automatically, capped (default 2–3 rounds, and
    bounded by the protected budget floor); past the cap it escalates to
