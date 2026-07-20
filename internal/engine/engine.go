@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,12 +103,12 @@ type Config struct {
 	// StageBudget is a flat per-autonomous-stage credit budget (0 = no
 	// budget). The session cap is set ~10% below it (soft-stop
 	// headroom); the model is told its budget and nudged at thresholds.
-	// It is the fallback for features without a spend-plan envelope; a
-	// feature with an envelope uses per-stage allocations instead (§5.1
-	// layer 3, see stageBudget).
+	// It is the fallback for features without a budget envelope; a
+	// feature with an envelope draws every stage from what's left of it
+	// (§5.1 layer 3, see stageBudget).
 	StageBudget float64
 	// TurnReserve is one agent turn's worth of credits, the floor for
-	// every plan-derived stage cap (0 = domain.TurnReserveCredits).
+	// every envelope-derived budget (0 = domain.TurnReserveCredits).
 	// Enforcement runs between turns, so smaller caps cannot be held.
 	TurnReserve float64
 }
@@ -400,8 +401,8 @@ func (e *Engine) schedule() {
 // it off. On setup failure it frees the slot and records the error.
 func (e *Engine) startAutonomous(s *Session) {
 	// price this session's token spend at its provider's rate (0 =
-	// default), and use the same rate for the rollover baseline so the
-	// budget math is self-consistent.
+	// default), and use the same rate for the remaining-envelope baseline
+	// so the budget math is self-consistent.
 	_, provider := e.resolveRole(s.Feature.Profile, s.Role)
 	s.setByokRate(provider.CreditsPer1KTokens)
 	// compute the stage budget once so the enforced cap, the budget-aware
@@ -596,9 +597,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	}
 	var maxCredits float64
 	// autonomous stages get a budget cap + budget-aware hint (interactive
-	// chat is human-paced, so it isn't capped). Plan-derived budgets
+	// chat is human-paced, so it isn't capped). Envelope-derived budgets
 	// arrive already floored at one turn's reserve (stageBudget), so the
-	// enforced cap is never the un-holdable sliver that poisons rollover.
+	// enforced cap is never an un-holdable sliver.
 	if budget > 0 && !interactiveStage(f.Stage) {
 		maxCredits = budget * capHeadroom
 		hints = append(hints, budgetHint(budget))
@@ -787,7 +788,8 @@ func (e *Engine) freeSlot(s *Session) {
 // stage from its checkpoint — the "top up" action of a budget-exhaustion
 // gate (DESIGN §5.1 layer 3). The raise is persisted to the store, so it
 // survives stage advances and gummi restarts; RaisedEnvelope sizes it so
-// the resumed stage always has real headroom rather than a sliver.
+// the resumed stage always has real multi-turn headroom rather than a
+// sliver.
 //
 // The spend is priced at the default credit rate here; a BYOK provider
 // with a much higher per-token rate can still re-gate after a top-up,
@@ -799,8 +801,7 @@ func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 		return err
 	}
 	if f.Budget.Envelope > 0 {
-		raised := domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
-			RaisedEnvelope(f.Stage, f.Spend.CreditEquivalent())
+		raised := f.Budget.RaisedEnvelope(f.Spend.CreditEquivalent())
 		if int(raised) > f.Budget.Envelope {
 			f.Budget.Envelope = int(raised)
 			if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
@@ -809,6 +810,28 @@ func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 		}
 	}
 	return e.Run(f)
+}
+
+// RaiseEnvelope durably sets a feature's envelope to an explicit credit
+// figure — the proactive counterpart of TopUp's automatic raise. It only
+// persists: no stage is resumed, and a running session keeps the cap it
+// was spawned with (stage budgets re-read the envelope at session
+// start). The figure is validated against EnvelopeFloor so the next
+// stage cannot gate immediately; any figure above the floor is
+// accepted, so a too-generous envelope can also be tightened. Zero
+// removes the cap.
+func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int) error {
+	f, err := e.cfg.Store.GetFeature(ctx, id)
+	if err != nil {
+		return err
+	}
+	if to != 0 {
+		if floor := int(math.Ceil(domain.EnvelopeFloor(f.Spend.CreditEquivalent()))); to < floor {
+			return fmt.Errorf("%s: %d credits is below the %d-credit floor (spend plus resume headroom)", id, to, floor)
+		}
+	}
+	f.Budget.Envelope = to
+	return e.cfg.Store.UpdateFeature(ctx, &f)
 }
 
 // exhaust checkpoints and stops a session that hit its credit budget —
@@ -940,7 +963,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// accumulate the feature's running total across all stages. Persist
 		// the credit-equivalent (not raw credits): a BYOK stage reports
 		// tokens with zero credits, and storing that raw would make its spend
-		// invisible to the credits-denominated rollover once any hosted stage
+		// invisible to the credits-denominated envelope once any hosted stage
 		// contributed credits. Hosted events already carry credits, so this
 		// leaves them unchanged and never double-counts.
 		if e.cfg.Persist && e.cfg.Store != nil {

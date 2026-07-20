@@ -52,7 +52,7 @@ func (d *inboxDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, d.onJump(d.items[d.sel].Feature)
 		}
 	case "u":
-		// top up: release the reserve and resume an exhausted stage. Only
+		// top up: raise the envelope and resume an exhausted stage. Only
 		// budget gates offer it; other items ignore the key.
 		if d.sel < len(d.items) && d.items[d.sel].Kind == attnBudget && d.onTopUp != nil {
 			return true, d.onTopUp(d.items[d.sel].Feature)

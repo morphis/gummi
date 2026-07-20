@@ -17,20 +17,23 @@ const capHeadroom = 0.90
 // (DESIGN §5.1 layer 2). 100% is the exhaustion checkpoint.
 var budgetThresholds = []int{50, 80, 95}
 
-// stageBudget returns the credit budget for a feature's current stage.
-// A feature with a spend-plan envelope (layer 3) gets its per-stage
-// allocation with rollover and the protected review/verify floor; one
-// without falls back to the flat config value (layer 1/2 behavior).
+// stageBudget returns the credit budget for a feature's current stage:
+// what's left of its envelope (layer 3), or the flat config value for a
+// feature without one (layer 1/2 behavior). Every stage draws from the
+// same envelope — there are no per-stage allocations. Review and verify
+// are guaranteed by the workflow (they can never be skipped), not by a
+// protected budget share: a drained envelope defers them behind the
+// top-up gate.
 //
-// A positive plan-derived cap is floored at one agent turn: enforcement
-// runs between turns (a turn is a whole agentic loop), so a smaller cap
-// cannot be held anyway — the turn overshoots it and the overshoot then
-// poisons the rollover math of every later stage. Exhaustion semantics
-// are unchanged: a plan with nothing left still returns 0 and gates.
+// A positive envelope-derived budget is floored at one agent turn:
+// enforcement runs between turns (a turn is a whole agentic loop), so a
+// smaller cap cannot be held anyway — the turn overshoots it either way.
+// Exhaustion semantics are unchanged: an envelope with nothing left
+// still returns 0 and gates.
 func (e *Engine) stageBudget(f domain.Feature, byokRate float64) float64 {
 	if f.Budget.Envelope > 0 {
-		b := domain.PlanFor(f.Kind, float64(f.Budget.Envelope)).
-			StageBudget(f.Stage, e.featureSpent(f, byokRate), false)
+		cur := e.currentFeature(f)
+		b := cur.Budget.Remaining(cur.Spend.CreditEquivalentAt(byokRate))
 		if reserve := e.turnReserve(); b > 0 && b < reserve {
 			b = reserve
 		}
@@ -47,18 +50,18 @@ func (e *Engine) turnReserve() float64 {
 	return domain.TurnReserveCredits
 }
 
-// featureSpent returns the feature's credit-equivalent spend so far,
-// reading the store's authoritative running total (updated on every usage
-// event) so rollover math sees spend from prior stages, priced at the
-// current session's provider rate.
-func (e *Engine) featureSpent(f domain.Feature, byokRate float64) float64 {
-	sp := f.Spend
+// currentFeature returns the store's authoritative row for a feature —
+// its running spend total (updated on every usage event) and its
+// current envelope (a top-up may have raised it) — so the budget math
+// sees spend from prior stages. Falls back to the caller's copy without
+// a store.
+func (e *Engine) currentFeature(f domain.Feature) domain.Feature {
 	if e.cfg.Store != nil {
 		if cur, err := e.cfg.Store.GetFeature(context.Background(), f.ID); err == nil {
-			sp = cur.Spend
+			return cur
 		}
 	}
-	return sp.CreditEquivalentAt(byokRate)
+	return f
 }
 
 // diffReviewHints turns a feature's open diff annotations into system

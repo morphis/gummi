@@ -14,6 +14,7 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mb        [m  [38;2;191;188;200mbounce back to implement/fix[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mP        [m  [38;2;191;188;200mrestore the plan stage on a quick/skip-plan feature (design phase [m
 [38;2;107;80;255m│[m  [38;2;191;188;200mv        [m  [38;2;191;188;200mrun verify checks[m
+[38;2;107;80;255m│[m  [38;2;191;188;200mu        [m  [38;2;191;188;200mset the budget envelope (credits; 0 = uncapped)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200ma        [m  [38;2;191;188;200mraw-attach the agent CLI in the worktree[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle needs-attention queue[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mi        [m  [38;2;191;188;200mopen needs-attention inbox[m
@@ -21,4 +22,3 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mm        [m  [38;2;191;188;200msquash-merge branch into main (you write the message)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mc        [m  [38;2;191;188;200mclean up a landed branch[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mn        [m  [38;2;191;188;200mnew feature[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mB        [m  [38;2;191;188;200mnew bug[m

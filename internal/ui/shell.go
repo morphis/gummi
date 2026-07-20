@@ -147,7 +147,7 @@ func (m *Shell) reconstructInbox() {
 			// running/queued/interactive sessions raise their own items live
 			continue
 		case exhaustedActivity(snap.Activity):
-			m.inbox.add(id, attnBudget, string(snap.Feature.Stage)+" hit its budget — u top up (release reserve) or x park")
+			m.inbox.add(id, attnBudget, string(snap.Feature.Stage)+" hit its budget — u top up or x park")
 		default:
 			m.inbox.add(id, attnGate, string(snap.Feature.Stage)+" finished — review & advance")
 		}
@@ -253,7 +253,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" reached its budget with work committed — g advance, or u top up for more")
 			m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
 		} else {
-			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up (release reserve) or x park")
+			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up or x park")
 			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 		}
 	case engine.EventQuestion:
@@ -703,6 +703,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.inbox.remove(r.F.ID)
 			return m.bounceStage(r.F.ID)
 		}
+	case "u":
+		if r, ok := m.selected(); ok {
+			m.Overlay.Push(newEnvelopeDialog(r.F, func(to int) tea.Cmd {
+				return m.setEnvelope(r.F.ID, to)
+			}))
+		}
 	case "P":
 		if r, ok := m.selected(); ok {
 			return m.routeViaPlan(r.F.ID)
@@ -1104,6 +1110,26 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 		}
 		return noticeMsg{text: fmt.Sprintf("%s topped up — envelope raised to %d credits, resuming",
 			id, f.Budget.Envelope)}
+	}
+}
+
+// setEnvelope durably sets a feature's envelope to an explicit credit
+// figure (the u envelope dialog). Unlike topUpBudget it resumes
+// nothing: a budget-gated feature stays in the inbox, where enter or
+// its own u picks the work back up.
+func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
+	if m.engine == nil {
+		m.notice = noticeMsg{text: "no agent configured — budgets meter agent spend", isErr: true}
+		return nil
+	}
+	return func() tea.Msg {
+		if err := m.engine.RaiseEnvelope(context.Background(), id, to); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if to == 0 {
+			return noticeMsg{text: string(id) + ": envelope removed — spend is uncapped"}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: envelope set to %d credits (applies from the next agent session)", id, to)}
 	}
 }
 

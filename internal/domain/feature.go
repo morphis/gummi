@@ -69,9 +69,10 @@ func ParseFeatureID(s string) (FeatureID, error) {
 	return FeatureID(s), nil
 }
 
-// Budget is a feature's spend envelope in Copilot credits
-// (1 credit = $0.01). Per-stage allocation and metering land in M3;
-// M0 records the envelope and a running total.
+// Budget is a work item's spend envelope in Copilot credits
+// (1 credit = $0.01): one pool every stage draws from until it runs dry
+// and a human gate offers a top-up. See Remaining and RaisedEnvelope
+// (plan.go) for the budget math.
 type Budget struct {
 	Envelope int // credits allotted for the whole feature; 0 = no cap
 	Spent    int // credits consumed so far

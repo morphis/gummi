@@ -96,13 +96,13 @@ func runBoard() error {
 		shell.SetProfileNames(names)
 		defer cleanup()
 	}
-	// layer-3 spend plan: new features get this credit envelope, split
-	// into per-stage allocations with rollover and a protected review floor.
+	// layer-3 budget: new features get this credit envelope, drawn on by
+	// every stage until it runs dry and a human gate offers a top-up.
 	if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			if float64(n) < domain.TurnReserveCredits {
 				fmt.Fprintf(os.Stderr, "gummi: GUMMI_ENVELOPE=%d is below one agent turn (~%d credits); "+
-					"stage caps will be floored at a turn and overshoot the envelope\n", n, int(domain.TurnReserveCredits))
+					"stage budgets will be floored at a turn and overshoot the envelope\n", n, int(domain.TurnReserveCredits))
 			}
 			shell.SetEnvelope(n)
 		}
@@ -188,7 +188,7 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 			stageBudget = b
 		}
 	}
-	// one turn's credits, the floor for plan-derived stage caps
+	// one turn's credits, the floor for envelope-derived stage budgets
 	// (default domain.TurnReserveCredits; override for unusual models)
 	var turnReserve float64
 	if v := os.Getenv("GUMMI_TURN_RESERVE"); v != "" {

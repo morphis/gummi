@@ -236,21 +236,16 @@ func skipSummary(f domain.Feature) string {
 	return strings.Join(parts, ", ")
 }
 
-// budgetSummary formats the spend plan: spend against the envelope, plus
-// the current stage's cap (allocation + rollover) and the protected
-// reserve, so the card shows where this stage's money comes from. A
-// top-up raises the envelope itself (durably, in the store), so these
-// figures already reflect it.
+// budgetSummary formats the budget: spend against the envelope plus
+// what's left — every stage draws from the same pool, so one remainder
+// is the whole story. A top-up raises the envelope itself (durably, in
+// the store), so these figures already reflect it.
 func budgetSummary(f domain.Feature) string {
 	env := float64(f.Budget.Envelope)
 	spent := f.Spend.CreditEquivalent()
-	plan := domain.DefaultPlan(env)
 	s := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
-	if cap := plan.StageBudget(f.Stage, spent, false); cap > 0 {
-		s += fmt.Sprintf("  ·  %s stage cap %g", f.Stage, roundSpend(cap))
-	}
-	if r := env * plan.Reserve; r > 0 {
-		s += fmt.Sprintf("  ·  %g reserve", roundSpend(r))
+	if left := f.Budget.Remaining(spent); left > 0 {
+		s += fmt.Sprintf("  ·  %g left", roundSpend(left))
 	}
 	return s
 }

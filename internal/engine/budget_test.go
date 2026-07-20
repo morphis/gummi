@@ -144,9 +144,9 @@ func TestBudgetOverspendEnforcedGummiSide(t *testing.T) {
 	}
 }
 
-func TestSpendPlanDrivesStageBudget(t *testing.T) {
-	// a feature with an envelope gets its per-stage allocation with
-	// rollover and the protected review/verify floor, not a flat budget.
+func TestEnvelopeDrivesStageBudget(t *testing.T) {
+	// a feature with an envelope gets what's left of it as the stage
+	// budget, not the flat config value.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -167,15 +167,15 @@ func TestSpendPlanDrivesStageBudget(t *testing.T) {
 	}
 	waitState(t, e, "FD-001", StateDone)
 
-	// implement cap through 70% of 300 = 210, minus 40 spent = 170 available;
-	// the enforced cap sits 10% below that.
-	if got := rec.opts().MaxCredits; got < 152.9 || got > 153.1 {
-		t.Errorf("MaxCredits = %v, want ~153 (170 stage budget × 0.9)", got)
+	// 300 envelope minus 40 spent = 260 available; the enforced cap sits
+	// 10% below that.
+	if got := rec.opts().MaxCredits; got < 233.9 || got > 234.1 {
+		t.Errorf("MaxCredits = %v, want ~234 (260 stage budget × 0.9)", got)
 	}
 }
 
 func TestTopUpRaisesEnvelopeDurably(t *testing.T) {
-	// a verify stage at its 95% cap has nothing left and gates
+	// a verify stage whose feature consumed the whole envelope gates
 	// immediately; a top-up raises the envelope itself — persisted to the
 	// store, so it survives stage advances and restarts — and resumes
 	// with real headroom.
@@ -189,7 +189,7 @@ func TestTopUpRaisesEnvelopeDurably(t *testing.T) {
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddSpend(context.Background(), f.ID, 285, 0, 0, 0); err != nil { // at the 95% cap
+	if err := store.AddSpend(context.Background(), f.ID, 300, 0, 0, 0); err != nil { // envelope drained
 		t.Fatal(err)
 	}
 	withWorktree(t, wt, f)
@@ -202,7 +202,8 @@ func TestTopUpRaisesEnvelopeDurably(t *testing.T) {
 		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
 	}
 
-	// top up: envelope raised (285 × 1.25 / 0.95 = 375 → 380), persisted.
+	// top up: envelope rederived from real spend (300 × 1.25 = 375 → 380),
+	// persisted.
 	if err := e.TopUp(context.Background(), f.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -214,16 +215,16 @@ func TestTopUpRaisesEnvelopeDurably(t *testing.T) {
 	if got.Budget.Envelope != 380 {
 		t.Errorf("stored envelope = %d, want 380 (durable raise)", got.Budget.Envelope)
 	}
-	// stage budget 380×0.95 − 285 = 76 → MaxCredits 76 × 0.9 = 68.4.
-	if mc := rec.opts().MaxCredits; mc < 68.3 || mc > 68.5 {
-		t.Errorf("resumed MaxCredits = %v, want ~68.4 (raised envelope)", mc)
+	// stage budget 380 − 300 = 80 → MaxCredits 80 × 0.9 = 72.
+	if mc := rec.opts().MaxCredits; mc < 71.9 || mc > 72.1 {
+		t.Errorf("resumed MaxCredits = %v, want ~72 (raised envelope)", mc)
 	}
 }
 
 func TestTopUpOverTightEnvelopeNoRegate(t *testing.T) {
 	// a 3× underestimated envelope: the spend already dwarfs it, so a
-	// reserve-sized release could never resume the stage — the raise must
-	// rederive the envelope from the real spend and leave usable headroom.
+	// sliver of a raise could never resume the stage — the raise must
+	// leave real multi-turn headroom.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -246,8 +247,9 @@ func TestTopUpOverTightEnvelopeNoRegate(t *testing.T) {
 		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
 	}
 
-	// top up: rederived envelope 120 × 1.25 / 0.25 = 600; the stage
-	// resumes and completes with budget 600×0.25 − 120 = 30 → cap 27.
+	// top up: resume floor 120 + 60 = 180 beats rederive 150; the stage
+	// resumes with two full turns of budget 180 − 120 = 60 → cap 54, not
+	// the one-turn sliver that would re-gate after a single expensive turn.
 	if err := e.TopUp(context.Background(), f.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -256,11 +258,59 @@ func TestTopUpOverTightEnvelopeNoRegate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Budget.Envelope != 600 {
-		t.Errorf("stored envelope = %d, want 600 (rederived from spend)", got.Budget.Envelope)
+	if got.Budget.Envelope != 180 {
+		t.Errorf("stored envelope = %d, want 180 (resume floor from spend)", got.Budget.Envelope)
 	}
-	if mc := rec.opts().MaxCredits; mc < 26.9 || mc > 27.1 {
-		t.Errorf("resumed MaxCredits = %v, want ~27", mc)
+	if mc := rec.opts().MaxCredits; mc < 53.9 || mc > 54.1 {
+		t.Errorf("resumed MaxCredits = %v, want ~54 (two turns of headroom)", mc)
+	}
+}
+
+func TestRaiseEnvelopeExplicitFigure(t *testing.T) {
+	// the u envelope dialog: an explicit figure persists without resuming
+	// anything, sub-floor figures are rejected (they would gate the next
+	// turn immediately), and zero removes the cap.
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "plan", domain.StagePlan)
+	f.Budget.Envelope = 300
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSpend(context.Background(), f.ID, 100, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// floor = 100 spent + two turns of reserve (60) = 160
+	if err := e.RaiseEnvelope(context.Background(), f.ID, 150); err == nil {
+		t.Fatal("a sub-floor figure was accepted")
+	}
+
+	if err := e.RaiseEnvelope(context.Background(), f.ID, 500); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget.Envelope != 500 {
+		t.Errorf("stored envelope = %d, want 500", got.Budget.Envelope)
+	}
+	if rec.opts().MaxCredits != 0 {
+		t.Errorf("a raise opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
+	}
+
+	if err := e.RaiseEnvelope(context.Background(), f.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = store.GetFeature(context.Background(), f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget.Envelope != 0 {
+		t.Errorf("stored envelope = %d, want 0 (uncapped)", got.Budget.Envelope)
 	}
 }
 
@@ -444,8 +494,8 @@ func TestBudgetExhaustedRaisesCheckpoint(t *testing.T) {
 func TestStageCapFlooredAtTurnReserve(t *testing.T) {
 	// enforcement runs between turns, so a sliver of remaining budget
 	// (here 5 credits) cannot be held as a cap — the first turn would
-	// blow through it and poison the rollover math. The cap is floored
-	// at one turn's reserve instead.
+	// blow through it anyway. The cap is floored at one turn's reserve
+	// instead.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -456,8 +506,8 @@ func TestStageCapFlooredAtTurnReserve(t *testing.T) {
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	// implement's cumulative cap is 70% of 300 = 210; leave 5 remaining
-	if err := store.AddSpend(context.Background(), f.ID, 205, 0, 0, 0); err != nil {
+	// leave 5 of the 300 envelope remaining
+	if err := store.AddSpend(context.Background(), f.ID, 295, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	withWorktree(t, wt, f)
@@ -475,8 +525,9 @@ func TestStageCapFlooredAtTurnReserve(t *testing.T) {
 }
 
 func TestExhaustedPlanStillGatesDespiteFloor(t *testing.T) {
-	// the turn-reserve floor applies to positive caps only: a plan with
-	// nothing left still returns 0 and gates before a session opens.
+	// the turn-reserve floor applies to positive budgets only: an
+	// envelope with nothing left still returns 0 and gates before a
+	// session opens.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -487,7 +538,7 @@ func TestExhaustedPlanStillGatesDespiteFloor(t *testing.T) {
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddSpend(context.Background(), f.ID, 210, 0, 0, 0); err != nil { // exactly at cap
+	if err := store.AddSpend(context.Background(), f.ID, 300, 0, 0, 0); err != nil { // exactly at the envelope
 		t.Fatal(err)
 	}
 	withWorktree(t, wt, f)

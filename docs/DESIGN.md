@@ -398,39 +398,40 @@ its budget, so gummi does, twice:
   The 95% message explicitly demands a checkpoint. This converts the hard
   stop from a cliff into a landing.
 
-**Layer 3 — the spend plan.** Each feature carries a spend plan: an envelope
-plus per-stage allocations, recorded in the spec and shown on the kanban
-card.
+**Layer 3 — the budget envelope.** Each work item carries one credit
+envelope, shown on the kanban card. Every stage — interactive or
+autonomous — draws from the same pool; an autonomous stage's session cap
+is simply what's left of the envelope (floored at one agent turn, since
+enforcement runs between turns and a smaller cap cannot be held).
 
-```yaml
-# defaults per profile; overridable per feature at creation or plan-approval
-budget:
-  envelope: 300            # credits for the whole feature
-  allocation:              # of envelope
-    brainstorm+spec: 15%
-    plan:            10%
-    implement:       45%
-    review:          15%   # protected — implement cannot borrow from it
-    verify:          10%
-    reserve:         5%    # orchestrator-held; released only at a human gate
-```
+There are deliberately **no per-stage allocations**. An earlier design
+split the envelope into stage shares with rollover, a protected
+review/verify floor, and an orchestrator-held reserve; it was dropped.
+The stage-level precision was fictional (turn-granular enforcement,
+uncapped interactive stages, and provider price differences all blow
+through fractional caps), and it produced the worst budget UX gummi had:
+a stage gating "exhausted" while the card showed plenty of envelope
+left. The quality guarantee the floor purported to give is already owned
+by the workflow — review and verify can never be skipped, so a feature
+whose envelope runs dry before review simply parks at the top-up gate;
+it cannot land unreviewed.
 
-Rules that make the plan real rather than decorative:
+Rules that make the envelope real rather than decorative:
 
-- **Rollover forward**: unspent budget from a completed stage flows into the
-  next stage — finishing the spec cheaply buys implementation headroom.
-- **Protected quality floor**: review/verify allocations can't be borrowed
-  against. A feature that exhausts implementation budget pauses; it doesn't
-  eat its own review.
-- **Human gates on exhaustion**: when a stage runs dry, the gate offers:
-  *top up* (release reserve or raise envelope), *downshift* (re-route the
+- **One pool, one gate**: the item runs until the envelope is spent, then
+  moves to the needs-attention queue. When a stage runs dry, the gate
+  offers: *top up* (raise the envelope), *downshift* (re-route the
   role to a cheaper/BYOK model from the profile's fallback chain and
   resume from checkpoint), *split* (agent proposes cutting scope into a
   follow-up FD), or *park*.
-- **Plan-time estimation (later)**: at plan approval, a scribe-role pass can
-  size the work (files touched, test surface, historical spend on similar
-  features from `.gummi/state`) and propose adjusted allocations. v1 ships
-  static profile percentages; estimation is an M4+ refinement.
+- **Top-ups leave real headroom**: a raise is sized to the larger of
+  spend × 1.25 (re-deriving the envelope from what the work actually
+  costs) and spend + two agent turns, so a resumed stage never re-gates
+  on the next turn.
+- **Plan-time estimation**: the envelope is proposed from the historical
+  median spend of completed features blended with a scribe-role
+  estimate, padded and floored (`MinEnvelope`) so estimates skewing low
+  don't gate instantly.
 
 **BYOK/local spend.** Credits only meter GitHub-hosted usage; local llama.cpp
 is credit-free but not cost-free (time, watts). The meter therefore records a
@@ -646,8 +647,8 @@ Spec annotation editor (`%%`-based, annotate mode + gate feedback loop).
 `profiles.yaml`, per-role model/BYOK env injection, llama.cpp smoke test,
 spend metering + kanban cost column, cross-model review default. Budget
 layers 1+2: `--max-ai-credits` caps per session, budget-aware system hints,
-threshold nudges, budget-exhausted checkpointing. Spend plans with rollover,
-protected review floor, and exhaustion gates (layer 3).
+threshold nudges, budget-exhausted checkpointing. Budget envelopes with
+exhaustion gates (layer 3).
 
 **M4 — quality automation**
 `%%` question extraction, spec templates, diff viewer with line annotations
@@ -677,8 +678,8 @@ Decided in the design interview (2026-07-03):
    and Verify are never skippable; the quality floor is non-negotiable.
 4. **Review loop**: after the implementer addresses findings, a fresh
    review pass triggers automatically, capped (default 2–3 rounds, and
-   bounded by the protected budget floor); past the cap it escalates to
-   the human instead of looping. The **plan critique** is the same
+   bounded by the feature's budget envelope); past the cap it escalates
+   to the human instead of looping. The **plan critique** is the same
    pattern at design altitude: critique→replan, capped at 2 rounds,
    then the human gate — catching design-level security/correctness
    flaws before implementation tokens are spent.

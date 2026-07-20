@@ -43,9 +43,9 @@ away, because there is no configuration.
 *roles* (`architect`, `implementer`, `reviewer`, `scribe`), and a
 *profile* maps roles to concrete models — a frontier model for design
 and review, a cheap or local model for mechanical steps. Each feature
-carries a credit envelope split into per-stage allocations with
-rollover, a protected review floor, and human gates on exhaustion. Same
-process every time; spend chosen per feature.
+carries a credit envelope every stage draws from, with a human top-up
+gate when it runs dry. Same process every time; spend chosen per
+feature.
 
 ## The workflow
 
