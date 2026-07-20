@@ -51,7 +51,7 @@ func TestRouteViaPlan(t *testing.T) {
 	m.now = func() time.Time { return time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC) }
 	m.Attach(store, wt, ws)
 
-	if msg := m.createFeature(formResult{Title: "Add a healthz endpoint", Skip: domain.QuickRoute()})(); msg != nil {
+	if msg := m.createFeature(formResult{Desc: "Add a healthz endpoint", Skip: domain.QuickRoute()})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}
@@ -77,7 +77,7 @@ func TestRouteViaPlan(t *testing.T) {
 	}
 
 	// past the design phase the plan stage is behind the card
-	if msg := m.createFeature(formResult{Title: "Another one", Skip: domain.QuickRoute()})(); msg != nil {
+	if msg := m.createFeature(formResult{Desc: "Another one", Skip: domain.QuickRoute()})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

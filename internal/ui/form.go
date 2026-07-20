@@ -3,7 +3,7 @@ package ui
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -21,12 +21,13 @@ const (
 	fieldCount
 )
 
-// featureForm is the new-feature dialog: one description line — the
-// brainstorm stage develops everything else in the spec. Profile and
-// the skip flags (the only workflow flexibility, fixed at creation)
+// featureForm is the new-feature dialog: a free-form description — the
+// first line becomes the card title, anything beyond it seeds the
+// draft's Problem section for the brainstorm stage to develop. Profile
+// and the skip flags (the only workflow flexibility, fixed at creation)
 // share a single demoted options row.
 type featureForm struct {
-	desc     textinput.Model
+	desc     textarea.Model
 	profiles []string
 	profile  int
 	skip     domain.SkipFlags
@@ -43,10 +44,12 @@ func newFeatureForm(profiles []string, onSubmit func(formResult) tea.Cmd) *featu
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
-	desc := textinput.New()
+	desc := textarea.New()
 	desc.Placeholder = "describe the feature…"
-	desc.CharLimit = 120
+	desc.CharLimit = 4000
+	desc.ShowLineNumbers = false
 	desc.SetWidth(46)
+	desc.SetHeight(4)
 	desc.Focus()
 	return &featureForm{desc: desc, profiles: profiles, onSubmit: onSubmit}
 }
@@ -67,20 +70,27 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		// validate the slug of the derived title (what creation will use),
 		// not the whole description
-		if _, err := domain.Slugify(domain.DeriveTitle(desc)); err != nil {
+		title, _, _ := domain.SplitFreeform(desc)
+		if _, err := domain.Slugify(title); err != nil {
 			d.errText = err.Error()
 			return false, nil
 		}
 		res := formResult{
-			Title:   desc,
+			Desc:    desc,
 			Profile: d.profiles[d.profile],
 			Skip:    d.skip,
 		}
 		return true, d.onSubmit(res)
-	case "tab", "down":
+	case "alt+enter", "ctrl+j":
+		if d.focus == fieldDesc {
+			d.desc.InsertString("\n")
+			d.errText = ""
+		}
+		return false, nil
+	case "tab":
 		d.setFocus((d.focus + 1) % fieldCount)
 		return false, nil
-	case "shift+tab", "up":
+	case "shift+tab":
 		d.setFocus((d.focus + fieldCount - 1) % fieldCount)
 		return false, nil
 	}
@@ -115,7 +125,7 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 }
 
 // HandlePaste implements overlay.Paster: pasted text goes into the
-// description while it's focused.
+// description while it's focused, newlines intact.
 func (d *featureForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	if d.focus == fieldDesc {
 		d.desc, _ = d.desc.Update(msg)
@@ -152,7 +162,6 @@ func (d *featureForm) skipLabel() string {
 func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new feature") + "\n\n")
-	// the input's own "> " prompt is the focus affordance for this row
 	b.WriteString(d.desc.View() + "\n\n")
 
 	// the options row: quiet until focused, skips flagged when set
@@ -171,7 +180,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter create · tab options · esc cancel"
+	hint := "enter create · alt+enter newline · tab options · esc cancel"
 	if d.focus == fieldOpts {
 		hint = "←/→ profile · q quick · b/p toggle skips · enter create · esc cancel"
 	}

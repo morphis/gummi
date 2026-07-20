@@ -95,23 +95,25 @@ func (m *Shell) loadRows() tea.Msg {
 	return rowsMsg{rows: rows}
 }
 
-// formResult carries the new-feature form's fields. The description
-// the user types is the feature's title; everything richer lives in
+// formResult carries the new-feature form's fields. The description's
+// first line is the feature's title; the lines past it are seeded into
 // the spec, which the brainstorm stage develops.
 type formResult struct {
-	Title   string
+	Desc    string
 	Profile string
 	Skip    domain.SkipFlags
 }
 
-// createFeature mints a number and persists a new feature in todo.
+// createFeature mints a number and persists a new feature in todo,
+// seeding the spec draft with the description when it runs past one
+// line — the brainstorm stage picks the Problem section up from there.
 func (m *Shell) createFeature(res formResult) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		// the form takes one free-text line; a long line becomes a concise
-		// card title with the full text kept as the one-liner (the card body),
-		// so the title slot isn't the whole description.
-		title, oneLiner := domain.SplitDescription(res.Title)
+		// the first line becomes a concise card title with its full text
+		// kept as the one-liner (the card body), so the title slot isn't
+		// the whole description.
+		title, oneLiner, seed := domain.SplitFreeform(res.Desc)
 		slug, err := domain.Slugify(title)
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
@@ -130,6 +132,20 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 			Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
 			CreatedAt: now, UpdatedAt: now,
+		}
+		// Seed the draft first (so the description survives), then persist —
+		// a persisted feature with no draft would be reseeded blank. A
+		// title-sized description seeds nothing: the blank template's
+		// prompts do more for brainstorm than an echoed title would.
+		if seed != "" {
+			draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
+			content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed}, domain.DraftProvenance{})
+			if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
+			if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
 		}
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}

@@ -120,9 +120,12 @@ First run creates the `.gummi/` workspace lazily — state directory
 (0700), starter `config.yaml` and `profiles.yaml`, worktrees directory,
 and the ignore rules that keep it all out of your repo's history. Then:
 
-1. Press `n` and type a one-line description — that's the whole creation
-   form; brainstorm develops the rest. Profile and skip flags sit on a
-   quiet options row.
+1. Press `n` and describe the feature — that's the whole creation form;
+   brainstorm develops the rest. The first line becomes the card title;
+   write (or paste) as much as you know past it and it seeds the spec's
+   Problem section, so brainstorm starts from your words instead of a
+   blank page (`alt+enter` for a newline). Profile and skip flags sit
+   on a quiet options row.
 2. Press `enter` to attach and brainstorm/spec with the architect in the
    chat pane. Open questions are tracked as a `%%` checklist in the
    spec (`s` to view it; `tab` toggles a PR-style annotate mode).

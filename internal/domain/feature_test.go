@@ -203,3 +203,33 @@ func TestSplitDescription(t *testing.T) {
 		t.Errorf("long desc split = (%q, %q)", title, oneLiner)
 	}
 }
+
+func TestSplitFreeform(t *testing.T) {
+	// a single line splits exactly as SplitDescription and seeds nothing
+	full := "Add a healthz endpoint. It returns status and version for the load balancer."
+	title, oneLiner, seed := SplitFreeform(full)
+	if title != "Add a healthz endpoint" || oneLiner != full || seed != "" {
+		t.Errorf("single-line split = (%q, %q, %q)", title, oneLiner, seed)
+	}
+
+	// more lines: title from the first, the whole text as seed, verbatim
+	desc := "Dark mode toggle\n\nRespect the OS preference by default.\nPersist an explicit override in config."
+	title, oneLiner, seed = SplitFreeform(desc)
+	if title != "Dark mode toggle" || oneLiner != "" {
+		t.Errorf("multi-line split = (%q, %q)", title, oneLiner)
+	}
+	if seed != desc {
+		t.Errorf("seed = %q, want the description verbatim", seed)
+	}
+
+	// CRLF paste normalizes to plain newlines
+	_, _, seed = SplitFreeform("Title line\r\nBody line\r\n")
+	if seed != "Title line\nBody line" {
+		t.Errorf("CRLF seed = %q", seed)
+	}
+
+	// trailing blank lines after the first are not a body
+	if _, _, seed := SplitFreeform("Dark mode toggle\n\n  \n"); seed != "" {
+		t.Errorf("whitespace-only body seeded %q", seed)
+	}
+}

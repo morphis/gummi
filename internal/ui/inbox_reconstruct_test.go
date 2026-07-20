@@ -134,7 +134,7 @@ func TestCreateFeatureDerivesTitle(t *testing.T) {
 	m.Attach(store, wt, ws)
 
 	long := "Add a healthz endpoint. It returns status and version so the load balancer can check liveness."
-	if msg := m.createFeature(formResult{Title: long})(); msg != nil {
+	if msg := m.createFeature(formResult{Desc: long})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

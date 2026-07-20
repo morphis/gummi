@@ -243,6 +243,26 @@ func SplitDescription(desc string) (title, oneLiner string) {
 	return title, oneLiner
 }
 
+// SplitFreeform splits a free-form, possibly multi-line description
+// into a card title, a card one-liner, and a draft seed. The title and
+// one-liner derive from the first non-blank line exactly as
+// SplitDescription derives them from a single-line description. When
+// the description carries anything beyond that line, the full text —
+// verbatim, newlines intact — is returned as seed so creation can
+// pre-fill the draft's Problem section: the card stores only
+// line-sized text, the paragraphs live in the artifact.
+func SplitFreeform(desc string) (title, oneLiner, seed string) {
+	desc = strings.ReplaceAll(desc, "\r\n", "\n")
+	desc = strings.ReplaceAll(desc, "\r", "\n")
+	desc = strings.TrimSpace(desc)
+	first, rest, _ := strings.Cut(desc, "\n")
+	title, oneLiner = SplitDescription(first)
+	if strings.TrimSpace(rest) != "" {
+		seed = desc
+	}
+	return title, oneLiner, seed
+}
+
 // firstSentenceEnd returns the index just past the first sentence
 // terminator (., !, ?) that is followed by whitespace or the string end,
 // or -1 when there is none. A terminator glued to the next character
