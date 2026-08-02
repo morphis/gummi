@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
@@ -19,15 +20,7 @@ import (
 // envelope top-up).
 func runResume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
-	answer := fs.String("answer", "", "answer a delegated ask_user question")
-	approve := fs.Bool("approve", false, "approve a caller design gate")
-	requestChanges := fs.String("request-changes", "", "send a caller design gate back with a note")
-	gate := fs.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller")
-	timeout := fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
-	autonomous := fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
-	verbose := fs.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	ref := fs.String("ref", "", "external correlation id, echoed in the stream")
-	until := fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
+	rv := registerResumeFlags(fs)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: gummi resume <id|ref> [--answer <text> | --approve | --request-changes <note>]")
 		fs.PrintDefaults()
@@ -39,19 +32,19 @@ func runResume(args []string) error {
 		return err
 	}
 
-	in, err := resumeInput(*answer, *approve, *requestChanges, isSet(fs, "answer"), isSet(fs, "request-changes"))
+	in, err := resumeInput(*rv.answer, *rv.approve, *rv.requestChanges, isSet(fs, "answer"), isSet(fs, "request-changes"))
 	if err != nil {
 		return err
 	}
 	// resume carries no envelope (the feature already has one); the rest of
 	// the driving options mirror run so the continued tail behaves the same.
-	if *gate != driver.GateAuto && *gate != driver.GateCaller {
-		return fmt.Errorf("--gate-approval must be %q or %q, got %q", driver.GateAuto, driver.GateCaller, *gate)
+	if *rv.gate != driver.GateAuto && *rv.gate != driver.GateCaller {
+		return fmt.Errorf("--gate-approval must be %q or %q, got %q", driver.GateAuto, driver.GateCaller, *rv.gate)
 	}
 	opts := driver.Options{
-		GateApproval: *gate, StageTimeout: *timeout,
-		Autonomous: *autonomous, Verbose: *verbose, Ref: *ref,
-		Until: domain.Stage(*until),
+		GateApproval: *rv.gate, StageTimeout: *rv.timeout,
+		Autonomous: *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
+		Until: domain.Stage(*rv.until),
 	}
 
 	// resolve the id/ref inside the closure, once the store is open under the
@@ -64,6 +57,33 @@ func runResume(args []string) error {
 		}
 		return d.Resume(ctx, f.ID, in)
 	}, opts)
+}
+
+// resumeFlagValues holds the flag pointers `gummi resume` binds.
+// registerResumeFlags is the single registration site, so the skill's
+// grammar generator can enumerate the same set (see runFlagValues).
+type resumeFlagValues struct {
+	answer, requestChanges *string
+	gate, ref, until       *string
+	approve, autonomous    *bool
+	verbose                *bool
+	timeout                *time.Duration
+}
+
+// registerResumeFlags binds `gummi resume`'s flags onto fs and returns
+// their pointers (definition only; parsing stays in runResume).
+func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
+	return &resumeFlagValues{
+		answer:         fs.String("answer", "", "answer a delegated ask_user question"),
+		approve:        fs.Bool("approve", false, "approve a caller design gate"),
+		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
+		gate:           fs.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller"),
+		timeout:        fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
+		autonomous:     fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
+		verbose:        fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
+		ref:            fs.String("ref", "", "external correlation id, echoed in the stream"),
+		until:          fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
+	}
 }
 
 // resumeInput builds the ResumeInput from the mutually exclusive decision

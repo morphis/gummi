@@ -19,7 +19,7 @@ import (
 // nothing and holds no lock, so it is safe to poll a running feature.
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	jsonOut := fs.Bool("json", false, "emit machine-readable JSON instead of the text summary")
+	jsonOut := registerStatusFlags(fs)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: gummi status <id|ref> [--json]")
 		fs.PrintDefaults()
@@ -45,6 +45,13 @@ func runStatus(args []string) error {
 		renderStatus(os.Stdout, view)
 		return nil
 	})
+}
+
+// registerStatusFlags binds `gummi status`'s only flag onto fs and returns
+// its pointer, so the skill's grammar generator can enumerate it alongside
+// the run/resume flag sets (see runFlagValues).
+func registerStatusFlags(fs *flag.FlagSet) *bool {
+	return fs.Bool("json", false, "emit machine-readable JSON instead of the text summary")
 }
 
 // statusView is the status command's payload — the JSON schema the skill

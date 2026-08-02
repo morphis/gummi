@@ -1,0 +1,112 @@
+# Using gummi to ship a feature or bug
+
+gummi is a meta-harness that drives coding agents through a **fixed, spec-driven
+workflow** — spec → review → verify — with each work item on its own git
+worktree and branch. You (the calling agent) invoke `gummi run`, answer the
+questions it delegates to you, and report the **verified branch** it produces.
+gummi orchestrates the coding work; it never merges and never skips review or
+verify.
+
+## When to use gummi (vs. editing directly)
+
+Use gummi for **PR-sized work that deserves a real quality bar** — a feature or
+bug fix that warrants a written spec, an independent code review, a verify pass
+(build/test/lint + acceptance checks), and an isolated branch a human can review
+before it lands.
+
+Edit files directly for **trivia**: a typo, a one-line config tweak, a rename —
+anything where a spec-and-review cycle is pure overhead. If the change is big
+enough that you'd open a PR for it, it's big enough for gummi.
+
+**Oversized asks:** if the request spans several independently shippable pieces,
+don't push it through one run. Decompose it into PR-sized features yourself and
+loop `gummi run` once per feature, sequentially — one verified branch each.
+
+## First run: check readiness with `gummi doctor`
+
+Before the first `gummi run` in a repo, run:
+
+```
+gummi doctor --json
+```
+
+It returns a structured checklist — repo, workspace, backend, profile, auth,
+envelope, lock. Repair each item that isn't `ok`:
+
+- **backend / profile** — pick which coding agent gummi drives (`GUMMI_AGENT`) and
+  a cost-tiered profile (frontier models for the architect/reviewer roles, a
+  cheaper model for the implementer/scribe). Avoid pointing gummi's roles at the
+  same frontier model your own session runs on — you'd pay for it twice.
+- **auth** — if a check reports auth is needed, gummi hands you the **exact
+  command**. Give it to the **human** to run (e.g. surface it with the `!`
+  prefix). You never handle secrets: API keys are referenced by environment
+  variable **name**, never written as literal values.
+- **envelope** — every run needs a credit envelope. Pass `--envelope N` per run,
+  or set `GUMMI_ENVELOPE`. A run refuses to start without one.
+
+Re-run `gummi doctor` until it reports `ready: true`, then proceed.
+
+## Command grammar
+
+```
+{{.Grammar}}
+```
+
+A run drives one feature via the **quick route** by default (spec → implement →
+review → verify). `--full` opts into the brainstorm + plan stages for larger
+work. The design gates auto-cross under the default `--gate-approval=auto`; pass
+`--gate-approval=caller` to approve them yourself.
+
+`status`, `spec`, and `diff` are **read-only** — they take no lock, so you can
+inspect a feature while a run is live.
+
+## The decision loop
+
+Each `gummi run` / `gummi resume` streams milestone + decision NDJSON on stdout
+and exits with a **typed status**. Branch on the exit code:
+
+{{.ExitTable}}
+
+The loop you run:
+
+1. `gummi run --envelope N "<description>"` (add `--ref <id>` to correlate with
+   your own tracker, `--acceptance <file|->` to seed the verification plan).
+2. Read the exit code:
+   - **done (0)** — parse the final `done` line for the branch; report it to your
+     caller/human and stop. The branch is verified, not merged.
+   - **question (2)** — a design decision was delegated to you. Answer from your
+     **task context first**; if unsure, read the spec (`gummi spec <id>`) or diff
+     (`gummi diff <id>`); use the `recommended` option only as a tiebreaker. Then
+     `gummi resume <id> --answer "<text-or-option>"`. A caller gate (under
+     `--gate-approval=caller`) is the same shape: `resume <id> --approve` or
+     `--request-changes "<note>"`.
+   - **blocked (3)** — open `%%` spec threads or diff comments block a gate.
+     Resolve them, or `gummi resume <id> --request-changes "<note>"` to send it
+     back; if you can't, escalate to the human.
+   - **escalation (4) / exhausted (5) / timeout (6)** — stop and report to the
+     human. These are durable and resumable: the card stays on the board.
+     `exhausted` resumes only after the envelope is raised; `escalation` and
+     `timeout` after the human weighs in.
+   - **error (1)** — a setup/agent failure; nothing partial landed. Report it.
+3. After a `resume`, read the new exit code and repeat until `done`.
+
+## Stop early for a human design review
+
+For work where a human should sign off on the design before implementation burns
+tokens, add `--until spec` (or `--until plan` on `--full`). The run stops cleanly
+at that stage — event `stopped`, exit 0 — with the feature parked and resumable.
+Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
+--approve` continues to the verified branch.
+
+## What gummi guarantees
+
+- **Review and verify always run.** There is no flag, profile, or config that
+  skips them — the quality floor is invariant.
+- **gummi stops at a verified branch. It never merges.** Landing (a PR, a push, a
+  squash-merge) stays with the human.
+- **It fails loud.** Anything a human would resolve — a design question, a
+  rerun/critique cap, an exhausted envelope, a stalled stage — becomes a typed
+  non-zero exit and a durable, resumable card, never a silent auto-proceed.
+
+Your job: drive the loop, answer what's delegated to you, and report the verified
+branch upward.

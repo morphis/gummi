@@ -28,16 +28,7 @@ const defaultStageTimeout = 10 * time.Minute
 // configured — both fail loud before any work begins.
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	envelope := fs.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)")
-	profile := fs.String("profile", "", "profile mapping roles to models (default: first configured)")
-	full := fs.Bool("full", false, "run the full route (brainstorm + plan), not the quick route")
-	gate := fs.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller")
-	timeout := fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
-	autonomous := fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
-	verbose := fs.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	ref := fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
-	acceptance := fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
-	until := fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
+	rv := registerRunFlags(fs)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `usage: gummi run [flags] "<description>"`)
 		fs.PrintDefaults()
@@ -51,11 +42,11 @@ func runRun(args []string) error {
 	}
 	desc := fs.Arg(0)
 
-	acceptanceText, err := readAcceptance(*acceptance)
+	acceptanceText, err := readAcceptance(*rv.acceptance)
 	if err != nil {
 		return err
 	}
-	opts, err := driverOptions(*envelope, *profile, *full, *gate, *timeout, *autonomous, *verbose, *ref, acceptanceText, *until)
+	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.full, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until)
 	if err != nil {
 		return err
 	}
@@ -63,6 +54,38 @@ func runRun(args []string) error {
 	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store) (driver.Outcome, error) {
 		return d.Run(ctx, desc)
 	}, opts)
+}
+
+// runFlagValues holds the flag pointers `gummi run` binds. registerRunFlags
+// is the single registration site: runRun reads these pointers, and the
+// skill's command-grammar generator (cmd/gummi/skill.go) enumerates the
+// same flag set — so the documented grammar can never drift from the
+// shipped flags (a golden test asserts every one appears in SKILL.md).
+type runFlagValues struct {
+	envelope                       *int
+	profile, gate, ref, acceptance *string
+	until                          *string
+	full, autonomous, verbose      *bool
+	timeout                        *time.Duration
+}
+
+// registerRunFlags binds `gummi run`'s flags onto fs and returns their
+// pointers. It defines the flags only — parsing and validation stay in
+// runRun — so a throwaway FlagSet can be handed here purely to enumerate
+// the grammar.
+func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
+	return &runFlagValues{
+		envelope:   fs.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)"),
+		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
+		full:       fs.Bool("full", false, "run the full route (brainstorm + plan), not the quick route"),
+		gate:       fs.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller"),
+		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
+		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
+		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
+		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
+		acceptance: fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)"),
+		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
+	}
 }
 
 // readAcceptance loads the --acceptance criteria: a file path, or "-" for
