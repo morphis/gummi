@@ -248,16 +248,11 @@ func (e *Engine) promoteDraft(f *domain.Feature) error {
 // none exists yet.
 func (e *Engine) artifactFile(f *domain.Feature) string {
 	root := e.cfg.Worktrees.Root()
-	for _, p := range []string{
+	return spec.LocateArtifact(
 		filepath.Join(root, f.ArtifactPath()),
 		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(f)),
 		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
-	} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
+	)
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored `%%`

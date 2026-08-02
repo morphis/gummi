@@ -35,6 +35,10 @@ const (
 	// StatusTimeout: a stage went quiet past the inactivity budget — a
 	// likely hang. Durable + resumable.
 	StatusTimeout Status = "timeout"
+	// StatusStopped: --until reached its deliberate stop before crossing a
+	// design gate. A clean, resumable halt — exit 0, distinguished from done
+	// only by the event name.
+	StatusStopped Status = "stopped"
 )
 
 // ExitCode is the process exit status for a terminal Status. done is 0;
@@ -42,7 +46,7 @@ const (
 // codes so a caller can branch on them.
 func (s Status) ExitCode() int {
 	switch s {
-	case StatusDone:
+	case StatusDone, StatusStopped:
 		return 0
 	case StatusError:
 		return 1

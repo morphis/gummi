@@ -5,10 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // runResume implements `gummi resume <FD-id> [--answer <text> | --approve
@@ -27,28 +27,14 @@ func runResume(args []string) error {
 	autonomous := fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	verbose := fs.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	ref := fs.String("ref", "", "external correlation id, echoed in the stream")
+	until := fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi resume <FD-id> [--answer <text> | --approve | --request-changes <note>]")
+		fmt.Fprintln(os.Stderr, "usage: gummi resume <id|ref> [--answer <text> | --approve | --request-changes <note>]")
 		fs.PrintDefaults()
 	}
-	// The id leads (`resume FD-042 --answer no`), but Go's flag parser stops
-	// at the first positional — so pull a leading id out before parsing, and
-	// still accept a trailing one (flags-first) as a fallback.
-	var idArg string
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		idArg, args = args[0], args[1:]
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if idArg == "" {
-		idArg = fs.Arg(0)
-	}
-	if idArg == "" || fs.NArg() > 1 {
-		fs.Usage()
-		return fmt.Errorf("resume needs exactly one work-item id")
-	}
-	id, err := domain.ParseFeatureID(idArg)
+	// resume is id-first (`resume FD-042 --answer no`) and accepts an
+	// external ref in the id slot (resolved against the store below, D11).
+	idArg, err := idFirstArg(fs, args)
 	if err != nil {
 		return err
 	}
@@ -65,10 +51,18 @@ func runResume(args []string) error {
 	opts := driver.Options{
 		GateApproval: *gate, StageTimeout: *timeout,
 		Autonomous: *autonomous, Verbose: *verbose, Ref: *ref,
+		Until: domain.Stage(*until),
 	}
 
-	return withRunEngine(func(ctx context.Context, d *driver.Driver) (driver.Outcome, error) {
-		return d.Resume(ctx, id, in)
+	// resolve the id/ref inside the closure, once the store is open under the
+	// run lock; --until is validated against the resolved feature's route in
+	// driver.Resume.
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store) (driver.Outcome, error) {
+		f, err := resolveFeatureID(ctx, store, idArg)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		return d.Resume(ctx, f.ID, in)
 	}, opts)
 }
 

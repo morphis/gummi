@@ -23,7 +23,7 @@ func TestRunRequiresEnvelope(t *testing.T) {
 // GUMMI_ENVELOPE supplies the envelope when --envelope is absent.
 func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "250")
-	opts, err := driverOptions(0, "", false, driver.GateAuto, time.Minute, false, false, "")
+	opts, err := driverOptions(0, "", false, driver.GateAuto, time.Minute, false, false, "", "", "")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
@@ -34,15 +34,39 @@ func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 
 // An unknown --gate-approval value is rejected.
 func TestDriverOptionsGateValidation(t *testing.T) {
-	if _, err := driverOptions(100, "", false, "sometimes", time.Minute, false, false, ""); err == nil {
+	if _, err := driverOptions(100, "", false, "sometimes", time.Minute, false, false, "", "", ""); err == nil {
 		t.Fatal("bad gate-approval accepted")
 	}
-	opts, err := driverOptions(100, "", true, driver.GateCaller, 0, true, true, "JIRA-9")
+	opts, err := driverOptions(100, "", true, driver.GateCaller, 0, true, true, "JIRA-9", "must handle empty input", "plan")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
 	if !opts.Full || opts.GateApproval != driver.GateCaller || !opts.Autonomous || opts.Ref != "JIRA-9" {
 		t.Fatalf("options not threaded through: %+v", opts)
+	}
+	if opts.Acceptance != "must handle empty input" || opts.Until != "plan" {
+		t.Fatalf("acceptance/until not threaded through: %+v", opts)
+	}
+}
+
+// --until is validated against the route: plan is legal on the full route
+// but not on the quick route (where plan is skipped); spec is legal on both.
+func TestDriverOptionsUntilRouteValidation(t *testing.T) {
+	// quick route (full=false): --until plan is off-route → rejected.
+	if _, err := driverOptions(100, "", false, driver.GateAuto, time.Minute, false, false, "", "", "plan"); err == nil {
+		t.Fatal("--until plan accepted on the quick route (plan is skipped)")
+	}
+	// quick route: --until spec is valid.
+	if _, err := driverOptions(100, "", false, driver.GateAuto, time.Minute, false, false, "", "", "spec"); err != nil {
+		t.Fatalf("--until spec rejected on the quick route: %v", err)
+	}
+	// full route: --until plan is valid.
+	if _, err := driverOptions(100, "", true, driver.GateAuto, time.Minute, false, false, "", "", "plan"); err != nil {
+		t.Fatalf("--until plan rejected on the full route: %v", err)
+	}
+	// an unknown stage is always rejected.
+	if _, err := driverOptions(100, "", true, driver.GateAuto, time.Minute, false, false, "", "", "banana"); err == nil {
+		t.Fatal("--until banana accepted")
 	}
 }
 
@@ -51,6 +75,10 @@ func TestDriverOptionsGateValidation(t *testing.T) {
 func TestDriverExitMapping(t *testing.T) {
 	if err := driverExit(driver.Outcome{Status: driver.StatusDone}, nil); err != nil {
 		t.Fatalf("done → %v, want nil", err)
+	}
+	// --until's clean stop also exits 0 (nil return).
+	if err := driverExit(driver.Outcome{Status: driver.StatusStopped}, nil); err != nil {
+		t.Fatalf("stopped → %v, want nil (exit 0)", err)
 	}
 	cases := map[driver.Status]int{
 		driver.StatusQuestion:   2,

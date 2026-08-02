@@ -124,6 +124,16 @@ type timeoutEvent struct {
 	Resume string `json:"resume"`
 }
 
+// stoppedEvent is the --until terminal milestone: a clean early stop at the
+// named design stage, resumable. Exit 0 (a caller tells it apart from done
+// by the event, not the code).
+type stoppedEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Stage  string `json:"stage"`
+	Resume string `json:"resume"`
+}
+
 type doneEvent struct {
 	Event        string  `json:"event"`
 	ID           string  `json:"id"`

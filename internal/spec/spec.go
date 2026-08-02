@@ -494,3 +494,21 @@ func blankTemplate(f *domain.Feature) string {
 func DraftFilename(f *domain.Feature) string {
 	return string(f.ID) + "-" + f.Slug + ".md"
 }
+
+// LocateArtifact returns the first candidate path that exists on disk, or
+// "" when none does. Callers pass the artifact's possible homes in
+// precedence order (workspace home, then draft, then a mid-flight worktree
+// copy); it is the single source of truth for "where does this item's
+// design artifact live right now?" — shared by the engine (Advance's gate
+// checks) and the read-only CLI commands, so both resolve identically.
+func LocateArtifact(candidates ...string) string {
+	for _, p := range candidates {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}

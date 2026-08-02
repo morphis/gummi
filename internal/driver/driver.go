@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -34,7 +35,9 @@ type Options struct {
 	StageTimeout time.Duration // per-stage inactivity budget (0 disables)
 	Autonomous   bool          // auto-take the recommended answer instead of checkpointing (D5)
 	Verbose      bool          // add per-tool-call activity lines to the stream
-	Ref          string        // optional external correlation id, echoed in NDJSON (D11)
+	Ref          string        // optional external correlation id, echoed in NDJSON + persisted as ExternalRef (D11)
+	Acceptance   string        // optional acceptance-criteria text, seeded into the draft's Verification plan (D10)
+	Until        domain.Stage  // stop cleanly before crossing the gate that leaves this design stage (B3); "" runs to verified
 }
 
 // Driver runs one feature through the engine's gate floor headlessly. It
@@ -83,6 +86,15 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 // terminal Outcome. The quick route is the default; --full opts into the
 // brainstorm+plan route (D3).
 func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
+	// validate --until against the route this run will take before minting a
+	// feature, so a bad stop target never leaves a stray FD in the backlog.
+	skip := domain.QuickRoute()
+	if d.opts.Full {
+		skip = domain.SkipFlags{}
+	}
+	if err := ValidateUntil(d.opts.Until, domain.KindFeature, skip); err != nil {
+		return d.fail("", err)
+	}
 	f, err := d.createFeature(ctx, desc)
 	if err != nil {
 		return d.fail("", err)
@@ -117,6 +129,9 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	}
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
+		return d.fail(string(id), err)
+	}
+	if err := ValidateUntil(d.opts.Until, f.Kind, f.Skip); err != nil {
 		return d.fail(string(id), err)
 	}
 	// the correlation line first, so a resume's stream is self-identifying.
@@ -442,6 +457,16 @@ func (d *Driver) stepTo(ctx context.Context, id domain.FeatureID, to domain.Stag
 // advances now (honoring blockers); under caller it checkpoints. It is
 // also the verify→done stop-at-verified path (Advance never merges).
 func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, error) {
+	// --until: a deliberate early stop at a design boundary. crossGate is
+	// exactly the gate that leaves the current design stage (spec via
+	// driveInteractive, plan via judgePlanCritique), so intercepting here —
+	// before any advance/blocker/caller-gate logic — stops the run cleanly
+	// with the feature parked at the Until stage, resumable, exit 0 (B3). A
+	// pending in-stage question still checkpoints first: driveInteractive
+	// only reaches crossGate once the stage has no open ask.
+	if d.opts.Until != "" && f.Stage == d.opts.Until {
+		return d.stopped(f), nil
+	}
 	if d.opts.GateApproval == GateCaller && f.Stage != domain.StageVerify {
 		// a caller gate on a design stage: report any blockers, else
 		// checkpoint for --approve/--request-changes. Verify is never a
@@ -530,6 +555,15 @@ func (d *Driver) timeout(f domain.Feature) Outcome {
 	return Outcome{Status: StatusTimeout, ID: string(f.ID)}
 }
 
+// stopped is the --until early-stop terminal: a clean, deliberate halt at a
+// design boundary (the feature stays parked at f.Stage, resumable). It exits
+// 0 — not an escalation — so a caller distinguishes it from `done` by the
+// event name, not the exit code.
+func (d *Driver) stopped(f domain.Feature) Outcome {
+	d.out.emit(stoppedEvent{Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID)})
+	return Outcome{Status: StatusStopped, ID: string(f.ID)}
+}
+
 func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	d.out.emit(escalationEvent{Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID)})
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
@@ -570,13 +604,16 @@ func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature
 		ID: id, Num: num, Kind: domain.KindFeature, Title: title, OneLiner: oneLiner,
 		Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: skip,
 		Profile: d.opts.Profile, Budget: domain.Budget{Envelope: d.opts.Envelope},
-		CreatedAt: now, UpdatedAt: now,
+		ExternalRef: d.opts.Ref, CreatedAt: now, UpdatedAt: now,
 	}
-	// seed the draft before persisting, so a description that runs past the
-	// card title survives; a title-sized description seeds nothing.
-	if seed != "" {
+	// seed the draft before persisting: the description's overflow fills the
+	// Problem section (a title-sized description seeds nothing there), and
+	// --acceptance fills the Verification plan (D10). Either input alone is
+	// enough to warrant a draft; both are just a pre-fill the spec agent
+	// still owns and approves.
+	if seed != "" || d.opts.Acceptance != "" {
 		draft := filepath.Join(d.ws.DraftsDir(), spec.DraftFilename(&f))
-		content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed}, domain.DraftProvenance{})
+		content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed, Acceptance: d.opts.Acceptance}, domain.DraftProvenance{})
 		if err := os.MkdirAll(d.ws.DraftsDir(), 0o750); err != nil {
 			return domain.Feature{}, err
 		}
@@ -614,6 +651,55 @@ func (d *Driver) pendingAsk(id domain.FeatureID) *engine.Ask {
 // changes) — the semantic milestone at a verdict boundary.
 func (d *Driver) emitResult(f domain.Feature, v verdict) {
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: verdictString(v)})
+}
+
+// UntilStops lists the stages --until may name for an item's route: the
+// design-side stages actually present on it (Interactive stages plus a
+// feature's Plan), in workflow order. These are the deliberate
+// pre-implementation boundaries where stopping is meaningful and
+// unambiguous (unlike the implement↔review rerun loop). A skipped stage
+// is not on the route, so it is never a valid stop — on the quick route
+// (brainstorm + plan skipped) only Spec remains.
+func UntilStops(kind domain.Kind, skip domain.SkipFlags) []domain.Stage {
+	var out []domain.Stage
+	if kind == domain.KindBug {
+		if !skip.Triage {
+			out = append(out, domain.StageTriage)
+		}
+		if !skip.Diagnose {
+			out = append(out, domain.StageDiagnose)
+		}
+		return out
+	}
+	if !skip.Brainstorm {
+		out = append(out, domain.StageBrainstorm)
+	}
+	out = append(out, domain.StageSpec)
+	if !skip.Plan {
+		out = append(out, domain.StagePlan)
+	}
+	return out
+}
+
+// ValidateUntil accepts an empty Until (run to verified) or a stage that is
+// a legal stop on the item's route (UntilStops); anything else — an
+// off-route stage (e.g. --until plan on the quick route) or an unknown
+// stage — is a usage error naming the valid choices.
+func ValidateUntil(until domain.Stage, kind domain.Kind, skip domain.SkipFlags) error {
+	if until == "" {
+		return nil
+	}
+	stops := UntilStops(kind, skip)
+	for _, s := range stops {
+		if s == until {
+			return nil
+		}
+	}
+	labels := make([]string, len(stops))
+	for i, s := range stops {
+		labels[i] = string(s)
+	}
+	return fmt.Errorf("--until %q is not a valid stop on this route; choose one of: %s", until, strings.Join(labels, ", "))
 }
 
 // forwardEdge is the primary forward stage out of f's current stage, for

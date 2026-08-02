@@ -4,10 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/state"
 )
@@ -33,7 +35,9 @@ func runRun(args []string) error {
 	timeout := fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
 	autonomous := fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	verbose := fs.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	ref := fs.String("ref", "", "external correlation id, echoed in the stream")
+	ref := fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
+	acceptance := fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
+	until := fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, `usage: gummi run [flags] "<description>"`)
 		fs.PrintDefaults()
@@ -47,19 +51,46 @@ func runRun(args []string) error {
 	}
 	desc := fs.Arg(0)
 
-	opts, err := driverOptions(*envelope, *profile, *full, *gate, *timeout, *autonomous, *verbose, *ref)
+	acceptanceText, err := readAcceptance(*acceptance)
+	if err != nil {
+		return err
+	}
+	opts, err := driverOptions(*envelope, *profile, *full, *gate, *timeout, *autonomous, *verbose, *ref, acceptanceText, *until)
 	if err != nil {
 		return err
 	}
 
-	return withRunEngine(func(ctx context.Context, d *driver.Driver) (driver.Outcome, error) {
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store) (driver.Outcome, error) {
 		return d.Run(ctx, desc)
 	}, opts)
 }
 
+// readAcceptance loads the --acceptance criteria: a file path, or "-" for
+// stdin. An empty flag (the default) yields empty text and no read. File IO
+// lives here in the CLI so the driver's Options carries the criteria text,
+// not a path.
+func readAcceptance(pathOrDash string) (string, error) {
+	switch pathOrDash {
+	case "":
+		return "", nil
+	case "-":
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("reading --acceptance from stdin: %w", err)
+		}
+		return string(b), nil
+	default:
+		b, err := os.ReadFile(pathOrDash)
+		if err != nil {
+			return "", fmt.Errorf("reading --acceptance %s: %w", pathOrDash, err)
+		}
+		return string(b), nil
+	}
+}
+
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
-func driverOptions(envelope int, profile string, full bool, gate string, timeout time.Duration, autonomous, verbose bool, ref string) (driver.Options, error) {
+func driverOptions(envelope int, profile string, full bool, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until string) (driver.Options, error) {
 	if envelope == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -73,9 +104,19 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 	if gate != driver.GateAuto && gate != driver.GateCaller {
 		return driver.Options{}, fmt.Errorf("--gate-approval must be %q or %q, got %q", driver.GateAuto, driver.GateCaller, gate)
 	}
+	// validate --until against the route --full selects, before any work
+	// begins (so a bad target fails as a plain usage error, not mid-run).
+	skip := domain.QuickRoute()
+	if full {
+		skip = domain.SkipFlags{}
+	}
+	if err := driver.ValidateUntil(domain.Stage(until), domain.KindFeature, skip); err != nil {
+		return driver.Options{}, err
+	}
 	return driver.Options{
 		Envelope: envelope, Profile: profile, Full: full, GateApproval: gate,
 		StageTimeout: timeout, Autonomous: autonomous, Verbose: verbose, Ref: ref,
+		Acceptance: acceptance, Until: domain.Stage(until),
 	}, nil
 }
 
@@ -84,7 +125,7 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 // os.Stdout, hands it to fn, and maps the terminal Outcome to a process
 // exit. The exclusive lock refuses to start while the TUI or another run
 // holds the workspace (D13).
-func withRunEngine(fn func(context.Context, *driver.Driver) (driver.Outcome, error), opts driver.Options) error {
+func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (driver.Outcome, error), opts driver.Options) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -114,7 +155,14 @@ func withRunEngine(fn func(context.Context, *driver.Driver) (driver.Outcome, err
 	defer func() { _ = eng.Close(); _ = ag.Close() }()
 
 	d := driver.New(eng, store, ws, os.Stdout, opts)
-	out, derr := fn(context.Background(), d)
+	out, derr := fn(context.Background(), d, store)
+	if out.Status == "" && derr != nil {
+		// the closure failed before the driver produced any outcome (e.g. an
+		// unknown id/ref in `resume`) — a plain setup/usage error to stderr,
+		// exit 1; the driver's own failures instead carry a StatusError
+		// Outcome (already reported on the NDJSON stream) and stay quiet.
+		return derr
+	}
 	return driverExit(out, derr)
 }
 
@@ -124,7 +172,9 @@ func withRunEngine(fn func(context.Context, *driver.Driver) (driver.Outcome, err
 // line is added (a setup error before the driver ran is returned plainly
 // and handled by main).
 func driverExit(out driver.Outcome, _ error) error {
-	if out.Status == driver.StatusDone {
+	// done and --until's clean stop both exit 0; every decision boundary
+	// takes its typed non-zero code (the NDJSON stream carried the detail).
+	if out.Status.ExitCode() == 0 {
 		return nil
 	}
 	return &exitError{code: out.Status.ExitCode()}
