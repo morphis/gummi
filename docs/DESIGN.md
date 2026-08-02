@@ -928,7 +928,99 @@ the filter and not dropped is exactly what materializes.
 - **Agent triage-at-ingest** — an optional pass that dedupes/clusters near-
   duplicate issues before the gate, if verbatim import proves too noisy.
 
-## 13. References
+## 13. Non-interactive driver & skill distribution
+
+The TUI assumes a human at the keyboard. A second driver runs the **same
+engine and the same quality floor** unattended, so a calling agent can ship a
+feature end to end — and gummi ships the skill that teaches that agent how.
+Nothing here softens the invariant workflow: the driver changes *who approves
+a gate*, not *whether* the floor runs. Anything a human would resolve becomes a
+durable, resumable escalation with a non-zero exit — deterministic failure over
+silent degradation.
+
+### 13.1 The driver
+
+One `gummi run` process drives exactly one feature (a free-form description),
+via the quick route by default, holds the exclusive `.gummi` lock, streams
+milestone + decision NDJSON, and **stops at a verified branch — it never
+merges**. The engine's full restartability (SQLite state, spec on the branch,
+session resume) makes `resume` free: each invocation runs forward until the
+caller must decide, then exits.
+
+- **Gate control** — `--gate-approval=auto` (default) auto-crosses design
+  gates; `=caller` checkpoints them for `resume --approve`/`--request-changes`.
+  Blockers (open `%%`/diff threads) are honored either way; Review and Verify
+  are never a caller gate — Verify is the floor's stop-at-verified.
+- **Envelope required** — a run refuses to start without one (`--envelope N` or
+  `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
+- **Design questions are delegated** — an interactive stage's `ask_user`
+  becomes a `question` checkpoint (answerable by option or free-form), unless
+  `--autonomous` auto-takes the recommended answer.
+- **Liveness** — a per-stage inactivity timeout (`--stage-timeout`) escalates a
+  hung stage rather than blocking forever.
+- **Steering seeds** — `--acceptance <file|->` seeds the spec's verification
+  plan; `--ref <id>` persists an external correlation id (`status`/`resume`
+  resolve it); `--until <stage>` stops cleanly at a design boundary
+  (event `stopped`, exit 0) for a human review before implementation spends
+  tokens.
+- **Read commands** — `status`/`spec`/`diff` are agent-free and take **no
+  lock** (SQLite WAL + read-only git), so they observe a live run safely.
+
+### 13.2 The exit contract
+
+Each `run`/`resume` ends on a typed `Status` with a stable exit code, so a
+caller branches on the result without parsing stdout:
+
+| exit | status | meaning |
+|---|---|---|
+| `0` | `done` | verified branch ready — report it, stop |
+| `0` | `stopped` | `--until` reached its clean stop — `resume --approve` to continue |
+| `1` | `error` | setup/agent failure — nothing partial landed |
+| `2` | `question` | delegated `ask_user`, or a caller design gate awaiting a decision |
+| `3` | `blocked` | open `%%`/diff threads block a gate |
+| `4` | `escalation` | a rerun/critique cap was hit, or a stage returned no clear verdict |
+| `5` | `exhausted` | the credit envelope ran dry |
+| `6` | `timeout` | a stage went quiet past the inactivity budget |
+
+Long autonomous stretches (implement → review → verify) carry no caller
+decisions under `auto`, so one `resume` streams that whole tail and returns
+only at `done` or an escalation.
+
+### 13.3 Skill distribution
+
+`gummi skill install` generates a `SKILL.md` (YAML frontmatter + markdown body)
+and writes it where all three supported agents read it. **All converge on one
+primitive**, so there is no per-agent instruction format: a single
+**project-scope** install to `.claude/skills/gummi/` is read by Claude
+natively, Copilot natively, and opencode via Claude-compat — one file, not
+three. `--scope user` diverges per agent (Claude + opencode share
+`$CLAUDE_CONFIG_DIR`/`~/.claude`; Copilot uses `~/.copilot`); `--agent`
+overrides detection; scope is detect-and-ask with project recommended.
+
+Two properties keep the doc honest:
+
+- **Grammar can't drift.** The body's command grammar is generated from the
+  real `run`/`resume`/`status`/`doctor` flag sets and its exit table from
+  `driver.Status`, and a golden test asserts every shipped flag appears — the
+  doc is locked to the binary in CI.
+- **Whole-file overwrite protection.** The frontmatter is version-stamped with
+  a content hash of the body; `install`/`list`/`doctor` compare it to detect a
+  stale or hand-edited file and refuse to overwrite without `--force` — safe by
+  default, never silently stale.
+
+### 13.4 Guided setup (`gummi doctor`)
+
+`gummi doctor [--json]` emits a structured readiness checklist — repo,
+workspace, backend, profile, auth, envelope, lock — that the skill's first-run
+flow consumes. It **reports; it never repairs**. Auth is probed offline: a BYOK
+key is confirmed by environment-variable **name** (never its value), and an
+interactive-login backend degrades to `unknown` with the exact command handed
+to the human to run. The profile check steers toward a cost-tiered profile and
+carries the nesting-cost warning (§5). `ready` is false iff any check fails;
+warnings and unknowns are advisory (an unset envelope warns — a run can still
+take `--envelope` — rather than blocking).
+
+## 14. References
 
 - Spec-driven parallel agents workflow: <https://schipper.ai/posts/parallel-coding-agents/>
 - Copilot SDK (Go): <https://github.com/github/copilot-sdk>

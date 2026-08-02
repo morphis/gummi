@@ -173,6 +173,83 @@ board, both gated on your review before anything is created:
   External refs are remembered, so re-importing skips bugs already on
   the board. `gummi bugs new` adds a single bug by hand.
 
+## Running headlessly (driving gummi from an agent)
+
+The board is one way in; the other is a **non-interactive driver** that runs
+the same engine and the same quality floor with no human at the keyboard.
+Each `gummi run` ships **one PR-sized feature to a verified branch**, streams
+milestone + decision NDJSON on stdout, and exits with a **typed status** — so
+a calling agent (or a script) can drive it and branch on the result. It
+changes *who approves a gate*, not *whether* review and verify run; it never
+merges.
+
+```sh
+gummi run --envelope 500 "Add a --format=json flag to the export command"
+```
+
+An envelope is required (`--envelope N`, or `GUMMI_ENVELOPE`) and an agent
+backend must be configured — both fail loud before any work begins. By
+default a run takes the quick route (spec → implement → review → verify) and
+auto-crosses design gates; `--full` adds brainstorm + plan, and
+`--gate-approval=caller` hands the design gates back to you via `resume`.
+
+| command | purpose |
+|---|---|
+| `gummi run [flags] "<description>"` | create and drive one feature to a verified branch |
+| `gummi resume <id\|ref> [--answer … \| --approve \| --request-changes …]` | apply a decision and drive on |
+| `gummi status <id\|ref> [--json]` | read-only: stage, blockers, spend, branch state |
+| `gummi spec <id\|ref>` | read-only: the current spec/report markdown |
+| `gummi diff <id\|ref>` | read-only: the worktree diff |
+| `gummi doctor [--json]` | readiness: repo, backend, auth, profile, envelope, lock |
+| `gummi skill show\|install\|list` | generate and install the calling-agent skill |
+
+`status`/`spec`/`diff` take no lock, so you can inspect a feature while a run
+is live. A run holds an exclusive `.gummi` lock, so a headless run and the TUI
+never touch the same workspace at once.
+
+Every `run`/`resume` ends on a typed exit the caller branches on:
+
+| exit | status | caller action |
+|---|---|---|
+| `0` | `done` | verified branch ready — report it, stop |
+| `0` | `stopped` | `--until` reached its clean stop — `resume --approve` to continue |
+| `2` | `question` | a delegated question or caller gate — `resume --answer`/`--approve`/`--request-changes` |
+| `3` | `blocked` | open `%%`/diff threads block a gate — resolve, or `resume --request-changes` |
+| `4` | `escalation` | a rerun/critique cap or unclear verdict — report to a human; resumable |
+| `5` | `exhausted` | envelope dry — raise it, then `resume` |
+| `6` | `timeout` | a stage went quiet (likely hang) — report; resumable |
+| `1` | `error` | setup/agent failure — nothing partial landed |
+
+Useful `run` flags: `--ref <id>` correlates a feature with your own tracker
+(and lets `status`/`resume` look it up by that id), `--acceptance <file|->`
+seeds the spec's verification plan, `--until spec` stops cleanly for a human
+design review before implementation burns tokens, and `--autonomous`
+auto-takes the recommended answer instead of checkpointing questions.
+
+### The calling-agent skill
+
+gummi generates its own **skill** — a `SKILL.md` documenting this loop — and
+installs it where Claude Code, GitHub Copilot CLI, and opencode all read it:
+
+```sh
+gummi skill install          # project scope: one .claude/skills/gummi/ covers all three
+gummi doctor                 # then check the backend/auth/envelope are ready
+```
+
+A single **project-scope** install (`.claude/skills/gummi/SKILL.md`) is read
+by Claude natively, Copilot natively, and opencode via Claude-compat;
+`--scope user` writes to each detected agent's home instead, and `--agent`
+targets one. The doc's command grammar and exit table are generated from the
+binary's real flags, so they can't drift; the frontmatter is version-stamped,
+so `install`/`list` detect a stale or edited file and refuse to overwrite it
+without `--force`. `gummi skill show` prints the rendered doc.
+
+`gummi doctor` is the readiness check the skill's first-run setup runs (`--json`
+for the machine-readable checklist). It **reports**; it never repairs auth or
+writes secrets — a backend needing login is surfaced as the exact command for
+a human to run, and BYOK keys are referenced by environment-variable name,
+never by value.
+
 ## Agent backends
 
 The agent layer is pluggable, selected with `GUMMI_AGENT`:
@@ -222,6 +299,7 @@ Environment variables:
 | `GUMMI_AGENT` | backend: `copilot` (default) · `claude` · `opencode` · `headless` |
 | `GUMMI_AGENT_CMD` | headless adapter's command line |
 | `GUMMI_CLAUDE_BIN` | claude backend's binary (default `claude` on PATH) |
+| `GUMMI_OPENCODE_BIN` | opencode backend's binary (default `opencode` on PATH) |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_PROVIDER_BASE_URL` / `_TYPE` / `_KEY_ENV` | ad-hoc BYOK endpoint without editing profiles |
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
