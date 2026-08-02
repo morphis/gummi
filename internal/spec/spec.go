@@ -140,6 +140,35 @@ func (d Doc) OpenQuestions() []Thread {
 	return open
 }
 
+// UserOpenThreads returns the open threads that carry an unresolved
+// human (`@user`) comment — the review feedback that blocks a gate and
+// that "request changes" sends to the agent. The template's own `@gummi`
+// prompts and unattributed notes are scaffolding and are not included.
+// Single source of truth for the gate-blocking check on both the UI and
+// the engine (Advance) sides.
+func (d Doc) UserOpenThreads() []Thread {
+	var out []Thread
+	for _, t := range d.OpenQuestions() {
+		if UnresolvedUserMarker(t) != nil {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// UnresolvedUserMarker returns the last unresolved `@user` marker in a
+// thread, or nil — the human's actual comment (which may thread under a
+// template prompt, so Markers[0] is not necessarily it).
+func UnresolvedUserMarker(t Thread) *Marker {
+	var found *Marker
+	for i := range t.Markers {
+		if t.Markers[i].Author == "user" && !t.Markers[i].Resolved {
+			found = &t.Markers[i]
+		}
+	}
+	return found
+}
+
 // MarkerLines lists the line numbers of all markers (for n/p jumps).
 func (d Doc) MarkerLines() []int {
 	out := make([]int, len(d.Markers))

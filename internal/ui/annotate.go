@@ -16,31 +16,14 @@ import (
 )
 
 // userOpenThreads returns the open annotation threads that carry a
-// human (`@user`) comment — the review feedback that blocks the gate and
-// that "request changes" sends to the agent. The template's own `@gummi`
-// prompts are scaffolding and are not included.
-func userOpenThreads(doc spec.Doc) []spec.Thread {
-	var out []spec.Thread
-	for _, t := range doc.OpenQuestions() {
-		if userMarker(t) != nil {
-			out = append(out, t)
-		}
-	}
-	return out
-}
+// human (`@user`) comment. It delegates to spec.UserOpenThreads so the
+// gate-blocking definition stays identical across the UI and the engine.
+func userOpenThreads(doc spec.Doc) []spec.Thread { return doc.UserOpenThreads() }
 
 // userMarker returns the last unresolved `@user` marker in a thread, or
 // nil — the human's actual comment (which may thread under a template
 // prompt, so Markers[0] is not it).
-func userMarker(t spec.Thread) *spec.Marker {
-	var found *spec.Marker
-	for i := range t.Markers {
-		if t.Markers[i].Author == "user" && !t.Markers[i].Resolved {
-			found = &t.Markers[i]
-		}
-	}
-	return found
-}
+func userMarker(t spec.Thread) *spec.Marker { return spec.UnresolvedUserMarker(t) }
 
 // compileOpenQuestions builds a structured turn from a spec's open
 // user annotations for the responsible role (DESIGN §6.1). Returns ""

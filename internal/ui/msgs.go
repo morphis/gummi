@@ -281,111 +281,64 @@ func (m *Shell) routeViaPlan(id domain.FeatureID) tea.Cmd {
 	}
 }
 
-// advanceStage moves the feature along its primary forward edge. When
-// the feature leaves Spec (spec approval, DESIGN §10.11) its worktree
-// and branch are created first.
+// advanceStage moves the feature along its primary forward edge by
+// running the engine's shared advance floor (engine.Advance) — the same
+// gate mechanics the headless driver uses, so the quality floor can't
+// fork between the two. This wrapper only maps the typed result back to
+// the board's notices and follow-on commands; the blocker checks,
+// worktree creation, artifact promotion, plan-time estimation, and the
+// recorded transition all live in the engine now (DESIGN §10.11, §6.1,
+// §5.1). When the feature leaves Spec its worktree and branch are created
+// there first.
 func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
+		// A static board (no coding agent) still advances: engine.Advance
+		// touches only the store, worktrees, and workspace, so a transient
+		// agent-less engine runs the same floor and closes. When an engine
+		// is wired, its Advance also drops the stale stage session.
+		eng := m.engine
+		if eng == nil {
+			eng = engine.New(engine.Config{Store: m.store, Worktrees: m.wt, Workspace: m.ws})
+			defer func() { _ = eng.Close() }()
+		}
+		res, err := eng.Advance(ctx, id, "user")
 		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		var estimate string // set at spec approval by plan-time estimation
-		nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
-		if len(nexts) == 0 {
+		switch res.Status {
+		case engine.StatusNoop:
 			return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id)}
-		}
-		// prefer the skip edge when the flag opts the item out of the
-		// intermediate stage, otherwise take the primary edge.
-		next := nexts[len(nexts)-1]
-		if f.Stage == domain.StageReview || f.Stage == domain.StageVerify {
-			// the last edge out of review/verify is a rerun (→ implement/fix),
-			// a bounce, not a forward move; g always goes forward.
-			next = nexts[0]
-		}
-		// unresolved user %% annotations block every human gate, not just
-		// spec approval — g re-gates only once they resolve (DESIGN §6.1).
-		if n := m.openQuestionsBlockingGate(f); n > 0 {
+		case engine.StatusBlockedQuestions:
+			// unresolved user %% annotations block every human gate — g
+			// re-gates only once they resolve (DESIGN §6.1).
 			surface := "spec"
-			if f.Kind == domain.KindBug {
+			if res.Feature.Kind == domain.KindBug {
 				surface = "report"
 			}
 			return noticeMsg{
-				text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, n, surface),
+				text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, res.Blockers, surface),
 				isErr: true,
 			}
-		}
-		// so do unresolved diff annotations, the gate's other backend
-		if n := m.openDiffCommentsBlockingGate(ctx, id); n > 0 {
+		case engine.StatusBlockedDiff:
 			return noticeMsg{
-				text:  fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, n),
+				text:  fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, res.Blockers),
 				isErr: true,
 			}
+		case engine.StatusNeedsMerge:
+			// verify→done is the user's "this feature is done" decision: the
+			// merge flow (user-written message → squash merge) finishes the
+			// transition to Done itself.
+			return mergeThenDoneMsg{f: res.Feature}
 		}
-		// Advancing out of Verify is the user's "this feature is done"
-		// decision: the branch lands on main as one squash commit before the
-		// record moves to Done. The merge flow (user-written message → merge)
-		// finishes the transition itself. A branch that already landed, is
-		// already gone (merged and cleaned up outside gummi), or never got
-		// any commits of its own (nothing to land — the artifact lives in
-		// the workspace, not on the branch) skips straight to the transition.
-		if next == domain.StageDone {
-			if exists, err := m.wt.BranchExists(ctx, &f); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			} else if exists {
-				if landed, err := m.wt.Landed(ctx, &f); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				} else if !landed {
-					if ahead, err := m.wt.BranchAhead(ctx, &f); err != nil {
-						return noticeMsg{text: sanitize(err.Error()), isErr: true}
-					} else if ahead {
-						return mergeThenDoneMsg{f: f}
-					}
-				}
-			}
-		}
-		// Crossing from the design phase (todo / interactive) into the first
-		// worktree stage is the approval gate: it creates the worktree and
-		// promotes the artifact (spec or bug report) to its workspace home.
-		// Bounces (review/verify → work stage) already have a worktree, so
-		// this fires exactly once, whichever design stage is being left.
-		enteringWorktree := next != domain.StageTodo && !workflow.Interactive(next)
-		existed := true
-		if enteringWorktree {
-			var err error
-			if existed, err = m.wt.Exists(ctx, &f); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-		}
-		if enteringWorktree && !existed {
-			if _, err := m.wt.Create(ctx, &f); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			// approval promotes the draft to the artifact's workspace home
-			// (DESIGN §10.11)
-			if err := m.migrateDraft(&f); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			// plan-time estimation is feature-specific (spec approval): size
-			// the spend-plan envelope from what completed features cost,
-			// before budgeted autonomous work begins (DESIGN §5.1).
-			if f.Stage == domain.StageSpec {
-				estimate = m.estimateEnvelope(ctx, &f)
-			}
-		}
-		fromSpec := f.Stage == domain.StageSpec
-		if _, err := m.store.Transition(ctx, id, next, "user"); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		m.dropSession(id) // the old stage's session is stale now
-		note := fmt.Sprintf("%s → %s", id, next) + estimate
-		// Approval kicks off the background one-shot passes: check
-		// discovery whenever a fresh worktree was created (both kinds),
-		// and the scribe envelope pass on spec approval in estimation
-		// mode only (an explicit GUMMI_ENVELOPE wins).
-		discover := enteringWorktree && !existed
-		est := fromSpec && m.envelope == 0
+		// StatusAdvanced: show the transition notice, then kick off the
+		// background one-shot passes — check discovery whenever a fresh
+		// worktree was created (both kinds), and the scribe envelope pass on
+		// spec approval in estimation mode only (an explicit GUMMI_ENVELOPE
+		// wins, so the UI default gates it here, not the engine).
+		note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
+		discover := res.EnteredWorktree
+		est := res.From == domain.StageSpec && m.envelope == 0
 		if discover || est {
 			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est}
 		}
@@ -495,40 +448,6 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", id, blended)}
 	}
-}
-
-// estimateEnvelope sizes a feature's spend-plan envelope from the median
-// spend of previously completed features and persists it, returning a
-// notice suffix describing the estimate. It only fills an *unset*
-// envelope (0), so an explicit GUMMI_ENVELOPE default a user chose is
-// respected, not silently replaced. Empty when the envelope is already
-// set, when there's no history to learn from, or on any error —
-// estimation is best-effort and never blocks the transition.
-func (m *Shell) estimateEnvelope(ctx context.Context, f *domain.Feature) string {
-	if f.Budget.Envelope != 0 {
-		return "" // an explicit envelope wins over estimation
-	}
-	feats, err := m.store.ListFeatures(ctx)
-	if err != nil {
-		return ""
-	}
-	var hist []domain.Spend
-	for _, x := range feats {
-		if x.ID != f.ID && x.Stage == domain.StageDone {
-			hist = append(hist, x.Spend)
-		}
-	}
-	env, n := domain.EstimateEnvelope(hist)
-	if n == 0 || env <= 0 {
-		return ""
-	}
-	f.Budget.Envelope = int(env)
-	if err := m.store.UpdateFeature(ctx, f); err != nil {
-		return ""
-	}
-	// n is the number of past features that metered spend (zero-spend
-	// completions are not samples).
-	return fmt.Sprintf(" · envelope estimated at %d credits from %d metered feature(s)", int(env), n)
 }
 
 // rebaseFeature rebases a feature's branch onto main from the TUI
