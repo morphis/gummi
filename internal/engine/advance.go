@@ -168,6 +168,20 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	return res, nil
 }
 
+// GateBlockers reports the open %%-thread and diff-annotation counts that
+// would block advancing id's current gate, without moving it — the
+// read-only view a caller-approval checkpoint needs before offering to
+// cross a gate (the headless driver's --gate-approval=caller path). It
+// reuses the exact floor checks Advance applies, so the pre-check and the
+// gate can never disagree.
+func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpen, diffOpen int, err error) {
+	f, err := e.cfg.Store.GetFeature(ctx, id)
+	if err != nil {
+		return 0, 0, err
+	}
+	return e.openQuestionsBlockingGate(f), e.openDiffCommentsBlockingGate(ctx, id), nil
+}
+
 // estimateEnvelope sizes a feature's spend-plan envelope from the median
 // spend of previously completed features and persists it, returning the
 // applied estimate and the number of metered samples behind it. It only

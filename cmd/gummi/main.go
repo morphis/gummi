@@ -5,6 +5,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,10 +43,23 @@ func version() string {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		// A driver invocation reports its typed exit via exitError, having
+		// already told the story on the NDJSON stream — exit with that code
+		// and stay quiet. Everything else is a setup/usage failure.
+		var ec *exitError
+		if errors.As(err, &ec) {
+			os.Exit(ec.code)
+		}
 		fmt.Fprintln(os.Stderr, "gummi:", err)
 		os.Exit(1)
 	}
 }
+
+// exitError carries a driver invocation's typed exit code up to main
+// without a stderr line — the NDJSON stream is the report.
+type exitError struct{ code int }
+
+func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 
 func run(args []string) error {
 	if len(args) > 0 {
@@ -57,8 +71,12 @@ func run(args []string) error {
 			return runIngest(args[1:])
 		case "bugs":
 			return runBugs(args[1:])
+		case "run":
+			return runRun(args[1:])
+		case "resume":
+			return runResume(args[1:])
 		default:
-			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest|bugs])", args[0])
+			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest|bugs|run|resume])", args[0])
 		}
 	}
 	// `gummi` with no arguments launches the board, creating the .gummi
@@ -75,6 +93,14 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
+	// Hold the workspace's exclusive lock for the TUI's lifetime, so a
+	// headless `gummi run`/`resume` refuses to touch the same .gummi while
+	// the board is open (and vice versa) — DESIGN §8.2 D13.
+	release, err := state.AcquireLock(ws.LockFile())
+	if err != nil {
+		return err
+	}
+	defer release()
 	store, err := state.OpenStore(ws.DBFile())
 	if err != nil {
 		return err
