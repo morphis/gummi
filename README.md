@@ -207,6 +207,13 @@ auto-crosses design gates; `--full` adds brainstorm + plan, and
 is live. A run holds an exclusive `.gummi` lock, so a headless run and the TUI
 never touch the same workspace at once.
 
+`status --json` carries two distinct terminal signals. `verified:true` means
+the verify gate passed and the branch is **ready to land** — the state a
+headless run stops at, and the flag a CI caller polls for. `done:true` means
+the branch was actually **squash-merged** into main (only `m` in the TUI, or a
+manual land, sets it) — so after a headless run, expect `verified:true` with
+`done:false` until you merge.
+
 Every `run`/`resume` ends on a typed exit the caller branches on:
 
 | exit | status | caller action |

@@ -141,6 +141,78 @@ func TestBuildStatusBlockersAndRoute(t *testing.T) {
 	}
 }
 
+// mkVerifyFeature persists FD-001 at the Verify stage with a real commit on
+// its branch, so branch_state reads "ahead" — the exact state that would trip
+// a naive "stage==verify && ahead" verified guess mid-run.
+func (f *readFixture) mkVerifyFeature(t *testing.T) domain.Feature {
+	t.Helper()
+	const num = 1
+	id, _ := domain.NewFeatureID(num)
+	slug, _ := domain.Slugify("json export")
+	now := time.Now()
+	feat := domain.Feature{
+		ID: id, Num: num, Kind: domain.KindFeature, Title: "JSON export", Slug: slug,
+		Stage: domain.StageVerify, Skip: domain.QuickRoute(), Budget: domain.Budget{Envelope: 500},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.store.CreateFeature(f.ctx, &feat); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.wt.Create(f.ctx, &feat); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, err := f.wt.Path(&feat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "work.txt"), []byte("w\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.wt.CommitAll(f.ctx, &feat, "work"); err != nil {
+		t.Fatal(err)
+	}
+	return feat
+}
+
+// status derives `verified` from the persisted verify marker, not from a
+// naive "at verify with an ahead branch" guess: a feature mid-verify reads
+// verified:false even with an ahead branch (the false-positive guard), and
+// only a stamped VerifiedAt — what the engine sets at the stop-at-verified
+// gate — flips it true, while `done` stays false until an actual merge.
+func TestBuildStatusVerified(t *testing.T) {
+	f := newReadFixture(t)
+	feat := f.mkVerifyFeature(t)
+
+	// mid-verify: the branch is already ahead, but the verify gate has not
+	// been crossed → not verified, not done.
+	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if v.BranchState != "ahead" {
+		t.Fatalf("branch_state = %q, want ahead (setup)", v.BranchState)
+	}
+	if v.Verified {
+		t.Fatal("verified=true mid-verify: false positive on an ahead branch")
+	}
+	if v.Done {
+		t.Fatal("done=true before any merge")
+	}
+
+	// the engine stamps this marker when it reaches the stop-at-verified gate.
+	if err := f.store.SetVerifiedAt(f.ctx, feat.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := f.store.GetFeature(f.ctx, feat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &verified)
+	if !v.Verified {
+		t.Fatal("verified=false at the terminal verified-branch state")
+	}
+	if v.Done {
+		t.Fatal("done=true without a merge — verified is not done")
+	}
+}
+
 // artifactPath resolves a draft, and gummi spec has bytes to print.
 func TestArtifactPathResolvesDraft(t *testing.T) {
 	f := newReadFixture(t)

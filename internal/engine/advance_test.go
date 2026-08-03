@@ -208,12 +208,26 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 		gitIn(t, wtDir, "add", "work.txt")
 		gitIn(t, wtDir, "commit", "-q", "-m", "work")
 
+		// mid-verify, before the gate is reached, the feature is not yet
+		// marked verified — the guard status's `verified` relies on.
+		if got, _ := store.GetFeature(ctx, f.ID); !got.VerifiedAt.IsZero() {
+			t.Fatalf("verified_at stamped before the verify gate: %v", got.VerifiedAt)
+		}
+
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusNeedsMerge {
 			t.Fatalf("status=%d, want needs-merge", res.Status)
 		}
 		if got, _ := store.GetFeature(ctx, f.ID); got.Stage != domain.StageVerify {
 			t.Fatalf("needs-merge gate transitioned to %s", got.Stage)
+		}
+		// reaching the gate stamps the verified marker (persisted + on the
+		// returned record), while the stage stays at verify.
+		if res.Feature.VerifiedAt.IsZero() {
+			t.Fatal("needs-merge result did not carry a verified_at stamp")
+		}
+		if got, _ := store.GetFeature(ctx, f.ID); got.VerifiedAt.IsZero() {
+			t.Fatal("needs-merge gate did not persist verified_at")
 		}
 	})
 

@@ -965,6 +965,13 @@ caller must decide, then exits.
   tokens.
 - **Read commands** — `status`/`spec`/`diff` are agent-free and take **no
   lock** (SQLite WAL + read-only git), so they observe a live run safely.
+  `status --json` distinguishes two terminal signals a poller must not
+  conflate: `verified` — the verify gate passed and the branch is **ready to
+  land** (stamped when the floor reaches the stop-at-verified gate, and false
+  while verify is still in flight, so an already-ahead branch mid-run never
+  false-positives) — and `done` — the branch was **squash-merged** into main.
+  A headless run ends at `verified:true`/`done:false`; only a land flips
+  `done`.
 
 ### 13.2 The exit contract
 
@@ -981,6 +988,11 @@ caller branches on the result without parsing stdout:
 | `4` | `escalation` | a rerun/critique cap was hit, or a stage returned no clear verdict |
 | `5` | `exhausted` | the credit envelope ran dry |
 | `6` | `timeout` | a stage went quiet past the inactivity budget |
+
+The exit/event `done` above names the run outcome — *a verified branch is
+ready* — not a merge; it is deliberately distinct from `status --json`'s `done`
+field, which is true only once the branch is **merged**. A caller keying off a
+completed run should poll `status`'s `verified`, not its `done` (§13.1).
 
 Long autonomous stretches (implement → review → verify) carry no caller
 decisions under `auto`, so one `resume` streams that whole tail and returns

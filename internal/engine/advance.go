@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
@@ -122,6 +123,17 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 					return res, err
 				} else if ahead {
 					res.Status = StatusNeedsMerge
+					// The verify gate has passed and the branch is ready to
+					// land: stamp the verified marker (once, keeping the first
+					// pass's time stable) so status can report `verified` at
+					// this terminal state without moving the stage off verify.
+					if f.VerifiedAt.IsZero() {
+						now := time.Now().UTC()
+						if err := e.cfg.Store.SetVerifiedAt(ctx, id, now); err != nil {
+							return res, err
+						}
+						res.Feature.VerifiedAt = now
+					}
 					return res, nil
 				}
 			}

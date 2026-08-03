@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS features (
 	external_ref    TEXT NOT NULL DEFAULT '',
 	skip_triage     INTEGER NOT NULL DEFAULT 0,
 	skip_diagnose   INTEGER NOT NULL DEFAULT 0,
-	quick           INTEGER NOT NULL DEFAULT 0
+	quick           INTEGER NOT NULL DEFAULT 0,
+	verified_at     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
@@ -264,6 +265,7 @@ var migrations = []string{
 	`ALTER TABLE stage_spend ADD COLUMN est_credits REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN quick INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN verified_at TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -313,19 +315,19 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
-	var id, stage, created, updated, kind string
+	var id, stage, created, updated, kind, verified string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
 		&f.Budget.Envelope, &f.Budget.Spent,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified)
 	if err != nil {
 		return f, err
 	}
@@ -337,6 +339,13 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	}
 	if f.UpdatedAt, err = time.Parse(timeFmt, updated); err != nil {
 		return f, fmt.Errorf("feature %s: corrupt updated_at %q: %w", id, updated, err)
+	}
+	// verified_at is empty until the verify gate stamps it; only a
+	// non-empty value is parsed, so an un-verified feature reads as zero.
+	if verified != "" {
+		if f.VerifiedAt, err = time.Parse(timeFmt, verified); err != nil {
+			return f, fmt.Errorf("feature %s: corrupt verified_at %q: %w", id, verified, err)
+		}
 	}
 	// A corrupt row (hand-edited DB, bad migration) must fail here, not
 	// flow onward: IDs and slugs feed branch names and worktree paths.
@@ -362,6 +371,22 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits, esti
 		WHERE id = ?`, credits, estimated, in, out, string(id))
 	if err != nil {
 		return fmt.Errorf("metering %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetVerifiedAt stamps when a feature's verify gate passed and its branch
+// became ready to land — the marker behind status's `verified` field and the
+// headless driver's stop-at-verified terminal state. Like AddSpend it is a
+// side-channel (it neither touches updated_at nor moves the stage, which
+// stays "verify" through and after the run), so the engine can record
+// "verified" the moment the gate is reached without a full-feature write.
+func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET verified_at = ? WHERE id = ?`,
+		t.UTC().Format(timeFmt), string(id))
+	if err != nil {
+		return fmt.Errorf("marking %s verified: %w", id, err)
 	}
 	return nil
 }

@@ -67,7 +67,12 @@ type statusView struct {
 	Spend       statusSpend    `json:"spend"`
 	Branch      string         `json:"branch"`
 	BranchState string         `json:"branch_state"`
-	Done        bool           `json:"done"`
+	// Verified is true once the verify gate has passed and the branch is
+	// ready to land — the headless driver's stop-at-verified terminal state.
+	// Distinct from Done (== merged): a CI caller polls `verified` to know a
+	// run reached its verified branch, since the headless driver never merges.
+	Verified bool `json:"verified"`
+	Done     bool `json:"done"`
 }
 
 type statusBlockers struct {
@@ -109,6 +114,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Manager, 
 		Spend:       statusSpend{Credits: f.Spend.Credits, Envelope: f.Budget.Envelope},
 		Branch:      f.BranchName(),
 		BranchState: branchState(ctx, wt, f),
+		Verified:    !f.VerifiedAt.IsZero(),
 		Done:        f.Stage == domain.StageDone,
 	}
 }
@@ -140,11 +146,21 @@ func renderStatus(w io.Writer, v statusView) {
 		fmt.Fprintf(w, "  Route:    %s\n", v.Route)
 	}
 	fmt.Fprintf(w, "  Branch:   %s  (%s)\n", v.Branch, v.BranchState)
+	fmt.Fprintf(w, "  Verified: %s\n", yesNo(v.Verified))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)
 	fmt.Fprintf(w, "  Blockers: %d open question(s) · %d open diff comment(s)\n", v.Blockers.OpenQuestions, v.Blockers.OpenDiff)
 	if v.Ref != "" {
 		fmt.Fprintf(w, "  Ref:      %s\n", v.Ref)
 	}
+}
+
+// yesNo renders a boolean status line as the human-friendly yes/no the
+// text summary uses.
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 // trimCredits formats a credit figure without a trailing ".0" for whole

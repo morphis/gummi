@@ -128,6 +128,12 @@ type Feature struct {
 	ExternalRef string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// VerifiedAt is stamped when the item's verify gate passes and its
+	// branch becomes ready to land — the headless driver's stop-at-verified
+	// terminal state (DESIGN §12). Zero until then. Distinct from reaching
+	// StageDone, which a merge sets: a verified branch is ready to land, not
+	// yet landed.
+	VerifiedAt time.Time
 }
 
 // Kind returns the feature's kind, treating the empty default as a

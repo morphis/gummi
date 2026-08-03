@@ -45,6 +45,13 @@ func TestQuickRouteToVerified(t *testing.T) {
 	if st := h.stageOf(id); st != domain.StageVerify {
 		t.Fatalf("feature at %s, want Verify (stop-at-verified never merges to Done)", st)
 	}
+	// the stop-at-verified gate stamps the verify marker `status --json`'s
+	// `verified` reads, even though the stage stays at Verify (never merged).
+	if f, err := h.store.GetFeature(context.Background(), id); err != nil {
+		t.Fatal(err)
+	} else if f.VerifiedAt.IsZero() {
+		t.Fatal("reached a verified branch but verified_at was not stamped")
+	}
 	if !h.has("created") || !h.has("gate") || !h.has("done") {
 		t.Fatalf("missing created/gate/done; stream=%v", h.eventKinds())
 	}
