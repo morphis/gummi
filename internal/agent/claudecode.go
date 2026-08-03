@@ -94,6 +94,16 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 			"env, Anthropic-shaped only); BYOK provider %q is not supported — drop the provider "+
 			"block for claude sessions", opts.Provider.BaseURL)
 	}
+	// The CLI only routes to Anthropic models, so a foreign model id would
+	// otherwise be forwarded as --model and fail deep in the run with the
+	// CLI's opaque "issue with the selected model" error (proposal §6). Reject
+	// it here, at session start, naming the file and the fix — the same
+	// fail-fast posture as the guarded/BYOK rejections above.
+	if foreign, provider := ForeignModel(opts.Model); foreign {
+		return nil, fmt.Errorf("claude backend cannot drive model %q (looks like a %s model); "+
+			"the Claude Code CLI only routes to Anthropic models — set this role to a claude-* "+
+			"model in .gummi/profiles.yaml, or select the matching backend via GUMMI_AGENT", opts.Model, provider)
+	}
 
 	args := []string{
 		"-p", "--input-format", "stream-json", "--output-format", "stream-json",

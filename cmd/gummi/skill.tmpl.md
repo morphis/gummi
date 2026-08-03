@@ -87,7 +87,10 @@ The loop you run:
      human. These are durable and resumable: the card stays on the board.
      `exhausted` resumes only after the envelope is raised; `escalation` and
      `timeout` after the human weighs in.
-   - **error (1)** — a setup/agent failure; nothing partial landed. Report it.
+   - **error (1)** — a setup/agent failure. Check `gummi status <id>`: a
+     pre-id setup failure landed nothing (report it), but a mid-run failure
+     can leave a durable, non-terminal card that a `gummi resume <id>` may
+     finish — the error event's `resumable`/`stage` fields say which.
 3. After a `resume`, read the new exit code and repeat until `done`.
 
 For a **small or well-specified** feature whose delegated questions you'd answer

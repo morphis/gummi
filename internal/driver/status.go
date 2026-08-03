@@ -19,7 +19,12 @@ type Status string
 const (
 	// StatusDone: a verified branch is ready. gummi never merges it.
 	StatusDone Status = "done"
-	// StatusError: setup or agent failure; nothing partial landed.
+	// StatusError: a setup or agent failure. Often nothing partial landed
+	// (a pre-id validation/setup failure), but a mid-run agent-turn failure
+	// can occur after earlier stages committed durable progress — that case
+	// is one `resume <id>` from possibly finishing. The exit code is 1
+	// regardless; the error event's `resumable`/`stage` fields tell the two
+	// apart (check `status <id>`).
 	StatusError Status = "error"
 	// StatusQuestion: a delegated ask_user question, or a caller design
 	// gate awaiting --approve/--request-changes. Resume to continue.

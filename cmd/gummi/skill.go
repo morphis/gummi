@@ -264,7 +264,7 @@ func exitTable() string {
 	}{
 		{driver.StatusDone, "verified branch ready — report it upward, stop"},
 		{driver.StatusStopped, "--until reached its clean stop — resume --approve to continue"},
-		{driver.StatusError, "setup/agent failure — nothing partial landed; report"},
+		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event)"},
 		{driver.StatusQuestion, "delegated question or caller gate — resume --answer/--approve/--request-changes"},
 		{driver.StatusBlocked, "open %% or diff threads block a gate — resolve, or resume --request-changes"},
 		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; resumable"},

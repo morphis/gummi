@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -336,6 +337,49 @@ func TestCallerGateApproveResume(t *testing.T) {
 	}
 	if out2.Status != StatusDone {
 		t.Fatalf("resume status = %q, want done; stream=%v", out2.Status, h.eventKinds())
+	}
+}
+
+// The error event distinguishes a resumable mid-run failure (a durable,
+// non-terminal card exists) from a pre-id setup failure where nothing
+// landed — even though both keep exit code 1.
+func TestErrorEventResumable(t *testing.T) {
+	h := newHarness(t, true, nil)
+
+	// a card parked at a non-terminal stage (implement) → resumable, with
+	// the parked stage named.
+	f := feature(1, domain.StageImplement)
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.driver(Options{}).fail(context.Background(), string(f.ID), errors.New("implement turn failed")); err == nil {
+		t.Fatal("fail returned a nil error")
+	}
+	e := lastEvent(h, "error")
+	if e == nil {
+		t.Fatalf("no error event; stream=%v", h.eventKinds())
+	}
+	if e["resumable"] != true {
+		t.Errorf("error resumable = %v, want true (non-terminal card exists)", e["resumable"])
+	}
+	if e["stage"] != string(domain.StageImplement) {
+		t.Errorf("error stage = %v, want implement", e["stage"])
+	}
+
+	// a pre-creation failure (no id) → not resumable, no stage.
+	h.buf.Reset()
+	if _, err := h.driver(Options{}).fail(context.Background(), "", errors.New("bad --until")); err == nil {
+		t.Fatal("fail returned a nil error")
+	}
+	e = lastEvent(h, "error")
+	if e == nil {
+		t.Fatalf("no error event; stream=%v", h.eventKinds())
+	}
+	if e["resumable"] != false {
+		t.Errorf("pre-id error resumable = %v, want false", e["resumable"])
+	}
+	if _, ok := e["stage"]; ok {
+		t.Errorf("pre-id error carried a stage %v, want none", e["stage"])
 	}
 }
 

@@ -93,11 +93,11 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 		skip = domain.SkipFlags{}
 	}
 	if err := ValidateUntil(d.opts.Until, domain.KindFeature, skip); err != nil {
-		return d.fail("", err)
+		return d.fail(ctx, "", err)
 	}
 	f, err := d.createFeature(ctx, desc)
 	if err != nil {
-		return d.fail("", err)
+		return d.fail(ctx, "", err)
 	}
 	route := "quick"
 	if d.opts.Full {
@@ -125,14 +125,14 @@ type ResumeInput struct {
 // branch, session resume) makes this free (DESIGN §4).
 func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput) (Outcome, error) {
 	if err := d.eng.Restore(ctx); err != nil {
-		return d.fail(string(id), fmt.Errorf("restoring sessions: %w", err))
+		return d.fail(ctx, string(id), fmt.Errorf("restoring sessions: %w", err))
 	}
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
-		return d.fail(string(id), err)
+		return d.fail(ctx, string(id), err)
 	}
 	if err := ValidateUntil(d.opts.Until, f.Kind, f.Skip); err != nil {
-		return d.fail(string(id), err)
+		return d.fail(ctx, string(id), err)
 	}
 	// the correlation line first, so a resume's stream is self-identifying.
 	d.out.emit(resumedEvent{Event: "resumed", ID: string(id), Ref: d.opts.Ref, Stage: string(f.Stage)})
@@ -143,7 +143,7 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		// process's gate-approval mode — the caller already decided.
 		out, err := d.autoAdvance(ctx, f)
 		if err != nil {
-			return d.fail(string(id), err)
+			return d.fail(ctx, string(id), err)
 		}
 		if out.terminal() {
 			return out, nil
@@ -164,11 +164,11 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 	for {
 		if err := ctx.Err(); err != nil {
-			return d.fail(string(id), err)
+			return d.fail(ctx, string(id), err)
 		}
 		f, err := d.store.GetFeature(ctx, id)
 		if err != nil {
-			return d.fail(string(id), err)
+			return d.fail(ctx, string(id), err)
 		}
 		if f.Stage == domain.StageDone || workflow.Terminal(f.Kind, f.Stage) {
 			return d.done(ctx, f)
@@ -187,7 +187,7 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 			out, err = d.driveAutonomous(ctx, f)
 		}
 		if err != nil {
-			return d.fail(string(id), err)
+			return d.fail(ctx, string(id), err)
 		}
 		if out.terminal() {
 			return out, nil
@@ -570,9 +570,24 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 }
 
 // fail emits the error line and returns the StatusError outcome plus the
-// error, so the CLI can also log it to stderr.
-func (d *Driver) fail(id string, err error) (Outcome, error) {
-	d.out.emit(errorEvent{Event: "error", ID: id, Error: err.Error()})
+// error, so the CLI can also log it to stderr. It computes resumability
+// best-effort: a failure that left a durable, non-terminal feature card
+// behind (id set, card present, stage not terminal) is one `resume` from
+// possibly finishing — distinct from a pre-id setup failure where nothing
+// landed. The exit code stays 1 either way; the `resumable`/`stage` fields
+// carry the distinction (status.go).
+func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error) {
+	ev := errorEvent{Event: "error", ID: id, Error: err.Error()}
+	if id != "" {
+		// detach from ctx: a cancelled/timed-out ctx (the very failure being
+		// reported) must not suppress the resumability lookup — the card is
+		// exactly what a caller needs to know survives.
+		if f, gerr := d.store.GetFeature(context.WithoutCancel(ctx), domain.FeatureID(id)); gerr == nil {
+			ev.Resumable = !workflow.Terminal(f.Kind, f.Stage)
+			ev.Stage = string(f.Stage)
+		}
+	}
+	d.out.emit(ev)
 	return Outcome{Status: StatusError, ID: id}, err
 }
 

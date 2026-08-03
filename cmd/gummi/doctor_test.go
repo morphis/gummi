@@ -143,6 +143,45 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 	}
 }
 
+// With the claude backend and no profiles.yaml yet, doctor evaluates the
+// seed template that WOULD be written and fails the profile check, naming
+// each role whose model the Anthropic-only backend cannot drive — the
+// warning fires before the first run that would hit it.
+func TestDoctorClaudeBackendFlagsForeignSeedModels(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_AGENT", "claude")
+
+	r := buildDoctorReport(gitRepo(t)) // no .gummi workspace → seed template
+	c := checkByName(r, "profile")
+	if c.Status != statusFail {
+		t.Fatalf("profile = %+v, want fail (claude can't drive the mixed thrifty default)", c)
+	}
+	if !strings.Contains(c.Detail, "implementer=gpt-5-mini") {
+		t.Errorf("profile detail should name the incompatible role: %q", c.Detail)
+	}
+	if !strings.Contains(c.Detail, "would be seeded") {
+		t.Errorf("profile detail should note it is the seed template: %q", c.Detail)
+	}
+	if r.Ready {
+		t.Error("report is ready despite a backend/model conflict")
+	}
+}
+
+// The same mixed seed template is fine for a non-Anthropic backend: only
+// the claude backend is cross-checked, so headless stays a warn/ok, not a
+// fail.
+func TestDoctorNonClaudeBackendIgnoresSeedModels(t *testing.T) {
+	clearDoctorEnv(t)
+	fakeAgentOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
+
+	r := buildDoctorReport(gitRepo(t))
+	if c := checkByName(r, "profile"); c.Status == statusFail {
+		t.Errorf("profile = %+v, want non-fail for a non-claude backend", c)
+	}
+}
+
 // A non-repo directory fails the repo check and blocks readiness.
 func TestDoctorNoRepoFails(t *testing.T) {
 	clearDoctorEnv(t)

@@ -336,6 +336,31 @@ func TestClaudeCodeRejectsGuardedAndBYOK(t *testing.T) {
 	}
 }
 
+// A foreign (non-Anthropic) model id is rejected at session start with a
+// clear message naming the model, rather than forwarded as --model to fail
+// opaquely mid-run. Anthropic ids and an empty id still start.
+func TestClaudeCodeRejectsForeignModel(t *testing.T) {
+	ag, err := NewClaudeCode(writeFakeClaude(t, fakeClaudeScript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	if _, err := ag.NewSession(context.Background(), SessionOpts{
+		WorkDir: t.TempDir(), Model: "gpt-5-mini",
+	}); err == nil || !strings.Contains(err.Error(), "gpt-5-mini") {
+		t.Errorf("foreign-model session error = %v, want a rejection naming the model", err)
+	}
+	// an Anthropic model and an empty (CLI-default) model both start.
+	for _, m := range []string{"claude-sonnet-5", ""} {
+		sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: m})
+		if err != nil {
+			t.Errorf("Model %q should start, got %v", m, err)
+			continue
+		}
+		sess.Close()
+	}
+}
+
 func TestClaudeCodeMissingBinary(t *testing.T) {
 	if _, err := NewClaudeCode("definitely-not-a-real-binary-xyz"); err == nil {
 		t.Error("missing binary should fail fast")

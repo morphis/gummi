@@ -78,6 +78,14 @@ func LoadProfiles(path string) (Profiles, error) {
 	if err != nil {
 		return Profiles{}, fmt.Errorf("reading %s: %w", path, err)
 	}
+	return ParseProfiles(raw, path)
+}
+
+// ParseProfiles parses and validates profiles YAML from raw bytes. name is
+// used only in error messages (a file path, or a label like the seed
+// template). It lets callers validate the ProfilesTemplate that WOULD be
+// seeded, before any file exists on disk.
+func ParseProfiles(raw []byte, path string) (Profiles, error) {
 	var p Profiles
 	if err := yaml.Unmarshal(raw, &p); err != nil {
 		return Profiles{}, fmt.Errorf("parsing %s: %w", path, err)

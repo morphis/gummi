@@ -147,6 +147,13 @@ type errorEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id,omitempty"`
 	Error string `json:"error"`
+	// Resumable is true when the failure left a durable, non-terminal
+	// feature card behind (earlier stages committed real progress) — the
+	// error's exit code is still 1, but a `resume <id>` may finish it. Stage
+	// is that card's parked stage. Both are absent when the failure happened
+	// before an id existed (creation/validation) or the card is terminal.
+	Resumable bool   `json:"resumable"`
+	Stage     string `json:"stage,omitempty"`
 }
 
 type activityEvent struct {

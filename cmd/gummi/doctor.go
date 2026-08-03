@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -118,14 +120,25 @@ func buildDoctorReport(cwd string) doctorReport {
 	}
 
 	// 4. profile
-	profiles, perr := config.LoadProfiles(ws.ProfilesFile())
+	profiles, seeded, perr := effectiveProfiles(ws.ProfilesFile())
 	switch {
 	case perr != nil:
 		add("profile", statusWarn, "profiles.yaml did not parse: "+perr.Error(), "fix .gummi/profiles.yaml")
 	case len(profiles.Profiles) == 0:
 		add("profile", statusWarn, "no profiles configured; gummi falls back to the single GUMMI_MODEL", nestingGuidance)
 	default:
-		add("profile", statusOK, fmt.Sprintf("profiles: %s (default %q)", strings.Join(profiles.Names(), ", "), profiles.Default), nestingGuidance)
+		note := ""
+		if seeded {
+			note = " (would be seeded on first run)"
+		}
+		if bad := backendModelConflicts(bi, profiles); bad != "" {
+			add("profile", statusFail,
+				fmt.Sprintf("default profile %q has roles the %s backend cannot drive%s: %s",
+					profiles.Default, bi.name, note, bad),
+				"set these roles to a claude-* model in .gummi/profiles.yaml, or select the matching backend via GUMMI_AGENT")
+		} else {
+			add("profile", statusOK, fmt.Sprintf("profiles: %s (default %q)%s", strings.Join(profiles.Names(), ", "), profiles.Default, note), nestingGuidance)
+		}
 	}
 
 	// 5. auth (offline)
@@ -148,6 +161,47 @@ func buildDoctorReport(cwd string) doctorReport {
 		}
 	}
 	return doctorReport{Ready: ready, Checks: checks}
+}
+
+// effectiveProfiles returns the profiles doctor should judge: the parsed
+// profiles.yaml when it exists, otherwise the ProfilesTemplate that
+// ensureWorkspace WOULD seed on the first run (seeded=true) — so a
+// backend/model conflict is caught before the run that would hit it, not
+// after. A parse error is surfaced verbatim.
+func effectiveProfiles(path string) (profiles config.Profiles, seeded bool, err error) {
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		p, perr := config.ParseProfiles([]byte(config.ProfilesTemplate), "seed template")
+		return p, true, perr
+	}
+	p, perr := config.LoadProfiles(path)
+	return p, false, perr
+}
+
+// backendModelConflicts reports the "role=model" pairs in the default
+// profile that the selected backend cannot drive, or "" when there is no
+// conflict. Only the Claude backend is Anthropic-locked today, so it is the
+// only one cross-checked (agent.ForeignModel is the shared predicate the
+// claude adapter rejects on at session start).
+func backendModelConflicts(bi backendInfo, p config.Profiles) string {
+	if bi.name != "claude" {
+		return ""
+	}
+	prof, ok := p.Profiles[p.Default]
+	if !ok {
+		return ""
+	}
+	roles := make([]string, 0, len(prof))
+	for role := range prof {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	var bad []string
+	for _, role := range roles {
+		if foreign, _ := agent.ForeignModel(prof[role].Model); foreign {
+			bad = append(bad, role+"="+prof[role].Model)
+		}
+	}
+	return strings.Join(bad, ", ")
 }
 
 const nestingGuidance = "steer to a cost-tiered profile: frontier models for architect/reviewer, a cheaper model for implementer/scribe; avoid pointing gummi's roles at the same frontier model your own session runs on (you'd pay for it twice)"
