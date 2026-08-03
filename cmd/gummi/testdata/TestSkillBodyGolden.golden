@@ -132,6 +132,12 @@ The loop you run:
    - **error (1)** — a setup/agent failure; nothing partial landed. Report it.
 3. After a `resume`, read the new exit code and repeat until `done`.
 
+For a **small or well-specified** feature whose delegated questions you'd answer
+with the `recommended` option anyway, start with `--autonomous`: it auto-takes
+the recommended answer instead of stopping at `question`, shipping the feature to
+a verified branch hands-free. Reserve the checkpointing loop above for genuinely
+ambiguous forks where the recommended answer might be wrong.
+
 ## Stop early for a human design review
 
 For work where a human should sign off on the design before implementation burns
