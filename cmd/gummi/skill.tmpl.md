@@ -33,10 +33,23 @@ gummi doctor --json
 It returns a structured checklist — repo, workspace, backend, profile, auth,
 envelope, lock. Repair each item that isn't `ok`:
 
-- **backend / profile** — pick which coding agent gummi drives (`GUMMI_AGENT`) and
-  a cost-tiered profile (frontier models for the architect/reviewer roles, a
-  cheaper model for the implementer/scribe). Avoid pointing gummi's roles at the
-  same frontier model your own session runs on — you'd pay for it twice.
+- **backend** — set gummi's backend to the **same agent that is driving it**:
+  if you are Claude Code, export `GUMMI_AGENT=claude` so gummi drives Claude with
+  Claude. Match the backend to yourself by default — it keeps the whole pipeline
+  on one vendor's auth, and it sidesteps the cross-model trap where the claude
+  backend forwards each role's model to the Claude CLI as `--model` and the CLI
+  rejects any non-`claude-*` id (a mismatched run passes spec, then dies at
+  implement).
+- **profile** — **do not rely on the auto-seeded default** (its implementer/scribe
+  roles are OpenAI ids the claude backend cannot drive). Instead **write the
+  `default` profile in `.gummi/profiles.yaml` yourself, and ask the human their
+  model preferences first.** Offer a cost-tiered shape — a frontier model for the
+  architect/reviewer roles, a cheaper one for implementer/scribe — with every
+  role on a model your backend can drive (for the claude backend, every role a
+  `claude-*` id, e.g. architect/reviewer `claude-sonnet-5`, implementer
+  `claude-sonnet-5`, scribe `claude-haiku-4-5`). If the human has no preference,
+  seed those tiered defaults. Tier down rather than pointing every role at the
+  top frontier model — you don't need the biggest model on the scribe.
 - **auth** — if a check reports auth is needed, gummi hands you the **exact
   command**. Give it to the **human** to run (e.g. surface it with the `!`
   prefix). You never handle secrets: API keys are referenced by environment
