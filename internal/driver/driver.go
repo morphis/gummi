@@ -19,10 +19,12 @@ import (
 
 // GateApproval selects who approves a design gate. The quality floor
 // (review/verify, blockers) runs the same either way — this only decides
-// whether a design gate auto-crosses or checkpoints to the caller.
+// whether a design gate auto-crosses or checkpoints to the caller. The
+// canonical values live in domain (persisted on the card); these alias them
+// so the driver's callers keep a local name.
 const (
-	GateAuto   = "auto"
-	GateCaller = "caller"
+	GateAuto   = domain.GateAuto
+	GateCaller = domain.GateCaller
 )
 
 // Options configures one run. Envelope is required (D6); a missing agent
@@ -30,14 +32,19 @@ const (
 type Options struct {
 	Envelope     int
 	Profile      string
-	Full         bool          // opt into the brainstorm+plan route (default: quick)
-	GateApproval string        // GateAuto (default) | GateCaller
-	StageTimeout time.Duration // per-stage inactivity budget (0 disables)
-	Autonomous   bool          // auto-take the recommended answer instead of checkpointing (D5)
-	Verbose      bool          // add per-tool-call activity lines to the stream
-	Ref          string        // optional external correlation id, echoed in NDJSON + persisted as ExternalRef (D11)
-	Acceptance   string        // optional acceptance-criteria text, seeded into the draft's Verification plan (D10)
-	Until        domain.Stage  // stop cleanly before crossing the gate that leaves this design stage (B3); "" runs to verified
+	Full         bool   // opt into the brainstorm+plan route (default: quick)
+	GateApproval string // GateAuto (default) | GateCaller
+	// GateApprovalSet reports that the caller passed --gate-approval
+	// explicitly on this invocation. A resume uses it to decide between
+	// overriding the card's persisted mode (set) and inheriting it (unset),
+	// so an unattended resume no longer silently reverts to auto.
+	GateApprovalSet bool
+	StageTimeout    time.Duration // per-stage inactivity budget (0 disables)
+	Autonomous      bool          // auto-take the recommended answer instead of checkpointing (D5)
+	Verbose         bool          // add per-tool-call activity lines to the stream
+	Ref             string        // optional external correlation id, echoed in NDJSON + persisted as ExternalRef (D11)
+	Acceptance      string        // optional acceptance-criteria text, seeded into the draft's Verification plan (D10)
+	Until           domain.Stage  // stop cleanly before crossing the gate that leaves this design stage (B3); "" runs to verified
 }
 
 // Driver runs one feature through the engine's gate floor headlessly. It
@@ -68,17 +75,29 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 	if opts.GateApproval == "" {
 		opts.GateApproval = GateAuto
 	}
-	actor := "auto"
-	if opts.GateApproval == GateCaller {
-		actor = "caller"
-	}
-	return &Driver{
+	d := &Driver{
 		eng:   eng,
 		store: store,
 		ws:    ws,
 		out:   newEmitter(out, opts.Verbose),
 		opts:  opts,
-		actor: actor,
+	}
+	d.setGate(opts.GateApproval)
+	return d
+}
+
+// setGate points the driver at a gate-approval mode, keeping the derived
+// transition actor ("auto"|"caller") in lockstep. An empty mode reads as
+// GateAuto. It is called at construction and again on resume once the
+// card's persisted mode is known.
+func (d *Driver) setGate(mode string) {
+	if mode == "" {
+		mode = GateAuto
+	}
+	d.opts.GateApproval = mode
+	d.actor = "auto"
+	if mode == GateCaller {
+		d.actor = "caller"
 	}
 }
 
@@ -134,6 +153,27 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	if err := ValidateUntil(d.opts.Until, f.Kind, f.Skip); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
+
+	// gate-approval mode persists on the card. A resume that re-passes
+	// --gate-approval overrides (and re-persists) it; one that doesn't
+	// inherits the mode `run` chose, instead of silently reverting to auto.
+	if d.opts.GateApprovalSet {
+		mode := d.opts.GateApproval // "auto"|"caller", validated by the CLI
+		stored := f.GateApproval
+		if stored == "" {
+			stored = GateAuto
+		}
+		if mode != stored {
+			if err := d.store.SetGateApproval(ctx, id, mode); err != nil {
+				return d.fail(ctx, string(id), fmt.Errorf("persisting gate-approval: %w", err))
+			}
+			f.GateApproval = mode
+		}
+		d.setGate(mode)
+	} else if f.GateApproval != "" {
+		d.setGate(f.GateApproval)
+	}
+
 	// the correlation line first, so a resume's stream is self-identifying.
 	d.out.emit(resumedEvent{Event: "resumed", ID: string(id), Ref: d.opts.Ref, Stage: string(f.Stage)})
 
@@ -167,6 +207,33 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		d.opening = *in.Answer
 	}
 	return d.drive(ctx, id)
+}
+
+// Verify is the cheap re-attach for a run whose verify already passed but
+// whose card lost its finalize to a crash in the tail (stage stuck at
+// verify, verified:false). It re-runs the feature's gummi-side acceptance
+// checks on the existing branch and, if they pass, finalizes the verify
+// gate (stamping verified_at and reporting the branch ready to land) with
+// no fresh agent verify pass. Checks that still fail escalate; anywhere a
+// cheap re-attach can't be trusted it fails with a hint to `resume`.
+func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, error) {
+	if err := d.eng.Restore(ctx); err != nil {
+		return d.fail(ctx, string(id), fmt.Errorf("restoring sessions: %w", err))
+	}
+	d.out.emit(resumedEvent{Event: "verify", ID: string(id), Ref: d.opts.Ref, Stage: string(domain.StageVerify)})
+	res, err := d.eng.Reverify(ctx, id, d.actor)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	switch res.Status {
+	case engine.ReverifyFinalized:
+		return d.done(ctx, res.Feature)
+	case engine.ReverifyFailed:
+		return d.escalation(res.Feature,
+			"re-verify FAILED — acceptance checks still failing: "+strings.Join(res.Failed, ", ")), nil
+	default: // ReverifyUnavailable
+		return d.fail(ctx, string(id), errors.New(res.Reason))
+	}
 }
 
 // drive is the checkpoint loop: it advances the feature stage by stage
@@ -563,9 +630,33 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
 }
 
+// timeoutHint is the standing cause note on a timeout: the inactivity
+// window elapsing almost always means the backend agent stalled or lost
+// its connection, not that gummi hung — the exact diagnosis the operator
+// report asked us to surface instead of a bare timeout.
+const timeoutHint = "the stage went silent for the whole --stage-timeout window — usually the backend agent " +
+	"stalled or dropped its connection (or lost auth), not gummi; check the backend agent's auth/API and resume"
+
 func (d *Driver) timeout(f domain.Feature) Outcome {
-	d.out.emit(timeoutEvent{Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID)})
+	d.out.emit(timeoutEvent{Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: timeoutHint, Resume: string(f.ID)})
 	return Outcome{Status: StatusTimeout, ID: string(f.ID)}
+}
+
+// backendHint returns a short remediation note when a failure's message
+// looks like a backend disconnect, mid-stream stall, or auth problem — the
+// conditions an operator most often misreads as a gummi bug. Empty for
+// anything else, so the hint field only appears when it helps.
+func backendHint(msg string) string {
+	l := strings.ToLower(msg)
+	switch {
+	case strings.Contains(l, "auth") || strings.Contains(l, "401") || strings.Contains(l, "403") ||
+		strings.Contains(l, "unauthorized") || strings.Contains(l, "forbidden") || strings.Contains(l, "credential"):
+		return "the backend agent looks unauthenticated — re-auth it (run the agent's login) and resume"
+	case strings.Contains(l, "stall") || strings.Contains(l, "stream") || strings.Contains(l, "mid-session") ||
+		strings.Contains(l, "aborted") || strings.Contains(l, "disconnect") || strings.Contains(l, "eof"):
+		return "the backend agent's stream died mid-turn — usually a transient backend/network drop or lost auth; check the agent and resume"
+	}
+	return ""
 }
 
 // stopped is the --until early-stop terminal: a clean, deliberate halt at a
@@ -590,7 +681,7 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 // landed. The exit code stays 1 either way; the `resumable`/`stage` fields
 // carry the distinction (status.go).
 func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error) {
-	ev := errorEvent{Event: "error", ID: id, Error: err.Error()}
+	ev := errorEvent{Event: "error", ID: id, Error: err.Error(), Hint: backendHint(err.Error())}
 	if id != "" {
 		// detach from ctx: a cancelled/timed-out ctx (the very failure being
 		// reported) must not suppress the resumability lookup — the card is
@@ -632,7 +723,8 @@ func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature
 		ID: id, Num: num, Kind: domain.KindFeature, Title: title, OneLiner: oneLiner,
 		Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: skip,
 		Profile: d.opts.Profile, Budget: domain.Budget{Envelope: d.opts.Envelope},
-		ExternalRef: d.opts.Ref, CreatedAt: now, UpdatedAt: now,
+		GateApproval: d.opts.GateApproval,
+		ExternalRef:  d.opts.Ref, CreatedAt: now, UpdatedAt: now,
 	}
 	// seed the draft before persisting: the description's overflow fills the
 	// Problem section (a title-sized description seeds nothing there), and

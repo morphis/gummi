@@ -137,6 +137,24 @@ at that stage — event `stopped`, exit 0 — with the feature parked and resuma
 Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
 --approve` continues to the verified branch.
 
+## Worktrees, and re-attaching a proven branch
+
+Each feature is checked out in its **own linked git worktree** under
+`.gummi/worktrees/FD-NNN`, on branch `gummi/FD-NNN-slug`. That branch is
+*already checked out there*, so a plain `git checkout gummi/FD-NNN-…` in the
+main repo fails (`exit 128`, "already checked out"). To build, test, or inspect
+a branch outside gummi, `cd` into its worktree — don't check the branch out in
+the main checkout.
+
+If a `run`/`resume` was cut off **right at the end of verify** — the branch has
+all its commits and passes the acceptance checks, but the card is still
+`stage: verify` with `verified: false` (e.g. `status <id>` shows it) — you don't
+have to re-run the whole verify stage. `gummi verify <id>` re-runs the spec's
+`gummi-checks` on the existing branch and, if they pass, finalizes the card
+(stamps `verified`, emits `done`, exit 0) with no fresh agent pass. If the
+checks still fail it escalates (exit 4); if a cheap re-attach can't be trusted
+(not parked at verify, no checks) it exits 1 and points you back to `resume`.
+
 ## What gummi guarantees
 
 - **Review and verify always run.** There is no flag, profile, or config that

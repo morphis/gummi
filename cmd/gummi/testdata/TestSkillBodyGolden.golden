@@ -67,7 +67,7 @@ gummi run [flags] "<description>"
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --envelope int            credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)
     --full                    run the full route (brainstorm + plan), not the quick route
-    --gate-approval string    who approves design gates: auto|caller
+    --gate-approval string    who approves design gates: auto|caller (persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
@@ -79,12 +79,14 @@ gummi resume <id|ref> [decision]
     --approve                 approve a caller design gate
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --envelope int            raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)
-    --gate-approval string    who approves later design gates: auto|caller
+    --gate-approval string    who approves later design gates: auto|caller (inherits the run's mode when omitted; pass to change it)
     --ref string              external correlation id, echoed in the stream
     --request-changes string  send a caller design gate back with a note
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
     --until string            stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)
     --verbose                 add per-tool-call activity lines to the stream
+
+gummi verify <id|ref>
 
 gummi status <id|ref>
     --json  emit machine-readable JSON instead of the text summary
@@ -179,6 +181,24 @@ tokens, add `--until spec` (or `--until plan` on `--full`). The run stops cleanl
 at that stage — event `stopped`, exit 0 — with the feature parked and resumable.
 Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
 --approve` continues to the verified branch.
+
+## Worktrees, and re-attaching a proven branch
+
+Each feature is checked out in its **own linked git worktree** under
+`.gummi/worktrees/FD-NNN`, on branch `gummi/FD-NNN-slug`. That branch is
+*already checked out there*, so a plain `git checkout gummi/FD-NNN-…` in the
+main repo fails (`exit 128`, "already checked out"). To build, test, or inspect
+a branch outside gummi, `cd` into its worktree — don't check the branch out in
+the main checkout.
+
+If a `run`/`resume` was cut off **right at the end of verify** — the branch has
+all its commits and passes the acceptance checks, but the card is still
+`stage: verify` with `verified: false` (e.g. `status <id>` shows it) — you don't
+have to re-run the whole verify stage. `gummi verify <id>` re-runs the spec's
+`gummi-checks` on the existing branch and, if they pass, finalizes the card
+(stamps `verified`, emits `done`, exit 0) with no fresh agent pass. If the
+checks still fail it escalates (exit 4); if a cheap re-attach can't be trusted
+(not parked at verify, no checks) it exits 1 and points you back to `resume`.
 
 ## What gummi guarantees
 

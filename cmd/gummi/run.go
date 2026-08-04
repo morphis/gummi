@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -78,7 +80,7 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 		envelope:   fs.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)"),
 		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
 		full:       fs.Bool("full", false, "run the full route (brainstorm + plan), not the quick route"),
-		gate:       fs.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller"),
+		gate:       fs.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller (persisted on the card; resume keeps it)"),
 		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
@@ -149,6 +151,16 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 // exit. The exclusive lock refuses to start while the TUI or another run
 // holds the workspace (D13).
 func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (driver.Outcome, error), opts driver.Options) error {
+	// A headless run/resume is routinely launched detached (backgrounded,
+	// nohup, a supervisor). Without this, gummi keeps the default SIGHUP
+	// disposition — terminate — so a controlling terminal that hangs up on
+	// detach kills gummi, and the death of the parent tears down the stdio
+	// pipes tethering the backend agent child, killing the model turn too
+	// (near-zero progress, no commits). Ignoring SIGHUP makes gummi survive
+	// the hangup and keep draining the child, nohup-style. The interactive
+	// board does not go through here, so its terminal handling is unchanged.
+	signal.Ignore(syscall.SIGHUP)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err

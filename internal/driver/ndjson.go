@@ -128,9 +128,13 @@ type exhaustedEvent struct {
 }
 
 type timeoutEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Stage  string `json:"stage"`
+	Event string `json:"event"`
+	ID    string `json:"id"`
+	Stage string `json:"stage"`
+	// Hint names the most likely cause (a backend stall/disconnect/auth
+	// loss rather than a gummi hang), so a caller reading the stream can act
+	// without re-diagnosing an opaque timeout.
+	Hint   string `json:"hint,omitempty"`
 	Resume string `json:"resume"`
 }
 
@@ -164,6 +168,9 @@ type errorEvent struct {
 	// before an id existed (creation/validation) or the card is terminal.
 	Resumable bool   `json:"resumable"`
 	Stage     string `json:"stage,omitempty"`
+	// Hint is a short remediation note when the error looks like a backend
+	// disconnect, stall, or auth failure — absent otherwise.
+	Hint string `json:"hint,omitempty"`
 }
 
 type activityEvent struct {

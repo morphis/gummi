@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+// Gate approval modes: who crosses a feature's design gates. GateAuto
+// auto-crosses them; GateCaller checkpoints each for the caller. The mode
+// is chosen at `run` and persisted on the card so an unattended `resume`
+// keeps it instead of silently reverting to auto. Empty reads as GateAuto.
+// These are the canonical values; internal/driver aliases them.
+const (
+	GateAuto   = "auto"
+	GateCaller = "caller"
+)
+
+// ValidGateApproval reports whether s is a storable gate-approval mode
+// (empty, "auto", or "caller"). Empty is valid and reads as GateAuto.
+func ValidGateApproval(s string) bool {
+	return s == "" || s == GateAuto || s == GateCaller
+}
+
 // Kind distinguishes the two units of work gummi tracks. Both share the
 // store, engine, worktree, and board; they differ only in which workflow
 // governs them (see internal/workflow) and which artifact template seeds
@@ -120,8 +136,13 @@ type Feature struct {
 	Stage    Stage
 	Skip     SkipFlags
 	Profile  string // profile name mapping roles to agent configs
-	Budget   Budget
-	Spend    Spend // metered cost across all stages
+	// GateApproval is who crosses this feature's design gates on an
+	// unattended resume: GateAuto (default) or GateCaller. Persisted at
+	// creation so a `resume` that doesn't re-pass --gate-approval inherits
+	// the run's choice rather than reverting to auto. Empty reads as auto.
+	GateApproval string
+	Budget       Budget
+	Spend        Spend // metered cost across all stages
 	// ExternalRef ties a bug back to its source (e.g. a GitHub issue URL),
 	// so re-ingesting the same source skips items already imported. Empty
 	// for manually created features and bugs.
@@ -200,6 +221,9 @@ func (f *Feature) Validate() error {
 	}
 	if f.Budget.Envelope < 0 || f.Budget.Spent < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)
+	}
+	if !ValidGateApproval(f.GateApproval) {
+		return fmt.Errorf("feature %s: unknown gate-approval mode %q", f.ID, f.GateApproval)
 	}
 	return nil
 }

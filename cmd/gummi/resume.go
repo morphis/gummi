@@ -48,8 +48,9 @@ func runResume(args []string) error {
 	// mirror run so the continued tail behaves the same.
 	opts := driver.Options{
 		Envelope:     *rv.envelope,
-		GateApproval: *rv.gate, StageTimeout: *rv.timeout,
-		Autonomous: *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
+		GateApproval: *rv.gate, GateApprovalSet: isSet(fs, "gate-approval"),
+		StageTimeout: *rv.timeout,
+		Autonomous:   *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
 		Until: domain.Stage(*rv.until),
 	}
 
@@ -85,7 +86,7 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		envelope:       fs.Int("envelope", 0, "raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)"),
 		approve:        fs.Bool("approve", false, "approve a caller design gate"),
 		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
-		gate:           fs.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller"),
+		gate:           fs.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller (inherits the run's mode when omitted; pass to change it)"),
 		timeout:        fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous:     fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:        fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),

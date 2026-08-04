@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS features (
 	skip_triage     INTEGER NOT NULL DEFAULT 0,
 	skip_diagnose   INTEGER NOT NULL DEFAULT 0,
 	quick           INTEGER NOT NULL DEFAULT 0,
-	verified_at     TEXT NOT NULL DEFAULT ''
+	verified_at     TEXT NOT NULL DEFAULT '',
+	gate_approval   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
@@ -266,6 +267,7 @@ var migrations = []string{
 	`ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN quick INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN verified_at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN gate_approval TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -298,13 +300,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, budget_spent, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick)
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -315,7 +317,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -327,7 +329,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Budget.Envelope, &f.Budget.Spent,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval)
 	if err != nil {
 		return f, err
 	}
@@ -387,6 +389,24 @@ func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.T
 		t.UTC().Format(timeFmt), string(id))
 	if err != nil {
 		return fmt.Errorf("marking %s verified: %w", id, err)
+	}
+	return nil
+}
+
+// SetGateApproval persists a feature's gate-approval mode (who crosses its
+// design gates on an unattended resume). Like SetVerifiedAt it is a
+// side-channel write — it neither touches updated_at nor moves the stage —
+// so `run` records the chosen mode at creation and a later `resume` that
+// re-passes --gate-approval can override it without a full-feature write.
+// An empty mode reads as domain.GateAuto.
+func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode string) error {
+	if !domain.ValidGateApproval(mode) {
+		return fmt.Errorf("setting gate-approval for %s: unknown mode %q", id, mode)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET gate_approval = ? WHERE id = ?`, mode, string(id))
+	if err != nil {
+		return fmt.Errorf("setting gate-approval for %s: %w", id, err)
 	}
 	return nil
 }

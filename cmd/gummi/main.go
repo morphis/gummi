@@ -75,6 +75,8 @@ func run(args []string) error {
 			return runRun(args[1:])
 		case "resume":
 			return runResume(args[1:])
+		case "verify":
+			return runVerify(args[1:])
 		case "status":
 			return runStatus(args[1:])
 		case "spec":
@@ -86,7 +88,7 @@ func run(args []string) error {
 		case "skill":
 			return runSkill(args[1:])
 		default:
-			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest|bugs|run|resume|status|spec|diff|doctor|skill])", args[0])
+			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest|bugs|run|resume|verify|status|spec|diff|doctor|skill])", args[0])
 		}
 	}
 	// `gummi` with no arguments launches the board, creating the .gummi

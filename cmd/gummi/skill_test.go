@@ -34,7 +34,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 
 	for _, cmd := range []string{
-		"gummi run", "gummi resume", "gummi status", "gummi spec",
+		"gummi run", "gummi resume", "gummi verify", "gummi status", "gummi spec",
 		"gummi diff", "gummi doctor", "gummi skill",
 	} {
 		if !strings.Contains(doc, cmd) {
