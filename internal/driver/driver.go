@@ -137,6 +137,19 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	// the correlation line first, so a resume's stream is self-identifying.
 	d.out.emit(resumedEvent{Event: "resumed", ID: string(id), Ref: d.opts.Ref, Stage: string(f.Stage)})
 
+	// --envelope raises the feature's credit budget before the parked stage
+	// re-runs — the headless path to clear an `exhausted` exit. It is a floor:
+	// a value at or below the current envelope is a no-op, so a caller passing
+	// `--envelope` on a routine resume can never shrink an in-flight budget.
+	if d.opts.Envelope > f.Budget.Envelope {
+		from := f.Budget.Envelope
+		f.Budget.Envelope = d.opts.Envelope
+		if err := d.store.UpdateFeature(ctx, &f); err != nil {
+			return d.fail(ctx, string(id), fmt.Errorf("raising envelope: %w", err))
+		}
+		d.out.emit(envelopeRaisedEvent{Event: "envelope", ID: string(id), From: from, To: f.Budget.Envelope})
+	}
+
 	switch {
 	case in.Approve:
 		// an explicit approval crosses the gate now, regardless of the

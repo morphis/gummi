@@ -268,7 +268,7 @@ func exitTable() string {
 		{driver.StatusQuestion, "delegated question or caller gate — resume --answer/--approve/--request-changes"},
 		{driver.StatusBlocked, "open %% or diff threads block a gate — resolve, or resume --request-changes"},
 		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; resumable"},
-		{driver.StatusExhausted, "credit envelope dry — raise it, then resume"},
+		{driver.StatusExhausted, "credit envelope dry — resume <id> --envelope N (a larger number) to raise it and continue"},
 		{driver.StatusTimeout, "a stage went quiet (likely hang) — report; resumable"},
 	}
 	var b strings.Builder

@@ -261,6 +261,85 @@ func TestBudgetExhausted(t *testing.T) {
 	}
 }
 
+// happyResumeScript drives a feature parked at Spec through to a verified
+// branch — the tail a `resume` re-runs after an envelope top-up.
+func happyResumeScript() map[domain.Stage]stageFn {
+	return map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	}
+}
+
+// `resume --envelope N` raises a parked feature's credit budget before the
+// stage re-runs — the headless path out of an exhausted exit. The raise is a
+// floor: it lifts the envelope and emits an `envelope` event.
+func TestResumeEnvelopeRaisesBudget(t *testing.T) {
+	h := newHarness(t, true, happyResumeScript())
+	f := feature(1, domain.StageSpec) // Budget.Envelope == 500
+	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{Envelope: 900}).Resume(context.Background(), f.ID, ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
+	}
+	got, err := h.store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget.Envelope != 900 {
+		t.Fatalf("envelope = %d, want 900 (raised)", got.Budget.Envelope)
+	}
+	ev := lastEvent(h, "envelope")
+	if ev == nil {
+		t.Fatalf("no envelope event; stream=%v", h.eventKinds())
+	}
+	if ev["from"].(float64) != 500 || ev["to"].(float64) != 900 {
+		t.Fatalf("envelope event = %v, want from=500 to=900", ev)
+	}
+}
+
+// An --envelope at or below the current budget is a floor no-op: it never
+// shrinks an in-flight envelope, and emits no envelope event.
+func TestResumeEnvelopeFloorNoOp(t *testing.T) {
+	h := newHarness(t, true, happyResumeScript())
+	f := feature(1, domain.StageSpec) // Budget.Envelope == 500
+	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.driver(Options{Envelope: 300}).Resume(context.Background(), f.ID, ResumeInput{}); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	got, err := h.store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget.Envelope != 500 {
+		t.Fatalf("envelope = %d, want 500 (unchanged; --envelope must never shrink)", got.Budget.Envelope)
+	}
+	if h.has("envelope") {
+		t.Fatalf("emitted an envelope event for a no-op raise; stream=%v", h.eventKinds())
+	}
+}
+
 // An open user %% thread in the artifact blocks the design gate.
 func TestBlockedGate(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{

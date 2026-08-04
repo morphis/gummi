@@ -36,12 +36,18 @@ func runResume(args []string) error {
 	if err != nil {
 		return err
 	}
-	// resume carries no envelope (the feature already has one); the rest of
-	// the driving options mirror run so the continued tail behaves the same.
 	if *rv.gate != driver.GateAuto && *rv.gate != driver.GateCaller {
 		return fmt.Errorf("--gate-approval must be %q or %q, got %q", driver.GateAuto, driver.GateCaller, *rv.gate)
 	}
+	if *rv.envelope < 0 {
+		return fmt.Errorf("--envelope must be a positive credit count, got %d", *rv.envelope)
+	}
+	// resume mostly reuses the feature's existing envelope; --envelope raises
+	// it (the only way to clear an exhausted stage headlessly — driver.Resume
+	// treats it as a floor and never lowers). The rest of the driving options
+	// mirror run so the continued tail behaves the same.
 	opts := driver.Options{
+		Envelope:     *rv.envelope,
 		GateApproval: *rv.gate, StageTimeout: *rv.timeout,
 		Autonomous: *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
 		Until: domain.Stage(*rv.until),
@@ -67,6 +73,7 @@ type resumeFlagValues struct {
 	gate, ref, until       *string
 	approve, autonomous    *bool
 	verbose                *bool
+	envelope               *int
 	timeout                *time.Duration
 }
 
@@ -75,6 +82,7 @@ type resumeFlagValues struct {
 func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 	return &resumeFlagValues{
 		answer:         fs.String("answer", "", "answer a delegated ask_user question"),
+		envelope:       fs.Int("envelope", 0, "raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)"),
 		approve:        fs.Bool("approve", false, "approve a caller design gate"),
 		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
 		gate:           fs.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller"),

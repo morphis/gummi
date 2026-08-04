@@ -56,6 +56,16 @@ type resumedEvent struct {
 	Stage string `json:"stage"`
 }
 
+// envelopeRaisedEvent reports a `resume --envelope N` top-up: the feature's
+// credit budget went From→To before the parked stage re-ran. Emitted only
+// when the new envelope actually exceeds the old one (a no-op raise is silent).
+type envelopeRaisedEvent struct {
+	Event string `json:"event"`
+	ID    string `json:"id"`
+	From  int    `json:"from"`
+	To    int    `json:"to"`
+}
+
 type stageEvent struct {
 	Event  string `json:"event"`
 	ID     string `json:"id"`

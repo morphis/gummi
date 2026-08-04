@@ -80,6 +80,21 @@ and exits with a **typed status**. Branch on the exit code:
 
 {{.ExitTable}}
 
+**Capture that exit code directly — never through a pipe.** `gummi run … | tee
+run.log` (or `| head`, `| grep`) reports the *filter's* exit status, not
+gummi's, so a `question`/`exhausted`/`error` looks like success. Redirect to a
+file and read `$?` on the next line:
+
+```
+gummi run --envelope N "<description>" > run.log; ec=$?
+```
+
+(or `set -o pipefail` if you must pipe). Equivalently, the exit code is fully
+redundant with the stream: the **last NDJSON line's `event`** (`done`,
+`question`, `blocked`, `escalation`, `exhausted`, `timeout`, `stopped`,
+`error`) is the terminal status — parse that if you'd rather not depend on the
+shell.
+
 The loop you run:
 
 1. `gummi run --envelope N "<description>"` (add `--ref <id>` to correlate with
@@ -98,8 +113,10 @@ The loop you run:
      back; if you can't, escalate to the human.
    - **escalation (4) / exhausted (5) / timeout (6)** — stop and report to the
      human. These are durable and resumable: the card stays on the board.
-     `exhausted` resumes only after the envelope is raised; `escalation` and
-     `timeout` after the human weighs in.
+     `exhausted` resumes with `gummi resume <id> --envelope N`, where N is
+     larger than the envelope it ran dry on (the `envelope` field on the
+     `exhausted` event) — the raise is a floor, so it can never shrink the
+     budget. `escalation` and `timeout` resume once the human weighs in.
    - **error (1)** — a setup/agent failure. Check `gummi status <id>`: a
      pre-id setup failure landed nothing (report it), but a mid-run failure
      can leave a durable, non-terminal card that a `gummi resume <id>` may
