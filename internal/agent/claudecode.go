@@ -128,8 +128,11 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	cmd.Dir = opts.WorkDir
 	// The child inherits gummi's environment: auth is out of band (the
 	// user's claude login or ANTHROPIC_API_KEY), exactly like copilot's gh
-	// auth, and the CLI reads its own config from $HOME.
-	cmd.Env = os.Environ()
+	// auth, and the CLI reads its own config from $HOME. Scrub the parent's
+	// Claude Code session markers first, so a gummi driven from inside a
+	// Claude Code session spawns a top-level child, not a bridge child of the
+	// caller's session (auth vars are preserved — see scrubClaudeSessionEnv).
+	cmd.Env = scrubClaudeSessionEnv(os.Environ())
 	// Run the child in its own process group and, on cancel/close, kill the
 	// whole group: claude spawns tool subprocesses (bash, editors) that
 	// would otherwise orphan and keep the stdout pipe open, stalling
@@ -187,6 +190,28 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	c.sessions = append(c.sessions, s)
 	c.mu.Unlock()
 	return s, nil
+}
+
+// scrubClaudeSessionEnv returns env with the parent Claude Code session
+// markers removed. When gummi is itself launched from inside a Claude Code
+// session, the process environment carries that session's identity —
+// CLAUDECODE, every CLAUDE_CODE_* marker (session id, child/bridge session),
+// and AI_AGENT — and a naive inherit would make the child claude present as a
+// bridge child of the caller's session instead of its own top-level run. The
+// child runs fine either way, so this is defensive hygiene, not a
+// correctness fix. Auth is deliberately preserved: CLAUDE_CONFIG_DIR (not a
+// CLAUDE_CODE_ key), ANTHROPIC_API_KEY, HOME, PATH and everything else pass
+// through, so the child authenticates exactly as before.
+func scrubClaudeSessionEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		if key == "CLAUDECODE" || key == "AI_AGENT" || strings.HasPrefix(key, "CLAUDE_CODE_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // Close implements Agent: end every live session.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -419,6 +420,185 @@ func TestCallerGateApproveResume(t *testing.T) {
 	}
 }
 
+// A bare `resume` (no --approve/--request-changes/--answer) landing on an
+// interactive stage already driven to its gate must re-present the gate, not
+// re-enter the stage. The prior run left a live spec session carrying the
+// finished interview; re-attaching would send no turn (the interview is
+// done) and the driver would block until --stage-timeout, then misreport a
+// backend stall. crossGate under --gate-approval=caller re-emits the same
+// checkpoint the first run produced — instantly, with no turn and no timeout.
+func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+	})
+	out, err := h.driver(Options{GateApproval: GateCaller}).Run(context.Background(), "feature")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Status != StatusQuestion {
+		t.Fatalf("run status = %q, want question (caller gate); stream=%v", out.Status, h.eventKinds())
+	}
+
+	// bare resume: no decision. A short timeout makes a regression (turn-less
+	// await) fail fast instead of hanging the suite.
+	h.buf.Reset()
+	out2, err := h.driver(Options{GateApproval: GateCaller, StageTimeout: 2 * time.Second}).
+		Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if out2.Status != StatusQuestion {
+		t.Fatalf("resume status = %q, want question (gate re-presented); stream=%v", out2.Status, h.eventKinds())
+	}
+	if h.has("timeout") {
+		t.Fatalf("bare resume timed out on a completed interactive stage; stream=%v", h.eventKinds())
+	}
+	if g := lastEvent(h, "gate"); g == nil || g["to"] != string(domain.StageImplement) {
+		t.Fatalf("gate event = %v, want to=implement", g)
+	}
+	if h.stageOf(domain.FeatureID(out.ID)) != domain.StageSpec {
+		t.Fatalf("feature advanced past spec on a bare resume; want it parked at the gate")
+	}
+}
+
+// The same completed-stage resume under --gate-approval=auto crosses the
+// gate instead of checkpointing: a feature parked at spec by `--until spec`
+// carries a finished interview, and a bare resume (no --until) must advance
+// through it to a verified branch, not park a turn-less session.
+func TestResumeCompletedAutoGateAdvances(t *testing.T) {
+	h := newHarness(t, true, happyResumeScript())
+	out, err := h.driver(Options{Until: domain.StageSpec}).Run(context.Background(), "feature")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Status != StatusStopped {
+		t.Fatalf("run status = %q, want stopped (--until spec); stream=%v", out.Status, h.eventKinds())
+	}
+
+	h.buf.Reset()
+	out2, err := h.driver(Options{StageTimeout: 2 * time.Second}).
+		Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if out2.Status != StatusDone {
+		t.Fatalf("resume status = %q, want done (auto-advanced past the gate); stream=%v", out2.Status, h.eventKinds())
+	}
+	if h.has("timeout") {
+		t.Fatalf("bare resume timed out instead of crossing the gate; stream=%v", h.eventKinds())
+	}
+}
+
+// The timeout hint is diagnosed from whether a turn was actually dispatched
+// this stage: a backend that goes silent after its turn points at the
+// backend, but a stage that timed out with no turn sent points the operator
+// at the gate decision — not a phantom backend outage.
+func TestTimeoutHintTracksSentTurn(t *testing.T) {
+	h := newHarness(t, true, nil)
+	f := feature(1, domain.StageSpec)
+
+	d := h.driver(Options{})
+	d.sentTurn = true
+	d.timeout(f)
+	if ev := lastEvent(h, "timeout"); ev == nil || !strings.Contains(ev["hint"].(string), "backend agent stalled") {
+		t.Fatalf("sent-turn timeout hint = %v, want a backend-stall diagnosis", ev)
+	}
+
+	h.buf.Reset()
+	d.sentTurn = false
+	d.timeout(f)
+	if ev := lastEvent(h, "timeout"); ev == nil || !strings.Contains(ev["hint"].(string), "no turn was sent") {
+		t.Fatalf("parked timeout hint = %v, want a gate-decision diagnosis", ev)
+	}
+}
+
+// Terminal events carry a `next` field naming the exact resume command that
+// advances the stop, so a caller driving the stream never has to recall which
+// verb a given stop takes (the mismatch behind the deadlock report). A
+// terminal success (`done`) carries none — there is nothing to resume.
+func TestNextCommandSelfDocumentsResume(t *testing.T) {
+	t.Run("question names --answer", func(t *testing.T) {
+		h := newHarness(t, false, map[domain.Stage]stageFn{
+			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return convAsk(o.Model, "Include a schema header?", "no (recommended)", "yes")
+			},
+		})
+		out, err := h.driver(Options{}).Run(context.Background(), "add export")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		q := lastEvent(h, "question")
+		if want := "gummi resume " + out.ID + ` --answer "<answer>"`; q == nil || q["next"] != want {
+			t.Fatalf("question next = %v, want %q", q["next"], want)
+		}
+	})
+
+	t.Run("caller gate names --approve", func(t *testing.T) {
+		h := newHarness(t, true, map[domain.Stage]stageFn{
+			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return msgIdle(o.Model, "Spec drafted.")
+			},
+		})
+		out, err := h.driver(Options{GateApproval: GateCaller}).Run(context.Background(), "feature")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		g := lastEvent(h, "gate")
+		if want := "gummi resume " + out.ID + " --approve"; g == nil || g["next"] != want {
+			t.Fatalf("gate next = %v, want %q", g["next"], want)
+		}
+	})
+
+	t.Run("--until stop names --approve", func(t *testing.T) {
+		h := newHarness(t, true, happyResumeScript())
+		out, err := h.driver(Options{Until: domain.StageSpec}).Run(context.Background(), "feature")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		s := lastEvent(h, "stopped")
+		if want := "gummi resume " + out.ID + " --approve"; s == nil || s["next"] != want {
+			t.Fatalf("stopped next = %v, want %q", s["next"], want)
+		}
+	})
+
+	t.Run("exhausted names --envelope doubled", func(t *testing.T) {
+		h := newHarness(t, true, map[domain.Stage]stageFn{
+			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return msgIdle(o.Model, "Spec.")
+			},
+			domain.StageImplement: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
+				return []agent.Event{{Kind: agent.EventBudgetExhausted}}
+			},
+		})
+		out, err := h.driver(Options{Envelope: 500}).Run(context.Background(), "feature")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		e := lastEvent(h, "exhausted")
+		if want := "gummi resume " + out.ID + " --envelope 1000"; e == nil || e["next"] != want {
+			t.Fatalf("exhausted next = %v, want %q (double the dry envelope)", e["next"], want)
+		}
+	})
+
+	t.Run("done carries no next", func(t *testing.T) {
+		h := newHarness(t, true, happyResumeScript())
+		out, err := h.driver(Options{}).Run(context.Background(), "feature")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if out.Status != StatusDone {
+			t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
+		}
+		if d := lastEvent(h, "done"); d == nil {
+			t.Fatal("no done event")
+		} else if _, ok := d["next"]; ok {
+			t.Fatalf("done event carried a next command: %v", d)
+		}
+	})
+}
+
 // The error event distinguishes a resumable mid-run failure (a durable,
 // non-terminal card exists) from a pre-id setup failure where nothing
 // landed — even though both keep exit code 1.
@@ -444,6 +624,9 @@ func TestErrorEventResumable(t *testing.T) {
 	if e["stage"] != string(domain.StageImplement) {
 		t.Errorf("error stage = %v, want implement", e["stage"])
 	}
+	if want := "gummi resume " + string(f.ID); e["next"] != want {
+		t.Errorf("error next = %v, want %q (resumable retry)", e["next"], want)
+	}
 
 	// a pre-creation failure (no id) → not resumable, no stage.
 	h.buf.Reset()
@@ -459,6 +642,9 @@ func TestErrorEventResumable(t *testing.T) {
 	}
 	if _, ok := e["stage"]; ok {
 		t.Errorf("pre-id error carried a stage %v, want none", e["stage"])
+	}
+	if _, ok := e["next"]; ok {
+		t.Errorf("pre-id error carried a next %v, want none (nothing landed)", e["next"])
 	}
 }
 

@@ -291,6 +291,95 @@ for line in sys.stdin:
 	}
 }
 
+// The parent's Claude Code session markers are stripped from the child's
+// environment so a gummi driven from inside a Claude Code session spawns a
+// top-level child, not a bridge child; auth and runtime vars pass through.
+func TestScrubClaudeSessionEnv(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin",
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_SESSION_ID=parent",
+		"CLAUDE_CODE_CHILD_SESSION=1",
+		"CLAUDE_CODE_BRIDGE_SESSION_ID=bridge",
+		"AI_AGENT=claude",
+		"CLAUDE_CONFIG_DIR=/home/x/.claude",
+		"ANTHROPIC_API_KEY=sk-test",
+		"HOME=/home/x",
+	}
+	set := map[string]bool{}
+	for _, kv := range scrubClaudeSessionEnv(in) {
+		k, _, _ := strings.Cut(kv, "=")
+		set[k] = true
+	}
+	for _, dropped := range []string{
+		"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+		"CLAUDE_CODE_BRIDGE_SESSION_ID", "AI_AGENT",
+	} {
+		if set[dropped] {
+			t.Errorf("kept %q; want it scrubbed from the child env", dropped)
+		}
+	}
+	// CLAUDE_CONFIG_DIR is auth (not a CLAUDE_CODE_ key) and must survive.
+	for _, kept := range []string{"PATH", "CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "HOME"} {
+		if !set[kept] {
+			t.Errorf("scrubbed %q; want it preserved (auth/runtime)", kept)
+		}
+	}
+}
+
+// End to end: the spawned child actually sees the scrubbed environment —
+// proving the scrub is wired into cmd.Env, not just a standalone helper.
+func TestClaudeCodeScrubsSessionEnvOnSpawn(t *testing.T) {
+	script := `import sys, json, os
+def out(o):
+    sys.stdout.write(json.dumps(o)+"\n"); sys.stdout.flush()
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    m = json.loads(line)
+    if m.get("type") != "user": continue
+    keys = ["CLAUDECODE","CLAUDE_CODE_SESSION_ID","CLAUDE_CODE_BRIDGE_SESSION_ID","AI_AGENT","CLAUDE_CONFIG_DIR"]
+    text = " ".join(k+"="+os.environ.get(k,"<unset>") for k in keys)
+    out({"type":"assistant","message":{"model":"m","content":[{"type":"text","text":text}]}})
+    out({"type":"result","subtype":"success","is_error":False,"modelUsage":{}})
+`
+	// gummi is "inside" a Claude Code session: the markers are in its env.
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "parent-sess")
+	t.Setenv("CLAUDE_CODE_BRIDGE_SESSION_ID", "bridge-sess")
+	t.Setenv("AI_AGENT", "claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", "/home/x/.claude")
+
+	ag, err := NewClaudeCode(writeFakeClaude(t, script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	var msg string
+	for _, e := range collect(t, sess) {
+		if e.Kind == EventMessage {
+			msg = e.Text
+		}
+	}
+	for _, want := range []string{
+		"CLAUDECODE=<unset>", "CLAUDE_CODE_SESSION_ID=<unset>",
+		"CLAUDE_CODE_BRIDGE_SESSION_ID=<unset>", "AI_AGENT=<unset>",
+		"CLAUDE_CONFIG_DIR=/home/x/.claude", // auth preserved
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("child env missing %q; got: %s", want, msg)
+		}
+	}
+}
+
 func TestClaudeCodeCrashMidTurnIsError(t *testing.T) {
 	script := `import sys
 sys.stdin.readline()

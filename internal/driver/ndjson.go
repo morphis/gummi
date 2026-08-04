@@ -90,6 +90,11 @@ type questionEvent struct {
 	Recommended string   `json:"recommended,omitempty"`
 	FreeForm    bool     `json:"free_form"`
 	Resume      string   `json:"resume"`
+	// Next is the copy-pasteable command that advances this stop — the exact
+	// `gummi resume <id> …` verb for this event, so a caller driving the
+	// stream never has to recall which flag a given stop takes. Free-form
+	// values (an answer, a change note) appear as a <placeholder> to fill in.
+	Next string `json:"next,omitempty"`
 }
 
 type gatePendingEvent struct {
@@ -98,6 +103,7 @@ type gatePendingEvent struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Resume string `json:"resume"`
+	Next   string `json:"next,omitempty"`
 }
 
 type blockedEvent struct {
@@ -115,6 +121,7 @@ type escalationEvent struct {
 	Stage  string `json:"stage"`
 	Reason string `json:"reason"`
 	Resume string `json:"resume"`
+	Next   string `json:"next,omitempty"`
 }
 
 type exhaustedEvent struct {
@@ -125,6 +132,7 @@ type exhaustedEvent struct {
 	Envelope  int     `json:"envelope"`
 	Committed bool    `json:"committed"`
 	Resume    string  `json:"resume"`
+	Next      string  `json:"next,omitempty"`
 }
 
 type timeoutEvent struct {
@@ -136,6 +144,7 @@ type timeoutEvent struct {
 	// without re-diagnosing an opaque timeout.
 	Hint   string `json:"hint,omitempty"`
 	Resume string `json:"resume"`
+	Next   string `json:"next,omitempty"`
 }
 
 // stoppedEvent is the --until terminal milestone: a clean early stop at the
@@ -146,6 +155,7 @@ type stoppedEvent struct {
 	ID     string `json:"id"`
 	Stage  string `json:"stage"`
 	Resume string `json:"resume"`
+	Next   string `json:"next,omitempty"`
 }
 
 type doneEvent struct {
@@ -171,6 +181,9 @@ type errorEvent struct {
 	// Hint is a short remediation note when the error looks like a backend
 	// disconnect, stall, or auth failure — absent otherwise.
 	Hint string `json:"hint,omitempty"`
+	// Next is the resume command to retry, present only when Resumable (a
+	// durable non-terminal card exists); absent for pre-id setup failures.
+	Next string `json:"next,omitempty"`
 }
 
 type activityEvent struct {

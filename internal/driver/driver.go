@@ -67,6 +67,7 @@ type Driver struct {
 	opening      string       // one-shot message to send on the next interactive stage (resume answer / change note)
 	curStage     domain.Stage // stage currently being driven (for verbose activity lines)
 	activityCur  int          // cursor into the live session's activity feed
+	sentTurn     bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
 }
 
 // New builds a driver writing its NDJSON stream to out. The caller owns
@@ -284,11 +285,28 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 	d.enterStage(f.Stage)
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage)})
 
+	// A bare resume that lands on an interactive stage already driven to its
+	// gate has no turn to send: the restored/live session carries the
+	// finished interview, so Attach reattaches silently (interactive stages
+	// advance on human turns, and a completed one has nothing to send).
+	// Re-entering would park a turn-less session that can only time out —
+	// the deadlock the operator report caught. Present the gate instead: the
+	// identical checkpoint a fresh run reaches here. crossGate auto-advances
+	// under --gate-approval=auto, checkpoints under caller, and surfaces any
+	// open-question blockers — so an incomplete interview reports its
+	// blockers rather than hanging, and neither path waits on a turn that
+	// was never sent. (A resume carrying an answer / change note does have a
+	// turn to send, so it falls through to Attach + Send below.)
+	if d.opening == "" && d.reattachSilent(f) {
+		return d.crossGate(ctx, f)
+	}
+
 	if _, err := d.eng.Attach(ctx, f); err != nil {
 		return Outcome{}, err
 	}
-	// a resume seeds the answer / change note as the opening turn; a fresh
-	// attach relies on the engine's own stage kickoff.
+	// past the guard a turn is always dispatched — a fresh Attach kicks off
+	// the stage, and a resume seeds the answer / change note below.
+	d.sentTurn = true
 	if d.opening != "" {
 		msg := d.opening
 		d.opening = ""
@@ -327,6 +345,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 				Event: "question", ID: string(f.ID), Q: ask.Question,
 				Options: askLabels(ask), Recommended: recommendedOption(ask),
 				FreeForm: ask.FreeForm, Resume: string(f.ID),
+				Next: resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 			})
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 		case endIdle:
@@ -359,6 +378,7 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	if err := d.eng.Run(f); err != nil {
 		return Outcome{}, err
 	}
+	d.sentTurn = true
 	end, err := d.awaitStage(ctx, f.ID)
 	if err != nil {
 		return Outcome{}, err
@@ -564,7 +584,10 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		next := forwardEdge(f)
-		d.out.emit(gatePendingEvent{Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(next), Resume: string(f.ID)})
+		d.out.emit(gatePendingEvent{
+			Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(next), Resume: string(f.ID),
+			Next: resumeCmd(string(f.ID), "--approve"),
+		})
 		return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 	}
 	return d.autoAdvance(ctx, f)
@@ -623,22 +646,43 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
 		f = got
 	}
+	// suggest a concrete raise (double the dry envelope) so `next` is runnable
+	// as-is; it is a floor the driver never lowers, and the caller can edit it.
+	suggested := f.Budget.Envelope * 2
 	d.out.emit(exhaustedEvent{
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),
+		Next: resumeCmd(string(f.ID), "--envelope", fmt.Sprintf("%d", suggested)),
 	})
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
 }
 
-// timeoutHint is the standing cause note on a timeout: the inactivity
-// window elapsing almost always means the backend agent stalled or lost
-// its connection, not that gummi hung — the exact diagnosis the operator
-// report asked us to surface instead of a bare timeout.
-const timeoutHint = "the stage went silent for the whole --stage-timeout window — usually the backend agent " +
-	"stalled or dropped its connection (or lost auth), not gummi; check the backend agent's auth/API and resume"
+// timeoutHintStalled is the cause note when the stage went silent AFTER
+// gummi dispatched the agent a turn: the inactivity window elapsing then
+// almost always means the backend agent stalled or lost its connection, not
+// that gummi hung. The driver knows a turn was sent (d.sentTurn), so it only
+// blames the backend when the backend is actually the party we're waiting on.
+const timeoutHintStalled = "the stage went silent for the whole --stage-timeout window after its turn was sent — " +
+	"usually the backend agent stalled or dropped its connection (or lost auth), not gummi; " +
+	"check the backend agent's auth/API and resume"
+
+// timeoutHintParked is the cause note when gummi never sent the agent a turn
+// this stage: the stage is parked at a gate with nothing to drive, so the
+// fault is caller-side, not the backend. It points at the decision that
+// advances the gate instead of sending the operator to debug the backend —
+// the misdiagnosis the operator report flagged.
+const timeoutHintParked = "the stage is parked at a gate and no turn was sent this stage — advance it with " +
+	"--approve (or --request-changes / --answer), not by a bare resume, which has nothing to drive here"
 
 func (d *Driver) timeout(f domain.Feature) Outcome {
-	d.out.emit(timeoutEvent{Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: timeoutHint, Resume: string(f.ID)})
+	hint := timeoutHintStalled
+	if !d.sentTurn {
+		hint = timeoutHintParked
+	}
+	d.out.emit(timeoutEvent{
+		Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: hint, Resume: string(f.ID),
+		Next: resumeCmd(string(f.ID)),
+	})
 	return Outcome{Status: StatusTimeout, ID: string(f.ID)}
 }
 
@@ -659,17 +703,37 @@ func backendHint(msg string) string {
 	return ""
 }
 
+// resumeCmd formats the copy-pasteable command a caller runs next to advance
+// a parked feature — the `next` field on terminal events. It keeps the stream
+// self-documenting so a driver never has to recall which resume verb a given
+// stop takes (the exact confusion that lets a bare resume land on a gate).
+// args are appended after `gummi resume <id>`; a free-form value a caller must
+// supply is passed as a <placeholder>.
+func resumeCmd(id string, args ...string) string {
+	cmd := "gummi resume " + id
+	if len(args) > 0 {
+		cmd += " " + strings.Join(args, " ")
+	}
+	return cmd
+}
+
 // stopped is the --until early-stop terminal: a clean, deliberate halt at a
 // design boundary (the feature stays parked at f.Stage, resumable). It exits
 // 0 — not an escalation — so a caller distinguishes it from `done` by the
 // event name, not the exit code.
 func (d *Driver) stopped(f domain.Feature) Outcome {
-	d.out.emit(stoppedEvent{Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID)})
+	d.out.emit(stoppedEvent{
+		Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID),
+		Next: resumeCmd(string(f.ID), "--approve"),
+	})
 	return Outcome{Status: StatusStopped, ID: string(f.ID)}
 }
 
 func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
-	d.out.emit(escalationEvent{Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID)})
+	d.out.emit(escalationEvent{
+		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
+		Next: resumeCmd(string(f.ID)),
+	})
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
 }
 
@@ -689,6 +753,9 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 		if f, gerr := d.store.GetFeature(context.WithoutCancel(ctx), domain.FeatureID(id)); gerr == nil {
 			ev.Resumable = !workflow.Terminal(f.Kind, f.Stage)
 			ev.Stage = string(f.Stage)
+			if ev.Resumable {
+				ev.Next = resumeCmd(id)
+			}
 		}
 	}
 	d.out.emit(ev)
@@ -752,6 +819,20 @@ func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature
 func (d *Driver) enterStage(stage domain.Stage) {
 	d.curStage = stage
 	d.activityCur = 0
+	d.sentTurn = false
+}
+
+// reattachSilent reports whether Attach would reattach to f's interactive
+// stage without sending a turn: a restored or still-live session for the
+// same stage already carries the interview transcript, so the engine treats
+// the conversation as underway (or finished) and stays quiet on attach. It
+// mirrors Attach's own `fresh` test (transcript emptiness), computed before
+// attaching so the driver can present the gate instead of parking a
+// turn-less session. A fresh stage (no session, empty transcript) reads
+// false — Attach will kick it off.
+func (d *Driver) reattachSilent(f domain.Feature) bool {
+	snap := d.snapshot(f.ID)
+	return snap.Feature.Stage == f.Stage && len(snap.Transcript) > 0
 }
 
 // snapshot returns the live session snapshot for id, or a zero snapshot.

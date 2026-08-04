@@ -264,13 +264,13 @@ func exitTable() string {
 		meaning string
 	}{
 		{driver.StatusDone, "verified branch ready — report it upward, stop"},
-		{driver.StatusStopped, "--until reached its clean stop — resume --approve to continue"},
+		{driver.StatusStopped, "clean `--until` stop — `resume <id> --approve` crosses the gate and continues"},
 		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event)"},
-		{driver.StatusQuestion, "delegated question or caller gate — resume --answer/--approve/--request-changes"},
-		{driver.StatusBlocked, "open %% or diff threads block a gate — resolve, or resume --request-changes"},
-		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; resumable"},
-		{driver.StatusExhausted, "credit envelope dry — resume <id> --envelope N (a larger number) to raise it and continue"},
-		{driver.StatusTimeout, "a stage went quiet (likely hang) — report; resumable"},
+		{driver.StatusQuestion, "a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>`"},
+		{driver.StatusBlocked, "open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back"},
+		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage"},
+		{driver.StatusExhausted, "credit envelope dry — `resume <id> --envelope N` (N larger than the dry envelope) raises it and continues"},
+		{driver.StatusTimeout, "a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage"},
 	}
 	var b strings.Builder
 	b.WriteString("| Exit | Status | What it means / your action |\n")

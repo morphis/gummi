@@ -95,6 +95,14 @@ redundant with the stream: the **last NDJSON line's `event`** (`done`,
 `error`) is the terminal status — parse that if you'd rather not depend on the
 shell.
 
+Every resumable terminal event also carries a **`next`** field: the literal
+`gummi resume …` command for that stop, with the right verb already chosen
+(free-form values you must supply appear as a `<placeholder>`, e.g. `--answer
+"<answer>"`, and `exhausted` pre-fills a doubled `--envelope`). Prefer running
+`next` verbatim over assembling the command yourself — it can't pick the wrong
+verb. `done` carries no `next` (nothing to resume); `blocked` carries none
+because its next step is to resolve the threads, not a fixed command.
+
 The loop you run:
 
 1. `gummi run --envelope N "<description>"` (add `--ref <id>` to correlate with
@@ -122,6 +130,28 @@ The loop you run:
      can leave a durable, non-terminal card that a `gummi resume <id>` may
      finish — the error event's `resumable`/`stage` fields say which.
 3. After a `resume`, read the new exit code and repeat until `done`.
+
+### Which `resume` verb — match the flag to why the run stopped
+
+`gummi resume <id>` does different things depending on its flag. Pick the one
+that matches the terminal event; the wrong verb wastes a stage or stalls:
+
+- `--answer "<text>"` — answers a delegated **`question`** event (an `ask_user`).
+- `--approve` / `--request-changes "<note>"` — decides a caller **`gate`** event
+  (a design gate under `--gate-approval=caller`), and the same pair continues a
+  `--until` **`stopped`** run.
+- `--envelope N` — clears an **`exhausted`** stop; N must exceed the dry envelope
+  (the `envelope` field on the event). It only raises, never lowers.
+- **no decision flag** — re-runs the parked stage exactly as it is. This is *only*
+  for retrying a stage that stalled (**`timeout`**), escalated (**`escalation`**),
+  or ran dry (after you top up with `--envelope`) — once the human has weighed in.
+  A bare `resume` is **not** how you cross a gate or answer a question: at a gate
+  it only re-presents the same gate, and at a delegated ask it has nothing to
+  send. Reach for `--approve` / `--answer` there.
+
+Exactly one decision flag per resume (`--answer`, `--approve`, and
+`--request-changes` are mutually exclusive). `--envelope` composes with any of
+them, or stands alone to top up a plain re-run.
 
 For a **small or well-specified** feature whose delegated questions you'd answer
 with the `recommended` option anyway, start with `--autonomous`: it auto-takes
