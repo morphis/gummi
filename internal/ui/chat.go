@@ -464,9 +464,6 @@ func chatMeta(s *theme.Styles, snap engine.Snapshot) string {
 	if m := runModel(snap); m != "" {
 		parts = append(parts, s.Muted.Render(m))
 	}
-	if p := snap.Provider.Describe(); p != "" {
-		parts = append(parts, s.Faint.Render(p))
-	}
 	if sp := spendSummary(snap); sp != "" {
 		parts = append(parts, s.Faint.Render(sp+" spent"))
 	}

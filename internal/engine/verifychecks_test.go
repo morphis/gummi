@@ -40,7 +40,7 @@ func TestVerifyStageRunsChecksGummiSide(t *testing.T) {
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -79,7 +79,7 @@ func kickoffAfterVerify(t *testing.T, seed func(store *state.Store, f domain.Fea
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -176,7 +176,7 @@ func TestVerifyStageGuardedSkipsGummiSide(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	// guarded mode: gummi does not auto-run the spec's commands; the agent does
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)

@@ -169,12 +169,14 @@ func runBoard() error {
 //
 // Env config (M1 stand-in for profiles):
 //
-//	GUMMI_MODEL              model id (default "gpt-5")
-//	GUMMI_PROVIDER_BASE_URL  BYOK OpenAI-compatible endpoint (optional)
-//	GUMMI_PROVIDER_TYPE      "openai"|"azure"|"anthropic" (default openai)
-//	GUMMI_PROVIDER_KEY_ENV   env var holding the provider key (optional)
+//	GUMMI_MODEL             model id (default "gpt-5")
+//	GUMMI_AGENT             default backend (copilot|claude|opencode|headless)
+//	GUMMI_HEADLESS_CREDITS_PER_1K
+//	                        headless adapter's token→credit rate, for a
+//	                        local endpoint (llama.cpp) that the engine
+//	                        still needs to meter against a credit budget
 func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, []string, func()) {
-	eng, ag, names := newEngineFromEnv(store, wt, ws)
+	eng, agents, names := newEngineFromEnv(store, wt, ws)
 	if eng == nil {
 		return nil, nil, nil
 	}
@@ -183,42 +185,51 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 	if err := eng.Restore(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, "gummi: restoring sessions:", err)
 	}
-	return eng, names, func() { _ = eng.Close(); _ = ag.Close() }
+	return eng, names, func() {
+		_ = eng.Close()
+		// close every distinct agent exactly once (the "" default key
+		// aliases one of the concrete-name entries).
+		seen := map[agent.Agent]struct{}{}
+		for _, a := range agents {
+			if _, ok := seen[a]; ok {
+				continue
+			}
+			seen[a] = struct{}{}
+			_ = a.Close()
+		}
+	}
 }
 
-// newEngineFromEnv constructs the orchestrator and its agent from the
+// newEngineFromEnv constructs the orchestrator and its agents from the
 // environment, without restoring prior sessions. buildEngine wraps it for
 // the board (adding Restore + a combined cleanup); one-shot commands like
-// `gummi ingest` use it directly and own the agent's lifetime. Returns
+// `gummi ingest` use it directly and own the agents' lifetimes. Returns
 // (nil, nil, nil) when no agent can be started.
-func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, agent.Agent, []string) {
-	// Adapter selection: GUMMI_AGENT_CMD picks the generic headless
-	// adapter (any agent binary speaking the stdio JSON protocol);
-	// otherwise gummi uses the first-class Copilot SDK adapter.
-	ag, err := buildAgent()
-	if err != nil {
-		return nil, nil, nil
-	}
-	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
-	var provider agent.Provider
-	if base := os.Getenv("GUMMI_PROVIDER_BASE_URL"); base != "" {
-		provider = agent.Provider{
-			Type:      cmp.Or(os.Getenv("GUMMI_PROVIDER_TYPE"), "openai"),
-			BaseURL:   base,
-			APIKeyEnv: os.Getenv("GUMMI_PROVIDER_KEY_ENV"),
-		}
-	}
-	maxActive := 1
-	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxActive = n
-		}
-	}
+func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string) {
 	// per-role model routing from .gummi/profiles.yaml (falls back to
 	// the single env model when absent or a role isn't covered)
 	profiles, err := config.LoadProfiles(ws.ProfilesFile())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
+	}
+	// Adapter selection: GUMMI_AGENT picks the default backend, and any
+	// distinct `backend:` referenced across the loaded profiles is
+	// started too. The map is keyed by adapter name, and the default is
+	// duplicated under the "" key so the engine's fallback lookup works.
+	agents, err := buildAgents(profiles)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		return nil, nil, nil
+	}
+	if len(agents) == 0 {
+		return nil, nil, nil
+	}
+	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
+	maxActive := 1
+	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxActive = n
+		}
 	}
 	var stageBudget float64
 	if v := os.Getenv("GUMMI_STAGE_BUDGET"); v != "" {
@@ -243,8 +254,8 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 		perm = agent.PermissionGuarded
 	}
 	eng := engine.New(engine.Config{
-		Agent: ag, Store: store, Worktrees: wt, Workspace: ws,
-		Model: model, Provider: provider, MaxActive: maxActive, Persist: true,
+		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
+		Model: model, MaxActive: maxActive, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm,
 	})
@@ -253,32 +264,80 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 	// fallback. Re-sorting alphabetically here would silently pick the wrong
 	// default (e.g. "premium" ahead of the configured "thrifty").
 	names := profiles.Names()
-	return eng, ag, names
+	return eng, agents, names
 }
 
-// buildAgent selects the agent backend from GUMMI_AGENT:
-//
-//	copilot   (default) — the GitHub Copilot SDK adapter
-//	claude              — the Claude Code CLI adapter (GUMMI_CLAUDE_BIN overrides the binary)
-//	opencode            — the opencode CLI adapter (GUMMI_OPENCODE_BIN overrides the binary)
-//	headless            — a generic subprocess agent (GUMMI_AGENT_CMD is its command line)
-//
-// For back-compat, setting GUMMI_AGENT_CMD alone still selects headless.
-// Command lines are split on spaces (operator config, not untrusted
-// input); use a wrapper script for arguments containing spaces.
-func buildAgent() (agent.Agent, error) {
+// defaultBackendName returns the backend name selected by GUMMI_AGENT
+// (or "copilot" when unset). For back-compat, GUMMI_AGENT_CMD without
+// GUMMI_AGENT selects headless.
+func defaultBackendName() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT"))) {
+	case "claude":
+		return "claude"
+	case "opencode":
+		return "opencode"
+	case "headless":
+		return "headless"
+	}
+	if strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")) != "" {
+		return "headless"
+	}
+	return "copilot"
+}
+
+// startAdapter starts one named backend. Command lines for headless are
+// split on spaces (operator config, not untrusted input); use a wrapper
+// script for arguments containing spaces.
+func startAdapter(name string) (agent.Agent, error) {
+	switch name {
 	case "claude":
 		return agent.NewClaudeCode(os.Getenv("GUMMI_CLAUDE_BIN"))
 	case "opencode":
 		return agent.NewOpencode(os.Getenv("GUMMI_OPENCODE_BIN"))
 	case "headless":
 		return agent.NewHeadless(strings.Fields(os.Getenv("GUMMI_AGENT_CMD")))
+	case "copilot":
+		return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
 	}
-	if cmd := strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")); cmd != "" {
-		return agent.NewHeadless(strings.Fields(cmd))
+	return nil, fmt.Errorf("unknown backend %q", name)
+}
+
+// buildAgents starts the default backend plus every additional backend
+// referenced by any role in the loaded profiles, returning them keyed by
+// adapter name. The default is aliased under the empty-string key so
+// engine.agentFor("") resolves. If a profile-referenced backend fails to
+// start, its error is reported and it is skipped — the default still
+// governs unaffected roles, and only sessions routed at the missing
+// backend will fail at newAgentSession.
+func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
+	def := defaultBackendName()
+	agents := map[string]agent.Agent{}
+	ag, err := startAdapter(def)
+	if err != nil {
+		return nil, err
 	}
-	return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
+	agents[def] = ag
+	agents[""] = ag // default alias, matches engine.agentFor's fallback
+
+	// discover the additional backends the profiles reference
+	extras := map[string]struct{}{}
+	for _, prof := range profiles.Profiles {
+		for _, rc := range prof {
+			if rc.Backend == "" || rc.Backend == def {
+				continue
+			}
+			extras[rc.Backend] = struct{}{}
+		}
+	}
+	for name := range extras {
+		a, err := startAdapter(name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gummi: skipping backend %q: %v\n", name, err)
+			continue
+		}
+		agents[name] = a
+	}
+	return agents, nil
 }
 
 // newManager binds the worktree manager to cwd and keeps .gummi out of

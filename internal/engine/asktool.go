@@ -510,7 +510,7 @@ func parseAskConvention(text string) (ask *Ask, stripped string, ok bool) {
 func (e *Engine) maybeConventionAsk(s *Session) bool {
 	// only interactive stages carry the convention hint and have a picker
 	// to answer with (cf. tool gating in newAgentSession).
-	if !s.Interactive || e.cfg.Agent == nil || e.cfg.Agent.Capabilities().ClientTools {
+	if !s.Interactive || s.ClientTools() {
 		return false
 	}
 	last, idx := s.lastAssistant()

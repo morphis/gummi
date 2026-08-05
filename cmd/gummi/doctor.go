@@ -179,9 +179,11 @@ func effectiveProfiles(path string) (profiles config.Profiles, seeded bool, err 
 
 // backendModelConflicts reports the "role=model" pairs in the default
 // profile that the selected backend cannot drive, or "" when there is no
-// conflict. Only the Claude backend is Anthropic-locked today, so it is the
-// only one cross-checked (agent.ForeignModel is the shared predicate the
-// claude adapter rejects on at session start).
+// conflict. Only the Claude backend is Anthropic-locked today, so it is
+// the only one cross-checked (agent.ForeignModel is the shared predicate
+// the claude adapter rejects on at session start). A role that explicitly
+// picks a different `backend:` is not flagged — the default backend never
+// sees it.
 func backendModelConflicts(bi backendInfo, p config.Profiles) string {
 	if bi.name != "claude" {
 		return ""
@@ -197,8 +199,12 @@ func backendModelConflicts(bi backendInfo, p config.Profiles) string {
 	sort.Strings(roles)
 	var bad []string
 	for _, role := range roles {
-		if foreign, _ := agent.ForeignModel(prof[role].Model); foreign {
-			bad = append(bad, role+"="+prof[role].Model)
+		rc := prof[role]
+		if rc.Backend != "" && rc.Backend != "claude" {
+			continue // routed at a different backend; claude never sees it
+		}
+		if foreign, _ := agent.ForeignModel(rc.Model); foreign {
+			bad = append(bad, role+"="+rc.Model)
 		}
 	}
 	return strings.Join(bad, ", ")
@@ -207,24 +213,11 @@ func backendModelConflicts(bi backendInfo, p config.Profiles) string {
 const nestingGuidance = "steer to a cost-tiered profile: frontier models for architect/reviewer, a cheaper model for implementer/scribe; avoid pointing gummi's roles at the same frontier model your own session runs on (you'd pay for it twice)"
 
 // authCheck reports auth readiness without spawning anything (confirmed
-// offline). A BYOK key is definitively knowable by env-var name (never its
-// value, G4); an interactive-login backend degrades to "unknown" with the
-// exact command a human runs (G2).
+// offline). Provider config lives in each backend's native store now
+// (Claude Code login, `opencode auth`, headless child's env), so an
+// interactive-login backend degrades to "unknown" with the exact command
+// a human runs (G2); a headless backend delegates to its own child.
 func authCheck(bi backendInfo) doctorCheck {
-	if base := os.Getenv("GUMMI_PROVIDER_BASE_URL"); base != "" {
-		keyEnv := os.Getenv("GUMMI_PROVIDER_KEY_ENV")
-		switch {
-		case keyEnv == "":
-			return doctorCheck{Name: "auth", Status: statusOK, Detail: "BYOK endpoint " + base + " with no key env (fine for a keyless local endpoint)"}
-		case os.Getenv(keyEnv) != "":
-			return doctorCheck{Name: "auth", Status: statusOK, Detail: "BYOK key present in $" + keyEnv}
-		default:
-			return doctorCheck{
-				Name: "auth", Status: statusFail, Detail: "BYOK key env $" + keyEnv + " is not set",
-				Remediation: "have the human export " + keyEnv + "=<key> (gummi references the key by name, never stores it)",
-			}
-		}
-	}
 	if bi.headless {
 		return doctorCheck{Name: "auth", Status: statusOK, Detail: "handled by the headless command (" + bi.bin + ")"}
 	}

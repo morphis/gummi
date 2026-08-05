@@ -3,41 +3,27 @@ package config
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
 
 	"gopkg.in/yaml.v3"
 )
 
-// safeKeyEnvRe restricts which environment variables a repo-committed
-// profile may reference for a BYOK key. Without this, a cloned repo
-// could set `api_key_env: GITHUB_TOKEN` (or any secret) and a hostile
-// `base_url`, exfiltrating that secret to the attacker's endpoint. Only
-// conventional API-key names and gummi's own namespace are allowed;
-// GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY, NPM_TOKEN, etc. do not match.
-var safeKeyEnvRe = regexp.MustCompile(`^(GUMMI_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_API_KEY)$`)
-
-// ProviderConfig is a role's optional BYOK endpoint in profiles.yaml.
-// The API key is referenced by env-var name only — a literal key must
-// never be persisted in the repo-committed profiles.yaml (threat list).
-type ProviderConfig struct {
-	Type      string `yaml:"type"`
-	BaseURL   string `yaml:"base_url"`
-	Model     string `yaml:"model"`
-	APIKeyEnv string `yaml:"api_key_env"`
-	// CreditsPer1KTokens is this provider's token→credit rate for budget
-	// math (0 = gummi's default). It lets a cheap local endpoint and a
-	// pricey hosted one meter against the same credit budget accurately.
-	CreditsPer1KTokens float64 `yaml:"credits_per_1k_tokens"`
-	// APIKey is intentionally rejected: keys must be env references.
-	APIKey string `yaml:"api_key"`
+// knownBackends is the set of adapter names a profile role may target via
+// its `backend:` field. It mirrors the switch in cmd/gummi/main.go's
+// buildAgents — anything else in a profile is a typo, so parsing fails
+// fast rather than silently falling through to the default backend.
+var knownBackends = map[string]struct{}{
+	"copilot":  {},
+	"claude":   {},
+	"opencode": {},
+	"headless": {},
 }
 
-// RoleConfig maps one role to a concrete agent config.
+// RoleConfig maps one role to a concrete backend+model. Backend is optional;
+// empty means "use the engine's default backend" (the one GUMMI_AGENT picks).
 type RoleConfig struct {
-	Adapter  string          `yaml:"adapter"`
-	Model    string          `yaml:"model"`
-	Provider *ProviderConfig `yaml:"byok"`
+	Backend string `yaml:"backend"`
+	Model   string `yaml:"model"`
 }
 
 // Profile maps role names (architect/implementer/reviewer/scribe) to
@@ -86,6 +72,33 @@ func LoadProfiles(path string) (Profiles, error) {
 // template). It lets callers validate the ProfilesTemplate that WOULD be
 // seeded, before any file exists on disk.
 func ParseProfiles(raw []byte, path string) (Profiles, error) {
+	// A pre-parse pass rejects the old `byok:` field with a migration
+	// pointer, rather than silently ignoring it. yaml.v3 drops unknown
+	// fields on strict-mode-off unmarshal, so a stale profile from before
+	// the per-role-backend change would parse clean but not do what its
+	// author expected.
+	var probe map[string]any
+	if err := yaml.Unmarshal(raw, &probe); err == nil {
+		if profs, ok := probe["profiles"].(map[string]any); ok {
+			for name, p := range profs {
+				roles, ok := p.(map[string]any)
+				if !ok {
+					continue
+				}
+				for role, rc := range roles {
+					rcm, ok := rc.(map[string]any)
+					if !ok {
+						continue
+					}
+					if _, has := rcm["byok"]; has {
+						return Profiles{}, fmt.Errorf("%s: profile %q role %q uses the removed `byok:` field; "+
+							"per-role BYOK is gone — configure the endpoint in the backend itself "+
+							"(claude/opencode/headless) and pick it with `backend:` instead", path, name, role)
+					}
+				}
+			}
+		}
+	}
 	var p Profiles
 	if err := yaml.Unmarshal(raw, &p); err != nil {
 		return Profiles{}, fmt.Errorf("parsing %s: %w", path, err)
@@ -95,15 +108,10 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 			if rc.Model == "" {
 				return Profiles{}, fmt.Errorf("%s: profile %q role %q has no model", path, name, role)
 			}
-			if rc.Provider != nil {
-				if rc.Provider.APIKey != "" {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q sets a literal byok api_key; use api_key_env with an environment variable name instead (keys must not be committed)", path, name, role)
-				}
-				if rc.Provider.BaseURL == "" {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q byok has no base_url", path, name, role)
-				}
-				if k := rc.Provider.APIKeyEnv; k != "" && !safeKeyEnvRe.MatchString(k) {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q api_key_env %q is not an allowed key variable (must end in _API_KEY or start with GUMMI_) — this blocks a committed profile from exfiltrating arbitrary secrets", path, name, role, k)
+			if rc.Backend != "" {
+				if _, ok := knownBackends[rc.Backend]; !ok {
+					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|opencode|headless",
+						path, name, role, rc.Backend)
 				}
 			}
 		}
@@ -111,45 +119,40 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 	return p, nil
 }
 
-// Template is the starter profiles.yaml written by `gummi init`.
-const ProfilesTemplate = `# gummi profiles: map each role to a model. A feature picks a profile;
-# roles indirect between the fixed workflow and concrete models, so the
-# same process can run cheap or premium. See docs/DESIGN.md §5.
+// ProfilesTemplate is the starter profiles.yaml written by `gummi init`.
+const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. A feature picks a
+# profile; roles indirect between the fixed workflow and concrete backends,
+# so the same process can run cheap or premium, or mix providers. See
+# docs/DESIGN.md §5.
 #
-# BYOK (local/hosted OpenAI-compatible endpoints) is configured per role
-# with a byok block. API keys are referenced by environment-variable
-# NAME (api_key_env) — never write a literal key here; profiles.yaml is
-# committed to the repo.
+# backend: (optional) copilot | claude | opencode | headless. Omit to use
+# the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
+# The backend owns provider config natively — Claude Code login, opencode
+# auth, GUMMI_AGENT_CMD for headless — so no keys or endpoints live here.
 
 default: thrifty
 
 profiles:
-  premium: # ship-critical features
-    architect: { model: claude-opus-4.8 }
-    implementer: { model: claude-sonnet-5 }
-    reviewer: { model: gpt-5-codex } # cross-model review catches more
-    scribe: { model: gpt-5-mini }
+  premium: # ship-critical features — cross-model review catches more
+    architect: { backend: claude, model: claude-opus-4.8 }
+    implementer: { backend: copilot, model: claude-sonnet-5 }
+    reviewer: { backend: claude, model: claude-sonnet-5 }
+    scribe: { backend: copilot, model: gpt-5-mini }
 
-  thrifty: # everyday features
+  thrifty: # everyday features — backend omitted → engine default
     architect: { model: claude-sonnet-5 }
     implementer: { model: gpt-5-mini }
     reviewer: { model: claude-sonnet-5 }
     scribe: { model: gpt-5-mini }
 
-  # local-heavy: near-zero cloud spend via a local llama.cpp server.
-  # Uncomment and point base_url at your endpoint. credits_per_1k_tokens
-  # sets the token→credit rate for budget math (default 0.5); a near-free
-  # local endpoint can meter cheaply against the same credit budget.
+  # local-heavy: mix a local llama.cpp endpoint (via the headless adapter)
+  # with cloud models. Point GUMMI_AGENT_CMD at a wrapper that speaks
+  # OpenAI to your local runner; set GUMMI_HEADLESS_CREDITS_PER_1K to a
+  # small rate so local spend meters cheaply against the same budget.
   #
   # local-heavy:
-  #   architect: { model: claude-sonnet-5 } # design still wants a big brain
-  #   implementer:
-  #     model: qwen2.5-coder-32b
-  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1, credits_per_1k_tokens: 0.02 }
-  #   reviewer:
-  #     model: qwen2.5-coder-32b
-  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1, credits_per_1k_tokens: 0.02 }
-  #   scribe:
-  #     model: qwen2.5-coder-32b
-  #     byok: { type: openai, base_url: http://127.0.0.1:8080/v1, credits_per_1k_tokens: 0.02 }
+  #   architect: { backend: claude, model: claude-sonnet-5 }
+  #   implementer: { backend: headless, model: qwen2.5-coder-32b }
+  #   reviewer: { backend: headless, model: qwen2.5-coder-32b }
+  #   scribe: { backend: copilot, model: gpt-5-mini }
 `

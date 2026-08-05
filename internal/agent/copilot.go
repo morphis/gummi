@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -26,8 +25,7 @@ const settleTimeout = 10 * time.Second
 
 // Copilot is an Agent backed by the GitHub Copilot CLI via the official
 // Go SDK. It runs one CLI server process (the client) and opens one SDK
-// session per gummi Session. BYOK providers are passed per session, so
-// per-role model routing needs no extra processes.
+// session per gummi Session.
 type Copilot struct {
 	client   *copilot.Client
 	mu       sync.Mutex
@@ -71,8 +69,13 @@ func (c *Copilot) Name() string { return "copilot" }
 
 // Capabilities implements Agent. The Copilot SDK provides all of these.
 func (c *Copilot) Capabilities() Capabilities {
-	return Capabilities{BYOK: true, Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
 }
+
+// CreditRate implements Agent: Copilot self-reports per-model AI-credit
+// spend via the SDK's usage events, so the engine must not re-price its
+// tokens. Zero here disables the token-priced fallback for hosted sessions.
+func (c *Copilot) CreditRate(string) float64 { return 0 }
 
 // NewSession implements Agent.
 func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, error) {
@@ -105,35 +108,19 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		cfg.OnPermissionRequest = copilot.PermissionHandler.ApproveAll
 	}
 	// The CLI enforces a floor on its own session cap (currently 30
-	// credits) and only meters GitHub-hosted usage; below the floor, or
-	// for BYOK, the orchestrator enforces the budget itself. So only
-	// pass the CLI cap when it clears the floor — it's an extra backstop.
+	// credits); below that floor, the orchestrator enforces the budget
+	// itself. So only pass the CLI cap when it clears the floor — it's an
+	// extra backstop.
 	if opts.MaxCredits >= cliMinCredits {
 		credits := opts.MaxCredits
 		cfg.SessionLimits = &copilot.SessionLimitsConfig{MaxAiCredits: &credits}
-	}
-	if opts.Provider.BaseURL != "" {
-		if opts.Model == "" {
-			return nil, errors.New("model is required when a BYOK provider is set")
-		}
-		p := &copilot.ProviderConfig{
-			Type:    opts.Provider.Type,
-			BaseURL: opts.Provider.BaseURL,
-		}
-		// The key is read from the environment at session start and
-		// never persisted on gummi's own structs (threat list).
-		if opts.Provider.APIKeyEnv != "" {
-			p.APIKey = os.Getenv(opts.Provider.APIKeyEnv)
-		}
-		cfg.Provider = p
 	}
 
 	cs := &copilotSession{
 		workdir: opts.WorkDir,
 		// hosted sessions are credits-metered by the CLI; their usage
-		// samples are authoritative as-is. BYOK reports tokens only, so
-		// the engine's token-priced fallback must stay in charge there.
-		metered:      opts.Provider.BaseURL == "",
+		// samples are authoritative as-is.
+		metered:      true,
 		raw:          make(chan Event, 256),
 		events:       make(chan Event),
 		stop:         make(chan struct{}),

@@ -314,7 +314,7 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 	args := json.RawMessage(`{"verdict":"changes","summary":"nil deref in foo"}`)
 	ag := toolCallFake("submit_verdict", args)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageReview)
@@ -353,7 +353,7 @@ func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
 	args := json.RawMessage(`{"verdict":"fail","summary":"rock build broken"}`)
 	ag := toolCallFake("submit_verdict", args)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify", domain.StageVerify)
@@ -374,7 +374,7 @@ func TestVerifyVerdictBlockedRecorded(t *testing.T) {
 	args := json.RawMessage(`{"verdict":"blocked","summary":"no pytest in this workspace"}`)
 	ag := toolCallFake("submit_verdict", args)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify", domain.StageVerify)
@@ -396,7 +396,7 @@ func TestReviewVerdictRejectsBlocked(t *testing.T) {
 	args := json.RawMessage(`{"verdict":"blocked","summary":"cannot run this"}`)
 	ag := toolCallFake("submit_verdict", args)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "review", domain.StageReview)
@@ -449,7 +449,7 @@ func TestResolveAnnotationMarksResolved(t *testing.T) {
 		hints = opts.SystemHints
 		return inner(opts, msg)
 	}
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	if err := e.Run(f); err != nil {
@@ -519,7 +519,7 @@ func TestResolveAnnotationRejectsForeignID(t *testing.T) {
 	}
 
 	ag := toolCallFake("resolve_annotation", json.RawMessage(fmt.Sprintf(`{"id":%d}`, annID)))
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	if err := e.Run(f); err != nil {

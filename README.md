@@ -254,29 +254,35 @@ without `--force`. `gummi skill show` prints the rendered doc.
 `gummi doctor` is the readiness check the skill's first-run setup runs (`--json`
 for the machine-readable checklist). It **reports**; it never repairs auth or
 writes secrets — a backend needing login is surfaced as the exact command for
-a human to run, and BYOK keys are referenced by environment-variable name,
-never by value.
+a human to run. Provider config (endpoints, API keys) lives in each backend's
+native store (Claude Code login, `opencode auth`, environment for headless),
+never in `profiles.yaml`.
 
 ## Agent backends
 
-The agent layer is pluggable, selected with `GUMMI_AGENT`:
+The agent layer is pluggable. `GUMMI_AGENT` selects the default backend;
+a `profiles.yaml` role can pick a specific backend via its `backend:`
+field (see Configuration below) so one session can mix providers — e.g.
+copilot for implement, claude for review.
 
 - **copilot** *(default)* — the official Copilot SDK for Go, driving the
   `copilot` CLI in server mode. Full duplex: streaming, tool-call
-  visibility, client tools, session resume, and per-session BYOK env —
-  an OpenAI-compatible endpoint (llama.cpp, vLLM, hosted) works without
-  GitHub authentication.
+  visibility, client tools, session resume.
 - **claude** — the Claude Code CLI in streaming print mode
   (`GUMMI_CLAUDE_BIN` overrides the binary). Requires
   `permissions: allow-all` — guarded mode is rejected because the CLI's
-  default permission mode silently auto-denies tools. BYOK provider
-  blocks are not supported; Claude Code manages its own endpoint
-  routing (Anthropic-shaped env such as `ANTHROPIC_BASE_URL`).
+  default permission mode silently auto-denies tools. Claude Code
+  manages its own endpoint routing via its native config
+  (`ANTHROPIC_BASE_URL`, Claude Code login).
 - **opencode** — the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
-  binary). Provider/model config is owned by opencode itself.
+  binary). Provider/model config is owned by opencode itself
+  (`opencode auth`, `opencode.json`).
 - **headless** — a generic subprocess adapter for any agent binary
   speaking a small stdio JSON protocol (`GUMMI_AGENT_CMD` is its
-  command line).
+  command line). The child inherits gummi's environment and reads its
+  own provider config from there. Set `GUMMI_HEADLESS_CREDITS_PER_1K`
+  to price a local endpoint's token spend into credits so it meters
+  against the same budget envelope.
 
 No usable agent just leaves the board static — creation, specs,
 worktrees, and gates all still work.
@@ -293,22 +299,24 @@ Two files in `.gummi/`, both scaffolded on first run:
   each spec's Verification plan (a `gummi-checks` block), where you
   review and edit them — and the TUI still surfaces the exact commands
   before running them.
-- **`profiles.yaml`** — role → model maps per profile (`premium`,
-  `thrifty`, …) with a declared default. BYOK per role via a `byok`
-  block; API keys are referenced by environment-variable name, never
-  written as literals. `credits_per_1k_tokens` sets the token→credit
-  rate so local/BYOK spend meters against the same budgets.
+- **`profiles.yaml`** — role → `{backend, model}` maps per profile
+  (`premium`, `thrifty`, …) with a declared default. `backend:` is
+  optional (`copilot` | `claude` | `opencode` | `headless`); omitted, the
+  role uses whatever `GUMMI_AGENT` selects. This lets a single profile
+  mix providers — e.g. `implementer: copilot`, `reviewer: claude` — and
+  keeps all provider config (endpoints, keys, credit rates) out of the
+  repo-committed file.
 
 Environment variables:
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | backend: `copilot` (default) · `claude` · `opencode` · `headless` |
+| `GUMMI_AGENT` | default backend: `copilot` (default) · `claude` · `opencode` · `headless` |
 | `GUMMI_AGENT_CMD` | headless adapter's command line |
 | `GUMMI_CLAUDE_BIN` | claude backend's binary (default `claude` on PATH) |
 | `GUMMI_OPENCODE_BIN` | opencode backend's binary (default `opencode` on PATH) |
+| `GUMMI_HEADLESS_CREDITS_PER_1K` | headless adapter's token→credit rate for a local endpoint (llama.cpp, vLLM); 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
-| `GUMMI_PROVIDER_BASE_URL` / `_TYPE` / `_KEY_ENV` | ad-hoc BYOK endpoint without editing profiles |
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
 | `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |

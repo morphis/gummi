@@ -50,7 +50,7 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 
 func TestRunCritiqueOnlyOnPlanStage(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: agent.NewFake("x"), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	for _, stage := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageSpec} {
@@ -77,7 +77,7 @@ func TestCritiqueRunsAsReviewer(t *testing.T) {
 			}
 		},
 	}
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	if err := e.RunCritique(f, ""); err != nil {

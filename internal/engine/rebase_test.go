@@ -52,7 +52,7 @@ func TestRunRebaseRunsAsImplementer(t *testing.T) {
 			}
 		},
 	}
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -121,7 +121,7 @@ func TestSettleAbortsLeftoverRebase(t *testing.T) {
 		t.Fatalf("conflicting rebase did not stop:\n%s", out)
 	}
 
-	e := New(Config{Agent: agent.NewFake("x"), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	s := &Session{Feature: f, Role: agent.RoleImplementer, Rebase: true, done: make(chan struct{})}
 	e.settle(s)

@@ -22,6 +22,10 @@ type Fake struct {
 	// OnInterrupt, if set, is called each time a session is interrupted
 	// (lets a test observe orchestrator-side budget enforcement).
 	OnInterrupt func()
+	// Rate is the fake's reported CreditRate (0 = engine default). Tests
+	// exercising the token-priced fallback set it to price the fake's
+	// synthetic token usage into credits.
+	Rate float64
 
 	mu       sync.Mutex
 	sessions []*fakeSession
@@ -33,7 +37,7 @@ type Fake struct {
 func NewFake(reply string) *Fake {
 	return &Fake{
 		Reply: reply,
-		Caps:  Capabilities{BYOK: true, Resume: true, UsageEvents: true, Interrupt: true},
+		Caps:  Capabilities{Resume: true, UsageEvents: true, Interrupt: true},
 	}
 }
 
@@ -43,15 +47,17 @@ func (f *Fake) Name() string { return "fake" }
 // Capabilities implements Agent.
 func (f *Fake) Capabilities() Capabilities { return f.Caps }
 
+// CreditRate implements Agent. Tests inject the rate they need via the
+// engine's Config.StageBudget / TurnReserve knobs; fake sessions carry no
+// realized rate of their own.
+func (f *Fake) CreditRate(string) float64 { return f.Rate }
+
 // NewSession implements Agent.
 func (f *Fake) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
 		return nil, errors.New("fake agent is closed")
-	}
-	if opts.Provider.BaseURL != "" && opts.Model == "" {
-		return nil, errors.New("model required when a provider is set")
 	}
 	s := &fakeSession{
 		agent: f,

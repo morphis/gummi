@@ -68,7 +68,7 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	}
 	defer ag.Close()
 	caps := ag.Capabilities()
-	if caps.BYOK || caps.ClientTools || !caps.Resume || !caps.UsageEvents || !caps.Interrupt {
+	if caps.ClientTools || !caps.Resume || !caps.UsageEvents || !caps.Interrupt {
 		t.Errorf("capabilities = %+v", caps)
 	}
 
@@ -406,7 +406,7 @@ sys.exit(2)
 	}
 }
 
-func TestClaudeCodeRejectsGuardedAndBYOK(t *testing.T) {
+func TestClaudeCodeRejectsGuarded(t *testing.T) {
 	ag, err := NewClaudeCode(writeFakeClaude(t, fakeClaudeScript))
 	if err != nil {
 		t.Fatal(err)
@@ -416,12 +416,6 @@ func TestClaudeCodeRejectsGuardedAndBYOK(t *testing.T) {
 		WorkDir: t.TempDir(), Permission: PermissionGuarded,
 	}); err == nil || !strings.Contains(err.Error(), "guarded") {
 		t.Errorf("guarded session error = %v, want a clear guarded rejection", err)
-	}
-	if _, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Model: "m",
-		Provider: Provider{BaseURL: "http://127.0.0.1:8080/v1"},
-	}); err == nil || !strings.Contains(err.Error(), "BYOK") {
-		t.Errorf("BYOK session error = %v, want a clear provider rejection", err)
 	}
 }
 

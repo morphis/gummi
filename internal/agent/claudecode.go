@@ -62,12 +62,17 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // Capabilities implements Agent. Resume here is continuity across turns,
 // inherent in the long-lived process (the same bar opencode meets; the
 // CLI's --resume also survives restarts, unused until the engine needs
-// it). Interrupt is the control protocol's interrupt request. BYOK is off:
-// Claude Code routes only to Anthropic-shaped endpoints via its own env.
+// it). Interrupt is the control protocol's interrupt request.
 // ClientTools arrives with the MCP bridge (P2).
 func (c *ClaudeCode) Capabilities() Capabilities {
 	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true}
 }
+
+// CreditRate implements Agent. The Claude Code CLI reports its own
+// USD-per-turn cost, which the adapter translates to credits directly
+// (see mapResult), so the engine must not re-price its tokens. Zero here
+// disables the token-priced fallback for Claude sessions.
+func (c *ClaudeCode) CreditRate(string) float64 { return 0 }
 
 // NewSession implements Agent: spawn one claude process in opts.WorkDir.
 func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
@@ -86,14 +91,6 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 			"(the CLI's default mode silently auto-denies tools and bypassPermissions would " +
 			"un-guard the session); set permissions: allow-all or use the copilot backend")
 	}
-	// Claude Code has no per-session OpenAI-compatible provider surface —
-	// its endpoint routing is Anthropic-shaped env config. Fail clearly
-	// like opencode rather than silently ignore the BYOK block.
-	if opts.Provider.BaseURL != "" {
-		return nil, fmt.Errorf("claude code manages its own endpoint routing (ANTHROPIC_BASE_URL "+
-			"env, Anthropic-shaped only); BYOK provider %q is not supported — drop the provider "+
-			"block for claude sessions", opts.Provider.BaseURL)
-	}
 	// The CLI only routes to Anthropic models, so a foreign model id would
 	// otherwise be forwarded as --model and fail deep in the run with the
 	// CLI's opaque "issue with the selected model" error (proposal §6). Reject
@@ -102,7 +99,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	if foreign, provider := ForeignModel(opts.Model); foreign {
 		return nil, fmt.Errorf("claude backend cannot drive model %q (looks like a %s model); "+
 			"the Claude Code CLI only routes to Anthropic models — set this role to a claude-* "+
-			"model in .gummi/profiles.yaml, or select the matching backend via GUMMI_AGENT", opts.Model, provider)
+			"model in .gummi/profiles.yaml, or point the role at a different `backend:`", opts.Model, provider)
 	}
 
 	args := []string{

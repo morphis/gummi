@@ -73,8 +73,9 @@ func TestHeadlessRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ag.Close()
-	if !ag.Capabilities().BYOK {
-		t.Error("headless should advertise BYOK")
+	caps := ag.Capabilities()
+	if !caps.Interrupt || !caps.UsageEvents || !caps.ClientTools {
+		t.Errorf("headless capabilities = %+v", caps)
 	}
 
 	wd := t.TempDir()

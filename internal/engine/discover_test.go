@@ -24,7 +24,7 @@ func discoverFixture(t *testing.T, reply string) (*Engine, domain.Feature, strin
 		atomic.AddInt32(&sessions, 1)
 		return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "discover me", domain.StagePlan)

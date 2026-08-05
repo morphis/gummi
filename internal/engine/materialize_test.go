@@ -32,7 +32,7 @@ func sampleResult() domain.IngestResult {
 
 func TestMaterializeCreatesFeaturesAndDrafts(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: agent.NewFake("x"), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -87,7 +87,7 @@ func TestMaterializeCreatesFeaturesAndDrafts(t *testing.T) {
 
 func TestMaterializeRejectsUnslugifiableTitle(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: agent.NewFake("x"), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	res := domain.IngestResult{Proposals: []domain.FeatureProposal{{Title: "!!!"}}}

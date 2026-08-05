@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -19,11 +18,8 @@ func profilesFixture() config.Profiles {
 				"reviewer":    {Model: "gpt-5-codex"},
 			},
 			"thrifty": {
-				"architect": {Model: "claude-sonnet"},
-				"implementer": {
-					Model:    "qwen",
-					Provider: &config.ProviderConfig{Type: "openai", BaseURL: "http://127.0.0.1:8080/v1", APIKeyEnv: "LLAMA_API_KEY"},
-				},
+				"architect":   {Model: "claude-sonnet"},
+				"implementer": {Backend: "headless", Model: "qwen"},
 			},
 		},
 	}
@@ -33,7 +29,7 @@ func TestResolveRolePerProfile(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{
-		Agent: rec, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
 		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
@@ -51,11 +47,22 @@ func TestResolveRolePerProfile(t *testing.T) {
 	}
 }
 
-func TestResolveRoleBYOKProvider(t *testing.T) {
+// TestResolveRoleBackend proves the profile's backend field routes the
+// session at a specific adapter — thrifty's implementer names `headless`,
+// and only that adapter should be handed the session.
+func TestResolveRoleBackend(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
+	def := recordingAgent()
+	def.name = "copilot"
+	head := recordingAgent()
+	head.name = "headless"
+	agents := map[string]agent.Agent{
+		"":         def, // default (unspecified backend)
+		"copilot":  def,
+		"headless": head,
+	}
 	e := New(Config{
-		Agent: rec, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
 		Model: "fallback", MaxActive: 1, Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
@@ -67,12 +74,11 @@ func TestResolveRoleBYOKProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState(t, e, "FD-002", StateDone)
-	got := rec.opts()
-	if got.Model != "qwen" {
-		t.Errorf("thrifty implement model = %q, want qwen", got.Model)
+	if got := head.opts(); got.Model != "qwen" {
+		t.Errorf("headless implementer model = %q, want qwen", got.Model)
 	}
-	if got.Provider.BaseURL != "http://127.0.0.1:8080/v1" || got.Provider.APIKeyEnv != "LLAMA_API_KEY" {
-		t.Errorf("byok provider not routed: %+v", got.Provider)
+	if def.count() != 0 {
+		t.Errorf("default backend saw %d sessions, want 0 (implementer routed elsewhere)", def.count())
 	}
 }
 
@@ -80,7 +86,7 @@ func TestResolveRoleFallback(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{
-		Agent: rec, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
 		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
@@ -108,7 +114,7 @@ func TestVerifyStageUsesReviewerRole(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{
-		Agent: rec, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
 		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
@@ -127,14 +133,23 @@ func TestVerifyStageUsesReviewerRole(t *testing.T) {
 
 func TestResolveRoleUnknownProfileUsesDefault(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	rec := recordingAgent()
+	def := recordingAgent()
+	def.name = "copilot"
+	head := recordingAgent()
+	head.name = "headless"
+	agents := map[string]agent.Agent{
+		"":         def,
+		"copilot":  def,
+		"headless": head,
+	}
 	e := New(Config{
-		Agent: rec, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
 		Model: "fallback", MaxActive: 1, Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
-	// a feature with an unknown profile name → the file's default (thrifty)
+	// a feature with an unknown profile name → the file's default (thrifty).
+	// thrifty's implementer names backend: headless.
 	f := feature(4, "impl", domain.StageImplement)
 	f.Profile = "does-not-exist"
 	withWorktree(t, wt, f)
@@ -142,17 +157,16 @@ func TestResolveRoleUnknownProfileUsesDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState(t, e, "FD-004", StateDone)
-	if got := rec.opts(); got.Model != "qwen" { // thrifty implementer
-		t.Errorf("unknown profile model = %q, want the default profile's (qwen)", got.Model)
+	if got := head.opts(); got.Model != "qwen" {
+		t.Errorf("unknown profile: headless model = %q, want the default profile's (qwen)", got.Model)
 	}
 }
 
 // resolveRole is also exercised directly for the no-profiles case.
 func TestResolveRoleNoProfiles(t *testing.T) {
-	e := &Engine{cfg: Config{Model: "only-model", Provider: agent.Provider{BaseURL: "http://x/v1"}}}
-	m, p := e.resolveRole("anything", agent.RoleArchitect)
-	if m != "only-model" || p.BaseURL != "http://x/v1" {
-		t.Errorf("no-profiles resolve = %q/%+v, want the config fallback", m, p)
+	e := &Engine{cfg: Config{Model: "only-model"}}
+	m, backend := e.resolveRole("anything", agent.RoleArchitect)
+	if m != "only-model" || backend != "" {
+		t.Errorf("no-profiles resolve = (%q, %q), want (only-model, \"\")", m, backend)
 	}
-	_ = context.Background()
 }

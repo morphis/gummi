@@ -7,7 +7,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"net/url"
 )
 
 // Role is a named capability slot a profile maps to a concrete model.
@@ -35,41 +34,6 @@ const (
 	// needs-attention queue.
 	PermissionGuarded Permission = "guarded"
 )
-
-// Provider is an OpenAI-compatible BYOK endpoint (llama.cpp, vLLM,
-// hosted). An empty Provider means the adapter's native routing
-// (Copilot-hosted models).
-type Provider struct {
-	// Type is "openai", "azure", or "anthropic". Empty ⇒ "openai".
-	Type string
-	// BaseURL is the endpoint, e.g. http://127.0.0.1:8080/v1.
-	BaseURL string
-	// APIKeyEnv names the environment variable holding the key; the
-	// adapter reads it at session start. The key itself is never
-	// stored on SessionOpts, so it can't leak into state or logs.
-	APIKeyEnv string
-	// CreditsPer1KTokens is the provider's token→credit rate for budget
-	// math (0 = the orchestrator's default). Advisory to the adapter; the
-	// engine uses it to price this session's token spend.
-	CreditsPer1KTokens float64
-}
-
-// Describe renders the provider for status displays: empty for native
-// routing, otherwise the type and endpoint host ("openai @ 127.0.0.1:8080").
-func (p Provider) Describe() string {
-	if p.BaseURL == "" {
-		return ""
-	}
-	typ := p.Type
-	if typ == "" {
-		typ = "openai"
-	}
-	host := p.BaseURL
-	if u, err := url.Parse(p.BaseURL); err == nil && u.Host != "" {
-		host = u.Host
-	}
-	return typ + " @ " + host
-}
 
 // ToolDef declares a gummi-owned client tool exposed to the agent's
 // model. The adapter surfaces each invocation as EventClientToolCall
@@ -110,14 +74,14 @@ type SessionOpts struct {
 	WorkDir string
 	// Role labels the session for the orchestrator and logs.
 	Role Role
-	// Model is the concrete model id, e.g. "gpt-5", "claude-sonnet-4.5",
-	// or a BYOK model name. Required when Provider is set.
+	// Model is the concrete model id, e.g. "gpt-5", "claude-sonnet-4.5".
+	// The adapter routes it through whatever native provider config it
+	// owns (Copilot's session, Claude Code's env, opencode's auth, the
+	// headless child's own config).
 	Model string
 	// SystemHints are stage instructions appended to the agent's
 	// system prompt (spec path, dev-guide, budget notes).
 	SystemHints []string
-	// Provider selects a BYOK endpoint; empty means native routing.
-	Provider Provider
 	// Permission is the tool-call policy.
 	Permission Permission
 	// MaxCredits caps session spend (Copilot credits, 1 = $0.01); 0
@@ -135,16 +99,23 @@ type Agent interface {
 	Name() string
 	// NewSession starts a session in opts.WorkDir with a role config.
 	NewSession(ctx context.Context, opts SessionOpts) (Session, error)
-	// Capabilities reports optional features (BYOK, resume, usage
-	// events) so callers can degrade gracefully.
+	// Capabilities reports optional features (resume, usage events, …)
+	// so callers can degrade gracefully.
 	Capabilities() Capabilities
+	// CreditRate returns this adapter's token→credit rate for model, in
+	// credits per 1k tokens. Zero means "engine, use your default / trust
+	// this adapter's native metering": Copilot self-reports credits, so it
+	// returns 0; the Claude Code CLI reports USD directly, so it too returns
+	// 0. Adapters that route to a rate-less endpoint (headless pointed at a
+	// local llama.cpp) return the operator-configured rate so budget math
+	// prices non-native traffic correctly against the same credit envelope.
+	CreditRate(model string) float64
 	// Close releases any backend process the agent owns.
 	Close() error
 }
 
 // Capabilities advertises optional adapter features.
 type Capabilities struct {
-	BYOK        bool // per-session OpenAI-compatible providers
 	Resume      bool // session resume across restarts
 	UsageEvents bool // per-turn usage/credit events
 	Interrupt   bool // mid-turn interruption
@@ -209,8 +180,9 @@ const (
 	EventError EventKind = "error"
 )
 
-// Usage is the spend for one model call. Credits meter Copilot-hosted
-// usage; Tokens meter BYOK. Either may be zero.
+// Usage is the spend for one model call. Credits meter native provider
+// billing (Copilot's AI credits, Claude Code's USD-derived credits);
+// Tokens meter adapters that surface token counts only. Either may be zero.
 type Usage struct {
 	Credits float64
 	// InputTokens counts the uncached input side: fresh input plus any
@@ -240,8 +212,8 @@ type Usage struct {
 	// sample, authoritative even at zero: the engine records it as-is and
 	// must not re-price the tokens or book the sample as an estimate.
 	// Credits-metering sessions (hosted Copilot) set it on every sample;
-	// BYOK and rate-less backends leave it unset so the engine's
-	// token-priced fallback still covers them.
+	// rate-less backends leave it unset so the engine's token-priced
+	// fallback still covers them.
 	Metered bool
 	// Helper marks spend on a model the backend used internally (title
 	// generation, summarization) rather than the session's working model —

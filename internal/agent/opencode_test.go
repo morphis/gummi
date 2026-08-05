@@ -106,17 +106,6 @@ func TestOpencodeRequiresModel(t *testing.T) {
 	}
 }
 
-func TestOpencodeRejectsBYOKProvider(t *testing.T) {
-	o := &Opencode{bin: "opencode"}
-	_, err := o.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Model: "openai/gpt-4",
-		Provider: Provider{Type: "openai", BaseURL: "http://127.0.0.1:8080/v1"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "opencode manages providers") {
-		t.Errorf("BYOK provider should fail clearly, got %v", err)
-	}
-}
-
 // fakeOC writes a fake `opencode` script that emits one text event then
 // sleeps, so a turn can be interrupted mid-flight deterministically.
 func fakeOC(t *testing.T) string {

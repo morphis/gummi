@@ -61,7 +61,7 @@ func newHarness(t *testing.T, clientTools bool, script map[domain.Stage]stageFn)
 
 	h := &harness{t: t, store: store, ws: ws, wt: wt, buf: &bytes.Buffer{}, root: root, calls: map[domain.Stage]int{}}
 	fake := agent.NewFake("")
-	fake.Caps = agent.Capabilities{BYOK: true, Resume: true, UsageEvents: true, Interrupt: true, ClientTools: clientTools}
+	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: clientTools}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
 		stage := h.stageFromWorkDir(opts.WorkDir)
 		fn := script[stage]
@@ -76,7 +76,8 @@ func newHarness(t *testing.T, clientTools bool, script map[domain.Stage]stageFn)
 	}
 	h.fake = fake
 	h.eng = engine.New(engine.Config{
-		Agent: fake, Store: store, Worktrees: wt, Workspace: ws,
+		Agents:  map[string]agent.Agent{"": fake, fake.Name(): fake},
+		Store:   store, Worktrees: wt, Workspace: ws,
 		Persist: true, Model: "test-model",
 	})
 	t.Cleanup(func() { h.eng.Close(); fake.Close() })

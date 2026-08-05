@@ -59,7 +59,7 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng := engine.New(engine.Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
+	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 	t.Cleanup(func() { eng.Close() })
 
 	m := NewShell(theme.GummiDark(), "v0-test")

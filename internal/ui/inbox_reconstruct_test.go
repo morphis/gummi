@@ -95,7 +95,7 @@ func TestReconstructInboxAfterRestart(t *testing.T) {
 	save(fGate, "done", "reviewer", "")
 	save(fFail, "paused", "implementer", "provider boom")
 
-	eng := engine.New(engine.Config{Agent: agent.NewFake("ok"), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	eng := engine.New(engine.Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { eng.Close() })
 	if err := eng.Restore(ctx); err != nil {
 		t.Fatal(err)

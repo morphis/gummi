@@ -123,7 +123,7 @@ func TestDiffCommentPersistsAndAnchors(t *testing.T) {
 func TestDiffRequestChangesGuardsStage(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	eng := engine.New(engine.Config{
-		Agent: agent.NewFake("ok"), Store: m.store, Worktrees: m.wt,
+		Agents: singleAgent(agent.NewFake("ok")), Store: m.store, Worktrees: m.wt,
 		Workspace: m.ws, MaxActive: 1,
 	})
 	t.Cleanup(func() { eng.Close() })
@@ -165,7 +165,7 @@ func TestDiffRequestChangesRerunsWorkStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := engine.New(engine.Config{
-		Agent: agent.NewFake("addressed"), Store: m.store, Worktrees: m.wt,
+		Agents: singleAgent(agent.NewFake("addressed")), Store: m.store, Worktrees: m.wt,
 		Workspace: m.ws, MaxActive: 1,
 	})
 	t.Cleanup(func() { eng.Close() })

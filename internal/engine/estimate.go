@@ -25,13 +25,14 @@ var estimateRe = regexp.MustCompile(`(?i)ESTIMATE:\s*\$?\s*([0-9]+(?:\.[0-9]+)?)
 // raw guess gates almost immediately.
 var backendCostFactor = map[string]float64{"claude": 2.5}
 
-// costFactor returns the configured backend's estimate multiplier
-// (1 when unknown or unconfigured).
-func (e *Engine) costFactor() float64 {
-	if e.cfg.Agent == nil {
+// costFactor returns the estimate multiplier for the given backend name
+// (1 when unknown). Empty backend resolves to the engine default.
+func (e *Engine) costFactor(backend string) float64 {
+	a := e.agentFor(backend)
+	if a == nil {
 		return 1
 	}
-	if f, ok := backendCostFactor[e.cfg.Agent.Name()]; ok {
+	if f, ok := backendCostFactor[a.Name()]; ok {
 		return f
 	}
 	return 1
@@ -57,19 +58,19 @@ func parseScribeEstimate(text string) (float64, bool) {
 // the board. Returns (0,nil) when the scribe declines or its reply can't
 // be parsed — estimation is advisory and never fatal.
 func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error) {
-	if e.cfg.Agent == nil {
+	model, backend := e.resolveRole(f.Profile, agent.RoleScribe)
+	ag := e.agentFor(backend)
+	if ag == nil {
 		return 0, nil
 	}
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return 0, err
 	}
-	model, provider := e.resolveRole(f.Profile, agent.RoleScribe)
-	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
+	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
 		Role:        agent.RoleScribe,
 		Model:       model,
-		Provider:    provider,
 		Permission:  e.cfg.Permission,
 		SystemHints: []string{fmt.Sprintf("The feature's spec is at %s; read it first.", specPath)},
 	})
@@ -86,7 +87,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 		case ev, ok := <-sess.Events():
 			if !ok {
 				v, _ := parseScribeEstimate(text.String())
-				return v * e.costFactor(), nil
+				return v * e.costFactor(backend), nil
 			}
 			switch ev.Kind {
 			case agent.EventTextDelta:
@@ -95,7 +96,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 				text.message(ev.Text)
 			case agent.EventIdle:
 				v, _ := parseScribeEstimate(text.String())
-				return v * e.costFactor(), nil
+				return v * e.costFactor(backend), nil
 			case agent.EventError:
 				return 0, ev.Err
 			}

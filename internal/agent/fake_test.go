@@ -21,8 +21,8 @@ func drain(t *testing.T, s Session) []Event {
 func TestFakeEchoRoundTrip(t *testing.T) {
 	ag := NewFake("hi there")
 	defer ag.Close()
-	if !ag.Capabilities().BYOK {
-		t.Error("fake should advertise BYOK")
+	if r := ag.CreditRate("m"); r != 0 {
+		t.Errorf("default fake CreditRate = %v, want 0", r)
 	}
 	s, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: "/tmp", Role: RoleScribe})
 	if err != nil {
@@ -69,18 +69,6 @@ func TestFakeResponderScript(t *testing.T) {
 	evs := drain(t, s)
 	if len(evs) != 4 || evs[2].Tool != "shell" {
 		t.Fatalf("script mismatch: %+v", evs)
-	}
-}
-
-func TestFakeProviderRequiresModel(t *testing.T) {
-	ag := NewFake("x")
-	defer ag.Close()
-	_, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir:  "/tmp",
-		Provider: Provider{BaseURL: "http://x/v1"},
-	})
-	if err == nil {
-		t.Fatal("provider without model should error")
 	}
 }
 

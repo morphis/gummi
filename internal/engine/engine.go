@@ -82,23 +82,29 @@ func interactiveKickoff(f domain.Feature) string {
 	}
 }
 
-// Config wires an engine to its backend. Model/Provider are the M1
-// stand-in for profiles (M3): one model config for every role.
+// Config wires an engine to its backends. Model is the M1 stand-in for
+// profiles: the fallback model when no profile applies. The default
+// backend is the entry stored under the "" key in Agents (matched by
+// agentFor's fallback).
 type Config struct {
-	Agent      agent.Agent
+	// Agents maps a backend name (matching a profile role's `backend:`)
+	// to its adapter. The empty-string key "" designates the default
+	// backend used when no profile applies or a role omits `backend:`.
+	// buildAgents in cmd/gummi seeds both the default's Name() and ""
+	// with the same adapter, so lookups by either always resolve.
+	Agents     map[string]agent.Agent
 	Store      *state.Store
 	Worktrees  *worktree.Manager
 	Workspace  state.Workspace
 	Model      string
-	Provider   agent.Provider
 	Permission agent.Permission
 	// MaxActive is the number of concurrent autonomous slots (default 1).
 	MaxActive int
 	// Persist writes session transcripts to Store so they survive a
 	// restart (Restore reloads them).
 	Persist bool
-	// Profiles maps a feature's profile + role to a concrete model /
-	// BYOK provider. Empty falls back to Model/Provider for every role.
+	// Profiles maps a feature's profile + role to a concrete backend +
+	// model. Empty falls back to Model + the default agent for every role.
 	Profiles config.Profiles
 	// StageBudget is a flat per-autonomous-stage credit budget (0 = no
 	// budget). The session cap is set ~10% below it (soft-stop
@@ -138,7 +144,7 @@ type Engine struct {
 	persistMu sync.Mutex
 }
 
-// New builds an engine. The caller owns cfg.Agent's lifetime.
+// New builds an engine. The caller owns every agent's lifetime.
 func New(cfg Config) *Engine {
 	if cfg.Permission == "" {
 		cfg.Permission = agent.PermissionAllowAll
@@ -160,11 +166,13 @@ func New(cfg Config) *Engine {
 	return e
 }
 
-// ClientTools reports whether the configured backend supports gummi's
+// ClientTools reports whether the default backend supports gummi's
 // client tools, so hint compilers (engine- and UI-side) only mention a
-// tool the agent can actually call.
+// tool the agent can actually call. Callers that touch a specific role's
+// backend should query that adapter's Capabilities() directly instead.
 func (e *Engine) ClientTools() bool {
-	return e.cfg.Agent != nil && e.cfg.Agent.Capabilities().ClientTools
+	a := e.defaultAgent()
+	return a != nil && a.Capabilities().ClientTools
 }
 
 // Events is the UI-facing stream. It stays open for the engine's life
@@ -400,14 +408,18 @@ func (e *Engine) schedule() {
 // startAutonomous creates the agent session for a queued run and kicks
 // it off. On setup failure it frees the slot and records the error.
 func (e *Engine) startAutonomous(s *Session) {
-	// price this session's token spend at its provider's rate (0 =
-	// default), and use the same rate for the remaining-envelope baseline
-	// so the budget math is self-consistent.
-	_, provider := e.resolveRole(s.Feature.Profile, s.Role)
-	s.setByokRate(provider.CreditsPer1KTokens)
+	// price this session's token spend at the resolved adapter's rate
+	// (0 = default), and use the same rate for the remaining-envelope
+	// baseline so the budget math is self-consistent.
+	model, backend := e.resolveRole(s.Feature.Profile, s.Role)
+	rate := 0.0
+	if a := e.agentFor(backend); a != nil {
+		rate = a.CreditRate(model)
+	}
+	s.setByokRate(rate)
 	// compute the stage budget once so the enforced cap, the budget-aware
 	// hint, and the session's own budget all agree.
-	budget := e.stageBudget(s.Feature, provider.CreditsPer1KTokens)
+	budget := e.stageBudget(s.Feature, rate)
 	// a budgeted feature with nothing left must not run uncapped (a 0
 	// budget elsewhere means "unbudgeted"): gate it immediately.
 	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !interactiveStage(s.Feature.Stage) {
@@ -563,22 +575,26 @@ func indentLines(s string) string {
 	return "    " + strings.ReplaceAll(s, "\n", "\n    ")
 }
 
-// stampSpawnInfo records on the session which backend, model, and
-// provider its profile/role resolve to — and the provider's token→credit
-// rate — so status displays (and interactive budget math) have them from
-// the moment the session exists, not after the first usage event.
+// stampSpawnInfo records on the session which backend and model its
+// profile/role resolve to — and the adapter's token→credit rate — so
+// status displays (and interactive budget math) have them from the
+// moment the session exists, not after the first usage event.
 func (e *Engine) stampSpawnInfo(s *Session) {
-	model, provider := e.resolveRole(s.Feature.Profile, s.Role)
+	model, backend := e.resolveRole(s.Feature.Profile, s.Role)
 	name := ""
-	if e.cfg.Agent != nil {
-		name = e.cfg.Agent.Name()
+	rate := 0.0
+	clientTools := false
+	if a := e.agentFor(backend); a != nil {
+		name = a.Name()
+		rate = a.CreditRate(model)
+		clientTools = a.Capabilities().ClientTools
 	}
-	s.setSpawnInfo(name, model, provider)
-	s.setByokRate(provider.CreditsPer1KTokens)
+	s.setSpawnInfo(name, model, clientTools)
+	s.setByokRate(rate)
 }
 
 // newAgentSession builds an agent session for a feature's stage, with
-// the model/provider chosen by the feature's profile for this role. It
+// the backend/model chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
 // Session (ask_user answer capture writes there).
 func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor) (agent.Session, string, error) {
@@ -586,7 +602,14 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	if err != nil {
 		return nil, "", err
 	}
-	model, provider := e.resolveRole(f.Profile, role)
+	model, backend := e.resolveRole(f.Profile, role)
+	ag := e.agentFor(backend)
+	if ag == nil {
+		if backend == "" {
+			return nil, "", fmt.Errorf("no agent configured for feature %s stage %s", f.ID, f.Stage)
+		}
+		return nil, "", fmt.Errorf("no agent registered for backend %q (feature %s role %s)", backend, f.ID, role)
+	}
 	hints := stageHints(f, specPath, flavor)
 	// implementation runs carry any open diff review comments so a fix-up
 	// (bounce from the diff surface's "request changes") addresses each
@@ -604,13 +627,13 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		maxCredits = budget * capHeadroom
 		hints = append(hints, budgetHint(budget))
 	}
-	// gummi-owned client tools per stage. When the backend supports them,
-	// register the tools and tell the agent they exist; otherwise fall
-	// back to prompt conventions (ask_user has a fenced-block convention;
-	// spec_annotate and submit_verdict degrade to the %% and VERDICT:
-	// text forms the stage hints already describe).
+	// gummi-owned client tools per stage. When the resolved backend
+	// supports them, register the tools and tell the agent they exist;
+	// otherwise fall back to prompt conventions (ask_user has a fenced-
+	// block convention; spec_annotate and submit_verdict degrade to the
+	// %% and VERDICT: text forms the stage hints already describe).
 	var tools []agent.ToolDef
-	if e.ClientTools() {
+	if ag.Capabilities().ClientTools {
 		tools = stageTools(f.Stage, flavor)
 		if h := toolHint(f.Stage, flavor); h != "" {
 			hints = append(hints, h)
@@ -618,12 +641,11 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	} else if interactiveStage(f.Stage) {
 		hints = append(hints, askConventionHint)
 	}
-	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
+	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     workDir,
 		Role:        role,
 		Model:       model,
 		SystemHints: hints,
-		Provider:    provider,
 		Permission:  e.cfg.Permission,
 		MaxCredits:  maxCredits,
 		Tools:       tools,
@@ -791,10 +813,10 @@ func (e *Engine) freeSlot(s *Session) {
 // the resumed stage always has real multi-turn headroom rather than a
 // sliver.
 //
-// The spend is priced at the default credit rate here; a BYOK provider
-// with a much higher per-token rate can still re-gate after a top-up,
-// since the stage-budget math at session start prices spend at that
-// provider's rate.
+// The spend is priced at the default credit rate here; an adapter with
+// a much higher per-token rate can still re-gate after a top-up, since
+// the stage-budget math at session start prices spend at that adapter's
+// rate.
 func (e *Engine) TopUp(ctx context.Context, id domain.FeatureID) error {
 	f, err := e.cfg.Store.GetFeature(ctx, id)
 	if err != nil {
@@ -961,11 +983,11 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	case agent.EventUsage:
 		s.addSpend(ev.Usage)
 		// accumulate the feature's running total across all stages. Persist
-		// the credit-equivalent (not raw credits): a BYOK stage reports
+		// the credit-equivalent (not raw credits): a token-only stage reports
 		// tokens with zero credits, and storing that raw would make its spend
-		// invisible to the credits-denominated envelope once any hosted stage
-		// contributed credits. Hosted events already carry credits, so this
-		// leaves them unchanged and never double-counts.
+		// invisible to the credits-denominated envelope once any credits-
+		// metered stage contributed credits. Metered events already carry
+		// credits, so this leaves them unchanged and never double-counts.
 		if e.cfg.Persist && e.cfg.Store != nil {
 			credits := s.creditEquivalent(ev.Usage)
 			// estimated is the token/rate-derived portion of credits, kept as
@@ -1021,8 +1043,8 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventBudget, Threshold: pct})
 		}
 		// gummi-side enforcement: interrupt and checkpoint once spend
-		// reaches the budget (covers BYOK and sub-floor budgets the CLI
-		// cap can't).
+		// reaches the budget (covers token-only backends and sub-floor
+		// budgets the CLI cap can't).
 		if s.overBudget() {
 			if a := s.agent(); a != nil {
 				_ = a.Interrupt(context.Background())

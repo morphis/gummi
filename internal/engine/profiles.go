@@ -1,44 +1,43 @@
 package engine
 
-import (
-	"github.com/morphis/gummi/internal/agent"
-	"github.com/morphis/gummi/internal/config"
-)
+import "github.com/morphis/gummi/internal/agent"
 
-// resolveRole picks the model and provider for a feature's profile and
-// role. It falls back to the engine's single-model config (M1/M2
-// behavior) when profiles are absent or don't cover the profile/role,
-// so a repo without profiles.yaml still works.
-func (e *Engine) resolveRole(profileName string, role agent.Role) (string, agent.Provider) {
+// resolveRole picks the model and backend name for a feature's profile
+// and role. It falls back to the engine's single-model config (M1/M2
+// behavior) when profiles are absent or don't cover the profile/role, so
+// a repo without profiles.yaml still works. An empty backend means "use
+// the engine's default backend" — agentFor resolves that.
+func (e *Engine) resolveRole(profileName string, role agent.Role) (model, backend string) {
 	prof, ok := e.cfg.Profiles.Profiles[profileName]
 	if !ok {
-		// try the profiles file's declared default
 		if def := e.cfg.Profiles.Default; def != "" {
 			prof, ok = e.cfg.Profiles.Profiles[def]
 		}
 	}
 	if ok {
 		if rc, ok := prof[string(role)]; ok {
-			return rc.Model, providerFrom(rc.Provider)
+			return rc.Model, rc.Backend
 		}
 	}
-	return e.cfg.Model, e.cfg.Provider
+	return e.cfg.Model, ""
 }
 
-// providerFrom converts a profile BYOK block to an agent.Provider. A nil
-// block means native routing (no BYOK).
-func providerFrom(p *config.ProviderConfig) agent.Provider {
-	if p == nil {
-		return agent.Provider{}
+// agentFor returns the Agent for the given backend name. An empty name,
+// or an unknown backend, resolves to the engine's default agent (the
+// entry stored under the "" key in cfg.Agents). Returns nil when the
+// engine has no agents at all — a construction-time misconfiguration the
+// callers already guard against with their own nil checks.
+func (e *Engine) agentFor(backend string) agent.Agent {
+	if backend != "" {
+		if a, ok := e.cfg.Agents[backend]; ok {
+			return a
+		}
 	}
-	typ := p.Type
-	if typ == "" {
-		typ = "openai"
-	}
-	return agent.Provider{
-		Type:               typ,
-		BaseURL:            p.BaseURL,
-		APIKeyEnv:          p.APIKeyEnv,
-		CreditsPer1KTokens: p.CreditsPer1KTokens,
-	}
+	return e.cfg.Agents[""]
 }
+
+// defaultAgent returns the engine's default backend, or nil when none is
+// configured. It exists because a handful of engine-owned sessions
+// (discovery, ingest, estimate) don't run under a profile role and use
+// the default directly.
+func (e *Engine) defaultAgent() agent.Agent { return e.agentFor("") }

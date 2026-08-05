@@ -15,7 +15,7 @@ import (
 func TestBaselineChecksPersists(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
-		Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
 		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
 	})
 	t.Cleanup(func() { e.Close() })
@@ -57,7 +57,7 @@ func TestBaselineChecksPersists(t *testing.T) {
 func TestBaselineChecksGuardedNoop(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
-		Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
 		Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded,
 	})
 	t.Cleanup(func() { e.Close() })
@@ -84,7 +84,7 @@ func TestBaselineChecksGuardedNoop(t *testing.T) {
 func TestBaselineChecksMalformedYAMLErrors(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
-		Agent: &agent.Fake{}, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
 		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
 	})
 	t.Cleanup(func() { e.Close() })

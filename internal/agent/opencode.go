@@ -51,12 +51,15 @@ func NewOpencode(bin string) (*Opencode, error) {
 func (o *Opencode) Name() string { return "opencode" }
 
 // Capabilities implements Agent. opencode persists sessions (--session),
-// reports per-step token/cost usage, and can be interrupted by killing the
-// turn's process. BYOK routing needs opencode-side provider config rather
-// than a per-session env, so it is not advertised here.
+// reports per-step token/cost usage, and can be interrupted by killing
+// the turn's process.
 func (o *Opencode) Capabilities() Capabilities {
 	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true}
 }
+
+// CreditRate implements Agent. opencode reports its own USD cost per step
+// (see mapEvent), so the engine must not re-price its tokens.
+func (o *Opencode) CreditRate(string) float64 { return 0 }
 
 // NewSession implements Agent. No process starts until the first Send; the
 // opencode session id is captured from that turn's events and threaded
@@ -69,16 +72,6 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	}
 	if opts.Model == "" {
 		return nil, errors.New("opencode requires a model (provider/model, e.g. opencode/deepseek-v4-flash-free)")
-	}
-	// opencode owns provider configuration through its own config
-	// (`opencode auth`, opencode.json). A gummi-style BYOK Provider (a
-	// Copilot base_url + key) doesn't map onto it, so rather than silently
-	// ignore it, fail clearly: configure the endpoint in opencode and
-	// reference it as `<provider>/<model>` in the profile's model.
-	if opts.Provider.BaseURL != "" {
-		return nil, fmt.Errorf("opencode manages providers itself; configure %q in opencode "+
-			"(`opencode auth` or opencode.json) and set the profile model to <provider>/<model> "+
-			"instead of a BYOK block", opts.Provider.BaseURL)
 	}
 	s := &opencodeSession{
 		o:       o,

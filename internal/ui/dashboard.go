@@ -190,9 +190,6 @@ func sessionMeta(snap engine.Snapshot) string {
 	if m := runModel(snap); m != "" {
 		parts = append(parts, m)
 	}
-	if p := snap.Provider.Describe(); p != "" {
-		parts = append(parts, p)
-	}
 	if sp := spendSummary(snap); sp != "" {
 		parts = append(parts, sp)
 	}

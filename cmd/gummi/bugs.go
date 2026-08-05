@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -65,7 +66,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	// so they don't need a coding agent — construct a bare engine when none
 	// is configured. Running the bugs later needs an agent; creating them
 	// does not.
-	eng, ag, names := newEngineFromEnv(store, wt, ws)
+	eng, agents, names := newEngineFromEnv(store, wt, ws)
 	if eng == nil {
 		eng = engine.New(engine.Config{Store: store, Worktrees: wt, Workspace: ws})
 	}
@@ -85,12 +86,26 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 		eng: eng, profile: prof, env: env,
 		cleanup: func() {
 			_ = eng.Close()
-			if ag != nil {
-				_ = ag.Close()
-			}
+			closeAgents(agents)
 			_ = store.Close()
 		},
 	}, nil
+}
+
+// closeAgents closes every distinct agent in the map exactly once (the
+// "" default alias points at one of the concrete-name entries).
+func closeAgents(agents map[string]agent.Agent) {
+	seen := map[agent.Agent]struct{}{}
+	for _, a := range agents {
+		if a == nil {
+			continue
+		}
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		_ = a.Close()
+	}
 }
 
 // runBugIngest implements `gummi bugs ingest`: pull open issues from a

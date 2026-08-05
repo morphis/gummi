@@ -183,11 +183,11 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (drive
 	if err != nil {
 		return err
 	}
-	eng, ag, _ := newEngineFromEnv(store, wt, ws)
+	eng, agents, _ := newEngineFromEnv(store, wt, ws)
 	if eng == nil {
 		return fmt.Errorf("no coding agent is configured; a run needs one (GitHub Copilot, or set GUMMI_AGENT/GUMMI_AGENT_CMD)")
 	}
-	defer func() { _ = eng.Close(); _ = ag.Close() }()
+	defer func() { _ = eng.Close(); closeAgents(agents) }()
 
 	d := driver.New(eng, store, ws, os.Stdout, opts)
 	out, derr := fn(context.Background(), d, store)

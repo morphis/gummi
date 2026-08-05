@@ -42,7 +42,7 @@ func TestEstimateStreamedReplyNotDoubled(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -89,7 +89,7 @@ func TestEstimateAppliesBackendCostFactor(t *testing.T) {
 		}
 	}}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -113,7 +113,7 @@ func TestEstimateRunsScribe(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)

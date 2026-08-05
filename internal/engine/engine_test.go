@@ -128,7 +128,7 @@ func waitActivity(t *testing.T, e *Engine, id domain.FeatureID, wants ...string)
 func newEngine(t *testing.T, ag agent.Agent) *Engine {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
@@ -197,7 +197,7 @@ func TestAutonomousRunKicksOff(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -235,7 +235,7 @@ func TestErrorFreesSlotAndUnwedgesQueue(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f1 := feature(1, "boom", domain.StageImplement)
@@ -278,7 +278,7 @@ func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "planned", domain.StagePlan)
@@ -309,7 +309,7 @@ func TestSchedulerQueuesBeyondMaxActive(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -343,7 +343,7 @@ func TestPauseFreesSlotAndPromotes(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -377,7 +377,7 @@ func TestMaxActiveTwo(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 2})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 2})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -419,7 +419,7 @@ func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -482,7 +482,7 @@ func TestSendUnknownFeature(t *testing.T) {
 func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl me", domain.StageImplement)
@@ -504,7 +504,7 @@ func TestWorktreeStageLocatesWorktree(t *testing.T) {
 func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agent: rec, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "Dark mode", domain.StageBrainstorm)
@@ -538,20 +538,34 @@ func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
 	}
 }
 
-// recorder is an Agent that captures the last SessionOpts.
+// recorder is an Agent that captures the last SessionOpts and counts
+// how many sessions it was asked to start — enough to assert that a
+// profile's backend field routed to the right adapter. name overrides
+// the underlying Fake's default "fake" identity when a test needs it to
+// match a specific backend key ("copilot", "headless").
 type recorder struct {
 	*agent.Fake
 	mu       sync.Mutex
 	lastOpts agent.SessionOpts
+	sessions int
+	name     string
 }
 
 func recordingAgent() *recorder {
 	return &recorder{Fake: agent.NewFake("ok")}
 }
 
+func (r *recorder) Name() string {
+	if r.name != "" {
+		return r.name
+	}
+	return r.Fake.Name()
+}
+
 func (r *recorder) NewSession(ctx context.Context, opts agent.SessionOpts) (agent.Session, error) {
 	r.mu.Lock()
 	r.lastOpts = opts
+	r.sessions++
 	r.mu.Unlock()
 	return r.Fake.NewSession(ctx, opts)
 }
@@ -560,4 +574,10 @@ func (r *recorder) opts() agent.SessionOpts {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.lastOpts
+}
+
+func (r *recorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessions
 }

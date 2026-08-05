@@ -22,9 +22,9 @@ func TestScribeEstimateBlendsAndPersists(t *testing.T) {
 
 	// a scribe that estimates 200; blended with the historical 100 → 150
 	eng := engine.New(engine.Config{
-		Agent: &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		Agents: singleAgent(&agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
 			return []agent.Event{{Kind: agent.EventMessage, Text: "Sizeable.\nESTIMATE: 200"}, {Kind: agent.EventIdle}}
-		}},
+		}}),
 		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
 	})
 	t.Cleanup(func() { eng.Close() })
@@ -45,9 +45,9 @@ func TestScribeEstimateBlendsAndPersists(t *testing.T) {
 func scribeEngine(t *testing.T, m *Shell, reply string) {
 	t.Helper()
 	eng := engine.New(engine.Config{
-		Agent: &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		Agents: singleAgent(&agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
 			return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
-		}},
+		}}),
 		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
 	})
 	t.Cleanup(func() { eng.Close() })

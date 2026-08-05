@@ -87,7 +87,9 @@ type IngestStep struct {
 // commentary) as the pass runs. It is called from the pass's goroutine;
 // callers wanting UI updates must hand off to their own loop.
 func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progress func(IngestStep)) (domain.IngestResult, error) {
-	if e.cfg.Agent == nil {
+	model, backend := e.resolveRole(profile, agent.RoleArchitect)
+	ag := e.agentFor(backend)
+	if ag == nil {
 		return domain.IngestResult{}, fmt.Errorf("no agent configured; cannot ingest")
 	}
 	raw, err := os.ReadFile(sourcePath)
@@ -102,8 +104,7 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 		return domain.IngestResult{}, err
 	}
 
-	model, provider := e.resolveRole(profile, agent.RoleArchitect)
-	caps := e.cfg.Agent.Capabilities()
+	caps := ag.Capabilities()
 	// point the agent at the absolute stashed path (like Estimate does with
 	// the spec) so a backend that resolves relative paths differently than
 	// its process CWD still finds it; provenance keeps the repo-relative path.
@@ -115,11 +116,10 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 	} else {
 		hints = append(hints, ingestConventionHint)
 	}
-	sess, err := e.cfg.Agent.NewSession(ctx, agent.SessionOpts{
+	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:     e.cfg.Worktrees.Root(),
 		Role:        agent.RoleArchitect,
 		Model:       model,
-		Provider:    provider,
 		Permission:  e.cfg.Permission,
 		SystemHints: hints,
 		Tools:       tools,

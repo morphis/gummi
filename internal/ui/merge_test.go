@@ -107,10 +107,10 @@ func TestSquashMergeFlow(t *testing.T) {
 func TestSquashMergeEngineNeverDrafts(t *testing.T) {
 	m, root, _ := mergeFixture(t)
 	eng := engine.New(engine.Config{
-		Agent: &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		Agents: singleAgent(&agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 			t.Errorf("merge spawned an agent session (role %s) — the user writes the message", opts.Role)
 			return []agent.Event{{Kind: agent.EventIdle}}
-		}},
+		}}),
 		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
 	})
 	t.Cleanup(func() { eng.Close() })

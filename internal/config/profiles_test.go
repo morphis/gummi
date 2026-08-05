@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,12 +21,11 @@ func TestLoadProfiles(t *testing.T) {
 	p := writeProfiles(t, `default: thrifty
 profiles:
   premium:
-    architect: { model: claude-opus-4.8 }
+    architect: { backend: claude, model: claude-opus-4.8 }
     reviewer: { model: gpt-5-codex }
   thrifty:
-    implementer:
-      model: qwen
-      byok: { type: openai, base_url: http://127.0.0.1:8080/v1, api_key_env: LLAMA_API_KEY }
+    implementer: { backend: headless, model: qwen2.5-coder-32b }
+    scribe: { model: gpt-5-mini }
 `)
 	if p.Default != "thrifty" {
 		t.Errorf("default = %q", p.Default)
@@ -33,41 +33,44 @@ profiles:
 	if p.Profiles["premium"]["architect"].Model != "claude-opus-4.8" {
 		t.Errorf("premium architect wrong: %+v", p.Profiles["premium"]["architect"])
 	}
-	if p.Profiles["premium"]["reviewer"].Model != "gpt-5-codex" {
-		t.Error("cross-model reviewer not parsed")
+	if p.Profiles["premium"]["architect"].Backend != "claude" {
+		t.Errorf("premium architect backend = %q, want claude", p.Profiles["premium"]["architect"].Backend)
 	}
-	byok := p.Profiles["thrifty"]["implementer"].Provider
-	if byok == nil || byok.BaseURL != "http://127.0.0.1:8080/v1" || byok.APIKeyEnv != "LLAMA_API_KEY" {
-		t.Errorf("byok not parsed: %+v", byok)
+	if p.Profiles["premium"]["reviewer"].Backend != "" {
+		t.Errorf("premium reviewer backend = %q, want empty (default)", p.Profiles["premium"]["reviewer"].Backend)
+	}
+	if p.Profiles["thrifty"]["implementer"].Backend != "headless" {
+		t.Errorf("thrifty implementer backend = %q, want headless", p.Profiles["thrifty"]["implementer"].Backend)
 	}
 }
 
-func TestLoadProfilesRejectsLiteralKey(t *testing.T) {
+func TestLoadProfilesRejectsUnknownBackend(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, `profiles:
+  x:
+    scribe: { backend: made-up, model: m }
+`))
+	if err == nil {
+		t.Fatal("unknown backend should be rejected")
+	}
+	if !strings.Contains(err.Error(), "made-up") {
+		t.Errorf("error should mention the bad backend, got: %v", err)
+	}
+}
+
+func TestLoadProfilesRejectsLegacyByok(t *testing.T) {
+	// stale profiles from before the migration must fail with a pointer,
+	// not silently ignore the removed field.
 	_, err := LoadProfiles(profilesPath(t, `profiles:
   x:
     scribe:
       model: m
-      byok: { base_url: http://h/v1, api_key: sk-secret-literal }
+      byok: { base_url: http://h/v1 }
 `))
 	if err == nil {
-		t.Fatal("literal byok api_key should be rejected")
+		t.Fatal("legacy byok: block should be rejected")
 	}
-}
-
-func TestLoadProfilesRejectsUnsafeKeyEnv(t *testing.T) {
-	// a committed profile must not be able to name an arbitrary secret
-	for _, bad := range []string{"GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN", "HOME"} {
-		body := "profiles:\n  x:\n    scribe:\n      model: m\n      byok: { base_url: http://evil/v1, api_key_env: " + bad + " }\n"
-		if _, err := LoadProfiles(profilesPath(t, body)); err == nil {
-			t.Errorf("api_key_env %q should be rejected (secret exfiltration)", bad)
-		}
-	}
-	// conventional API-key names and the gummi namespace are allowed
-	for _, ok := range []string{"OPENAI_API_KEY", "LLAMA_API_KEY", "GUMMI_PROVIDER_KEY"} {
-		body := "profiles:\n  x:\n    scribe:\n      model: m\n      byok: { base_url: http://h/v1, api_key_env: " + ok + " }\n"
-		if _, err := LoadProfiles(profilesPath(t, body)); err != nil {
-			t.Errorf("api_key_env %q should be allowed: %v", ok, err)
-		}
+	if !strings.Contains(err.Error(), "byok") || !strings.Contains(err.Error(), "backend") {
+		t.Errorf("error should point at the byok → backend migration, got: %v", err)
 	}
 }
 
@@ -75,18 +78,6 @@ func TestLoadProfilesRejectsMissingModel(t *testing.T) {
 	_, err := LoadProfiles(profilesPath(t, "profiles:\n  x:\n    architect: {}\n"))
 	if err == nil {
 		t.Error("role without a model should error")
-	}
-}
-
-func TestLoadProfilesRejectsByokWithoutBaseURL(t *testing.T) {
-	_, err := LoadProfiles(profilesPath(t, `profiles:
-  x:
-    scribe:
-      model: m
-      byok: { api_key_env: K }
-`))
-	if err == nil {
-		t.Error("byok without base_url should error")
 	}
 }
 
@@ -98,8 +89,21 @@ func TestProfilesTemplateParses(t *testing.T) {
 	if _, ok := p.Profiles["premium"]; !ok {
 		t.Error("template missing premium profile")
 	}
-	if p.Profiles["premium"]["reviewer"].Model == p.Profiles["premium"]["implementer"].Model {
-		t.Error("template premium should use cross-model review")
+	// premium routes implementer and reviewer through different backends
+	// (cross-backend review — same model, distinct provider infrastructure).
+	if p.Profiles["premium"]["reviewer"].Backend == p.Profiles["premium"]["implementer"].Backend {
+		t.Error("template premium should route reviewer through a different backend than implementer")
+	}
+	// every backend named in the template must be a known one.
+	for name, prof := range p.Profiles {
+		for role, rc := range prof {
+			if rc.Backend == "" {
+				continue
+			}
+			if _, ok := knownBackends[rc.Backend]; !ok {
+				t.Errorf("template profile %q role %q references unknown backend %q", name, role, rc.Backend)
+			}
+		}
 	}
 }
 

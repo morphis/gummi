@@ -14,7 +14,7 @@ import (
 // second engine can Restore from it.
 func persistEngine(t *testing.T, ag agent.Agent, ws state.Workspace, store *state.Store, wt *worktree.Manager) *Engine {
 	t.Helper()
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
@@ -169,7 +169,7 @@ func TestRestoreInterruptedAutonomousComesBackPaused(t *testing.T) {
 		<-release
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
-	e1 := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	e1 := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
 	if err := e1.Run(f); err != nil {
 		t.Fatal(err)
 	}

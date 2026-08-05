@@ -10,8 +10,6 @@ import (
 
 	copilot "github.com/github/copilot-sdk/go"
 	copilotrpc "github.com/github/copilot-sdk/go/rpc"
-
-	"github.com/morphis/gummi/internal/agent/fakeopenai"
 )
 
 // findCopilot locates the CLI so the test can drive it; it skips the
@@ -35,87 +33,25 @@ func findCopilot(t *testing.T) string {
 	return p
 }
 
-// TestCopilotBYOKRoundTrip is the phase-7 spike as a test: start the
-// CLI via the SDK, open a BYOK session against a local fake OpenAI
-// server, send one message, and assert the streamed reply + usage.
-// This needs no GitHub authentication — BYOK routes the model call to
-// the fake server, and the CLI's server mode does not gate BYOK on a
-// GitHub session.
-func TestCopilotBYOKRoundTrip(t *testing.T) {
+// TestCopilotCapabilities asserts the capabilities the adapter reports
+// (a smoke test against the real CLI; skipped when unavailable) so a
+// downstream integration relying on Interrupt / UsageEvents / Resume
+// keeps working. ClientTools is separately verified via unit tests.
+func TestCopilotCapabilities(t *testing.T) {
 	cli := findCopilot(t)
-
-	srv := fakeopenai.New(fakeopenai.WithReply("hello from byok"))
-	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	ag, err := NewCopilot(ctx, CopilotOptions{CLIPath: cli, LogLevel: "error"})
 	if err != nil {
 		t.Skipf("cannot start copilot CLI (no session/network?): %v", err)
 	}
 	defer ag.Close()
-
 	caps := ag.Capabilities()
-	if !caps.BYOK || !caps.Interrupt || !caps.UsageEvents || !caps.Resume {
+	if !caps.Interrupt || !caps.UsageEvents || !caps.Resume || !caps.ClientTools {
 		t.Errorf("unexpected capabilities: %+v", caps)
 	}
-
-	wd, _ := os.Getwd()
-	sess, err := ag.NewSession(ctx, SessionOpts{
-		WorkDir:    wd,
-		Role:       RoleScribe,
-		Model:      "fake-model",
-		Permission: PermissionAllowAll,
-		Provider:   Provider{Type: "openai", BaseURL: srv.BaseURL()},
-	})
-	if err != nil {
-		t.Fatalf("create BYOK session: %v", err)
-	}
-	defer sess.Close()
-
-	if err := sess.Send(ctx, "Say hello."); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-
-	var gotMessage string
-	var sawUsage bool
-	deadline := time.After(60 * time.Second)
-loop:
-	for {
-		select {
-		case ev, ok := <-sess.Events():
-			if !ok {
-				break loop
-			}
-			switch ev.Kind {
-			case EventMessage:
-				gotMessage = ev.Text
-			case EventUsage:
-				sawUsage = true
-			case EventError:
-				t.Fatalf("session error: %v", ev.Err)
-			case EventIdle:
-				break loop
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for the agent")
-		}
-	}
-
-	if gotMessage != "hello from byok" {
-		t.Errorf("assistant message = %q, want the fake reply", gotMessage)
-	}
-	if !sawUsage {
-		t.Error("no usage event observed")
-	}
-	// the fake provider must have actually been called (BYOK routing)
-	reqs := srv.Requests()
-	if len(reqs) == 0 {
-		t.Fatal("fake provider received no requests — BYOK not routed")
-	}
-	if reqs[0].Model != "fake-model" {
-		t.Errorf("provider called with model %q", reqs[0].Model)
+	if r := ag.CreditRate("any"); r != 0 {
+		t.Errorf("copilot CreditRate = %v, want 0 (self-metered)", r)
 	}
 }
 
@@ -146,93 +82,6 @@ func TestCopilotOnEventMapsStreamingEvents(t *testing.T) {
 		default:
 			t.Fatalf("event %d (%+v) was dropped", i, w)
 		}
-	}
-}
-
-// TestCopilotToolResultRoundTrip drives the real CLI end to end through
-// a tool execution: the scripted BYOK model requests a shell command,
-// the CLI runs it, and the adapter must surface both the tool call and
-// its captured result (output + call-id pairing) — the events the
-// transcript's forensic view is built on.
-func TestCopilotToolResultRoundTrip(t *testing.T) {
-	cli := findCopilot(t)
-
-	srv := fakeopenai.New(
-		fakeopenai.WithReply("command ran"),
-		fakeopenai.WithToolCall("bash", `{"command":"echo gummi-tool-e2e"}`),
-	)
-	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	ag, err := NewCopilot(ctx, CopilotOptions{CLIPath: cli, LogLevel: "error"})
-	if err != nil {
-		t.Skipf("cannot start copilot CLI (no session/network?): %v", err)
-	}
-	defer ag.Close()
-
-	wd := t.TempDir()
-	sess, err := ag.NewSession(ctx, SessionOpts{
-		WorkDir:    wd,
-		Role:       RoleImplementer,
-		Model:      "fake-model",
-		Permission: PermissionAllowAll,
-		Provider:   Provider{Type: "openai", BaseURL: srv.BaseURL()},
-	})
-	if err != nil {
-		t.Fatalf("create BYOK session: %v", err)
-	}
-	defer sess.Close()
-
-	if id, ok := sess.(Identified); !ok || id.SessionID() == "" {
-		t.Error("copilot session does not expose its session id")
-	}
-
-	if err := sess.Send(ctx, "Run the echo command."); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-
-	var call, result *Event
-	deadline := time.After(60 * time.Second)
-loop:
-	for {
-		select {
-		case ev, ok := <-sess.Events():
-			if !ok {
-				break loop
-			}
-			switch ev.Kind {
-			case EventToolCall:
-				e := ev
-				call = &e
-			case EventToolResult:
-				e := ev
-				result = &e
-			case EventError:
-				t.Fatalf("session error: %v", ev.Err)
-			case EventIdle:
-				break loop
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for the agent")
-		}
-	}
-
-	if call == nil || call.CallID == "" {
-		t.Fatalf("no tool call observed (call=%+v)", call)
-	}
-	if result == nil {
-		t.Fatal("no tool result observed — completions are being dropped")
-	}
-	if result.CallID != call.CallID {
-		t.Errorf("result call id %q != call id %q", result.CallID, call.CallID)
-	}
-	if result.Result == nil || !result.Result.OK {
-		t.Errorf("result = %+v, want OK", result.Result)
-	}
-	if !strings.Contains(result.Result.Output, "gummi-tool-e2e") {
-		t.Errorf("captured output %q missing the command's stdout", result.Result.Output)
 	}
 }
 
@@ -536,51 +385,6 @@ func TestCopilotMeteredStamp(t *testing.T) {
 					metered, e.Usage.Metered, e.Usage)
 			}
 		}
-	}
-}
-
-// TestCopilotCloseClosesSessionChannels verifies Agent.Close() closes
-// outstanding sessions' Events channels, so a `for range Events()`
-// consumer does not leak when the agent is torn down without an
-// explicit per-session Close.
-func TestCopilotCloseClosesSessionChannels(t *testing.T) {
-	cli := findCopilot(t)
-	srv := fakeopenai.New(fakeopenai.WithReply("bye"))
-	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	ag, err := NewCopilot(ctx, CopilotOptions{CLIPath: cli, LogLevel: "error"})
-	if err != nil {
-		t.Skipf("cannot start copilot CLI: %v", err)
-	}
-	wd, _ := os.Getwd()
-	sess, err := ag.NewSession(ctx, SessionOpts{
-		WorkDir:  wd,
-		Model:    "fake-model",
-		Provider: Provider{Type: "openai", BaseURL: srv.BaseURL()},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	drained := make(chan struct{})
-	go func() {
-		for range sess.Events() { //nolint:revive // draining until close
-		}
-		close(drained)
-	}()
-
-	// close the agent WITHOUT closing the session; the consumer must
-	// still observe the channel closing.
-	if err := ag.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-drained:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Events channel did not close after Agent.Close()")
 	}
 }
 

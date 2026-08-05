@@ -94,7 +94,7 @@ func TestIngestClientToolPath(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# Platform PRD\nlots of requirements\n")
@@ -122,7 +122,7 @@ func TestIngestConventionPath(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "design.md", "# Design\nstuff\n")
@@ -153,7 +153,7 @@ func TestIngestConventionPathStreamedThenCompleted(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "streamy.md", "# Spec\nthings\n")
@@ -167,7 +167,7 @@ func TestIngestConventionPathStreamedThenCompleted(t *testing.T) {
 func TestIngestNoProposalIsError(t *testing.T) {
 	ag := &agent.Fake{Reply: "I couldn't find anything to split."}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "empty-ish.md", "not really a spec\n")
@@ -179,7 +179,7 @@ func TestIngestNoProposalIsError(t *testing.T) {
 func TestIngestEmptySourceRejected(t *testing.T) {
 	ag := agent.NewFake("x")
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "blank.md", "   \n")
@@ -199,7 +199,7 @@ func TestIngestStashDoesNotClobberSameBasename(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	// two different documents that share a basename must both survive.
@@ -253,7 +253,7 @@ func TestIngestReportsProgress(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agent: ag, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# PRD\nrequirements\n")

@@ -30,10 +30,10 @@ var budgetThresholds = []int{50, 80, 95}
 // smaller cap cannot be held anyway — the turn overshoots it either way.
 // Exhaustion semantics are unchanged: an envelope with nothing left
 // still returns 0 and gates.
-func (e *Engine) stageBudget(f domain.Feature, byokRate float64) float64 {
+func (e *Engine) stageBudget(f domain.Feature, creditRate float64) float64 {
 	if f.Budget.Envelope > 0 {
 		cur := e.currentFeature(f)
-		b := cur.Budget.Remaining(cur.Spend.CreditEquivalentAt(byokRate))
+		b := cur.Budget.Remaining(cur.Spend.CreditEquivalentAt(creditRate))
 		if reserve := e.turnReserve(); b > 0 && b < reserve {
 			b = reserve
 		}

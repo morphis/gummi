@@ -115,8 +115,7 @@ type Snapshot struct {
 	// AgentSessionID is the backend's own session id (agent.Identified),
 	// pointing at its on-disk log; empty for backends without one.
 	AgentSessionID string
-	Model          string         // model resolved at spawn (Spend.Model is the reported one)
-	Provider       agent.Provider // BYOK endpoint; zero means native routing
+	Model          string // model resolved at spawn (Spend.Model is the reported one)
 	Transcript     []Message
 	Activity       []string // recent tool-call lines
 	Spend          agent.Usage
@@ -154,8 +153,7 @@ type Session struct {
 	agentSess      agent.Session // nil while queued
 	agentName      string        // backend identity, for display
 	agentSessionID string        // backend session id (agent.Identified), "" if none
-	model          string        // model resolved at spawn
-	provider       agent.Provider
+	model          string // model resolved at spawn
 	specPath       string // resolved spec/draft path (for ask_user capture)
 	state          SessionState
 	transcript     []Message
@@ -170,9 +168,10 @@ type Session struct {
 	finalized      bool    // stopped; must not be persisted (may be dropped)
 	heldSlot       bool    // true between taking and releasing an attention slot
 	budget         float64 // stage credit budget (0 = none)
-	byokRate       float64 // provider token→credit rate (0 = default)
+	creditRate     float64 // adapter's token→credit rate (0 = engine default)
 	threshold      int     // highest budget threshold crossed (%)
 	exhausted      bool    // hit the credit cap
+	clientTools    bool    // resolved backend's ClientTools capability (spawn-time cache)
 
 	// Outstanding estimated spend per model, awaiting a settle event
 	// that reconciles it to the provider-metered figure: pendingTokenEst
@@ -196,7 +195,6 @@ func (s *Session) Snapshot() Snapshot {
 		AgentName:      s.agentName,
 		AgentSessionID: s.agentSessionID,
 		Model:          s.model,
-		Provider:       s.provider,
 		Transcript:     append([]Message(nil), s.transcript...),
 		Activity:       append([]string(nil), s.activity...),
 		Spend:          s.spend,
@@ -504,27 +502,27 @@ func (s *Session) crossedThreshold() (pct int, spent float64) {
 }
 
 // spentForBudgetLocked returns the session's spend as a credit-equivalent
-// (credits for hosted, token-derived for BYOK at the provider's rate).
-// Caller holds s.mu.
+// (credits for a metered backend, token-derived for a token-only one at
+// the adapter's rate). Caller holds s.mu.
 func (s *Session) spentForBudgetLocked() float64 {
 	return domain.Spend{Credits: s.spend.Credits, InputTokens: s.spend.InputTokens, OutputTokens: s.spend.OutputTokens}.
-		CreditEquivalentAt(s.byokRate)
+		CreditEquivalentAt(s.creditRate)
 }
 
 func (s *Session) setByokRate(r float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.byokRate = r
+	s.creditRate = r
 }
 
 // creditEquivalent prices one usage event as credits at this session's
-// provider rate: the metered credits for hosted usage, or a token-derived
-// value for BYOK (which reports tokens, never credits). Persisting this
-// keeps the feature's credit-denominated running total whole when its
-// stages mix hosted and BYOK providers.
+// adapter rate: the metered credits when the backend reports them, or a
+// token-derived value when it reports only tokens. Persisting this keeps
+// the feature's credit-denominated running total whole when its stages
+// mix credits-metered and token-only backends.
 func (s *Session) creditEquivalent(u agent.Usage) float64 {
 	s.mu.Lock()
-	rate := s.byokRate
+	rate := s.creditRate
 	s.mu.Unlock()
 	return domain.Spend{Credits: u.Credits, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}.
 		CreditEquivalentAt(rate)
@@ -579,14 +577,25 @@ func (s *Session) takePendingAsk() *Ask {
 	return a
 }
 
-// setSpawnInfo records which backend, model, and provider this session
-// runs on, so the UI can say so before the first usage event arrives.
-func (s *Session) setSpawnInfo(agentName, model string, provider agent.Provider) {
+// setSpawnInfo records which backend and model this session runs on, so
+// the UI can say so before the first usage event arrives. clientTools
+// caches the resolved backend's advertised ClientTools capability so
+// callers that need to decide per-session (convention-ask fallback,
+// tool registration) don't have to look the adapter up again.
+func (s *Session) setSpawnInfo(agentName, model string, clientTools bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentName = agentName
 	s.model = model
-	s.provider = provider
+	s.clientTools = clientTools
+}
+
+// ClientTools reports whether this session's backend advertises native
+// client-tool support. Stamped at spawn (setSpawnInfo).
+func (s *Session) ClientTools() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.clientTools
 }
 
 // notePendingEst accumulates a usage sample's estimated credits against

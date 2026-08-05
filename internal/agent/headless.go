@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,8 +26,7 @@ import (
 //
 // Wire protocol — gummi → agent, one JSON object per line on stdin:
 //
-//	{"type":"init","workdir":"…","model":"…","hints":[…],
-//	 "provider":{"type":"openai","base_url":"…","api_key_env":"NAME"}}
+//	{"type":"init","workdir":"…","model":"…","hints":[…]}
 //	{"type":"send","text":"…"}
 //	{"type":"interrupt"}
 //
@@ -47,9 +47,9 @@ import (
 //	{"type":"resolve","id":"…","result":"…"}
 //
 // The declared client tools are advertised in the init frame's "tools".
-// The provider API key is never written into the protocol: init carries
-// only the env-var NAME, and the child inherits gummi's environment, so it
-// resolves the key itself (threat list: keys are references, not literals).
+// The child inherits gummi's environment, so any provider config it needs
+// (base URL, API key) it reads from env directly — gummi does not carry
+// endpoint or key material in the protocol.
 type Headless struct {
 	argv []string
 
@@ -71,29 +71,45 @@ func NewHeadless(argv []string) (*Headless, error) {
 // names the binary doing the work.
 func (h *Headless) Name() string { return filepath.Base(h.argv[0]) }
 
-// Capabilities implements Agent. The protocol carries a provider (BYOK),
-// an interrupt frame, and a usage frame, so those are supported; there is
-// no session persistence, so resume is not. A given child may choose not
-// to emit usage frames — the orchestrator meters whatever arrives and
-// enforces caps itself as a backstop regardless.
+// Capabilities implements Agent. The protocol carries interrupt and
+// usage frames, so those are supported; there is no session persistence,
+// so resume is not. A given child may choose not to emit usage frames —
+// the orchestrator meters whatever arrives and enforces caps itself as a
+// backstop regardless.
 func (h *Headless) Capabilities() Capabilities {
-	return Capabilities{BYOK: true, Interrupt: true, UsageEvents: true, ClientTools: true}
+	return Capabilities{Interrupt: true, UsageEvents: true, ClientTools: true}
 }
 
-// initMsg / turnMsg are the gummi → agent frames.
+// headlessCreditRateEnv is the operator's escape hatch for pricing a
+// headless child's token spend into credits — the local-heavy case, where
+// the child speaks to llama.cpp and the engine still meters against a
+// credit-denominated envelope. Absent or unparseable, CreditRate returns
+// 0 and the engine's default rate applies.
+const headlessCreditRateEnv = "GUMMI_HEADLESS_CREDITS_PER_1K"
+
+// CreditRate implements Agent. Reads the env-configured rate (credits per
+// 1k tokens) so operator config, not a repo-committed profile, controls
+// how a local/BYOK-behind-headless endpoint is priced. Zero disables the
+// override; the engine falls back to its own default.
+func (h *Headless) CreditRate(string) float64 {
+	v := strings.TrimSpace(os.Getenv(headlessCreditRateEnv))
+	if v == "" {
+		return 0
+	}
+	r, err := strconv.ParseFloat(v, 64)
+	if err != nil || r < 0 {
+		return 0
+	}
+	return r
+}
+
+// headlessInit is the gummi → agent init frame.
 type headlessInit struct {
-	Type     string        `json:"type"`
-	WorkDir  string        `json:"workdir"`
-	Model    string        `json:"model,omitempty"`
-	Hints    []string      `json:"hints,omitempty"`
-	Tools    []ToolDef     `json:"tools,omitempty"`
-	Provider *headlessProv `json:"provider,omitempty"`
-}
-
-type headlessProv struct {
-	Type      string `json:"type"`
-	BaseURL   string `json:"base_url"`
-	APIKeyEnv string `json:"api_key_env,omitempty"`
+	Type    string    `json:"type"`
+	WorkDir string    `json:"workdir"`
+	Model   string    `json:"model,omitempty"`
+	Hints   []string  `json:"hints,omitempty"`
+	Tools   []ToolDef `json:"tools,omitempty"`
 }
 
 // NewSession implements Agent: spawn the command in opts.WorkDir and send
@@ -105,20 +121,17 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if closed {
 		return nil, errors.New("headless agent is closed")
 	}
-	if opts.Provider.BaseURL != "" && opts.Model == "" {
-		return nil, errors.New("model required when a provider is set")
-	}
 
 	// spawn + init OUTSIDE the lock (fork/exec and the init write must not
 	// serialize session creation or block a concurrent Close).
 	procCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, h.argv[0], h.argv[1:]...) //nolint:gosec // argv is operator config (GUMMI_AGENT_CMD), not agent/repo input
 	cmd.Dir = opts.WorkDir
-	// The child inherits gummi's full environment so it can resolve the
-	// BYOK key by name (init carries only the env-var NAME). A generic
-	// operator-chosen agent binary may need arbitrary env, so — unlike the
-	// Copilot CLI, which takes a scrubbed allowlist — this passes the whole
-	// environment; the command is trusted operator config, not repo input.
+	// The child inherits gummi's full environment: a generic operator-chosen
+	// agent binary may need arbitrary env (its own provider config, an API
+	// key, HOME, PATH) so — unlike the Copilot CLI, which takes a scrubbed
+	// allowlist — this passes the whole environment. The command is trusted
+	// operator config, not repo input.
 	cmd.Env = os.Environ()
 	// Run the child in its own process group and, on cancel/close, kill the
 	// whole group: an agent binary spawns tool subprocesses (bash, editors)
@@ -161,10 +174,6 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		readDone: make(chan struct{}),
 	}
 	initFrame := headlessInit{Type: "init", WorkDir: opts.WorkDir, Model: opts.Model, Hints: opts.SystemHints, Tools: opts.Tools}
-	if opts.Provider.BaseURL != "" {
-		p := opts.Provider
-		initFrame.Provider = &headlessProv{Type: cmpOr(p.Type, "openai"), BaseURL: p.BaseURL, APIKeyEnv: p.APIKeyEnv}
-	}
 	if err := s.write(initFrame); err != nil {
 		// no goroutines started yet: tear down directly (Close would block
 		// on readDone, which read() will never close).
