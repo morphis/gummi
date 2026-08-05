@@ -433,8 +433,11 @@ file and run ` + "`git rebase --continue`" + ` until the rebase completes; when
 files were deleted or renamed on one side, honor main's structure and
 carry this branch's changes into it. Never use ` + "`git rebase --skip`" + `
 (it drops this branch's commits), never force-push, and never touch the
-main checkout. When the rebase completes, run a quick build/test check
-if the repo has one and fix fallout your resolution caused, then stop.
+main checkout. When the rebase completes, run a quick build check to catch resolution
+fallout: prefer the repo's standard build (Go: ` + "`go build ./...`" + `;
+Node: ` + "`npm run build`" + `; Make: ` + "`make`" + `) if discoverable, and
+fix fallout your resolution caused. Skip if the repo has no such
+command; this is fallout detection, not full CI, so stop after.
 If a conflict cannot be reconciled, run ` + "`git rebase --abort`" + ` and end
 your final message explaining which conflict and why.`)
 }

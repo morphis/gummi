@@ -237,6 +237,21 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	}
 }
 
+// TestRebaseHintCarriesBuildCheck: F15 concretized the rebase's
+// post-conflict check — name the discoverable build commands rather
+// than "if the repo has one".
+func TestRebaseHintCarriesBuildCheck(t *testing.T) {
+	h := unwrap(rebaseHint())
+	for _, want := range []string{
+		"go build ./...", "npm run build", "make",
+		"fallout detection, not full CI",
+	} {
+		if !strings.Contains(h, want) {
+			t.Errorf("rebase hint missing %q", want)
+		}
+	}
+}
+
 // TestInteractiveKickoffQuickSpec: the spec-chat opener flips with the
 // route — a quick card's agent leads by drafting, a standard card's by
 // converging the open threads.
