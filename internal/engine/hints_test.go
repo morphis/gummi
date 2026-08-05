@@ -81,6 +81,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		{domain.StageVerify, domain.KindBug, []string{
 			"no longer reproduces", "SKIPPED", "VERDICT: blocked", "[CI-only]",
 			"plan defect",
+			// F4: the regression-test check is inspection — the fix is
+			// already applied here; execution against a reverted state
+			// would need git surgery the agent is not authorized to do.
+			"do not attempt to run the test against a reverted state",
 		}},
 	}
 	for _, tc := range cases {
