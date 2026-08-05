@@ -77,6 +77,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"runs without erroring", "SKIPPED", "VERDICT: fail", "VERDICT: blocked",
 			"[CI-only]", "allowed:",
 			"never revert human edits", "plan defect",
+			// F5: the plan-defect channel is concrete — a bullet Verify
+			// writes to the artifact, not a vague "finding" it has no
+			// primitive for.
+			"finding: gummi-checks tag defect",
 		}},
 		{domain.StageVerify, domain.KindBug, []string{
 			"no longer reproduces", "SKIPPED", "VERDICT: blocked", "[CI-only]",
@@ -85,6 +89,8 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			// already applied here; execution against a reverted state
 			// would need git surgery the agent is not authorized to do.
 			"do not attempt to run the test against a reverted state",
+			// F5: same plan-defect channel on the bug flavor.
+			"finding: gummi-checks tag defect",
 		}},
 	}
 	for _, tc := range cases {

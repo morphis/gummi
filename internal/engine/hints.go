@@ -482,8 +482,10 @@ the verification plan explicitly allows skipping it: a step tagged
 [CI-only] may always be skipped, and a step tagged [env: <prereq>] may
 be skipped only when that prerequisite is genuinely absent — record
 each as SKIPPED (allowed: <tag>) with the reason. A tag inside the
-gummi-checks block itself is a plan defect — record it as a finding,
-do not honor it as a skip. If every live check
+gummi-checks block itself is a plan defect: append a bullet to the
+Verification section reading ` + "`finding: gummi-checks tag defect — <tag> inside the block at <line>`" + `
+and set your verdict to fail; do not honor the tag as a permission
+to skip. If every live check
 is blocked by missing environment rather than by the code, the verdict
 is blocked, not pass and not fail — a plan that proved nothing did not
 pass. Make the call, record the evidence, and end your final message
