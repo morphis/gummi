@@ -104,6 +104,30 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		t.Error("standard Spec leaked the quick-spec plan-drafting instruction")
 	}
 
+	// F2: interactive stages run in the main checkout — the guard fences
+	// them off from editing repo files or committing on main. Every
+	// interactive stage carries it; no autonomous stage does.
+	for _, st := range []domain.Stage{
+		domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
+	} {
+		kind := domain.KindFeature
+		if st == domain.StageTriage || st == domain.StageDiagnose {
+			kind = domain.KindBug
+		}
+		f := feature(1, "x", st)
+		f.Kind = kind
+		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		for _, want := range []string{"not an isolated worktree", "do not run git commit"} {
+			if !strings.Contains(h, want) {
+				t.Errorf("%s hint missing interactive guard %q", st, want)
+			}
+		}
+	}
+	autonomous := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageImplement), "spec.md", flavorStage), "\n"))
+	if strings.Contains(autonomous, "not an isolated worktree") {
+		t.Error("autonomous Implement stage carries the interactive-only guard")
+	}
+
 	// the plan-critique flavor: reviewer contract plus the tag-placement
 	// rule for the gummi-checks block, and the cost-shaping rules the
 	// FD-001 blowout motivated (one-pass discipline, turn budget,

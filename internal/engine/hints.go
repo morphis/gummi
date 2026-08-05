@@ -19,6 +19,17 @@ const (
 		"Root cause · Fix · Review · Verification"
 )
 
+// interactiveWorkingDirGuard fences the interactive stages that run in
+// the main checkout (locate returns Worktrees.Root() for them, not an
+// isolated worktree). Without this, a model may edit repo files or
+// commit on main, dirtying the user's tree — the design chat's writes
+// belong in the .gummi/ draft, nowhere else.
+const interactiveWorkingDirGuard = `You are running in the main checkout, not an isolated worktree.
+Do not edit repo files, and do not run git commit here — the design
+artifact under .gummi/ is yours to update, but everything else in
+the repo is off-limits. If a decision needs a change to the repo,
+describe it in the artifact and let the implementation stage make it.`
+
 // roleForStage maps a workflow stage to the agent role that performs it
 // (DESIGN §3). The bug workflow's design-side stages (triage, diagnose)
 // are architect work like brainstorm/spec; fix is implementer work like
@@ -63,6 +74,9 @@ func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	}
 	role, _ := roleForStage(f.Stage)
 	hints := []string{contractHint(f, specPath, role)}
+	if interactiveStage(f.Stage) {
+		hints = append(hints, interactiveWorkingDirGuard)
+	}
 
 	switch f.Stage {
 	case domain.StageBrainstorm:
