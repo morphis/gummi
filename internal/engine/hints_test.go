@@ -34,6 +34,20 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StagePlan, domain.KindFeature, []string{
 			"numbered steps", "tracer bullets",
+			// scope-cap: keeps the critique surface bounded (see the
+			// FD-001 regression — an unbounded plan drove multi-round,
+			// envelope-exhausting critiques).
+			"≤15 numbered steps",
+			// closure subsections: each is CONDITIONAL on spec content —
+			// projects without ADRs, gated tests, downstream consumers,
+			// or reachable Out-of-scope items ship no closure tables.
+			// Their presence in the hint is what lets a plan writer
+			// shift audit work to plan-time when the spec triggers them.
+			"`Reference mapping`", "`Skip-gate ledger`",
+			"`Downstream handoffs`", "`Out-of-scope confirmations`",
+			// plan self-audit: shifts row-vs-step verification from
+			// critique-time to plan-time.
+			"walk each table you shipped",
 		}},
 		{domain.StageImplement, domain.KindFeature, []string{
 			"Out of scope section is binding",
@@ -79,7 +93,9 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	}
 
 	// the plan-critique flavor: reviewer contract plus the tag-placement
-	// rule for the gummi-checks block
+	// rule for the gummi-checks block, and the cost-shaping rules the
+	// FD-001 blowout motivated (one-pass discipline, turn budget,
+	// blocking-only filtering, no ADR re-derivation).
 	critique := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorCritique), "\n"))
 	for _, want := range []string{
 		"%% @user:",
@@ -87,6 +103,16 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		"tags belong on prose live-check lines only",
 		"never a tag inside the gummi-checks block",
 		"VERDICT: pass", "VERDICT: changes",
+		// one-pass discipline + turn budget: bounds intra-session cost
+		// (the outer round cap in reviewloop.go doesn't).
+		"one pass", "≤4 turns",
+		// blocking-only filtering on critique (Review keeps nits): the
+		// critique is a pre-implementation cheap pass, not a full review.
+		"blocking findings only",
+		// audit the plan's Reference mapping instead of walking cited
+		// ADRs/RFCs — the FD-001 completeness-lens re-derivation was
+		// the single largest cost driver.
+		"Prefer the `Reference mapping`",
 	} {
 		if !strings.Contains(critique, unwrap(want)) {
 			t.Errorf("critique hint missing %q", want)
@@ -105,6 +131,12 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		"runs without erroring", "[env: <prereq>]", "[CI-only]",
 		"never inside the gummi-checks block",
 		"do not start implementing",
+		// the Plan claims shape must stay synchronized with the standard
+		// planHint's — the two branches forked once and cost a critique
+		// contract of truth. Keep them pinned to the same required shapes.
+		"helper <name>: keyed by <field>",
+		"golden <name> =",
+		"invariant, ordering rule, or error-path",
 	} {
 		if !strings.Contains(quick, unwrap(want)) {
 			t.Errorf("quick spec hint missing %q", want)
