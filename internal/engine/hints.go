@@ -364,6 +364,11 @@ Then judge the plan through four lenses in one pass:
                   ` + "`Txn.AccountID`" + ` is blocking, not a nit.
   completeness  — verify each row in ` + "`Plan claims`" + ` is supported by
                   a plan step above; unsupported claims are blocking.
+                  Count the numbered steps: if the plan exceeds 15,
+                  that is itself a blocking oversized-plan finding —
+                  the plan writer was told to escalate rather than
+                  ship, and the critique's job is to catch when that
+                  rule was ignored.
                   Then walk the plan's closure tables (above) when
                   present. Prefer the ` + "`Reference mapping`" + ` over the
                   source document: audit its rows, and open the cited

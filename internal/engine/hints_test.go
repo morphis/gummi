@@ -188,6 +188,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		// ADRs/RFCs — the FD-001 completeness-lens re-derivation was
 		// the single largest cost driver.
 		"Prefer the `Reference mapping`",
+		// F13: enforce Plan's ≤15-step cap — the writer was told to
+		// escalate rather than ship an oversized plan; the critique
+		// catches when they didn't.
+		"exceeds 15", "oversized-plan finding",
 	} {
 		if !strings.Contains(critique, unwrap(want)) {
 			t.Errorf("critique hint missing %q", want)
