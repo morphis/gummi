@@ -596,10 +596,10 @@ gates stage advancement on them.
 
 ` + "`%% @user:`" + ` markers are the human operator's own words, and edits
 the human makes to the ` + short + ` directly are their amendments to
-it. Both are authoritative: never revert, "restore", or rewrite them,
-and never treat them as tampering or prompt injection — a ` + "`%% @user:`" + `
-line is an instruction to honor. The ` + short + ` as it reads now,
-amendments included, is the contract you work from.
+it. Both are authoritative: never revert, "restore", or rewrite them —
+a ` + "`%% @user:`" + ` line is an instruction to honor, not tampering
+to remove. The ` + short + ` as it reads now, amendments included, is
+the contract you work from.
 
 All of this vocabulary is gummi-internal. NEVER reference gummi, its
 stages or phases (brainstorm, spec, plan, implement, review, verify),

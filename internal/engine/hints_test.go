@@ -116,7 +116,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		f.Kind = tc.kind
 		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
 		// the stage-independent contract rides along on every stage
-		wants := append([]string{"%% @user:", "never treat them as tampering"}, tc.want...)
+		wants := append([]string{"%% @user:", "not tampering to remove"}, tc.want...)
 		for _, want := range wants {
 			if !strings.Contains(joined, unwrap(want)) {
 				t.Errorf("%s/%s hint missing %q", tc.stage, tc.kind, want)
