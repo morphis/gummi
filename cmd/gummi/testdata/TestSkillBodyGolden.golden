@@ -170,11 +170,28 @@ The loop you run:
      larger than the envelope it ran dry on (the `envelope` field on the
      `exhausted` event) — the raise is a floor, so it can never shrink the
      budget. `escalation` and `timeout` resume once the human weighs in.
+     `timeout` also carries `stage_timeout_used` (what limit fired) — if the
+     backend agent is fine and just needed longer, resume with a bigger
+     `--stage-timeout` (e.g. double the value it reports) instead of
+     retrying at the same budget.
    - **error (1)** — a setup/agent failure. Check `gummi status <id>`: a
      pre-id setup failure landed nothing (report it), but a mid-run failure
      can leave a durable, non-terminal card that a `gummi resume <id>` may
      finish — the error event's `resumable`/`stage` fields say which.
 3. After a `resume`, read the new exit code and repeat until `done`.
+
+### Before you retry: check `preconditions.check_running`
+
+`exhausted` and `timeout` events carry a `preconditions.check_running` shell
+one-liner — run it before following `next`. gummi ignores SIGHUP so that a
+detached wrapper's death doesn't kill the model turn; the flipside is that
+your wrapper dying (e.g. the harness killed it) can leave gummi still
+churning as an orphan. A bare retry there fights the exclusive lock and
+looks like a fresh failure. `check_running` reads `.gummi/state/gummi.pid`
+and probes it with `kill -0`: if it prints "gummi still running as pid …",
+wait (or `tail -f .gummi/state/events.jsonl` to watch progress) until the
+pid is gone, then follow `next`. `gummi status --json` also exposes this
+under `"running"` when you'd rather branch on JSON than a shell probe.
 
 ### Which `resume` verb — match the flag to why the run stopped
 

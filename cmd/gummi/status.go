@@ -73,6 +73,14 @@ type statusView struct {
 	// run reached its verified branch, since the headless driver never merges.
 	Verified bool `json:"verified"`
 	Done     bool `json:"done"`
+	// Running reports whether the pid recorded at .gummi/state/gummi.pid is
+	// still alive — a live run or resume governing this workspace. Meant for
+	// an orchestrating agent whose bash wrapper was killed by the harness:
+	// gummi's SIGHUP-ignore makes it survive the hangup, so the wrapper's
+	// death is not gummi's death. A caller that sees running=true should wait
+	// (or attach to the events.jsonl mirror) instead of retrying, which would
+	// hit ErrLocked and look like a fresh failure.
+	Running bool `json:"running"`
 }
 
 type statusBlockers struct {
@@ -116,6 +124,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Manager, 
 		BranchState: branchState(ctx, wt, f),
 		Verified:    !f.VerifiedAt.IsZero(),
 		Done:        f.Stage == domain.StageDone,
+		Running:     state.ProcessAlive(state.ReadPIDFile(ws.PIDFile())),
 	}
 }
 
@@ -147,6 +156,7 @@ func renderStatus(w io.Writer, v statusView) {
 	}
 	fmt.Fprintf(w, "  Branch:   %s  (%s)\n", v.Branch, v.BranchState)
 	fmt.Fprintf(w, "  Verified: %s\n", yesNo(v.Verified))
+	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)
 	fmt.Fprintf(w, "  Blockers: %d open question(s) · %d open diff comment(s)\n", v.Blockers.OpenQuestions, v.Blockers.OpenDiff)
 	if v.Ref != "" {

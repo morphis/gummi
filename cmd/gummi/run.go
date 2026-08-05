@@ -16,11 +16,18 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
+// eventsFileMode is the permission the .gummi/state/events.jsonl mirror is
+// created with — same as the SQLite state DB (state may carry transcripts,
+// so it stays 0600).
+const eventsFileMode = 0o600
+
 // defaultStageTimeout bounds how long a single stage may go without any
 // activity before the driver treats it as a hang and escalates. Generous
-// by default (agents legitimately take minutes); --stage-timeout 0
-// disables it.
-const defaultStageTimeout = 10 * time.Minute
+// by default (a frontier reviewer on a dense plan spec can genuinely take
+// well past ten minutes to complete one critique turn); --stage-timeout 0
+// disables it. Callers who know their profile is faster can shrink it;
+// callers on especially large specs can push it higher.
+const defaultStageTimeout = 20 * time.Minute
 
 // runRun implements `gummi run [flags] "<description>"` (DESIGN §8.2): it
 // creates one feature and drives it headlessly through the quality floor
@@ -174,6 +181,31 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (drive
 		return err
 	}
 	defer release()
+
+	// A caller whose bash wrapper is killed by the harness (SIGHUP-ignored
+	// gummi keeps running) has no way to tell whether gummi died with the
+	// wrapper or is still churning: probing the flock would fight the live
+	// run and taking the lock (a bare retry) hits ErrLocked and looks like a
+	// fresh failure. Recording our pid — after the lock is ours, so it always
+	// names the live governor — lets an external check use `kill -0` to
+	// answer the question without touching the lock. Clear on clean exit so
+	// the absence is authoritative; a crash leaves the file behind but the
+	// pid it names no longer signals, so the same check still reads dead.
+	if err := state.WritePIDFile(ws.PIDFile(), os.Getpid()); err != nil {
+		return fmt.Errorf("recording pid: %w", err)
+	}
+	defer func() { _ = state.ClearPIDFile(ws.PIDFile()) }()
+
+	// Mirror the NDJSON stream to .gummi/state/events.jsonl in addition to
+	// stdout so a wrapper-death survivor can tail progress off disk. Append
+	// mode preserves cross-invocation history; the driver's own emitter
+	// serializes writes so no cross-line interleave slips in.
+	events, err := os.OpenFile(ws.EventsFile(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, eventsFileMode)
+	if err != nil {
+		return fmt.Errorf("opening events log: %w", err)
+	}
+	defer events.Close()
+
 	store, err := state.OpenStore(ws.DBFile())
 	if err != nil {
 		return err
@@ -189,7 +221,7 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (drive
 	}
 	defer func() { _ = eng.Close(); closeAgents(agents) }()
 
-	d := driver.New(eng, store, ws, os.Stdout, opts)
+	d := driver.New(eng, store, ws, io.MultiWriter(os.Stdout, events), opts)
 	out, derr := fn(context.Background(), d, store)
 	if out.Status == "" && derr != nil {
 		// the closure failed before the driver produced any outcome (e.g. an

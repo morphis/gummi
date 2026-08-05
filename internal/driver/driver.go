@@ -652,19 +652,25 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	d.out.emit(exhaustedEvent{
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),
-		Next: resumeCmd(string(f.ID), "--envelope", fmt.Sprintf("%d", suggested)),
+		Next:          resumeCmd(string(f.ID), "--envelope", fmt.Sprintf("%d", suggested)),
+		Preconditions: d.resumePreconditions(),
 	})
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
 }
 
 // timeoutHintStalled is the cause note when the stage went silent AFTER
-// gummi dispatched the agent a turn: the inactivity window elapsing then
-// almost always means the backend agent stalled or lost its connection, not
-// that gummi hung. The driver knows a turn was sent (d.sentTurn), so it only
-// blames the backend when the backend is actually the party we're waiting on.
-const timeoutHintStalled = "the stage went silent for the whole --stage-timeout window after its turn was sent — " +
-	"usually the backend agent stalled or dropped its connection (or lost auth), not gummi; " +
-	"check the backend agent's auth/API and resume"
+// gummi dispatched the agent a turn. Two things realistically go wrong here:
+// the backend agent stalled/lost its connection, OR the timeout was simply
+// too short for the backend's turn on this spec (a frontier reviewer on a
+// dense plan can legitimately run past 10 minutes producing one critique).
+// It also points at the pid-file probe so a caller who is orchestrating
+// gummi from a wrapper the harness may have killed doesn't confuse an
+// orphan-that-is-still-working with a hang.
+const timeoutHintStalled = "the stage went silent for the whole --stage-timeout window after its turn was sent. " +
+	"Before retrying, verify gummi isn't still running (preconditions.check_running) — a wrapper the harness killed " +
+	"can leave a live gummi behind, and a bare retry there just fights the lock. If nothing is running the backend " +
+	"either stalled/lost auth, or the turn genuinely needs longer than stage_timeout_used — resume with a larger " +
+	"--stage-timeout (e.g. double the current value) before blaming the backend."
 
 // timeoutHintParked is the cause note when gummi never sent the agent a turn
 // this stage: the stage is parked at a gate with nothing to drive, so the
@@ -679,11 +685,37 @@ func (d *Driver) timeout(f domain.Feature) Outcome {
 	if !d.sentTurn {
 		hint = timeoutHintParked
 	}
+	used := ""
+	if d.opts.StageTimeout > 0 {
+		used = d.opts.StageTimeout.String()
+	}
 	d.out.emit(timeoutEvent{
-		Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: hint, Resume: string(f.ID),
-		Next: resumeCmd(string(f.ID)),
+		Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: hint,
+		StageTimeoutUsed: used,
+		Resume:           string(f.ID),
+		Next:             resumeCmd(string(f.ID)),
+		Preconditions:    d.resumePreconditions(),
 	})
 	return Outcome{Status: StatusTimeout, ID: string(f.ID)}
+}
+
+// resumePreconditions builds the pid-probe caller-side check attached to
+// terminal events whose `next` command starts a new gummi run: exhaustion,
+// timeout. The probe warns when the workspace's recorded pid is still alive
+// — an orphan gummi from a killed wrapper — so an orchestrating agent knows
+// to wait instead of hitting ErrLocked on immediate retry. The path is
+// derived from the live workspace, so relocating the state dir keeps the
+// probe correct.
+func (d *Driver) resumePreconditions() *resumePreconditions {
+	pid := d.ws.PIDFile()
+	if pid == "" {
+		return nil
+	}
+	return &resumePreconditions{
+		CheckRunning: "pid=$(cat " + pid + " 2>/dev/null); " +
+			"[ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null && " +
+			"echo \"gummi still running as pid $pid — wait before resuming\"",
+	}
 }
 
 // backendHint returns a short remediation note when a failure's message

@@ -51,6 +51,18 @@ func (w Workspace) ProfilesFile() string { return filepath.Join(w.GummiDir(), "p
 // DBFile is the SQLite state store.
 func (w Workspace) DBFile() string { return filepath.Join(w.StateDir(), "gummi.db") }
 
+// PIDFile records the PID of the run/resume process governing this
+// workspace. It is written after the exclusive lock is taken and cleared
+// on clean exit, so an external caller — an orchestrating agent that
+// spawned gummi and lost its wrapper — can probe liveness (kill -0) even
+// though it can't take the lock (which would fight the live run).
+func (w Workspace) PIDFile() string { return filepath.Join(w.StateDir(), "gummi.pid") }
+
+// EventsFile mirrors the driver's NDJSON stream, one JSON object per line,
+// append-only. It lives beside the pid file so a caller whose wrapper died
+// mid-run can tail progress off disk instead of a lost stdout pipe.
+func (w Workspace) EventsFile() string { return filepath.Join(w.StateDir(), "events.jsonl") }
+
 // gitignore rules written by Init: worktrees and state are machinery
 // and must never be committed (state may contain transcripts).
 const gummiIgnore = `# written by gummi init — machinery, never commit

@@ -243,7 +243,9 @@ func TestVerifyFailEscalates(t *testing.T) {
 	}
 }
 
-// A budget-exhausted stage fails loud with the exhausted exit.
+// A budget-exhausted stage fails loud with the exhausted exit and carries
+// the check_running precondition an orchestrating caller uses to catch an
+// orphan gummi before following `next` (which would hit ErrLocked).
 func TestBudgetExhausted(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -259,6 +261,18 @@ func TestBudgetExhausted(t *testing.T) {
 	}
 	if out.Status != StatusExhausted {
 		t.Fatalf("status = %q, want exhausted; stream=%v", out.Status, h.eventKinds())
+	}
+	ev := lastEvent(h, "exhausted")
+	if ev == nil {
+		t.Fatalf("no exhausted event; stream=%v", h.eventKinds())
+	}
+	pre, ok := ev["preconditions"].(map[string]any)
+	if !ok || pre == nil {
+		t.Fatalf("exhausted event missing preconditions; ev=%v", ev)
+	}
+	cr, _ := pre["check_running"].(string)
+	if !strings.Contains(cr, "gummi.pid") || !strings.Contains(cr, "kill -0") {
+		t.Fatalf("exhausted.preconditions.check_running = %q, want a kill -0 probe over gummi.pid", cr)
 	}
 }
 
@@ -492,9 +506,10 @@ func TestResumeCompletedAutoGateAdvances(t *testing.T) {
 }
 
 // The timeout hint is diagnosed from whether a turn was actually dispatched
-// this stage: a backend that goes silent after its turn points at the
-// backend, but a stage that timed out with no turn sent points the operator
-// at the gate decision — not a phantom backend outage.
+// this stage: a backend that went silent after its turn points at the
+// backend (or a too-short stage-timeout on this profile); a stage that
+// timed out with no turn sent points the operator at the gate decision —
+// not a phantom backend outage.
 func TestTimeoutHintTracksSentTurn(t *testing.T) {
 	h := newHarness(t, true, nil)
 	f := feature(1, domain.StageSpec)
@@ -502,8 +517,8 @@ func TestTimeoutHintTracksSentTurn(t *testing.T) {
 	d := h.driver(Options{})
 	d.sentTurn = true
 	d.timeout(f)
-	if ev := lastEvent(h, "timeout"); ev == nil || !strings.Contains(ev["hint"].(string), "backend agent stalled") {
-		t.Fatalf("sent-turn timeout hint = %v, want a backend-stall diagnosis", ev)
+	if ev := lastEvent(h, "timeout"); ev == nil || !strings.Contains(ev["hint"].(string), "went silent") {
+		t.Fatalf("sent-turn timeout hint = %v, want a stall/too-short diagnosis", ev)
 	}
 
 	h.buf.Reset()
@@ -511,6 +526,53 @@ func TestTimeoutHintTracksSentTurn(t *testing.T) {
 	d.timeout(f)
 	if ev := lastEvent(h, "timeout"); ev == nil || !strings.Contains(ev["hint"].(string), "no turn was sent") {
 		t.Fatalf("parked timeout hint = %v, want a gate-decision diagnosis", ev)
+	}
+}
+
+// A timeout event carries the --stage-timeout that fired plus a check_running
+// precondition, so an orchestrating caller sees exactly what limit tripped
+// and can probe for an orphan gummi before retrying.
+func TestTimeoutCarriesStageTimeoutUsedAndCheckRunning(t *testing.T) {
+	h := newHarness(t, true, nil)
+	f := feature(1, domain.StageSpec)
+
+	d := h.driver(Options{StageTimeout: 7 * time.Minute})
+	d.sentTurn = true
+	d.timeout(f)
+	ev := lastEvent(h, "timeout")
+	if ev == nil {
+		t.Fatalf("no timeout event; stream=%v", h.eventKinds())
+	}
+	if got := ev["stage_timeout_used"]; got != "7m0s" {
+		t.Fatalf("stage_timeout_used = %v, want 7m0s", got)
+	}
+	pre, ok := ev["preconditions"].(map[string]any)
+	if !ok || pre == nil {
+		t.Fatalf("preconditions missing/wrong type; ev=%v", ev)
+	}
+	cr, _ := pre["check_running"].(string)
+	if !strings.Contains(cr, "gummi.pid") || !strings.Contains(cr, "kill -0") {
+		t.Fatalf("check_running = %q, want a kill -0 probe over gummi.pid", cr)
+	}
+}
+
+// A timeout with --stage-timeout=0 (disabled) omits stage_timeout_used
+// rather than lying with a "0s" number a caller might try to tune.
+func TestTimeoutOmitsUsedWhenDisabled(t *testing.T) {
+	h := newHarness(t, true, nil)
+	f := feature(1, domain.StageSpec)
+
+	// build the driver directly so the harness's 5s fallback for a zero
+	// StageTimeout doesn't mask the disabled case.
+	d := New(h.eng, h.store, h.ws, h.buf, Options{Envelope: 500, StageTimeout: 0})
+	d.sentTurn = true
+	d.timeout(f)
+	ev := lastEvent(h, "timeout")
+	if ev == nil {
+		t.Fatalf("no timeout event; stream=%v", h.eventKinds())
+	}
+	if _, present := ev["stage_timeout_used"]; present {
+		t.Fatalf("stage_timeout_used present with --stage-timeout=0; ev=%v", ev)
 	}
 }
 

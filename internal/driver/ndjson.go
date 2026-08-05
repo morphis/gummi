@@ -133,6 +133,11 @@ type exhaustedEvent struct {
 	Committed bool    `json:"committed"`
 	Resume    string  `json:"resume"`
 	Next      string  `json:"next,omitempty"`
+	// Preconditions carry probes a caller should run BEFORE acting on `next`
+	// (see resumePreconditions). Their point is to catch the "orphan gummi
+	// still running" race: a bare retry there hits ErrLocked and looks like a
+	// fresh failure. Empty when nothing is worth checking.
+	Preconditions *resumePreconditions `json:"preconditions,omitempty"`
 }
 
 type timeoutEvent struct {
@@ -142,9 +147,27 @@ type timeoutEvent struct {
 	// Hint names the most likely cause (a backend stall/disconnect/auth
 	// loss rather than a gummi hang), so a caller reading the stream can act
 	// without re-diagnosing an opaque timeout.
-	Hint   string `json:"hint,omitempty"`
-	Resume string `json:"resume"`
-	Next   string `json:"next,omitempty"`
+	Hint string `json:"hint,omitempty"`
+	// StageTimeoutUsed is the --stage-timeout value that fired, so a caller
+	// tuning it after a timeout has the misconfigured number in hand rather
+	// than guessing the default. Formatted as Go's Duration string (e.g.
+	// "20m0s"). Absent when the timeout was disabled (--stage-timeout 0).
+	StageTimeoutUsed string               `json:"stage_timeout_used,omitempty"`
+	Resume           string               `json:"resume"`
+	Next             string               `json:"next,omitempty"`
+	Preconditions    *resumePreconditions `json:"preconditions,omitempty"`
+}
+
+// resumePreconditions is the small set of probes a caller should run before
+// following a terminal event's `next` command. Right now it carries just
+// check_running — the shell one-liner that detects an orphan gummi process
+// still holding the workspace lock. Structured (not a free-form hint) so a
+// programmatic caller can enumerate the checks rather than parse prose.
+type resumePreconditions struct {
+	// CheckRunning is a shell one-liner that prints a warning when the
+	// workspace's recorded pid is still alive — a caller should wait rather
+	// than immediately retrying `next`, which would hit ErrLocked.
+	CheckRunning string `json:"check_running,omitempty"`
 }
 
 // stoppedEvent is the --until terminal milestone: a clean early stop at the

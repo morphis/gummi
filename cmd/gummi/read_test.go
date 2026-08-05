@@ -240,3 +240,36 @@ func TestDiffNoWorktreeErrors(t *testing.T) {
 		t.Fatal("diff on a feature with no worktree returned no error")
 	}
 }
+
+// status.Running reads the pid file: absent/stale reads false, a pid
+// pointing at a live process reads true. This is the probe an orchestrating
+// agent uses to tell an orphan gummi (wrapper died, gummi kept running)
+// apart from a truly-dead run — the ambiguity the FD-001 report flagged.
+func TestBuildStatusRunning(t *testing.T) {
+	f := newReadFixture(t)
+	feat := f.mkFeature(t, "")
+
+	// no pid file → not running.
+	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if v.Running {
+		t.Fatal("running=true with no pid file recorded")
+	}
+
+	// a pid pointing at nobody → not running.
+	if err := state.WritePIDFile(f.ws.PIDFile(), 1<<30); err != nil {
+		t.Fatal(err)
+	}
+	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if v.Running {
+		t.Fatal("running=true for a pid that cannot exist")
+	}
+
+	// the current process is always alive → true.
+	if err := state.WritePIDFile(f.ws.PIDFile(), os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if !v.Running {
+		t.Fatal("running=false with the pid file pointing at this test process")
+	}
+}
