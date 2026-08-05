@@ -31,6 +31,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"[env: <prereq>]", "[CI-only]",
 			"Tags belong on prose live-check lines only",
 			"never inside the gummi-checks block",
+			// F1: Spec must hand off Implementation notes to the Plan stage.
+			// The section was drafted twice (Spec, then Plan overwrote it) —
+			// dead work at best, competing prose at worst.
+			"Do not draft Implementation notes here",
 		}},
 		{domain.StagePlan, domain.KindFeature, []string{
 			"numbered steps", "tracer bullets",
@@ -90,6 +94,14 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 				t.Errorf("%s/%s hint missing %q", tc.stage, tc.kind, want)
 			}
 		}
+	}
+
+	// F1: standard Spec must not carry the quick-spec's plan-drafting
+	// instruction — Implementation notes are Plan's job when a Plan stage
+	// follows, and drafting them twice was dead work.
+	stdSpec := unwrap(strings.Join(stageHints(feature(1, "Dark mode", domain.StageSpec), "spec.md", flavorStage), "\n"))
+	if strings.Contains(stdSpec, "Implementation notes as the implementation plan") {
+		t.Error("standard Spec leaked the quick-spec plan-drafting instruction")
 	}
 
 	// the plan-critique flavor: reviewer contract plus the tag-placement
