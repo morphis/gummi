@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -570,6 +571,31 @@ func TestCompileDiffComments(t *testing.T) {
 	}
 	if got := CompileDiffComments([]domain.DiffAnnotation{{ID: 1, Resolved: true}}, true); got != "" {
 		t.Errorf("all-resolved must compile to empty, got %q", got)
+	}
+}
+
+// TestAllowedVerdictsPerStage pins the verdict vocabulary of each
+// session type: review negotiates "changes" (never "fail" — that
+// slipped through the old fallthrough with no downstream handling),
+// verify reports pass/fail/blocked, critique mirrors review, and
+// stages that don't offer submit_verdict get nil so a stray call is
+// refused rather than silently accepted.
+func TestAllowedVerdictsPerStage(t *testing.T) {
+	cases := []struct {
+		name string
+		s    *Session
+		want []string
+	}{
+		{"review", &Session{Feature: domain.Feature{Stage: domain.StageReview}}, []string{"pass", "changes"}},
+		{"verify", &Session{Feature: domain.Feature{Stage: domain.StageVerify}}, []string{"pass", "fail", "blocked"}},
+		{"critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
+		{"implement (no verdict tool)", &Session{Feature: domain.Feature{Stage: domain.StageImplement}}, nil},
+	}
+	for _, tc := range cases {
+		got := allowedVerdicts(tc.s)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

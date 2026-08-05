@@ -421,15 +421,21 @@ func (e *Engine) handleResolveAnnotation(s *Session, tc *agent.ToolCall) {
 // may declare the environment unable to run the plan (blocked). Scoping
 // per session keeps one stage's vocabulary from leaking into another's
 // loop — a review "blocked" or a verify "changes" is a contract
-// violation, bounced back to the agent to retry.
+// violation, bounced back to the agent to retry. Stages that offer no
+// submit_verdict tool return nil, so a stray call is refused instead of
+// silently accepted (the fallthrough previously admitted a "fail"
+// verdict on Review, which no downstream loop distinguished from
+// "changes").
 func allowedVerdicts(s *Session) []string {
 	switch {
-	case s.Critique:
-		return []string{"pass", "changes"}
 	case s.Feature.Stage == domain.StageVerify:
 		return []string{"pass", "fail", "blocked"}
+	case s.Critique:
+		return []string{"pass", "changes"}
+	case s.Feature.Stage == domain.StageReview:
+		return []string{"pass", "changes"}
 	default:
-		return []string{"pass", "changes", "fail"}
+		return nil
 	}
 }
 
@@ -446,6 +452,10 @@ func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
 	}
 	verdict := strings.ToLower(strings.TrimSpace(v.Verdict))
 	allowed := allowedVerdicts(s)
+	if len(allowed) == 0 {
+		e.resolveNow(s, tc.ID, "this stage does not accept a verdict")
+		return
+	}
 	if !slices.Contains(allowed, verdict) {
 		e.resolveNow(s, tc.ID, `verdict must be one of "`+strings.Join(allowed, `", "`)+`"`)
 		return
