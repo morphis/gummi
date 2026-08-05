@@ -22,7 +22,7 @@ func runResume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	rv := registerResumeFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi resume <id|ref> [--answer <text> | --approve | --request-changes <note>]")
+		fmt.Fprintln(os.Stderr, "usage: gummi resume <id|ref> [--answer <text> | --approve | --request-changes <note> | --bounce [--note <text>]]")
 		fs.PrintDefaults()
 	}
 	// resume is id-first (`resume FD-042 --answer no`) and accepts an
@@ -32,7 +32,8 @@ func runResume(args []string) error {
 		return err
 	}
 
-	in, err := resumeInput(*rv.answer, *rv.approve, *rv.requestChanges, isSet(fs, "answer"), isSet(fs, "request-changes"))
+	in, err := resumeInput(*rv.answer, *rv.approve, *rv.requestChanges, *rv.bounce, *rv.note,
+		isSet(fs, "answer"), isSet(fs, "request-changes"), isSet(fs, "note"))
 	if err != nil {
 		return err
 	}
@@ -70,12 +71,12 @@ func runResume(args []string) error {
 // registerResumeFlags is the single registration site, so the skill's
 // grammar generator can enumerate the same set (see runFlagValues).
 type resumeFlagValues struct {
-	answer, requestChanges *string
-	gate, ref, until       *string
-	approve, autonomous    *bool
-	verbose                *bool
-	envelope               *int
-	timeout                *time.Duration
+	answer, requestChanges, note *string
+	gate, ref, until             *string
+	approve, autonomous, bounce  *bool
+	verbose                      *bool
+	envelope                     *int
+	timeout                      *time.Duration
 }
 
 // registerResumeFlags binds `gummi resume`'s flags onto fs and returns
@@ -86,6 +87,8 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		envelope:       fs.Int("envelope", 0, "raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)"),
 		approve:        fs.Bool("approve", false, "approve a caller design gate"),
 		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
+		bounce:         fs.Bool("bounce", false, "rewind a verify/review-fail escalation to the work stage and continue (the TUI's `b` key)"),
+		note:           fs.String("note", "", "addendum to the reborn implement/fix kickoff (used with --bounce)"),
 		gate:           fs.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller (inherits the run's mode when omitted; pass to change it)"),
 		timeout:        fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous:     fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
@@ -97,10 +100,14 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 
 // resumeInput builds the ResumeInput from the mutually exclusive decision
 // flags, refusing more than one. All unset means "re-run the parked
-// stage". answerSet/changesSet distinguish an explicitly-empty flag from
-// an unset one, so `--answer ""` is still an (empty-answer) decision the
-// driver can reject cleanly rather than silently re-running.
-func resumeInput(answer string, approve bool, requestChanges string, answerSet, changesSet bool) (driver.ResumeInput, error) {
+// stage". answerSet/changesSet/noteSet distinguish an explicitly-empty flag
+// from an unset one, so `--answer ""` is still an (empty-answer) decision
+// the driver can reject cleanly rather than silently re-running. --note
+// only composes with --bounce; on its own it is a usage error, not a silent
+// no-op.
+func resumeInput(answer string, approve bool, requestChanges string, bounce bool, note string,
+	answerSet, changesSet, noteSet bool,
+) (driver.ResumeInput, error) {
 	n := 0
 	var in driver.ResumeInput
 	if answerSet {
@@ -117,8 +124,16 @@ func resumeInput(answer string, approve bool, requestChanges string, answerSet, 
 		c := requestChanges
 		in = driver.ResumeInput{RequestChanges: &c}
 	}
+	if bounce {
+		n++
+		nt := note
+		in = driver.ResumeInput{Bounce: &nt}
+	}
 	if n > 1 {
-		return driver.ResumeInput{}, fmt.Errorf("give at most one of --answer, --approve, --request-changes")
+		return driver.ResumeInput{}, fmt.Errorf("give at most one of --answer, --approve, --request-changes, --bounce")
+	}
+	if noteSet && !bounce {
+		return driver.ResumeInput{}, fmt.Errorf("--note only applies with --bounce")
 	}
 	return in, nil
 }

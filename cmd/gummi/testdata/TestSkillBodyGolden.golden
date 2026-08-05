@@ -78,8 +78,10 @@ gummi resume <id|ref> [decision]
     --answer string           answer a delegated ask_user question
     --approve                 approve a caller design gate
     --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --bounce                  rewind a verify/review-fail escalation to the work stage and continue (the TUI's b key)
     --envelope int            raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)
     --gate-approval string    who approves later design gates: auto|caller (inherits the run's mode when omitted; pass to change it)
+    --note string             addendum to the reborn implement/fix kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
     --request-changes string  send a caller design gate back with a note
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
@@ -121,7 +123,7 @@ and exits with a **typed status**. Branch on the exit code:
 | 1 | `error` | setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event) |
 | 2 | `question` | a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>` |
 | 3 | `blocked` | open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back |
-| 4 | `escalation` | rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage |
+| 4 | `escalation` | rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage. A verify-fail (or review cap-hit) carries `next: resume <id> --bounce --note "<why>"`, which rewinds the feature to implement/fix and drives review→verify again |
 | 5 | `exhausted` | credit envelope dry — `resume <id> --envelope N` (N larger than the dry envelope) raises it and continues |
 | 6 | `timeout` | a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage |
 
@@ -202,6 +204,13 @@ that matches the terminal event; the wrong verb wastes a stage or stalls:
 - `--approve` / `--request-changes "<note>"` — decides a caller **`gate`** event
   (a design gate under `--gate-approval=caller`), and the same pair continues a
   `--until` **`stopped`** run.
+- `--bounce [--note "<why>"]` — un-parks a verify-fail (or a review cap-hit)
+  **`escalation`**: rewinds the feature to its work stage (implement/fix) and
+  drives the review → verify tail again. The optional `--note` is an addendum
+  to the reborn implement kickoff, alongside any open `%%` diff/spec threads
+  the engine already folds in. This is the CLI counterpart of the TUI's `b`
+  key; use it when the human has looked at the verify evidence and decided a
+  rework is the right call.
 - `--envelope N` — clears an **`exhausted`** stop; N must exceed the dry envelope
   (the `envelope` field on the event). It only raises, never lowers.
 - **no decision flag** — re-runs the parked stage exactly as it is. This is *only*
@@ -211,9 +220,9 @@ that matches the terminal event; the wrong verb wastes a stage or stalls:
   it only re-presents the same gate, and at a delegated ask it has nothing to
   send. Reach for `--approve` / `--answer` there.
 
-Exactly one decision flag per resume (`--answer`, `--approve`, and
-`--request-changes` are mutually exclusive). `--envelope` composes with any of
-them, or stands alone to top up a plain re-run.
+Exactly one decision flag per resume (`--answer`, `--approve`,
+`--request-changes`, and `--bounce` are mutually exclusive). `--envelope`
+composes with any of them, or stands alone to top up a plain re-run.
 
 For a **small or well-specified** feature whose delegated questions you'd answer
 with the `recommended` option anyway, start with `--autonomous`: it auto-takes

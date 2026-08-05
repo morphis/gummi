@@ -268,7 +268,7 @@ func exitTable() string {
 		{driver.StatusError, "setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event)"},
 		{driver.StatusQuestion, "a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>`"},
 		{driver.StatusBlocked, "open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back"},
-		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage"},
+		{driver.StatusEscalation, "rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage. A verify-fail (or review cap-hit) carries `next: resume <id> --bounce --note \"<why>\"`, which rewinds the feature to implement/fix and drives review→verify again"},
 		{driver.StatusExhausted, "credit envelope dry — `resume <id> --envelope N` (N larger than the dry envelope) raises it and continues"},
 		{driver.StatusTimeout, "a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage"},
 	}

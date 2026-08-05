@@ -951,6 +951,12 @@ caller must decide, then exits.
   gates; `=caller` checkpoints them for `resume --approve`/`--request-changes`.
   Blockers (open `%%`/diff threads) are honored either way; Review and Verify
   are never a caller gate — Verify is the floor's stop-at-verified.
+- **Verify-fail bounce** — a `verify FAILED` (or a review cap-hit) escalation
+  is un-parked with `resume --bounce [--note <why>]`, which rewinds the
+  feature to its work stage (implement/fix) and drives the review→verify tail
+  again — the CLI counterpart of the TUI's `b` key (§10 review floor's rerun
+  edge). The `--note` becomes an addendum to the reborn implement kickoff,
+  alongside any open `%%` diff/spec annotations the engine already folds in.
 - **Envelope required** — a run refuses to start without one (`--envelope N` or
   `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
 - **Design questions are delegated** — an interactive stage's `ask_user`

@@ -157,6 +157,13 @@ that matches the terminal event; the wrong verb wastes a stage or stalls:
 - `--approve` / `--request-changes "<note>"` — decides a caller **`gate`** event
   (a design gate under `--gate-approval=caller`), and the same pair continues a
   `--until` **`stopped`** run.
+- `--bounce [--note "<why>"]` — un-parks a verify-fail (or a review cap-hit)
+  **`escalation`**: rewinds the feature to its work stage (implement/fix) and
+  drives the review → verify tail again. The optional `--note` is an addendum
+  to the reborn implement kickoff, alongside any open `%%` diff/spec threads
+  the engine already folds in. This is the CLI counterpart of the TUI's `b`
+  key; use it when the human has looked at the verify evidence and decided a
+  rework is the right call.
 - `--envelope N` — clears an **`exhausted`** stop; N must exceed the dry envelope
   (the `envelope` field on the event). It only raises, never lowers.
 - **no decision flag** — re-runs the parked stage exactly as it is. This is *only*
@@ -166,9 +173,9 @@ that matches the terminal event; the wrong verb wastes a stage or stalls:
   it only re-presents the same gate, and at a delegated ask it has nothing to
   send. Reach for `--approve` / `--answer` there.
 
-Exactly one decision flag per resume (`--answer`, `--approve`, and
-`--request-changes` are mutually exclusive). `--envelope` composes with any of
-them, or stands alone to top up a plain re-run.
+Exactly one decision flag per resume (`--answer`, `--approve`,
+`--request-changes`, and `--bounce` are mutually exclusive). `--envelope`
+composes with any of them, or stands alone to top up a plain re-run.
 
 For a **small or well-specified** feature whose delegated questions you'd answer
 with the `recommended` option anyway, start with `--autonomous`: it auto-takes

@@ -101,21 +101,51 @@ func TestDriverExitMapping(t *testing.T) {
 // explicitly-empty answer as a (rejectable) decision rather than a
 // silent re-run.
 func TestResumeInputMutuallyExclusive(t *testing.T) {
-	if _, err := resumeInput("no", true, "", true, false); err == nil {
+	if _, err := resumeInput("no", true, "", false, "", true, false, false); err == nil {
 		t.Fatal("both --answer and --approve accepted")
 	}
-	in, err := resumeInput("no", false, "", true, false)
+	in, err := resumeInput("no", false, "", false, "", true, false, false)
 	if err != nil || in.Answer == nil || *in.Answer != "no" {
 		t.Fatalf("answer input = %+v, err=%v", in, err)
 	}
-	in, err = resumeInput("", true, "", false, false)
+	in, err = resumeInput("", true, "", false, "", false, false, false)
 	if err != nil || !in.Approve {
 		t.Fatalf("approve input = %+v, err=%v", in, err)
 	}
 	// no flags set → an all-zero input (re-run the parked stage).
-	in, err = resumeInput("", false, "", false, false)
-	if err != nil || in.Answer != nil || in.Approve || in.RequestChanges != nil {
+	in, err = resumeInput("", false, "", false, "", false, false, false)
+	if err != nil || in.Answer != nil || in.Approve || in.RequestChanges != nil || in.Bounce != nil {
 		t.Fatalf("empty resume input = %+v, err=%v", in, err)
+	}
+}
+
+// --bounce is a fourth mutually-exclusive decision (the verify/review
+// rewind), and --note is only meaningful when carried by --bounce — an
+// orphan --note is a usage error, not a silent no-op.
+func TestResumeInputBounce(t *testing.T) {
+	// --bounce alone → empty-note bounce.
+	in, err := resumeInput("", false, "", true, "", false, false, false)
+	if err != nil || in.Bounce == nil || *in.Bounce != "" {
+		t.Fatalf("bounce input = %+v, err=%v", in, err)
+	}
+	// --bounce --note "why" → bounce carrying the note.
+	in, err = resumeInput("", false, "", true, "flaky mock", false, false, true)
+	if err != nil || in.Bounce == nil || *in.Bounce != "flaky mock" {
+		t.Fatalf("bounce+note input = %+v, err=%v", in, err)
+	}
+	// --bounce combined with any other decision is refused.
+	if _, err := resumeInput("no", false, "", true, "", true, false, false); err == nil {
+		t.Fatal("both --answer and --bounce accepted")
+	}
+	if _, err := resumeInput("", true, "", true, "", false, false, false); err == nil {
+		t.Fatal("both --approve and --bounce accepted")
+	}
+	if _, err := resumeInput("", false, "changes", true, "", false, true, false); err == nil {
+		t.Fatal("both --request-changes and --bounce accepted")
+	}
+	// --note without --bounce is a usage error, not a silently-dropped flag.
+	if _, err := resumeInput("", false, "", false, "orphan", false, false, true); err == nil {
+		t.Fatal("--note accepted without --bounce")
 	}
 }
 

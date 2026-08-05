@@ -214,10 +214,21 @@ func TestReviewCapEscalates(t *testing.T) {
 	}
 }
 
-// Verify failing / blocked escalates rather than merging.
+// Verify failing / blocked escalates rather than merging. The `next` field
+// on a verify-fail (the human's remediation is to rewind to implement)
+// names `--bounce`, so a caller driving the stream doesn't have to recall
+// which verb un-parks the stop; a blocked verify — where re-implementing
+// won't help — keeps the bare `resume`, pointing the human at the
+// environment/plan instead.
 func TestVerifyFailEscalates(t *testing.T) {
-	for _, verdict := range []string{"fail", "blocked"} {
-		t.Run(verdict, func(t *testing.T) {
+	for _, tc := range []struct {
+		verdict  string
+		wantNext string
+	}{
+		{"fail", ` --bounce --note "<why>"`},
+		{"blocked", ""},
+	} {
+		t.Run(tc.verdict, func(t *testing.T) {
 			h := newHarness(t, true, map[domain.Stage]stageFn{
 				domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 					return msgIdle(o.Model, "Spec.")
@@ -226,7 +237,7 @@ func TestVerifyFailEscalates(t *testing.T) {
 					return toolVerdict(o.Model, "pass")
 				},
 				domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-					return toolVerdict(o.Model, verdict)
+					return toolVerdict(o.Model, tc.verdict)
 				},
 			})
 			out, err := h.driver(Options{}).Run(context.Background(), "feature")
@@ -234,12 +245,106 @@ func TestVerifyFailEscalates(t *testing.T) {
 				t.Fatalf("Run: %v", err)
 			}
 			if out.Status != StatusEscalation {
-				t.Fatalf("verify %s: status = %q, want escalation", verdict, out.Status)
+				t.Fatalf("verify %s: status = %q, want escalation", tc.verdict, out.Status)
 			}
 			if st := h.stageOf(domain.FeatureID(out.ID)); st != domain.StageVerify {
-				t.Fatalf("verify %s: feature at %s, want Verify (not merged)", verdict, st)
+				t.Fatalf("verify %s: feature at %s, want Verify (not merged)", tc.verdict, st)
+			}
+			want := "gummi resume " + out.ID + tc.wantNext
+			if e := lastEvent(h, "escalation"); e == nil || e["next"] != want {
+				t.Fatalf("verify %s escalation.next = %v, want %q", tc.verdict, e["next"], want)
 			}
 		})
+	}
+}
+
+// A verify-fail escalation is un-parked by `resume --bounce`: the driver
+// rewinds the feature to its work stage (Implement for a feature, Fix for a
+// bug), so the review → verify tail runs again. The --note becomes an
+// addendum to the reborn implement kickoff — the same channel the diff
+// surface's request-changes takes via Engine.RunWith.
+func TestResumeBounceRewindsAndCompletes(t *testing.T) {
+	var implementCalls []string
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			implementCalls = append(implementCalls, msg)
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+			if n == 0 {
+				return toolVerdict(o.Model, "fail") // first pass fails → escalation
+			}
+			return toolVerdict(o.Model, "pass") // after the bounce, the reworked branch passes
+		},
+	})
+
+	out, err := h.driver(Options{}).Run(context.Background(), "feature")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Status != StatusEscalation {
+		t.Fatalf("initial status = %q, want escalation (verify fail); stream=%v", out.Status, h.eventKinds())
+	}
+	if st := h.stageOf(domain.FeatureID(out.ID)); st != domain.StageVerify {
+		t.Fatalf("stage = %s, want Verify (parked at the failed gate)", st)
+	}
+
+	h.buf.Reset()
+	note := "verify hit a timing race in the exporter; guard the flush"
+	out2, err := h.driver(Options{}).Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{Bounce: &note})
+	if err != nil {
+		t.Fatalf("Resume(bounce): %v", err)
+	}
+	if out2.Status != StatusDone {
+		t.Fatalf("resume status = %q, want done (bounce → implement → review → verify pass); stream=%v",
+			out2.Status, h.eventKinds())
+	}
+	// two implement runs total: the original one before the failed verify, and
+	// the reborn one after --bounce.
+	if h.calls[domain.StageImplement] != 2 {
+		t.Fatalf("implement entered %d times, want 2 (bounce should re-run it)", h.calls[domain.StageImplement])
+	}
+	if len(implementCalls) != 2 {
+		t.Fatalf("captured %d implement kickoff messages, want 2", len(implementCalls))
+	}
+	// the second implement kickoff must carry the --note addendum; the first
+	// (fresh run) must not (nothing to reference yet).
+	if strings.Contains(implementCalls[0], note) {
+		t.Fatalf("fresh implement kickoff already carried the bounce note:\n%s", implementCalls[0])
+	}
+	if !strings.Contains(implementCalls[1], note) {
+		t.Fatalf("reborn implement kickoff missing the --note addendum:\n%s", implementCalls[1])
+	}
+}
+
+// A --bounce landing on a stage that is neither review nor verify is a
+// usage error: the driver refuses to rewind (there is no forward-facing
+// bounce edge from anywhere else) rather than silently transitioning.
+func TestResumeBounceRefusesOffStage(t *testing.T) {
+	h := newHarness(t, true, nil)
+	f := feature(1, domain.StageSpec)
+	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	empty := ""
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{Bounce: &empty})
+	if err == nil {
+		t.Fatal("Resume(bounce) at Spec: want an error, got nil")
+	}
+	if out.Status != StatusError {
+		t.Fatalf("status = %q, want error", out.Status)
+	}
+	// the feature must not have moved off Spec.
+	if st := h.stageOf(f.ID); st != domain.StageSpec {
+		t.Fatalf("Spec advanced to %s despite a refused bounce", st)
 	}
 }
 

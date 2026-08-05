@@ -65,6 +65,7 @@ type Driver struct {
 	planRounds   int          // automatic plan→critique rounds burned
 	reviewsRun   int          // review stages entered so far (for the done receipt)
 	opening      string       // one-shot message to send on the next interactive stage (resume answer / change note)
+	bounceNote   string       // one-shot addendum to the next implement/fix kickoff after a --bounce resume
 	curStage     domain.Stage // stage currently being driven (for verbose activity lines)
 	activityCur  int          // cursor into the live session's activity feed
 	sentTurn     bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
@@ -132,12 +133,16 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 
 // ResumeInput carries a resume's decision. Exactly one field is set:
 // Answer resolves a delegated ask_user; Approve/RequestChanges resolve a
-// caller design gate; all-zero re-runs the parked stage (after an
+// caller design gate; Bounce sends a verify-failed (or review-failed)
+// feature back to the work stage — the headless counterpart of the TUI's
+// `b` key — with the (possibly empty) string carried as an addendum to the
+// next implement/fix kickoff; all-zero re-runs the parked stage (after an
 // exhaustion top-up, a timeout, or an escalation).
 type ResumeInput struct {
 	Answer         *string
 	Approve        bool
 	RequestChanges *string
+	Bounce         *string
 }
 
 // Resume rehydrates the engine's persisted sessions, applies the caller's
@@ -202,6 +207,23 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		if out.terminal() {
 			return out, nil
 		}
+	case in.Bounce != nil:
+		// A verify-fail (or review-fail) escalation is un-parked by rewinding
+		// the feature to its work stage — the same rerun edge the TUI's `b`
+		// key takes via bounceStage. The optional note becomes an addendum to
+		// the reborn implement/fix kickoff, alongside any open diff/spec
+		// annotations the engine folds in independently.
+		if f.Stage != domain.StageVerify && f.Stage != domain.StageReview {
+			return d.fail(ctx, string(id),
+				fmt.Errorf("%s is at %s; --bounce only rewinds review/verify to %s",
+					id, f.Stage, workflow.WorkStage(f.Kind)))
+		}
+		back := workflow.WorkStage(f.Kind)
+		if _, err := d.store.Transition(ctx, id, back, d.actor); err != nil {
+			return d.fail(ctx, string(id), err)
+		}
+		d.eng.Drop(id) // the stale review/verify session must not restart
+		d.bounceNote = *in.Bounce
 	case in.RequestChanges != nil:
 		d.opening = *in.RequestChanges
 	case in.Answer != nil:
@@ -375,7 +397,19 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Round: round})
 
-	if err := d.eng.Run(f); err != nil {
+	// a --bounce resume stashed a kickoff note for the first work-stage run
+	// that follows the rewind; consume it on that exact dispatch so it
+	// reaches the reborn implement/fix as an addendum to the kickoff (the
+	// same path Engine.RunWith takes for the diff surface's request-changes).
+	var err error
+	if d.bounceNote != "" && (f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
+		note := d.bounceNote
+		d.bounceNote = ""
+		err = d.eng.RunWith(f, note)
+	} else {
+		err = d.eng.Run(f)
+	}
+	if err != nil {
 		return Outcome{}, err
 	}
 	d.sentTurn = true
@@ -415,7 +449,7 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		case verdictChanges:
 			if d.reviewRounds >= maxReviewRounds {
 				d.reviewRounds = 0
-				return d.escalation(f, fmt.Sprintf("review still requesting changes after %d rounds", maxReviewRounds)), nil
+				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", maxReviewRounds)), nil
 			}
 			d.reviewRounds++
 			return d.stepTo(ctx, f.ID, workflow.WorkStage(f.Kind))
@@ -435,7 +469,7 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		case verdictBlocked:
 			return d.escalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
 		case verdictFail, verdictChanges:
-			return d.escalation(f, "verify FAILED — read the evidence in the artifact"), nil
+			return d.bounceEscalation(f, "verify FAILED — read the evidence in the artifact"), nil
 		default:
 			return d.escalation(f, "verify finished with no clear verdict"), nil
 		}
@@ -765,6 +799,19 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: resumeCmd(string(f.ID)),
+	})
+	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
+}
+
+// bounceEscalation is the escalation flavor used when the human's follow-up
+// is to rewind review/verify back to implement/fix — a review cap-hit or a
+// verify-fail. The `next` field names `--bounce` so a caller driving the
+// stream never has to recall which verb un-parks this stop; `--note` is
+// carried as a placeholder for the caller's own change note.
+func (d *Driver) bounceEscalation(f domain.Feature, reason string) Outcome {
+	d.out.emit(escalationEvent{
+		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
+		Next: resumeCmd(string(f.ID), "--bounce", "--note", `"<why>"`),
 	})
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
 }
