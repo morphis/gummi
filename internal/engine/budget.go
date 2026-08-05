@@ -118,7 +118,8 @@ func CompileDiffComments(anns []domain.DiffAnnotation, resolveTool bool) string 
 }
 
 // budgetHint is the session-start system instruction telling the model
-// its budget (DESIGN §5.1 layer 2, "at session start").
+// its budget (DESIGN §5.1 layer 2, "at session start"). Tailored for
+// stages that edit files (implement, fix).
 func budgetHint(budget float64) string {
 	return fmt.Sprintf(`You have a budget of about %.0f credits (≈$%.2f) for this stage. `+
 		`Work budget-consciously: prefer targeted reads over broad exploration, `+
@@ -126,6 +127,18 @@ func budgetHint(budget float64) string {
 		`task cannot finish within budget, stop early and write a checkpoint `+
 		`(what's done, what's left, where to resume) into the spec's progress `+
 		`section rather than running dry mid-edit.`, budget, budget*0.01)
+}
+
+// budgetHintReadMostly is the variant used by stages that don't edit
+// files (plan critique, verify). The "batch edits / avoid refactors"
+// clause is noise there, and critique specifically needs breadth to
+// walk closure tables and cited rules — a read-restriction hint
+// pulls in the wrong direction.
+func budgetHintReadMostly(budget float64) string {
+	return fmt.Sprintf(`You have a budget of about %.0f credits (≈$%.2f) for this stage. `+
+		`Work budget-consciously. If you estimate you cannot finish within budget, `+
+		`stop early and write a checkpoint (what's done, what's left, where to resume) `+
+		`into the artifact rather than running dry.`, budget, budget*0.01)
 }
 
 // nudge builds the mid-session budget update injected at a threshold.

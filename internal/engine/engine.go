@@ -625,7 +625,15 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// enforced cap is never an un-holdable sliver.
 	if budget > 0 && !interactiveStage(f.Stage) {
 		maxCredits = budget * capHeadroom
-		hints = append(hints, budgetHint(budget))
+		// Read-mostly stages don't edit files: critique judges the plan,
+		// verify runs the artifact's checks. The write-focused hint
+		// pulls them in the wrong direction (critique needs breadth to
+		// walk closure tables; verify never batches edits).
+		if flavor == flavorCritique || f.Stage == domain.StageVerify {
+			hints = append(hints, budgetHintReadMostly(budget))
+		} else {
+			hints = append(hints, budgetHint(budget))
+		}
 	}
 	// gummi-owned client tools per stage. When the resolved backend
 	// supports them, register the tools and tell the agent they exist;

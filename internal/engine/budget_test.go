@@ -38,6 +38,41 @@ func TestBudgetHintAndCap(t *testing.T) {
 	}
 }
 
+// F7: read-mostly stages (plan critique, verify) get a leaner budget
+// hint — the write-focused clauses ("batch edits", "avoid speculative
+// refactors") are noise there, and critique specifically needs
+// breadth to walk closure tables.
+func TestBudgetHintReadMostlyForVerify(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{
+		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, StageBudget: 100,
+	})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify", domain.StageVerify)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	joined := strings.Join(rec.opts().SystemHints, "\n")
+	if !strings.Contains(joined, "budget of about 100 credits") {
+		t.Errorf("read-mostly hint missing credit figure:\n%s", joined)
+	}
+	if !strings.Contains(joined, "checkpoint") {
+		t.Errorf("read-mostly hint missing checkpoint clause:\n%s", joined)
+	}
+	if strings.Contains(joined, "avoid speculative refactors") {
+		t.Error("verify carried the write-focused refactor clause")
+	}
+	if strings.Contains(joined, "batch related edits") {
+		t.Error("verify carried the write-focused batch-edits clause")
+	}
+}
+
 func TestBudgetNoCapForInteractive(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
