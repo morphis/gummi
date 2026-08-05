@@ -540,6 +540,16 @@ func contractHint(f domain.Feature, specPath string, role agent.Role) string {
 		noun, artifact, sections = "bug", "bug report", bugSections
 		short = "bug report"
 	}
+	// Reviewers (Review, Verify, plan-critique) don't fill design
+	// sections — they read them and add findings — so the "overwrite or
+	// resolve" nudge is either inapplicable or wrong for them.
+	seededLine := "Seeded `%% @gummi:` lines are placeholder notes — " +
+		"overwrite or resolve them as you fill in their section."
+	if role == agent.RoleReviewer {
+		seededLine = "Seeded `%% @gummi:` lines are placeholder notes; " +
+			"leave them where they are — filling in sections is the " +
+			"design/implementation roles' job."
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are the %s for %s %s: %s.\n", role, noun, f.ID, f.Title)
 	if f.OneLiner != "" {
@@ -551,11 +561,10 @@ state database, source code, or design docs.
 The %s's %s is at %s.
 It exists — gummi materializes it from its template — and it is the
 single source of truth: read it, work from it, keep it current. Its
-sections, in order: %s. Seeded `+"`%%%% @gummi:`"+` lines are placeholder
-notes — overwrite or resolve them as you fill in their section.
+sections, in order: %s. %s
 
 Open questions and annotations are `+"`%%%%`"+` marker lines in the %s,
-one line each:`, noun, artifact, specPath, sections, artifact)
+one line each:`, noun, artifact, specPath, sections, seededLine, artifact)
 	b.WriteString(`
   %% @` + string(role) + `: <question or note>
   %% @` + string(role) + `: resolved — <answer>     (resolves its thread)

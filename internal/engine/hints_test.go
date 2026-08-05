@@ -106,6 +106,21 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}
 	}
 
+	// F9: contractHint's `%% @gummi:` line reads differently by role.
+	// Reviewers (Review/Verify/Critique) shouldn't be told to fill in
+	// sections — they read and add findings.
+	reviewHints := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageReview), "spec.md", flavorStage), "\n"))
+	if !strings.Contains(reviewHints, "leave them where they are") {
+		t.Error("review contractHint missing the softened seeded-line phrasing")
+	}
+	if strings.Contains(reviewHints, "overwrite or resolve them") {
+		t.Error("review contractHint carried the writer-role instruction")
+	}
+	specStd := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageSpec), "spec.md", flavorStage), "\n"))
+	if !strings.Contains(specStd, "overwrite or resolve them") {
+		t.Error("spec contractHint lost the writer-role instruction")
+	}
+
 	// F1: standard Spec must not carry the quick-spec's plan-drafting
 	// instruction — Implementation notes are Plan's job when a Plan stage
 	// follows, and drafting them twice was dead work.
