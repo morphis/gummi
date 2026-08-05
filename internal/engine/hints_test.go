@@ -55,6 +55,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StageImplement, domain.KindFeature, []string{
 			"Out of scope section is binding",
+			// F11: commit bodies survive the squash into main, so they
+			// carry the change's rationale forward — symmetric with the
+			// Fix hint, which already tells the agent this.
+			"describe what and why in the commit body",
 		}},
 		{domain.StageTriage, domain.KindBug, []string{
 			"Verify the claim first", "one question per turn",

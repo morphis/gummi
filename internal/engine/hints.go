@@ -175,9 +175,11 @@ using the spec and plan as context. The spec's Out of scope section is
 binding — build nothing past it. Make focused edits, run the
 relevant checks as you go, and keep changes reviewable. Commit your
 work to this branch with focused git commits as you complete each
-coherent piece — the branch lands on main as a single squash commit
-when the user accepts the feature, and gummi checkpoint-commits
-anything you leave uncommitted when the stage ends. Keep the
+coherent piece — describe what and why in the commit body (bodies
+survive the squash as the merge commit's description) — the branch
+lands on main as a single squash commit when the user accepts the
+feature, and gummi checkpoint-commits anything you leave uncommitted
+when the stage ends. Keep the
 spec's Progress section current: what's done, what's left, where to
 resume. If your changes alter how the repo is built, tested, or linted,
 update the gummi-checks block in the Verification plan — the Verify
