@@ -252,6 +252,19 @@ func TestRebaseHintCarriesBuildCheck(t *testing.T) {
 	}
 }
 
+// TestInteractiveKickoffPanicsOnUnknown: F18 — the default clause was
+// "the brainstorm chat" copy, so any future interactive stage would
+// silently ship the wrong opener. Every interactive stage is
+// enumerated; an unknown one must panic.
+func TestInteractiveKickoffPanicsOnUnknown(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on unknown interactive stage")
+		}
+	}()
+	interactiveKickoff(feature(1, "x", domain.StageImplement))
+}
+
 // TestInteractiveKickoffQuickSpec: the spec-chat opener flips with the
 // route — a quick card's agent leads by drafting, a standard card's by
 // converging the open threads.

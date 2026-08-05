@@ -75,10 +75,15 @@ func interactiveKickoff(f domain.Feature) string {
 		return "The user just opened the diagnose chat. Read the bug report and its " +
 			"reproduction, then drive toward root cause: state your leading hypothesis with your " +
 			"reasoning, and put the most consequential open question to the user first. Keep it short."
-	default:
+	case domain.StageBrainstorm:
 		return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
 			"interview: state the problem as you understand it in a sentence or two and ask the " +
 			"single highest-leverage question, with your recommended answer. Keep it short."
+	default:
+		// Every interactive stage is enumerated above; a fall-through
+		// means a new interactive stage landed without a kickoff opener,
+		// and the model would otherwise get a wrong-stage copy.
+		panic(fmt.Sprintf("interactiveKickoff: unknown interactive stage %s", f.Stage))
 	}
 }
 
