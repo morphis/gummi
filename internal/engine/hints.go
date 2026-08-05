@@ -91,8 +91,17 @@ the approved spec and write it into the spec's Implementation notes as
 numbered steps — one line per step, so review markers can anchor to
 it — each step naming the files and functions it touches and the tests
 that prove it. Order the steps as tracer bullets: the first step cuts
-a thin complete path through the system, later steps widen it. Stop
-when the plan is written; the user approves it.`))
+a thin complete path through the system, later steps widen it. End
+the plan with a ` + "`Plan claims`" + ` subsection: a table (one claim per
+bulleted line) of every load-bearing self-assertion the plan is
+making. Three claim shapes are required when applicable:
+  - ` + "`helper <name>: keyed by <field>, returns <type>`" + `
+  - ` + "`golden <name> = <value> because <one-line trace through the plan>`" + `
+  - ` + "`<ADR or spec ref> rule <n> exercised by <scenario/test name>`" + `
+Add any other claim (invariant, ordering rule, error path) the reader
+would otherwise have to re-derive from prose. This subsection is what
+the plan critique stress-tests — an unstated claim is one the critique
+cannot verify. Stop when the plan is written; the user approves it.`))
 	case domain.StageImplement:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Implement (autonomous). Implement the feature in this worktree
@@ -209,6 +218,17 @@ itself, since no Plan stage follows — numbered steps, one line per
 step, each naming the files and functions it touches and the tests
 that prove it, ordered as tracer bullets (the first step cuts a thin
 complete path, later steps widen it); and ` + verificationPlanHint + `.
+End the Implementation notes with a ` + "`Plan claims`" + ` subsection: a
+table (one claim per bulleted line) of every load-bearing
+self-assertion the plan is making. Three claim shapes are required
+when applicable:
+  - ` + "`helper <name>: keyed by <field>, returns <type>`" + `
+  - ` + "`golden <name> = <value> because <one-line trace through the plan>`" + `
+  - ` + "`<ADR or spec ref> rule <n> exercised by <scenario/test name>`" + `
+Add any other claim (invariant, ordering rule, error path) the reader
+would otherwise have to re-derive from prose. This subsection is what
+the plan critique stress-tests — an unstated claim is one the critique
+cannot verify.
 Flag anything you are genuinely unsure about as its own %% marker
 thread with a recommended answer, rather than interviewing the user
 decision by decision. The user approves the spec to advance — do not
@@ -243,14 +263,39 @@ Stage: Plan critique (autonomous, fresh context). The implementation
 plan was just written (or revised after a prior critique) into the
 spec's Implementation notes. Your job is to refute it before the user
 approves it — do not fix it yourself, and do not review code (none
-exists yet). Read the whole spec and judge the plan through four
-lenses:
+exists yet). Keep finding findings at your effort level until you can
+honestly say no more remain in this pass — do not stop at a small
+target count. A second round costs as much as this one and should not
+be a substitute for a thorough first pass. Read the whole spec and
+judge the plan through four lenses:
   security      — attack surface the approach opens: input handling,
                   authz, secrets, injection, unsafe defaults
-  correctness   — edge cases, error paths, concurrency, invariants the
-                  plan breaks or forgets
+  correctness   — edge cases, error paths, concurrency, invariants
+                  the plan breaks or forgets. For each helper, table,
+                  or map the plan introduces by name, state what it
+                  is keyed by and what it returns, and verify the
+                  plan's later uses of it match — a helper named
+                  ` + "`catKindByID`" + ` but keyed by ` + "`Txn.AccountID`" + ` is a
+                  blocking finding, not a nit.
   completeness  — does the plan actually cover the spec's Chosen
                   approach, and does the Verification plan prove it?
+                  Walk each of these sub-checks:
+                    - For each self-claim the plan publishes in its
+                      Plan claims table (see below), verify the plan
+                      text supports it; unsupported claims are
+                      blocking.
+                    - For every golden or expected value the plan
+                      lands, trace through the plan's own steps to
+                      the value — if the trace does not reach it,
+                      the test is not proven and that is a blocking
+                      finding.
+                    - For every ADR, spec section, or external doc
+                      the plan references, enumerate its rules and
+                      check the plan honors *each* one — do not stop
+                      at the rule that jumped out. A rule that reads
+                      as load-bearing for the feature but is never
+                      exercised by the plan's tests is a blocking
+                      finding.
   executability — can the Verification plan run HERE? Probe each live
                   check's prerequisites in this worktree cheaply
                   (imports resolve, tools on PATH, services it names
