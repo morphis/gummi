@@ -43,6 +43,20 @@ const (
 	resolveToolName  = "resolve_annotation"
 )
 
+// The verdict-semantics constants are the shared clauses used by both
+// tool descriptions (below) and the stage-hint prose (hints.go's
+// review/plan-critique hints). Restating them in more than one place
+// let them drift; the tool description and the fallback VERDICT: line
+// contract must always mean the same thing per stage.
+const (
+	// verdictPassBlockingFindings is the shared pass-verdict base for
+	// review/critique — nits ride along on a pass.
+	verdictPassBlockingFindings = "no blocking findings (nits alone pass)"
+	// verdictChangesBase is the shared changes-verdict base for
+	// review/critique — a single blocking finding is enough.
+	verdictChangesBase = "at least one blocking finding"
+)
+
 // stageTools returns the gummi-owned client tools offered on a stage.
 // ask_user is interactive-only (it blocks on a human, and only the chat
 // picker can answer it); spec_annotate is offered to the interactive
@@ -147,8 +161,8 @@ func submitVerdictTool() agent.ToolDef {
 				"verdict": map[string]any{
 					"type": "string",
 					"enum": []any{"pass", "changes"},
-					"description": "pass = no blocking findings (nits alone pass), ready to verify; " +
-						"changes = at least one blocking finding, bounce back to implement.",
+					"description": "pass = " + verdictPassBlockingFindings + ", ready to verify; " +
+						"changes = " + verdictChangesBase + ", bounce back to implement.",
 				},
 				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
 			},
@@ -173,8 +187,8 @@ func critiqueVerdictTool() agent.ToolDef {
 				"verdict": map[string]any{
 					"type": "string",
 					"enum": []any{"pass", "changes"},
-					"description": "pass = no blocking findings (nits alone pass), ready for the " +
-						"user's approval; changes = at least one blocking finding, the plan must be revised.",
+					"description": "pass = " + verdictPassBlockingFindings + ", ready for the " +
+						"user's approval; changes = " + verdictChangesBase + ", the plan must be revised.",
 				},
 				"summary": map[string]any{"type": "string", "description": "One-line rationale."},
 			},

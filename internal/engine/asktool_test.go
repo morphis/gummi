@@ -574,6 +574,28 @@ func TestCompileDiffComments(t *testing.T) {
 	}
 }
 
+// TestVerdictToolDescriptionsShareConstants pins that both
+// review-shaped verdict tools describe pass/changes with the same
+// shared constants (they had drifted before the shared constants
+// existed).
+func TestVerdictToolDescriptionsShareConstants(t *testing.T) {
+	tools := map[string]agent.ToolDef{
+		"review":   submitVerdictTool(),
+		"critique": critiqueVerdictTool(),
+	}
+	for name, def := range tools {
+		props := def.Parameters["properties"].(map[string]any)
+		verdict := props["verdict"].(map[string]any)
+		desc := verdict["description"].(string)
+		if !strings.Contains(desc, verdictPassBlockingFindings) {
+			t.Errorf("%s tool description missing shared pass constant: %q", name, desc)
+		}
+		if !strings.Contains(desc, verdictChangesBase) {
+			t.Errorf("%s tool description missing shared changes constant: %q", name, desc)
+		}
+	}
+}
+
 // TestAllowedVerdictsPerStage pins the verdict vocabulary of each
 // session type: review negotiates "changes" (never "fail" — that
 // slipped through the old fallthrough with no downstream handling),
