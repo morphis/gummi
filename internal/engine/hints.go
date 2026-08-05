@@ -19,6 +19,25 @@ const (
 		"Root cause · Fix · Review · Verification"
 )
 
+// planClaimsRubric is the required-shape rubric for the `Plan claims`
+// subsection: one bullet per load-bearing self-assertion the plan is
+// making, so the critique reads them directly instead of re-deriving
+// from prose. Both the Plan stage and the quick-spec flavor (which
+// folds the plan into the Spec) emit it — a plan is a plan whether
+// or not a Spec stage preceded it. Kept as one constant so the two
+// callsites can never drift; a prior drift cost a critique contract
+// of truth.
+const planClaimsRubric = "a `Plan claims` subsection: a table (one " +
+	"claim per bulleted line) of every load-bearing self-assertion " +
+	"the plan is making. Required claim shapes:\n" +
+	"  - `helper <name>: keyed by <field>, returns <type>` — one per\n" +
+	"    helper, table, or map the plan introduces by name\n" +
+	"  - `golden <name> = <value> because <one-line trace through the plan>`\n" +
+	"    — one per test with a fixed expected value\n" +
+	"  - any other load-bearing invariant, ordering rule, or error-path\n" +
+	"    contract the reader would otherwise have to re-derive from prose,\n" +
+	"    one bullet per claim"
+
 // interactiveWorkingDirGuard fences the interactive stages that run in
 // the main checkout (locate returns Worktrees.Root() for them, not an
 // isolated worktree). Without this, a model may edit repo files or
@@ -111,17 +130,8 @@ put the scope back to the user (what to cut, what to split into a
 follow-up FD) rather than shipping an oversized plan — an oversized
 plan is a spec problem, not a plan problem.
 
-End the plan with a ` + "`Plan claims`" + ` subsection: a table (one claim
-per bulleted line) of every load-bearing self-assertion the plan is
-making. Required claim shapes:
-  - ` + "`helper <name>: keyed by <field>, returns <type>`" + ` — one per
-    helper, table, or map the plan introduces by name
-  - ` + "`golden <name> = <value> because <one-line trace through the plan>`" + `
-    — one per test with a fixed expected value
-  - any other load-bearing invariant, ordering rule, or error-path
-    contract the reader would otherwise have to re-derive from prose,
-    one bullet per claim (e.g. "SIGHUP arrives before checkpoint
-    flushes")
+End the plan with ` + planClaimsRubric + ` (e.g. "SIGHUP arrives before
+checkpoint flushes").
 
 Then, ONLY when the spec makes them relevant, add these closure
 subsections. Each is a bounded table the critique reads directly
@@ -274,16 +284,7 @@ itself, since no Plan stage follows — numbered steps, one line per
 step, each naming the files and functions it touches and the tests
 that prove it, ordered as tracer bullets (the first step cuts a thin
 complete path, later steps widen it); and ` + verificationPlanHint + `.
-End the Implementation notes with a ` + "`Plan claims`" + ` subsection: a
-table (one claim per bulleted line) of every load-bearing
-self-assertion the plan is making. Required claim shapes:
-  - ` + "`helper <name>: keyed by <field>, returns <type>`" + ` — one per
-    helper, table, or map the plan introduces by name
-  - ` + "`golden <name> = <value> because <one-line trace through the plan>`" + `
-    — one per test with a fixed expected value
-  - any other load-bearing invariant, ordering rule, or error-path
-    contract the reader would otherwise have to re-derive from prose,
-    one bullet per claim.
+End the Implementation notes with ` + planClaimsRubric + `.
 This subsection is what a fresh reader (and any later review) uses to
 spot-check the plan — an unstated claim is one the reader cannot
 verify.
