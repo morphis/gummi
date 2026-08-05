@@ -64,6 +64,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StageFix, domain.KindBug, []string{
 			"correct seam", "root cause in the commit message",
+			// F10: `[` in an unescaped grep is a regex character class,
+			// so a naked `grep -r "[DEBUG-"` silently misses matches on
+			// many systems. Force the fixed-string form.
+			"grep -rF",
 		}},
 		{domain.StageReview, domain.KindFeature, []string{
 			"conformance", "standards", "scope", "blocking or nit",

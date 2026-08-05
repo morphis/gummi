@@ -231,7 +231,9 @@ the commit message body — the branch lands on main as a single squash
 commit when the user accepts the fix, and gummi checkpoint-commits
 anything you leave uncommitted when the stage ends. Keep the report's
 Fix section current: what you changed and why. Before you finish, grep
-for [DEBUG- and delete any temporary logs. If you are addressing review
+the worktree for the literal string [DEBUG- (use ` + "`grep -rF '[DEBUG-'`" + `
+or ` + "`rg -F '[DEBUG-'`" + ` so the [ is not read as a regex character
+class) and delete any temporary logs. If you are addressing review
 findings, resolve each thread in the Review section with how you fixed
 it. If you hit a blocker or need a decision, stop and say so rather than
 guessing.`))
