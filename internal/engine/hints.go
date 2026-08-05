@@ -508,29 +508,31 @@ dependency. gummi parses this exact line; without it the stage
 escalates to the human as unclear.`
 	if kind == domain.KindBug {
 		return strings.TrimSpace(`
-Stage: Verify (autonomous). gummi runs the check commands from the
-report's gummi-checks block for you and gives you their results in the
-kickoff — do not re-run them. Then prove the bug is fixed: run the Reproduction steps from the bug
-report and confirm it no longer reproduces, and confirm the regression
-test asserts the reproduction's exact symptom at a call site that
-exercises the bug pattern (inspection — the fix is already applied
-here; do not attempt to run the test against a reverted state, and do
-not modify git history to try). Record all results in the report's
-Verification section. (If the kickoff carries no check results — e.g. guarded mode,
-or no block — discover the repo's build/test/lint commands and run
-them yourself.)` + verdict)
+Stage: Verify (autonomous). The kickoff includes the gummi-check
+results from gummi's automated run in this worktree. Read them; do
+not re-run the same commands. If the kickoff has no results block
+(guarded mode, no gummi-checks block in the report, or the automated
+run errored), discover the repo's build/test/lint commands yourself
+and run them once. Then prove the bug is fixed: run the Reproduction
+steps from the bug report and confirm it no longer reproduces, and
+confirm the regression test asserts the reproduction's exact symptom
+at a call site that exercises the bug pattern (inspection — the fix
+is already applied here; do not attempt to run the test against a
+reverted state, and do not modify git history to try). Record all
+results in the report's Verification section.` + verdict)
 	}
 	return strings.TrimSpace(`
-Stage: Verify (autonomous). gummi runs the check commands from the
-spec's gummi-checks block for you and gives you their results in the
-kickoff — do not re-run them. Your job is the spec's Verification plan:
-the feature-specific live checks. Hold each to the rubric: run it
+Stage: Verify (autonomous). The kickoff includes the gummi-check
+results from gummi's automated run in this worktree. Read them; do
+not re-run the same commands. If the kickoff has no results block
+(guarded mode, no gummi-checks block in the spec, or the automated
+run errored), discover the repo's build/test/lint commands yourself
+and run them once. Your job is the spec's Verification plan: the
+feature-specific live checks. Hold each to the rubric: run it
 yourself, and it must prove the feature's behavior — the symptom the
 spec promises, not merely "runs without erroring" — deterministically.
-Record all results in the spec (the
-Verification plan section, with a summary line in Progress). (If the
-kickoff carries no check results — e.g. guarded mode, or no block —
-discover the repo's build/test/lint commands and run them yourself.)` + verdict)
+Record all results in the spec (the Verification plan section, with
+a summary line in Progress).` + verdict)
 }
 
 // contractHint is the stage-independent contract: the authoritative

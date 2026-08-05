@@ -89,6 +89,9 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			// writes to the artifact, not a vague "finding" it has no
 			// primitive for.
 			"finding: gummi-checks tag defect",
+			// F12: the "no results block" branch has an explicit
+			// trigger, not a parenthetical afterthought.
+			"do not re-run the same commands", "If the kickoff has no results block",
 		}},
 		{domain.StageVerify, domain.KindBug, []string{
 			"no longer reproduces", "SKIPPED", "VERDICT: blocked", "[CI-only]",
@@ -99,6 +102,9 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"do not attempt to run the test against a reverted state",
 			// F5: same plan-defect channel on the bug flavor.
 			"finding: gummi-checks tag defect",
+			// F12: same explicit "no results block" trigger on the bug
+			// flavor.
+			"do not re-run the same commands", "If the kickoff has no results block",
 		}},
 	}
 	for _, tc := range cases {
