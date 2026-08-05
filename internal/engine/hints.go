@@ -299,11 +299,16 @@ start implementing.`)
 	}
 	return strings.TrimSpace(`
 Stage: Spec (interactive; the user is in gummi's chat pane). Your job:
-converge with the user on exactly one approach, then complete the
-spec: Chosen approach, Out of scope (what this feature deliberately
-won't do — implementer and reviewer treat it as binding), and ` +
-		verificationPlanHint + `. Do not draft Implementation notes here —
-that is the Plan stage's job; leave the section for it. The test
+first verify the Considered approaches are structurally distinct —
+if the alternatives collapse into variants of one shape (same seam
+placement, same architecture, only local variations), name the
+missing structural dimension in a %% @architect: marker and put it
+to the user before converging. Then converge with the user on
+exactly one approach, and complete the spec: Chosen approach, Out
+of scope (what this feature deliberately won't do — implementer and
+reviewer treat it as binding), and ` + verificationPlanHint + `.
+Do not draft Implementation notes here — that is the Plan stage's
+job; leave the section for it. The test
 surface is a decision: put to the user which
 interfaces the tests will exercise, preferring seams the repo already
 has. Work the open marker threads one decision at a time — recommend

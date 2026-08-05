@@ -35,6 +35,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			// The section was drafted twice (Spec, then Plan overwrote it) —
 			// dead work at best, competing prose at worst.
 			"Do not draft Implementation notes here",
+			// F14: Spec gates convergence on approach diversity —
+			// Brainstorm required "structurally different" approaches,
+			// but no downstream stage verified until now.
+			"structurally distinct", "missing structural dimension",
 		}},
 		{domain.StagePlan, domain.KindFeature, []string{
 			"numbered steps", "tracer bullets",
