@@ -13,10 +13,23 @@ import (
 func clearDoctorEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"GUMMI_AGENT", "GUMMI_AGENT_CMD", "GUMMI_CLAUDE_BIN", "GUMMI_OPENCODE_BIN",
+		"GUMMI_AGENT", "GUMMI_AGENT_CMD", "GUMMI_CLAUDE_BIN", "GUMMI_CODEX_BIN", "GUMMI_OPENCODE_BIN",
 		"GUMMI_ENVELOPE",
 	} {
 		t.Setenv(k, "")
+	}
+}
+
+func TestDoctorCodexUsesNativeLoginRemediation(t *testing.T) {
+	clearDoctorEnv(t)
+	fakeAgentOnPath(t, "codex")
+	t.Setenv("GUMMI_AGENT", "codex")
+	r := buildDoctorReport(gitRepo(t))
+	if c := checkByName(r, "backend"); c.Status != statusOK || !strings.Contains(c.Detail, "codex") {
+		t.Fatalf("backend = %+v", c)
+	}
+	if c := checkByName(r, "auth"); !strings.Contains(c.Remediation, "codex login") {
+		t.Fatalf("auth = %+v", c)
 	}
 }
 

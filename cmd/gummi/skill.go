@@ -32,11 +32,11 @@ const skillName = "gummi"
 const skillDescription = "Ship one PR-sized feature or bug to a verified branch via gummi's headless, spec-driven workflow (spec, review, verify; gummi never merges). Use when the work warrants a spec, an independent code review, and an isolated branch — not for trivial one-line edits."
 
 // runSkill implements `gummi skill show|install|list` (DESIGN §7): it
-// generates the SKILL.md all three agents (Claude, Copilot, opencode) read
+// generates the SKILL.md that Claude, Copilot, Codex, and opencode read
 // and installs it. No engine dependency — this command lands independently.
 func runSkill(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: gummi skill show|install|list [--agent claude|opencode|copilot] [--scope user|project] [--force] [--dry-run]")
+		return fmt.Errorf("usage: gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -244,7 +244,7 @@ func commandGrammar() string {
 	b.WriteString("gummi diff <id|ref>\n\n")
 	writeCmd("gummi doctor", flagLines(func(fs *flag.FlagSet) { registerDoctorFlags(fs) }))
 	b.WriteString("\n")
-	b.WriteString("gummi skill show|install|list [--agent claude|opencode|copilot] [--scope user|project] [--force] [--dry-run]")
+	b.WriteString("gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]")
 	return b.String()
 }
 
@@ -287,6 +287,7 @@ type skillAgent string
 
 const (
 	agentClaude   skillAgent = "claude"
+	agentCodex    skillAgent = "codex"
 	agentOpencode skillAgent = "opencode"
 	agentCopilot  skillAgent = "copilot"
 )
@@ -299,7 +300,7 @@ type installTarget struct {
 
 func skillInstall(args []string) error {
 	fs := flag.NewFlagSet("skill install", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "", "target a specific agent: claude|opencode|copilot (default: detect)")
+	agentFlag := fs.String("agent", "", "target a specific agent: claude|codex|opencode|copilot (default: detect)")
 	scopeFlag := fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
 	force := fs.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
 	dryRun := fs.Bool("dry-run", false, "print what would be written, change nothing")
@@ -383,8 +384,10 @@ func skillList(args []string) error {
 	curHash := skillBodyHash()
 	rows := []installTarget{
 		{path: projectSkillPath(cwd), label: "project (claude/copilot/opencode)"},
+		{path: codexProjectSkillPath(cwd), label: "project (codex)"},
 		{path: userSkillPath(agentClaude), label: "user (claude/opencode)"},
 		{path: userSkillPath(agentCopilot), label: "user (copilot)"},
+		{path: userSkillPath(agentCodex), label: "user (codex)"},
 	}
 	for _, r := range rows {
 		fmt.Printf("  %-32s %-12s %s\n", r.label, describeInstall(r.path, curHash), r.path)
@@ -415,8 +418,7 @@ func describeInstall(path, curHash string) string {
 // --- detection, scope & paths -----------------------------------------
 
 // detectAgents reports which agents are present via env + PATH (§7). Used
-// only for user-scope installs; project scope needs no detection (one file
-// covers all three).
+// only for user-scope installs; project scope needs no detection.
 func detectAgents() []skillAgent {
 	var out []skillAgent
 	if os.Getenv("CLAUDECODE") != "" || os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "" ||
@@ -425,6 +427,9 @@ func detectAgents() []skillAgent {
 	}
 	if hasEnvPrefix("OPENCODE") || onPath("opencode") {
 		out = append(out, agentOpencode)
+	}
+	if os.Getenv("CODEX_HOME") != "" || hasEnvPrefix("CODEX_") || onPath("codex") {
+		out = append(out, agentCodex)
 	}
 	if onPath("copilot") || onPath("gh") {
 		out = append(out, agentCopilot)
@@ -448,10 +453,10 @@ func hasEnvPrefix(prefix string) bool {
 
 func parseAgent(s string) (skillAgent, error) {
 	switch skillAgent(s) {
-	case agentClaude, agentOpencode, agentCopilot:
+	case agentClaude, agentCodex, agentOpencode, agentCopilot:
 		return skillAgent(s), nil
 	default:
-		return "", fmt.Errorf("--agent must be claude, opencode, or copilot, got %q", s)
+		return "", fmt.Errorf("--agent must be claude, codex, opencode, or copilot, got %q", s)
 	}
 }
 
@@ -467,7 +472,7 @@ func resolveScope(flagVal string) (string, error) {
 			return promptScope(), nil
 		}
 		fmt.Fprintln(os.Stderr, "gummi: no --scope given and stdin is not interactive; defaulting to project scope "+
-			"(one .claude/skills/gummi install is read by claude, copilot, and opencode).")
+			"(project scope installs the shared skill for claude/copilot/opencode and the Codex skill under .agents/skills).")
 		return "project", nil
 	default:
 		return "", fmt.Errorf("--scope must be project or user, got %q", flagVal)
@@ -475,14 +480,26 @@ func resolveScope(flagVal string) (string, error) {
 }
 
 // resolveTargets maps a scope (+ optional --agent) to concrete SKILL.md
-// paths. Project scope is one file for all three agents; user scope diverges
-// per agent (claude+opencode share the claude home, copilot has its own).
+// paths. Project scope uses the shared .claude path plus Codex's .agents path;
+// user scope diverges per agent (claude+opencode share the claude home).
 func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
 	if scope == "project" {
-		return []installTarget{{
+		shared := installTarget{
 			path:  projectSkillPath(cwd),
 			label: "project (read by claude, copilot, opencode)",
-		}}, nil
+		}
+		codex := installTarget{path: codexProjectSkillPath(cwd), label: "project (read by codex)"}
+		switch agentFlag {
+		case "":
+			return []installTarget{shared, codex}, nil
+		case string(agentCodex):
+			return []installTarget{codex}, nil
+		default:
+			if _, err := parseAgent(agentFlag); err != nil {
+				return nil, err
+			}
+			return []installTarget{shared}, nil
+		}
 	}
 	var agents []skillAgent
 	if agentFlag != "" {
@@ -492,7 +509,7 @@ func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
 		}
 		agents = []skillAgent{a}
 	} else if agents = detectAgents(); len(agents) == 0 {
-		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|opencode|copilot (or use --scope project)")
+		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|codex|opencode|copilot (or use --scope project)")
 	}
 	seen := map[string]bool{}
 	var targets []installTarget
@@ -507,16 +524,26 @@ func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
 	return targets, nil
 }
 
-// projectSkillPath is the one project-scope install all three agents read.
+// projectSkillPath is the shared project-scope install Claude, Copilot, and
+// opencode read.
 func projectSkillPath(cwd string) string {
 	return filepath.Join(cwd, ".claude", "skills", "gummi", "SKILL.md")
 }
 
+// codexProjectSkillPath is Codex's repository-scoped skill location.
+func codexProjectSkillPath(cwd string) string {
+	return filepath.Join(cwd, ".agents", "skills", "gummi", "SKILL.md")
+}
+
 // userSkillPath is an agent's user-scope home. Claude and opencode share the
-// Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot has its own.
+// Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot and Codex each
+// have their own native homes.
 func userSkillPath(a skillAgent) string {
 	if a == agentCopilot {
 		return filepath.Join(homeDir(), ".copilot", "skills", "gummi", "SKILL.md")
+	}
+	if a == agentCodex {
+		return filepath.Join(homeDir(), ".agents", "skills", "gummi", "SKILL.md")
 	}
 	base := os.Getenv("CLAUDE_CONFIG_DIR")
 	if base == "" {

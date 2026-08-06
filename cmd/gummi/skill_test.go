@@ -155,11 +155,22 @@ func TestInstallOneLifecycle(t *testing.T) {
 // and rejects an unknown --agent.
 func TestResolveTargets(t *testing.T) {
 	proj, err := resolveTargets("project", "", "/repo")
-	if err != nil || len(proj) != 1 {
+	if err != nil || len(proj) != 2 {
 		t.Fatalf("project targets = %+v, err=%v", proj, err)
 	}
 	if !strings.HasSuffix(proj[0].path, filepath.Join(".claude", "skills", "gummi", "SKILL.md")) {
 		t.Errorf("project path = %q", proj[0].path)
+	}
+	if !strings.HasSuffix(proj[1].path, filepath.Join(".agents", "skills", "gummi", "SKILL.md")) {
+		t.Errorf("codex project path = %q", proj[1].path)
+	}
+	codexProject, err := resolveTargets("project", "codex", "/repo")
+	if err != nil || len(codexProject) != 1 || codexProject[0].path != codexProjectSkillPath("/repo") {
+		t.Fatalf("explicit codex project target = %+v, err=%v", codexProject, err)
+	}
+	codex, err := resolveTargets("user", "codex", "/repo")
+	if err != nil || len(codex) != 1 || !strings.Contains(codex[0].path, filepath.Join(".agents", "skills", "gummi")) {
+		t.Fatalf("codex user target = %+v, err=%v", codex, err)
 	}
 
 	cop, err := resolveTargets("user", "copilot", "/repo")
@@ -177,5 +188,18 @@ func TestUserSkillPathHonorsClaudeConfigDir(t *testing.T) {
 	got := userSkillPath(agentClaude)
 	if want := filepath.Join("/custom/cc", "skills", "gummi", "SKILL.md"); got != want {
 		t.Errorf("userSkillPath = %q, want %q", got, want)
+	}
+}
+
+func TestDetectAgentsIncludesCodex(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	found := false
+	for _, a := range detectAgents() {
+		if a == agentCodex {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Codex was not detected from CODEX_HOME")
 	}
 }

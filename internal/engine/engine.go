@@ -955,6 +955,11 @@ func (e *Engine) pump(s *Session) {
 				e.emitStopped(s)
 				return
 			}
+			// Process-backed adapters learn their durable conversation id from
+			// the first backend event, after NewSession has returned.
+			if id, ok := s.agent().(agent.Identified); ok {
+				s.setAgentSessionID(id.SessionID())
+			}
 			e.handle(s, ev)
 		}
 	}

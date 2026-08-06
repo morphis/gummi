@@ -15,9 +15,9 @@ import (
 
 // resolveAttach validates a raw-attach request and returns the command to
 // run and the directory to run it in. The command comes from
-// GUMMI_ATTACH_CMD (default "copilot"), split on spaces — operator config,
-// not untrusted input. An error string (non-empty) means the attach can't
-// proceed and should surface as a notice.
+// GUMMI_ATTACH_CMD (defaulting to the selected backend's native CLI), split
+// on spaces — operator config, not untrusted input. An error string
+// (non-empty) means the attach can't proceed and should surface as a notice.
 func (m *Shell) resolveAttach(f domain.Feature) (argv []string, dir string, problem string) {
 	ctx := context.Background()
 	if ok, err := m.wt.Exists(ctx, &f); err != nil {
@@ -27,7 +27,7 @@ func (m *Shell) resolveAttach(f domain.Feature) (argv []string, dir string, prob
 	}
 	cmdline := strings.TrimSpace(os.Getenv("GUMMI_ATTACH_CMD"))
 	if cmdline == "" {
-		cmdline = "copilot"
+		cmdline = defaultAttachCommand()
 	}
 	argv = strings.Fields(cmdline)
 	if len(argv) == 0 {
@@ -37,6 +37,31 @@ func (m *Shell) resolveAttach(f domain.Feature) (argv []string, dir string, prob
 		return nil, "", "raw attach: " + argv[0] + " not found (set GUMMI_ATTACH_CMD)"
 	}
 	return argv, filepath.Join(m.wt.Root(), f.WorktreePath()), ""
+}
+
+func defaultAttachCommand() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT"))) {
+	case "claude":
+		return envOr("GUMMI_CLAUDE_BIN", "claude")
+	case "codex":
+		return envOr("GUMMI_CODEX_BIN", "codex")
+	case "opencode":
+		return envOr("GUMMI_OPENCODE_BIN", "opencode")
+	case "headless":
+		return strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD"))
+	default:
+		if cmd := strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")); cmd != "" {
+			return cmd
+		}
+		return "copilot"
+	}
+}
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // attachRaw is the escape hatch (DESIGN §9 M5): it suspends gummi's TUI and

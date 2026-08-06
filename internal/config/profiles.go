@@ -16,6 +16,7 @@ var knownBackends = map[string]struct{}{
 	"copilot":  {},
 	"claude":   {},
 	"opencode": {},
+	"codex":    {},
 	"headless": {},
 }
 
@@ -110,7 +111,7 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 			}
 			if rc.Backend != "" {
 				if _, ok := knownBackends[rc.Backend]; !ok {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|opencode|headless",
+					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless",
 						path, name, role, rc.Backend)
 				}
 			}
@@ -125,9 +126,9 @@ const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. 
 # so the same process can run cheap or premium, or mix providers. See
 # docs/DESIGN.md §5.
 #
-# backend: (optional) copilot | claude | opencode | headless. Omit to use
+# backend: (optional) copilot | claude | codex | opencode | headless. Omit to use
 # the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
-# The backend owns provider config natively — Claude Code login, opencode
+# The backend owns provider config natively — Claude Code login, Codex login, opencode
 # auth, GUMMI_AGENT_CMD for headless — so no keys or endpoints live here.
 
 default: thrifty

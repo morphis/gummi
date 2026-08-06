@@ -65,3 +65,11 @@ func TestVersionNonEmpty(t *testing.T) {
 		t.Fatalf("version() = %q, want ldflags value to win", got)
 	}
 }
+
+func TestDefaultBackendCodex(t *testing.T) {
+	t.Setenv("GUMMI_AGENT", "codex")
+	t.Setenv("GUMMI_AGENT_CMD", "")
+	if got := defaultBackendName(); got != "codex" {
+		t.Fatalf("default backend = %q", got)
+	}
+}

@@ -236,18 +236,19 @@ auto-takes the recommended answer instead of checkpointing questions.
 ### The calling-agent skill
 
 gummi generates its own **skill** — a `SKILL.md` documenting this loop — and
-installs it where Claude Code, GitHub Copilot CLI, and opencode all read it:
+installs it where Claude Code, GitHub Copilot CLI, Codex, and opencode read it:
 
 ```sh
-gummi skill install          # project scope: one .claude/skills/gummi/ covers all three
+gummi skill install          # project scope: shared .claude/skills + Codex .agents/skills
 gummi doctor                 # then check the backend/auth/envelope are ready
 ```
 
-A single **project-scope** install (`.claude/skills/gummi/SKILL.md`) is read
-by Claude natively, Copilot natively, and opencode via Claude-compat;
+A **project-scope** install writes `.claude/skills/gummi/SKILL.md` for Claude,
+Copilot, and opencode, plus `.agents/skills/gummi/SKILL.md` for Codex.
 `--scope user` writes to each detected agent's home instead, and `--agent`
-targets one. The doc's command grammar and exit table are generated from the
-binary's real flags, so they can't drift; the frontmatter is version-stamped,
+targets one (`$HOME/.agents/skills` for Codex). The doc's command grammar and
+exit table are generated from the binary's real flags, so they can't drift;
+the frontmatter is version-stamped,
 so `install`/`list` detect a stale or edited file and refuse to overwrite it
 without `--force`. `gummi skill show` prints the rendered doc.
 
@@ -255,7 +256,7 @@ without `--force`. `gummi skill show` prints the rendered doc.
 for the machine-readable checklist). It **reports**; it never repairs auth or
 writes secrets — a backend needing login is surfaced as the exact command for
 a human to run. Provider config (endpoints, API keys) lives in each backend's
-native store (Claude Code login, `opencode auth`, environment for headless),
+native store (Claude Code login, `codex login`, `opencode auth`, environment for headless),
 never in `profiles.yaml`.
 
 ## Agent backends
@@ -277,6 +278,14 @@ copilot for implement, claude for review.
 - **opencode** — the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
   binary). Provider/model config is owned by opencode itself
   (`opencode auth`, `opencode.json`).
+- **codex** — the Codex CLI (`GUMMI_CODEX_BIN` overrides the binary), using
+  stable `codex exec --json` JSONL turns and `codex exec resume` while the
+  gummi session remains live. Codex owns authentication (`codex login`) and
+  provider configuration; gummi passes the profile's model through Codex's
+  native `-m` flag and never copies credentials or writes Codex config. This backend requires
+  `permissions: allow-all`: the stable exec stream cannot service guarded
+  approval callbacks. Messages appear when Codex completes each message item,
+  while command, file-change, and MCP activity remains visible as tool events.
 - **headless** — a generic subprocess adapter for any agent binary
   speaking a small stdio JSON protocol (`GUMMI_AGENT_CMD` is its
   command line). The child inherits gummi's environment and reads its
@@ -301,7 +310,7 @@ Two files in `.gummi/`, both scaffolded on first run:
   before running them.
 - **`profiles.yaml`** — role → `{backend, model}` maps per profile
   (`premium`, `thrifty`, …) with a declared default. `backend:` is
-  optional (`copilot` | `claude` | `opencode` | `headless`); omitted, the
+  optional (`copilot` | `claude` | `codex` | `opencode` | `headless`); omitted, the
   role uses whatever `GUMMI_AGENT` selects. This lets a single profile
   mix providers — e.g. `implementer: copilot`, `reviewer: claude` — and
   keeps all provider config (endpoints, keys, credit rates) out of the
@@ -311,9 +320,10 @@ Environment variables:
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default) · `claude` · `opencode` · `headless` |
+| `GUMMI_AGENT` | default backend: `copilot` (default) · `claude` · `codex` · `opencode` · `headless` |
 | `GUMMI_AGENT_CMD` | headless adapter's command line |
 | `GUMMI_CLAUDE_BIN` | claude backend's binary (default `claude` on PATH) |
+| `GUMMI_CODEX_BIN` | codex backend's binary (default `codex` on PATH) |
 | `GUMMI_OPENCODE_BIN` | opencode backend's binary (default `opencode` on PATH) |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | headless adapter's token→credit rate for a local endpoint (llama.cpp, vLLM); 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
@@ -322,7 +332,7 @@ Environment variables:
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_THEME` | `dark` (default) · `light` · `neon` |
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default) · `desktop` · `off` |
-| `GUMMI_ATTACH_CMD` | command for raw-attach (default `copilot`) |
+| `GUMMI_ATTACH_CMD` | command for raw-attach (default: selected backend's CLI) |
 
 ## Try it without your repo
 

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -17,6 +18,56 @@ func persistEngine(t *testing.T, ag agent.Agent, ws state.Workspace, store *stat
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
 	t.Cleanup(func() { e.Close() })
 	return e
+}
+
+type delayedIDAgent struct{ agent.Agent }
+
+func (a delayedIDAgent) NewSession(ctx context.Context, opts agent.SessionOpts) (agent.Session, error) {
+	s, err := a.Agent.NewSession(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &delayedIDSession{Session: s}, nil
+}
+
+type delayedIDSession struct {
+	agent.Session
+	mu sync.Mutex
+	id string
+}
+
+func (s *delayedIDSession) Send(ctx context.Context, msg string) error {
+	if err := s.Session.Send(ctx, msg); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.id = "learned-after-send"
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *delayedIDSession) SessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.id
+}
+
+func TestSessionIDLearnedFromEventsIsPersisted(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	f := feature(1, "dynamic-id", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	ag := delayedIDAgent{Agent: &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}}}
+	e := persistEngine(t, ag, ws, store, wt)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+	if got := e.Get(f.ID).Snapshot().AgentSessionID; got != "learned-after-send" {
+		t.Fatalf("dynamic session id = %q", got)
+	}
 }
 
 // createFeature persists a feature so session FKs resolve.

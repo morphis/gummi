@@ -42,3 +42,12 @@ func TestResolveAttachCommandNotFound(t *testing.T) {
 		t.Errorf("problem = %q, want a not-found message", problem)
 	}
 }
+
+func TestDefaultAttachUsesSelectedCodexBinary(t *testing.T) {
+	t.Setenv("GUMMI_ATTACH_CMD", "")
+	t.Setenv("GUMMI_AGENT", "codex")
+	t.Setenv("GUMMI_CODEX_BIN", "/opt/codex-custom")
+	if got := defaultAttachCommand(); got != "/opt/codex-custom" {
+		t.Fatalf("default attach = %q", got)
+	}
+}

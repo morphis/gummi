@@ -57,6 +57,13 @@ func TestLoadProfilesRejectsUnknownBackend(t *testing.T) {
 	}
 }
 
+func TestLoadProfilesAcceptsCodex(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: codex, model: gpt-5 }\n")
+	if got := p.Profiles["x"]["implementer"].Backend; got != "codex" {
+		t.Fatalf("backend = %q", got)
+	}
+}
+
 func TestLoadProfilesRejectsLegacyByok(t *testing.T) {
 	// stale profiles from before the migration must fail with a pointer,
 	// not silently ignore the removed field.

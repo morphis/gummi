@@ -298,6 +298,8 @@ func backendChoice() backendInfo {
 		return backendInfo{name: "claude", bin: cmp.Or(os.Getenv("GUMMI_CLAUDE_BIN"), "claude"), login: "authenticate the Claude Code CLI (`claude`)"}
 	case "opencode":
 		return backendInfo{name: "opencode", bin: cmp.Or(os.Getenv("GUMMI_OPENCODE_BIN"), "opencode"), login: "opencode auth login"}
+	case "codex":
+		return backendInfo{name: "codex", bin: cmp.Or(os.Getenv("GUMMI_CODEX_BIN"), "codex"), login: "codex login"}
 	case "headless":
 		return backendInfo{name: "headless", bin: firstField(os.Getenv("GUMMI_AGENT_CMD")), headless: true}
 	}

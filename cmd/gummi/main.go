@@ -170,7 +170,7 @@ func runBoard() error {
 // Env config (M1 stand-in for profiles):
 //
 //	GUMMI_MODEL             model id (default "gpt-5")
-//	GUMMI_AGENT             default backend (copilot|claude|opencode|headless)
+//	GUMMI_AGENT             default backend (copilot|claude|codex|opencode|headless)
 //	GUMMI_HEADLESS_CREDITS_PER_1K
 //	                        headless adapter's token→credit rate, for a
 //	                        local endpoint (llama.cpp) that the engine
@@ -276,6 +276,8 @@ func defaultBackendName() string {
 		return "claude"
 	case "opencode":
 		return "opencode"
+	case "codex":
+		return "codex"
 	case "headless":
 		return "headless"
 	}
@@ -294,6 +296,8 @@ func startAdapter(name string) (agent.Agent, error) {
 		return agent.NewClaudeCode(os.Getenv("GUMMI_CLAUDE_BIN"))
 	case "opencode":
 		return agent.NewOpencode(os.Getenv("GUMMI_OPENCODE_BIN"))
+	case "codex":
+		return agent.NewCodex(os.Getenv("GUMMI_CODEX_BIN"))
 	case "headless":
 		return agent.NewHeadless(strings.Fields(os.Getenv("GUMMI_AGENT_CMD")))
 	case "copilot":

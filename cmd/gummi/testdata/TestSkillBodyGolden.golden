@@ -35,9 +35,10 @@ envelope, lock. Repair each item that isn't `ok`:
 
 - **backend** — set gummi's backend to the **same agent that is driving it**:
   if you are Claude Code, export `GUMMI_AGENT=claude` so gummi drives Claude with
-  Claude. Match the backend to yourself by default — it keeps the whole pipeline
-  on one vendor's auth, and it sidesteps the cross-model trap where the claude
-  backend forwards each role's model to the Claude CLI as `--model` and the CLI
+  Claude; if you are Codex, export `GUMMI_AGENT=codex`. Match the backend to
+  yourself by default — it keeps the whole pipeline on one vendor's auth, and
+  it sidesteps the cross-model trap where the claude backend forwards each
+  role's model to the Claude CLI as `--model` and the CLI
   rejects any non-`claude-*` id (a mismatched run passes spec, then dies at
   implement).
 - **profile** — **do not rely on the auto-seeded default** (its implementer/scribe
@@ -100,7 +101,7 @@ gummi diff <id|ref>
 gummi doctor
     --json  emit the readiness checklist as JSON (the skill's setup path)
 
-gummi skill show|install|list [--agent claude|opencode|copilot] [--scope user|project] [--force] [--dry-run]
+gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]
 ```
 
 A run drives one feature via the **quick route** by default (spec → implement →
