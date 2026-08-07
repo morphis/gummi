@@ -73,6 +73,15 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if opts.Model == "" {
 		return nil, errors.New("opencode requires a model (provider/model, e.g. opencode/deepseek-v4-flash-free)")
 	}
+	// Guarded mode would need opencode's per-tool approval protocol, which
+	// isn't wired. Without --auto, opencode auto-rejects any tool touching
+	// a path outside cwd — the spec at .gummi/specs/... lives outside the
+	// worktree — so the first `read` fails silently, no VERDICT emits, and
+	// the plan critique escalates "unclear". Fail loud like claudecode.
+	if opts.Permission == PermissionGuarded {
+		return nil, errors.New("opencode adapter: guarded permissions are not supported " +
+			"(no --auto → tools outside cwd auto-reject silently); set permissions: allow-all")
+	}
 	s := &opencodeSession{
 		o:       o,
 		workdir: opts.WorkDir,
@@ -155,6 +164,11 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 		return errors.New("a turn is already in progress")
 	}
 	args := []string{"run", "--format", "json", "-m", s.model}
+	// --auto: opencode's default policy rejects any tool call touching a
+	// path outside cwd. The spec lives in the main checkout's .gummi/specs
+	// (outside the worktree cwd), so without this the reviewer's first
+	// `read` is silently rejected and the turn dies before any VERDICT.
+	args = append(args, "--auto")
 	if s.sessionID != "" {
 		args = append(args, "--session", s.sessionID)
 	}

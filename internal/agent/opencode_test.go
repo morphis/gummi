@@ -106,6 +106,79 @@ func TestOpencodeRequiresModel(t *testing.T) {
 	}
 }
 
+// Guarded permissions need per-tool approval, which the run interface doesn't
+// expose — without --auto opencode silently auto-rejects any tool touching a
+// path outside cwd (e.g. reads of the main checkout's spec), so the turn dies
+// before any VERDICT. Fail loud at session creation instead of degrading.
+func TestOpencodeGuardedRejected(t *testing.T) {
+	o := &Opencode{bin: "opencode"}
+	_, err := o.NewSession(context.Background(), SessionOpts{Model: "x", Permission: PermissionGuarded})
+	if err == nil || !strings.Contains(err.Error(), "allow-all") {
+		t.Fatalf("error = %v, want one mentioning allow-all", err)
+	}
+}
+
+// Send must pass --auto to `opencode run` so tool calls touching paths outside
+// the worktree (the spec at .gummi/specs/... lives in the main checkout) are
+// not silently rejected.
+func TestOpencodeSendPassesAutoFlag(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	argsFile := dir + "/args"
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
+		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind == EventIdle {
+				data, err := os.ReadFile(argsFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+				var seen bool
+				for _, l := range lines {
+					if l == "--auto" {
+						seen = true
+						break
+					}
+				}
+				if !seen {
+					t.Errorf("opencode args %q missing --auto flag", lines)
+				}
+				return
+			}
+			if e.Kind == EventError {
+				t.Fatalf("send errored: %v", e.Err)
+			}
+		case <-deadline:
+			t.Fatal("no idle before deadline")
+		}
+	}
+}
+
 // fakeOC writes a fake `opencode` script that emits one text event then
 // sleeps, so a turn can be interrupted mid-flight deterministically.
 func fakeOC(t *testing.T) string {
