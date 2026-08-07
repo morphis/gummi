@@ -49,6 +49,7 @@ type BugReport struct {
 	Expected      string   // → ## Expected vs actual (expected)
 	Actual        string   // → ## Expected vs actual (actual)
 	Environment   string   // → ## Environment
+	Discussion    string   // → ## Discussion (issue comments; rendered only when non-empty)
 	OpenQuestions []string // → %% markers under Summary (triage's checklist)
 }
 
