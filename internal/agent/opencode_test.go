@@ -62,6 +62,38 @@ func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	}
 }
 
+// A step_finish with reason=length and output=0 means the model exhausted
+// its max_tokens cap entirely on reasoning tokens and emitted no visible
+// text. Without a specific signal the driver just sees a clean idle with
+// empty output and escalates as "unclear verdict". The adapter must surface
+// this as an EventError so the operator can raise limit.output.
+func TestOpencodeMapEventLengthTruncationSurfaces(t *testing.T) {
+	s := newOCSession()
+	var msg strings.Builder
+	evs := s.mapEvent([]byte(`{"type":"step_finish","part":{"type":"step-finish","reason":"length","tokens":{"input":1325,"output":0,"reasoning":32000},"cost":0}}`), &msg)
+	// usage, context, then the length-cap error
+	if len(evs) != 3 {
+		t.Fatalf("events = %d, want 3 (usage, context, error): %+v", len(evs), evs)
+	}
+	if evs[2].Kind != EventError || evs[2].Err == nil {
+		t.Fatalf("evs[2] = %+v, want EventError with a message", evs[2])
+	}
+	if !strings.Contains(evs[2].Err.Error(), "reason=length") || !strings.Contains(evs[2].Err.Error(), "limit.output") {
+		t.Errorf("err = %q, want mention of reason=length and limit.output", evs[2].Err.Error())
+	}
+	// A step_finish with reason=length but some output still emitted must NOT
+	// surface an error — the model got a partial turn through and the driver
+	// can decide what to do with the partial text.
+	s = newOCSession()
+	msg.Reset()
+	evs = s.mapEvent([]byte(`{"type":"step_finish","part":{"type":"step-finish","reason":"length","tokens":{"input":100,"output":50,"reasoning":200},"cost":0}}`), &msg)
+	for _, e := range evs {
+		if e.Kind == EventError {
+			t.Errorf("length-with-output should not surface an error, got %+v", e)
+		}
+	}
+}
+
 func TestOpencodeMapEventFlushesSegmentBeforeTool(t *testing.T) {
 	s := newOCSession()
 	var msg strings.Builder

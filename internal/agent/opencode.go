@@ -301,19 +301,21 @@ type ocEvent struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
 	Part      struct {
-		ID    string  `json:"id"`
-		Type  string  `json:"type"`
-		Text  string  `json:"text"`
-		Tool  string  `json:"tool"`
-		Cost  float64 `json:"cost"`
-		Error string  `json:"error"`
-		State struct {
+		ID     string  `json:"id"`
+		Type   string  `json:"type"`
+		Text   string  `json:"text"`
+		Tool   string  `json:"tool"`
+		Cost   float64 `json:"cost"`
+		Error  string  `json:"error"`
+		Reason string  `json:"reason"` // step-finish: "stop" | "tool-calls" | "length" | …
+		State  struct {
 			Title string         `json:"title"`
 			Input map[string]any `json:"input"`
 		} `json:"state"` // tool parts: arguments and a pre-rendered title
 		Tokens struct {
-			Input  int64 `json:"input"`
-			Output int64 `json:"output"`
+			Input     int64 `json:"input"`
+			Output    int64 `json:"output"`
+			Reasoning int64 `json:"reasoning"`
 		} `json:"tokens"`
 	} `json:"part"`
 }
@@ -385,6 +387,19 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 		// (opencode reports no window limit, so Limit stays 0/unknown).
 		if e.Part.Tokens.Input > 0 {
 			out = append(out, Event{Kind: EventContext, Context: Context{Tokens: e.Part.Tokens.Input}})
+		}
+		// reason="length" means the step hit its max_tokens cap. For a
+		// reasoning-capable model this usually presents as "reasoning ate
+		// the whole completion budget, output=0" — no visible assistant
+		// text emits, and the driver would otherwise see a clean idle
+		// with empty output and escalate as "unclear verdict". Surface a
+		// legible error instead so the failure mode is diagnosable.
+		if e.Part.Reason == "length" && e.Part.Tokens.Output == 0 {
+			out = append(out, Event{Kind: EventError, Err: fmt.Errorf(
+				"opencode step truncated at output cap (reason=length, reasoning=%d, output=0): "+
+					"raise the model's limit.output in opencode.jsonc or reduce reasoning",
+				e.Part.Tokens.Reasoning,
+			)})
 		}
 		return out
 	case "error":
