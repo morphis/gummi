@@ -413,6 +413,9 @@ func renderBug(f *domain.Feature, r domain.BugReport, prov domain.BugProvenance,
 	section(&b, "Reproduction", neutralizeMarkers(r.Reproduction), promptBugRepro)
 	section(&b, "Expected vs actual", expectedVsActual(r), promptBugExpAct)
 	section(&b, "Environment", neutralizeMarkers(r.Environment), promptBugEnv)
+	if r.Discussion != "" {
+		section(&b, "Discussion", neutralizeMarkers(r.Discussion), "")
+	}
 	section(&b, "Root cause", "", promptBugRootCause)
 	section(&b, "Fix", "", promptBugFix)
 	section(&b, "Review", "", promptBugReview)

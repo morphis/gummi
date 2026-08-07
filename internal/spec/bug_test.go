@@ -89,3 +89,34 @@ func TestSeededBugTemplateNeutralizesMarkers(t *testing.T) {
 		t.Errorf("injected marker survived neutralization\n---\n%s", out)
 	}
 }
+
+func TestSeededBugTemplate_DiscussionSection(t *testing.T) {
+	f := &domain.Feature{ID: "BG-020", Num: 20, Kind: domain.KindBug, Title: "Login loop", Slug: "login-loop", Stage: domain.StageTodo}
+	r := domain.BugReport{
+		Discussion: "**alice:** likely the SAML session cookie\n\n**bob:** repros on Chrome 120 too",
+	}
+	out := SeededBugTemplate(f, r, domain.BugProvenance{Source: "github"}, "")
+
+	// Discussion renders with its content, positioned between Environment
+	// and Root cause, and only when non-empty.
+	envIdx := strings.Index(out, "## Environment")
+	discIdx := strings.Index(out, "## Discussion")
+	rootIdx := strings.Index(out, "## Root cause")
+	if envIdx < 0 || discIdx < 0 || rootIdx < 0 {
+		t.Fatalf("missing section\n---\n%s", out)
+	}
+	if !(envIdx < discIdx && discIdx < rootIdx) {
+		t.Errorf("Discussion must sit between Environment and Root cause\n---\n%s", out)
+	}
+	if !strings.Contains(out, "likely the SAML session cookie") || !strings.Contains(out, "**bob:** repros") {
+		t.Errorf("Discussion content missing\n---\n%s", out)
+	}
+}
+
+func TestSeededBugTemplate_NoDiscussionSection(t *testing.T) {
+	f := &domain.Feature{ID: "BG-020", Num: 20, Kind: domain.KindBug, Title: "Login loop", Slug: "login-loop", Stage: domain.StageTodo}
+	out := SeededBugTemplate(f, domain.BugReport{Description: "something broke"}, domain.BugProvenance{}, "")
+	if strings.Contains(out, "## Discussion") {
+		t.Errorf("empty Discussion must not render a heading\n---\n%s", out)
+	}
+}
