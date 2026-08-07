@@ -19,23 +19,26 @@ const (
 	bugIngestFieldRepo = iota
 	bugIngestFieldLabel
 	bugIngestFieldProfile
+	bugIngestFieldComments
 	bugIngestFieldCount
 )
 
 // bugIngestForm collects the GitHub target for a bug import: the repo
-// (blank = this repo's origin remote), a label filter, and the profile
-// the new bugs adopt. State defaults to open (the CLI exposes the rest).
+// (blank = this repo's origin remote), a label filter, the profile the
+// new bugs adopt, and whether to fetch each issue's comments. State
+// defaults to open (the CLI exposes the rest).
 type bugIngestForm struct {
 	repo     textinput.Model
 	label    textinput.Model
 	profiles []string
 	profile  int
+	comments bool
 	focus    int
 
-	onSubmit func(repo, label, profile string) tea.Cmd
+	onSubmit func(repo, label, profile string, comments bool) tea.Cmd
 }
 
-func newBugIngestForm(profiles []string, onSubmit func(repo, label, profile string) tea.Cmd) *bugIngestForm {
+func newBugIngestForm(profiles []string, onSubmit func(repo, label, profile string, comments bool) tea.Cmd) *bugIngestForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -61,7 +64,7 @@ func (d *bugIngestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "esc":
 		return true, nil
 	case "enter":
-		return true, d.onSubmit(strings.TrimSpace(d.repo.Value()), strings.TrimSpace(d.label.Value()), d.profiles[d.profile])
+		return true, d.onSubmit(strings.TrimSpace(d.repo.Value()), strings.TrimSpace(d.label.Value()), d.profiles[d.profile], d.comments)
 	case "tab", "down":
 		d.setFocus((d.focus + 1) % bugIngestFieldCount)
 		return false, nil
@@ -76,6 +79,10 @@ func (d *bugIngestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
 		case "right", "l", "space":
 			d.profile = (d.profile + 1) % len(d.profiles)
+		}
+	case bugIngestFieldComments:
+		if key.String() == "c" || key.String() == "space" {
+			d.comments = !d.comments
 		}
 	case bugIngestFieldRepo:
 		d.repo, _ = d.repo.Update(key)
@@ -124,9 +131,24 @@ func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString(marker + profile + "\n")
 
+	box := "[ ]"
+	if d.comments {
+		box = "[x]"
+	}
+	cmMarker := "  "
+	comments := s.Faint.Render(box + " Fetch comments")
+	if d.focus == bugIngestFieldComments {
+		cmMarker = s.Cursor.Render("▸ ")
+		comments = s.Subtle.Render(box + " Fetch comments")
+	}
+	b.WriteString(cmMarker + comments + "\n")
+
 	hint := "enter import · tab next · esc cancel"
-	if d.focus == bugIngestFieldProfile {
+	switch d.focus {
+	case bugIngestFieldProfile:
 		hint = "←/→ profile · enter import · esc cancel"
+	case bugIngestFieldComments:
+		hint = "c toggle comments · enter import · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
@@ -379,7 +401,7 @@ func (m *Shell) materializeBugIngest() tea.Cmd {
 
 // startBugIngest fetches issues from the GitHub target and opens the
 // review surface. The fetch shells out to gh, so it runs off the main loop.
-func (m *Shell) startBugIngest(repo, label, profile string) tea.Cmd {
+func (m *Shell) startBugIngest(repo, label, profile string, comments bool) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured — bug import needs the engine", isErr: true}
 		return nil
@@ -392,7 +414,7 @@ func (m *Shell) startBugIngest(repo, label, profile string) tea.Cmd {
 	m.bugIngesting = true
 	m.notice = noticeMsg{text: "importing GitHub issues…"}
 	return func() tea.Msg {
-		src := engine.GitHubSource{Repo: repo, Label: label, Dir: root}
+		src := engine.GitHubSource{Repo: repo, Label: label, Dir: root, FetchComments: comments}
 		res, err := eng.IngestBugs(context.Background(), src)
 		if err != nil {
 			return bugIngestLoadedMsg{err: err}

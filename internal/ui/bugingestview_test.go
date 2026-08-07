@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 func sampleBugImport() engine.BugIngestResult {
@@ -99,5 +101,37 @@ func TestBugImportFilterKeyFlow(t *testing.T) {
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.bugIngest != nil {
 		t.Error("esc (not filtering) should discard the import")
+	}
+}
+
+func TestBugImportFormCommentsCheckbox(t *testing.T) {
+	var submitted *bool
+	form := newBugIngestForm([]string{"thrifty", "fast"},
+		func(_ string, _ string, _ string, comments bool) tea.Cmd {
+			submitted = &comments
+			return nil
+		})
+
+	// default off; renders an unchecked box.
+	if form.comments {
+		t.Fatal("comments should default off")
+	}
+	if !strings.Contains(form.View(theme.New(theme.GummiDark()), 60, 12), "[ ] Fetch comments") {
+		t.Error("view should render the unchecked comments box")
+	}
+
+	// tab to the comments field and press 'c' to check it.
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	form.HandleKey(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	if !form.comments {
+		t.Fatal("'c' on the comments field should check it")
+	}
+
+	// submitting passes the checked flag through.
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if submitted == nil || !*submitted {
+		t.Errorf("onSubmit should receive comments=true, got %v", submitted)
 	}
 }

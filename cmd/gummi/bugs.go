@@ -119,8 +119,9 @@ func runBugIngest(args []string) error {
 	profile := fs.String("profile", "", "profile the new bugs adopt (default: first configured)")
 	envelope := fs.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)")
 	yes := fs.Bool("yes", false, "materialize without the confirmation prompt")
+	comments := fs.Bool("comments", false, "fetch issue comments into the report's Discussion section")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--label bug] [--state open] [--profile p] [--envelope n] [--yes]")
+		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--label bug] [--state open] [--profile p] [--envelope n] [--comments] [--yes]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -134,7 +135,7 @@ func runBugIngest(args []string) error {
 	defer be.cleanup()
 
 	cwd, _ := os.Getwd()
-	src := engine.GitHubSource{Repo: *repo, Label: *label, State: *stateFilter, Dir: cwd}
+	src := ingestGitHubSource(*repo, *label, *stateFilter, *comments, cwd)
 	ctx := context.Background()
 	target := *repo
 	if target == "" {
@@ -158,6 +159,19 @@ func runBugIngest(args []string) error {
 		}
 	}
 	return materializeBugs(ctx, be, res.Proposals)
+}
+
+// ingestGitHubSource builds the GitHub source from parsed ingest flags.
+// Kept as a small helper so the flag-to-source mapping is testable without
+// standing up a workspace and shelling out to gh.
+func ingestGitHubSource(repo, label, state string, comments bool, dir string) engine.GitHubSource {
+	return engine.GitHubSource{
+		Repo:          repo,
+		Label:         label,
+		State:         state,
+		Dir:           dir,
+		FetchComments: comments,
+	}
 }
 
 // runBugNew implements `gummi bugs new`: one hand-entered bug straight

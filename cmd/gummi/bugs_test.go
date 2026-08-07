@@ -34,3 +34,18 @@ func TestRenderBugProposals(t *testing.T) {
 		}
 	}
 }
+
+func TestBugIngest_CommentsFlag(t *testing.T) {
+	withComments := ingestGitHubSource("o/r", "bug", "open", true, "/tmp/repo")
+	if !withComments.FetchComments {
+		t.Error("--comments=true should set FetchComments")
+	}
+	withoutComments := ingestGitHubSource("o/r", "bug", "open", false, "/tmp/repo")
+	if withoutComments.FetchComments {
+		t.Error("--comments absent should leave FetchComments false")
+	}
+	// the other fields are threaded through unchanged.
+	if withComments.Repo != "o/r" || withComments.Label != "bug" || withComments.State != "open" || withComments.Dir != "/tmp/repo" {
+		t.Errorf("source fields wrong: %+v", withComments)
+	}
+}
