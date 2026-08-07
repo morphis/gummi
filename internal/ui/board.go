@@ -43,7 +43,7 @@ func (m *Shell) boardView(w int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 	var lastSuper domain.SuperState
-	for shortcut, i := range m.displayOrder() {
+	for shortcut, i := range m.displayOrder(m.sortMode) {
 		r := m.rows[i]
 		if super := r.F.Stage.SuperState(); shortcut == 0 || super != lastSuper {
 			if shortcut > 0 {
@@ -88,6 +88,10 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if r.F.Kind == domain.KindBug {
 		id = s.Warning.Render(string(r.F.ID))
 	}
+	badge := ""
+	if sev := r.F.Severity; sev != "" {
+		badge = " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
+	}
 	title := s.CardTitle.Render(r.F.Title)
 	tag := ""
 	if r.F.Profile != "" {
@@ -106,8 +110,23 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if !r.F.Spend.Zero() {
 		cost = " " + s.Faint.Render(spendTick(r.F.Spend))
 	}
-	line := cursor + num + " " + glyph + " " + id + " " + title + loop + tag + wtMark + landed + cost
+	line := cursor + num + " " + glyph + " " + id + badge + " " + title + loop + tag + wtMark + landed + cost
 	return ansi.Truncate(line, w, "…")
+}
+
+// severityAbbrev is the compact badge text for a bug's severity level;
+// called only for non-empty severities.
+func severityAbbrev(sev domain.Severity) string {
+	switch sev {
+	case domain.SeverityCritical:
+		return "CRIT"
+	case domain.SeverityHigh:
+		return "HIGH"
+	case domain.SeverityMedium:
+		return "MED"
+	default:
+		return "LOW"
+	}
 }
 
 // spendTick is the compact cost marker on a card: Copilot credits when

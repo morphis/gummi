@@ -2,6 +2,7 @@ package theme
 
 import (
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -32,6 +33,13 @@ type Styles struct {
 	CardID     lipgloss.Style // FD-042
 	CardTitle  lipgloss.Style
 	ProfileTag lipgloss.Style // [thrifty]
+
+	// Severity badges (bug impact) on board cards, tinted to read
+	// by color: coral for critical, mustard, julep, oyster for low.
+	SeverityCritical lipgloss.Style
+	SeverityHigh     lipgloss.Style
+	SeverityMedium   lipgloss.Style
+	SeverityLow      lipgloss.Style
 
 	// Status bar.
 	StatusBase lipgloss.Style // the bar's base text (quiet, no fill)
@@ -81,6 +89,11 @@ func New(t Theme) *Styles {
 		CardTitle:  base,
 		ProfileTag: base.Foreground(t.FgFaint),
 
+		SeverityCritical: base.Foreground(charmtone.Coral),
+		SeverityHigh:     base.Foreground(charmtone.Mustard),
+		SeverityMedium:   base.Foreground(charmtone.Julep),
+		SeverityLow:      base.Foreground(charmtone.Oyster),
+
 		StatusBase: base,
 		PillMode:   lipgloss.NewStyle().Foreground(t.OnAccent).Background(t.Accent).Bold(true).Padding(0, 1),
 		Pill:       lipgloss.NewStyle().Foreground(t.FgSubtle).Background(t.BgRaised).Padding(0, 1),
@@ -125,4 +138,21 @@ func (s *Styles) StagePill(st domain.Stage) lipgloss.Style {
 		return v
 	}
 	return s.Pill
+}
+
+// SeverityBadgeStyle returns the badge style for a bug's severity level,
+// or an empty style (renders as plain text) for an unclassified bug.
+func (s *Styles) SeverityBadgeStyle(sev domain.Severity) lipgloss.Style {
+	switch sev {
+	case domain.SeverityCritical:
+		return s.SeverityCritical
+	case domain.SeverityHigh:
+		return s.SeverityHigh
+	case domain.SeverityMedium:
+		return s.SeverityMedium
+	case domain.SeverityLow:
+		return s.SeverityLow
+	default:
+		return lipgloss.Style{}
+	}
 }

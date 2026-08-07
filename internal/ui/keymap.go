@@ -116,6 +116,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "B", label: "bug", help: "new bug"},
 		{key: "I", label: "ingest", help: "ingest a spec into features"},
 		{key: "G", label: "import", help: "import bugs from GitHub"},
+		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
 		{key: "y", label: "duplicate", help: "duplicate as a fresh card in todo (this card stays)"},
 		{key: "x", label: "delete", help: "delete feature"},
 		{key: "?", label: "help", bar: true},

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,16 @@ import (
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
+)
+
+// SortMode selects how the board's todo column is ordered. It is an
+// ephemeral, in-memory toggle (never persisted): SortCreation shows
+// cards in creation order, SortSeverity ranks bugs by severity.
+type SortMode int
+
+const (
+	SortCreation SortMode = iota
+	SortSeverity
 )
 
 // Shell is gummi's top-level Bubble Tea model. It owns the screen
@@ -47,6 +58,7 @@ type Shell struct {
 
 	rows      []featureRow
 	sel       int
+	sortMode  SortMode // todo-column ordering toggle (ephemeral, not persisted)
 	notice    noticeMsg
 	spec      *specView      // non-nil while the spec surface is open
 	diff      *diffView      // non-nil while the diff surface is open
@@ -654,17 +666,25 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "k", "up":
 		m.moveSel(-1)
 	case "pgup":
-		if order := m.displayOrder(); len(order) > 0 {
+		if order := m.displayOrder(m.sortMode); len(order) > 0 {
 			m.sel = order[0]
 		}
 	case "pgdown":
-		if order := m.displayOrder(); len(order) > 0 {
+		if order := m.displayOrder(m.sortMode); len(order) > 0 {
 			m.sel = order[len(order)-1]
 		}
 	case "n":
 		m.Overlay.Push(newFeatureForm(m.profileNames, m.createFeature))
 	case "B":
 		m.Overlay.Push(newBugForm(m.profileNames, m.createBug))
+	case "S":
+		if m.sortMode == SortSeverity {
+			m.sortMode = SortCreation
+			m.notice = noticeMsg{text: "todo: creation order"}
+		} else {
+			m.sortMode = SortSeverity
+			m.notice = noticeMsg{text: "todo: by severity"}
+		}
 	case "I":
 		if m.engine == nil {
 			m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
@@ -803,7 +823,7 @@ func (m *Shell) mainPage() int {
 
 // moveSel moves the selection through the board's display order.
 func (m *Shell) moveSel(delta int) {
-	order := m.displayOrder()
+	order := m.displayOrder(m.sortMode)
 	if len(order) == 0 {
 		return
 	}
@@ -821,24 +841,54 @@ func (m *Shell) moveSel(delta int) {
 // jumpSel selects the nth visible card (1-based), matching the numbers
 // shown on the board.
 func (m *Shell) jumpSel(n int) {
-	order := m.displayOrder()
+	order := m.displayOrder(m.sortMode)
 	if n >= 1 && n <= len(order) {
 		m.sel = order[n-1]
 	}
 }
 
 // displayOrder lists row indices in board display order (grouped by
-// super-state).
-func (m *Shell) displayOrder() []int {
+// super-state). With sort == SortSeverity the todo column is ordered by
+// severity (critical first) with creation time as a stable tiebreaker;
+// every other column keeps chronological order regardless.
+func (m *Shell) displayOrder(mode SortMode) []int {
 	var order []int
 	for _, super := range domain.SuperStates {
+		var idxs []int
 		for i, r := range m.rows {
 			if r.F.Stage.SuperState() == super {
-				order = append(order, i)
+				idxs = append(idxs, i)
 			}
 		}
+		if super == domain.SuperTodo && mode == SortSeverity {
+			sort.SliceStable(idxs, func(a, b int) bool {
+				ra, rb := severityRank(m.rows[idxs[a]].F.Severity), severityRank(m.rows[idxs[b]].F.Severity)
+				if ra != rb {
+					return ra > rb
+				}
+				return m.rows[idxs[a]].F.CreatedAt.Before(m.rows[idxs[b]].F.CreatedAt)
+			})
+		}
+		order = append(order, idxs...)
 	}
 	return order
+}
+
+// severityRank maps a severity to its sort rank: critical ranks highest
+// (4), an unclassified (empty) severity ranks lowest (0).
+func severityRank(sev domain.Severity) int {
+	switch sev {
+	case domain.SeverityCritical:
+		return 4
+	case domain.SeverityHigh:
+		return 3
+	case domain.SeverityMedium:
+		return 2
+	case domain.SeverityLow:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (m *Shell) clampSel() {
