@@ -147,8 +147,13 @@ type Feature struct {
 	// so re-ingesting the same source skips items already imported. Empty
 	// for manually created features and bugs.
 	ExternalRef string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Severity is the bug's impact level; empty for features and
+	// unclassified bugs. It is a bug-only field (features created through
+	// normal channels never carry one) but lives on the card so the board
+	// can badge and sort by it without a join.
+	Severity  Severity
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// VerifiedAt is stamped when the item's verify gate passes and its
 	// branch becomes ready to land — the headless driver's stop-at-verified
 	// terminal state (DESIGN §12). Zero until then. Distinct from reaching

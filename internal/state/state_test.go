@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	_ "modernc.org/sqlite"
 )
 
 func gitRoot(t *testing.T) string {
@@ -395,5 +397,68 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	list, err := s2.ListFeatures(ctx)
 	if err != nil || len(list) != 1 || list[0].Title != "Persist me" {
 		t.Fatalf("reopen lost data: %+v, err=%v", list, err)
+	}
+}
+
+// TestMigrations verifies the additive severity column exists, survives
+// a reopen (severity persisted through a round trip), and that opening
+// the store twice is idempotent (the ALTER TABLE duplicate-column error
+// is swallowed).
+func TestMigrations(t *testing.T) {
+	w, err := Init(gitRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Open twice up front to exercise the migration path twice — the
+	// second open must not choke on the already-present column.
+	s1, err := OpenStore(w.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := OpenStore(w.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Close()
+	defer s2.Close()
+
+	// The severity column exists in the schema after migration.
+	db, err := sql.Open("sqlite", w.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('features') WHERE name='severity'`,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("severity column missing from features schema (count=%d)", n)
+	}
+
+	ctx := context.Background()
+	id, _ := domain.NewID(domain.KindBug, 1)
+	f := feat(1, "Severe bug")
+	f.ID = id
+	f.Kind = domain.KindBug
+	f.Severity = domain.SeverityCritical
+	if err := s1.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	// Severity survives a fresh open.
+	s3, err := OpenStore(w.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s3.Close()
+	got, err := s3.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Severity != domain.SeverityCritical {
+		t.Errorf("severity = %q, want %q after reopen", got.Severity, domain.SeverityCritical)
 	}
 }

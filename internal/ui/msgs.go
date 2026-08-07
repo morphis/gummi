@@ -188,7 +188,7 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 			ID: id, Num: num, Kind: domain.KindBug, Title: res.Title, OneLiner: res.OneLiner,
 			Slug: slug, Stage: workflow.Initial(domain.KindBug), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
-			CreatedAt: now, UpdatedAt: now,
+			Severity: res.Severity, CreatedAt: now, UpdatedAt: now,
 		}
 		// Seed the report draft first (so severity/one-liner survive), then
 		// persist — a persisted bug with no draft would be reseeded blank.

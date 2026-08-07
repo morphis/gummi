@@ -98,7 +98,7 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 			ID: id, Num: num, Kind: domain.KindBug, Title: p.Title, OneLiner: p.OneLiner,
 			Slug: slugs[i], Stage: workflow.Initial(domain.KindBug), Skip: p.Skip,
 			Profile: opts.Profile, Budget: domain.Budget{Envelope: opts.Envelope},
-			ExternalRef: p.ExternalRef, CreatedAt: now, UpdatedAt: now,
+			ExternalRef: p.ExternalRef, Severity: p.Severity, CreatedAt: now, UpdatedAt: now,
 		}
 		// Draft first so a write failure aborts before the bug exists — a
 		// persisted bug with no draft would be reseeded blank on first open.

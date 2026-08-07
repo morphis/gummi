@@ -268,6 +268,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN quick INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN verified_at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN gate_approval TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN severity TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -300,13 +301,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, budget_spent, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval)
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity))
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -317,22 +318,23 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
-	var id, stage, created, updated, kind, verified string
+	var id, stage, created, updated, kind, verified, severity string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
 		&f.Budget.Envelope, &f.Budget.Spent,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity)
 	if err != nil {
 		return f, err
 	}
+	f.Severity = domain.Severity(severity)
 	f.ID = domain.FeatureID(id)
 	f.Kind = domain.Kind(kind)
 	f.Stage = domain.Stage(stage)
