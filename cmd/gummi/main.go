@@ -306,34 +306,56 @@ func startAdapter(name string) (agent.Agent, error) {
 	return nil, fmt.Errorf("unknown backend %q", name)
 }
 
-// buildAgents starts the default backend plus every additional backend
-// referenced by any role in the loaded profiles, returning them keyed by
-// adapter name. The default is aliased under the empty-string key so
-// engine.agentFor("") resolves. If a profile-referenced backend fails to
-// start, its error is reported and it is skipped — the default still
-// governs unaffected roles, and only sessions routed at the missing
-// backend will fail at newAgentSession.
+// requiredBackends returns the set of backend names the loaded profiles
+// actually need, expanding a role's omitted `backend:` field to the
+// engine default. With no profiles at all every role falls through to the
+// default, so it is always required. It is the single place that decides
+// whether the default backend must start: it is needed only when some
+// role lacks an explicit backend or a profile references it directly —
+// never when every role in every profile names a different backend.
+func requiredBackends(def string, profiles config.Profiles) map[string]struct{} {
+	needed := map[string]struct{}{}
+	if len(profiles.Profiles) == 0 {
+		needed[def] = struct{}{}
+	}
+	for _, prof := range profiles.Profiles {
+		for _, rc := range prof {
+			name := rc.Backend
+			if name == "" {
+				name = def
+			}
+			needed[name] = struct{}{}
+		}
+	}
+	return needed
+}
+
+// buildAgents starts exactly the backends the loaded profiles reference,
+// returning them keyed by adapter name: the default first when it is
+// required (aliased under the empty-string key so engine.agentFor("")
+// resolves), then every distinct profile backend. A default that no role
+// needs is not started at all, so gummi works with all-non-default
+// backends (e.g. opencode/headless) even when the default CLI — copilot,
+// when GUMMI_AGENT is unset — is not installed. If a profile-referenced
+// backend fails to start, its error is reported and it is skipped; only
+// sessions routed at that missing backend fail at newAgentSession.
 func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 	def := defaultBackendName()
 	agents := map[string]agent.Agent{}
-	ag, err := startAdapter(def)
-	if err != nil {
-		return nil, err
-	}
-	agents[def] = ag
-	agents[""] = ag // default alias, matches engine.agentFor's fallback
 
-	// discover the additional backends the profiles reference
-	extras := map[string]struct{}{}
-	for _, prof := range profiles.Profiles {
-		for _, rc := range prof {
-			if rc.Backend == "" || rc.Backend == def {
-				continue
-			}
-			extras[rc.Backend] = struct{}{}
+	needed := requiredBackends(def, profiles)
+	if _, ok := needed[def]; ok {
+		ag, err := startAdapter(def)
+		if err != nil {
+			return nil, err
 		}
+		agents[def] = ag
+		agents[""] = ag // default alias, matches engine.agentFor's fallback
+		delete(needed, def)
 	}
-	for name := range extras {
+
+	// start the remaining required backends
+	for name := range needed {
 		a, err := startAdapter(name)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "gummi: skipping backend %q: %v\n", name, err)

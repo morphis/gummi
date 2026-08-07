@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/morphis/gummi/internal/config"
 )
 
 func TestEnsureWorkspaceLazyInit(t *testing.T) {
@@ -71,5 +73,117 @@ func TestDefaultBackendCodex(t *testing.T) {
 	t.Setenv("GUMMI_AGENT_CMD", "")
 	if got := defaultBackendName(); got != "codex" {
 		t.Fatalf("default backend = %q", got)
+	}
+}
+
+func TestRequiredBackendsSkipsUnneededDefault(t *testing.T) {
+	// BG-001: when every role in every profile names an explicit
+	// non-default backend, the default backend (here "copilot", what an
+	// unset GUMMI_AGENT selects) must NOT be required. buildAgents used to
+	// start the default unconditionally, aborting startup when the default
+	// CLI isn't installed before the profile backends even get a chance.
+	all := func(backend string) config.Profile {
+		return config.Profile{
+			"architect":   {Backend: backend, Model: "m"},
+			"implementer": {Backend: backend, Model: "m"},
+			"reviewer":    {Backend: backend, Model: "m"},
+			"scribe":      {Backend: backend, Model: "m"},
+		}
+	}
+	cases := []struct {
+		name     string
+		profiles config.Profiles
+		wantDef  bool
+	}{
+		{
+			name: "all roles explicit non-default backend",
+			profiles: config.Profiles{
+				Default:  "test",
+				Profiles: map[string]config.Profile{"test": all("headless")},
+			},
+			wantDef: false,
+		},
+		{
+			name:     "no profiles falls back to the default",
+			profiles: config.Profiles{},
+			wantDef:  true,
+		},
+		{
+			name: "role with omitted backend needs the default",
+			profiles: config.Profiles{
+				Default: "test",
+				Profiles: map[string]config.Profile{
+					"test": {
+						"architect": {Backend: "headless", Model: "m"},
+						"scribe":    {Model: "m"}, // no backend → default
+					},
+				},
+			},
+			wantDef: true,
+		},
+		{
+			name: "role referencing the default directly needs it",
+			profiles: config.Profiles{
+				Default: "test",
+				Profiles: map[string]config.Profile{
+					"test": all("copilot"),
+				},
+			},
+			wantDef: true,
+		},
+	}
+	const def = "copilot"
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			needed := requiredBackends(def, tc.profiles)
+			_, gotDef := needed[def]
+			if gotDef != tc.wantDef {
+				t.Errorf("requiredBackends(%q) default required = %v, want %v (needed: %v)",
+					def, gotDef, tc.wantDef, needed)
+			}
+		})
+	}
+}
+
+// TestBuildAgentsSkipsUnstartableDefault exercises the bug at its call
+// site: with GUMMI_AGENT unset the default backend is copilot, which is
+// often not installed. When every profile role names a usable non-default
+// backend, buildAgents must start only those backends and must not abort
+// on the missing default. opencode is pointed at the test binary via
+// GUMMI_OPENCODE_BIN so it starts without any external CLI, keeping the
+// case hermetic; it intentionally stays a different name than the
+// "copilot" default. Before the fix this failed — buildAgents tried to
+// start copilot first and returned its error.
+func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_AGENT", "")
+	t.Setenv("GUMMI_AGENT_CMD", "")
+	t.Setenv("GUMMI_OPENCODE_BIN", bin)
+	profiles := config.Profiles{
+		Default: "test",
+		Profiles: map[string]config.Profile{
+			"test": {
+				"architect":   {Backend: "opencode", Model: "m"},
+				"implementer": {Backend: "opencode", Model: "m"},
+				"reviewer":    {Backend: "opencode", Model: "m"},
+				"scribe":      {Backend: "opencode", Model: "m"},
+			},
+		},
+	}
+	if got := defaultBackendName(); got != "copilot" {
+		t.Fatalf("precondition: default backend = %q, want copilot", got)
+	}
+	agents, err := buildAgents(profiles)
+	if err != nil {
+		t.Fatalf("buildAgents failed when only the (absent) default backend was skipped: %v", err)
+	}
+	if _, ok := agents["opencode"]; !ok {
+		t.Errorf("buildAgents did not start the opencode backend required by the profile (got %v)", agents)
+	}
+	if _, ok := agents["copilot"]; ok {
+		t.Errorf("buildAgents started the copilot default even though no role references it")
 	}
 }
