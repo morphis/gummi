@@ -162,7 +162,7 @@ func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
 type bugIngestView struct {
 	source   string
 	props    []bugIngestProposal
-	skipped  int
+	skipped  []domain.FeatureID
 	cursor   int // index into the filtered (visible) list
 	profile  string
 	envelope int
@@ -185,7 +185,11 @@ func newBugIngestView(res engine.BugIngestResult, profile string, envelope int) 
 	filter.Placeholder = "filter by title / label / text…"
 	filter.CharLimit = 80
 	filter.SetWidth(40)
-	return &bugIngestView{source: res.Source, props: props, skipped: len(res.Skipped), profile: profile, envelope: envelope, filter: filter}
+	skipped := make([]domain.FeatureID, len(res.Skipped))
+	for i, s := range res.Skipped {
+		skipped[i] = s.LocalID
+	}
+	return &bugIngestView{source: res.Source, props: props, skipped: skipped, profile: profile, envelope: envelope, filter: filter}
 }
 
 // bugMatches reports whether a proposal matches the (already lowercased)
@@ -497,8 +501,12 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	if bv.selected() >= 0 {
 		tail.WriteString("\n" + bv.renderDetail(s, w))
 	}
-	if bv.skipped > 0 {
-		tail.WriteString("\n" + s.Faint.Render(fmt.Sprintf("%d already on the board, skipped", bv.skipped)))
+	if len(bv.skipped) > 0 {
+		ids := make([]string, len(bv.skipped))
+		for i, id := range bv.skipped {
+			ids[i] = string(id)
+		}
+		tail.WriteString("\n" + s.Faint.Render(fmt.Sprintf("%d already on the board, skipped: %s", len(bv.skipped), strings.Join(ids, ", "))))
 	}
 	tailLines := 0
 	if tail.Len() > 0 {

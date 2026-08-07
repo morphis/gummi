@@ -15,7 +15,7 @@ func TestRenderBugProposals(t *testing.T) {
 			{Title: "Login loops", OneLiner: "SSO bounce", Severity: domain.SeverityHigh, ExternalRef: "https://x/42"},
 			{Title: "Typo in footer"},
 		},
-		Skipped: []domain.BugProposal{{Title: "old one", ExternalRef: "https://x/1"}},
+		Skipped: []engine.SkippedBug{{Proposal: domain.BugProposal{Title: "old one", ExternalRef: "https://x/1"}, LocalID: "BG-041"}},
 	}
 	var b strings.Builder
 	renderBugProposals(&b, res)
@@ -27,7 +27,8 @@ func TestRenderBugProposals(t *testing.T) {
 		"severity high",
 		"https://x/42",
 		"2. Typo in footer",
-		"Skipped 1 already on the board.",
+		"Skipped 1 already on the board:",
+		"→ BG-041  old one",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n---\n%s", want, out)

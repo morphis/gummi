@@ -19,7 +19,7 @@ func sampleBugImport() engine.BugIngestResult {
 			{Title: "Logout crash", ExternalRef: "https://x/2"},
 			{Title: "Footer typo", ExternalRef: "https://x/3"},
 		},
-		Skipped: []domain.BugProposal{{Title: "old", ExternalRef: "https://x/0"}},
+		Skipped: []engine.SkippedBug{{Proposal: domain.BugProposal{Title: "old", ExternalRef: "https://x/0"}, LocalID: "BG-041"}},
 	}
 }
 
@@ -27,6 +27,9 @@ func TestBugImportFilterNarrowsVisibleAndKept(t *testing.T) {
 	bv := newBugIngestView(sampleBugImport(), "thrifty", 0)
 	if bv.keptCount() != 3 || len(bv.visible()) != 3 {
 		t.Fatalf("unfiltered: keep=%d visible=%d, want 3/3", bv.keptCount(), len(bv.visible()))
+	}
+	if len(bv.skipped) != 1 || bv.skipped[0] != "BG-041" {
+		t.Errorf("skipped IDs = %v, want [BG-041]", bv.skipped)
 	}
 
 	bv.filter.SetValue("log") // matches "Login loops" and "Logout crash"

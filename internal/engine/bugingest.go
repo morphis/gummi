@@ -20,6 +20,14 @@ import (
 // there is no architect pass and no coverage map. IngestBugs fetches and
 // dedupes; the caller gates; MaterializeBugs mints and seeds.
 
+// SkippedBug pairs a dedup-skipped proposal with the local bug it already
+// photographs (the feature whose ExternalRef matched), so a re-ingest can
+// say not just "already on the board" but which BG- card to look at.
+type SkippedBug struct {
+	Proposal domain.BugProposal
+	LocalID  domain.FeatureID
+}
+
 // BugIngestResult is one ingest pass: the fresh proposals to review, and
 // the ones skipped because their external ref is already on the board.
 // Skipped is surfaced (not silently dropped) so a re-ingest reports what
@@ -27,7 +35,7 @@ import (
 type BugIngestResult struct {
 	Source    string
 	Proposals []domain.BugProposal
-	Skipped   []domain.BugProposal
+	Skipped   []SkippedBug
 }
 
 // IngestBugs pulls candidate bugs from a source and partitions them into
@@ -46,8 +54,8 @@ func (e *Engine) IngestBugs(ctx context.Context, src BugSource) (BugIngestResult
 				continue
 			}
 			seen[p.ExternalRef] = true
-			if _, err := e.cfg.Store.FeatureByExternalRef(ctx, p.ExternalRef); err == nil {
-				res.Skipped = append(res.Skipped, p)
+			if f, err := e.cfg.Store.FeatureByExternalRef(ctx, p.ExternalRef); err == nil {
+				res.Skipped = append(res.Skipped, SkippedBug{Proposal: p, LocalID: f.ID})
 				continue
 			} else if !errors.Is(err, state.ErrNotFound) {
 				return BugIngestResult{}, err

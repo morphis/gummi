@@ -271,7 +271,10 @@ func renderBugProposals(w io.Writer, res engine.BugIngestResult) {
 		}
 	}
 	if len(res.Skipped) > 0 {
-		fmt.Fprintf(w, "\nSkipped %d already on the board.\n", len(res.Skipped))
+		fmt.Fprintf(w, "\nSkipped %d already on the board:\n", len(res.Skipped))
+		for _, s := range res.Skipped {
+			fmt.Fprintf(w, "  → %s  %s\n", s.LocalID, clean(s.Proposal.Title))
+		}
 	}
 	fmt.Fprintln(w)
 }

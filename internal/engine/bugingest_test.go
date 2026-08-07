@@ -95,6 +95,11 @@ func TestIngestBugsDedupesAgainstBoard(t *testing.T) {
 	if len(second.Proposals) != 0 || len(second.Skipped) != 2 {
 		t.Errorf("re-ingest: %d fresh / %d skipped, want 0/2", len(second.Proposals), len(second.Skipped))
 	}
+	for _, s := range second.Skipped {
+		if s.LocalID == "" {
+			t.Errorf("skipped bug %q has empty LocalID", s.Proposal.Title)
+		}
+	}
 }
 
 func TestMaterializeBugsCreatesSeededBugs(t *testing.T) {
