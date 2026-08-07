@@ -36,6 +36,12 @@ const (
 
 var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes|fail|blocked)\s*$`)
 
+// verdictTailRe catches models that emit the verdict glued to the
+// preceding sentence ("…redundant.VERDICT: changes") with no newline
+// before it — the strict verdictRe misses those. It anchors to the end
+// of the trimmed text, so a stray mid-text mention still doesn't count.
+var verdictTailRe = regexp.MustCompile(`(?i)\bVERDICT:\s*(pass|changes|fail|blocked)\s*$`)
+
 // verdictFromTool maps a submit_verdict tool result to a reviewVerdict.
 func verdictFromTool(v string) reviewVerdict {
 	switch v {
@@ -54,19 +60,12 @@ func verdictFromTool(v string) reviewVerdict {
 
 // parseVerdict finds the last VERDICT line in review output.
 func parseVerdict(text string) reviewVerdict {
-	matches := verdictRe.FindAllStringSubmatch(text, -1)
-	if len(matches) == 0 {
-		return verdictUnclear
+	if matches := verdictRe.FindAllStringSubmatch(text, -1); len(matches) > 0 {
+		return verdictFromTool(strings.ToLower(matches[len(matches)-1][1]))
 	}
-	switch strings.ToLower(matches[len(matches)-1][1]) {
-	case "pass":
-		return verdictPass
-	case "changes":
-		return verdictChanges
-	case "fail":
-		return verdictFail
-	case "blocked":
-		return verdictBlocked
+	trimmed := strings.TrimRight(text, " \t\r\n")
+	if m := verdictTailRe.FindStringSubmatch(trimmed); m != nil {
+		return verdictFromTool(strings.ToLower(m[1]))
 	}
 	return verdictUnclear
 }

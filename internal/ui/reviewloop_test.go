@@ -29,6 +29,11 @@ func TestParseVerdict(t *testing.T) {
 		"VERDICT: FAIL":                                    verdictFail,
 		"no pip in this sandbox\nVERDICT: blocked":         verdictBlocked,
 		"VERDICT: BLOCKED":                                 verdictBlocked,
+		// A chatty model glues the verdict to the previous sentence with no
+		// intervening newline; anchor the fallback to end-of-text so the
+		// tail form still resolves while a mid-text mention doesn't.
+		"…making check 16 redundant.VERDICT: changes":     verdictChanges,
+		"we agreed VERDICT: pass was too generous.":       verdictUnclear,
 	}
 	for in, want := range cases {
 		if got := parseVerdict(in); got != want {
