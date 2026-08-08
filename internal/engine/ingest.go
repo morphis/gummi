@@ -87,7 +87,7 @@ type IngestStep struct {
 // commentary) as the pass runs. It is called from the pass's goroutine;
 // callers wanting UI updates must hand off to their own loop.
 func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progress func(IngestStep)) (domain.IngestResult, error) {
-	model, backend := e.resolveRole(profile, agent.RoleArchitect)
+	model, backend, _ := e.resolveRole(profile, agent.RoleArchitect)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return domain.IngestResult{}, fmt.Errorf("no agent configured; cannot ingest")

@@ -25,6 +25,12 @@ var knownBackends = map[string]struct{}{
 type RoleConfig struct {
 	Backend string `yaml:"backend"`
 	Model   string `yaml:"model"`
+	// OutputTokenMax, when >0, raises the per-step output-token cap for
+	// this role. Only the opencode backend honors it (it exports
+	// OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX, opencode's sole lever above
+	// its hardcoded 32000 default; opencode.jsonc's limit.output can only
+	// lower the cap, never raise it). Other backends ignore it.
+	OutputTokenMax int `yaml:"output_token_max"`
 }
 
 // Profile maps role names (architect/implementer/reviewer/scribe) to
@@ -114,6 +120,9 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless",
 						path, name, role, rc.Backend)
 				}
+			}
+			if rc.OutputTokenMax < 0 {
+				return Profiles{}, fmt.Errorf("%s: profile %q role %q output_token_max %d is negative", path, name, role, rc.OutputTokenMax)
 			}
 		}
 	}

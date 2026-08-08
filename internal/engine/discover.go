@@ -41,7 +41,7 @@ on failure, and stay offline — no dependency installs, no watch modes.`
 // edits. Best-effort like Estimate: an unusable reply returns (nil, nil)
 // and the Verify agent falls back to discovering the commands itself.
 func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain.Check, error) {
-	model, backend := e.resolveRole(f.Profile, agent.RoleScribe)
+	model, backend, _ := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return nil, nil

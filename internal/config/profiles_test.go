@@ -21,7 +21,7 @@ func TestLoadProfiles(t *testing.T) {
 	p := writeProfiles(t, `default: thrifty
 profiles:
   premium:
-    architect: { backend: claude, model: claude-opus-4.8 }
+    architect: { backend: claude, model: claude-opus-4.8, output_token_max: 128000 }
     reviewer: { model: gpt-5-codex }
   thrifty:
     implementer: { backend: headless, model: qwen2.5-coder-32b }
@@ -35,6 +35,12 @@ profiles:
 	}
 	if p.Profiles["premium"]["architect"].Backend != "claude" {
 		t.Errorf("premium architect backend = %q, want claude", p.Profiles["premium"]["architect"].Backend)
+	}
+	if got := p.Profiles["premium"]["architect"].OutputTokenMax; got != 128000 {
+		t.Errorf("premium architect output_token_max = %d, want 128000", got)
+	}
+	if got := p.Profiles["premium"]["reviewer"].OutputTokenMax; got != 0 {
+		t.Errorf("premium reviewer output_token_max = %d, want 0 (unset)", got)
 	}
 	if p.Profiles["premium"]["reviewer"].Backend != "" {
 		t.Errorf("premium reviewer backend = %q, want empty (default)", p.Profiles["premium"]["reviewer"].Backend)
@@ -54,6 +60,19 @@ func TestLoadProfilesRejectsUnknownBackend(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "made-up") {
 		t.Errorf("error should mention the bad backend, got: %v", err)
+	}
+}
+
+func TestLoadProfilesRejectsNegativeOutputTokenMax(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, `profiles:
+  x:
+    scribe: { model: m, output_token_max: -1 }
+`))
+	if err == nil {
+		t.Fatal("negative output_token_max should be rejected")
+	}
+	if !strings.Contains(err.Error(), "output_token_max") {
+		t.Errorf("error should mention output_token_max, got: %v", err)
 	}
 }
 

@@ -7,7 +7,7 @@ import "github.com/morphis/gummi/internal/agent"
 // behavior) when profiles are absent or don't cover the profile/role, so
 // a repo without profiles.yaml still works. An empty backend means "use
 // the engine's default backend" — agentFor resolves that.
-func (e *Engine) resolveRole(profileName string, role agent.Role) (model, backend string) {
+func (e *Engine) resolveRole(profileName string, role agent.Role) (model, backend string, outputTokenMax int) {
 	prof, ok := e.cfg.Profiles.Profiles[profileName]
 	if !ok {
 		if def := e.cfg.Profiles.Default; def != "" {
@@ -16,10 +16,10 @@ func (e *Engine) resolveRole(profileName string, role agent.Role) (model, backen
 	}
 	if ok {
 		if rc, ok := prof[string(role)]; ok {
-			return rc.Model, rc.Backend
+			return rc.Model, rc.Backend, rc.OutputTokenMax
 		}
 	}
-	return e.cfg.Model, ""
+	return e.cfg.Model, "", 0
 }
 
 // agentFor returns the Agent for the given backend name. An empty name,

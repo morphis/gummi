@@ -83,14 +83,15 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 			"(no --auto → tools outside cwd auto-reject silently); set permissions: allow-all")
 	}
 	s := &opencodeSession{
-		o:       o,
-		workdir: opts.WorkDir,
-		model:   opts.Model,
-		hints:   opts.SystemHints,
-		raw:     make(chan Event, 32),
-		events:  make(chan Event),
-		stop:    make(chan struct{}),
-		partLen: map[string]int{},
+		o:              o,
+		workdir:        opts.WorkDir,
+		model:          opts.Model,
+		hints:          opts.SystemHints,
+		outputTokenMax: opts.OutputTokenMax,
+		raw:            make(chan Event, 32),
+		events:         make(chan Event),
+		stop:           make(chan struct{}),
+		partLen:        map[string]int{},
 	}
 	go s.forward()
 	o.sessions = append(o.sessions, s)
@@ -109,10 +110,11 @@ func (o *Opencode) Close() error {
 }
 
 type opencodeSession struct {
-	o       *Opencode
-	workdir string
-	model   string
-	hints   []string
+	o              *Opencode
+	workdir        string
+	model          string
+	hints          []string
+	outputTokenMax int // >0 → export OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX per turn
 
 	raw    chan Event
 	events chan Event
@@ -186,6 +188,14 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	cmd := exec.CommandContext(procCtx, s.o.bin, args...) //nolint:gosec // bin is operator config, args are gummi-built
 	cmd.Dir = s.workdir
 	cmd.Env = os.Environ()
+	// opencode caps each step's output at min(limit.output, 32000) and only
+	// this env var lifts the 32000 ceiling (opencode.jsonc can't). Set per
+	// the role's output_token_max so reasoning-heavy stages aren't truncated
+	// (reason=length, output=0). gummi forwards os.Environ() to opencode, so
+	// appending here reaches the child.
+	if s.outputTokenMax > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=%d", s.outputTokenMax))
+	}
 	// Run opencode in its own process group and, on cancel/interrupt, kill
 	// the whole group — opencode spawns tool subprocesses (bash, editors)
 	// that would otherwise be orphaned and keep the stdout pipe open,

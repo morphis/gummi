@@ -165,8 +165,8 @@ func TestResolveRoleUnknownProfileUsesDefault(t *testing.T) {
 // resolveRole is also exercised directly for the no-profiles case.
 func TestResolveRoleNoProfiles(t *testing.T) {
 	e := &Engine{cfg: Config{Model: "only-model"}}
-	m, backend := e.resolveRole("anything", agent.RoleArchitect)
-	if m != "only-model" || backend != "" {
-		t.Errorf("no-profiles resolve = (%q, %q), want (only-model, \"\")", m, backend)
+	m, backend, otm := e.resolveRole("anything", agent.RoleArchitect)
+	if m != "only-model" || backend != "" || otm != 0 {
+		t.Errorf("no-profiles resolve = (%q, %q, %d), want (only-model, \"\", 0)", m, backend, otm)
 	}
 }

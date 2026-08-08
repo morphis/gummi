@@ -211,6 +211,68 @@ func TestOpencodeSendPassesAutoFlag(t *testing.T) {
 	}
 }
 
+// Send exports OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX into opencode's
+// environment when (and only when) the role sets output_token_max — it is
+// opencode's sole lever above its hardcoded 32000 per-step output cap.
+func TestOpencodeSendInjectsOutputTokenMax(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	run := func(t *testing.T, otm int) string {
+		dir := t.TempDir()
+		envFile := dir + "/env"
+		path := dir + "/opencode"
+		body := "#!/bin/sh\n" +
+			"env > " + envFile + "\n" +
+			`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		ag, err := NewOpencode(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ag.Close()
+		ctx := context.Background()
+		sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x", OutputTokenMax: otm})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sess.Close()
+		if err := sess.Send(ctx, "go"); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case e := <-sess.Events():
+				if e.Kind == EventIdle {
+					data, err := os.ReadFile(envFile)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return string(data)
+				}
+				if e.Kind == EventError {
+					t.Fatalf("send errored: %v", e.Err)
+				}
+			case <-deadline:
+				t.Fatal("no idle before deadline")
+			}
+		}
+	}
+	t.Run("set", func(t *testing.T) {
+		if env := run(t, 128000); !strings.Contains(env, "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=128000") {
+			t.Errorf("env missing OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=128000:\n%s", env)
+		}
+	})
+	t.Run("unset", func(t *testing.T) {
+		if env := run(t, 0); strings.Contains(env, "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX") {
+			t.Errorf("otm=0 must not set OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX:\n%s", env)
+		}
+	})
+}
+
 // fakeOC writes a fake `opencode` script that emits one text event then
 // sleeps, so a turn can be interrupted mid-flight deterministically.
 func fakeOC(t *testing.T) string {

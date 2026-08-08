@@ -90,6 +90,10 @@ type SessionOpts struct {
 	// Tools are gummi-owned client tools (ignored by adapters without
 	// the ClientTools capability; the orchestrator gates on it).
 	Tools []ToolDef
+	// OutputTokenMax, when >0, raises the per-step output-token cap.
+	// Only the opencode adapter honors it (exported as
+	// OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX); other backends ignore it.
+	OutputTokenMax int
 }
 
 // Agent creates sessions and reports what its backend can do.

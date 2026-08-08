@@ -416,7 +416,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	// price this session's token spend at the resolved adapter's rate
 	// (0 = default), and use the same rate for the remaining-envelope
 	// baseline so the budget math is self-consistent.
-	model, backend := e.resolveRole(s.Feature.Profile, s.Role)
+	model, backend, _ := e.resolveRole(s.Feature.Profile, s.Role)
 	rate := 0.0
 	if a := e.agentFor(backend); a != nil {
 		rate = a.CreditRate(model)
@@ -585,7 +585,7 @@ func indentLines(s string) string {
 // status displays (and interactive budget math) have them from the
 // moment the session exists, not after the first usage event.
 func (e *Engine) stampSpawnInfo(s *Session) {
-	model, backend := e.resolveRole(s.Feature.Profile, s.Role)
+	model, backend, _ := e.resolveRole(s.Feature.Profile, s.Role)
 	name := ""
 	rate := 0.0
 	clientTools := false
@@ -607,7 +607,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	if err != nil {
 		return nil, "", err
 	}
-	model, backend := e.resolveRole(f.Profile, role)
+	model, backend, outputTokenMax := e.resolveRole(f.Profile, role)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		if backend == "" {
@@ -655,13 +655,14 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		hints = append(hints, askConventionHint)
 	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:     workDir,
-		Role:        role,
-		Model:       model,
-		SystemHints: hints,
-		Permission:  e.cfg.Permission,
-		MaxCredits:  maxCredits,
-		Tools:       tools,
+		WorkDir:        workDir,
+		Role:           role,
+		Model:          model,
+		SystemHints:    hints,
+		Permission:     e.cfg.Permission,
+		MaxCredits:     maxCredits,
+		Tools:          tools,
+		OutputTokenMax: outputTokenMax,
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("starting %s session: %w", role, err)
