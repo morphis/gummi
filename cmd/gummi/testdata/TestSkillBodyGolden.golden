@@ -34,13 +34,14 @@ It returns a structured checklist — repo, workspace, backend, profile, auth,
 envelope, lock. Repair each item that isn't `ok`:
 
 - **backend** — set gummi's backend to the **same agent that is driving it**:
-  if you are Claude Code, export `GUMMI_AGENT=claude` so gummi drives Claude with
-  Claude; if you are Codex, export `GUMMI_AGENT=codex`. Match the backend to
-  yourself by default — it keeps the whole pipeline on one vendor's auth, and
-  it sidesteps the cross-model trap where the claude backend forwards each
-  role's model to the Claude CLI as `--model` and the CLI
-  rejects any non-`claude-*` id (a mismatched run passes spec, then dies at
-  implement).
+  give every role a `backend:` in `.gummi/profiles.yaml` (e.g. `backend:
+  claude` if you are Claude Code, `backend: codex` if you are Codex); export
+  `GUMMI_AGENT` only to set the fallback default for roles that omit it.
+  Match the backend to yourself by default — it keeps the whole pipeline on
+  one vendor's auth, and it sidesteps the cross-model trap where the claude
+  backend forwards each role's model to the Claude CLI as `--model` and the
+  CLI rejects any non-`claude-*` id (a mismatched run passes spec, then dies
+  at implement).
 - **profile** — **do not rely on the auto-seeded default** (its implementer/scribe
   roles are OpenAI ids the claude backend cannot drive). Instead **write the
   `default` profile in `.gummi/profiles.yaml` yourself, and ask the human their
