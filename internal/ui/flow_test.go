@@ -378,7 +378,9 @@ func TestSkipFlagsChangeRoute(t *testing.T) {
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Tiny fix")
-	// toggle both skip flags on the options row: tab, then b and p
+	// toggle both skip flags on the options row: tab past the new
+	// envelope field, then tab to options, then b and p
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // envelope field
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // options row
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})

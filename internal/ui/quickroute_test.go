@@ -16,7 +16,8 @@ import (
 // one keystroke in (both skips + the marker), one keystroke back out,
 // and an individual b/p toggle demotes the route to plain skips.
 func TestFeatureFormQuickToggle(t *testing.T) {
-	form := newFeatureForm(nil, func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, 0, func(formResult) tea.Cmd { return nil })
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // focus the envelope field
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // focus the options row
 
 	form.HandleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
