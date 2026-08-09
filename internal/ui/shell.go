@@ -674,9 +674,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.sel = order[len(order)-1]
 		}
 	case "n":
-		m.Overlay.Push(newFeatureForm(m.profileNames, m.createFeature))
+		m.Overlay.Push(newFeatureForm(m.profileNames, m.envelope, m.createFeature))
 	case "B":
-		m.Overlay.Push(newBugForm(m.profileNames, m.createBug))
+		m.Overlay.Push(newBugForm(m.profileNames, m.envelope, m.createBug))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation

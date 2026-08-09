@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -17,6 +19,7 @@ var defaultProfilePresets = []string{"thrifty", "premium", "local-heavy"}
 // form fields, in tab order.
 const (
 	fieldDesc = iota
+	fieldEnvelope
 	fieldOpts
 	fieldCount
 )
@@ -25,9 +28,12 @@ const (
 // first line becomes the card title, anything beyond it seeds the
 // draft's Problem section for the brainstorm stage to develop. Profile
 // and the skip flags (the only workflow flexibility, fixed at creation)
-// share a single demoted options row.
+// share a single demoted options row. The envelope line sits between
+// them, pre-filled with the global default so the user can override it
+// at creation time without a second trip to the detail view.
 type featureForm struct {
 	desc     textarea.Model
+	env      textinput.Model
 	profiles []string
 	profile  int
 	skip     domain.SkipFlags
@@ -39,8 +45,9 @@ type featureForm struct {
 
 // newFeatureForm builds the dialog; profiles are the selectable profile
 // names in display order, first selected (falling back to the built-in
-// presets when empty), and onSubmit receives the validated fields.
-func newFeatureForm(profiles []string, onSubmit func(formResult) tea.Cmd) *featureForm {
+// presets when empty), defaultEnvelope is the global default pre-filled
+// into the envelope input, and onSubmit receives the validated fields.
+func newFeatureForm(profiles []string, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *featureForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -51,7 +58,12 @@ func newFeatureForm(profiles []string, onSubmit func(formResult) tea.Cmd) *featu
 	desc.SetWidth(46)
 	desc.SetHeight(4)
 	desc.Focus()
-	return &featureForm{desc: desc, profiles: profiles, onSubmit: onSubmit}
+	env := textinput.New()
+	env.Placeholder = "credits (0 = uncapped)"
+	env.SetWidth(46)
+	env.CharLimit = 12
+	env.SetValue(strconv.Itoa(defaultEnvelope))
+	return &featureForm{desc: desc, env: env, profiles: profiles, onSubmit: onSubmit}
 }
 
 // ID implements overlay.Dialog.
@@ -75,10 +87,22 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.errText = err.Error()
 			return false, nil
 		}
+		// an empty envelope is the "use default" signal; a non-negative
+		// integer becomes an explicit envelope (0 = uncapped)
+		var env *int
+		if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
+			n, err := strconv.Atoi(trimmed)
+			if err != nil || n < 0 {
+				d.errText = "envelope must be a non-negative number of credits"
+				return false, nil
+			}
+			env = &n
+		}
 		res := formResult{
-			Desc:    desc,
-			Profile: d.profiles[d.profile],
-			Skip:    d.skip,
+			Desc:     desc,
+			Profile:  d.profiles[d.profile],
+			Skip:     d.skip,
+			Envelope: env,
 		}
 		return true, d.onSubmit(res)
 	case "alt+enter", "ctrl+j":
@@ -120,6 +144,9 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case fieldDesc:
 		d.desc, _ = d.desc.Update(key)
 		d.errText = ""
+	case fieldEnvelope:
+		d.env, _ = d.env.Update(key)
+		d.errText = ""
 	}
 	return false, nil
 }
@@ -136,10 +163,13 @@ func (d *featureForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 
 func (d *featureForm) setFocus(f int) {
 	d.focus = f
-	if f == fieldDesc {
+	d.desc.Blur()
+	d.env.Blur()
+	switch f {
+	case fieldDesc:
 		d.desc.Focus()
-	} else {
-		d.desc.Blur()
+	case fieldEnvelope:
+		d.env.Focus()
 	}
 }
 
@@ -163,6 +193,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new feature") + "\n\n")
 	b.WriteString(d.desc.View() + "\n\n")
+	b.WriteString(d.env.View() + "\n\n")
 
 	// the options row: quiet until focused, skips flagged when set
 	marker := "  "
@@ -180,8 +211,11 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter create · alt+enter newline · tab options · esc cancel"
-	if d.focus == fieldOpts {
+	hint := "enter create · alt+enter newline · tab envelope · esc cancel"
+	switch d.focus {
+	case fieldEnvelope:
+		hint = "numeric credits (0 = uncapped) · enter create · esc cancel"
+	case fieldOpts:
 		hint = "←/→ profile · q quick · b/p toggle skips · enter create · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))

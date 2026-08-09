@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -10,12 +11,14 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// bugForm is the new-bug dialog: a title line plus a demoted options row
-// (profile · severity · triage/diagnose skips). It mirrors the feature
-// form — the triage stage develops reproduction and root cause, just as
-// brainstorm develops a feature — but carries bug-shaped options.
+// bugForm is the new-bug dialog: a title line, an envelope line, plus a
+// demoted options row (profile · severity · triage/diagnose skips). It
+// mirrors the feature form — the triage stage develops reproduction and
+// root cause, just as brainstorm develops a feature — but carries
+// bug-shaped options.
 type bugForm struct {
 	desc     textinput.Model
+	env      textinput.Model
 	profiles []string
 	profile  int
 	sevs     []domain.Severity
@@ -31,7 +34,7 @@ type bugForm struct {
 // first ("") means unset — triage classifies it later.
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
-func newBugForm(profiles []string, onSubmit func(bugFormResult) tea.Cmd) *bugForm {
+func newBugForm(profiles []string, defaultEnvelope int, onSubmit func(bugFormResult) tea.Cmd) *bugForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -40,7 +43,12 @@ func newBugForm(profiles []string, onSubmit func(bugFormResult) tea.Cmd) *bugFor
 	desc.CharLimit = 120
 	desc.SetWidth(46)
 	desc.Focus()
-	return &bugForm{desc: desc, profiles: profiles, sevs: bugSeverityChoices, onSubmit: onSubmit}
+	env := textinput.New()
+	env.Placeholder = "credits (0 = uncapped)"
+	env.SetWidth(46)
+	env.CharLimit = 12
+	env.SetValue(strconv.Itoa(defaultEnvelope))
+	return &bugForm{desc: desc, env: env, profiles: profiles, sevs: bugSeverityChoices, onSubmit: onSubmit}
 }
 
 // ID implements overlay.Dialog.
@@ -61,11 +69,21 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.errText = err.Error()
 			return false, nil
 		}
+		var env *int
+		if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
+			n, err := strconv.Atoi(trimmed)
+			if err != nil || n < 0 {
+				d.errText = "envelope must be a non-negative number of credits"
+				return false, nil
+			}
+			env = &n
+		}
 		return true, d.onSubmit(bugFormResult{
 			Title:    desc,
 			Severity: d.sevs[d.sev],
 			Profile:  d.profiles[d.profile],
 			Skip:     d.skip,
+			Envelope: env,
 		})
 	case "tab", "down":
 		d.setFocus((d.focus + 1) % fieldCount)
@@ -92,6 +110,9 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case fieldDesc:
 		d.desc, _ = d.desc.Update(key)
 		d.errText = ""
+	case fieldEnvelope:
+		d.env, _ = d.env.Update(key)
+		d.errText = ""
 	}
 	return false, nil
 }
@@ -108,10 +129,13 @@ func (d *bugForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 
 func (d *bugForm) setFocus(f int) {
 	d.focus = f
-	if f == fieldDesc {
+	d.desc.Blur()
+	d.env.Blur()
+	switch f {
+	case fieldDesc:
 		d.desc.Focus()
-	} else {
-		d.desc.Blur()
+	case fieldEnvelope:
+		d.env.Focus()
 	}
 }
 
@@ -140,6 +164,7 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new bug") + "\n\n")
 	b.WriteString(d.desc.View() + "\n\n")
+	b.WriteString(d.env.View() + "\n\n")
 
 	marker := "  "
 	profile := s.Faint.Render(d.profiles[d.profile])
@@ -160,8 +185,11 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter create · tab options · esc cancel"
-	if d.focus == fieldOpts {
+	hint := "enter create · tab envelope · esc cancel"
+	switch d.focus {
+	case fieldEnvelope:
+		hint = "numeric credits (0 = uncapped) · enter create · esc cancel"
+	case fieldOpts:
 		hint = "←/→ profile · s severity · t/d toggle skips · enter create · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))

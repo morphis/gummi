@@ -99,9 +99,10 @@ func (m *Shell) loadRows() tea.Msg {
 // first line is the feature's title; the lines past it are seeded into
 // the spec, which the brainstorm stage develops.
 type formResult struct {
-	Desc    string
-	Profile string
-	Skip    domain.SkipFlags
+	Desc     string
+	Profile  string
+	Skip     domain.SkipFlags
+	Envelope *int
 }
 
 // createFeature mints a number and persists a new feature in todo,
@@ -127,10 +128,14 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		now := m.now()
+		env := m.envelope
+		if res.Envelope != nil {
+			env = *res.Envelope
+		}
 		f := domain.Feature{
 			ID: id, Num: num, Title: title, OneLiner: oneLiner,
 			Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: res.Skip,
-			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
+			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
 			CreatedAt: now, UpdatedAt: now,
 		}
 		// Seed the draft first (so the description survives), then persist —
@@ -163,6 +168,7 @@ type bugFormResult struct {
 	Severity domain.Severity
 	Profile  string
 	Skip     domain.SkipFlags
+	Envelope *int
 }
 
 // createBug mints a BG number and persists a new bug in todo, seeding its
@@ -184,10 +190,14 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		now := m.now()
+		env := m.envelope
+		if res.Envelope != nil {
+			env = *res.Envelope
+		}
 		f := domain.Feature{
 			ID: id, Num: num, Kind: domain.KindBug, Title: res.Title, OneLiner: res.OneLiner,
 			Slug: slug, Stage: workflow.Initial(domain.KindBug), Skip: res.Skip,
-			Profile: res.Profile, Budget: domain.Budget{Envelope: m.envelope},
+			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
 			Severity: res.Severity, CreatedAt: now, UpdatedAt: now,
 		}
 		// Seed the report draft first (so severity/one-liner survive), then
