@@ -31,26 +31,6 @@ const skillName = "gummi"
 
 const skillDescription = "Ship one PR-sized feature or bug to a verified branch via gummi's headless, spec-driven workflow (spec, review, verify; gummi never merges). Use when the work warrants a spec, an independent code review, and an isolated branch — not for trivial one-line edits."
 
-// runSkill implements `gummi skill show|install|list` (DESIGN §7): it
-// generates the SKILL.md that Claude, Copilot, Codex, and opencode read
-// and installs it. No engine dependency — this command lands independently.
-func runSkill(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]")
-	}
-	sub, rest := args[0], args[1:]
-	switch sub {
-	case "show":
-		return skillShow(rest)
-	case "install":
-		return skillInstall(rest)
-	case "list":
-		return skillList(rest)
-	default:
-		return fmt.Errorf("unknown skill subcommand %q (usage: gummi skill show|install|list)", sub)
-	}
-}
-
 // skillShow prints the rendered SKILL.md (frontmatter + body) to stdout.
 func skillShow(args []string) error {
 	fs := flag.NewFlagSet("skill show", flag.ContinueOnError)

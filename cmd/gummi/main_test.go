@@ -44,15 +44,17 @@ func TestRunVersion(t *testing.T) {
 	// (no-arg `run` launches the board, which needs a repo + TTY, so it
 	// isn't exercised here.)
 	for _, args := range [][]string{{"version"}, {"--version"}, {"-v"}} {
-		if err := run(args); err != nil {
-			t.Errorf("run(%v) = %v, want nil", args, err)
+		rootCmd.SetArgs(args)
+		if err := rootCmd.Execute(); err != nil {
+			t.Errorf("Execute(%v) = %v, want nil", args, err)
 		}
 	}
 }
 
 func TestRunUnknownCommand(t *testing.T) {
-	if err := run([]string{"frobnicate"}); err == nil {
-		t.Fatal("run with unknown command: want error, got nil")
+	rootCmd.SetArgs([]string{"frobnicate"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("Execute with unknown command: want error, got nil")
 	}
 }
 

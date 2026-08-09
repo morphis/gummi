@@ -61,39 +61,14 @@ type exitError struct{ code int }
 
 func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 
+// run executes the CLI for args, delegating dispatch to the cobra command
+// tree (root.go). It stays a standalone function taking explicit args so the
+// tests and any embedder can drive the CLI without touching os.Args. `gummi`
+// with no arguments launches the board, creating the .gummi workspace lazily
+// on first run.
 func run(args []string) error {
-	if len(args) > 0 {
-		switch args[0] {
-		case "version", "--version", "-v":
-			fmt.Printf("gummi %s\n", version())
-			return nil
-		case "ingest":
-			return runIngest(args[1:])
-		case "bugs":
-			return runBugs(args[1:])
-		case "run":
-			return runRun(args[1:])
-		case "resume":
-			return runResume(args[1:])
-		case "verify":
-			return runVerify(args[1:])
-		case "status":
-			return runStatus(args[1:])
-		case "spec":
-			return runSpec(args[1:])
-		case "diff":
-			return runDiff(args[1:])
-		case "doctor":
-			return runDoctor(args[1:])
-		case "skill":
-			return runSkill(args[1:])
-		default:
-			return fmt.Errorf("unknown argument %q (usage: gummi [version|ingest|bugs|run|resume|verify|status|spec|diff|doctor|skill])", args[0])
-		}
-	}
-	// `gummi` with no arguments launches the board, creating the .gummi
-	// workspace lazily on first run.
-	return runBoard()
+	rootCmd.SetArgs(args)
+	return rootCmd.Execute()
 }
 
 func runBoard() error {

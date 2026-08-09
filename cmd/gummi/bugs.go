@@ -15,24 +15,6 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// runBugs implements `gummi bugs …`: bug ingestion from GitHub issues and
-// manual entry (DESIGN §11, bug variant). Both funnel into the same gate
-// + materialize path as feature ingestion.
-func runBugs(args []string) error {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs <ingest|new> [flags]")
-		return fmt.Errorf("bugs needs a subcommand")
-	}
-	switch args[0] {
-	case "ingest":
-		return runBugIngest(args[1:])
-	case "new":
-		return runBugNew(args[1:])
-	default:
-		return fmt.Errorf("unknown bugs subcommand %q (want ingest|new)", args[0])
-	}
-}
-
 // bugEnv bundles the store/engine wiring bug commands share.
 type bugEnv struct {
 	eng     *engine.Engine
