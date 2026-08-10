@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -60,22 +59,22 @@ func newWorkspace(t *testing.T) (*Shell, string) {
 }
 
 // pump executes a command and feeds resulting messages back into the
-// model until the command chain settles. Commands that don't return
-// promptly (timers such as the textarea cursor blink, or the engine
-// event listener that blocks on its channel) run asynchronously in the
-// real Bubble Tea runtime; here we treat a slow command as async and
-// stop following it rather than blocking on the timer.
+// model until the command chain settles. It mirrors the real Bubble Tea
+// runtime without a wall-clock guess: a finite command is run to
+// completion (no deadline — it may legitimately shell out to git and take
+// as long as it takes), while a subscription-tagged command — one that in
+// the real runtime never returns (the engine event listener, a re-arming
+// timer) — is skipped via subscription's registry before being invoked.
 func pump(t *testing.T, m *Shell, cmd tea.Cmd) *Shell {
 	t.Helper()
 	for cmd != nil {
-		done := make(chan tea.Msg, 1)
-		go func(c tea.Cmd) { done <- c() }(cmd)
-		var msg tea.Msg
-		select {
-		case msg = <-done:
-		case <-time.After(100 * time.Millisecond):
-			return m // slow/timer command: async in the real runtime
+		// subscription-wrapped commands never finish on their own; skip
+		// them so the run doesn't block on a channel or timer that the
+		// real tea loop handles asynchronously.
+		if isSubscription(cmd) {
+			return m
 		}
+		msg := cmd()
 		if msg == nil {
 			return m
 		}

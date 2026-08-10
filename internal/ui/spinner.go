@@ -20,7 +20,7 @@ type spinnerTickMsg struct{}
 
 // spinnerTick schedules the next frame advance.
 func spinnerTick() tea.Cmd {
-	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinnerTickMsg{} })
+	return subscription(tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinnerTickMsg{} }))
 }
 
 // spinner returns the current frame of the shared activity spinner.

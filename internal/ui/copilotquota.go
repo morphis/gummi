@@ -51,7 +51,7 @@ type copilotQuotaMsg struct {
 type copilotQuotaTickMsg struct{}
 
 func copilotQuotaTick() tea.Cmd {
-	return tea.Tick(copilotQuotaInterval, func(time.Time) tea.Msg { return copilotQuotaTickMsg{} })
+	return subscription(tea.Tick(copilotQuotaInterval, func(time.Time) tea.Msg { return copilotQuotaTickMsg{} }))
 }
 
 // fetchCopilotQuota reads the quota off the render loop. m.ghCopilotUser

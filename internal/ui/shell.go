@@ -214,12 +214,19 @@ func (m *Shell) Init() tea.Cmd {
 		// restored, so a parked budget gate (and its top-up path) survives a
 		// restart instead of vanishing until re-triggered.
 		m.reconstructInbox()
-		cmds = append(cmds, m.listenEngine)
+		cmds = append(cmds, m.listenEngineCmd())
 	}
 	if m.copilotHint {
 		cmds = append(cmds, m.fetchCopilotQuota())
 	}
 	return tea.Batch(cmds...)
+}
+
+// listenEngineCmd wraps the blocking engine-listener as a subscription so
+// synchronous test scaffolds know to skip it rather than wait on the
+// never-returning channel read.
+func (m *Shell) listenEngineCmd() tea.Cmd {
+	return subscription(m.listenEngine)
 }
 
 // listenEngine bridges the engine's event channel into Bubble Tea: it
@@ -546,7 +553,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// engine events otherwise carry no payload the view needs — they
 		// just signal "re-render from Snapshot" — so keep listening, plus
 		// any automatic review-loop follow-up.
-		return m, tea.Batch(m.listenEngine, cmd)
+		return m, tea.Batch(m.listenEngineCmd(), cmd)
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly; drop the pane so the

@@ -130,8 +130,15 @@ func TestBugInteractiveStagesOpenChat(t *testing.T) {
 }
 
 func TestWatchAttachesRunningSession(t *testing.T) {
-	// no trailing idle: the session stays busy, so the run keeps going
+	// The watched feature's session stays busy (no trailing idle so the
+	// run keeps going), but a one-shot scribe pass — fired at the approval
+	// gate and driven synchronously by the test pump — must still finish,
+	// or the pump waits on it forever. So the scribe role is answered with
+	// a bare idle so its pass resolves without disturbing the run itself.
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
 		return []agent.Event{
 			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
 			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
