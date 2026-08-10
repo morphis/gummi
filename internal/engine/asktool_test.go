@@ -650,3 +650,306 @@ func TestUnknownClientToolAutoResolves(t *testing.T) {
 		}
 	}
 }
+
+// engineSpecFixture is a minimal spec used by the spec-view/replace
+// handler tests. The feature() title "Dark mode" fixes the draft filename
+// FD-001-dark-mode.md under DraftsDir.
+const engineSpecFixture = `# FD-001: Dark mode
+
+## Problem
+
+dark problem.
+
+## Out of scope
+
+scope stuff.
+
+## Chosen approach
+
+A.
+`
+
+func seedDraft(t *testing.T, e *Engine, f domain.Feature) {
+	t.Helper()
+	dir := e.cfg.Workspace.DraftsDir()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, spec.DraftFilename(&f))
+	if err := os.WriteFile(path, []byte(engineSpecFixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func specDraftPath(e *Engine, f domain.Feature) string {
+	return filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
+}
+
+type toolResolver interface {
+	Resolved(string) (string, bool)
+}
+
+// The four architect stages expose spec_view and spec_replace_section
+// alongside ask_user and spec_annotate.
+func TestArchitectStageToolSurface(t *testing.T) {
+	want := []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"}
+	for _, st := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose} {
+		var names []string
+		for _, td := range stageTools(st, flavorStage) {
+			names = append(names, td.Name)
+		}
+		if !slices.Equal(names, want) {
+			t.Errorf("stage %s tools = %v, want %v", st, names, want)
+		}
+	}
+	// the non-architect stages keep their existing surfaces
+	if got := stageTools(domain.StageReview, flavorStage); len(got) != 1 || got[0].Name != "submit_verdict" {
+		t.Errorf("review tools changed: %+v", got)
+	}
+}
+
+func TestArchitectToolHintMentionsSpecTools(t *testing.T) {
+	hint := toolHint(domain.StageBrainstorm, flavorStage)
+	for _, want := range []string{"spec_view", "spec_replace_section"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("hint missing %s:\n%s", want, hint)
+		}
+	}
+	if !strings.Contains(hint, "%% @user:") {
+		t.Errorf("hint must restate the %% @user: re-emit responsibility:\n%s", hint)
+	}
+}
+
+func TestSpecViewReturnsSection(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{"section":"Problem"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	got, done := r.Resolved("c1")
+	if !done {
+		t.Fatal("spec_view never resolved")
+	}
+	want := "\ndark problem.\n\n"
+	if got != want {
+		t.Errorf("resolved with %q, want %q", got, want)
+	}
+	if got == strings.TrimSpace(got) || strings.Contains(got, "## Problem") {
+		t.Errorf("expected verbatim section body without heading, got %q", got)
+	}
+	// read-only: no activity recorded
+	if got := s.Snapshot().Activity; len(got) != 0 {
+		t.Errorf("spec_view recorded activity: %v", got)
+	}
+}
+
+func TestSpecViewWholeDoc(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	got, done := r.Resolved("c1")
+	if !done {
+		t.Fatal("spec_view never resolved")
+	}
+	raw, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(raw) {
+		t.Errorf("whole-doc view != on-disk bytes")
+	}
+}
+
+func TestSpecViewUnknownSection(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{"section":"Nope"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	got, done := r.Resolved("c1")
+	if !done || got != `spec_view: unknown section "Nope"` {
+		t.Errorf("resolved with %q done=%v", got, done)
+	}
+}
+
+func TestSpecReplaceSectionWritesBody(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"%% @user: keep me\nnew problem body.\n"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	raw, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "%% @user: keep me\nnew problem body.\n") {
+		t.Errorf("replacement body not on disk:\n%s", raw)
+	}
+
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	if got, done := r.Resolved("c1"); !done || got != "updated Problem section" {
+		t.Errorf("resolved with %q done=%v, want updated Problem section", got, done)
+	}
+	var noted bool
+	for _, a := range s.Snapshot().Activity {
+		if a == "updated Problem section" {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("activity lacks note: %v", s.Snapshot().Activity)
+	}
+}
+
+func TestSpecReplaceSectionOtherSectionsUntouched(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"changed.\n"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	if _, err := e.Attach(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	raw, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(raw)
+	if !strings.Contains(out, "## Out of scope\n\nscope stuff.\n") {
+		t.Errorf("Out of scope section changed:\n%s", out)
+	}
+	if !strings.Contains(out, "## Chosen approach\n\nA.\n") {
+		t.Errorf("Chosen approach section changed:\n%s", out)
+	}
+}
+
+func TestSpecReplaceSectionCanonicalTitleInActivity(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"problem","body":"new.\n"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	// lowercase name "problem" still reports the on-disk "Problem" title
+	if got, done := r.Resolved("c1"); !done || got != "updated Problem section" {
+		t.Errorf("resolved with %q done=%v, want updated Problem section", got, done)
+	}
+	var noted bool
+	for _, a := range s.Snapshot().Activity {
+		if a == "updated Problem section" {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("activity lacks canonical note: %v", s.Snapshot().Activity)
+	}
+}
+
+func TestSpecReplaceSectionRejectsHeadingInBody(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"## Injected\nboom\n"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	before, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	after, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("disk changed on reject:\n%s", after)
+	}
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	got, done := r.Resolved("c1")
+	if !done || !strings.Contains(got, "top-level `## ` heading") {
+		t.Errorf("resolved with %q done=%v, want heading-in-body error", got, done)
+	}
+}
+
+func TestSpecReplaceSectionUnknownSection(t *testing.T) {
+	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Nope","body":"x\n"}`)))
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	before, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	after, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("disk changed on unknown-section error:\n%s", after)
+	}
+	r, ok := s.agent().(toolResolver)
+	if !ok {
+		t.Fatal("fake session is not a resolver")
+	}
+	if got, done := r.Resolved("c1"); !done || !strings.Contains(got, "unknown section") {
+		t.Errorf("resolved with %q done=%v, want unknown section error", got, done)
+	}
+}

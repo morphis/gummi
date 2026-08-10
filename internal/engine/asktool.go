@@ -41,6 +41,9 @@ const (
 	annotateToolName = "spec_annotate"
 	verdictToolName  = "submit_verdict"
 	resolveToolName  = "resolve_annotation"
+
+	specViewToolName           = "spec_view"
+	specReplaceSectionToolName = "spec_replace_section"
 )
 
 // The verdict-semantics constants are the shared clauses used by both
@@ -77,7 +80,7 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	}
 	switch stage {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
-		return []agent.ToolDef{askUserTool(), specAnnotateTool()}
+		return []agent.ToolDef{askUserTool(), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageReview:
 		return []agent.ToolDef{submitVerdictTool()}
 	case domain.StageVerify:
@@ -146,6 +149,43 @@ func specAnnotateTool() agent.ToolDef {
 				},
 			},
 			"required": []any{"anchor", "note"},
+		},
+	}
+}
+
+func specViewTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: specViewToolName,
+		Description: "Read a section of the current spec's artifact. Pass the section's heading " +
+			"text (case-insensitive) to return that section's body, or omit section to return the " +
+			"whole document. Read-only — never modifies the artifact.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"section": map[string]any{
+					"type":        "string",
+					"description": "Optional: the section's heading text, e.g. \"Problem\". Omit for the whole document.",
+				},
+			},
+		},
+	}
+}
+
+func specReplaceSectionTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: specReplaceSectionToolName,
+		Description: "Rewrite the body of one section of the current spec's artifact — the lines between " +
+			"its `## ` heading and the next `## ` heading (or end of file). Heading match is " +
+			"case-insensitive; the heading line itself is never touched. The write is a naive splice: " +
+			"re-emit any `%% @user:` marker lines yourself, since gummi does not preserve, diff, or merge " +
+			"them for you. The body must not contain a top-level `## ` heading.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"section": map[string]any{"type": "string", "description": "The section's heading text, case-insensitive."},
+				"body":    map[string]any{"type": "string", "description": "The new section body."},
+			},
+			"required": []any{"section", "body"},
 		},
 	}
 }
@@ -263,14 +303,20 @@ line.`
 	}
 	switch stage {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
-		return `You have two gummi tools. ask_user: put a decision to the user as a
+		return `You have four gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
 (faster for the user, cheaper); lead with your recommended option,
 marked as such in its label; ask one question at a time (parallel
 ask_user calls are bounced); pass spec_anchor to have gummi record
 the answer into the artifact. spec_annotate: attach an open question to a
 line and let gummi place the %% marker with correct anchoring, instead
-of writing %% lines yourself.`
+of writing %% lines yourself. spec_view: read the spec's sections — pass
+the section heading text for one section's body, omit it for the whole
+document (read-only). spec_replace_section: rewrite a whole section
+between its ## heading and the next — heading match is case-insensitive.
+The write is a naive splice: re-emit any %% @user: marker lines yourself,
+since gummi does not preserve them for you; never include a top-level
+## heading in the body.`
 	case domain.StageReview:
 		return `Call the submit_verdict tool exactly once at the end of your review
 (verdict "pass" or "changes") to drive gummi's review loop, instead of
@@ -310,6 +356,10 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleVerdict(s, tc)
 	case resolveToolName:
 		e.handleResolveAnnotation(s, tc)
+	case specViewToolName:
+		e.handleSpecView(s, tc)
+	case specReplaceSectionToolName:
+		e.handleSpecReplaceSection(s, tc)
 	default:
 		e.resolveNow(s, tc.ID, fmt.Sprintf("unknown tool %q — proceed without it", tc.Name))
 	}
@@ -376,6 +426,65 @@ func (e *Engine) handleAnnotate(s *Session, tc *agent.ToolCall) {
 	s.appendActivity("annotated spec: " + a.Note)
 	e.persist(s)
 	e.resolveNow(s, tc.ID, "annotation added to the spec")
+}
+
+// handleSpecView resolves a spec_view call with a section body (or the
+// whole document) read directly from disk. Read-only: no lock, no
+// activity, no persist — spec_view may return pre- or post-write bytes
+// during a concurrent write, never a torn mix, because the writer swaps
+// the inode atomically.
+func (e *Engine) handleSpecView(s *Session, tc *agent.ToolCall) {
+	var a struct {
+		Section string `json:"section"`
+	}
+	_ = json.Unmarshal(tc.Args, &a)
+	raw, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
+		return
+	}
+	body, ok := spec.ViewSection(string(raw), a.Section)
+	if !ok {
+		e.resolveNow(s, tc.ID, fmt.Sprintf("spec_view: unknown section %q", a.Section))
+		return
+	}
+	e.resolveNow(s, tc.ID, body)
+}
+
+// handleSpecReplaceSection swaps a section's body under the same
+// lock + atomic-write path as annotate, emits one activity note, and
+// resolves the call immediately. On any error the call resolves with the
+// error and the file on disk is byte-identical.
+func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
+	var a struct {
+		Section string `json:"section"`
+		Body    string `json:"body"`
+	}
+	if err := json.Unmarshal(tc.Args, &a); err != nil || strings.TrimSpace(a.Section) == "" {
+		e.resolveNow(s, tc.ID, "spec_replace_section needs a section name")
+		return
+	}
+	path := s.SpecPath()
+	unlock := spec.LockFile(path)
+	defer unlock()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
+		return
+	}
+	out, matchedTitle, err := spec.ReplaceSection(string(raw), a.Section, a.Body)
+	if err != nil {
+		e.resolveNow(s, tc.ID, err.Error())
+		return
+	}
+	if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
+		e.resolveNow(s, tc.ID, "could not write the spec: "+err.Error())
+		return
+	}
+	note := "updated " + matchedTitle + " section"
+	s.appendActivity(note)
+	e.persist(s)
+	e.resolveNow(s, tc.ID, note)
 }
 
 // handleResolveAnnotation flips a diff review comment to resolved and
