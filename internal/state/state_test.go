@@ -92,6 +92,103 @@ func TestInitRefusesSymlinkedState(t *testing.T) {
 	}
 }
 
+// nestedLayout synthesizes a parent workspace P with a git repo and a
+// managed worktree entry FD-042 (a worktree root carrying a .git
+// gitdir-pointer file), returning P. It mirrors the failure mode where an
+// agent runs inside its own feature worktree.
+func nestedLayout(t *testing.T) string {
+	t.Helper()
+	p := gitRoot(t)
+	if err := os.MkdirAll(filepath.Join(p, ".gummi", "worktrees", "FD-042"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// A nested worktree has a .git gitdir-pointer FILE, not a directory.
+	if err := os.WriteFile(filepath.Join(p, ".gummi", "worktrees", "FD-042", ".git"), []byte("gitdir: ../.git/worktrees/FD-042\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func assertNestedRefusal(t *testing.T, p, root string) {
+	t.Helper()
+	_, err := Init(root)
+	if !errors.Is(err, ErrNestedInit) {
+		t.Fatalf("Init(%s) = %v, want ErrNestedInit", root, err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, p) || !strings.Contains(msg, "FD-042") {
+		t.Errorf("error %q does not name enclosing root %s and worktree FD-042", msg, p)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, ".gummi")); !os.IsNotExist(statErr) {
+		t.Errorf("nested .gummi at %s created after refusal: %v", root, statErr)
+	}
+}
+
+func TestInitRefusesNestedWorkspace(t *testing.T) {
+	p := nestedLayout(t)
+	assertNestedRefusal(t, p, filepath.Join(p, ".gummi", "worktrees", "FD-042"))
+}
+
+func TestInitRefusesFromWorktreeSubdir(t *testing.T) {
+	p := nestedLayout(t)
+	sub := filepath.Join(p, ".gummi", "worktrees", "FD-042", "pkg", "foo")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	assertNestedRefusal(t, p, sub)
+}
+
+func TestInitSucceedsInUnrelatedRepo(t *testing.T) {
+	q := gitRoot(t)
+	w, err := Init(q)
+	if err != nil {
+		t.Fatalf("Init in unrelated repo: %v", err)
+	}
+	if fi, statErr := os.Stat(w.GummiDir()); statErr != nil || !fi.IsDir() {
+		t.Errorf("unrelated repo .gummi not created: %v", statErr)
+	}
+}
+
+func TestInitAtEnclosingWorkspaceRoot(t *testing.T) {
+	p := nestedLayout(t)
+	if _, err := Init(p); err != nil {
+		t.Fatalf("Init at enclosing workspace root %s should proceed: %v", p, err)
+	}
+}
+
+func TestInitNestingBeatsGitCheck(t *testing.T) {
+	p := nestedLayout(t)
+	root := filepath.Join(p, ".gummi", "worktrees", "FD-042")
+	_, err := Init(root)
+	if !errors.Is(err, ErrNestedInit) {
+		t.Fatalf("Init at nested worktree with .git pointer = %v, want ErrNestedInit", err)
+	}
+}
+
+func TestInitIgnoresSymlinkedAncestorGummi(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(parent, ".gummi")); err != nil {
+		t.Fatal(err)
+	}
+	q := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(filepath.Join(q, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	w, err := Init(q)
+	if err != nil {
+		t.Fatalf("Init with symlinked ancestor .gummi: %v", err)
+	}
+	if fi, statErr := os.Stat(w.GummiDir()); statErr != nil || !fi.IsDir() {
+		t.Errorf("repo .gummi not created across symlinked ancestor: %v", statErr)
+	}
+}
+
+func TestInitNestingHasNoOverride(t *testing.T) {
+	t.Setenv("GUMMI_ALLOW_NESTED", "1")
+	p := nestedLayout(t)
+	assertNestedRefusal(t, p, filepath.Join(p, ".gummi", "worktrees", "FD-042"))
+}
+
 func TestOpenRequiresInit(t *testing.T) {
 	if _, err := Open(t.TempDir()); err == nil {
 		t.Fatal("Open without init: want error")

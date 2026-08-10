@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Workspace locates gummi's on-disk layout inside one repository.
@@ -86,12 +87,65 @@ func Open(root string) (Workspace, error) {
 	return w, nil
 }
 
+// ErrNestedInit marks an Init attempt whose root lives inside another
+// workspace's managed worktree. It is a distinct sentinel so callers and
+// tests can recognize the refusal without string matching.
+var ErrNestedInit = errors.New("refusing to init inside a managed worktree")
+
+// enclosingWorkspace walks from root toward the filesystem root and
+// reports the first managed worktree (parent workspace root P and entry
+// <id>) that contains (or equals) root. The walk starts at
+// filepath.Dir(root) so that root itself — where .gummi/ sits as a direct
+// child, not inside any worktrees/<id>/ — is never inspected. Each
+// ancestor .gummi/ and .gummi/worktrees/ must be a real directory (not a
+// symlink), matching the anti-symlink-smuggle convention of mkdirChecked.
+func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
+	for p := filepath.Dir(root); ; p = filepath.Dir(p) {
+		if fi, err := os.Lstat(filepath.Join(p, ".gummi")); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+			if p == filepath.VolumeName(p) || filepath.Dir(p) == p {
+				return "", "", false
+			}
+			continue
+		}
+		wt := filepath.Join(p, ".gummi", "worktrees")
+		if fi, err := os.Lstat(wt); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+			if p == filepath.VolumeName(p) || filepath.Dir(p) == p {
+				return "", "", false
+			}
+			continue
+		}
+		entries, err := os.ReadDir(wt)
+		if err != nil {
+			return "", "", false
+		}
+		for _, e := range entries {
+			id := e.Name()
+			dir := filepath.Join(wt, id)
+			if rel, err := filepath.Rel(dir, root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return p, id, true
+			}
+		}
+		if p == filepath.VolumeName(p) || filepath.Dir(p) == p {
+			return "", "", false
+		}
+	}
+}
+
 // Init creates the .gummi skeleton in root. root must be the top of a
 // git repository (worktrees and branches make no sense elsewhere).
 // Init is idempotent: existing files, and in particular an existing
 // seq counter, are never clobbered.
 func Init(root string) (Workspace, error) {
 	w := Workspace{Root: root}
+	// Refuse to materialize a workspace inside another workspace's managed
+	// worktree: such an init would nest and silently mask the real
+	// workspace for any future command that runs there. This check runs
+	// before the .git check because a nested worktree has a .git
+	// gitdir-pointer file that would otherwise pass and mask the more
+	// specific diagnosis.
+	if parent, id, ok := enclosingWorkspace(root); ok {
+		return Workspace{}, fmt.Errorf("%s is inside %s's worktree %s; run gummi from %s instead: %w", root, parent, id, parent, ErrNestedInit)
+	}
 	// .git is a directory in a normal checkout and a gitdir-pointer
 	// file in worktrees and submodules; both are valid repo roots.
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {

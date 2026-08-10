@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/state"
 )
 
 func TestEnsureWorkspaceLazyInit(t *testing.T) {
@@ -37,6 +39,26 @@ func TestEnsureWorkspaceLazyInit(t *testing.T) {
 func TestEnsureWorkspaceRejectsNonRepo(t *testing.T) {
 	if _, err := ensureWorkspace(t.TempDir()); err == nil {
 		t.Error("ensureWorkspace in a non-git dir should error")
+	}
+}
+
+func TestEnsureWorkspaceRefusesNested(t *testing.T) {
+	p := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(p, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(p, ".gummi", "worktrees", "FD-042")
+	if err := os.MkdirAll(wt, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: ../.git/worktrees/FD-042\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorkspace(wt); !errors.Is(err, state.ErrNestedInit) {
+		t.Fatalf("ensureWorkspace in nested worktree = %v, want ErrNestedInit", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(wt, ".gummi")); !os.IsNotExist(statErr) {
+		t.Errorf("ensureWorkspace materialized nested .gummi: %v", statErr)
 	}
 }
 
