@@ -108,19 +108,34 @@ func buildDoctorReport(cwd string) doctorReport {
 		add("workspace", statusWarn, "no .gummi workspace yet", "created automatically on the first `gummi run` (or `gummi` TUI)")
 	}
 
-	// 3. backend
-	bi := backendChoice()
-	switch {
-	case bi.bin == "":
-		add("backend", statusFail, "GUMMI_AGENT=headless but GUMMI_AGENT_CMD is empty", "set GUMMI_AGENT_CMD to the agent command line")
-	case onPath(bi.bin):
-		add("backend", statusOK, fmt.Sprintf("%s (%s found on PATH)", bi.name, bi.bin), "")
-	default:
-		add("backend", statusFail, fmt.Sprintf("%s backend selected but %q is not on PATH", bi.name, bi.bin), bi.installHint())
+	// profiles are parsed once and shared by the backend check (they decide
+	// which backends are required) and the profile cross-check below.
+	profiles, seeded, perr := effectiveProfiles(ws.ProfilesFile())
+
+	// 3. backend — one check per required backend, mirroring the set
+	// buildAgents (main.go) would start. The default backend is probed only
+	// when the profiles actually need it; a workspace whose profiles route
+	// every role elsewhere emits no line for the unused default at all. A
+	// failing check names the profile/role pairs that pull the backend in,
+	// so an operator knows which profile to re-point.
+	def := defaultBackendName()
+	rolesByBackend := requiredBackendRoles(def, profiles)
+	ordered := orderedRequiredBackends(def, requiredBackends(def, profiles))
+	for _, name := range ordered {
+		bi := backendInfoFor(name)
+		attr := roleAttribution(rolesByBackend[name])
+		switch {
+		case bi.bin == "":
+			add("backend:"+bi.name, statusFail, "headless backend required but GUMMI_AGENT_CMD is empty"+attr, "set GUMMI_AGENT_CMD to the agent command line")
+		case onPath(bi.bin):
+			add("backend:"+bi.name, statusOK, fmt.Sprintf("%s (%s found on PATH)", bi.name, bi.bin), "")
+		default:
+			add("backend:"+bi.name, statusFail, fmt.Sprintf("%s backend selected but %q is not on PATH%s", bi.name, bi.bin, attr), bi.installHint(name == def))
+		}
 	}
 
 	// 4. profile
-	profiles, seeded, perr := effectiveProfiles(ws.ProfilesFile())
+	bi := backendInfoFor(def)
 	switch {
 	case perr != nil:
 		add("profile", statusWarn, "profiles.yaml did not parse: "+perr.Error(), "fix .gummi/profiles.yaml")
@@ -141,8 +156,11 @@ func buildDoctorReport(cwd string) doctorReport {
 		}
 	}
 
-	// 5. auth (offline)
-	checks = append(checks, authCheck(bi))
+	// 5. auth (offline) — one line per required backend, pairing with the
+	// backend:* checks above.
+	for _, name := range ordered {
+		checks = append(checks, authCheck(backendInfoFor(name)))
+	}
 
 	// 6. envelope
 	checks = append(checks, envelopeCheck())
@@ -219,10 +237,10 @@ const nestingGuidance = "steer to a cost-tiered profile: frontier models for arc
 // a human runs (G2); a headless backend delegates to its own child.
 func authCheck(bi backendInfo) doctorCheck {
 	if bi.headless {
-		return doctorCheck{Name: "auth", Status: statusOK, Detail: "handled by the headless command (" + bi.bin + ")"}
+		return doctorCheck{Name: "auth:" + bi.name, Status: statusOK, Detail: "handled by the headless command (" + bi.bin + ")"}
 	}
 	return doctorCheck{
-		Name: "auth", Status: statusUnknown, Detail: bi.name + " auth state is not checked offline",
+		Name: "auth:" + bi.name, Status: statusUnknown, Detail: bi.name + " auth state is not checked offline",
 		Remediation: "if runs fail on auth, have the human run: " + bi.login,
 	}
 }
@@ -283,17 +301,21 @@ type backendInfo struct {
 	headless bool
 }
 
-func (bi backendInfo) installHint() string {
+func (bi backendInfo) installHint(isDefault bool) string {
 	if bi.headless {
 		return "install " + bi.bin + " (the GUMMI_AGENT_CMD agent), or point GUMMI_AGENT_CMD at an available one"
+	}
+	if !isDefault {
+		return "install the " + bi.name + " CLI (" + bi.bin + "), or re-point the roles that need it in .gummi/profiles.yaml"
 	}
 	return "install the " + bi.name + " CLI (" + bi.bin + "), or select another backend via GUMMI_AGENT"
 }
 
-// backendChoice mirrors buildAgent's selection (main.go) without
-// constructing the agent, so doctor can report the backend offline.
-func backendChoice() backendInfo {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT"))) {
+// backendInfoFor describes one named backend — the same mapping
+// startAdapter (main.go) uses, without constructing the agent, so doctor
+// can report each required backend offline.
+func backendInfoFor(name string) backendInfo {
+	switch name {
 	case "claude":
 		return backendInfo{name: "claude", bin: cmp.Or(os.Getenv("GUMMI_CLAUDE_BIN"), "claude"), login: "authenticate the Claude Code CLI (`claude`)"}
 	case "opencode":
@@ -302,11 +324,71 @@ func backendChoice() backendInfo {
 		return backendInfo{name: "codex", bin: cmp.Or(os.Getenv("GUMMI_CODEX_BIN"), "codex"), login: "codex login"}
 	case "headless":
 		return backendInfo{name: "headless", bin: firstField(os.Getenv("GUMMI_AGENT_CMD")), headless: true}
+	case "copilot":
+		return backendInfo{name: "copilot", bin: "copilot", login: "gh auth login  (authenticate GitHub Copilot)"}
 	}
-	if cmd := strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")); cmd != "" {
-		return backendInfo{name: "headless", bin: firstField(cmd), headless: true}
+	return backendInfo{name: ""}
+}
+
+// orderedRequiredBackends returns the backends doctor must probe: the
+// default first when it is required, then the rest in lexicographic order.
+// The ordering is deterministic so two runs over the same state agree.
+func orderedRequiredBackends(def string, req map[string]struct{}) []string {
+	names := make([]string, 0, len(req))
+	for name := range req {
+		if name != def {
+			names = append(names, name)
+		}
 	}
-	return backendInfo{name: "copilot", bin: "copilot", login: "gh auth login  (authenticate GitHub Copilot)"}
+	sort.Strings(names)
+	if _, ok := req[def]; ok {
+		names = append([]string{def}, names...)
+	}
+	return names
+}
+
+// requiredBackendRoles mirrors requiredBackends (main.go) but keeps the
+// provenance the set discards: for each backend the loaded profiles
+// reference, the "profile/role" pairs that pull it in, in deterministic
+// order. Doctor uses it to name who needs a backend, so an operator can
+// re-point the right profile when a backend is missing. With no profiles at
+// all the default backend is required but has no profile to name.
+func requiredBackendRoles(def string, profiles config.Profiles) map[string][]string {
+	roles := map[string][]string{}
+	if len(profiles.Profiles) == 0 {
+		roles[def] = nil
+	}
+	for pname, p := range profiles.Profiles {
+		byRole := map[string][]string{}
+		for role, rc := range p {
+			name := rc.Backend
+			if name == "" {
+				name = def
+			}
+			byRole[name] = append(byRole[name], role)
+		}
+		for b, rs := range byRole {
+			sort.Strings(rs)
+			for _, r := range rs {
+				roles[b] = append(roles[b], pname+"/"+r)
+			}
+		}
+	}
+	for b := range roles {
+		sort.Strings(roles[b])
+	}
+	return roles
+}
+
+// roleAttribution renders the referencing-profile hint appended to a failing
+// backend check's detail — e.g. " (required by premium/architect, ...)".
+// It is empty when there is no profile provenance to name (unprofiled
+// default).
+func roleAttribution(roles []string) string {
+	if len(roles) == 0 {
+		return ""
+	}
+	return " (required by " + strings.Join(roles, ", ") + ")"
 }
 
 func firstField(s string) string {

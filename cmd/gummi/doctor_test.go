@@ -25,10 +25,10 @@ func TestDoctorCodexUsesNativeLoginRemediation(t *testing.T) {
 	fakeAgentOnPath(t, "codex")
 	t.Setenv("GUMMI_AGENT", "codex")
 	r := buildDoctorReport(gitRepo(t))
-	if c := checkByName(r, "backend"); c.Status != statusOK || !strings.Contains(c.Detail, "codex") {
+	if c := checkByName(r, "backend:codex"); c.Status != statusOK || !strings.Contains(c.Detail, "codex") {
 		t.Fatalf("backend = %+v", c)
 	}
-	if c := checkByName(r, "auth"); !strings.Contains(c.Remediation, "codex login") {
+	if c := checkByName(r, "auth:codex"); !strings.Contains(c.Remediation, "codex login") {
 		t.Fatalf("auth = %+v", c)
 	}
 }
@@ -48,10 +48,19 @@ func gitRepo(t *testing.T) string {
 // that dir on PATH, so a headless backend check finds it hermetically.
 func fakeAgentOnPath(t *testing.T, bin string) {
 	t.Helper()
+	fakeAgentsOnPath(t, bin)
+}
+
+// fakeAgentsOnPath drops several executables into one fresh dir and puts
+// that dir on PATH, so a report can probe multiple backends at once.
+func fakeAgentsOnPath(t *testing.T, bins ...string) {
+	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, bin)
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, bin := range bins {
+		p := filepath.Join(dir, bin)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", dir)
 }
@@ -65,24 +74,38 @@ func checkByName(r doctorReport, name string) doctorCheck {
 	return doctorCheck{}
 }
 
+// headlessProfiles routes every role to the headless backend, so a test
+// that only exercises headless gets no unrelated backend:<name> checks.
+const headlessProfiles = `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: headless, model: qwen }
+    implementer: { backend: headless, model: qwen }
+    reviewer: { backend: headless, model: qwen }
+    scribe: { backend: headless, model: qwen }
+`
+
 // A repo with a present headless backend binary and a healthy envelope
 // reports ready (workspace/profile warns don't block). auth is handled
 // by the headless child, so it reads as ok.
 func TestDoctorReadyWithHeadlessAuth(t *testing.T) {
 	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, headlessProfiles)
 	fakeAgentOnPath(t, "fakeagent")
 	t.Setenv("GUMMI_AGENT", "headless")
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
 	t.Setenv("GUMMI_ENVELOPE", "500")
 
-	r := buildDoctorReport(gitRepo(t))
+	r := buildDoctorReport(repo)
 	if !r.Ready {
 		t.Fatalf("expected ready, got not ready: %+v", r.Checks)
 	}
-	if c := checkByName(r, "backend"); c.Status != statusOK {
+	if c := checkByName(r, "backend:headless"); c.Status != statusOK {
 		t.Errorf("backend = %+v, want ok", c)
 	}
-	if c := checkByName(r, "auth"); c.Status != statusOK {
+	if c := checkByName(r, "auth:headless"); c.Status != statusOK {
 		t.Errorf("auth = %+v, want ok", c)
 	}
 	if c := checkByName(r, "envelope"); c.Status != statusOK {
@@ -97,7 +120,7 @@ func TestDoctorBackendMissingBinary(t *testing.T) {
 	t.Setenv("GUMMI_CLAUDE_BIN", "gummi-no-such-binary-xyz")
 
 	r := buildDoctorReport(gitRepo(t))
-	if c := checkByName(r, "backend"); c.Status != statusFail {
+	if c := checkByName(r, "backend:claude"); c.Status != statusFail {
 		t.Errorf("backend = %+v, want fail", c)
 	}
 	if r.Ready {
@@ -109,12 +132,14 @@ func TestDoctorBackendMissingBinary(t *testing.T) {
 // --envelope); a sub-turn envelope also warns.
 func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, headlessProfiles)
 	fakeAgentOnPath(t, "fakeagent")
 	t.Setenv("GUMMI_AGENT", "headless")
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
 	// no envelope, no BYOK (auth becomes n/a for headless).
 
-	r := buildDoctorReport(gitRepo(t))
+	r := buildDoctorReport(repo)
 	if c := checkByName(r, "envelope"); c.Status != statusWarn {
 		t.Errorf("envelope = %+v, want warn", c)
 	}
@@ -177,5 +202,164 @@ func TestDoctorNoRepoFails(t *testing.T) {
 	}
 	if r.Ready {
 		t.Error("report is ready outside a git repo")
+	}
+}
+
+// writeProfiles writes a profiles.yaml under the repo's .gummi dir so the
+// report's profile and backend checks parse a real loaded profile set.
+func writeProfiles(t *testing.T, repo, body string) {
+	t.Helper()
+	dir := filepath.Join(repo, ".gummi")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profiles.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The bug fix: the default backend (copilot, since GUMMI_AGENT is unset)
+// is unused because every role names backend: opencode, so doctor judges
+// only opencode and reports ready despite copilot being absent from PATH.
+func TestDoctorProfileRoutesAwayFromDefault(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: gpt-5 }
+    implementer: { backend: opencode, model: gpt-5 }
+    reviewer: { backend: opencode, model: gpt-5 }
+    scribe: { backend: opencode, model: gpt-5 }
+`)
+	fakeAgentOnPath(t, "opencode") // PATH has opencode but not copilot
+
+	r := buildDoctorReport(repo)
+	if !r.Ready {
+		t.Fatalf("expected ready, got not ready: %+v", r.Checks)
+	}
+	if c := checkByName(r, "backend:opencode"); c.Status != statusOK {
+		t.Errorf("backend:opencode = %+v, want ok", c)
+	}
+	for _, c := range r.Checks {
+		if strings.HasPrefix(c.Name, "backend:copilot") || strings.HasPrefix(c.Name, "auth:copilot") {
+			t.Errorf("unexpected check for the unused default backend: %q", c.Name)
+		}
+	}
+}
+
+// A backend the profiles actually reference but whose binary is missing is
+// now caught — no blind spot for profile-referenced non-default backends.
+func TestDoctorRequiredNonDefaultBackendMissing(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: gpt-5 }
+    implementer: { backend: opencode, model: gpt-5 }
+    reviewer: { backend: opencode, model: gpt-5 }
+    scribe: { backend: opencode, model: gpt-5 }
+`)
+	// PATH holds nothing — opencode (and the copilot default) are absent.
+	t.Setenv("PATH", t.TempDir())
+
+	r := buildDoctorReport(repo)
+	if c := checkByName(r, "backend:opencode"); c.Status != statusFail {
+		t.Errorf("backend:opencode = %+v, want fail", c)
+	}
+	if r.Ready {
+		t.Error("report is ready with a missing required backend")
+	}
+	if c := checkByName(r, "backend:copilot"); c.Name != "" {
+		t.Errorf("expected no backend:copilot check, got %+v", c)
+	}
+}
+
+// With no profiles.yaml the seed template applies (omits backend on every
+// role), so the default backend is required and still probed.
+func TestDoctorDefaultRequiredWhenSeedTemplate(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_AGENT", "claude")
+	t.Setenv("GUMMI_CLAUDE_BIN", "gummi-no-such-binary-xyz")
+
+	r := buildDoctorReport(gitRepo(t))
+	if c := checkByName(r, "backend:claude"); c.Status != statusFail {
+		t.Errorf("backend:claude = %+v, want fail", c)
+	}
+	if r.Ready {
+		t.Error("report is ready with a missing default backend binary")
+	}
+}
+
+// A missing non-default backend's fail detail names the profile/role pairs
+// that pull it in, so an operator knows which profile to re-point.
+func TestDoctorBackendMissingNamesReferencingRoles(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: opencode, model: gpt-5 }
+    implementer: { backend: headless, model: qwen }
+    reviewer: { backend: opencode, model: gpt-5 }
+    scribe: { backend: headless, model: qwen }
+`)
+	// PATH holds nothing — opencode (and the copilot default) are absent.
+	fakeAgentsOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "opencode")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
+
+	r := buildDoctorReport(repo)
+	c := checkByName(r, "backend:opencode")
+	if c.Status != statusFail {
+		t.Fatalf("backend:opencode = %+v, want fail", c)
+	}
+	for _, want := range []string{"premium/architect", "premium/reviewer"} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("backend:opencode detail %q does not name referring role %q", c.Detail, want)
+		}
+	}
+}
+
+// The required set is ordered — default first, then the rest lexicographic
+// — and the ordering is stable across repeated runs.
+func TestDoctorRequiredBackendsOrder(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: claude, model: claude-opus-4.8 }
+    implementer: { backend: headless, model: qwen }
+    reviewer: { backend: opencode, model: gpt-5 }
+    scribe: { backend: opencode, model: gpt-5 }
+`)
+	fakeAgentsOnPath(t, "opencode", "claude", "fakeagent")
+	t.Setenv("GUMMI_AGENT", "opencode")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
+
+	var got []string
+	for _, c := range buildDoctorReport(repo).Checks {
+		if strings.HasPrefix(c.Name, "backend:") {
+			got = append(got, c.Name)
+		}
+	}
+	want := []string{"backend:opencode", "backend:claude", "backend:headless"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("backend order = %v, want %v", got, want)
+	}
+	var again []string
+	for _, c := range buildDoctorReport(repo).Checks {
+		if strings.HasPrefix(c.Name, "backend:") {
+			again = append(again, c.Name)
+		}
+	}
+	if strings.Join(again, ",") != strings.Join(want, ",") {
+		t.Errorf("backend order not deterministic: %v vs %v", again, want)
 	}
 }
