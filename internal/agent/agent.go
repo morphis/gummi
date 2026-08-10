@@ -72,6 +72,13 @@ type Identified interface {
 type SessionOpts struct {
 	// WorkDir is the feature's worktree; the agent's cwd.
 	WorkDir string
+	// ArtifactPath is the absolute path to the item's durable design
+	// artifact (a feature's spec, a bug's report) in the main checkout's
+	// workspace, which the stage agents read and write. It is absolute so
+	// adapters need not know the workspace root; it may be empty when the
+	// opts are constructed without going through the engine, and adapters
+	// that consume it must tolerate that.
+	ArtifactPath string
 	// Role labels the session for the orchestrator and logs.
 	Role Role
 	// Model is the concrete model id, e.g. "gpt-5", "claude-sonnet-4.5".

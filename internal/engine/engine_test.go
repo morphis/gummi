@@ -66,6 +66,18 @@ func feature(num int, title string, stage domain.Stage) domain.Feature {
 	}
 }
 
+// bugFeature builds a bug-kind work item (BG-NNN) the same way feature
+// does, so tests can cover the artifact-path naming across kinds.
+func bugFeature(num int, title string, stage domain.Stage) domain.Feature {
+	id, _ := domain.NewID(domain.KindBug, num)
+	slug, _ := domain.Slugify(title)
+	now := time.Now()
+	return domain.Feature{
+		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: stage,
+		CreatedAt: now, UpdatedAt: now,
+	}
+}
+
 func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
@@ -498,6 +510,34 @@ func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	}
 	if rec.opts().Role != agent.RoleImplementer {
 		t.Errorf("role = %s, want implementer", rec.opts().Role)
+	}
+}
+
+func TestArtifactPathOnStageSession(t *testing.T) {
+	for _, f := range []domain.Feature{
+		feature(1, "impl me", domain.StageImplement),
+		bugFeature(2, "flaky test", domain.StageFix),
+	} {
+		t.Run(string(f.ID), func(t *testing.T) {
+			ws, store, wt := newRepo(t)
+			rec := recordingAgent()
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			t.Cleanup(func() { e.Close() })
+
+			withWorktree(t, wt, f)
+			if err := e.Run(f); err != nil {
+				t.Fatal(err)
+			}
+			waitState(t, e, f.ID, StateDone)
+
+			want := filepath.Join(wt.Root(), f.ArtifactPath())
+			if rec.opts().ArtifactPath != want {
+				t.Errorf("ArtifactPath = %s, want promoted artifact %s", rec.opts().ArtifactPath, want)
+			}
+			if rec.opts().WorkDir == rec.opts().ArtifactPath {
+				t.Errorf("ArtifactPath %s must not be the worktree workdir", rec.opts().ArtifactPath)
+			}
+		})
 	}
 }
 

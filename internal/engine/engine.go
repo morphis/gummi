@@ -681,6 +681,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:        workDir,
+		ArtifactPath:   specPath,
 		Role:           role,
 		Model:          model,
 		SystemHints:    hints,
