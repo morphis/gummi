@@ -262,3 +262,208 @@ func TestRecreateClearsDrift(t *testing.T) {
 		t.Fatalf("recreated worktree still refuses: %v", err)
 	}
 }
+
+// Landed refuses on drift: the is-ancestor vs squash-landed disagreement
+// from the Problem statement must surface as a typed ForkDriftError, never
+// as an ambiguous bool.
+func TestLandedRefusesOnDrift(t *testing.T) {
+	root := newRepo(t)
+	fs := &memForkStore{}
+	m, err := NewManager(ctx, root, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := feature(1, "Landed drift")
+	if _, err := m.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := fs.ForkPoint(ctx, f.ID)
+	if err != nil || recorded == "" {
+		t.Fatalf("no recorded fork: %q, %v", recorded, err)
+	}
+
+	rewindMainBackward(t, root)
+
+	landed, err := m.Landed(ctx, f)
+	if err == nil {
+		t.Fatalf("Landed returned (%v, nil) despite drift", landed)
+	}
+	var fe *ForkDriftError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want *ForkDriftError, got %T: %v", err, err)
+	}
+	if fe.Recorded != recorded {
+		t.Errorf("Recorded = %s, want %s", fe.Recorded, recorded)
+	}
+	if fe.MainHead != mustGit(t, root, "rev-parse", "HEAD") {
+		t.Errorf("MainHead = %s, want main HEAD", fe.MainHead)
+	}
+}
+
+// A forward advance of main leaves the recorded fork an ancestor, so
+// Landed keeps its normal boolean-returning behavior — no drift refusal.
+func TestLandedForwardAdvancePasses(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Landed forward")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "feat.txt", "feature\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "feature work")
+	writeFile(t, root, "main.txt", "main\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "main advance")
+
+	landed, err := m.Landed(ctx, f)
+	if err != nil {
+		t.Fatalf("Landed refused on forward advance: %v", err)
+	}
+	if landed {
+		t.Fatal("branch with unmerged work read as landed")
+	}
+}
+
+// CommitAll refuses on drift before staging: the branch tip is
+// byte-identical before and after (no add, no commit).
+func TestCommitAllRefusesOnDrift(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "CommitAll drift")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "dirty.txt", "uncommitted\n")
+	branch := "refs/heads/" + f.BranchName()
+	before := mustGit(t, root, "rev-parse", branch)
+
+	rewindMainBackward(t, root)
+
+	done, err := m.CommitAll(ctx, f, "checkpoint")
+	if err == nil {
+		t.Fatalf("CommitAll returned (%v, nil) despite drift", done)
+	}
+	var fe *ForkDriftError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want *ForkDriftError, got %T: %v", err, err)
+	}
+	if after := mustGit(t, root, "rev-parse", branch); after != before {
+		t.Fatalf("branch tip moved despite refusal: %s → %s", before, after)
+	}
+}
+
+// A forward advance of main lets CommitAll proceed normally: the dirty
+// work is committed and the branch tip moves.
+func TestCommitAllForwardAdvancePasses(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "CommitAll forward")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "dirty.txt", "uncommitted\n")
+	branch := "refs/heads/" + f.BranchName()
+	before := mustGit(t, root, "rev-parse", branch)
+
+	writeFile(t, root, "main.txt", "main\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "main advance")
+
+	done, err := m.CommitAll(ctx, f, "checkpoint")
+	if err != nil {
+		t.Fatalf("CommitAll refused on forward advance: %v", err)
+	}
+	if !done {
+		t.Fatal("CommitAll made no commit for a dirty worktree")
+	}
+	if after := mustGit(t, root, "rev-parse", branch); after == before {
+		t.Fatal("branch tip did not move after CommitAll")
+	}
+}
+
+// The cleanup escape hatches must not be blocked by drift: an operator
+// facing a ForkDriftError has to be able to tear the affected worktree
+// down. Remove on a clean worktree succeeds without force and clears the
+// recorded fork.
+func TestRemoveSurvivesDrift(t *testing.T) {
+	root := newRepo(t)
+	fs := &memForkStore{}
+	m, err := NewManager(ctx, root, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := feature(1, "Remove drift")
+	if _, err := m.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	rewindMainBackward(t, root)
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("expected drift after rewind")
+	}
+
+	if err := m.Remove(ctx, f, false); err != nil {
+		t.Fatalf("Remove refused on drift: %v", err)
+	}
+	if got, err := fs.ForkPoint(ctx, f.ID); err != nil || got != "" {
+		t.Fatalf("fork not cleared after Remove: %q, %v", got, err)
+	}
+}
+
+// DeleteBranch is another cleanup hatch: force=true is the operator
+// semantic under drift, since the branch sits on the pre-rewind lineage
+// and git's -d ancestry check would refuse it as "not fully merged".
+func TestDeleteBranchSurvivesDrift(t *testing.T) {
+	root := newRepo(t)
+	fs := &memForkStore{}
+	m, err := NewManager(ctx, root, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := feature(1, "DeleteBranch drift")
+	if _, err := m.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	rewindMainBackward(t, root)
+	if err := m.Remove(ctx, f, true); err != nil {
+		t.Fatalf("Remove failed: %v", err)
+	}
+	if err := m.DeleteBranch(ctx, f, true); err != nil {
+		t.Fatalf("DeleteBranch refused on drift: %v", err)
+	}
+	if got, err := fs.ForkPoint(ctx, f.ID); err != nil || got != "" {
+		t.Fatalf("fork not cleared after DeleteBranch: %q, %v", got, err)
+	}
+}
+
+// DeleteLandedBranch goes through the private squashLanded, never the
+// guarded public Landed, so drift must never block the teardown — whatever
+// git's own -d verdict is, it is not a ForkDriftError.
+func TestDeleteLandedBranchBypassesGuard(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Landed bypass")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "sq.txt", "feature work\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "feature commit")
+
+	rewindMainBackward(t, root)
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("expected drift after rewind")
+	}
+
+	err = m.DeleteLandedBranch(ctx, f)
+	var fe *ForkDriftError
+	if errors.As(err, &fe) {
+		t.Fatalf("DeleteLandedBranch surfaced ForkDriftError: %v", err)
+	}
+}

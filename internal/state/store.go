@@ -452,11 +452,17 @@ func (s *Store) SetForkPoint(ctx context.Context, id domain.FeatureID, sha strin
 
 // ForkPoint reads a feature's recorded fork-point SHA — the empty string
 // when the worktree predates drift detection (the lazy-backfill sentinel).
+// A feature without a row reads the same way: it has no fork to guard
+// against, so the guard treats it as needing an initial anchor rather than
+// hard-failing.
 func (s *Store) ForkPoint(ctx context.Context, id domain.FeatureID) (string, error) {
 	var sha string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT fork_point FROM features WHERE id = ?`, string(id)).Scan(&sha)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
 		return "", fmt.Errorf("reading fork-point for %s: %w", id, err)
 	}
 	return sha, nil

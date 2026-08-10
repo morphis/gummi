@@ -250,6 +250,13 @@ func (m *Manager) CommitAll(ctx context.Context, f *domain.Feature, message stri
 	if err != nil {
 		return false, err
 	}
+	// Refuse before staging anything: if main was rewound past the recorded
+	// fork, a checkpoint would stack on a branch whose base is no longer
+	// coherent with main. Returning early leaves the branch tip byte-identical
+	// and hands the operator a ForkDriftError naming the remedy.
+	if err := m.AssertNoForkDrift(ctx, f); err != nil {
+		return false, err
+	}
 	if _, err := runGit(ctx, p, "add", "-A"); err != nil {
 		return false, err
 	}
@@ -448,6 +455,15 @@ func (m *Manager) MainDirtyPaths(ctx context.Context) ([]string, error) {
 // A branch merged by fast-forward while main had no other activity (HEAD
 // == branch tip) still reads as not-yet-landed until main next advances.
 func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
+	// A rewrite of main (a rewind or rebase past the recorded fork) makes
+	// the is-ancestor and squash-landed routes disagree: the branch reads
+	// as unmerged by ancestry yet content-landed by squash detection. Refuse
+	// the ambiguous result instead — the caller hears a ForkDriftError and
+	// can recreate the worktree from current main rather than trust a bool
+	// that hides the failure.
+	if err := m.AssertNoForkDrift(ctx, f); err != nil {
+		return false, err
+	}
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return false, err
@@ -737,15 +753,17 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 			return err
 		}
 		if err := m.forkStore.SetForkPoint(ctx, f.ID, recorded); err != nil {
-			// A concurrent create or backfill stamped the fork first; adopt
-			// the recorded value it wrote rather than fail the operation.
-			// Anything else is a genuine store error and must propagate.
+			// A concurrent create or backfill (or a store row that cannot hold
+			// a fork point — no feature row — under the stamped-once guard)
+			// means we cannot persist our anchor. Adopt whatever the store has
+			// when it can say so; otherwise fall back to the merge-base we just
+			// computed so the check still runs rather than hard-failing on a
+			// store that cannot backfill.
 			if !errors.Is(err, state.ErrForkPointStamped) {
 				return err
 			}
-			recorded, err = m.forkStore.ForkPoint(ctx, f.ID)
-			if err != nil {
-				return err
+			if cur, rerr := m.forkStore.ForkPoint(ctx, f.ID); rerr == nil && cur != "" {
+				recorded = cur
 			}
 		} else {
 			log.Printf("drift detection for %s starts from %s", f.ID, recorded)

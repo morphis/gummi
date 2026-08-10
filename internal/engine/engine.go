@@ -718,6 +718,13 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	if !hasWT {
 		return "", "", fmt.Errorf("feature %s at stage %s has no worktree; approve the spec to create one first", f.ID, f.Stage)
 	}
+	// A rewrite of main reported after the worktree was created makes the
+	// on-disk branch's base incoherent with main; refuse before promoting the
+	// artifact or handing the agent a workdir it can only deepen the
+	// divergence in. The operator recreates the worktree from current main.
+	if err := e.cfg.Worktrees.AssertNoForkDrift(ctx, &f); err != nil {
+		return "", "", err
+	}
 	workDir = filepath.Join(root, f.WorktreePath())
 	artifact := filepath.Join(root, f.ArtifactPath())
 	if err := spec.Promote(artifact, draft, filepath.Join(workDir, f.ArtifactPath()), &f); err != nil {
