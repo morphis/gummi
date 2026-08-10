@@ -49,7 +49,7 @@ func newRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root)
+	wt, err := worktree.NewManager(context.Background(), root, store)
 	if err != nil {
 		t.Fatal(err)
 	}

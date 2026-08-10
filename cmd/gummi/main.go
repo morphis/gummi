@@ -93,7 +93,7 @@ func runBoard() error {
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd, store)
 	if err != nil {
 		return err
 	}
@@ -345,8 +345,8 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 // the product repo's tracking (exclude + untrack-if-tracked) before any
 // agent session can touch the repo. Exclusion problems warn rather than
 // block the launch: the board still works.
-func newManager(ctx context.Context, cwd string) (*worktree.Manager, error) {
-	wt, err := worktree.NewManager(ctx, cwd)
+func newManager(ctx context.Context, cwd string, fs worktree.ForkPointStore) (*worktree.Manager, error) {
+	wt, err := worktree.NewManager(ctx, cwd, fs)
 	if err != nil {
 		return nil, err
 	}

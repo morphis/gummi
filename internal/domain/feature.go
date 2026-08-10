@@ -160,6 +160,12 @@ type Feature struct {
 	// StageDone, which a merge sets: a verified branch is ready to land, not
 	// yet landed.
 	VerifiedAt time.Time
+	// ForkPoint is the commit SHA that was `git merge-base main <branch>`
+	// when the item's worktree was created — the anchor used to detect
+	// fork-point drift (main rewound past the recorded fork). Empty until
+	// the worktree is created (or, for pre-existing worktrees, until the
+	// first diff-based access lazily backfills it).
+	ForkPoint string
 }
 
 // Kind returns the feature's kind, treating the empty default as a

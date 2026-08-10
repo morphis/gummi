@@ -15,10 +15,7 @@ import (
 // its origin — and leaves MainTrackedDirty's behavior untouched.
 func TestMainDirtyPathsMixedstate(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 
 	writeFile(t, root, "tracked_clean.go", "package main\n")
 	writeFile(t, root, "tracked_staged.go", "package main\n")
@@ -67,10 +64,7 @@ func TestMainDirtyPathsMixedstate(t *testing.T) {
 // entry.
 func TestMainDirtyPathsRenameDestination(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	writeFile(t, root, "old.go", "package main\n")
 	mustGit(t, root, "add", ".")
 	mustGit(t, root, "commit", "-q", "-m", "seed")
@@ -90,10 +84,7 @@ func TestMainDirtyPathsRenameDestination(t *testing.T) {
 // TestMainDirtyPathsClean returns an empty set on a clean tree.
 func TestMainDirtyPathsClean(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	paths, err := m.MainDirtyPaths(ctx)
 	if err != nil {
 		t.Fatal(err)

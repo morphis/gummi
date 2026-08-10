@@ -211,7 +211,7 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (drive
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd, store)
 	if err != nil {
 		return err
 	}

@@ -9,10 +9,7 @@ import (
 
 func TestEnsureGummiExcludedIdempotent(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	for i := 0; i < 2; i++ {
 		if untracked, err := m.EnsureGummiExcluded(ctx); err != nil || untracked {
 			t.Fatalf("pass %d: untracked=%v err=%v", i, untracked, err)
@@ -40,10 +37,7 @@ func TestEnsureGummiExcludedUntracksWithoutTouchingDisk(t *testing.T) {
 	mustGit(t, root, "add", "-f", ".gummi")
 	mustGit(t, root, "commit", "-q", "-m", "poisoned")
 
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	untracked, err := m.EnsureGummiExcluded(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -109,10 +103,7 @@ func TestCreateUntracksGummiInWorktree(t *testing.T) {
 	mustGit(t, root, "add", "-f", ".gummi")
 	mustGit(t, root, "commit", "-q", "-m", "poisoned")
 
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -149,10 +140,7 @@ func TestLandAfterWorktreeUntrack(t *testing.T) {
 	mustGit(t, root, "add", "-f", ".gummi")
 	mustGit(t, root, "commit", "-q", "-m", "poisoned")
 
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -185,10 +173,7 @@ func TestRebaseAfterWorktreeUntrack(t *testing.T) {
 	mustGit(t, root, "add", "-f", ".gummi")
 	mustGit(t, root, "commit", "-q", "-m", "poisoned")
 
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	if _, err := m.EnsureGummiExcluded(ctx); err != nil {
 		t.Fatal(err)
 	}

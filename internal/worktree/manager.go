@@ -3,7 +3,9 @@ package worktree
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,7 +13,26 @@ import (
 	"sync"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
+
+// ForkPointStore is the subset of the state store the manager needs to
+// persist and read a feature's recorded fork-point SHA. The concrete
+// *state.Store satisfies it; tests swap in an in-memory stub.
+type ForkPointStore interface {
+	// ForkPoint reads a feature's recorded fork-point SHA; the empty string
+	// when the worktree predates drift detection (the lazy-backfill sentinel).
+	ForkPoint(ctx context.Context, id domain.FeatureID) (string, error)
+	// SetForkPoint stamps the SHA. It refuses to overwrite a non-empty value
+	// (stamped-once invariant, reported via state.ErrForkPointStamped), so
+	// Create and the lazy backfill cannot race a stored SHA into being
+	// overwritten.
+	SetForkPoint(ctx context.Context, id domain.FeatureID, sha string) error
+	// ClearForkPoint resets a feature's recorded fork-point SHA to the empty
+	// backfill sentinel, so the next Create on the row re-anchors the fork to
+	// main's then-current head.
+	ClearForkPoint(ctx context.Context, id domain.FeatureID) error
+}
 
 // Manager creates and tends the per-feature git worktrees nested under
 // <root>/.gummi/worktrees. Every git invocation uses argument arrays;
@@ -21,6 +42,10 @@ import (
 type Manager struct {
 	root string // absolute physical path of the main checkout
 
+	// forkStore persists each worktree's recorded fork-point SHA, the
+	// anchor diff-based stages check against for drift.
+	forkStore ForkPointStore
+
 	// mainMu serializes gummi-initiated mutations of the main checkout
 	// (squash merges).
 	mainMu sync.Mutex
@@ -28,7 +53,7 @@ type Manager struct {
 
 // NewManager binds a manager to the repo rooted at root. It verifies
 // root really is the top level of a git working tree.
-func NewManager(ctx context.Context, root string) (*Manager, error) {
+func NewManager(ctx context.Context, root string, fs ForkPointStore) (*Manager, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -52,7 +77,7 @@ func NewManager(ctx context.Context, root string) (*Manager, error) {
 	}
 	// Keep the physical path: git prints physical paths (e.g. in
 	// worktree list), so all later comparisons must share the namespace.
-	return &Manager{root: realAbs}, nil
+	return &Manager{root: realAbs, forkStore: fs}, nil
 }
 
 // Root returns the absolute repo root the manager is bound to.
@@ -164,6 +189,27 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 		}
 		return "", fmt.Errorf("untracking .gummi in new worktree: %w", err)
 	}
+	// Record the fork point — merge-base(main HEAD, branch) at creation —
+	// so diff-based stages can later detect if main is rewound past it.
+	// This happens after the untrack succeeds, so a rolled-back creation
+	// never leaves a stored SHA pointing at a nonexistent worktree.
+	recorded, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	if err != nil {
+		if _, rmErr := runGit(ctx, m.root, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.root, "branch", "-D", "--", branch)
+		}
+		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
+	}
+	// Stamp the fresh fork. A recreated worktree reuses the feature row, so
+	// a still-recorded SHA from a prior incarnation is tolerated (the row is
+	// never overwritten — stamped once), matching Remove/DeleteBranch, which
+	// clear it; only a genuine write error rolls the creation back.
+	if err := m.forkStore.SetForkPoint(ctx, f.ID, recorded); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
+		if _, rmErr := runGit(ctx, m.root, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.root, "branch", "-D", "--", branch)
+		}
+		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
+	}
 	return p, nil
 }
 
@@ -183,7 +229,10 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 	if _, err := runGit(ctx, m.root, args...); err != nil {
 		return err
 	}
-	return nil
+	// The worktree is gone, so its recorded fork is meaningless. Clear it so
+	// a recreate re-anchors to main's then-current head instead of keeping a
+	// stale SHA that would trip the drift guard forever.
+	return m.forkStore.ClearForkPoint(ctx, f.ID)
 }
 
 // CommitAll stages everything in the feature's worktree — tracked edits
@@ -237,8 +286,13 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 	if force {
 		flag = "-D"
 	}
-	_, err = runGit(ctx, m.root, "branch", flag, "--", branch)
-	return err
+	if _, err := runGit(ctx, m.root, "branch", flag, "--", branch); err != nil {
+		return err
+	}
+	// The branch is gone; a later Create makes a fresh branch from main's
+	// current head, so the recorded fork no longer describes it — clear it to
+	// let that recreate re-anchor without tripping the drift guard.
+	return m.forkStore.ClearForkPoint(ctx, f.ID)
 }
 
 // DeleteLandedBranch removes the feature's branch after its work landed
@@ -599,6 +653,17 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	}
 	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
 	if err != nil {
+		// merge-base gives up when main and branch share no common
+		// ancestor — the signature of a rewind that took main to a
+		// disconnected history. That is drift, so run the guard first so a
+		// real rewind surfaces as the typed ForkDriftError; anything else
+		// propagates the merge-base failure.
+		if derr := m.AssertNoForkDrift(ctx, f); derr != nil {
+			return derr
+		}
+		return err
+	}
+	if err := m.assertNoForkDriftAgainstBase(ctx, f, base); err != nil {
 		return err
 	}
 	if n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch); err != nil {
@@ -633,6 +698,100 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	return nil
 }
 
+// ForkDriftError reports that the feature's recorded fork point is no
+// longer an ancestor of main's current HEAD — i.e. main was rewound past
+// where the worktree's branch originally forked, so a diff-based stage
+// would present commits the feature did not author as its own. Recorded
+// and MainHead are the two commit SHAs. Recreating the worktree against
+// the current main is the v1-recommended remedy.
+type ForkDriftError struct {
+	// Recorded is the fork point stamped at worktree-creation time.
+	Recorded string
+	// MainHead is main's current HEAD — the commit main was rewound to.
+	MainHead string
+}
+
+func (e *ForkDriftError) Error() string {
+	return fmt.Sprintf("fork drift: main was rewound past %s (recorded fork at %s); the diff would include commits this work item did not author. Recreate the worktree from current main to recover", e.MainHead, e.Recorded)
+}
+
+// AssertNoForkDrift refuses a diff-based operation when the feature's
+// recorded fork point is no longer an ancestor of main's current HEAD —
+// main was rewound backward past where the branch forked, so the live
+// merge-base has slid with it and would re-introduce already-merged
+// commits as the feature's own. Forward advances of main leave the stored
+// SHA as an ancestor and pass. A worktree with no recorded fork point
+// (created before drift detection existed) is lazily anchored to
+// merge-base(main, branch) as it reads now, with a one-line note.
+func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) error {
+	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	if err != nil {
+		return err
+	}
+	// Lazy backfill: anchor the recorded fork from the current merge-base
+	// for worktrees predating drift detection. Drift already suffered by
+	// them is unreconstructable; detection starts from here.
+	if recorded == "" {
+		recorded, err = runGit(ctx, m.root, "merge-base", "HEAD", f.BranchName())
+		if err != nil {
+			return err
+		}
+		if err := m.forkStore.SetForkPoint(ctx, f.ID, recorded); err != nil {
+			// A concurrent create or backfill stamped the fork first; adopt
+			// the recorded value it wrote rather than fail the operation.
+			// Anything else is a genuine store error and must propagate.
+			if !errors.Is(err, state.ErrForkPointStamped) {
+				return err
+			}
+			recorded, err = m.forkStore.ForkPoint(ctx, f.ID)
+			if err != nil {
+				return err
+			}
+		} else {
+			log.Printf("drift detection for %s starts from %s", f.ID, recorded)
+		}
+	}
+	// Check ancestry directly against the main checkout's HEAD ref. The
+	// pass-through path costs a single git invocation: the recorded SHA is
+	// accepted as-is by --is-ancestor, so no separate HEAD resolution is
+	// needed unless drift is actually detected (where the resolved SHA is
+	// required for the error message). We deliberately do NOT fold this
+	// into a caller's own merge-base computation: drift is defined against
+	// main HEAD, not the live merge-base, so reusing the latter would flag
+	// a legitimate branch rebase as drift.
+	ok, err := gitOK(ctx, m.root, "merge-base", "--is-ancestor", recorded, "HEAD")
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	mainHead, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	return &ForkDriftError{Recorded: recorded, MainHead: mainHead}
+}
+
+// assertNoForkDriftAgainstBase is AssertNoForkDrift with the live
+// merge-base already computed. If that merge-base still equals the
+// recorded fork point, drift is impossible by construction — a merge-base
+// is a common ancestor of main HEAD, hence an ancestor of it — so no
+// ancestry git call is needed. Otherwise it defers to the full check.
+// This is the merge path's zero-extra-call case: the common pass where
+// main has not rewound past the fork reuses the merge-base SquashMerge
+// already computed instead of spawning a second git invocation.
+func (m *Manager) assertNoForkDriftAgainstBase(ctx context.Context, f *domain.Feature, base string) error {
+	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	if err != nil {
+		return err
+	}
+	if recorded != "" && base == recorded {
+		return nil
+	}
+	return m.AssertNoForkDrift(ctx, f)
+}
+
 // Diff returns the unified diff of the feature branch against the point
 // it forked from main: the merge base to the worktree (so both committed
 // branch work and uncommitted edits show, without main's later commits
@@ -640,6 +799,9 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 	p, err := m.requireWorktree(f)
 	if err != nil {
+		return "", err
+	}
+	if err := m.AssertNoForkDrift(ctx, f); err != nil {
 		return "", err
 	}
 	mainHead, err := runGit(ctx, m.root, "rev-parse", "HEAD")

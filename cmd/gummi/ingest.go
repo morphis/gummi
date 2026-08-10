@@ -50,7 +50,7 @@ func runIngest(args []string) error {
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd, store)
 	if err != nil {
 		return err
 	}

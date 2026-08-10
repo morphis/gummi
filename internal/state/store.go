@@ -19,6 +19,13 @@ import (
 // ErrNotFound is returned when a feature ID has no row.
 var ErrNotFound = errors.New("feature not found")
 
+// ErrForkPointStamped is returned by SetForkPoint when the feature row
+// already records a fork-point SHA. It is the "stamped once" refusal that
+// keeps Create and the lazy backfill from racing a stored SHA into being
+// overwritten; callers distinguish it from a genuine store error with
+// errors.Is.
+var ErrForkPointStamped = errors.New("fork point already stamped")
+
 // Store persists features and their transition history in SQLite.
 type Store struct {
 	db *sql.DB
@@ -49,7 +56,8 @@ CREATE TABLE IF NOT EXISTS features (
 	skip_diagnose   INTEGER NOT NULL DEFAULT 0,
 	quick           INTEGER NOT NULL DEFAULT 0,
 	verified_at     TEXT NOT NULL DEFAULT '',
-	gate_approval   TEXT NOT NULL DEFAULT ''
+	gate_approval   TEXT NOT NULL DEFAULT '',
+	fork_point      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
@@ -269,6 +277,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN verified_at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN gate_approval TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN severity TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -301,13 +310,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, budget_spent, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope, f.Budget.Spent,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity))
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -318,7 +327,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -330,7 +339,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Budget.Envelope, &f.Budget.Spent,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint)
 	if err != nil {
 		return f, err
 	}
@@ -409,6 +418,59 @@ func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode s
 		`UPDATE features SET gate_approval = ? WHERE id = ?`, mode, string(id))
 	if err != nil {
 		return fmt.Errorf("setting gate-approval for %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetForkPoint stamps a feature's recorded fork-point SHA. It is a
+// side-channel write (it neither touches updated_at nor moves the stage) —
+// the worktree manager records it at worktree-creation time so diff-based
+// stages can detect later fork drift. It is stamped exactly once: the empty
+// string is the sentinel for "recorded at creation or lazily backfilled",
+// so an UPDATE is refused unless the row currently holds the "" sentinel,
+// guaranteeing Create and the lazy backfill can never race a stored SHA
+// into being overwritten. sha must be non-empty and not already recorded.
+func (s *Store) SetForkPoint(ctx context.Context, id domain.FeatureID, sha string) error {
+	if sha == "" {
+		return fmt.Errorf("setting fork-point for %s: refusing an empty SHA", id)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE features SET fork_point = ? WHERE id = ? AND fork_point = ''`,
+		sha, string(id))
+	if err != nil {
+		return fmt.Errorf("setting fork-point for %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("setting fork-point for %s: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("setting fork-point for %s: %w", id, ErrForkPointStamped)
+	}
+	return nil
+}
+
+// ForkPoint reads a feature's recorded fork-point SHA — the empty string
+// when the worktree predates drift detection (the lazy-backfill sentinel).
+func (s *Store) ForkPoint(ctx context.Context, id domain.FeatureID) (string, error) {
+	var sha string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT fork_point FROM features WHERE id = ?`, string(id)).Scan(&sha)
+	if err != nil {
+		return "", fmt.Errorf("reading fork-point for %s: %w", id, err)
+	}
+	return sha, nil
+}
+
+// ClearForkPoint resets a feature's recorded fork-point SHA to the empty
+// backfill sentinel. It is called when a feature's worktree is removed or
+// its branch deleted, so a later recreate re-anchors the fork to main as it
+// reads then instead of keeping a now-stale SHA. It never fails when the
+// row exists, regardless of whether a fork was previously recorded.
+func (s *Store) ClearForkPoint(ctx context.Context, id domain.FeatureID) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE features SET fork_point = '' WHERE id = ?`, string(id)); err != nil {
+		return fmt.Errorf("clearing fork-point for %s: %w", id, err)
 	}
 	return nil
 }

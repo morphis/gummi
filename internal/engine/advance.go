@@ -170,6 +170,17 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		}
 	}
 
+	// Advancing into Review hands a human reviewer (and, after this commit
+	// landed, an autonomous review agent) a diff of the feature's work. The
+	// agent shells out to git itself rather than routing through
+	// Manager.Diff(), so this transition is the last place the engine can
+	// fail cleanly before the reviewer sees a poisoned diff: refuse to
+	// enter Review if main was rewound past the recorded fork.
+	if next == domain.StageReview {
+		if err := e.cfg.Worktrees.AssertNoForkDrift(ctx, &f); err != nil {
+			return res, err
+		}
+	}
 	if _, err := e.cfg.Store.Transition(ctx, id, next, actor); err != nil {
 		return res, err
 	}

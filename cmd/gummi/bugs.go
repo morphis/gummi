@@ -39,7 +39,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wt, err := newManager(context.Background(), cwd)
+	wt, err := newManager(context.Background(), cwd, store)
 	if err != nil {
 		_ = store.Close()
 		return nil, err

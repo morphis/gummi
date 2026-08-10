@@ -7,10 +7,7 @@ import (
 
 func TestCommitAll(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(7, "Checkpoint me")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -49,10 +46,7 @@ func TestCommitAll(t *testing.T) {
 
 func TestCommitAllEmptyMessageRefused(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(7, "Checkpoint me")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -68,10 +62,7 @@ func TestCommitAllEmptyMessageRefused(t *testing.T) {
 
 func TestCommitAllNoWorktree(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(7, "Checkpoint me")
 	if _, err := m.CommitAll(ctx, f, "msg"); err == nil || !strings.Contains(err.Error(), "no worktree") {
 		t.Fatalf("err = %v, want a no-worktree refusal", err)

@@ -42,7 +42,7 @@ func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Manager,
 		return err
 	}
 	defer store.Close()
-	wt, err := worktree.NewManager(context.Background(), cwd)
+	wt, err := worktree.NewManager(context.Background(), cwd, store)
 	if err != nil {
 		return err
 	}

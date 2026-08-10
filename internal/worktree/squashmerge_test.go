@@ -14,10 +14,7 @@ import (
 // returns the manager, feature, and worktree path.
 func committedFeature(t *testing.T, root string) (*Manager, *domain.Feature, string) {
 	t.Helper()
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(9, "Land me")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -116,10 +113,7 @@ func TestSquashMergeUntrackedMainFileOK(t *testing.T) {
 
 func TestSquashMergeNothingToMerge(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(9, "Land me")
 	if _, err := m.Create(ctx, f); err != nil {
 		t.Fatal(err)
@@ -142,10 +136,7 @@ func TestSquashMergeEmptyMessageRefused(t *testing.T) {
 
 func TestSquashMergeMissingBranch(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(9, "Land me")
 	if err := m.SquashMerge(ctx, f, "FD-009: land me"); err == nil || !strings.Contains(err.Error(), "no branch") {
 		t.Fatalf("err = %v, want missing-branch refusal", err)

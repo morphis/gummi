@@ -3,16 +3,72 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 var ctx = context.Background()
+
+// memForkStore is an in-memory ForkPointStore for worktree tests: a map
+// keyed by feature ID. SetForkPoint refuses to overwrite a non-empty value,
+// mirroring the real store's stamped-once contract, so the package's own
+// tests exercise drift semantics without gaining a state dependency.
+type memForkStore struct {
+	mu sync.Mutex
+	m  map[domain.FeatureID]string
+}
+
+func (s *memForkStore) ForkPoint(_ context.Context, id domain.FeatureID) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		return "", nil
+	}
+	return s.m[id], nil
+}
+
+func (s *memForkStore) SetForkPoint(_ context.Context, id domain.FeatureID, sha string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[domain.FeatureID]string{}
+	}
+	if cur, ok := s.m[id]; ok && cur != "" {
+		return fmt.Errorf("%w: fork-point already recorded", state.ErrForkPointStamped)
+	}
+	s.m[id] = sha
+	return nil
+}
+
+func (s *memForkStore) ClearForkPoint(_ context.Context, id domain.FeatureID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[domain.FeatureID]string{}
+	}
+	delete(s.m, id)
+	return nil
+}
+
+// newManager binds a worktree manager in a test, wiring a fresh in-memory
+// fork-point store so Create's stamp and the drift guard share state.
+// Failures call t.Fatal, mirroring the test helpers around it.
+func newManager(t *testing.T, root string) *Manager {
+	t.Helper()
+	m, err := NewManager(ctx, root, &memForkStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
 
 // newRepo creates a throwaway repo with one commit and returns its root.
 func newRepo(t *testing.T) string {
@@ -64,7 +120,7 @@ func feature(num int, title string) *domain.Feature {
 }
 
 func TestNewManagerRejectsNonRepo(t *testing.T) {
-	if _, err := NewManager(ctx, t.TempDir()); err == nil {
+	if _, err := NewManager(ctx, t.TempDir(), &memForkStore{}); err == nil {
 		t.Fatal("non-repo accepted")
 	}
 }
@@ -75,17 +131,14 @@ func TestNewManagerRejectsSubdir(t *testing.T) {
 	if err := os.Mkdir(sub, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewManager(ctx, sub); err == nil {
+	if _, err := NewManager(ctx, sub, &memForkStore{}); err == nil {
 		t.Fatal("subdir accepted as repo root")
 	}
 }
 
 func TestCreateAndRemove(t *testing.T) {
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(42, "Dark mode")
 
 	p, err := m.Create(ctx, f)
@@ -137,10 +190,7 @@ func TestCreateInEmptyRepoFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	if _, err := m.Create(ctx, feature(1, "Too early")); err == nil {
 		t.Fatal("create in commitless repo accepted")
 	}
@@ -148,7 +198,7 @@ func TestCreateInEmptyRepoFails(t *testing.T) {
 
 func TestDirty(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(1, "CSV export")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -172,7 +222,7 @@ func TestDirty(t *testing.T) {
 
 func TestTrackedDirty(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(1, "rework")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -192,7 +242,7 @@ func TestTrackedDirty(t *testing.T) {
 
 func TestLanded(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(7, "Auth fix")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -220,7 +270,7 @@ func TestLanded(t *testing.T) {
 
 func TestRebaseOnMain(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(9, "Search")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -246,7 +296,7 @@ func TestRebaseOnMain(t *testing.T) {
 
 func TestRebaseConflictAbortsCleanly(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(10, "Conflict")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -291,10 +341,7 @@ func TestRebaseConflictAbortsCleanly(t *testing.T) {
 func conflictedWorktree(t *testing.T) (*Manager, *domain.Feature, string) {
 	t.Helper()
 	root := newRepo(t)
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	f := feature(11, "Helper")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -368,7 +415,7 @@ func TestRebasedOnMain(t *testing.T) {
 
 func TestLandedSquashMerge(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(8, "Squash me")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -398,7 +445,7 @@ func TestLandedFalseForFreshBranch(t *testing.T) {
 	// a just-created branch sits at main's HEAD (a trivial ancestor); it
 	// must not be reported as landed.
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(7, "Fresh")
 	if _, err := m.Create(ctx, f); err != nil {
 		t.Fatal(err)
@@ -410,7 +457,7 @@ func TestLandedFalseForFreshBranch(t *testing.T) {
 
 func TestList(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	if paths, err := m.List(ctx); err != nil || len(paths) != 0 {
 		t.Fatalf("List on fresh repo = %v, %v", paths, err)
 	}
@@ -433,7 +480,7 @@ func TestList(t *testing.T) {
 
 func TestCreateAfterRemoveNamesLeftoverBranch(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(3, "Recreate")
 	if _, err := m.Create(ctx, f); err != nil {
 		t.Fatal(err)
@@ -456,7 +503,7 @@ func TestCreateAfterRemoveNamesLeftoverBranch(t *testing.T) {
 
 func TestRebaseOnDirtyWorktreeIsNotScary(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(4, "Dirty rebase")
 	p, err := m.Create(ctx, f)
 	if err != nil {
@@ -486,10 +533,7 @@ func TestSymlinkedWorktreesDirRefused(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(root, ".gummi", "worktrees")); err != nil {
 		t.Fatal(err)
 	}
-	m, err := NewManager(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newManager(t, root)
 	if _, err := m.Create(ctx, feature(5, "Escape attempt")); err == nil {
 		t.Fatal("Create wrote through a symlinked worktrees dir")
 	}
@@ -500,7 +544,7 @@ func TestSymlinkedWorktreesDirRefused(t *testing.T) {
 
 func TestMissingWorktreeErrorsClearly(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 	f := feature(6, "Ghost")
 	if _, err := m.Dirty(ctx, f); err == nil || !strings.Contains(err.Error(), "no worktree") {
 		t.Errorf("Dirty on missing worktree: %v, want 'no worktree' error", err)
@@ -514,7 +558,7 @@ func TestMissingWorktreeErrorsClearly(t *testing.T) {
 // any git command runs.
 func TestHostileFeatureRefused(t *testing.T) {
 	root := newRepo(t)
-	m, _ := NewManager(ctx, root)
+	m := newManager(t, root)
 
 	hostile := []*domain.Feature{
 		func() *domain.Feature { f := feature(1, "ok"); f.Slug = "../../../tmp/evil"; return f }(),
