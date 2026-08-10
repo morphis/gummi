@@ -36,16 +36,21 @@ const (
 	// via the resolve_annotation client tool — an open diff surface should
 	// re-read its annotations so the open-count burns down live.
 	EventAnnotations EventKind = "annotations"
+	// EventTripwire fires when the agent made a clean→dirty transition on
+	// the main checkout — new paths appear that weren't dirty before the
+	// turn. The run aborts (DirtyPaths names the new paths).
+	EventTripwire EventKind = "tripwire"
 )
 
 // Event is one item in the engine's UI-facing stream.
 type Event struct {
-	Feature   domain.FeatureID
-	Stage     domain.Stage
-	Kind      EventKind
-	Err       error
-	Threshold int  // budget % for EventBudget
-	Committed bool // EventExhausted: the stage's work was committed (not stranded)
+	Feature    domain.FeatureID
+	Stage      domain.Stage
+	Kind       EventKind
+	Err        error
+	Threshold  int      // budget % for EventBudget
+	Committed  bool     // EventExhausted: the stage's work was committed (not stranded)
+	DirtyPaths []string // EventTripwire: paths newly dirty on main after the turn (sorted)
 }
 
 // SessionState is a session's scheduling status.
@@ -153,8 +158,8 @@ type Session struct {
 	agentSess      agent.Session // nil while queued
 	agentName      string        // backend identity, for display
 	agentSessionID string        // backend session id (agent.Identified), "" if none
-	model          string // model resolved at spawn
-	specPath       string // resolved spec/draft path (for ask_user capture)
+	model          string        // model resolved at spawn
+	specPath       string        // resolved spec/draft path (for ask_user capture)
 	state          SessionState
 	transcript     []Message
 	activity       []string
@@ -171,7 +176,14 @@ type Session struct {
 	creditRate     float64 // adapter's token→credit rate (0 = engine default)
 	threshold      int     // highest budget threshold crossed (%)
 	exhausted      bool    // hit the credit cap
+	tripped        bool    // main-checkout tripwire fired; the run is dead
 	clientTools    bool    // resolved backend's ClientTools capability (spawn-time cache)
+
+	// preTurnDirt is the set of paths dirty on the main checkout
+	// immediately before the pending Send. The tripwire compares it
+	// against the post-turn set at EventIdle; nil means no pre-turn
+	// snapshot was taken this turn (see takePreTurn).
+	preTurnDirt map[string]struct{}
 
 	// Outstanding estimated spend per model, awaiting a settle event
 	// that reconciles it to the provider-metered figure: pendingTokenEst
@@ -641,6 +653,44 @@ func (s *Session) markExhausted() bool {
 		return false
 	}
 	s.exhausted = true
+	s.busy = false
+	return true
+}
+
+// beginTurn records the set of paths dirty on main immediately before a
+// Send, arming the tripwire's post-turn comparison.
+func (s *Session) beginTurn(paths []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	set := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		set[p] = struct{}{}
+	}
+	s.preTurnDirt = set
+}
+
+// takePreTurn reads-and-clears the pre-turn dirt set, returning nil when
+// no snapshot was taken this turn (a resumed session, a race, or a
+// pre-turn snapshot error that skipped beginTurn) — the fault-open arm
+// the tripwire must not mis-fire on.
+func (s *Session) takePreTurn() map[string]struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pre := s.preTurnDirt
+	s.preTurnDirt = nil
+	return pre
+}
+
+// markTripped latches that the main-checkout tripwire fired, returning
+// true only the first time so the abort (activity, state, event) happens
+// exactly once. Mirrors markExhausted.
+func (s *Session) markTripped() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tripped {
+		return false
+	}
+	s.tripped = true
 	s.busy = false
 	return true
 }

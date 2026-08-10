@@ -1,10 +1,12 @@
 package worktree
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -328,6 +330,55 @@ func (m *Manager) MainTrackedDirty(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(out) != "", nil
+}
+
+// MainDirtyPaths returns the sorted set of paths dirty under the main
+// checkout: tracked edits (staged or unstaged) plus new non-ignored
+// untracked files, produced from the NUL-terminated porcelain stream so
+// path names (renames, odd characters) survive intact. .gummi is
+// excluded — its index state is gummi's own machinery. Rename and copy
+// records yield the destination path only; the origin path is consumed
+// and discarded. This is the tripwire's raw signal: on a clean→dirty
+// transition the caller aborts the run naming the newly-dirty paths.
+func (m *Manager) MainDirtyPaths(ctx context.Context) ([]string, error) {
+	out, err := runGitRaw(ctx, m.root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ":(exclude).gummi")
+	if err != nil {
+		return nil, err
+	}
+	set := map[string]struct{}{}
+	fields := []byte(out)
+	for i := 0; i+3 < len(fields); {
+		// porcelain v1 -z: "XY path\0"; a rename/copy is "XY dest\0origin\0".
+		if fields[i+2] != ' ' {
+			break // malformed; stop rather than mis-parse
+		}
+		status := fields[i : i+2]
+		j := bytes.IndexByte(fields[i+3:], 0)
+		if j < 0 {
+			j = len(fields) - (i + 3) // unterminated tail: take the rest
+		}
+		path := string(fields[i+3 : i+3+j])
+		i += 3 + j + 1
+		if path != "" {
+			set[path] = struct{}{}
+		}
+		// a rename/copy record carries a second NUL-terminated field (the
+		// origin); consume and discard it so the origin isn't emitted as a
+		// separate dirty entry.
+		if len(status) == 2 && (status[0] == 'R' || status[0] == 'C') {
+			if k := bytes.IndexByte(fields[i:], 0); k >= 0 {
+				i += k + 1
+			} else {
+				i = len(fields)
+			}
+		}
+	}
+	paths := make([]string, 0, len(set))
+	for p := range set {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 // Landed reports whether the feature branch has merged into main, by

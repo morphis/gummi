@@ -147,6 +147,13 @@ type Engine struct {
 	// persistDelete so an in-flight save can't land after the delete and
 	// resurrect a dropped row.
 	persistMu sync.Mutex
+
+	// dirtyPathsFn returns the sorted set of paths dirty on the main
+	// checkout. Bound at construction to cfg.Worktrees.MainDirtyPaths; it
+	// is the tripwire's sole injection seam, so tests can substitute a
+	// call-counter or fault-injecting closure without reaching into the
+	// worktree package or swapping the concrete Config.Worktrees pointer.
+	dirtyPathsFn func(context.Context) ([]string, error)
 }
 
 // New builds an engine. The caller owns every agent's lifetime.
@@ -159,13 +166,14 @@ func New(cfg Config) *Engine {
 		max = 1
 	}
 	e := &Engine{
-		cfg:       cfg,
-		maxActive: max,
-		now:       time.Now,
-		raw:       make(chan Event, 256),
-		events:    make(chan Event),
-		stopped:   make(chan struct{}),
-		live:      map[domain.FeatureID]*Session{},
+		cfg:          cfg,
+		maxActive:    max,
+		now:          time.Now,
+		raw:          make(chan Event, 256),
+		events:       make(chan Event),
+		stopped:      make(chan struct{}),
+		live:         map[domain.FeatureID]*Session{},
+		dirtyPathsFn: cfg.Worktrees.MainDirtyPaths,
 	}
 	go e.forward()
 	return e
@@ -285,6 +293,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	e.persist(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
 	if fresh {
+		e.beforeTurn(ctx, s)
 		if err := sess.Send(ctx, ko); err != nil {
 			s.setError(err)
 			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventError, Err: err})
@@ -475,6 +484,7 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			msg = pre + "\n\n" + msg
 		}
 	}
+	e.beforeTurn(context.Background(), s)
 	if err := sess.Send(context.Background(), msg); err != nil {
 		e.failRun(s, err)
 	}
@@ -715,6 +725,7 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
+	e.beforeTurn(ctx, s)
 	if err := a.Send(ctx, msg); err != nil {
 		e.failRun(s, err)
 		return err
@@ -868,6 +879,66 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 	}
 	f.Budget.Envelope = to
 	return e.cfg.Store.UpdateFeature(ctx, &f)
+}
+
+// beforeTurn snapshots main's dirty set immediately before a Send hands
+// work to the agent, arming the tripwire's post-turn comparison. On a
+// MainDirtyPaths error it records a diagnostic activity line and skips
+// the snapshot (s.beginTurn is not called), so takePreTurn reports "unset"
+// at post-turn and checkTrip returns nil — fail-open: a broken git skips
+// the trip decision for that turn rather than misattributing the
+// operator's pre-existing dirt to the agent.
+func (e *Engine) beforeTurn(ctx context.Context, s *Session) {
+	paths, err := e.dirtyPathsFn(ctx)
+	if err != nil {
+		s.appendActivity("main-checkout tripwire: pre-turn snapshot failed — skipping trip check for this turn: " + err.Error())
+		return
+	}
+	s.beginTurn(paths)
+}
+
+// checkTrip compares the post-turn dirty set against the pre-turn
+// snapshot, returning the newly-dirty paths (sorted) when the agent made
+// a clean→dirty transition. It returns nil — no trip — when no pre-turn
+// snapshot was taken this turn (takePreTurn "unset": a resumed session, a
+// race, or a pre-turn snapshot error), or when the post-turn call itself
+// errors (a diagnostic activity line records the git flake). A missing
+// pair thus fails safe rather than tripping on a spurious empty pre-set.
+func (e *Engine) checkTrip(s *Session) []string {
+	pre := s.takePreTurn()
+	if pre == nil {
+		return nil
+	}
+	post, err := e.dirtyPathsFn(context.Background())
+	if err != nil {
+		s.appendActivity("main-checkout tripwire: post-turn snapshot failed — checking skipped: " + err.Error())
+		return nil
+	}
+	var delta []string
+	for _, p := range post {
+		if _, ok := pre[p]; !ok {
+			delta = append(delta, p)
+		}
+	}
+	return delta
+}
+
+// trip aborts a session on a main-checkout tripwire hit: the agent
+// dirtied paths that were clean before its turn. It is a hard stop — the
+// run is dead, no top-up, no resume. The working tree is left exactly as
+// the agent left it (no settle, no revert, no checkpoint commit): only
+// engine-internal state changes (activity line, session state, slot
+// release). The operator resolves the main dirt and re-runs the stage.
+func (e *Engine) trip(s *Session, paths []string) {
+	if !s.markTripped() {
+		return // already tripped; a stale event must not duplicate the abort
+	}
+	s.appendActivity("main-checkout tripwire: new dirty paths — " + strings.Join(paths, ", "))
+	s.setState(StateDone)
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventTripwire, DirtyPaths: paths})
+	s.stop() // finalizes the session, closing the underlying agent: a follow-up Send fails at a.Send
+	e.freeSlot(s)
 }
 
 // exhaust checkpoints and stops a session that hit its credit budget —
@@ -1077,6 +1148,12 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		return
 	case agent.EventIdle:
 		s.setBusy(false)
+		// the turn made a clean→dirty transition on main: abort the run
+		// before any "finished" gate can read it as healthy.
+		if paths := e.checkTrip(s); len(paths) > 0 {
+			e.trip(s, paths)
+			return
+		}
 		// a turn that already exhausted its budget has raised the
 		// budget gate and freed its slot; the trailing idle must not
 		// downgrade that gate to a generic "finished" one.

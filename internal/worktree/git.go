@@ -30,6 +30,19 @@ func (e *gitError) Unwrap() error { return e.err }
 // runGit executes git with an argument array (never a shell) in dir.
 // It returns trimmed stdout.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := runGitRaw(ctx, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// runGitRaw is runGit without the trim. TrimSpace must not touch a
+// -z porcelain stream: its first record's leading status byte is often a
+// space for an unstaged edit, which would strip the "X" and corrupt the
+// field, and trimming the trailing bytes is wrong for a NUL-delimited
+// record stream regardless.
+func runGitRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	full := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	var stdout, stderr bytes.Buffer
@@ -38,7 +51,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", &gitError{args: full, stderr: stderr.String(), err: err}
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // gitOK runs git and reports only success/failure (for predicates such
