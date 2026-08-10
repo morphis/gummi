@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -263,6 +264,31 @@ func TestInteractiveKickoffPanicsOnUnknown(t *testing.T) {
 		}
 	}()
 	interactiveKickoff(feature(1, "x", domain.StageImplement))
+}
+
+// TestContractHintStatesBoundary pins the artifact/worktree boundary the
+// stage contract now states: the artifact is gummi-managed and located
+// outside the working directory (its path kept visible for opening), a
+// statement that code changes belong in the working directory rides
+// along for every role, and the bare unscoped artifact path is gone.
+func TestContractHintStatesBoundary(t *testing.T) {
+	f := feature(7, "Boundary", domain.StageImplement)
+	path := "/project/example/spec.md"
+	for _, role := range []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer} {
+		h := unwrap(contractHint(f, path, role))
+		if !strings.Contains(h, "is gummi-managed and lives outside your working directory") {
+			t.Errorf("%s: artifact not named gummi-managed and located outside cwd", role)
+		}
+		if !strings.Contains(h, "code changes belong in the working directory") {
+			t.Errorf("%s: missing code-scope clause", role)
+		}
+		if !strings.Contains(h, path) {
+			t.Errorf("%s: artifact path must stay visible for opening", role)
+		}
+		if strings.Contains(h, "is at "+path) {
+			t.Errorf("%s: bare unscoped artifact path leaked", role)
+		}
+	}
 }
 
 // TestInteractiveKickoffQuickSpec: the spec-chat opener flips with the

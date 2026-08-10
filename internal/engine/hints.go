@@ -577,7 +577,11 @@ func contractHint(f domain.Feature, specPath string, role agent.Role) string {
 	fmt.Fprintf(&b, `These facts are authoritative — do not re-derive them from gummi's
 state database, source code, or design docs.
 
-The %s's %s is at %s.
+The %s's %s is gummi-managed and lives outside your working
+directory, at %s. Keep that path for opening the file: read and edit
+the artifact in place there, and let annotations flow through it. It is
+the only writeable surface gummi exposes outside the working directory
+— code changes belong in the working directory (cwd) and only there.
 It exists — gummi materializes it from its template — and it is the
 single source of truth: read it, work from it, keep it current. Its
 sections, in order: %s. %s
