@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -207,5 +208,52 @@ func TestTripPreTurnErrorDoesNotSpuriouslyTrip(t *testing.T) {
 	}
 	if out := gitOut(t, r.root, "status", "--porcelain"); !strings.Contains(out, "README.md") {
 		t.Fatal("operator's README.md dirt vanished")
+	}
+}
+
+// TestCloseCancelsInFlightTripSnapshot locks the teardown race: the
+// post-turn trip snapshot (a git status that can run past a finished
+// test, racing t.TempDir cleanup) must be bound to the session's
+// lifecycle, so finalizing the engine cancels an in-flight snapshot
+// rather than letting it outlive Close. Fails without the session-scoped
+// context because the snapshot then holds a background context that
+// cancellation can never reach.
+func TestCloseCancelsInFlightTripSnapshot(t *testing.T) {
+	r := newTripRig(t)
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	calls := 0
+	// a snapshot that stands in for a git subprocess still walking the
+	// worktree: the post-turn one blocks until the session context is
+	// canceled. The pre-turn snapshot (call 1) returns immediately so the
+	// turn can actually run and reach the post-turn check.
+	r.e.dirtyPathsFn = func(ctx context.Context) ([]string, error) {
+		calls++
+		if calls == 1 {
+			return nil, nil
+		}
+		close(entered)
+		<-ctx.Done()
+		close(released)
+		return nil, ctx.Err()
+	}
+	r.ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-turn trip snapshot never entered")
+	}
+	// finalize the engine while the snapshot is in flight: it must be
+	// canceled, so no git subprocess survives Close to race teardown.
+	r.e.Close()
+	select {
+	case <-released:
+	case <-time.After(5 * time.Second):
+		t.Fatal("in-flight trip snapshot was not canceled by Close")
 	}
 }

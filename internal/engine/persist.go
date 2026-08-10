@@ -110,6 +110,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 			// so it comes back clean (best-effort, like the live settle).
 			_, _ = e.cfg.Worktrees.AbortRebase(ctx, &f)
 		}
+		ctx, cancel := context.WithCancel(context.Background())
 		s := &Session{
 			Feature:     f,
 			Role:        role,
@@ -118,6 +119,8 @@ func (e *Engine) Restore(ctx context.Context) error {
 			Rebase:      rebase,
 			state:       restoredState(snap.State),
 			done:        make(chan struct{}),
+			ctx:         ctx,
+			cancel:      cancel,
 		}
 		for _, m := range snap.Transcript {
 			s.transcript = append(s.transcript, Message{
@@ -132,6 +135,13 @@ func (e *Engine) Restore(ctx context.Context) error {
 		}
 		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
+		// A resumable live session is being rehydrated (a parked interactive
+		// question, an autonomous run picked up again): stop the prior one,
+		// or its pump would outlive Restore and, unjoined by Close, leak.
+		// Mirrors the old.stop() both replace and RunWith do on overwrite.
+		if old := e.live[snap.Feature]; old != nil {
+			old.stop()
+		}
 		e.live[snap.Feature] = s
 	}
 	return nil

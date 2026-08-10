@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"sync"
 
@@ -153,6 +154,11 @@ type Session struct {
 
 	done     chan struct{}
 	stopOnce sync.Once
+	// ctx is the session's lifecycle context: canceled by stop(), so any
+	// in-flight git subprocess (the tripwire's dirty snapshots) is killed
+	// the instant the session finalizes rather than racing teardown.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu             sync.Mutex
 	agentSess      agent.Session // nil while queued
@@ -758,6 +764,9 @@ func (s *Session) stop() {
 		s.mu.Lock()
 		s.finalized = true
 		s.mu.Unlock()
+		if s.cancel != nil {
+			s.cancel()
+		}
 		close(s.done)
 		if a := s.agent(); a != nil {
 			_ = a.Close()

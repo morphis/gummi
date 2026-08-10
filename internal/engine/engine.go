@@ -142,6 +142,12 @@ type Engine struct {
 	running int                // autonomous sessions currently holding slots
 	closed  bool
 
+	// wg tracks the pump and kickoff goroutines so Close can join them
+	// before returning: a barrier for any filesystem touch (git subprocess
+	// snapshots, persist writes) those goroutines may still be mid-way
+	// through when teardown begins.
+	wg sync.WaitGroup
+
 	// persistMu serializes a session save against a delete of the same
 	// feature: it spans persist's finalized-check-and-write and
 	// persistDelete so an in-flight save can't land after the delete and
@@ -258,7 +264,12 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), specPath: specPath}
+	// The session's lifecycle context is bound to nothing: it is canceled by
+	// Session.stop, not by the caller's ctx going away. Keep it distinct from
+	// the caller's ctx so the initial kickoff Send stays on the caller's
+	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
+	sctx, cancel := context.WithCancel(context.Background())
+	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, specPath: specPath}
 	e.stampSpawnInfo(s)
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
@@ -283,7 +294,8 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		s.stop() // engine closed during startup: don't leave the agent live
 		return nil, errors.New("engine is closed")
 	}
-	go e.pump(s)
+	e.wg.Add(1)
+	go func() { defer e.wg.Done(); e.pump(s) }()
 	var ko string
 	if fresh {
 		ko = interactiveKickoff(f)
@@ -293,7 +305,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	e.persist(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
 	if fresh {
-		e.beforeTurn(ctx, s)
+		e.beforeTurn(s)
 		if err := sess.Send(ctx, ko); err != nil {
 			s.setError(err)
 			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventError, Err: err})
@@ -381,7 +393,8 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 			return nil // already scheduled
 		}
 	}
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, state: StateQueued, done: make(chan struct{}), kickoffNote: note}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -458,7 +471,8 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.freeSlot(s)
 		return
 	}
-	go e.pump(s)
+	e.wg.Add(1)
+	go func() { defer e.wg.Done(); e.pump(s) }()
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
 
 	s.appendUser(s.kickoffMessage())
@@ -467,7 +481,8 @@ func (e *Engine) startAutonomous(s *Session) {
 	// The kickoff is sent off the scheduler goroutine: the Verify stage
 	// runs the repo's fixed checks gummi-side first, which can take
 	// minutes, and must not stall slot scheduling.
-	go e.sendKickoff(s, sess)
+	e.wg.Add(1)
+	go func() { defer e.wg.Done(); e.sendKickoff(s, sess) }()
 }
 
 // sendKickoff delivers the stage kickoff. For the Verify stage in
@@ -484,7 +499,7 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			msg = pre + "\n\n" + msg
 		}
 	}
-	e.beforeTurn(context.Background(), s)
+	e.beforeTurn(s)
 	if err := sess.Send(context.Background(), msg); err != nil {
 		e.failRun(s, err)
 	}
@@ -725,7 +740,7 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	e.beforeTurn(ctx, s)
+	e.beforeTurn(s)
 	if err := a.Send(ctx, msg); err != nil {
 		e.failRun(s, err)
 		return err
@@ -888,8 +903,8 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 // at post-turn and checkTrip returns nil — fail-open: a broken git skips
 // the trip decision for that turn rather than misattributing the
 // operator's pre-existing dirt to the agent.
-func (e *Engine) beforeTurn(ctx context.Context, s *Session) {
-	paths, err := e.dirtyPathsFn(ctx)
+func (e *Engine) beforeTurn(s *Session) {
+	paths, err := e.dirtyPathsFn(s.ctx)
 	if err != nil {
 		s.appendActivity("main-checkout tripwire: pre-turn snapshot failed — skipping trip check for this turn: " + err.Error())
 		return
@@ -909,7 +924,7 @@ func (e *Engine) checkTrip(s *Session) []string {
 	if pre == nil {
 		return nil
 	}
-	post, err := e.dirtyPathsFn(context.Background())
+	post, err := e.dirtyPathsFn(s.ctx)
 	if err != nil {
 		s.appendActivity("main-checkout tripwire: post-turn snapshot failed — checking skipped: " + err.Error())
 		return nil
@@ -1008,6 +1023,9 @@ func (e *Engine) Close() error {
 	for _, s := range sessions {
 		s.stop()
 	}
+	// Join the pump and kickoff goroutines so no git subprocess or persist
+	// write is still in flight against the workspace when Close returns.
+	e.wg.Wait()
 	close(e.stopped)
 	return nil
 }
