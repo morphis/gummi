@@ -107,6 +107,15 @@ type SessionOpts struct {
 	// tools via `gummi __mcp`. Adapters that do not know how to consume it
 	// (all real ones, until a transport consumer lands) ignore it.
 	MCPSockPath string
+	// FeatureID is the feature this session serves, as a plain string. The
+	// engine stringifies it from domain.FeatureID at construction so this
+	// package stays free of a domain import. Adapters that do not need it
+	// ignore it.
+	FeatureID string
+	// ExtraReadAllows are absolute file paths the session is allowed to
+	// read outside WorkDir. Adapters without a per-file allowlist (or
+	// without a cage of any kind) ignore it.
+	ExtraReadAllows []string
 }
 
 // Agent creates sessions and reports what its backend can do.
@@ -140,6 +149,11 @@ type Capabilities struct {
 	// session surfaces invocations as EventClientToolCall and implements
 	// ToolResolver. Adapters without it fall back to a prompt convention.
 	ClientTools bool
+	// MCPTools reports that the adapter reaches gummi's tools via the MCP
+	// endpoint at SessionOpts.MCPSockPath, not via SessionOpts.Tools.
+	// Distinct from ClientTools so callers that do not bind an MCP endpoint
+	// (transient sessions) still fall back to the prompt convention.
+	MCPTools bool
 }
 
 // Session is one live agent conversation bound to a feature + stage.

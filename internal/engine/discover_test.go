@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -133,6 +134,36 @@ func TestDiscoverChecksCarriesArtifactPath(t *testing.T) {
 			}
 			if rec.opts().WorkDir == rec.opts().ArtifactPath {
 				t.Errorf("ArtifactPath %s must not be the worktree workdir", rec.opts().ArtifactPath)
+			}
+		})
+	}
+}
+
+func TestDiscoverChecksPassesSpecPathAsExtraRead(t *testing.T) {
+	for _, f := range []domain.Feature{
+		feature(1, "discover spec", domain.StagePlan),
+		bugFeature(2, "discover bug", domain.StageFix),
+	} {
+		t.Run(string(f.ID), func(t *testing.T) {
+			ws, store, wt := newRepo(t)
+			rec := recordingAgent()
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			t.Cleanup(func() { e.Close() })
+
+			withWorktree(t, wt, f)
+			p := filepath.Join(wt.Root(), f.ArtifactPath())
+			if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(spec.Template(&f)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := e.DiscoverChecks(context.Background(), f); err != nil {
+				t.Fatal(err)
+			}
+			if got := rec.opts().ExtraReadAllows; !reflect.DeepEqual(got, []string{p}) {
+				t.Errorf("ExtraReadAllows = %v, want [%s]", got, p)
 			}
 		})
 	}

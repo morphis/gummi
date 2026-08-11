@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+// opencodeExecPath locates gummi's own executable when materializing the
+// per-session config, so opencode's MCP child is a real `gummi __mcp`
+// process rather than whatever shadows "gummi" on $PATH. Production uses
+// the real os.Executable; tests rebind it (see opencode_integration_test).
+var opencodeExecPath = os.Executable
+
 // Opencode is an Agent backed by the opencode CLI's headless scripting
 // interface (`opencode run --format json`), which streams the model's
 // activity as one JSON event per line and continues a persistent session
@@ -54,7 +60,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage, and can be interrupted by killing
 // the turn's process.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step
@@ -73,14 +79,36 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if opts.Model == "" {
 		return nil, errors.New("opencode requires a model (provider/model, e.g. opencode/deepseek-v4-flash-free)")
 	}
-	// Guarded mode would need opencode's per-tool approval protocol, which
-	// isn't wired. Without --auto, opencode auto-rejects any tool touching
-	// a path outside cwd — the spec at .gummi/specs/... lives outside the
-	// worktree — so the first `read` fails silently, no VERDICT emits, and
-	// the plan critique escalates "unclear". Fail loud like claudecode.
-	if opts.Permission == PermissionGuarded {
-		return nil, errors.New("opencode adapter: guarded permissions are not supported " +
-			"(no --auto → tools outside cwd auto-reject silently); set permissions: allow-all")
+	// The per-session config keeps opencode's file tools pinned to the
+	// worktree, and --auto only auto-approves what isn't explicitly denied,
+	// so guarded and allow-all collapse to the same safe cage until a
+	// per-tool approval bridge lands. Guarded is therefore accepted.
+	//
+	// Resolve gummi's own executable and materialize the session config
+	// before the session exists, so a failure here is terminal rather than
+	// silently falling back to a $PATH "opencode" that could spawn a
+	// mismatched MCP child.
+	exe, err := opencodeExecPath()
+	if err != nil {
+		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
+	}
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows)
+	if err != nil {
+		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
+	}
+	cf, err := os.CreateTemp("", "gummi-opencode-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("opencode adapter: creating session config: %w", err)
+	}
+	configPath := cf.Name()
+	if _, err := cf.Write(cfg); err != nil {
+		_ = cf.Close()
+		_ = os.Remove(configPath)
+		return nil, fmt.Errorf("opencode adapter: writing session config: %w", err)
+	}
+	if err := cf.Close(); err != nil {
+		_ = os.Remove(configPath)
+		return nil, fmt.Errorf("opencode adapter: closing session config: %w", err)
 	}
 	s := &opencodeSession{
 		o:              o,
@@ -89,6 +117,8 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		hints:          opts.SystemHints,
 		mcpSock:        opts.MCPSockPath,
 		outputTokenMax: opts.OutputTokenMax,
+		configPath:     configPath,
+		featureID:      opts.FeatureID,
 		raw:            make(chan Event, 32),
 		events:         make(chan Event),
 		stop:           make(chan struct{}),
@@ -117,6 +147,12 @@ type opencodeSession struct {
 	hints          []string
 	mcpSock        string // opts.MCPSockPath (exported to the child when set)
 	outputTokenMax int    // >0 → export OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX per turn
+	// configPath is the per-session OPENCODE_CONFIG temp file, materialized
+	// at NewSession and removed at Close.
+	configPath string
+	// featureID mirrors SessionOpts.FeatureID, threaded into the config's
+	// mcp.gummi command so the spawned child serves the right feature.
+	featureID string
 
 	raw    chan Event
 	events chan Event
@@ -200,6 +236,13 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	}
 	if s.mcpSock != "" {
 		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+s.mcpSock)
+	}
+	// The per-session config carries the worktree cage and the mcp.gummi
+	// endpoint. Exporting OPENCODE_CONFIG alongside GUMMI_MCP_SOCK (which
+	// opencode's mcp.local.environment only applies to the spawned MCP
+	// subprocess, not the main run) makes the child inherit the socket too.
+	if s.configPath != "" {
+		cmd.Env = append(cmd.Env, "OPENCODE_CONFIG="+s.configPath)
 	}
 	// Run opencode in its own process group and, on cancel/interrupt, kill
 	// the whole group — opencode spawns tool subprocesses (bash, editors)
@@ -447,6 +490,9 @@ func (s *opencodeSession) Close() error {
 		}
 		s.mu.Unlock()
 		close(s.stop) // forward closes events; readTurn exits via stop/EOF
+		if s.configPath != "" {
+			_ = os.Remove(s.configPath)
+		}
 	})
 	return nil
 }

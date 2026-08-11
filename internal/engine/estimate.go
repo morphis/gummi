@@ -68,12 +68,13 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 		return 0, err
 	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:      workDir,
-		ArtifactPath: specPath,
-		Role:         agent.RoleScribe,
-		Model:        model,
-		Permission:   e.cfg.Permission,
-		SystemHints:  []string{fmt.Sprintf("The feature's spec is at %s; read it first.", specPath)},
+		WorkDir:         workDir,
+		ArtifactPath:    specPath,
+		Role:            agent.RoleScribe,
+		Model:           model,
+		Permission:      e.cfg.Permission,
+		SystemHints:     []string{fmt.Sprintf("The feature's spec is at %s; read it first.", specPath)},
+		ExtraReadAllows: []string{specPath},
 	})
 	if err != nil {
 		return 0, err

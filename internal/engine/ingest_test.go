@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -321,4 +322,62 @@ func TestDecodeProposalStatusFallback(t *testing.T) {
 	if res.Coverage[2].Status != domain.CoverageUnmapped {
 		t.Errorf("explicit unmapped = %q, want unmapped", res.Coverage[2].Status)
 	}
+}
+
+func TestIngestPassesStashedSourceAsExtraRead(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Here:\n```gummi-propose\n" + sampleProposalJSON + "\n```\n"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	rec := &recorder{Fake: ag}
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# PRD\nrequirements\n")
+	if _, err := e.Ingest(context.Background(), src, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(e.cfg.Workspace.IngestDir(), "prd.md")
+	if got := rec.opts().ExtraReadAllows; !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("ExtraReadAllows = %v, want [%s]", got, want)
+	}
+}
+
+// An opencode-style backend (Capabilities.MCPTools) reaches gummi's tools
+// via MCP and ignores opts.Tools; ingest binds no MCP endpoint, so it must
+// route such a backend to the fenced-convention path, not announce a tool
+// the session cannot reach.
+func TestIngestOpencodeUsesConventionPath(t *testing.T) {
+	ag := &agent.Fake{
+		Caps: agent.Capabilities{MCPTools: true},
+		Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
+			if len(opts.Tools) != 0 {
+				t.Errorf("MCPTools backend must not receive opts.Tools: %+v", opts.Tools)
+			}
+			hints := strings.Join(opts.SystemHints, "\n")
+			if !strings.Contains(hints, ingestConventionHint) {
+				t.Errorf("MCPTools backend missing the convention hint; got:\n%s", hints)
+			}
+			if strings.Contains(hints, ingestToolHint) {
+				t.Errorf("MCPTools backend received the tool hint for an unreachable client tool")
+			}
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "Here:\n```gummi-propose\n" + sampleProposalJSON + "\n```\n"},
+				{Kind: agent.EventIdle},
+			}
+		},
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	src := writeSource(t, wsRoot{ws.Root}, "design.md", "# Design\nstuff\n")
+	res, err := e.Ingest(context.Background(), src, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSampleResult(t, res)
 }

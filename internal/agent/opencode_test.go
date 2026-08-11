@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
@@ -138,15 +139,108 @@ func TestOpencodeRequiresModel(t *testing.T) {
 	}
 }
 
-// Guarded permissions need per-tool approval, which the run interface doesn't
-// expose — without --auto opencode silently auto-rejects any tool touching a
-// path outside cwd (e.g. reads of the main checkout's spec), so the turn dies
-// before any VERDICT. Fail loud at session creation instead of degrading.
-func TestOpencodeGuardedRejected(t *testing.T) {
+// The per-session config cages opencode's file tools to the worktree, and
+// --auto only auto-approves what isn't explicitly denied, so guarded is as
+// safe as allow-all for opencode until a per-tool approval bridge lands.
+// Guarded must therefore be accepted, not rejected.
+func TestOpencodeGuardedAccepted(t *testing.T) {
 	o := &Opencode{bin: "opencode"}
-	_, err := o.NewSession(context.Background(), SessionOpts{Model: "x", Permission: PermissionGuarded})
-	if err == nil || !strings.Contains(err.Error(), "allow-all") {
-		t.Fatalf("error = %v, want one mentioning allow-all", err)
+	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x", Permission: PermissionGuarded})
+	if err != nil {
+		t.Fatalf("guarded NewSession should succeed: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("guarded NewSession returned a nil session")
+	}
+	_ = sess.Close()
+}
+
+func TestOpencodeCapabilitiesReportsMCPTools(t *testing.T) {
+	c := (&Opencode{}).Capabilities()
+	if !c.MCPTools {
+		t.Errorf("MCPTools = false, want true (opencode reaches tools via MCP)")
+	}
+	if c.ClientTools {
+		t.Errorf("ClientTools = true, want false (opencode ignores opts.Tools)")
+	}
+}
+
+// NewSession must materialize the OPENCODE_CONFIG file, with the caller's
+// worktree/socket/feature id reaching the emitted mcp.gummi command.
+func TestOpencodeNewSessionMaterializesConfig(t *testing.T) {
+	o := &Opencode{bin: "opencode"}
+	wt := t.TempDir()
+	sess, err := o.NewSession(context.Background(), SessionOpts{
+		WorkDir: wt, Model: "x", MCPSockPath: "/tmp/mcp/FD-011.sock", FeatureID: "FD-011",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	oc := sess.(*opencodeSession)
+	if oc.configPath == "" || oc.featureID != "FD-011" {
+		t.Fatalf("session configPath=%q featureID=%q", oc.configPath, oc.featureID)
+	}
+	raw, err := os.ReadFile(oc.configPath)
+	if err != nil {
+		t.Fatalf("config file not readable: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("config not valid JSON: %v\n%s", err, raw)
+	}
+	gummi := m["mcp"].(map[string]any)["gummi"].(map[string]any)
+	cmd := gummi["command"].([]any)
+	exe, _ := os.Executable()
+	if got, _ := cmd[0].(string); got != exe {
+		t.Errorf("mcp.gummi.command[0] = %q, want %q", got, exe)
+	}
+	env := gummi["environment"].(map[string]any)
+	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/FD-011.sock" {
+		t.Errorf("GUMMI_MCP_SOCK = %v, want /tmp/mcp/FD-011.sock", env["GUMMI_MCP_SOCK"])
+	}
+}
+
+// An unbound session (no MCPSockPath/FeatureID) must still materialize the
+// config file, but emit no top-level mcp key — so no __mcp child spawns.
+func TestOpencodeNewSessionOmitsMCPWhenUnbound(t *testing.T) {
+	o := &Opencode{bin: "opencode"}
+	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	oc := sess.(*opencodeSession)
+	raw, err := os.ReadFile(oc.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := m["mcp"]; present {
+		t.Errorf("mcp block present when unbound")
+	}
+	if _, present := m["permission"]; !present {
+		t.Errorf("permission block missing when unbound")
+	}
+}
+
+// Close must remove the session's config file.
+func TestOpencodeCloseRemovesConfig(t *testing.T) {
+	o := &Opencode{bin: "opencode"}
+	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oc := sess.(*opencodeSession)
+	path := oc.configPath
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("config file still present after Close (stat=%v)", err)
 	}
 }
 
@@ -271,6 +365,57 @@ func TestOpencodeSendInjectsOutputTokenMax(t *testing.T) {
 			t.Errorf("otm=0 must not set OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX:\n%s", env)
 		}
 	})
+}
+
+func TestOpencodeSendPassesOpencodeConfigEnv(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	envFile := dir + "/env"
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"env > " + envFile + "\n" +
+		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x", FeatureID: "FD-011"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind == EventIdle {
+				data, err := os.ReadFile(envFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "OPENCODE_CONFIG=" + sess.(*opencodeSession).configPath
+				if !strings.Contains(string(data), want) {
+					t.Errorf("env missing %q:\n%s", want, data)
+				}
+				return
+			}
+			if e.Kind == EventError {
+				t.Fatalf("send errored: %v", e.Err)
+			}
+		case <-deadline:
+			t.Fatal("no idle before deadline")
+		}
+	}
 }
 
 // fakeOC writes a fake `opencode` script that emits one text event then

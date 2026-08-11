@@ -117,12 +117,13 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 		hints = append(hints, ingestConventionHint)
 	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:     e.cfg.Worktrees.Root(),
-		Role:        agent.RoleArchitect,
-		Model:       model,
-		Permission:  e.cfg.Permission,
-		SystemHints: hints,
-		Tools:       tools,
+		WorkDir:         e.cfg.Worktrees.Root(),
+		Role:            agent.RoleArchitect,
+		Model:           model,
+		Permission:      e.cfg.Permission,
+		SystemHints:     hints,
+		Tools:           tools,
+		ExtraReadAllows: []string{absPath},
 	})
 	if err != nil {
 		return domain.IngestResult{}, fmt.Errorf("starting ingest session: %w", err)

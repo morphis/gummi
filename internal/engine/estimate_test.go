@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -144,6 +145,28 @@ func TestEstimateCarriesArtifactPath(t *testing.T) {
 			want := filepath.Join(wt.Root(), f.ArtifactPath())
 			if rec.opts().ArtifactPath != want {
 				t.Errorf("ArtifactPath = %s, want %s", rec.opts().ArtifactPath, want)
+			}
+		})
+	}
+}
+
+func TestEstimatePassesSpecPathAsExtraRead(t *testing.T) {
+	for _, f := range []domain.Feature{
+		feature(1, "impl", domain.StageImplement),
+		bugFeature(2, "flaky", domain.StageFix),
+	} {
+		t.Run(string(f.ID), func(t *testing.T) {
+			ws, store, wt := newRepo(t)
+			rec := recordingAgent()
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			t.Cleanup(func() { e.Close() })
+			withWorktree(t, wt, f)
+			if _, err := e.Estimate(context.Background(), f); err != nil {
+				t.Fatal(err)
+			}
+			want := filepath.Join(wt.Root(), f.ArtifactPath())
+			if got := rec.opts().ExtraReadAllows; !reflect.DeepEqual(got, []string{want}) {
+				t.Errorf("ExtraReadAllows = %v, want [%s]", got, want)
 			}
 		})
 	}

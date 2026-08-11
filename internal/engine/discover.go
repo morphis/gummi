@@ -56,12 +56,13 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		}
 	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:      workDir,
-		ArtifactPath: specPath,
-		Role:         agent.RoleScribe,
-		Model:        model,
-		Permission:   e.cfg.Permission,
-		SystemHints:  []string{"You are surveying the repository read-only; do not modify any files."},
+		WorkDir:         workDir,
+		ArtifactPath:    specPath,
+		Role:            agent.RoleScribe,
+		Model:           model,
+		Permission:      e.cfg.Permission,
+		SystemHints:     []string{"You are surveying the repository read-only; do not modify any files."},
+		ExtraReadAllows: []string{specPath},
 	})
 	if err != nil {
 		return nil, err

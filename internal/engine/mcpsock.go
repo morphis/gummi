@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,14 +17,28 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
+// unixPathMax is the longest accepted filesystem unix socket path (the
+// platform sun_path length, 108 bytes, with room for the terminating NUL).
+// Paths longer than this make bind() fail with EINVAL.
+const unixPathMax = 107
+
 // mcpSockPath is the per-feature, per-workspace unix socket address: the
 // endpoint the engine binds a live feature session's tools to, and the
 // path a `gummi __mcp --feature <id>` child reads from GUMMI_MCP_SOCK.
 // Derived purely from the workspace + feature id so the listener (bound
 // before the child spawns) and any future dial site agree without
-// threading state between them.
+// threading state between them. Every stage session binds an endpoint, so
+// a workspace living deep on disk must not push the socket path past the
+// unix path limit: when the workspace-scoped path would be too long, it
+// falls back to a short, deterministic path under the system temp dir
+// (bind and teardown both use this same value, so they agree).
 func mcpSockPath(w state.Workspace, id domain.FeatureID) string {
-	return filepath.Join(w.StateDir(), "mcp", string(id)+".sock")
+	path := filepath.Join(w.StateDir(), "mcp", string(id)+".sock")
+	if len(path) <= unixPathMax {
+		return path
+	}
+	sum := sha256.Sum256([]byte(path))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("gummi-mcp-%x.sock", sum[:6]))
 }
 
 // mcpEndpoint is one live feature session's inbound tool-call listener.

@@ -621,3 +621,49 @@ func (r *recorder) count() int {
 	defer r.mu.Unlock()
 	return r.sessions
 }
+
+// Every stage session must bind an inbound MCP endpoint and carry the
+// feature id on SessionOpts, for both a ClientTools backend and an
+// MCPTools (opencode-style) backend. The MCPTools backend must also still
+// receive the stage's client tools and toolHint, since it consumes the
+// tools over MCP rather than through opts.Tools.
+func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
+	for name, caps := range map[string]agent.Capabilities{
+		"clientTools": {ClientTools: true},
+		"mcpTools":    {MCPTools: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var got agent.SessionOpts
+			ag := &agent.Fake{Caps: caps, Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
+				mu.Lock()
+				got = opts
+				mu.Unlock()
+				return []agent.Event{{Kind: agent.EventIdle}}
+			}}
+			ws, store, wt := newRepo(t)
+			e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			t.Cleanup(func() { e.Close() })
+
+			f := feature(1, "x", domain.StageSpec)
+			if _, err := e.Attach(context.Background(), f); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, e, EventIdle)
+			mu.Lock()
+			defer mu.Unlock()
+			if got.MCPSockPath == "" {
+				t.Errorf("%s: MCPSockPath empty", name)
+			}
+			if got.FeatureID != string(f.ID) {
+				t.Errorf("%s: FeatureID = %q, want %q", name, got.FeatureID, string(f.ID))
+			}
+			if len(got.Tools) == 0 {
+				t.Errorf("%s: Tools empty", name)
+			}
+			if h := toolHint(f.Stage, flavorStage); h != "" && !strings.Contains(strings.Join(got.SystemHints, "\n"), h) {
+				t.Errorf("%s: SystemHints missing stage toolHint", name)
+			}
+		})
+	}
+}

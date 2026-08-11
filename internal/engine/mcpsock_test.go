@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/mcp"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // fakeNoTools is an agent that cannot call client tools, so the engine
@@ -275,6 +277,34 @@ func TestMCPSockTeardown(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("accept loop not joined within 2s")
 	default:
+	}
+}
+
+// A workspace deep on disk must not push the socket path past the unix
+// socket length limit: mcpSockPath falls back to a short system-temp path
+// that still binds, while short roots stay workspace-scoped.
+func TestMCPSockPathStaysUnderUnixLimit(t *testing.T) {
+	longRoot := filepath.Join(t.TempDir(), strings.Repeat("d", 130))
+	ws := state.Workspace{Root: longRoot}
+	path := mcpSockPath(ws, "FD-001")
+	if len(path) > unixPathMax {
+		t.Fatalf("socket path %d bytes exceeds unix limit: %s", len(path), path)
+	}
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", path)
+	if err != nil {
+		t.Fatalf("bind long-root socket %s: %v", path, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove long-root socket: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// short roots keep the workspace-scoped location unchanged.
+	wsShort := state.Workspace{Root: t.TempDir()}
+	if p := mcpSockPath(wsShort, "FD-001"); !strings.HasPrefix(p, filepath.Join(wsShort.StateDir(), "mcp")) {
+		t.Errorf("short root moved off the workspace: %s", p)
 	}
 }
 

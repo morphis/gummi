@@ -681,8 +681,10 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// otherwise fall back to prompt conventions (ask_user has a fenced-
 	// block convention; spec_annotate and submit_verdict degrade to the
 	// %% and VERDICT: text forms the stage hints already describe).
+	// A backend that reaches gummi's tools over MCP is told they exist the
+	// same way, so its stage sessions still receive the toolHint.
 	var tools []agent.ToolDef
-	if ag.Capabilities().ClientTools {
+	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
 		tools = stageTools(f.Stage, flavor)
 		if h := toolHint(f.Stage, flavor); h != "" {
 			hints = append(hints, h)
@@ -690,36 +692,18 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	} else if interactiveStage(f.Stage) {
 		hints = append(hints, askConventionHint)
 	}
-	// A backend without native client tools is bridged over MCP: bind the
-	// session's inbound endpoint before spawning the child, so a child
-	// that dials on start (once a transport consumer lands) never races
-	// the bind. On success the teardown is returned for the caller to
-	// stash on the Session's lifecycle; on any failure below the endpoint
+	// Every stage session gets its own inbound MCP endpoint, so a backend
+	// that consumes gummi's tools over MCP (rather than opts.Tools) has a
+	// socket to dial; one whose transport hasn't landed simply ignores it.
+	// The endpoint is bound before spawning the child so a child that dials
+	// on start never races the bind. The teardown is returned for the caller
+	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
-	if !ag.Capabilities().ClientTools {
-		mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f)
-		if err != nil {
-			return nil, "", nil, err
-		}
-		sess, specErr := ag.NewSession(ctx, agent.SessionOpts{
-			WorkDir:        workDir,
-			ArtifactPath:   specPath,
-			Role:           role,
-			Model:          model,
-			SystemHints:    hints,
-			Permission:     e.cfg.Permission,
-			MaxCredits:     maxCredits,
-			Tools:          tools,
-			OutputTokenMax: outputTokenMax,
-			MCPSockPath:    mcpPath,
-		})
-		if specErr != nil {
-			mcpTeardown()
-			return nil, "", nil, fmt.Errorf("starting %s session: %w", role, specErr)
-		}
-		return sess, specPath, mcpTeardown, nil
+	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f)
+	if err != nil {
+		return nil, "", nil, err
 	}
-	sess, err := ag.NewSession(ctx, agent.SessionOpts{
+	sess, specErr := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:        workDir,
 		ArtifactPath:   specPath,
 		Role:           role,
@@ -729,11 +713,14 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		MaxCredits:     maxCredits,
 		Tools:          tools,
 		OutputTokenMax: outputTokenMax,
+		MCPSockPath:    mcpPath,
+		FeatureID:      string(f.ID),
 	})
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("starting %s session: %w", role, err)
+	if specErr != nil {
+		mcpTeardown()
+		return nil, "", nil, fmt.Errorf("starting %s session: %w", role, specErr)
 	}
-	return sess, specPath, nil, nil
+	return sess, specPath, mcpTeardown, nil
 }
 
 // locate resolves the working directory and spec path for a feature's
