@@ -105,7 +105,7 @@ func runBoard() error {
 	// Profile names for the new-feature/bug/ingest dialogs come purely
 	// from .gummi/profiles.yaml and are available whether or not any agent
 	// backend can start — surface them unconditionally so the dialogs show
-	// the real profiles even on a static board (BG-020).
+	// the real profiles even on a static board.
 	shell.SetProfileNames(profileNames(ws))
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
@@ -255,7 +255,7 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 // when none could be loaded. It is deliberately independent of the agent
 // engine: the yaml list is available whether or not any CLI agent can
 // start, so the board's dialogs show the real profiles even when the
-// backend is down (BG-020).
+// backend is down.
 func profileNames(ws state.Workspace) []string {
 	profiles, err := config.LoadProfiles(ws.ProfilesFile())
 	if err != nil {

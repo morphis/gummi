@@ -212,7 +212,7 @@ func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
 	}
 }
 
-// TestProfileNamesFromYaml locks in BG-020: the dialogs' profile list
+// TestProfileNamesFromYaml locks in the fix: the dialogs' profile list
 // must come from .gummi/profiles.yaml, ordered with the declared default
 // first, and must never fall back to the built-in presets merely because
 // an agent backend couldn't start. profileNames is the seam runBoard uses
