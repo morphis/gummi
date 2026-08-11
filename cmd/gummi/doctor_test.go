@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
 )
 
 // clearDoctorEnv neutralizes every environment variable buildDoctorReport
@@ -202,6 +205,115 @@ func TestDoctorNoRepoFails(t *testing.T) {
 	}
 	if r.Ready {
 		t.Error("report is ready outside a git repo")
+	}
+}
+
+// writeConfig writes a config.yaml under the repo's .gummi dir so tests can
+// set the workspace sandbox default doctor judges.
+func writeConfig(t *testing.T, repo, body string) {
+	t.Helper()
+	dir := filepath.Join(repo, ".gummi")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A default (warn) profile with a covered backend reports ok carrying the
+// resolved mode, wired through the full buildDoctorReport path.
+func TestDoctorSandboxOk(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: m }
+    implementer: { backend: opencode, model: m }
+    reviewer: { backend: opencode, model: m }
+    scribe: { backend: opencode, model: m }
+`)
+	r := buildDoctorReport(repo)
+	c := checkByName(r, "sandbox:thrifty")
+	if c.Status != statusOK {
+		t.Fatalf("sandbox:thrifty = %+v, want ok", c)
+	}
+	if !strings.Contains(c.Detail, "mode=warn") {
+		t.Errorf("detail %q should carry mode=warn", c.Detail)
+	}
+}
+
+// An enforce profile whose only backend reaches tools over MCP (opencode)
+// satisfies enforce — MCP-only coverage is no gap.
+func TestDoctorSandboxCoveredByMCP(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeConfig(t, repo, `permissions: allow-all
+sandbox: enforce
+`)
+	writeProfiles(t, repo, `
+default: opencode-only
+profiles:
+  opencode-only:
+    implementer: { backend: opencode, model: m }
+`)
+	r := buildDoctorReport(repo)
+	c := checkByName(r, "sandbox:opencode-only")
+	if c.Status != statusOK {
+		t.Fatalf("sandbox:opencode-only = %+v, want ok (MCP-only coverage)", c)
+	}
+	if !strings.Contains(c.Detail, "mode=enforce") {
+		t.Errorf("detail %q should carry mode=enforce", c.Detail)
+	}
+}
+
+// TestDoctorSandboxFail: an enforce profile whose role routes at a backend
+// with no tool coverage at all fails, naming the (backend, role) pair. The
+// synthetic "uncovered" backend (registered into the static capabilities
+// view) stands in for a real tool-less backend, since every compile-time
+// known backend advertises some tool path.
+func TestDoctorSandboxFail(t *testing.T) {
+	clearDoctorEnv(t)
+	unreg := agent.RegisterCapabilities("uncovered", agent.Capabilities{})
+	defer unreg()
+
+	cfg := config.Config{Sandbox: "enforce"}
+	profiles := config.Profiles{Profiles: map[string]config.Profile{
+		"risky": {"implementer": {Backend: "uncovered", Model: "m"}},
+	}}
+	checks := sandboxChecks(cfg, profiles)
+	c := checkByName(doctorReport{Checks: checks}, "sandbox:risky")
+	if c.Status != statusFail {
+		t.Fatalf("sandbox:risky = %+v, want fail", c)
+	}
+	if !strings.Contains(c.Detail, "uncovered/implementer") {
+		t.Errorf("detail %q should name uncovered/implementer", c.Detail)
+	}
+}
+
+// A profile that omits its own sandbox value inherits the workspace
+// default — so a workspace-wide enforce with a gap fails the omitted
+// profile too.
+func TestDoctorSandboxUsesWorkspaceDefault(t *testing.T) {
+	clearDoctorEnv(t)
+	unreg := agent.RegisterCapabilities("uncovered", agent.Capabilities{})
+	defer unreg()
+
+	cfg := config.Config{Sandbox: "enforce"}
+	profiles := config.Profiles{
+		Profiles: map[string]config.Profile{
+			"bare": {"implementer": {Backend: "uncovered", Model: "m"}},
+		},
+	}
+	checks := sandboxChecks(cfg, profiles)
+	c := checkByName(doctorReport{Checks: checks}, "sandbox:bare")
+	if c.Status != statusFail {
+		t.Fatalf("sandbox:bare = %+v, want fail via inherited enforce", c)
+	}
+	if !strings.Contains(c.Detail, "mode=enforce") {
+		t.Errorf("detail %q should carry mode=enforce", c.Detail)
 	}
 }
 

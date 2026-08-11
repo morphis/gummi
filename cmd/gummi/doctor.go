@@ -16,6 +16,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -155,6 +156,14 @@ func buildDoctorReport(cwd string) doctorReport {
 			add("profile", statusOK, fmt.Sprintf("profiles: %s (default %q)%s", strings.Join(profiles.Names(), ", "), profiles.Default, note), nestingGuidance)
 		}
 	}
+
+	// config.yaml is loaded for the workspace sandbox default (a missing
+	// or unparsable file degrades to the built-in warn, matching a run).
+	wsCfg, _ := config.Load(ws.ConfigFile())
+
+	// sandbox — one check per defined profile, reporting the resolved mode
+	// and flagging any enforce profile whose tool coverage is incomplete.
+	checks = append(checks, sandboxChecks(wsCfg, profiles)...)
 
 	// 5. auth (offline) — one line per required backend, pairing with the
 	// backend:* checks above.
@@ -406,6 +415,55 @@ func isDir(p string) bool {
 func isFile(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// sandboxChecks emits one sandbox:<profile> check per defined profile. It
+// resolves each profile the same way a run would — profile mode overrides
+// the workspace default, which overrides the built-in warn — but with the
+// static agent.CapabilitiesFor view rather than live adapters, so doctor
+// never constructs an engine or backend. A profile that resolves to enforce
+// with at least one coverage gap fails, naming every (backend, role) pair;
+// everything else reports ok with the resolved mode.
+func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
+	def := defaultBackendName()
+	var checks []doctorCheck
+	for name, prof := range profiles.Profiles {
+		// expand omitted backends to the concrete default so the resolver
+		// can look each up by name in the static capabilities view.
+		resolved := make(config.Profile, len(prof))
+		for role, rc := range prof {
+			r := rc
+			if r.Backend == "" {
+				r.Backend = def
+			}
+			resolved[role] = r
+		}
+		caps := map[string]agent.Capabilities{}
+		for _, rc := range resolved {
+			if _, ok := caps[rc.Backend]; ok {
+				continue
+			}
+			c, _ := agent.CapabilitiesFor(rc.Backend)
+			caps[rc.Backend] = c
+		}
+		res := sandbox.Resolve(sandbox.Mode(cfg.Sandbox), sandbox.Mode(profiles.Sandboxes[name]), resolved, caps)
+		detail := "mode=" + string(res.Mode)
+		if res.Mode == sandbox.ModeEnforce && len(res.Gaps) > 0 {
+			pairs := make([]string, 0, len(res.Gaps))
+			for _, g := range res.Gaps {
+				pairs = append(pairs, g.Backend+"/"+g.Role)
+			}
+			checks = append(checks, doctorCheck{
+				Name:        "sandbox:" + name,
+				Status:      statusFail,
+				Detail:      detail + " — no tool coverage: " + strings.Join(pairs, ", "),
+				Remediation: "route the flagged roles at a backend that reaches gummi's tools (ClientTools or MCPTools), or lower the profile's sandbox to warn/off",
+			})
+		} else {
+			checks = append(checks, doctorCheck{Name: "sandbox:" + name, Status: statusOK, Detail: detail})
+		}
+	}
+	return checks
 }
 
 // renderDoctor prints the human-readable checklist with a status glyph and

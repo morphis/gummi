@@ -7,6 +7,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/sandbox"
 )
 
 // EventKind classifies an engine Event.
@@ -176,14 +177,15 @@ type Session struct {
 	verdict        string // review verdict from submit_verdict ("pass"/"changes")
 	err            error
 	stopped        bool
-	finalized      bool    // stopped; must not be persisted (may be dropped)
-	heldSlot       bool    // true between taking and releasing an attention slot
-	budget         float64 // stage credit budget (0 = none)
-	creditRate     float64 // adapter's token→credit rate (0 = engine default)
-	threshold      int     // highest budget threshold crossed (%)
-	exhausted      bool    // hit the credit cap
-	tripped        bool    // main-checkout tripwire fired; the run is dead
-	clientTools    bool    // resolved backend's ClientTools capability (spawn-time cache)
+	finalized      bool         // stopped; must not be persisted (may be dropped)
+	heldSlot       bool         // true between taking and releasing an attention slot
+	budget         float64      // stage credit budget (0 = none)
+	creditRate     float64      // adapter's token→credit rate (0 = engine default)
+	threshold      int          // highest budget threshold crossed (%)
+	exhausted      bool         // hit the credit cap
+	tripped        bool         // main-checkout tripwire fired; the run is dead
+	clientTools    bool         // resolved backend's ClientTools capability (spawn-time cache)
+	sandboxMode    sandbox.Mode // resolved confinement mode (stamped at spawn)
 
 	// preTurnDirt is the set of paths dirty on the main checkout
 	// immediately before the pending Send. The tripwire compares it
@@ -627,6 +629,23 @@ func (s *Session) ClientTools() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.clientTools
+}
+
+// setSandboxMode records the session's resolved confinement mode (warn /
+// enforce / off), stamped once at spawn. The tripwire reads it to decide
+// whether this run's arming state is on or off.
+func (s *Session) setSandboxMode(m sandbox.Mode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sandboxMode = m
+}
+
+// SandboxMode returns the session's resolved confinement mode. The zero
+// value (unset) is treated as armed — only an explicit off disarms.
+func (s *Session) SandboxMode() sandbox.Mode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sandboxMode
 }
 
 // registerResolver stashes a waiter for an in-flight MCP tool-call and

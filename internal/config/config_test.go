@@ -56,3 +56,29 @@ func TestTemplateParses(t *testing.T) {
 		t.Errorf("template permissions = %q", c.Permissions)
 	}
 }
+
+func TestLoadSandbox(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("permissions: allow-all\nsandbox: enforce\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sandbox != "enforce" {
+		t.Errorf("sandbox = %q, want enforce", c.Sandbox)
+	}
+}
+
+func TestLoadRejectsBadSandbox(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("sandbox: enfrce\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("unknown sandbox mode should error at load")
+	}
+}

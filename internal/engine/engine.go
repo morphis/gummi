@@ -25,6 +25,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
@@ -104,6 +105,10 @@ type Config struct {
 	Workspace  state.Workspace
 	Model      string
 	Permission agent.Permission
+	// Sandbox is the workspace-wide confinement mode (enforce|warn|off),
+	// taken from .gummi/config.yaml. Empty means a profile that also omits
+	// a value falls back to the built-in default (warn).
+	Sandbox string
 	// MaxActive is the number of concurrent autonomous slots (default 1).
 	MaxActive int
 	// Persist writes session transcripts to Store so they survive a
@@ -250,6 +255,13 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		return nil, fmt.Errorf("stage %s is autonomous; use Run", f.Stage)
 	}
 
+	// A run whose profile resolves to enforce must not start while any role
+	// names a backend without tool coverage — feature-level, before any
+	// session, queue slot, or engine event.
+	if res := e.resolveSandbox(f); res.Mode == sandbox.ModeEnforce && len(res.Gaps) > 0 {
+		return nil, &sandbox.RefusalError{Mode: res.Mode, Gaps: res.Gaps}
+	}
+
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
@@ -383,6 +395,13 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	}
 	if interactiveStage(f.Stage) {
 		return fmt.Errorf("stage %s is interactive; use Attach", f.Stage)
+	}
+
+	// Feature-level refusal at session start: enforce + any coverage gap
+	// fails the whole run before any stage begins. No auto-degrade to warn,
+	// no --force — the operator edits the profile to lift the guarantee.
+	if res := e.resolveSandbox(f); res.Mode == sandbox.ModeEnforce && len(res.Gaps) > 0 {
+		return &sandbox.RefusalError{Mode: res.Mode, Gaps: res.Gaps}
 	}
 
 	e.mu.Lock()
@@ -629,6 +648,7 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 	}
 	s.setSpawnInfo(name, model, clientTools)
 	s.setByokRate(rate)
+	s.setSandboxMode(e.resolveSandbox(s.Feature).Mode)
 }
 
 // newAgentSession builds an agent session for a feature's stage, with
@@ -939,6 +959,11 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 // the trip decision for that turn rather than misattributing the
 // operator's pre-existing dirt to the agent.
 func (e *Engine) beforeTurn(s *Session) {
+	// An off-mode run arms nothing: skip the pre-turn snapshot entirely, so
+	// the tripwire is genuinely disarmed (checkTrip short-circuits too).
+	if s.SandboxMode() == sandbox.ModeOff {
+		return
+	}
 	paths, err := e.dirtyPathsFn(s.ctx)
 	if err != nil {
 		s.appendActivity("main-checkout tripwire: pre-turn snapshot failed — skipping trip check for this turn: " + err.Error())
@@ -955,6 +980,9 @@ func (e *Engine) beforeTurn(s *Session) {
 // errors (a diagnostic activity line records the git flake). A missing
 // pair thus fails safe rather than tripping on a spurious empty pre-set.
 func (e *Engine) checkTrip(s *Session) []string {
+	if s.SandboxMode() == sandbox.ModeOff {
+		return nil
+	}
 	pre := s.takePreTurn()
 	if pre == nil {
 		return nil

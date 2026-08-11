@@ -133,6 +133,19 @@ func TestProfilesTemplateParses(t *testing.T) {
 	}
 }
 
+// TestParseProfilesRejectsMalformedYAML: a document with a YAML syntax
+// error must fail loudly rather than silently loading zero profiles (the
+// probe round-trip must not swallow the parse error).
+func TestParseProfilesRejectsMalformedYAML(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, "profiles:\n  x:\n    architect: { model: m\n"))
+	if err == nil {
+		t.Fatal("malformed YAML should be rejected")
+	}
+	if !strings.Contains(err.Error(), "parsing") {
+		t.Errorf("error should carry the parsing prefix, got: %v", err)
+	}
+}
+
 func profilesPath(t *testing.T, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "profiles.yaml")
@@ -149,4 +162,62 @@ func writeProfiles(t *testing.T, body string) Profiles {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func TestParseProfilesSandbox(t *testing.T) {
+	p := writeProfiles(t, `default: premium
+profiles:
+  premium:
+    sandbox: enforce
+    architect: { backend: claude, model: claude-opus-4.8 }
+    implementer: { model: gpt-5 }
+  thrifty:
+    architect: { model: somemodel }
+`)
+	if got := p.Sandboxes["premium"]; got != "enforce" {
+		t.Errorf("premium sandbox = %q, want enforce", got)
+	}
+	if got, ok := p.Sandboxes["thrifty"]; ok && got != "" {
+		t.Errorf("thrifty sandbox = %q, want unset", got)
+	}
+	// the role still parses even though a sibling `sandbox:` key exists.
+	if p.Profiles["premium"]["architect"].Backend != "claude" {
+		t.Errorf("premium architect backend = %q, want claude", p.Profiles["premium"]["architect"].Backend)
+	}
+}
+
+func TestParseProfilesRejectsBadSandbox(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, `profiles:
+  x:
+    sandbox: enfrce
+    architect: { model: m }
+`))
+	if err == nil {
+		t.Fatal("unknown per-profile sandbox should be rejected")
+	}
+	if !strings.Contains(err.Error(), "sandbox") {
+		t.Errorf("error should mention sandbox, got: %v", err)
+	}
+}
+
+// TestParseProfilesSandboxDoesNotShadowRoles: a profile carrying
+// `sandbox:` still parses its four roles correctly (the field is stripped
+// before the roles map is unmarshalled, never misread as a role).
+func TestParseProfilesSandboxDoesNotShadowRoles(t *testing.T) {
+	p := writeProfiles(t, `profiles:
+  x:
+    sandbox: enforce
+    architect: { backend: opencode, model: a }
+    implementer: { backend: opencode, model: b }
+    reviewer: { backend: opencode, model: c }
+    scribe: { backend: opencode, model: d }
+`)
+	for _, role := range []string{"architect", "implementer", "reviewer", "scribe"} {
+		if got := p.Profiles["x"][role].Model; got == "" {
+			t.Errorf("role %q model empty — sandbox shadowed the roles map", role)
+		}
+	}
+	if p.Sandboxes["x"] != "enforce" {
+		t.Errorf("sandbox = %q, want enforce", p.Sandboxes["x"])
+	}
 }

@@ -257,3 +257,36 @@ func TestCloseCancelsInFlightTripSnapshot(t *testing.T) {
 		t.Fatal("in-flight trip snapshot was not canceled by Close")
 	}
 }
+
+// TestTripwireDisarmedOnOff: a session whose resolved mode is Off never
+// arms the tripwire — the pre-turn snapshot is skipped and the write to
+// main produces no EventTripwire (EventIdle arrives instead), and
+// dirtyPathsFn is never called for a snapshot.
+func TestTripwireDisarmedOnOff(t *testing.T) {
+	ag := agent.NewFake("ack")
+	ws, store, wt := newRepo(t)
+	e := New(Config{
+		Agents: singleAgent(ag), Store: store, Worktrees: wt,
+		Workspace: ws, Model: "m", MaxActive: 1, Sandbox: "off",
+	})
+	t.Cleanup(func() { e.Close() })
+
+	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		writeAt(t, wt.Root(), "cmd/gummi/main.go") // would trip in warn/enforce
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}
+	calls := 0
+	real := wt.MainDirtyPaths
+	e.dirtyPathsFn = func(ctx context.Context) ([]string, error) {
+		calls++
+		return real(ctx)
+	}
+
+	if _, err := e.Attach(context.Background(), feature(1, "Z", domain.StageBrainstorm)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle) // a trip would replace this with EventTripwire and hang the wait
+	if calls != 0 {
+		t.Fatalf("dirtyPathsFn called %d times, want 0: off mode must skip the pre-turn snapshot", calls)
+	}
+}

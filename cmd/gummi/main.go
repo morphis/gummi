@@ -223,16 +223,20 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 	// Honor the repo's permission mode from config.yaml. Without this the
 	// parsed value was inert and "permissions: guarded" silently ran allow-all.
 	perm := agent.PermissionAllowAll
+	var sandboxMode string
 	if cfg, err := config.Load(ws.ConfigFile()); err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
-	} else if cfg.Guarded() {
-		perm = agent.PermissionGuarded
+	} else {
+		if cfg.Guarded() {
+			perm = agent.PermissionGuarded
+		}
+		sandboxMode = cfg.Sandbox
 	}
 	eng := engine.New(engine.Config{
 		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
 		Model: model, MaxActive: maxActive, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
-		Permission: perm,
+		Permission: perm, Sandbox: sandboxMode,
 	})
 	// Names() already orders the declared default first (the rest sorted) so
 	// index 0 is the intended default for the forms and the CLI --profile

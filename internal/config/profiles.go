@@ -42,6 +42,11 @@ type Profiles struct {
 	// Default names the profile used when a feature has none.
 	Default  string             `yaml:"default"`
 	Profiles map[string]Profile `yaml:"profiles"`
+	// Sandboxes maps a profile name to its declared sandbox mode
+	// (enforce|warn|off). A missing or empty value means unset — that
+	// profile inherits the workspace default from config.yaml, falling back
+	// to the built-in "warn".
+	Sandboxes map[string]string
 }
 
 // Names lists the profile names for the new-feature form: the declared
@@ -79,37 +84,79 @@ func LoadProfiles(path string) (Profiles, error) {
 // template). It lets callers validate the ProfilesTemplate that WOULD be
 // seeded, before any file exists on disk.
 func ParseProfiles(raw []byte, path string) (Profiles, error) {
-	// A pre-parse pass rejects the old `byok:` field with a migration
-	// pointer, rather than silently ignoring it. yaml.v3 drops unknown
-	// fields on strict-mode-off unmarshal, so a stale profile from before
-	// the per-role-backend change would parse clean but not do what its
-	// author expected.
+	// Probe the document as a generic map so we can (a) reject the old
+	// `byok:` field with a migration pointer and (b) strip the per-profile
+	// `sandbox:` key before the strict unmarshal. Any YAML syntax error
+	// must surface here — otherwise the failing probe would round-trip to
+	// an empty document and the strict unmarshal below would silently
+	// succeed with zero profiles. yaml.v3 drops unknown fields on
+	// strict-mode-off unmarshal, which is exactly why we probe first: a
+	// stale profile from before the per-role-backend change would parse
+	// clean but not do what its author expected.
 	var probe map[string]any
-	if err := yaml.Unmarshal(raw, &probe); err == nil {
-		if profs, ok := probe["profiles"].(map[string]any); ok {
-			for name, p := range profs {
-				roles, ok := p.(map[string]any)
+	if err := yaml.Unmarshal(raw, &probe); err != nil {
+		return Profiles{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if profs, ok := probe["profiles"].(map[string]any); ok {
+		for name, p := range profs {
+			roles, ok := p.(map[string]any)
+			if !ok {
+				continue
+			}
+			for role, rc := range roles {
+				rcm, ok := rc.(map[string]any)
 				if !ok {
 					continue
 				}
-				for role, rc := range roles {
-					rcm, ok := rc.(map[string]any)
-					if !ok {
-						continue
-					}
-					if _, has := rcm["byok"]; has {
-						return Profiles{}, fmt.Errorf("%s: profile %q role %q uses the removed `byok:` field; "+
-							"per-role BYOK is gone — configure the endpoint in the backend itself "+
-							"(claude/opencode/headless) and pick it with `backend:` instead", path, name, role)
-					}
+				if _, has := rcm["byok"]; has {
+					return Profiles{}, fmt.Errorf("%s: profile %q role %q uses the removed `byok:` field; "+
+						"per-role BYOK is gone — configure the endpoint in the backend itself "+
+						"(claude/opencode/headless) and pick it with `backend:` instead", path, name, role)
 				}
 			}
 		}
 	}
+
+	// A per-profile top-level `sandbox:` sits alongside the roles and would
+	// otherwise collide with a role's map on unmarshal. Strip it out of each
+	// profile before the strict `Profile` unmarshal, capturing and
+	// enum-validating every value so a typo fails workspace load loudly —
+	// the same contract as the workspace sandbox field.
+	sandboxes := map[string]string{}
+	if profs, ok := probe["profiles"].(map[string]any); ok {
+		for name, p := range profs {
+			roles, ok := p.(map[string]any)
+			if !ok {
+				continue
+			}
+			sb, has := roles["sandbox"]
+			if !has {
+				continue
+			}
+			s, ok := sb.(string)
+			if !ok {
+				return Profiles{}, fmt.Errorf("%s: profile %q sandbox must be a string, got %T", path, name, sb)
+			}
+			switch s {
+			case "", "enforce", "warn", "off":
+			default:
+				return Profiles{}, fmt.Errorf("%s: profile %q sandbox must be \"enforce\", \"warn\", or \"off\", got %q", path, name, s)
+			}
+			sandboxes[name] = s
+			delete(roles, "sandbox")
+		}
+	}
+	// Re-encode the cleaned (sandbox-stripped) document so the strict
+	// unmarshal below never sees a `sandbox` key pretending to be a role.
+	cleaned, err := yaml.Marshal(probe)
+	if err != nil {
+		return Profiles{}, fmt.Errorf("re-encoding %s: %w", path, err)
+	}
 	var p Profiles
-	if err := yaml.Unmarshal(raw, &p); err != nil {
+	if err := yaml.Unmarshal(cleaned, &p); err != nil {
 		return Profiles{}, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	p.Sandboxes = sandboxes
 	for name, prof := range p.Profiles {
 		for role, rc := range prof {
 			if rc.Model == "" {
@@ -148,6 +195,8 @@ profiles:
     implementer: { backend: copilot, model: claude-sonnet-5 }
     reviewer: { backend: claude, model: claude-sonnet-5 }
     scribe: { backend: copilot, model: gpt-5-mini }
+    # sandbox: warn  # enforce holds premium runs to full confinement; off
+    #                # disarms the tripwire for a trusted escape hatch.
 
   thrifty: # everyday features — backend omitted → engine default
     architect: { model: claude-sonnet-5 }

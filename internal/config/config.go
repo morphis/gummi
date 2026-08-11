@@ -15,6 +15,10 @@ import (
 type Config struct {
 	// Permissions is "allow-all" (default) or "guarded" (DESIGN §4.4).
 	Permissions string `yaml:"permissions"`
+	// Sandbox is the workspace-wide confinement default: "enforce", "warn",
+	// or "off". Empty means unset — profiles that omit their own value fall
+	// back to the built-in "warn".
+	Sandbox string `yaml:"sandbox"`
 }
 
 // Load reads and parses config.yaml. A missing file yields the default
@@ -36,6 +40,11 @@ func Load(path string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s: permissions must be \"allow-all\" or \"guarded\", got %q", path, c.Permissions)
 	}
+	switch c.Sandbox {
+	case "", "enforce", "warn", "off":
+	default:
+		return Config{}, fmt.Errorf("%s: sandbox must be \"enforce\", \"warn\", or \"off\", got %q", path, c.Sandbox)
+	}
 	return c, nil
 }
 
@@ -54,4 +63,12 @@ const Template = `# gummi configuration. See docs/DESIGN.md.
 
 # permissions: allow-all (default) or guarded.
 permissions: allow-all
+
+# sandbox: enforce|warn|off — the confinement guarantee a run is held to
+# (default warn). enforce refuses to start any run whose profile routes a
+# role at a backend without tool coverage; warn arms the same tripwire but
+# never refuses on coverage gaps; off disarms the tripwire entirely (only
+# for bootstrap/test sessions that legitimately touch main). Profiles may
+# override this per-profile in .gummi/profiles.yaml.
+# sandbox: warn
 `
