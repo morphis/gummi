@@ -16,11 +16,17 @@ import (
 	"time"
 )
 
+// claudeExecPath locates gummi's own executable when materializing the
+// per-session --mcp-config payload, so claude's MCP child is a real
+// `gummi __mcp` process rather than whatever shadows "gummi" on $PATH.
+// Production uses the real os.Executable; tests rebind it.
+var claudeExecPath = os.Executable
+
 // ClaudeCode is an Agent backed by the Claude Code CLI in its long-lived
 // bidirectional stream-json mode:
 //
 //	claude -p --input-format stream-json --output-format stream-json \
-//	  --verbose --include-partial-messages --permission-mode bypassPermissions
+//	  --verbose --include-partial-messages --permission-mode acceptEdits
 //
 // One process per session (cwd = the feature's worktree), user turns
 // written as JSON lines on stdin, activity read as JSON lines on stdout —
@@ -34,7 +40,7 @@ import (
 // per-request metering reads the message_delta stream event instead.
 //
 // P1 scope: allow-all only (guarded needs the control-protocol approval
-// path, P3) and no client tools (MCP, P2).
+// path, P3) with MCP tools (client tools, P2, still absent).
 type ClaudeCode struct {
 	bin string
 
@@ -62,10 +68,14 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // Capabilities implements Agent. Resume here is continuity across turns,
 // inherent in the long-lived process (the same bar opencode meets; the
 // CLI's --resume also survives restarts, unused until the engine needs
-// it). Interrupt is the control protocol's interrupt request.
-// ClientTools arrives with the MCP bridge (P2).
+// it). Interrupt is the control protocol's interrupt request. MCPTools
+// reports that gummi's tools are reached via the MCP endpoint at
+// SessionOpts.MCPSockPath. ClientTools (SessionOpts.Tools with a
+// ToolResolver) is deliberately off: the adapter has no native
+// replacement for the ask_user convention path, so flipping it would
+// silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -109,7 +119,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		// and no message_delta usage, so sessions would look frozen and the
 		// engine's budget check would only move at turn ends.
 		"--verbose", "--include-partial-messages",
-		"--permission-mode", "bypassPermissions",
+		"--permission-mode", "acceptEdits",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -117,6 +127,28 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	if len(opts.SystemHints) > 0 {
 		args = append(args, "--append-system-prompt", strings.Join(opts.SystemHints, "\n\n"))
 	}
+	// With a feature id and MCP socket both present, hand claude the full
+	// MCP server config inline so its tool calls reach gummi's tools over
+	// stdio. --strict-mcp-config is unconditional when we do: it shadows
+	// operator-side servers in ~/.claude.json or a project .mcp.json for
+	// the session, so a broken user-side server can't crash a stage.
+	// Missing either field → no MCP flags, so a session without a feature
+	// id starts without MCP rather than failing (mirrors opencode).
+	if opts.FeatureID != "" && opts.MCPSockPath != "" {
+		exe, err := claudeExecPath()
+		if err != nil {
+			return nil, fmt.Errorf("claude adapter: locating own executable: %w", err)
+		}
+		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath)
+		args = append(args, "--strict-mcp-config", "--mcp-config", string(cfg))
+	}
+	// Static allowlist: pre-approving a tool skips its permission checks
+	// entirely, so Edit, Write, and MultiEdit MUST stay off this list —
+	// allowlisting any of them would neutralize acceptEdits' cwd check
+	// above. And never pass --add-dir for the main checkout: it lifts the
+	// write cage alongside the read allowance. Both invariants are
+	// load-bearing; breaking either silently re-opens the write hole.
+	args = append(args, "--allowedTools", "Bash Read Grep Glob mcp__gummi")
 
 	// spawn OUTSIDE the lock (fork/exec must not serialize session creation
 	// or block a concurrent Close).
@@ -130,9 +162,6 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// Claude Code session spawns a top-level child, not a bridge child of the
 	// caller's session (auth vars are preserved — see scrubClaudeSessionEnv).
 	cmd.Env = scrubClaudeSessionEnv(os.Environ())
-	if opts.MCPSockPath != "" {
-		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+opts.MCPSockPath)
-	}
 	// Run the child in its own process group and, on cancel/close, kill the
 	// whole group: claude spawns tool subprocesses (bash, editors) that
 	// would otherwise orphan and keep the stdout pipe open, stalling
@@ -169,7 +198,6 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		stdin:       stdin,
 		stderr:      stderr,
 		workdir:     opts.WorkDir,
-		mcpSock:     opts.MCPSockPath,
 		raw:         make(chan Event, 64),
 		events:      make(chan Event),
 		stop:        make(chan struct{}),
@@ -230,7 +258,6 @@ type claudeSession struct {
 	cmd     *exec.Cmd
 	cancel  context.CancelFunc
 	workdir string // opts.WorkDir, for repo-relative tool-call details
-	mcpSock string // opts.MCPSockPath (exported to the child when set)
 	stdin   io.WriteCloser
 	stderr  *capWriter // bounded tail of the child's stderr, for crash diagnostics
 

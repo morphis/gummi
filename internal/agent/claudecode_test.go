@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +70,7 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	}
 	defer ag.Close()
 	caps := ag.Capabilities()
-	if caps.ClientTools || !caps.Resume || !caps.UsageEvents || !caps.Interrupt {
+	if !caps.MCPTools || caps.ClientTools || !caps.Resume || !caps.UsageEvents || !caps.Interrupt {
 		t.Errorf("capabilities = %+v", caps)
 	}
 
@@ -238,10 +240,20 @@ awaitDelta:
 	}
 }
 
-func TestClaudeCodeArgsPlumbing(t *testing.T) {
-	// the fake echoes its argv, cwd, and the received turn text back as the
-	// assistant message, proving the CLI flags and frames are built right.
-	script := `import sys, json, os
+// ambientMCPSock reports GUMMI_MCP_SOCK as the child will inherit it (the
+// adapter inherits os.Environ and adds nothing), so the argv-echo tests can
+// assert the child's env against a possibly-empty ambient value.
+func ambientMCPSock() string {
+	if v := os.Getenv("GUMMI_MCP_SOCK"); v != "" {
+		return v
+	}
+	return "<unset>"
+}
+
+// claudeArgvEchoScript answers one turn by echoing the child's argv, cwd,
+// and GUMMI_MCP_SOCK env value back as the assistant message, proving the
+// CLI flags, cwd, and env are built right for a given SessionOpts.
+const claudeArgvEchoScript = `import sys, json, os
 def out(o):
     sys.stdout.write(json.dumps(o)+"\n"); sys.stdout.flush()
 for line in sys.stdin:
@@ -249,10 +261,13 @@ for line in sys.stdin:
     if not line: continue
     m = json.loads(line)
     if m.get("type") != "user": continue
-    text = "argv=" + " ".join(sys.argv[1:]) + " cwd=" + os.getcwd() + " msg=" + m["message"]["content"][0]["text"]
+    text = "argv=" + " ".join(sys.argv[1:]) + " cwd=" + os.getcwd() + " envsock=" + os.environ.get("GUMMI_MCP_SOCK","<unset>") + " msg=" + m["message"]["content"][0]["text"]
     out({"type":"assistant","message":{"model":"m","content":[{"type":"text","text":text}]}})
     out({"type":"result","subtype":"success","is_error":False,"modelUsage":{}})
 `
+
+func TestClaudeCodeArgsPlumbing(t *testing.T) {
+	script := claudeArgvEchoScript
 	ag, err := NewClaudeCode(writeFakeClaude(t, script))
 	if err != nil {
 		t.Fatal(err)
@@ -281,9 +296,10 @@ for line in sys.stdin:
 	}
 	for _, wantPart := range []string{
 		"--input-format stream-json", "--output-format stream-json",
-		"--include-partial-messages", "--permission-mode bypassPermissions",
+		"--include-partial-messages", "--permission-mode acceptEdits",
 		"--model test-model", "--append-system-prompt hint one\n\nhint two",
-		"cwd=" + wd, "msg=ping",
+		"--allowedTools Bash Read Grep Glob mcp__gummi",
+		"cwd=" + wd, "envsock=" + ambientMCPSock(), "msg=ping",
 	} {
 		if !strings.Contains(msg, wantPart) {
 			t.Errorf("echoed invocation missing %q: %s", wantPart, msg)
@@ -476,67 +492,305 @@ func TestClaudeCodeCloseClosesEvents(t *testing.T) {
 // turn. Explicitly opt-in: it spends real quota, so presence-gating alone
 // (the findCopilot pattern) would bill every `go test ./...` on a machine
 // with claude installed.
+// claudeMCPStubScript is a minimal stdio MCP server the claude child spawns
+// when --mcp-config points at it. It answers initialize/tools/list and
+// serves one canned tool, mcp__gummi__spec_view, echoing the requested
+// section back — enough to prove a real claude session can parse the
+// --mcp-config flags and route a tool call to the configured server.
+const claudeMCPStubScript = `import sys, json
+def out(o):
+    sys.stdout.write(json.dumps(o)+"\n"); sys.stdout.flush()
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    msg = json.loads(line)
+    mid = msg.get("id")
+    if mid is None:
+        continue
+    method = msg.get("method")
+    if method == "initialize":
+        res = {"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"gummi-stub","version":"0"}}
+    elif method == "tools/list":
+        res = {"tools":[{"name":"mcp__gummi__spec_view","description":"view a spec section","inputSchema":{"type":"object","properties":{"section":{"type":"string"}},"required":["section"]}}]}
+    elif method == "tools/call":
+        params = msg.get("params", {}) or {}
+        if params.get("name") == "mcp__gummi__spec_view":
+            args = params.get("arguments") or {}
+            res = {"content":[{"type":"text","text":"STUB-SECTION:"+str(args.get("section",""))}]}
+        else:
+            res = {"content":[{"type":"text","text":"unknown tool"}]}
+    elif method == "ping":
+        res = {}
+    else:
+        out({"jsonrpc":"2.0","id":mid,"error":{"code":-32601,"message":"unknown method"}})
+        continue
+    out({"jsonrpc":"2.0","id":mid,"result":res})
+`
+
+// claudeRealReply sends one turn to the live claude child and returns the
+// joined text of its message/text deltas, ending at idle or error.
+func claudeRealReply(t *testing.T, sess Session, prompt string) string {
+	t.Helper()
+	if err := sess.Send(context.Background(), prompt); err != nil {
+		t.Fatalf("send %q: %v", prompt, err)
+	}
+	var text strings.Builder
+	deadline := time.After(150 * time.Second)
+	for {
+		select {
+		case e, ok := <-sess.Events():
+			if !ok {
+				return text.String()
+			}
+			switch e.Kind {
+			case EventTextDelta, EventMessage:
+				text.WriteString(e.Text)
+			case EventIdle:
+				return text.String()
+			case EventError:
+				t.Fatalf("real CLI turn errored (%q): %v", prompt, e.Err)
+			}
+		case <-deadline:
+			t.Fatalf("timed out awaiting idle for %q", prompt)
+		}
+	}
+}
+
+// TestClaudeCodeRealCLI drives the actual claude binary — one process, four
+// cheap haiku turns — with the new acceptEdits + MCP + allowlist argv baked
+// in, verifying the cwd cage holds for real. Explicitly opt-in: it spends
+// real quota, so presence-gating alone (the findCopilot pattern) would bill
+// every `go test ./...` on a machine with claude installed.
 func TestClaudeCodeRealCLI(t *testing.T) {
 	if os.Getenv("GUMMI_CLAUDE_TEST") != "1" {
 		t.Skip("set GUMMI_CLAUDE_TEST=1 to test against the real claude CLI (spends quota)")
 	}
+
+	// Point the MCP block at a canned stdio server so a real claude session
+	// can round-trip a tool call without a live engine underneath.
+	stub := writeFakeClaude(t, claudeMCPStubScript)
+	prev := claudeExecPath
+	claudeExecPath = func() (string, error) { return stub, nil }
+	t.Cleanup(func() { claudeExecPath = prev })
+
+	wt := t.TempDir()
+	prevWd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prevWd) })
+	if err := os.Chdir(wt); err != nil {
+		t.Fatal(err)
+	}
+
 	ag, err := NewClaudeCode("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{
-		WorkDir: t.TempDir(), Model: "haiku", Permission: PermissionAllowAll,
+	sess, err := ag.NewSession(context.Background(), SessionOpts{
+		WorkDir:     wt,
+		MCPSockPath: filepath.Join(t.TempDir(), "FD-012.sock"),
+		FeatureID:   "FD-012",
+		Model:       "haiku",
+		Permission:  PermissionAllowAll,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sess.Close()
-	if err := sess.Send(ctx, "Reply with exactly: ok"); err != nil {
+
+	// (a) write inside the worktree → acceptEdits auto-approves.
+	claudeRealReply(t, sess, "Create a file named inhere.txt in the current directory containing exactly: inside-ok")
+	deadline := time.After(15 * time.Second)
+	for {
+		if data, err := os.ReadFile(filepath.Join(wt, "inhere.txt")); err == nil {
+			if !strings.Contains(string(data), "inside-ok") {
+				t.Errorf("inhere.txt = %q, want inside-ok", data)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("inhere.txt was not written inside the worktree")
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	// (b) write outside the worktree → refused by acceptEdits, no file.
+	claudeRealReply(t, sess, "Create a file named ../out-of-cage.txt in the parent directory containing exactly: escape")
+	if _, err := os.Stat(filepath.Join(wt, "..", "out-of-cage.txt")); err == nil {
+		t.Fatal("write outside the worktree was not refused (out-of-cage.txt exists)")
+	}
+
+	// (c) an allowlisted MCP tool round-trips through --mcp-config.
+	got := claudeRealReply(t, sess, "Call the MCP tool named mcp__gummi__spec_view with arguments {\"section\":\"Problem\"} and report the result text verbatim.")
+	if !strings.Contains(got, "STUB-SECTION:Problem") {
+		t.Errorf("spec_view reply missing canned section: %q", got)
+	}
+
+	// (d) a tool NOT on the allowlist auto-denies without wedging the turn.
+	claudeRealReply(t, sess, "Use the WebFetch tool to retrieve https://example.com and report its status.")
+}
+
+func TestClaudeCodeArgsMCPWiring(t *testing.T) {
+	prev := claudeExecPath
+	claudeExecPath = func() (string, error) { return "/opt/gummi-stub", nil }
+	t.Cleanup(func() { claudeExecPath = prev })
+
+	ag, err := NewClaudeCode(writeFakeClaude(t, claudeArgvEchoScript))
+	if err != nil {
 		t.Fatal(err)
 	}
-	var evs []Event
-	deadline := time.After(120 * time.Second)
-drain:
-	for {
-		select {
-		case e, ok := <-sess.Events():
-			if !ok {
-				break drain
-			}
-			evs = append(evs, e)
-			if e.Kind == EventIdle || e.Kind == EventError {
-				break drain
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for the real CLI")
+	defer ag.Close()
+	sess, err := ag.NewSession(context.Background(), SessionOpts{
+		WorkDir:     t.TempDir(),
+		FeatureID:   "FD-012",
+		MCPSockPath: "/tmp/mcp/FD-012.sock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	var msg string
+	for _, e := range collect(t, sess) {
+		if e.Kind == EventMessage {
+			msg = e.Text
 		}
 	}
-	var sawText, sawIdle bool
-	var credits float64
-	var ctxEv Context
-	for _, e := range evs {
-		switch e.Kind {
-		case EventError:
-			t.Fatalf("real CLI turn errored: %v", e.Err)
-		case EventTextDelta, EventMessage:
-			sawText = true
-		case EventUsage:
-			credits += e.Usage.Credits
-		case EventContext:
-			ctxEv = e.Context
-		case EventIdle:
-			sawIdle = true
+
+	// pull the serialized args out of the echoed "argv=" prefix
+	start := strings.Index(msg, "argv=")
+	end := strings.Index(msg, " cwd=")
+	if start < 0 || end <= start {
+		t.Fatalf("bad argv echo: %s", msg)
+	}
+	fields := strings.Fields(msg[start+len("argv=") : end])
+
+	var cfg string
+	for i, f := range fields {
+		if f == "--mcp-config" {
+			if i+1 >= len(fields) {
+				t.Fatalf("--mcp-config has no value: %s", msg)
+			}
+			cfg = fields[i+1]
 		}
 	}
-	if !sawIdle || !sawText {
-		t.Errorf("real CLI turn: idle=%v text=%v (events: %d)", sawIdle, sawText, len(evs))
+	if cfg == "" {
+		t.Fatalf("argv missing --mcp-config: %s", msg)
 	}
-	if credits <= 0 {
-		t.Errorf("real CLI turn metered %v credits, want > 0", credits)
+	if !slicesContains(fields, "--strict-mcp-config") {
+		t.Errorf("argv missing --strict-mcp-config: %s", msg)
 	}
-	if ctxEv.Tokens <= 0 || ctxEv.Limit <= 0 {
-		t.Errorf("real CLI context = %+v, want live occupancy", ctxEv)
+
+	var parsed struct {
+		MCP struct {
+			Gummi struct {
+				Command string            `json:"command"`
+				Args    []string          `json:"args"`
+				Env     map[string]string `json:"env"`
+			} `json:"gummi"`
+		} `json:"mcpServers"`
 	}
+	if err := json.Unmarshal([]byte(cfg), &parsed); err != nil {
+		t.Fatalf("--mcp-config not valid JSON: %v\n%s", err, cfg)
+	}
+	g := parsed.MCP.Gummi
+	if g.Command != "/opt/gummi-stub" {
+		t.Errorf("mcp.gummi.command = %q, want /opt/gummi-stub", g.Command)
+	}
+	if !reflect.DeepEqual(g.Args, []string{"__mcp", "--feature", "FD-012"}) {
+		t.Errorf("mcp.gummi.args = %v, want [__mcp --feature FD-012]", g.Args)
+	}
+	if g.Env["GUMMI_MCP_SOCK"] != "/tmp/mcp/FD-012.sock" {
+		t.Errorf("mcp.gummi.env.GUMMI_MCP_SOCK = %v, want /tmp/mcp/FD-012.sock", g.Env["GUMMI_MCP_SOCK"])
+	}
+
+	// The socket must ride only inside the MCP config, not the child env
+	// (the GUMMI_MCP_SOCK export was dropped): the child inherits ambient
+	// only, and never the configured socket.
+	if !strings.Contains(msg, "envsock="+ambientMCPSock()) {
+		t.Errorf("child env GUMMI_MCP_SOCK != ambient: %s", msg)
+	}
+	if strings.Contains(msg, "envsock=/tmp/mcp/FD-012.sock") {
+		t.Errorf("child env carries the configured MCP socket: %s", msg)
+	}
+
+	// The allowlist is appended last: exactly the same tokens, in order.
+	wantTools := []string{"Bash", "Read", "Grep", "Glob", "mcp__gummi"}
+	ai := -1
+	for i, f := range fields {
+		if f == "--allowedTools" {
+			ai = i
+		}
+	}
+	if ai < 0 {
+		t.Fatalf("argv missing --allowedTools: %s", msg)
+	}
+	if ai+1+len(wantTools) != len(fields) || !reflect.DeepEqual(fields[ai+1:], wantTools) {
+		t.Errorf("allowlist = %v, want %v", fields[ai+1:], wantTools)
+	}
+
+	// A1: the write tools must never reach the argv — allowlisting any of
+	// them would bypass acceptEdits' cwd check.
+	for _, bad := range []string{"Edit", "Write", "MultiEdit"} {
+		for _, f := range fields {
+			if f == bad {
+				t.Errorf("argv contains %q; it must stay off the allowlist", bad)
+			}
+		}
+	}
+}
+
+func TestClaudeCodeArgsNoMCPWithoutFeature(t *testing.T) {
+	prev := claudeExecPath
+	claudeExecPath = func() (string, error) { return "/opt/gummi-stub", nil }
+	t.Cleanup(func() { claudeExecPath = prev })
+
+	for name, args := range map[string][2]string{
+		"no feature": {"", "/tmp/mcp/FD-012.sock"},
+		"no sock":    {"FD-012", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ag, err := NewClaudeCode(writeFakeClaude(t, claudeArgvEchoScript))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ag.Close()
+			sess, err := ag.NewSession(context.Background(), SessionOpts{
+				WorkDir: t.TempDir(), FeatureID: args[0], MCPSockPath: args[1],
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sess.Close()
+			if err := sess.Send(context.Background(), "ping"); err != nil {
+				t.Fatal(err)
+			}
+			var msg string
+			for _, e := range collect(t, sess) {
+				if e.Kind == EventMessage {
+					msg = e.Text
+				}
+			}
+			if strings.Contains(msg, "--mcp-config") || strings.Contains(msg, "--strict-mcp-config") {
+				t.Errorf("MCP flags present for featureID=%q sock=%q: %s", args[0], args[1], msg)
+			}
+			if !strings.Contains(msg, "--permission-mode acceptEdits") {
+				t.Errorf("missing --permission-mode acceptEdits: %s", msg)
+			}
+			if !strings.Contains(msg, "--allowedTools Bash Read Grep Glob mcp__gummi") {
+				t.Errorf("missing allowlist: %s", msg)
+			}
+		})
+	}
+}
+
+func slicesContains(xs []string, target string) bool {
+	for _, x := range xs {
+		if x == target {
+			return true
+		}
+	}
+	return false
 }
