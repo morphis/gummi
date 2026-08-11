@@ -102,11 +102,15 @@ func runBoard() error {
 	shell := ui.NewShell(th, version())
 	shell.Attach(store, wt, ws)
 
+	// Profile names for the new-feature/bug/ingest dialogs come purely
+	// from .gummi/profiles.yaml and are available whether or not any agent
+	// backend can start — surface them unconditionally so the dialogs show
+	// the real profiles even on a static board (BG-020).
+	shell.SetProfileNames(profileNames(ws))
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
-	if eng, names, cleanup := buildEngine(store, wt, ws); eng != nil {
+	if eng, _, cleanup := buildEngine(store, wt, ws); eng != nil {
 		shell.AttachEngine(eng)
-		shell.SetProfileNames(names)
 		defer cleanup()
 	}
 	// layer-3 budget: new features get this credit envelope, drawn on by
@@ -244,6 +248,21 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 	// default (e.g. "premium" ahead of the configured "thrifty").
 	names := profiles.Names()
 	return eng, agents, names
+}
+
+// profileNames returns the profile names declared in .gummi/profiles.yaml
+// in display order (the declared default first, the rest sorted), or nil
+// when none could be loaded. It is deliberately independent of the agent
+// engine: the yaml list is available whether or not any CLI agent can
+// start, so the board's dialogs show the real profiles even when the
+// backend is down (BG-020).
+func profileNames(ws state.Workspace) []string {
+	profiles, err := config.LoadProfiles(ws.ProfilesFile())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		return nil
+	}
+	return profiles.Names()
 }
 
 // defaultBackendName returns the backend name selected by GUMMI_AGENT

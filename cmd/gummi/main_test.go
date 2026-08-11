@@ -211,3 +211,68 @@ func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
 		t.Errorf("buildAgents started the copilot default even though no role references it")
 	}
 }
+
+// TestProfileNamesFromYaml locks in BG-020: the dialogs' profile list
+// must come from .gummi/profiles.yaml, ordered with the declared default
+// first, and must never fall back to the built-in presets merely because
+// an agent backend couldn't start. profileNames is the seam runBoard uses
+// to set the forms' offerings; before the fix the names were dropped on a
+// failed engine start and the forms showed fabricated presets instead.
+func TestProfileNamesFromYaml(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := state.Init(dir)
+	if err != nil {
+		t.Fatalf("state.Init: %v", err)
+	}
+	body := `default: mab
+profiles:
+  mab:
+    architect: {backend: opencode, model: m}
+    implementer: {backend: opencode, model: m}
+    reviewer: {backend: opencode, model: m}
+    scribe: {backend: opencode, model: m}
+  claude:
+    architect: {backend: claude, model: m}
+    implementer: {backend: opencode, model: m}
+    reviewer: {backend: claude, model: m}
+    scribe: {backend: opencode, model: m}
+`
+	if err := os.WriteFile(ws.ProfilesFile(), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := profileNames(ws)
+	want := []string{"mab", "claude"}
+	if len(got) != len(want) {
+		t.Fatalf("profileNames = %v, want %v", got, want)
+	}
+	for i, name := range want {
+		if got[i] != name {
+			t.Errorf("profileNames[%d] = %q, want %q (default first)", i, got[i], name)
+		}
+	}
+	for _, name := range got {
+		if name == "thrifty" || name == "premium" || name == "local-heavy" {
+			t.Errorf("profileNames offered hardcoded preset %q; expected profiles.yaml names %v", name, want)
+		}
+	}
+}
+
+// TestProfileNamesWithoutYaml ensures a workspace with no profiles.yaml
+// yields no names — the forms' own preset fallback is still the last
+// resort there.
+func TestProfileNamesWithoutYaml(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := state.Init(dir)
+	if err != nil {
+		t.Fatalf("state.Init: %v", err)
+	}
+	if got := profileNames(ws); len(got) != 0 {
+		t.Fatalf("profileNames without profiles.yaml = %v, want empty", got)
+	}
+}
