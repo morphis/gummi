@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+// codexExecPath locates gummi's own executable when materializing the
+// per-invocation `-c mcp_servers.gummi=…` override, so codex's MCP child is
+// a real `gummi __mcp` process rather than whatever shadows "gummi" on
+// $PATH. Production uses the real os.Executable; tests rebind it.
+var codexExecPath = os.Executable
+
 // Codex drives the stable, machine-readable Codex CLI exec interface. Each
 // turn is a separate process; Codex owns authentication, provider settings,
 // configuration, and the durable thread state used by exec resume.
@@ -38,7 +44,7 @@ func NewCodex(bin string) (*Codex, error) {
 
 func (c *Codex) Name() string { return "codex" }
 func (c *Codex) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true}
 }
 func (c *Codex) CreditRate(string) float64 { return 0 }
 
@@ -48,16 +54,13 @@ func (c *Codex) NewSession(_ context.Context, opts SessionOpts) (Session, error)
 	if c.closed {
 		return nil, errors.New("codex agent is closed")
 	}
-	if opts.Permission == PermissionGuarded {
-		return nil, errors.New("codex does not support guarded permissions through `codex exec`; set permissions to allow-all or use the copilot backend")
-	}
 	if opts.Model == "" {
 		return nil, errors.New("codex requires a model")
 	}
 	s := &codexSession{
 		c: c, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
-		mcpSock: opts.MCPSockPath,
-		raw:     make(chan Event, 32), events: make(chan Event), stop: make(chan struct{}),
+		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath,
+		raw: make(chan Event, 32), events: make(chan Event), stop: make(chan struct{}),
 	}
 	go s.forward()
 	c.sessions = append(c.sessions, s)
@@ -77,7 +80,7 @@ func (c *Codex) Close() error {
 type codexSession struct {
 	c                           *Codex
 	workdir, model              string
-	mcpSock                     string // opts.MCPSockPath (exported to the child when set)
+	featureID, mcpSock          string // opts.FeatureID, opts.MCPSockPath (feature gates the -c override)
 	hints                       []string
 	raw                         chan Event
 	events                      chan Event
@@ -119,11 +122,11 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 		s.mu.Unlock()
 		return errors.New("a turn is already in progress")
 	}
-	args := []string{"exec", "--json", "--color", "never", "-m", s.model, "--dangerously-bypass-approvals-and-sandbox"}
-	if s.threadID != "" {
-		args = append(args, "resume", s.threadID)
+	args, err := s.buildArgs()
+	if err != nil {
+		s.mu.Unlock()
+		return err
 	}
-	args = append(args, "-")
 	prompt := msg
 	if !s.primed && len(s.hints) > 0 {
 		prompt = strings.Join(s.hints, "\n\n") + "\n\n" + msg
@@ -132,9 +135,9 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 	procCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, s.c.bin, args...) //nolint:gosec // executable is operator-selected; argv is adapter-built
 	cmd.Dir, cmd.Env, cmd.Stdin = s.workdir, os.Environ(), strings.NewReader(prompt)
-	if s.mcpSock != "" {
-		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+s.mcpSock)
-	}
+	// The socket path reaches the __mcp child via the TOML env table on the
+	// -c override, not the parent process env; codex auth still resolves via
+	// the inherited environment above.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
@@ -160,6 +163,41 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 	s.mu.Unlock()
 	go s.readTurn(cmd, stdout, &stderr, cancel)
 	return nil
+}
+
+// buildArgs assembles the argv for one `codex exec` invocation. The
+// approval policy is expressed as an inline config override (`-c`) rather
+// than the top-level `-a` flag, codex exec does not accept; keeping every
+// token on the exec subcommand mirrors the MCP override injected below,
+// and leaves the argument vector testable against a real codex binary
+// without a live session.
+func (s *codexSession) buildArgs() ([]string, error) {
+	args := []string{
+		"exec", "--json", "--color", "never", "-m", s.model,
+		"-s", "workspace-write", "-c", `approval_policy="never"`,
+		"--skip-git-repo-check", "--ignore-user-config",
+	}
+	// With a feature id and MCP socket both present, register gummi's tool
+	// server via an inline TOML config override (`-c`), codex's only
+	// per-invocation MCP injection point. Missing either field -> no MCP
+	// flags, so a session without a feature id starts without MCP rather
+	// than failing (mirrors claudecode/opencode).
+	if s.featureID != "" && s.mcpSock != "" {
+		exe, err := codexExecPath()
+		if err != nil {
+			return nil, fmt.Errorf("codex adapter: locating own executable: %w", err)
+		}
+		override, err := buildCodexGummiOverride(exe, s.featureID, s.mcpSock)
+		if err != nil {
+			return nil, fmt.Errorf("codex adapter: building gummi override: %w", err)
+		}
+		args = append(args, "-c", override)
+	}
+	if s.threadID != "" {
+		args = append(args, "resume", s.threadID)
+	}
+	args = append(args, "-")
+	return args, nil
 }
 
 func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringer, cancel context.CancelFunc) {
