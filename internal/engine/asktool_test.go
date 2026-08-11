@@ -953,3 +953,112 @@ func TestSpecReplaceSectionUnknownSection(t *testing.T) {
 		t.Errorf("resolved with %q done=%v, want unknown section error", got, done)
 	}
 }
+
+// DispatchClientTool routes a non-interactive tool through the registered
+// resolver channel, so a non-ClientTools backend bridged over MCP gets
+// the same result as a native one. spec_view resolves immediately.
+func TestDispatchClientToolSpecView(t *testing.T) {
+	e := newEngine(t, agent.NewFake("ack"))
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.DispatchClientTool(context.Background(), s, "spec_view",
+		json.RawMessage(`{"section":"Problem"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\ndark problem.\n\n"; result != want {
+		t.Errorf("spec_view result = %q, want %q", result, want)
+	}
+	// the call was claimed from the resolver pool, leaving no orphan
+	if got := s.resolverCount(); got != 0 {
+		t.Errorf("resolver pool not drained: %d left", got)
+	}
+}
+
+// resolveNow prefers a registered resolver over the backend's ToolResolver,
+// and DispatchClientTool's ask_user blocks until Answer delivers.
+func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
+	e := newEngine(t, toolCallFake("", nil))
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, isResolver := s.agent().(toolResolver)
+	if !isResolver {
+		t.Fatal("callFake session should be a resolver for the precedence test")
+	}
+	type dcall struct {
+		out string
+		err error
+	}
+	done := make(chan dcall, 1)
+	go func() {
+		out, derr := e.DispatchClientTool(context.Background(), s, "ask_user",
+			json.RawMessage(`{"question":"theme?","options":[{"label":"dark"}]}`))
+		done <- dcall{out, derr}
+	}()
+	deadline := time.After(3 * time.Second)
+	for s.Snapshot().PendingAsk == nil {
+		select {
+		case <-deadline:
+			t.Fatal("ask never became pending")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if err := e.Answer(context.Background(), f.ID, "dark"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-done:
+		if r.err != nil || r.out != "dark" {
+			t.Fatalf("ask_user dispatch = %q, %v; want dark, nil", r.out, r.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ask_user dispatch never resolved")
+	}
+}
+
+// A canceled dispatch returns ctx.Err and drains its resolver entry, so a
+// late answer after the caller gave up is a no-op, not an orphaned waiter.
+func TestDispatchClientToolContextCancel(t *testing.T) {
+	e := newEngine(t, agent.NewFake("ack"))
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	seedDraft(t, e, f)
+	s, err := e.Attach(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, derr := e.DispatchClientTool(ctx, s, "ask_user",
+			json.RawMessage(`{"question":"q","options":[{"label":"a"}]}`))
+		done <- derr
+	}()
+	deadline := time.After(3 * time.Second)
+	for s.Snapshot().PendingAsk == nil {
+		select {
+		case <-deadline:
+			t.Fatal("ask never became pending")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("dispatch err = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("canceled dispatch never returned")
+	}
+	if got := s.resolverCount(); got != 0 {
+		t.Errorf("canceled dispatch left %d resolver entries", got)
+	}
+}

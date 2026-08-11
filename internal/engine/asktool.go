@@ -365,6 +365,28 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 	}
 }
 
+// DispatchClientTool executes a client tool on a live session from the
+// MCP bridge, blocking until the tool resolves. It generates the engine-
+// side call id, registers a waiter on the session, and funnels the call
+// through the exact handleClientTool path a native ClientTools backend
+// exercises, so ask_user/verdict/resolve behaviours are identical. It
+// returns exactly one of the tool's result string or ctx.Err(); never a
+// nil-error empty success.
+func (e *Engine) DispatchClientTool(ctx context.Context, s *Session, name string, args json.RawMessage) (string, error) {
+	callID := fmt.Sprintf("mcp-%d", e.mcpSeq.Add(1))
+	ch := s.registerResolver(callID)
+	e.handleClientTool(s, &agent.ToolCall{ID: callID, Name: name, Args: args})
+	select {
+	case result := <-ch:
+		return result, nil
+	case <-ctx.Done():
+		// the caller went away: drop the waiter so a late resolve is a
+		// no-op (the backend, not a ToolResolver, is silent on it).
+		s.takeResolver(callID)
+		return "", ctx.Err()
+	}
+}
+
 // handleAsk turns an ask_user call into a pending question (blocks the
 // agent's turn until Answer). One question at a time: a parallel ask_user
 // while another is pending is bounced with an immediate result — letting
@@ -594,9 +616,18 @@ func (e *Engine) handleVerdict(s *Session, tc *agent.ToolCall) {
 }
 
 // resolveNow answers a tool call directly (no user involved), for calls
-// gummi declines to route. Best-effort: a backend without ToolResolver
-// simply drops it.
+// gummi declines to route. A registered MCP waiter for the call id wins
+// over the backend's ToolResolver, so an in-flight MCP dispatch resolves
+// to its own waiter; otherwise a backend without ToolResolver simply
+// drops the result (best-effort).
 func (e *Engine) resolveNow(s *Session, callID, result string) {
+	if ch, ok := s.takeResolver(callID); ok {
+		select {
+		case ch <- result:
+		default: // a waiter that already gave up: drop it
+		}
+		return
+	}
 	if r, ok := s.agent().(agent.ToolResolver); ok {
 		_ = r.Resolve(context.Background(), callID, result)
 	}
@@ -688,17 +719,29 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
 
 	// resolve the blocked tool call if the backend supports it; otherwise
-	// deliver the answer as a normal turn (the convention path).
-	a := s.agent()
-	if r, ok := a.(agent.ToolResolver); ok && ask.CallID != "" {
-		if err := r.Resolve(ctx, ask.CallID, answer); err != nil {
-			// Resolve failed: restore the question so the user can retry,
-			// rather than leaving the agent's blocked tool call orphaned to
-			// hang the turn. trySet avoids clobbering a newer ask.
-			s.trySetPendingAsk(ask)
-			return err
+	// deliver the answer as a normal turn (the convention path). An MCP
+	// dispatch — a non-ClientTools backend bridged over the session
+	// socket — resolves via its registered waiter channel first, so the
+	// bridge's blocked call resumes exactly like a native one.
+	if ask.CallID != "" {
+		if ch, ok := s.takeResolver(ask.CallID); ok {
+			select {
+			case ch <- answer:
+			default: // the waiter already gave up (ctx cancel): drop it
+			}
+			return nil
 		}
-		return nil
+		a := s.agent()
+		if r, ok := a.(agent.ToolResolver); ok {
+			if err := r.Resolve(ctx, ask.CallID, answer); err != nil {
+				// Resolve failed: restore the question so the user can retry,
+				// rather than leaving the agent's blocked tool call orphaned to
+				// hang the turn. trySet avoids clobbering a newer ask.
+				s.trySetPendingAsk(ask)
+				return err
+			}
+			return nil
+		}
 	}
 	return e.Send(ctx, id, answer)
 }

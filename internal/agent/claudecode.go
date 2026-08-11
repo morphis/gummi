@@ -130,6 +130,9 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// Claude Code session spawns a top-level child, not a bridge child of the
 	// caller's session (auth vars are preserved — see scrubClaudeSessionEnv).
 	cmd.Env = scrubClaudeSessionEnv(os.Environ())
+	if opts.MCPSockPath != "" {
+		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+opts.MCPSockPath)
+	}
 	// Run the child in its own process group and, on cancel/close, kill the
 	// whole group: claude spawns tool subprocesses (bash, editors) that
 	// would otherwise orphan and keep the stdout pipe open, stalling
@@ -166,6 +169,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		stdin:       stdin,
 		stderr:      stderr,
 		workdir:     opts.WorkDir,
+		mcpSock:     opts.MCPSockPath,
 		raw:         make(chan Event, 64),
 		events:      make(chan Event),
 		stop:        make(chan struct{}),
@@ -226,6 +230,7 @@ type claudeSession struct {
 	cmd     *exec.Cmd
 	cancel  context.CancelFunc
 	workdir string // opts.WorkDir, for repo-relative tool-call details
+	mcpSock string // opts.MCPSockPath (exported to the child when set)
 	stdin   io.WriteCloser
 	stderr  *capWriter // bounded tail of the child's stderr, for crash diagnostics
 

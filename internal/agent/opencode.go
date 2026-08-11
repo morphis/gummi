@@ -87,6 +87,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		workdir:        opts.WorkDir,
 		model:          opts.Model,
 		hints:          opts.SystemHints,
+		mcpSock:        opts.MCPSockPath,
 		outputTokenMax: opts.OutputTokenMax,
 		raw:            make(chan Event, 32),
 		events:         make(chan Event),
@@ -114,7 +115,8 @@ type opencodeSession struct {
 	workdir        string
 	model          string
 	hints          []string
-	outputTokenMax int // >0 → export OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX per turn
+	mcpSock        string // opts.MCPSockPath (exported to the child when set)
+	outputTokenMax int    // >0 → export OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX per turn
 
 	raw    chan Event
 	events chan Event
@@ -195,6 +197,9 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	// appending here reaches the child.
 	if s.outputTokenMax > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=%d", s.outputTokenMax))
+	}
+	if s.mcpSock != "" {
+		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+s.mcpSock)
 	}
 	// Run opencode in its own process group and, on cancel/interrupt, kill
 	// the whole group — opencode spawns tool subprocesses (bash, editors)

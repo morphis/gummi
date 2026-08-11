@@ -101,6 +101,12 @@ type SessionOpts struct {
 	// Only the opencode adapter honors it (exported as
 	// OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX); other backends ignore it.
 	OutputTokenMax int
+	// MCPSockPath is the absolute unix socket path of the session's
+	// inbound MCP endpoint, stamped by the engine when the backend's
+	// Capabilities().ClientTools is false so the child can serve gummi's
+	// tools via `gummi __mcp`. Adapters that do not know how to consume it
+	// (all real ones, until a transport consumer lands) ignore it.
+	MCPSockPath string
 }
 
 // Agent creates sessions and reports what its backend can do.

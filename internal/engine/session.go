@@ -191,6 +191,19 @@ type Session struct {
 	// snapshot was taken this turn (see takePreTurn).
 	preTurnDirt map[string]struct{}
 
+	// mcpTeardown releases the session's MCP inbound endpoint (closes the
+	// listener, joins its goroutines, removes the socket file) exactly
+	// once, hand-in-hand with stop (see setMCPTeardown).
+	mcpTeardown func()
+
+	// resolvers is the registered in-flight MCP tool-call waiters, keyed
+	// by the engine-side call id (mcp-<n>). A registered call resolves
+	// via its channel instead of the backend's ToolResolver, so a
+	// non-ClientTools backend served over MCP gets its answer the same
+	// way a native one does. Each entry is a buffered channel of capacity
+	// 1 that DispatchClientTool selects on.
+	resolvers map[string]chan string
+
 	// Outstanding estimated spend per model, awaiting a settle event
 	// that reconciles it to the provider-metered figure: pendingTokenEst
 	// is what the engine priced from raw tokens (no adapter cost at
@@ -616,6 +629,62 @@ func (s *Session) ClientTools() bool {
 	return s.clientTools
 }
 
+// registerResolver stashes a waiter for an in-flight MCP tool-call and
+// returns its channel. DispatchClientTool owns the call id; Resolve paths
+// that answer the call take the channel via takeResolver.
+func (s *Session) registerResolver(callID string) chan string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resolvers == nil {
+		s.resolvers = map[string]chan string{}
+	}
+	ch := make(chan string, 1)
+	s.resolvers[callID] = ch
+	return ch
+}
+
+// takeResolver claims and removes a registered MCP call-waiter, reporting
+// whether one existed. A take for an already-taken or never-registered id
+// is a no-op returning ok=false, so a stale resolve can never fire twice.
+func (s *Session) takeResolver(callID string) (chan string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch, ok := s.resolvers[callID]
+	if ok {
+		delete(s.resolvers, callID)
+	}
+	return ch, ok
+}
+
+// resolverCount reports how many MCP call-waiters are still registered
+// (test and lifecycle probes: there must be zero orphans after a session
+// ends).
+func (s *Session) resolverCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.resolvers)
+}
+
+// setMCPTeardown installs the session's MCP inbound-endpoint release
+// function, or runs it inline when the session is already stopped. It is
+// atomic with stop (both take s.mu): a teardown arriving after stop fired
+// — the autonomous Pause/Drop/Close race where the backend is still
+// spawning — runs immediately rather than being stashed and orphaned, so
+// the accept-loop goroutine and the socket file never leak.
+func (s *Session) setMCPTeardown(teardown func()) {
+	if teardown == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.finalized {
+		s.mu.Unlock()
+		teardown()
+		return
+	}
+	s.mcpTeardown = teardown
+	s.mu.Unlock()
+}
+
 // notePendingEst accumulates a usage sample's estimated credits against
 // its model, split by origin: tokenEst was priced by the engine from raw
 // tokens, adapterEst by the adapter from a realized rate. A later settle
@@ -763,6 +832,8 @@ func (s *Session) stop() {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		s.finalized = true
+		teardown := s.mcpTeardown
+		s.mcpTeardown = nil
 		s.mu.Unlock()
 		if s.cancel != nil {
 			s.cancel()
@@ -770,6 +841,9 @@ func (s *Session) stop() {
 		close(s.done)
 		if a := s.agent(); a != nil {
 			_ = a.Close()
+		}
+		if teardown != nil {
+			teardown()
 		}
 	})
 }

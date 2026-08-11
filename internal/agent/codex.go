@@ -54,8 +54,11 @@ func (c *Codex) NewSession(_ context.Context, opts SessionOpts) (Session, error)
 	if opts.Model == "" {
 		return nil, errors.New("codex requires a model")
 	}
-	s := &codexSession{c: c, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
-		raw: make(chan Event, 32), events: make(chan Event), stop: make(chan struct{})}
+	s := &codexSession{
+		c: c, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
+		mcpSock: opts.MCPSockPath,
+		raw:     make(chan Event, 32), events: make(chan Event), stop: make(chan struct{}),
+	}
 	go s.forward()
 	c.sessions = append(c.sessions, s)
 	return s, nil
@@ -74,6 +77,7 @@ func (c *Codex) Close() error {
 type codexSession struct {
 	c                           *Codex
 	workdir, model              string
+	mcpSock                     string // opts.MCPSockPath (exported to the child when set)
 	hints                       []string
 	raw                         chan Event
 	events                      chan Event
@@ -128,6 +132,9 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 	procCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, s.c.bin, args...) //nolint:gosec // executable is operator-selected; argv is adapter-built
 	cmd.Dir, cmd.Env, cmd.Stdin = s.workdir, os.Environ(), strings.NewReader(prompt)
+	if s.mcpSock != "" {
+		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+s.mcpSock)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
@@ -219,6 +226,7 @@ func (s *codexSession) finishTurn(cancel context.CancelFunc) {
 	s.cancel = nil
 	s.mu.Unlock()
 }
+
 func (s *codexSession) emit(e Event) {
 	select {
 	case s.raw <- e:
@@ -305,7 +313,8 @@ func (s *codexSession) mapLine(line []byte) ([]Event, bool, error) {
 func itemStarted(id, typ, command, server, tool string, changes []struct {
 	Path string `json:"path"`
 	Kind string `json:"kind"`
-}) []Event {
+},
+) []Event {
 	switch typ {
 	case "command_execution":
 		return []Event{{Kind: EventToolCall, Tool: "command", Detail: command, CallID: id}}
@@ -320,7 +329,8 @@ func itemStarted(id, typ, command, server, tool string, changes []struct {
 func itemCompleted(started bool, id, typ, text, command, output, status string, exit *int, server, tool, itemErr string, result json.RawMessage, changes []struct {
 	Path string `json:"path"`
 	Kind string `json:"kind"`
-}) []Event {
+},
+) []Event {
 	if typ == "agent_message" {
 		if text != "" {
 			return []Event{{Kind: EventMessage, Text: text}}
@@ -357,7 +367,8 @@ func itemCompleted(started bool, id, typ, text, command, output, status string, 
 func changeSummary(changes []struct {
 	Path string `json:"path"`
 	Kind string `json:"kind"`
-}) string {
+},
+) string {
 	parts := make([]string, 0, len(changes))
 	for _, c := range changes {
 		if c.Path != "" {
@@ -366,6 +377,7 @@ func changeSummary(changes []struct {
 	}
 	return strings.Join(parts, ", ")
 }
+
 func errorMessage(raw map[string]json.RawMessage) string {
 	var msg string
 	_ = json.Unmarshal(raw["message"], &msg)
@@ -415,6 +427,7 @@ func (s *codexSession) Interrupt(_ context.Context) error {
 	}
 	return nil
 }
+
 func (s *codexSession) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()

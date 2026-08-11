@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -148,6 +149,11 @@ type Engine struct {
 	// through when teardown begins.
 	wg sync.WaitGroup
 
+	// mcpSeq is the atomic source of engine-side MCP call ids, so a
+	// session's in-flight dispatches are unique and never collide with a
+	// backend's own tool-call ids (disjoint namespaces).
+	mcpSeq atomic.Uint64
+
 	// persistMu serializes a session save against a delete of the same
 	// feature: it spans persist's finalized-check-and-write and
 	// persistDelete so an in-flight save can't land after the delete and
@@ -260,7 +266,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	}
 
 	// interactive chat is human-paced: no budget cap.
-	sess, specPath, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
+	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
 	if err != nil {
 		return nil, err
 	}
@@ -270,6 +276,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
 	sctx, cancel := context.WithCancel(context.Background())
 	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, specPath: specPath}
+	s.setMCPTeardown(mcpTeardown)
 	e.stampSpawnInfo(s)
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
@@ -453,7 +460,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.exhaust(s)
 		return
 	}
-	sess, specPath, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor())
+	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor())
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -463,6 +470,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	}
 	s.setSpecPath(specPath)
 	s.setBudget(budget)
+	s.setMCPTeardown(mcpTeardown)
 	// Pause/Drop/Close may have finalized this session while newAgentSession
 	// was spawning the backend (seconds). If so, attachAgent refuses: close
 	// the orphaned agent and free the slot rather than run it unwatched.
@@ -626,19 +634,22 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 // newAgentSession builds an agent session for a feature's stage, with
 // the backend/model chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
-// Session (ask_user answer capture writes there).
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor) (agent.Session, string, error) {
+// Session (ask_user answer capture writes there), and — when the resolved
+// backend cannot call client tools — the MCP inbound-endpoint teardown
+// stub, so the caller can bind it to the Session's lifecycle before the
+// child inherits GUMMI_MCP_SOCK.
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor) (agent.Session, string, func(), error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	model, backend, outputTokenMax := e.resolveRole(f.Profile, role)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		if backend == "" {
-			return nil, "", fmt.Errorf("no agent configured for feature %s stage %s", f.ID, f.Stage)
+			return nil, "", nil, fmt.Errorf("no agent configured for feature %s stage %s", f.ID, f.Stage)
 		}
-		return nil, "", fmt.Errorf("no agent registered for backend %q (feature %s role %s)", backend, f.ID, role)
+		return nil, "", nil, fmt.Errorf("no agent registered for backend %q (feature %s role %s)", backend, f.ID, role)
 	}
 	hints := stageHints(f, specPath, flavor)
 	// implementation runs carry any open diff review comments so a fix-up
@@ -679,6 +690,35 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	} else if interactiveStage(f.Stage) {
 		hints = append(hints, askConventionHint)
 	}
+	// A backend without native client tools is bridged over MCP: bind the
+	// session's inbound endpoint before spawning the child, so a child
+	// that dials on start (once a transport consumer lands) never races
+	// the bind. On success the teardown is returned for the caller to
+	// stash on the Session's lifecycle; on any failure below the endpoint
+	// is released here, so callers see a nil teardown alongside an error.
+	if !ag.Capabilities().ClientTools {
+		mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		sess, specErr := ag.NewSession(ctx, agent.SessionOpts{
+			WorkDir:        workDir,
+			ArtifactPath:   specPath,
+			Role:           role,
+			Model:          model,
+			SystemHints:    hints,
+			Permission:     e.cfg.Permission,
+			MaxCredits:     maxCredits,
+			Tools:          tools,
+			OutputTokenMax: outputTokenMax,
+			MCPSockPath:    mcpPath,
+		})
+		if specErr != nil {
+			mcpTeardown()
+			return nil, "", nil, fmt.Errorf("starting %s session: %w", role, specErr)
+		}
+		return sess, specPath, mcpTeardown, nil
+	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:        workDir,
 		ArtifactPath:   specPath,
@@ -691,9 +731,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		OutputTokenMax: outputTokenMax,
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("starting %s session: %w", role, err)
+		return nil, "", nil, fmt.Errorf("starting %s session: %w", role, err)
 	}
-	return sess, specPath, nil
+	return sess, specPath, nil, nil
 }
 
 // locate resolves the working directory and spec path for a feature's
