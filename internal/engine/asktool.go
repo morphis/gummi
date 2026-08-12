@@ -63,14 +63,18 @@ const (
 // stageTools returns the gummi-owned client tools offered on a stage.
 // ask_user is interactive-only (it blocks on a human, and only the chat
 // picker can answer it); spec_annotate is offered to the interactive
-// architect; submit_verdict to the reviewer; resolve_annotation to the
-// implementer/fixer so it can mark diff review comments addressed
+// architect; submit_verdict to the reviewer/verifier; resolve_annotation
+// to the implementer/fixer so it can mark diff review comments addressed
 // (DESIGN §6.1's resolve event for diffs — always registered on those
-// stages because comments can also arrive mid-run as a live turn). The
-// non-blocking tools (annotate, verdict, resolve) are gummi-resolved
-// immediately, so they are safe on autonomous stages. The plan-critique
-// pass reviews the plan and files findings, so it gets both; the
-// rebase-resolve pass is judged by git state alone and gets none.
+// stages because comments can also arrive mid-run as a live turn). Every
+// stage that works with the design artifact reads and rewrites it through
+// spec_view/spec_replace_section rather than raw file access, so a backend
+// caged to the worktree still has a gummi-mediated path to it. The
+// non-blocking tools (annotate, verdict, resolve, spec_view,
+// spec_replace_section) are gummi-resolved immediately, so they are safe
+// on autonomous stages. The plan-critique pass reviews the plan and files
+// findings, so it gets both; the rebase-resolve pass is judged by git
+// state alone and gets none.
 func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	switch flavor {
 	case flavorCritique:
@@ -82,11 +86,11 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
 		return []agent.ToolDef{askUserTool(), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageReview:
-		return []agent.ToolDef{submitVerdictTool()}
+		return []agent.ToolDef{submitVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageVerify:
-		return []agent.ToolDef{verifyVerdictTool()}
+		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageImplement, domain.StageFix:
-		return []agent.ToolDef{resolveAnnotationTool()}
+		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
 	default:
 		return nil
 	}
@@ -318,11 +322,18 @@ The write is a naive splice: re-emit any %% @user: marker lines yourself,
 since gummi does not preserve them for you; never include a top-level
 ## heading in the body.`
 	case domain.StageReview:
-		return `Call the submit_verdict tool exactly once at the end of your review
-(verdict "pass" or "changes") to drive gummi's review loop, instead of
-writing a VERDICT: line.`
+		return `Read the relevant parts of the design artifact with spec_view (pass a
+section heading for one section's body, omit it for the whole document).
+Record your findings in the artifact with spec_replace_section: rewrite a
+section's body between its ## heading and the next, and re-emit any
+%% @user: marker lines yourself. Then call the submit_verdict tool exactly
+once at the end of your review (verdict "pass" or "changes") to drive
+gummi's review loop, instead of writing a VERDICT: line.`
 	case domain.StageVerify:
-		return `Call the submit_verdict tool exactly once at the end (verdict "pass",
+		return `Record the verification evidence in the design artifact with
+spec_view and spec_replace_section (a section's body sits between its ##
+heading and the next; re-emit any %% @user: marker lines yourself), then
+call the submit_verdict tool exactly once at the end (verdict "pass",
 "fail", or "blocked") instead of writing a VERDICT: line — gummi gates
 on it.`
 	default:

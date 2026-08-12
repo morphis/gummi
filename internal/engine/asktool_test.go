@@ -344,8 +344,15 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 // (pass|fail|blocked) and a "fail" verdict is recorded like any other.
 func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
 	tools := stageTools(domain.StageVerify, flavorStage)
-	if len(tools) != 1 || tools[0].Name != "submit_verdict" {
-		t.Fatalf("verify tools = %+v, want submit_verdict only", tools)
+	if len(tools) != 3 || tools[0].Name != "submit_verdict" {
+		t.Fatalf("verify tools = %+v, want submit_verdict first", tools)
+	}
+	specNames := map[string]bool{}
+	for _, td := range tools[1:] {
+		specNames[td.Name] = true
+	}
+	if !specNames[specViewToolName] || !specNames[specReplaceSectionToolName] {
+		t.Fatalf("verify tools = %+v missing spec_view/spec_replace_section", tools)
 	}
 	if toolHint(domain.StageVerify, flavorStage) == "" {
 		t.Error("verify has no tool hint")
@@ -702,9 +709,38 @@ func TestArchitectStageToolSurface(t *testing.T) {
 			t.Errorf("stage %s tools = %v, want %v", st, names, want)
 		}
 	}
-	// the non-architect stages keep their existing surfaces
-	if got := stageTools(domain.StageReview, flavorStage); len(got) != 1 || got[0].Name != "submit_verdict" {
+	// the worktree stages carry submit_verdict/resolve_annotation plus the
+	// artifact access tools, so a backend caged to the worktree never has to
+	// read or write the spec through raw file access
+	if got := stageTools(domain.StageReview, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
 		t.Errorf("review tools changed: %+v", got)
+	}
+	if got := stageTools(domain.StageVerify, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
+		t.Errorf("verify tools changed: %+v", got)
+	}
+	if got := stageTools(domain.StageImplement, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
+		t.Errorf("implement tools changed: %+v", got)
+	}
+	if got := stageTools(domain.StageFix, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
+		t.Errorf("fix tools changed: %+v", got)
+	}
+}
+
+// TestWorktreeStagesOfferArtifactTools pins the regression: worktree
+// stages are backed by agents caged to the worktree, so the design
+// artifact is only reachable through gummi's mediated path. Every such
+// stage must offer spec_view and spec_replace_section; otherwise the
+// agent has to fall back to raw file access, which a caged backend
+// cannot reach and reacts to with a blocked verdict.
+func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
+	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageReview, domain.StageVerify} {
+		names := map[string]bool{}
+		for _, td := range stageTools(st, flavorStage) {
+			names[td.Name] = true
+		}
+		if !names[specViewToolName] || !names[specReplaceSectionToolName] {
+			t.Errorf("stage %s tools %v lack spec_view/spec_replace_section", st, names)
+		}
 	}
 }
 
