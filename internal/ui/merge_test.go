@@ -46,15 +46,52 @@ func pressMerge(t *testing.T, m *Shell) *Shell {
 	return press(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
 }
 
-// typeMessage writes the landing commit message into the open dialog —
-// it opens empty, the message is the user's to provide.
+// typeMessage writes the landing commit message into the open dialog,
+// marking it as user-modified (a real keystroke would) so a late draft
+// can never clobber it.
 func typeMessage(t *testing.T, m *Shell, msg string) {
 	t.Helper()
 	d, ok := m.Overlay.Top().(*commitMsgDialog)
 	if !ok {
 		t.Fatalf("commit-message dialog not open (notice %q)", m.notice.text)
 	}
+	d.modified = true
 	d.input.SetValue(msg)
+}
+
+// draftFenced wraps a landing message in the machine-readable fence the
+// scribe's reply must carry, as attachDraftEngine would return it.
+func draftFenced(t *testing.T, body string) string {
+	t.Helper()
+	return "```gummi-commit\n" + body + "\n```"
+}
+
+// attachDraftEngine wires a fake scribe that answers the landing-message
+// pass with the given fenced drafts, in order, one per pass.
+func attachDraftEngine(t *testing.T, m *Shell, drafts ...string) *Shell {
+	t.Helper()
+	i := 0
+	eng := engine.New(engine.Config{
+		Agents: singleAgent(&agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+			var reply string
+			if i < len(drafts) {
+				reply = drafts[i]
+				i++
+			}
+			return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
+		}}),
+		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
+	})
+	t.Cleanup(func() { eng.Close() })
+	m.AttachEngine(eng)
+	return m
+}
+
+// draftMsgBody returns the parsed fenced body for draftFenced(t, body).
+func draftMsgBody(t *testing.T, fenced string) string {
+	t.Helper()
+	body := strings.TrimPrefix(fenced, "```gummi-commit\n")
+	return strings.TrimSuffix(body, "\n```")
 }
 
 func TestSquashMergeFlow(t *testing.T) {
@@ -67,7 +104,7 @@ func TestSquashMergeFlow(t *testing.T) {
 		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
 	if d.input.Value() != "" {
-		t.Fatalf("dialog prefill = %q, want empty — the user writes the message", d.input.Value())
+		t.Fatalf("dialog prefill = %q, want empty with no agent to draft", d.input.Value())
 	}
 	if m.mergePrep {
 		t.Error("mergePrep flag still set with the dialog open")
@@ -104,33 +141,89 @@ func TestSquashMergeFlow(t *testing.T) {
 	}
 }
 
-func TestSquashMergeEngineNeverDrafts(t *testing.T) {
+func TestCommitMsgDraftFillsTextarea(t *testing.T) {
 	m, root, _ := mergeFixture(t)
-	eng := engine.New(engine.Config{
-		Agents: singleAgent(&agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-			t.Errorf("merge spawned an agent session (role %s) — the user writes the message", opts.Role)
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}}),
-		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
-	})
-	t.Cleanup(func() { eng.Close() })
-	m.AttachEngine(eng)
-
+	draft := draftFenced(t, "feat(ui): sort the board\n\n- seats by severity")
+	m = attachDraftEngine(t, m, draft)
 	m = pressMerge(t, m)
 	d, ok := m.Overlay.Top().(*commitMsgDialog)
 	if !ok {
 		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
-	if d.input.Value() != "" {
-		t.Fatalf("dialog prefill = %q, want empty — the user writes the message", d.input.Value())
+	want := draftMsgBody(t, draft)
+	if d.input.Value() != want {
+		t.Fatalf("dialog prefill = %q, want the scribe draft %q", d.input.Value(), want)
 	}
-	d.input.SetValue("FD-001: rebase me")
+	// ctrl+s on an unmodified pre-filled draft is a deliberate approval
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
 	}
-	if got := gitOut(t, root, "log", "-1", "--format=%s"); got != "FD-001: rebase me" {
-		t.Errorf("main HEAD subject = %q", got)
+	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != want {
+		t.Errorf("main HEAD message = %q, want the approved draft %q", got, want)
+	}
+}
+
+func TestCommitMsgDraftDoesNotClobber(t *testing.T) {
+	m, root, _ := mergeFixture(t)
+	m = attachDraftEngine(t, m, draftFenced(t, "feat(ui): draft that must lose"))
+	// open the dialog but hold the draft until after the user types
+	model, draftCmd := m.Update(mergeReadyMsg{f: m.rows[0].F, thenDone: false})
+	m = model.(*Shell)
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("mergeReadyMsg did not open the dialog (notice %q)", m.notice.text)
+	}
+	typeMessage(t, m, "my own message")
+	// now let the draft arrive — it must not clobber the keystrokes
+	m = pump(t, m, draftCmd)
+	d, _ := m.Overlay.Top().(*commitMsgDialog)
+	if d.input.Value() != "my own message" {
+		t.Fatalf("draft clobbered the user's message: %q", d.input.Value())
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
+		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != "my own message" {
+		t.Errorf("main HEAD message = %q, want the user's message", got)
+	}
+}
+
+func TestCommitMsgCtrlRRegenerates(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	first := draftFenced(t, "feat(ui): first take")
+	second := draftFenced(t, "feat(ui): regenerated take")
+	m = attachDraftEngine(t, m, first, second)
+	m = pressMerge(t, m)
+	d, _ := m.Overlay.Top().(*commitMsgDialog)
+	if d.input.Value() != draftMsgBody(t, first) {
+		t.Fatalf("initial draft = %q, want first take", d.input.Value())
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	d, _ = m.Overlay.Top().(*commitMsgDialog)
+	if d.input.Value() != draftMsgBody(t, second) {
+		t.Fatalf("after ctrl+r draft = %q, want the regenerated take", d.input.Value())
+	}
+}
+
+func TestCommitMsgEscCancelsInflight(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	m = attachDraftEngine(t, m, draftFenced(t, "feat(ui): stale take"))
+	// open the dialog and grab the in-flight draft cmd without draining it
+	model, draftCmd := m.Update(mergeReadyMsg{f: m.rows[0].F, thenDone: false})
+	m = model.(*Shell)
+	if m.Overlay.Top() == nil {
+		t.Fatal("mergeReadyMsg did not open the dialog")
+	}
+	// esc cancels the whole merge, including the in-flight draft
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.Overlay.Top() != nil {
+		t.Fatal("esc did not close the dialog")
+	}
+	// a late reply after esc must not touch the closed dialog
+	m = pump(t, m, draftCmd)
+	if m.Overlay.Top() != nil {
+		t.Fatal("late draft reopened or touched a closed dialog")
 	}
 }
 

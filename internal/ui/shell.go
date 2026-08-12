@@ -391,9 +391,28 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: sanitize(msg.warn), isErr: true}
 		}
 		f, thenDone := msg.f, msg.thenDone
-		m.Overlay.Push(newCommitMsgDialog(f, func(message string) tea.Cmd {
+		d := newCommitMsgDialog(f, func(message string) tea.Cmd {
 			return m.squashMergeFeature(f, message, thenDone)
-		}))
+		}, func(dctx context.Context, feature domain.Feature) (string, error) {
+			// best-effort: a nil engine or any drafting failure yields an
+			// empty draft, never a hard error or a delayed dialog; dctx
+			// lets esc cancel an in-flight pass.
+			if m.engine == nil {
+				return "", nil
+			}
+			return m.engine.DraftCommitMessage(dctx, feature)
+		})
+		m.Overlay.Push(d)
+		// start the draft pass off the render loop; the dialog is already
+		// open and editable, and the draft fills only while unmodified.
+		return m, d.startDraft()
+
+	case commitDraftMsg:
+		// a late reply from a closed dialog (esc) or a stale pass (ctrl+r
+		// regenerated) is dropped; apply only while the dialog is live.
+		if d, ok := m.Overlay.Top().(*commitMsgDialog); ok && d.feature == msg.f {
+			d.apply(msg)
+		}
 		return m, nil
 
 	case mergeThenDoneMsg:

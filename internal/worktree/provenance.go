@@ -25,14 +25,27 @@ var provenanceRe = regexp.MustCompile(`(?im)(` +
 	`|%%\s*@(reviewer|architect|implementer|scribe)\b` +
 	`)`)
 
-// ProvenanceWarnings scans the feature branch's own commit messages
-// (merge base to tip) for agent-authorship metadata. The squash landing
-// discards branch messages — the user writes the landing message — so
-// this is belt-and-suspenders: it surfaces attribution that would leak
-// if the branch were merged some other way, or that signals an agent
-// authored commits it shouldn't have. One warning per offending commit;
-// empty when clean.
-func (m *Manager) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]string, error) {
+// MatchesAttribution returns the first provenance match found in s (the
+// matched text, "" when s is clean). It backs both the branch warning scan
+// and the squash landing-message scrub, so a generated message can never
+// carry agent-authorship metadata into main's history on ctrl+s.
+func MatchesAttribution(s string) string {
+	return provenanceRe.FindString(s)
+}
+
+// Commit is one commit on the feature branch, surfaced to the scribe as
+// its short hash and full message. The body may contain any text git
+// allows; it is fed to the scribe, never rendered to a terminal.
+type Commit struct {
+	Hash string
+	Body string
+}
+
+// BranchCommits returns the feature branch's own commits (merge base to
+// tip) in git-log order, one Commit per commit. This is the single
+// source of the merge-base/log plumbing; ProvenanceWarnings scans the
+// same stream.
+func (m *Manager) BranchCommits(ctx context.Context, f *domain.Feature) ([]Commit, error) {
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return nil, err
@@ -47,18 +60,86 @@ func (m *Manager) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]
 	if err != nil {
 		return nil, err
 	}
-	var warns []string
+	var commits []Commit
 	for _, rec := range strings.Split(out, "\x1e") {
 		hash, body, ok := strings.Cut(strings.TrimSpace(rec), "\x1f")
 		if !ok {
 			continue
 		}
-		if match := provenanceRe.FindString(body); match != "" {
+		commits = append(commits, Commit{Hash: hash, Body: body})
+	}
+	return commits, nil
+}
+
+// draftCommitCap and draftDiffstatMax bound what feeds the landing-message
+// scribe pass: branch bodies and a big diff stat must not blow a scribe's
+// configured output_token_max on a long feature.
+const (
+	draftCommitCap   = 50
+	draftDiffstatMax = 4000
+)
+
+// DraftFeed is the branch material the scribe reads to compose a landing
+// commit message: the branch's own commit messages (capped) and a bounded
+// diffstat against main. Both are bounded here, beside the git plumbing.
+type DraftFeed struct {
+	Commits  []Commit
+	Diffstat string
+}
+
+// BranchDraftFeed returns the branch commits (first draftCommitCap) and a
+// bounded diffstat (merge base..tip) for the landing-message pass. The
+// diffstat is advisory: a failure yields an empty stat, never a hard
+// error, so an unusable stat still lets the pass run.
+func (m *Manager) BranchDraftFeed(ctx context.Context, f *domain.Feature) (*DraftFeed, error) {
+	commits, err := m.BranchCommits(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) > draftCommitCap {
+		commits = commits[:draftCommitCap]
+	}
+	stat, _ := m.branchDiffstat(ctx, f)
+	if len(stat) > draftDiffstatMax {
+		stat = stat[:draftDiffstatMax]
+	}
+	return &DraftFeed{Commits: commits, Diffstat: stat}, nil
+}
+
+// branchDiffstat returns the diffstat of the feature branch's commits
+// against main (merge base..tip).
+func (m *Manager) branchDiffstat(ctx context.Context, f *domain.Feature) (string, error) {
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return "", err
+	}
+	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	if err != nil {
+		return "", err
+	}
+	return runGit(ctx, m.root, "diff", "--stat", base+".."+branch)
+}
+
+// ProvenanceWarnings scans the feature branch's own commit messages
+// (merge base to tip) for agent-authorship metadata. The squash landing
+// discards branch messages — the user writes the landing message — so
+// this is belt-and-suspenders: it surfaces attribution that would leak
+// if the branch were merged some other way, or that signals an agent
+// authored commits it shouldn't have. One warning per offending commit;
+// empty when clean.
+func (m *Manager) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]string, error) {
+	commits, err := m.BranchCommits(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	var warns []string
+	for _, c := range commits {
+		if match := MatchesAttribution(c.Body); match != "" {
 			match = strings.TrimSpace(match)
 			if len(match) > 40 {
 				match = match[:40] + "…"
 			}
-			warns = append(warns, fmt.Sprintf("%s (%q)", hash, match))
+			warns = append(warns, fmt.Sprintf("%s (%q)", c.Hash, match))
 		}
 	}
 	return warns, nil

@@ -19,6 +19,6 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle needs-attention queue[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mi        [m  [38;2;191;188;200mopen needs-attention inbox[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mr        [m  [38;2;191;188;200mrebase branch onto main (conflicts hand off to an agent)[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mm        [m  [38;2;191;188;200msquash-merge branch into main (you write the message)[m
+[38;2;107;80;255m│[m  [38;2;191;188;200mm        [m  [38;2;191;188;200msquash-merge branch into main (review & approve the drafted messag[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mc        [m  [38;2;191;188;200mclean up a landed branch[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mn        [m  [38;2;191;188;200mnew feature[m

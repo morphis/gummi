@@ -135,10 +135,10 @@ and the ignore rules that keep it all out of your repo's history. Then:
 4. Watch the running agent (`enter`), review the diff (`d`), and let the
    review/verify loop run. `b` bounces work back with your annotations.
 5. Done means a verified branch. Press `m` to squash-merge it into main:
-   you write the landing commit's message yourself in a dialog — gummi
-   never generates it — and nothing is committed until you confirm. Or
-   merge outside gummi — either way it detects the landing (merge or
-   squash-merge) and offers cleanup (`c`).
+   the dialog drafts a suggested landing message from the spec and the
+   branch's commits; you review, edit, and approve it — nothing is
+   committed until you confirm. Or merge outside gummi — either way it
+   detects the landing (merge or squash-merge) and offers cleanup (`c`).
 
 Key surfaces on the board (press `?` anywhere for the full table):
 
@@ -153,7 +153,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `n` / `B` | new feature / new bug |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
 | `a` | raw-attach the agent CLI in the worktree (escape hatch) |
-| `r` / `m` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (you write the commit message) |
+| `r` / `m` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) |
 | `y` | duplicate — a fresh copy starts over in todo, the original stays |
 | `c` / `x` | clean up a landed branch / delete |
 

@@ -180,7 +180,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	commitWork(t, root, "FD-001")
 
 	// g at verify is the "done" decision: it routes through the squash
-	// merge — commit-message dialog (the user writes the message), then
+	// merge — commit-message dialog (drafts a message the user approves), then
 	// land on main and move to done
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {

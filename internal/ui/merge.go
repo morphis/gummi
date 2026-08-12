@@ -24,13 +24,14 @@ type mergeReadyMsg struct {
 	err  error
 }
 
-// prepareMerge checks the merge preconditions off the render loop. The
-// landing commit's message is the user's to write — gummi never
-// generates it — so on success the shell opens an empty editor.
-// Anything still uncommitted in the worktree (including untracked files
-// — new source files are agent work like any other) is committed as a
-// final checkpoint first: gummi owns the branch's commits, and only
-// committed work merges.
+// prepareMerge checks the merge preconditions off the render loop. On
+// success it opens the commit-message dialog, which drafts a suggested
+// landing message from the spec and the branch — the user still approves
+// and can edit it; nothing lands without an explicit ctrl+s. Anything
+// still uncommitted in the worktree (including untracked files — new
+// source files are agent work like any other) is committed as a final
+// checkpoint first: gummi owns the branch's commits, and only committed
+// work merges.
 func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -91,6 +92,16 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		}
 		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up"}
 	}
+}
+
+// commitDraftMsg carries a best-effort draft landing message for the open
+// commit-message dialog. gen tags the pass that produced it: only the
+// latest generation is applied, so a late reply from a re-draft (ctrl+r)
+// or a dialog closed by esc is dropped rather than clobbering.
+type commitDraftMsg struct {
+	f     domain.FeatureID
+	gen   int
+	draft string
 }
 
 // mergeThenDoneMsg asks the shell to run the merge flow as the

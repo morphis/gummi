@@ -110,7 +110,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "tab", label: "attention", help: "cycle needs-attention queue"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},
-		{key: "m", label: "merge", help: "squash-merge branch into main (you write the message)"},
+		{key: "m", label: "merge", help: "squash-merge branch into main (review & approve the drafted message)"},
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
 		{key: "n", label: "new", help: "new feature", bar: true},
 		{key: "B", label: "bug", help: "new bug"},
