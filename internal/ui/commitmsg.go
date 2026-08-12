@@ -110,8 +110,11 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		// regenerate the draft; applies only while the user hasn't typed.
 		return false, d.startDraft()
 	}
-	d.modified = true
+	before := d.input.Value()
 	d.input, _ = d.input.Update(key)
+	if d.input.Value() != before {
+		d.modified = true
+	}
 	return false, nil
 }
 
