@@ -719,7 +719,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// on start never races the bind. The teardown is returned for the caller
 	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
-	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f)
+	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor)
 	if err != nil {
 		return nil, "", nil, err
 	}

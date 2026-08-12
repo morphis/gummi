@@ -54,6 +54,7 @@ func mcpSockPath(w state.Workspace, id domain.FeatureID) string {
 type mcpEndpoint struct {
 	engine  *Engine
 	feature domain.Feature
+	flavor  runFlavor
 	ln      net.Listener
 
 	ctx    context.Context
@@ -74,7 +75,7 @@ type mcpEndpoint struct {
 // for the accept and per-connection goroutines, and removes the socket
 // file. It must be stashed on the Session (setMCPTeardown) so Session.stop
 // invokes it exactly once; an error here leaves nothing behind to release.
-func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature) (string, func(), error) {
+func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor runFlavor) (string, func(), error) {
 	path := mcpSockPath(e.cfg.Workspace, f.ID)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -95,6 +96,7 @@ func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature) (string
 	ep := &mcpEndpoint{
 		engine:  e,
 		feature: f,
+		flavor:  flavor,
 		ln:      ln,
 		ctx:     epCtx,
 		cancel:  epCancel,
@@ -243,11 +245,13 @@ func (ep *mcpEndpoint) dispatch(conn net.Conn, wmu *sync.Mutex, req *mcp.Request
 	ep.writeFrame(conn, wmu, mcp.Response{JSONRPC: mcp.JSONRPC, ID: req.ID, Result: result})
 }
 
-// listTools mirrors stageTools for the endpoint's feature. A feature
-// session always drives flavorStage; the endpoint is bound pre-session, so
-// it answers the stage's own tool set rather than a pass flavor.
+// listTools mirrors stageTools for the endpoint's feature and the pass
+// flavor the session was created for. The endpoint is bound per-run from
+// newAgentSession, which holds the same flavor it used to build the
+// session's stageHints/toolHint, so the tool list it advertises matches
+// what that pass's prompt told the model existed.
 func (ep *mcpEndpoint) listTools() (json.RawMessage, error) {
-	defs := stageTools(ep.feature.Stage, flavorStage)
+	defs := stageTools(ep.feature.Stage, ep.flavor)
 	return mcp.MarshalTools(defs)
 }
 
