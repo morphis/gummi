@@ -32,7 +32,21 @@ Compose the landing commit message as:
 - a Conventional Commits subject: type(scope): summary
 - imperative mood, at most 72 characters, no trailing period
 - a blank line
-- a short body of "- " bullets describing what changed and why
+- a body of "- " bullets, each stating the change's rationale (the "why"),
+  not a mechanical restatement of what the diff does
+
+Every body line, including each "- " bullet, stays at or under 72
+characters. If a bullet would run longer, continue it on an indented line
+two spaces past the "- " (aligned under the bullet text) and keep that
+line at or under 72 too.
+
+Never enumerate the diff or implementation line-by-line: no per-file,
+per-line, or per-hunk restatement of what changed. Each bullet must say
+why the change is worth making — the reasoning a future reader needs —
+not recite the mechanics.
+
+Good:   - guarantee the landing message carries rationale, not a diff recap
+Bad:    - edited commitmsg.go to add the wrapBodyLines and isDiffDump helpers
 
 The subject must describe the CHANGE, not the process: no "address review
 findings", no stage names, and no feature/bug id prefix (the id is
@@ -87,6 +101,57 @@ func parseGummiCommit(text string) (string, bool) {
 		return "", false
 	}
 	return draft, true
+}
+
+// isDiffDump reports whether s looks like a raw diff dump rather than a
+// composed message: true if any trimmed line begins with a diff-marker
+// prefix (`diff --git`, `+++ `, `--- `, or `@@ `). These never appear in
+// a hand-written rationale and reliably signal a model that pasted the
+// diff back instead of writing prose.
+func isDiffDump(s string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "diff --git") ||
+			strings.HasPrefix(line, "+++ ") ||
+			strings.HasPrefix(line, "--- ") ||
+			strings.HasPrefix(line, "@@ ") {
+			return true
+		}
+	}
+	return false
+}
+
+// wrapBodyLines hard-wraps any body line longer than width at the last
+// word boundary at or before width, continuing the remainder on an
+// indented line (two spaces, aligned under a "- " bullet). Lines at or
+// under width and blank lines pass through unchanged. The subject line is
+// excluded by the caller, so the pass never rewrites it.
+func wrapBodyLines(s string, width int) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line == "" || len(line) <= width {
+			continue
+		}
+		var wrapped []string
+		for line != "" {
+			line = strings.Trim(line, " ")
+			if line == "" {
+				break
+			}
+			if len(line) <= width {
+				wrapped = append(wrapped, line)
+				break
+			}
+			cut := strings.LastIndex(line[:width], " ")
+			if cut < 0 {
+				cut = width // no word boundary in the window; hard break
+			}
+			wrapped = append(wrapped, strings.TrimSpace(line[:cut]))
+			line = strings.TrimSpace(line[cut:])
+		}
+		lines[i] = strings.Join(wrapped, "\n  ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // commitDraftTimeout bounds the landing-message pass so a wedged backend
@@ -151,6 +216,15 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		draft, ok := parseGummiCommit(text.String())
 		if !ok {
 			return ""
+		}
+		// the deterministic pass: guarantee the shape regardless of model
+		// compliance, so a diff-shaped or unwrapped draft never reaches
+		// main's history on ctrl+s.
+		if isDiffDump(draft) {
+			return ""
+		}
+		if subject, body, ok := strings.Cut(draft, "\n"); ok {
+			draft = subject + "\n" + wrapBodyLines(body, 72)
 		}
 		// the sharp edge: a generated message must never carry agent
 		// attribution into main's history on ctrl+s.
