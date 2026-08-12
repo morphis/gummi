@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -465,5 +466,147 @@ func TestDeleteLandedBranchBypassesGuard(t *testing.T) {
 	var fe *ForkDriftError
 	if errors.As(err, &fe) {
 		t.Fatalf("DeleteLandedBranch surfaced ForkDriftError: %v", err)
+	}
+}
+
+// TestReanchorOnMain proves the full re-anchor recovery: after main is
+// rewritten under a drifted worktree, rebasing the branch onto main and then
+// re-anchoring the fork clears drift, re-stamps the fork to main's HEAD, and
+// leaves the branch's checkpoint commit intact.
+func TestReanchorOnMain(t *testing.T) {
+	root := newRepo(t)
+	fs := &memForkStore{}
+	m, err := NewManager(ctx, root, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := feature(1, "Reanchor")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a checkpoint commit of the feature's own
+	writeFile(t, p, "check.txt", "checkpoint\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "checkpoint")
+
+	// rewrite main under the worktree — drift
+	rewindMainBackward(t, root)
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("expected drift after rewind")
+	}
+
+	// the recovery gesture: rebase then re-anchor
+	if err := m.RebaseOnMain(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ReanchorOnMain(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AssertNoForkDrift(ctx, f); err != nil {
+		t.Fatalf("still drifted after re-anchor: %v", err)
+	}
+	// the fork is re-stamped to main's HEAD
+	want := mustGit(t, root, "rev-parse", "HEAD")
+	if got, _ := fs.ForkPoint(ctx, f.ID); got != want {
+		t.Fatalf("re-anchored fork = %s, want main HEAD %s", got, want)
+	}
+	// the checkpoint commit survives the rebase
+	logMsg := mustGit(t, root, "log", "--oneline", f.BranchName())
+	if !strings.Contains(logMsg, "checkpoint") {
+		t.Fatalf("checkpoint commit lost after re-anchor:\n%s", logMsg)
+	}
+}
+
+// Re-anchoring refuses when main's HEAD is not in the branch's history: the
+// soundness guard fails, the feature is still drifted, and the operator
+// keeps a ForkDriftError naming the remedies.
+func TestReanchorOnMain_RefusesWhenNotRebased(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Refuse reanchor")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "chk.txt", "x\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "chk")
+	rewindMainBackward(t, root)
+
+	err = m.ReanchorOnMain(ctx, f)
+	var fe *ForkDriftError
+	if !errors.As(err, &fe) {
+		t.Fatalf("ReanchorOnMain without a rebase: want *ForkDriftError, got %T: %v", err, err)
+	}
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("drift cleared without a rebase")
+	}
+}
+
+// The rewritten ForkDriftError names the work item, its branch, both full
+// SHAs, the likely causes, and both remedies — and errors.As matching still
+// works for existing callers.
+func TestForkDriftErrorMessage(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Message")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "m.txt", "m\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "m")
+	rewindMainBackward(t, root)
+
+	recorded, _ := m.forkStore.ForkPoint(ctx, f.ID)
+	mainHead := mustGit(t, root, "rev-parse", "HEAD")
+	err = m.AssertNoForkDrift(ctx, f)
+	var fe *ForkDriftError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want *ForkDriftError, got %T: %v", err, err)
+	}
+	msg := fe.Error()
+	for _, want := range []string{
+		string(f.ID), f.BranchName(), recorded, mainHead,
+		"fork drift", "press r", "reflog",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q does not name %q", msg, want)
+		}
+	}
+}
+
+// A drifted worktree with an uncommitted edit recovers in one gesture: the
+// --autostash rebase carries the edit across, and after re-anchoring the
+// drift clears with the uncommitted edit restored — never silently dropped.
+func TestRebaseOnMainAutostashCarriesDirty(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(1, "Autostash")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// an uncommitted edit to a tracked file
+	writeFile(t, p, "README.md", "uncommitted edit\n")
+	rewindMainBackward(t, root)
+	if err := m.AssertNoForkDrift(ctx, f); err == nil {
+		t.Fatal("expected drift")
+	}
+
+	if err := m.RebaseOnMainAutostash(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ReanchorOnMain(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AssertNoForkDrift(ctx, f); err != nil {
+		t.Fatalf("drift not cleared: %v", err)
+	}
+	// the uncommitted edit survived the stash/unstash
+	if content, err := os.ReadFile(filepath.Join(p, "README.md")); err != nil || string(content) != "uncommitted edit\n" {
+		t.Fatalf("uncommitted edit lost after autostash: %q, %v", content, err)
 	}
 }

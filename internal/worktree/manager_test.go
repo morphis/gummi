@@ -48,6 +48,19 @@ func (s *memForkStore) SetForkPoint(_ context.Context, id domain.FeatureID, sha 
 	return nil
 }
 
+func (s *memForkStore) ReanchorForkPoint(_ context.Context, id domain.FeatureID, sha string) error {
+	if sha == "" {
+		return fmt.Errorf("re-anchoring fork-point for %s: refusing an empty SHA", id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[domain.FeatureID]string{}
+	}
+	s.m[id] = sha
+	return nil
+}
+
 func (s *memForkStore) ClearForkPoint(_ context.Context, id domain.FeatureID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

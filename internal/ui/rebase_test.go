@@ -257,6 +257,11 @@ func TestAgentRebaseSuccessReVerifies(t *testing.T) {
 	if ok, err := m.wt.RebasedOnMain(context.Background(), &f); !ok || err != nil {
 		t.Fatalf("branch not rebased onto main: %v %v", ok, err)
 	}
+	// the judged-ok rebase re-anchored the fork to main's head, so drift is
+	// clear for the feature re-run.
+	if err := m.wt.AssertNoForkDrift(context.Background(), &f); err != nil {
+		t.Fatalf("agent rebase left drift: %v", err)
+	}
 	// the quality floor: verify re-ran (a fresh non-rebase session), and
 	// its pass raised the landing gate
 	s := eng.Get("FD-001")
@@ -271,5 +276,70 @@ func TestAgentRebaseSuccessReVerifies(t *testing.T) {
 	}
 	if !gated {
 		t.Errorf("re-verify did not raise the landing gate; inbox: %+v", m.inbox.list())
+	}
+}
+
+// driftUnder rewinds main to an unrelated lineage under the feature
+// worktree, so the recorded fork is no longer an ancestor of main's HEAD.
+func driftUnder(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "rewound.ts"), []byte("rewound\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "checkout", "-q", "--orphan", "tmp-rew")
+	git(t, root, "commit", "-qm", "rewound main")
+	git(t, root, "branch", "-M", "tmp-rew", "main")
+}
+
+// A drifted feature's r gesture reports no drift afterwards: the rebase
+// followed by the re-anchor clears the stranded state and re-stamps the fork
+// to main's head in one keypress.
+func TestRebaseDriftedReanchors(t *testing.T) {
+	m, root, wt := rebaseFeatureFixture(t)
+	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "add", ".")
+	git(t, wt, "commit", "-qm", "feature work")
+	driftUnder(t, root)
+
+	f, _ := m.store.GetFeature(context.Background(), "FD-001")
+	if err := m.wt.AssertNoForkDrift(context.Background(), &f); err == nil {
+		t.Fatal("expected drift before r")
+	}
+	m = pump(t, m, m.rebaseFeature(f))
+	if m.notice.isErr || !strings.Contains(m.notice.text, "rebased onto main") {
+		t.Fatalf("drifted rebase: notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if err := m.wt.AssertNoForkDrift(context.Background(), &f); err != nil {
+		t.Fatalf("still drifted after r: %v", err)
+	}
+}
+
+// A drifted worktree with uncommitted work recovers via the same r gesture:
+// the drifted+dirty branch uses --autostash, so the edit survives and drift
+// clears — nothing is silently discarded, and no raw git is needed.
+func TestRebaseDriftedDirtyRecovers(t *testing.T) {
+	m, root, wt := rebaseFeatureFixture(t)
+	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("uncommitted edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	driftUnder(t, root)
+
+	f, _ := m.store.GetFeature(context.Background(), "FD-001")
+	if err := m.wt.AssertNoForkDrift(context.Background(), &f); err == nil {
+		t.Fatal("expected drift before r")
+	}
+	m = pump(t, m, m.rebaseFeature(f))
+	if m.notice.isErr || !strings.Contains(m.notice.text, "rebased onto main") {
+		t.Fatalf("drifted+dirty rebase: notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if err := m.wt.AssertNoForkDrift(context.Background(), &f); err != nil {
+		t.Fatalf("drift not cleared: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(wt, "README.md"))
+	if err != nil || string(content) != "uncommitted edit\n" {
+		t.Fatalf("uncommitted edit lost after recovery: %q, %v", content, err)
 	}
 }

@@ -28,6 +28,11 @@ type ForkPointStore interface {
 	// Create and the lazy backfill cannot race a stored SHA into being
 	// overwritten.
 	SetForkPoint(ctx context.Context, id domain.FeatureID, sha string) error
+	// ReanchorForkPoint overwrites a feature's recorded fork-point SHA
+	// unconditionally — the single explicit re-stamp, distinct from the
+	// stamped-once SetForkPoint, reached only through the manager's re-anchor
+	// operation after it has verified main's HEAD is in the branch's history.
+	ReanchorForkPoint(ctx context.Context, id domain.FeatureID, sha string) error
 	// ClearForkPoint resets a feature's recorded fork-point SHA to the empty
 	// backfill sentinel, so the next Create on the row re-anchors the fork to
 	// main's then-current head.
@@ -540,6 +545,23 @@ func (e *RebaseConflictError) Error() string {
 // returned; when the rebase could not start at all (e.g. dirty worktree)
 // the original error is returned untouched.
 func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
+	return m.rebaseOnMain(ctx, f, false)
+}
+
+// RebaseOnMainAutostash rebases onto main like RebaseOnMain, but passes
+// --autostash so a drifted worktree's uncommitted edits are stashed for the
+// rebase and restored after, in one gesture. It is scoped to the drifted
+// case: the ordinary, non-drifted rebase keeps refusing a dirty worktree
+// (the safe default), so uncommitted work is never silently discarded.
+func (m *Manager) RebaseOnMainAutostash(ctx context.Context, f *domain.Feature) error {
+	return m.rebaseOnMain(ctx, f, true)
+}
+
+// rebaseOnMain is the shared engine behind RebaseOnMain and
+// RebaseOnMainAutostash; autostash selects whether the rebase carries
+// uncommitted work across (--autostash) or refuses to start on a dirty
+// worktree.
+func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash bool) error {
 	p, err := m.requireWorktree(f)
 	if err != nil {
 		return err
@@ -548,7 +570,12 @@ func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
 	if err != nil {
 		return err
 	}
-	if _, err := runGit(ctx, p, "rebase", mainHead); err != nil {
+	args := []string{"rebase"}
+	if autostash {
+		args = append(args, "--autostash")
+	}
+	args = append(args, mainHead)
+	if _, err := runGit(ctx, p, args...); err != nil {
 		if !m.rebaseInProgress(ctx, p) {
 			return fmt.Errorf("rebase of %s did not start: %w", f.ID, err)
 		}
@@ -558,6 +585,31 @@ func (m *Manager) RebaseOnMain(ctx context.Context, f *domain.Feature) error {
 			return fmt.Errorf("rebase failed AND abort failed, worktree %s needs manual attention: %w (abort: %v)", p, err, abortErr)
 		}
 		return &RebaseConflictError{Files: conflicts}
+	}
+	return nil
+}
+
+// ReanchorOnMain re-stamps the feature's recorded fork point to main's
+// current HEAD — the recovery that clears fork drift. It is guarded by
+// RebasedOnMain: main's HEAD must already be in the branch's history, so the
+// merge base IS main's HEAD and the post-rebase diff can only be the
+// feature's own commits. When the guard fails the feature is still drifted,
+// and its current ForkDriftError is returned so the operator keeps the
+// remedies. Idempotent: re-anchoring to the same HEAD twice is a no-op.
+func (m *Manager) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
+	mainHead, err := m.MainHead(ctx)
+	if err != nil {
+		return err
+	}
+	rebased, err := m.RebasedOnMain(ctx, f)
+	if err != nil {
+		return err
+	}
+	if !rebased {
+		return m.AssertNoForkDrift(ctx, f)
+	}
+	if err := m.forkStore.ReanchorForkPoint(ctx, f.ID, mainHead); err != nil {
+		return err
 	}
 	return nil
 }
@@ -714,21 +766,34 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	return nil
 }
 
+// ForkDriftRemedy is the single recovery phrase quoted verbatim by both
+// ForkDriftError.Error() and the doctor remediation line, so the two never
+// drift apart: pressing r rebases the branch onto main and re-anchors the
+// fork, and if main was rewound (not just rebased) restoring it from its
+// reflog undoes the accidental rewind.
+const ForkDriftRemedy = "press r in the board to rebase onto main and re-anchor this work item to it, or if main was accidentally rewound restore it from its reflog"
+
 // ForkDriftError reports that the feature's recorded fork point is no
 // longer an ancestor of main's current HEAD — i.e. main was rewound past
 // where the worktree's branch originally forked, so a diff-based stage
-// would present commits the feature did not author as its own. Recorded
-// and MainHead are the two commit SHAs. Recreating the worktree against
-// the current main is the v1-recommended remedy.
+// would present commits the feature did not author as its own. Recorded and
+// MainHead are the two commit SHAs. FeatureID and Branch identify the
+// work item the drift stranding. Fields are populated only at the single
+// construction site in AssertNoForkDrift.
 type ForkDriftError struct {
+	// FeatureID is the drifted work item.
+	FeatureID domain.FeatureID
+	// Branch is the work item's git branch.
+	Branch string
 	// Recorded is the fork point stamped at worktree-creation time.
 	Recorded string
-	// MainHead is main's current HEAD — the commit main was rewound to.
+	// MainHead is main's current HEAD — the commit main now points at.
 	MainHead string
 }
 
 func (e *ForkDriftError) Error() string {
-	return fmt.Sprintf("fork drift: main was rewound past %s (recorded fork at %s); the diff would include commits this work item did not author. Recreate the worktree from current main to recover", e.MainHead, e.Recorded)
+	return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is no longer in main's history; main now points at %s (likely a rebase, amend, or reset on main). %s",
+		e.FeatureID, e.Branch, e.Recorded, e.MainHead, ForkDriftRemedy)
 }
 
 // AssertNoForkDrift refuses a diff-based operation when the feature's
@@ -788,7 +853,7 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	if err != nil {
 		return err
 	}
-	return &ForkDriftError{Recorded: recorded, MainHead: mainHead}
+	return &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead}
 }
 
 // assertNoForkDriftAgainstBase is AssertNoForkDrift with the live

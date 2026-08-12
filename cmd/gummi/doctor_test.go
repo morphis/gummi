@@ -1,13 +1,20 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // clearDoctorEnv neutralizes every environment variable buildDoctorReport
@@ -474,4 +481,134 @@ profiles:
 	if strings.Join(again, ",") != strings.Join(want, ",") {
 		t.Errorf("backend order not deterministic: %v vs %v", again, want)
 	}
+}
+
+// TestDoctorForkDrift: a feature whose recorded fork is no longer an
+// ancestor of main reports an advisory warn naming it, with the shared
+// remedy and its fork left unchanged; a clean repo passes quietly. The
+// check is present in the --json payload too (same report shape).
+func TestDoctorForkDrift(t *testing.T) {
+	clearDoctorEnv(t)
+	fi := newDoctorFixture(t)
+
+	// a feature with a worktree — Create stamps its fork in the store.
+	f := fi.feature()
+	if _, err := fi.wt.Create(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	fork := f.ForkPoint
+	if fork == "" {
+		fork, _ = fi.store.ForkPoint(context.Background(), f.ID)
+	}
+	if fork == "" {
+		t.Fatal("no fork recorded for the feature worktree")
+	}
+
+	// clean: no drift.
+	r := buildDoctorReport(fi.root)
+	if c := checkByName(r, "fork-drift"); c.Status != statusOK {
+		t.Fatalf("clean repo fork-drift = %+v, want ok", c)
+	}
+
+	// drift: rewrite main under the worktree.
+	fi.rewindMain()
+
+	r = buildDoctorReport(fi.root)
+	c := checkByName(r, "fork-drift")
+	if c.Status != statusWarn {
+		t.Fatalf("drifted fork-drift = %+v, want warn", c)
+	}
+	if !strings.Contains(c.Detail, string(f.ID)) || !strings.Contains(c.Detail, f.BranchName()) {
+		t.Errorf("detail %q should name the drifted feature and branch", c.Detail)
+	}
+	if c.Remediation == "" || !strings.Contains(c.Remediation, "press r") {
+		t.Errorf("remediation %q should carry the shared r-gesture remedy", c.Remediation)
+	}
+	// doctor writes nothing: the recorded fork is unchanged.
+	if got, err := fi.store.ForkPoint(context.Background(), f.ID); err != nil || got != fork {
+		t.Fatalf("doctor changed the recorded fork: got %q (err %v), want %q", got, err, fork)
+	}
+	// it appears in the --json payload without error.
+	if _, err := json.Marshal(r); err != nil {
+		t.Fatalf("report does not marshal: %v", err)
+	}
+}
+
+// doctorFixture is a real repo + gummi workspace + store + worktree manager,
+// the shape buildDoctorReport reads against live.
+type doctorFixture struct {
+	root  string
+	store *state.Store
+	wt    *worktree.Manager
+}
+
+func newDoctorFixture(t *testing.T) *doctorFixture {
+	t.Helper()
+	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "t")
+	git("config", "user.email", "t@e.invalid")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "init")
+
+	ws, err := state.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	wt, err := worktree.NewManager(context.Background(), root, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &doctorFixture{root: root, store: store, wt: wt}
+}
+
+func (f *doctorFixture) feature() domain.Feature {
+	id, _ := domain.NewFeatureID(1)
+	slug, _ := domain.Slugify("drift me")
+	now := time.Now()
+	feat := domain.Feature{
+		ID: id, Num: 1, Kind: domain.KindFeature, Title: "Drift me", Slug: slug,
+		Stage: domain.StageSpec, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := f.store.CreateFeature(context.Background(), &feat); err != nil {
+		panic(err)
+	}
+	return feat
+}
+
+// rewindMain rewinds main to an unrelated lineage under the feature's
+// worktree, so the recorded fork is no longer an ancestor of main's HEAD.
+func (f *doctorFixture) rewindMain() {
+	git := func(args ...string) {
+		if err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", f.root}, args...)...).Run(); err != nil {
+			panic(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "rewound.ts"), []byte("rewound\n"), 0o600); err != nil {
+		panic(err)
+	}
+	git("add", ".")
+	git("checkout", "-q", "--orphan", "tmp-rewound")
+	git("commit", "-q", "-m", "rewound main")
+	git("branch", "-M", "tmp-rewound", "main")
 }

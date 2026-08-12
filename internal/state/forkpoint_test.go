@@ -115,3 +115,48 @@ func TestClearForkPoint(t *testing.T) {
 		t.Fatalf("re-stamp after clear: %v", err)
 	}
 }
+
+// ReanchorForkPoint is the single explicit re-stamp: it overwrites a fork
+// already stamped by SetForkPoint (so re-anchoring a drifted feature works),
+// refuses an empty SHA, and leaves SetForkPoint's stamped-once rule intact.
+func TestReanchorForkPoint(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(5, "Reanchor")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	const first = "0123456789abcdef0123456789abcdef01234567"
+	if err := s.SetForkPoint(ctx, f.ID, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// re-anchor overwrites unconditionally — the recovery write.
+	const second = "9999999999999999999999999999999999999999"
+	if err := s.ReanchorForkPoint(ctx, f.ID, second); err != nil {
+		t.Fatalf("re-anchor: %v", err)
+	}
+	if got, err := s.ForkPoint(ctx, f.ID); err != nil || got != second {
+		t.Fatalf("fork after re-anchor = %q, %v; want %q", got, err, second)
+	}
+
+	// an empty SHA is refused and leaves the recorded value untouched.
+	if err := s.ReanchorForkPoint(ctx, f.ID, ""); err == nil {
+		t.Fatal("re-anchor accepted an empty SHA")
+	}
+	if got, _ := s.ForkPoint(ctx, f.ID); got != second {
+		t.Fatalf("empty re-anchor clobbered the fork: %q", got)
+	}
+
+	// SetForkPoint still refuses to overwrite — the stamped-once rule is
+	// untouched by the new write.
+	if err := s.SetForkPoint(ctx, f.ID, first); err == nil {
+		t.Fatal("SetForkPoint overwrote a stamped value")
+	} else if !errors.Is(err, ErrForkPointStamped) {
+		t.Fatalf("SetForkPoint refusal is not ErrForkPointStamped: %v", err)
+	}
+	if got, _ := s.ForkPoint(ctx, f.ID); got != second {
+		t.Fatalf("SetForkPoint clobbered the re-anchored fork: %q", got)
+	}
+}

@@ -479,12 +479,27 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 		if _, err := m.wt.AbortRebase(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
+		var autostash bool
 		if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		} else if dirty {
-			return noticeMsg{text: string(f.ID) + ": worktree has uncommitted changes — commit them before rebasing", isErr: true}
+			// A dirty worktree is normally refused (nothing uncommitted is
+			// risked), but a drifted one would otherwise deadlock: CommitAll
+			// refuses under drift, so the operator could neither commit nor
+			// rebase. When drift is the cause, --autostash carries the work
+			// across the rebase and restores it — never silently discarding
+			// it. A non-drifted dirty worktree keeps the safe refusal.
+			if err := m.wt.AssertNoForkDrift(ctx, &f); err != nil {
+				autostash = true
+			} else {
+				return noticeMsg{text: string(f.ID) + ": worktree has uncommitted changes — commit them before rebasing", isErr: true}
+			}
 		}
-		if err := m.wt.RebaseOnMain(ctx, &f); err != nil {
+		if autostash {
+			if err := m.wt.RebaseOnMainAutostash(ctx, &f); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+		} else if err := m.wt.RebaseOnMain(ctx, &f); err != nil {
 			var ce *worktree.RebaseConflictError
 			if errors.As(err, &ce) {
 				if m.engine != nil {
@@ -495,6 +510,12 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: sanitize(string(f.ID) + ": " + ce.Error() + " — resolve on the branch, then retry"), isErr: true}
 			}
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		// Re-anchor the recorded fork to main's HEAD after the rebase, so a
+		// drifted feature is cleared in the same gesture and a fresh one does
+		// not go stale on the next innocent rewrite of main.
+		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + " rebased onto main"}
 	}

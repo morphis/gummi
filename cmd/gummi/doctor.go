@@ -2,12 +2,14 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // runDoctor implements `gummi doctor [--json]` (DESIGN §5, G1): a read-only
@@ -180,6 +183,12 @@ func buildDoctorReport(cwd string) doctorReport {
 	} else {
 		add("lock", statusOK, "n/a — no workspace to lock yet", "")
 	}
+
+	// 8. fork-drift — read-only report of features whose recorded fork
+	// point is no longer an ancestor of main's HEAD. Advisory (warn): one
+	// recoverable, per-feature condition must not block readiness.
+	fd := forkDriftStatus(ws)
+	add(fd.Name, fd.Status, fd.Detail, fd.Remediation)
 
 	ready := true
 	for _, c := range checks {
@@ -464,6 +473,72 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 		}
 	}
 	return checks
+}
+
+// forkDriftStatus reports whether any feature's recorded fork point is no
+// longer an ancestor of main's HEAD. It is read-only and safe to run while a
+// feature is live: it reads the store's fork points and runs local git
+// ancestry checks only, never re-anchoring or backfilling. It degrades to
+// a quiet ok when the store or main's HEAD is unreadable, so doctor never
+// fails on a workspace it cannot read.
+func forkDriftStatus(ws state.Workspace) doctorCheck {
+	detail := "no drifted work items"
+	ok := func() doctorCheck {
+		return doctorCheck{Name: "fork-drift", Status: statusOK, Detail: detail}
+	}
+	// Read-only: never create a store that isn't there, so doctor running
+	// against an un-initialized workspace writes nothing.
+	if _, err := os.Stat(ws.DBFile()); err != nil {
+		return ok()
+	}
+	st, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		return ok()
+	}
+	defer st.Close()
+	features, err := st.ListFeatures(context.Background())
+	if err != nil {
+		return ok()
+	}
+	var drifted []string
+	for i := range features {
+		f := &features[i]
+		if f.ForkPoint == "" {
+			continue
+		}
+		head := exec.CommandContext(context.Background(), "git", "-C", ws.Root, "merge-base", "--is-ancestor", f.ForkPoint, "HEAD") //nolint:gosec // read-only ancestry probe against the validated repo root and a stored fork SHA
+		if err := head.Run(); err != nil {
+			// HEAD is either unreadable (degrade to ok, never a false
+			// failure) or the fork is genuinely no longer an ancestor —
+			// which needs the command to have started, so treat "not an
+			// ancestor" (the process exit status path) as drift below and
+			// anything else as unreadable.
+			if isAncestorFailure(err) {
+				drifted = append(drifted, fmt.Sprintf("%s (%s)", f.ID, f.BranchName()))
+			}
+		}
+	}
+	if len(drifted) == 0 {
+		return ok()
+	}
+	sort.Strings(drifted)
+	return doctorCheck{
+		Name:        "fork-drift",
+		Status:      statusWarn,
+		Detail:      "fork point is no longer in main's history for: " + strings.Join(drifted, ", "),
+		Remediation: worktree.ForkDriftRemedy,
+	}
+}
+
+// isAncestorFailure reports whether err means "not an ancestor" (git's
+// --is-ancestor exit status 1) rather than "could not run / unreadable
+// repo". Only the former is treated as drift; anything else degrades to a
+// readable-but-quiet ok.
+func isAncestorFailure(err error) bool {
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode() == 1
+	}
+	return false
 }
 
 // renderDoctor prints the human-readable checklist with a status glyph and

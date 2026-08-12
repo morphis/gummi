@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -100,11 +101,19 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		m.notice = noticeMsg{text: string(id) + ": agent rebase failed — " + msg.problem, isErr: true}
 		return m.loadRows
 	}
-	if msg.f.Stage != domain.StageVerify {
+	f := msg.f
+	// The rebase resolved cleanly; re-anchor the recorded fork to main's
+	// HEAD so a drifted feature is cleared in the same gesture and the
+	// resolution does not go stale under the next rewrite of main.
+	if err := m.wt.ReanchorOnMain(context.Background(), &f); err != nil {
+		return func() tea.Msg {
+			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
+		}
+	}
+	if f.Stage != domain.StageVerify {
 		m.notice = noticeMsg{text: string(id) + " rebased onto main"}
 		return m.loadRows
 	}
-	f := msg.f
 	return func() tea.Msg {
 		m.dropSession(f.ID) // the finished rebase session is stale
 		if err := m.engine.Run(f); err != nil {

@@ -468,6 +468,24 @@ func (s *Store) ForkPoint(ctx context.Context, id domain.FeatureID) (string, err
 	return sha, nil
 }
 
+// ReanchorForkPoint overwrites a feature's recorded fork-point SHA
+// unconditionally — the one explicit, auditable exception to SetForkPoint's
+// stamped-once rule. It is only reachable through the worktree manager's
+// re-anchor operation, which has already verified the new SHA is sound
+// (main's HEAD is an ancestor of the branch). SetForkPoint and the lazy
+// backfill keep their protection: Create still cannot clobber a recorded
+// fork. sha must be non-empty.
+func (s *Store) ReanchorForkPoint(ctx context.Context, id domain.FeatureID, sha string) error {
+	if sha == "" {
+		return fmt.Errorf("re-anchoring fork-point for %s: refusing an empty SHA", id)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE features SET fork_point = ? WHERE id = ?`, sha, string(id)); err != nil {
+		return fmt.Errorf("re-anchoring fork-point for %s: %w", id, err)
+	}
+	return nil
+}
+
 // ClearForkPoint resets a feature's recorded fork-point SHA to the empty
 // backfill sentinel. It is called when a feature's worktree is removed or
 // its branch deleted, so a later recreate re-anchors the fork to main as it
