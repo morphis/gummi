@@ -166,6 +166,12 @@ type Feature struct {
 	// the worktree is created (or, for pre-existing worktrees, until the
 	// first diff-based access lazily backfills it).
 	ForkPoint string
+	// PlanRounds is the live per-cycle plan-critique round count. Unlike
+	// fork_point it is a running cycle counter, not a stamped-once anchor:
+	// the engine reads it back on resume to size the remaining critique
+	// budget, and resets it to 0 when a plan cycle completes. Zero until a
+	// plan cycle has started.
+	PlanRounds int
 }
 
 // Kind returns the feature's kind, treating the empty default as a
