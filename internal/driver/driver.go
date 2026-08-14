@@ -12,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/planround"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/workflow"
@@ -53,12 +54,13 @@ type Options struct {
 // synchronously between reads, the same contract the TUI's update loop
 // relies on.
 type Driver struct {
-	eng   *engine.Engine
-	store *state.Store
-	ws    state.Workspace
-	out   *emitter
-	opts  Options
-	actor string // transition actor recorded in history ("auto" | "caller")
+	eng       *engine.Engine
+	store     *state.Store
+	planStore planround.Store // plan-round persistence seam (defaults to store)
+	ws        state.Workspace
+	out       *emitter
+	opts      Options
+	actor     string // transition actor recorded in history ("auto" | "caller")
 
 	// loop state for the single feature this process governs.
 	reviewRounds int          // automatic review→fix rounds burned in the current loop
@@ -78,11 +80,12 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 		opts.GateApproval = GateAuto
 	}
 	d := &Driver{
-		eng:   eng,
-		store: store,
-		ws:    ws,
-		out:   newEmitter(out, opts.Verbose),
-		opts:  opts,
+		eng:       eng,
+		store:     store,
+		planStore: store,
+		ws:        ws,
+		out:       newEmitter(out, opts.Verbose),
+		opts:      opts,
 	}
 	d.setGate(opts.GateApproval)
 	return d
@@ -394,6 +397,16 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 		round = d.reviewsRun
 	case domain.StageImplement, domain.StageFix:
 		round = d.reviewRounds
+	case domain.StagePlan:
+		// seed the in-memory counter from the persisted value so a resume
+		// honors (and reports) the rounds already burned this cycle. A
+		// failed read aborts plan-stage entry: the count is the budget.
+		persisted, err := planround.Load(ctx, d.planStore, f.ID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		d.planRounds = persisted
+		round = persisted
 	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Round: round})
 
@@ -523,12 +536,21 @@ func (d *Driver) judgePlanCritique(ctx context.Context, f domain.Feature, snap e
 	d.emitResult(f, v)
 	switch v {
 	case verdictPass:
+		if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
+			return Outcome{}, err
+		}
 		d.planRounds = 0
 		return d.crossGate(ctx, f)
 	case verdictChanges:
 		if d.planRounds >= maxPlanRounds {
+			if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
+				return Outcome{}, err
+			}
 			d.planRounds = 0
 			return d.escalation(f, fmt.Sprintf("plan critique still requesting changes after %d rounds", maxPlanRounds)), nil
+		}
+		if err := planround.Bump(ctx, d.planStore, f.ID); err != nil {
+			return Outcome{}, err
 		}
 		d.planRounds++
 		if err := d.eng.RunWith(f, replanNote); err != nil {
@@ -537,6 +559,9 @@ func (d *Driver) judgePlanCritique(ctx context.Context, f domain.Feature, snap e
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning", Round: d.planRounds})
 		return d.awaitReplan(ctx, f)
 	default:
+		if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
+			return Outcome{}, err
+		}
 		d.planRounds = 0
 		return d.escalation(f, "plan critique finished with no clear verdict"), nil
 	}
