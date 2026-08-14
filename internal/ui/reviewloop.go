@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/planround"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -195,6 +196,17 @@ const reCritiqueNote = "This is a re-critique: a prior round's findings were add
 // past the cap, or an unclear verdict). The feature never leaves the
 // Plan stage — the loop is invisible to the state machine, and the
 // human gate stays at the end of it.
+
+// writeHalt raises a needs-attention notice for a failed plan-rounds
+// write-through and stops the loop leg, so the in-memory counter cannot
+// drift from the store's record and silently re-grant budget on a later
+// resume.
+func (m *Shell) writeHalt(id domain.FeatureID, err error) tea.Cmd {
+	m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+	m.raiseAttention(id, attnFailure, sanitize(err.Error()))
+	return nil
+}
+
 func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 	s := m.engine.Get(id)
 	if s == nil {
@@ -208,21 +220,36 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 	}
 	switch sessionVerdict(snap) {
 	case verdictPass:
+		// clear the persisted count so the next plan cycle starts fresh.
+		if err := planround.Reset(context.Background(), m.planStore, id); err != nil {
+			return m.writeHalt(id, err)
+		}
 		m.planRounds[id] = 0
 		m.raiseAttention(id, attnGate, "plan critiqued: clean — review & approve")
 		return nil
 	case verdictChanges:
 		if m.planRounds[id] >= maxPlanRounds {
+			if err := planround.Reset(context.Background(), m.planStore, id); err != nil {
+				return m.writeHalt(id, err)
+			}
 			m.planRounds[id] = 0
 			m.raiseEscalation(id, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
 			m.notice = noticeMsg{text: string(id) + " plan critique escalated after " + itoa(maxPlanRounds) + " rounds", isErr: true}
 			return nil
+		}
+		// persist the burned round before it lands in the fast path, so a
+		// mid-loop resume observes it.
+		if err := planround.Bump(context.Background(), m.planStore, id); err != nil {
+			return m.writeHalt(id, err)
 		}
 		m.planRounds[id]++
 		return m.planStep(id, false, "critique requested changes → replanning (round "+itoa(m.planRounds[id])+")")
 	default:
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
+		if err := planround.Reset(context.Background(), m.planStore, id); err != nil {
+			return m.writeHalt(id, err)
+		}
 		m.planRounds[id] = 0
 		m.raiseEscalation(id, "plan critique finished with no clear verdict — review the plan manually")
 		return nil

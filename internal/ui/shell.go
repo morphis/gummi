@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
+	"github.com/morphis/gummi/internal/planround"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/layout"
@@ -78,6 +79,7 @@ type Shell struct {
 	baselining   map[domain.FeatureID]bool // a baseline check run is in flight
 	reviewRounds map[domain.FeatureID]int  // automatic review→fix→review counter
 	planRounds   map[domain.FeatureID]int  // automatic plan→critique→replan counter
+	planStore    planround.Store           // persistence seam for planRounds (defaults to store)
 	profileNames []string                  // profile names for the new-feature form
 	envelope     int                       // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier          // bell/desktop hook for needs-attention events
@@ -116,6 +118,9 @@ func NewShell(t theme.Theme, version string) *Shell {
 // and paths. Must be called before Run for board functionality.
 func (m *Shell) Attach(store *state.Store, wt *worktree.Manager, ws state.Workspace) {
 	m.store, m.wt, m.ws = store, wt, ws
+	// the plan-rounds persistence seam defaults to the real store; tests
+	// may swap in a failing store to prove the fail-closed path.
+	m.planStore = store
 }
 
 // AttachEngine wires the agent orchestrator, enabling interactive chat
@@ -264,7 +269,16 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
 		m.reviewRounds[ev.Feature] = 0
-		m.planRounds[ev.Feature] = 0
+		// clear the persisted plan-rounds count first, and only zero the
+		// in-memory counter once the write succeeds — a failed write must
+		// not re-grant budget on resume (the next entry rehydrates the
+		// persisted, nonzero value).
+		if err := planround.Reset(context.Background(), m.planStore, ev.Feature); err != nil {
+			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
+		} else {
+			m.planRounds[ev.Feature] = 0
+		}
 		if ev.Committed {
 			// wrap-up exhaustion: the stage's work is committed, so this
 			// reads as ready-to-advance with top-up as the alternative —
@@ -1049,12 +1063,36 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	}
 }
 
+// seedPlanRounds hydrates the in-memory plan-critique round counter from
+// the store on plan-stage entry, so a resumed plan resumes with the rounds
+// already burned instead of a fresh two-round budget. A failed read returns
+// the error and leaves the fast-path map untouched; the caller aborts
+// dispatch rather than proceeding on a guessed-zero count.
+func (m *Shell) seedPlanRounds(f domain.Feature) error {
+	n, err := planround.Load(context.Background(), m.planStore, f.ID)
+	if err != nil {
+		return err
+	}
+	m.planRounds[f.ID] = n
+	return nil
+}
+
 // runStage enqueues an autonomous run for a feature's stage; the engine
 // schedules and kicks it off. Activity streams into the dashboard;
 // `p` pauses it. On an already-running session, enter attaches the chat
 // pane as an observer: the full scrollable transcript, with steering
 // via the input (esc detaches, the run keeps going).
 func (m *Shell) runStage(f domain.Feature) tea.Cmd {
+	// entering the plan stage hydrates the loop's round counter from the
+	// store, so a resumed plan resumes with the rounds already burned. A
+	// failed read aborts dispatch rather than guessing at a fresh budget.
+	if f.Stage == domain.StagePlan {
+		if err := m.seedPlanRounds(f); err != nil {
+			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
+			return nil
+		}
+	}
 	if s := m.engine.Get(f.ID); s != nil {
 		switch s.State() {
 		case engine.StateRunning:

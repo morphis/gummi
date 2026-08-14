@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -32,8 +33,8 @@ func TestParseVerdict(t *testing.T) {
 		// A chatty model glues the verdict to the previous sentence with no
 		// intervening newline; anchor the fallback to end-of-text so the
 		// tail form still resolves while a mid-text mention doesn't.
-		"…making check 16 redundant.VERDICT: changes":     verdictChanges,
-		"we agreed VERDICT: pass was too generous.":       verdictUnclear,
+		"…making check 16 redundant.VERDICT: changes": verdictChanges,
+		"we agreed VERDICT: pass was too generous.":   verdictUnclear,
 	}
 	for in, want := range cases {
 		if got := parseVerdict(in); got != want {
@@ -536,4 +537,159 @@ func drainEngineLoop(t *testing.T, m *Shell) *Shell {
 		}
 	}
 	return m
+}
+
+// failPlanStore fails reads, writes, or both — the fail-closed proof for
+// the TUI's plan-rounds persistence seam (mirrors the headless driver).
+type failPlanStore struct {
+	failLoad  bool
+	failWrite bool
+}
+
+func (f *failPlanStore) PlanRounds(context.Context, domain.FeatureID) (int, error) {
+	if f.failLoad {
+		return 0, errors.New("read failed")
+	}
+	return 0, nil
+}
+
+func (f *failPlanStore) IncrementPlanRounds(context.Context, domain.FeatureID) error {
+	if f.failWrite {
+		return errors.New("bump failed")
+	}
+	return nil
+}
+
+func (f *failPlanStore) ClearPlanRounds(context.Context, domain.FeatureID) error {
+	if f.failWrite {
+		return errors.New("clear failed")
+	}
+	return nil
+}
+
+// drainUntil consumes engine events and the review-loop commands they
+// produce until pred is true or the loop settles — the plan-loop analog
+// of drainEngineLoop that lets a test stop at an intermediate verdict.
+func drainUntil(t *testing.T, m *Shell, pred func(*Shell) bool) *Shell {
+	t.Helper()
+	for i := 0; i < 60; i++ {
+		if pred(m) {
+			return m
+		}
+		select {
+		case ev := <-m.engine.Events():
+			cmd := m.handleEngineEvent(ev)
+			m = pump(t, m, cmd)
+		case <-time.After(80 * time.Millisecond):
+			return m
+		}
+	}
+	return m
+}
+
+// A plan resumed through the TUI hydrates its round counter from the
+// store (a prior, possibly headless session's count), then bumps it —
+// seed(1) + one changes verdict(1) = 2 — instead of restarting at a fresh
+// zero budget.
+func TestPlanRoundsSeedsFromStoreOnPlanEntry(t *testing.T) {
+	var critiques atomic.Int32
+	m, eng := chatWorkspace(t, planAgent(&critiques, "Missing authz check.\nVERDICT: changes", "Sound.\nVERDICT: pass"))
+	m = advanceTo(t, m, domain.StagePlan)
+	// a prior session burned one round; the store is the shared record
+	if err := m.store.SetPlanRounds(context.Background(), "FD-001", 1); err != nil {
+		t.Fatal(err)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run plan → seed(1)
+	settleChat(t, eng)
+	m = drainUntil(t, m, func(m *Shell) bool { return m.planRounds["FD-001"] == 2 })
+	if got := m.planRounds["FD-001"]; got != 2 {
+		t.Errorf("m.planRounds = %d, want 2 (seed 1 + bump 1)", got)
+	}
+	if got, err := m.store.PlanRounds(context.Background(), "FD-001"); err != nil || got != 2 {
+		t.Errorf("store.PlanRounds = %d, %v; want 2", got, err)
+	}
+}
+
+// Every completion path that resets the in-memory counter also write-
+// throughs the clear, and a failed clear never re-grants budget.
+func TestPlanRoundsClearOnPassAndExhaustion(t *testing.T) {
+	t.Run("pass clears", func(t *testing.T) {
+		var critiques atomic.Int32
+		m := runPlan(t, planAgent(&critiques, "Sound.\nVERDICT: pass"))
+		if got := m.planRounds["FD-001"]; got != 0 {
+			t.Errorf("m.planRounds after pass = %d, want 0", got)
+		}
+		if got, err := m.store.PlanRounds(context.Background(), "FD-001"); err != nil || got != 0 {
+			t.Errorf("store.PlanRounds after pass = %d, %v; want 0", got, err)
+		}
+	})
+	t.Run("exhaustion clears", func(t *testing.T) {
+		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
+		m.planRounds["FD-001"] = 1
+		if err := m.store.SetPlanRounds(context.Background(), "FD-001", 1); err != nil {
+			t.Fatal(err)
+		}
+		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StagePlan, Committed: false}))
+		if got := m.planRounds["FD-001"]; got != 0 {
+			t.Errorf("m.planRounds after exhaustion = %d, want 0", got)
+		}
+		if got, err := m.store.PlanRounds(context.Background(), "FD-001"); err != nil || got != 0 {
+			t.Errorf("store.PlanRounds after exhaustion = %d, %v; want 0", got, err)
+		}
+	})
+	t.Run("exhaustion write-fail keeps count", func(t *testing.T) {
+		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
+		m.planRounds["FD-001"] = 1
+		m.planStore = &failPlanStore{failWrite: true}
+		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StagePlan, Committed: false}))
+		if got := m.planRounds["FD-001"]; got != 1 {
+			t.Errorf("m.planRounds after failed exhaustion clear = %d, want 1 (count not lost)", got)
+		}
+		if !m.notice.isErr {
+			t.Error("no error notice raised on a failed exhaustion clear")
+		}
+	})
+}
+
+// Store failures are never silently ignored: a failed seed read aborts
+// plan dispatch and a failed write-through halts the loop leg.
+func TestPlanRoundsWriteThroughFailsClosed(t *testing.T) {
+	t.Run("read aborts plan dispatch", func(t *testing.T) {
+		m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "plan written" }))
+		m = advanceTo(t, m, domain.StagePlan)
+		m.planStore = &failPlanStore{failLoad: true}
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if !m.notice.isErr {
+			t.Error("no error notice on a failing seed read")
+		}
+		if s := eng.Get("FD-001"); s != nil && (s.State() == engine.StateRunning || s.State() == engine.StateQueued) {
+			t.Error("plan session started despite a failing seed read")
+		}
+	})
+	t.Run("write aborts the round", func(t *testing.T) {
+		var critiques atomic.Int32
+		m, eng := chatWorkspace(t, planAgent(&critiques, "Missing authz check.\nVERDICT: changes"))
+		m = advanceTo(t, m, domain.StagePlan)
+		m.planStore = &failPlanStore{failWrite: true}
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		settleChat(t, eng)
+		m = drainEngineLoop(t, m)
+		if got := critiques.Load(); got != 1 {
+			t.Errorf("critique ran %d times, want 1 (no replan after a failed write)", got)
+		}
+		if !hasAttn(m, attnFailure) {
+			t.Error("no failure attention raised on a failed write-through")
+		}
+	})
+}
+
+// hasAttn reports whether the inbox holds a needs-attention item of the
+// given kind for the test's feature.
+func hasAttn(m *Shell, kind attnKind) bool {
+	for _, it := range m.inbox.list() {
+		if it.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
