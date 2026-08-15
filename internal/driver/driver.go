@@ -410,6 +410,41 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Round: round})
 
+	// A resume that lands on the Plan stage must not re-invoke the plan
+	// writer: the restored/live session tells us where the loop was when it
+	// stopped. A finished writer (revised plan already on disk) resumes the
+	// critique; a finished critique routes to the judge (replan on changes /
+	// approve on pass); an in-flight session keeps awaiting. Only a fresh
+	// plan entry — no restored Plan-stage session — starts the writer below.
+	// The snapshot's feature stage is the guard, so a leftover done session
+	// from a prior stage is never mistaken for a plan resume.
+	if f.Stage == domain.StagePlan {
+		if snap := d.snapshot(f.ID); snap.Feature.Stage == domain.StagePlan {
+			if snap.State == engine.StateDone && !snap.Critique {
+				// the revised plan is on disk: critique it, using the
+				// re-critique kickoff when a prior round was burned.
+				kickoff := ""
+				result := "critiquing"
+				if d.planRounds > 0 {
+					kickoff = reCritiqueNote
+					result = "re-critiquing"
+				}
+				if err := d.eng.RunCritique(f, kickoff); err != nil {
+					return Outcome{}, err
+				}
+				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: result})
+				return d.awaitPlanCritique(ctx, f)
+			}
+			if snap.State == engine.StateDone && snap.Critique {
+				// awaiting replan/approval: the judge decides (replan writer
+				// on changes, gate on pass). Never re-run the critique.
+				return d.judgePlanCritique(ctx, f, snap)
+			}
+			// still in flight: keep awaiting the running pass, spawn nothing.
+			return d.awaitPlanCritique(ctx, f)
+		}
+	}
+
 	// a --bounce resume stashed a kickoff note for the first work-stage run
 	// that follows the rewind; consume it on that exact dispatch so it
 	// reaches the reborn implement/fix as an addendum to the kickoff (the

@@ -1101,18 +1101,31 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 		case engine.StateQueued:
 			m.notice = noticeMsg{text: string(f.ID) + " is queued"}
 			return nil
-		}
-		// An interrupted plan critique resumes as a critique: the plan is
-		// already written, so restarting the plan writer would burn a full
-		// plan pass to redo finished work. (The critique itself still starts
-		// over — mid-transcript resume and persisting planRounds across
-		// restarts are deferred.)
-		if f.Stage == domain.StagePlan && s.Snapshot().Critique {
-			return func() tea.Msg {
-				if err := m.engine.RunCritique(f, ""); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		case engine.StateDone:
+			// A finished plan session resumes the loop at its position
+			// instead of re-running the plan writer: a finished writer
+			// means the (possibly revised) plan is already on disk, so the
+			// next leg is the critique; a finished critique means the loop
+			// is awaiting the judge's replan-or-approve decision. Other
+			// stages just re-run (status quo).
+			if f.Stage == domain.StagePlan {
+				if s.Snapshot().Critique {
+					return m.onPlanDone(f.ID)
 				}
-				return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)"}
+				return m.planStep(f.ID, true, "resuming plan critique (plan already written)")
+			}
+		case engine.StatePaused:
+			// An interrupted plan critique resumes as a critique: the plan
+			// is already written, so restarting the plan writer would burn
+			// a full plan pass to redo finished work. A mid-flight writer
+			// still falls through to engine.Run (status-quo restart).
+			if f.Stage == domain.StagePlan && s.Snapshot().Critique {
+				return func() tea.Msg {
+					if err := m.engine.RunCritique(f, ""); err != nil {
+						return noticeMsg{text: sanitize(err.Error()), isErr: true}
+					}
+					return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)"}
+				}
 			}
 		}
 	}

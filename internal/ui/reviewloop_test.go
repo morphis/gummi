@@ -693,3 +693,83 @@ func hasAttn(m *Shell, kind attnKind) bool {
 	}
 	return false
 }
+
+// A finished plan-writer session resumed through the TUI routes to the
+// critique (via planStep) — the revised plan is already on disk — never
+// back to the plan writer. With a prior round burned, the resumed critique
+// uses the re-critique kickoff.
+func TestRunStageResumesFinishedPlanAsCritique(t *testing.T) {
+	var mu sync.Mutex
+	var reviewerMsgs []string
+	var writerRuns int
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleReviewer {
+			mu.Lock()
+			reviewerMsgs = append(reviewerMsgs, msg)
+			mu.Unlock()
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "Sound plan.\nVERDICT: pass"},
+				{Kind: agent.EventIdle},
+			}
+		}
+		if opts.Role == agent.RoleArchitect {
+			mu.Lock()
+			writerRuns++
+			mu.Unlock()
+			// the plan writer exhausts, so it parks as a finished (StateDone)
+			// writer session without auto-continuing the loop.
+			return []agent.Event{{Kind: agent.EventBudgetExhausted}}
+		}
+		// scribe/interactive sessions respond normally (DiscoverChecks waits
+		// on an idle turn, not an exhaustion).
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "done"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StagePlan)
+
+	// run the plan writer; it exhausts into a finished (StateDone, !Critique)
+	// writer session, parked mid-cycle.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = drainEngineLoop(t, m) // process the writer's exhaustion event
+	s := eng.Get("FD-001")
+	if s == nil || s.State() != engine.StateDone || s.Snapshot().Critique {
+		t.Fatalf("want a finished plan-writer session, got state=%v critique=%v", s.State(), s.Snapshot().Critique)
+	}
+	mu.Lock()
+	if got := len(reviewerMsgs); got != 0 {
+		mu.Unlock()
+		t.Fatalf("a critique ran before the resume: %d", got)
+	}
+	mu.Unlock()
+
+	// a prior round burned on the card: the resumed critique re-critiques.
+	if err := m.store.SetPlanRounds(context.Background(), "FD-001", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// resume the stage: the finished writer must route to a critique (via
+	// planStep), not back to the plan writer.
+	f, err := m.store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pump(t, m, m.runStage(f))
+	settleChat(t, eng)
+	mu.Lock()
+	defer mu.Unlock()
+	if writerRuns != 1 {
+		t.Errorf("plan writer ran %d times, want 1 (the resume must not restart it)", writerRuns)
+	}
+	if len(reviewerMsgs) != 1 {
+		t.Fatalf("critique ran %d times, want 1 (the resumed leg)", len(reviewerMsgs))
+	}
+	if !strings.Contains(reviewerMsgs[0], "re-critique") {
+		t.Errorf("resumed critique kickoff missing the re-critique note: %q", reviewerMsgs[0])
+	}
+	if got := eng.Get("FD-001").Snapshot().Critique; !got {
+		t.Error("resumed session is not a critique pass")
+	}
+}
