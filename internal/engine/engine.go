@@ -1093,6 +1093,11 @@ func (e *Engine) Close() error {
 	return nil
 }
 
+// errSessionDied reports an agent session whose event stream ended without
+// a terminal turn (no Idle, no Error): the backend process died mid-flight
+// rather than finishing or failing cleanly.
+var errSessionDied = errors.New("agent session died without finishing")
+
 // pump relays one session's agent events into the engine stream and
 // accumulates its transcript/activity/spend. It exits when the session
 // stops or its agent channel closes.
@@ -1105,6 +1110,17 @@ func (e *Engine) pump(s *Session) {
 			return
 		case ev, ok := <-events:
 			if !ok {
+				// The agent's event stream ended without a terminal turn.
+				// Distinguish a genuine backend death — the session was still
+				// running, so it never reached Idle/Error — from a benign
+				// teardown (replace/drop/pause set a terminal state before
+				// stopping the agent, so the stream closing there is expected).
+				// A death surfaces as an error so the driver escalates promptly
+				// instead of hanging out the whole stage timeout and misreading
+				// a dead agent as a backend stall.
+				if s.State() == StateRunning {
+					e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: errSessionDied})
+				}
 				e.emitStopped(s)
 				return
 			}

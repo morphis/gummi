@@ -26,10 +26,16 @@ type Fake struct {
 	// exercising the token-priced fallback set it to price the fake's
 	// synthetic token usage into credits.
 	Rate float64
+	// DieAfter makes a session's event stream close (as if the backend
+	// process died) after this many turns have been sent across all
+	// sessions, without emitting Idle/Error — the driver's silent-death
+	// regression trigger. 0 disables it.
+	DieAfter int
 
 	mu       sync.Mutex
 	sessions []*fakeSession
 	closed   bool
+	turns    int
 }
 
 // NewFake returns a Fake that echoes a fixed reply and advertises full
@@ -162,6 +168,14 @@ func (s *fakeSession) Send(_ context.Context, msg string) error {
 	// (which a test may block to hold a slot) runs inside the goroutine,
 	// not in Send, so it never stalls the caller.
 	go func() {
+		s.agent.mu.Lock()
+		s.agent.turns++
+		die := s.agent.DieAfter > 0 && s.agent.turns >= s.agent.DieAfter
+		s.agent.mu.Unlock()
+		if die {
+			s.closeOnce() // event stream ends: the backend "died" mid-turn
+			return
+		}
 		var stream []Event
 		if s.agent.Responder != nil {
 			stream = s.agent.Responder(s.opts, msg)
