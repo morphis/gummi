@@ -144,6 +144,67 @@ func TestAddComment(t *testing.T) {
 	}
 }
 
+func TestResolveComment(t *testing.T) {
+	content := "anchor\n%% @gummi: first\n%% @user: open question\n%% @gummi: another\nbody\n%% @gummi: separate thread"
+	// resolve the @user marker in the first thread: the resolution splices
+	// in immediately after THAT marker, not the thread's last one, so the
+	// trailing @gummi marker below stays open
+	out, err := ResolveComment(content, 3, "user", "2026-07-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "anchor\n%% @gummi: first\n%% @user: open question\n%% @user(2026-07-03): resolved\n%% @gummi: another\nbody\n%% @gummi: separate thread"
+	if out != want {
+		t.Errorf("ResolveComment = %q, want %q", out, want)
+	}
+	// the resolution closed the @user marker and everything above it; the
+	// trailing @gummi marker stays open, so no user thread blocks the gate
+	// even though the thread still has an open (non-user) marker
+	d := Parse(out)
+	if len(d.UserOpenThreads()) != 0 {
+		t.Fatalf("open user threads after resolve: %+v", d.UserOpenThreads())
+	}
+	if len(d.OpenQuestions()) != 2 {
+		t.Fatalf("open questions after resolve = %d, want 2 (the trailing marker + separate thread)", len(d.OpenQuestions()))
+	}
+
+	// multi-marker thread: resolving the FIRST marker leaves the ones below
+	// it open (per-marker model) — the @user question must stay open
+	multi, err := ResolveComment(content, 2, "u", "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMulti := "anchor\n%% @gummi: first\n%% @u(d): resolved\n%% @user: open question\n%% @gummi: another\nbody\n%% @gummi: separate thread"
+	if multi != wantMulti {
+		t.Errorf("multi-marker thread = %q, want %q", multi, wantMulti)
+	}
+	dm := Parse(multi)
+	if len(dm.UserOpenThreads()) != 1 {
+		t.Fatalf("user open threads after resolving first marker = %d, want 1 (the @user below stays open)", len(dm.UserOpenThreads()))
+	}
+
+	// single-marker thread: the common case is unaffected — the resolution
+	// empties the user-open threads
+	single, err := ResolveComment("anchor\n%% @user: a question\n", 2, "user", "2026-07-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if single != "anchor\n%% @user: a question\n%% @user(2026-07-03): resolved\n" {
+		t.Errorf("single-marker thread = %q", single)
+	}
+	if got := len(Parse(single).UserOpenThreads()); got != 0 {
+		t.Errorf("user open threads after resolving single marker = %d, want 0", got)
+	}
+
+	// errors on a non-marker line and out of range
+	if _, err := ResolveComment(content, 1, "u", "d"); err == nil {
+		t.Error("non-marker line accepted")
+	}
+	if _, err := ResolveComment(content, 99, "u", "d"); err == nil {
+		t.Error("out-of-range line accepted")
+	}
+}
+
 func TestFindAnchor(t *testing.T) {
 	content := "## Problem\nThe toggle persists via localStorage.\n%% @gummi: note\nAnother line about storage.\nThe toggle persists via localStorage.\n"
 	// unique content line

@@ -245,3 +245,155 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 		t.Errorf("agent thread not listed as informational:\n%s", out)
 	}
 }
+
+func TestSpecResolveComment(t *testing.T) {
+	m := specWorkspace(t)
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // annotate
+	// add an open @user marker threaded under line 1
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "open question")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(m.spec.doc.UserOpenThreads()) != 1 {
+		t.Fatalf("open user threads = %d, want 1", len(m.spec.doc.UserOpenThreads()))
+	}
+	// move the cursor onto the marker (threaded under line 1) and resolve
+	m = press(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	want := "%% @user(2026-07-03): resolved"
+	if !strings.Contains(m.spec.content, want) {
+		t.Fatalf("resolution not written:\n%s", m.spec.content)
+	}
+	raw, err := os.ReadFile(m.spec.path)
+	if err != nil || !strings.Contains(string(raw), want) {
+		t.Fatalf("resolution not persisted: %v", err)
+	}
+	if len(m.spec.doc.UserOpenThreads()) != 0 {
+		t.Errorf("open user threads after resolve = %d, want 0", len(m.spec.doc.UserOpenThreads()))
+	}
+	// x on the now-resolved thread → already resolved
+	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if !strings.Contains(m.notice.text, "already resolved") {
+		t.Errorf("x on a resolved thread: notice = %q", m.notice.text)
+	}
+	// x on a content line → no marker
+	m.spec.cursor = 5
+	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if !strings.Contains(m.notice.text, "no marker") {
+		t.Errorf("x on a content line: notice = %q", m.notice.text)
+	}
+}
+
+func TestSpecResolveFirstOfTwoMarkers(t *testing.T) {
+	// x targets the marker at the cursor, not the whole thread: resolving
+	// the first of two markers on one anchor must leave the second one
+	// open, so the gate stays blocked.
+	m := specWorkspace(t)
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // annotate
+	content := "## Problem\nTwo questions.\n" +
+		"%% @user(2026-08-16): per-device or synced?\n" +
+		"%% @user(2026-08-16): what about SSR?\n"
+	if err := os.WriteFile(m.spec.path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.spec.content = content
+	m.spec.doc = spec.Parse(content)
+	if len(m.spec.doc.UserOpenThreads()) != 1 {
+		t.Fatalf("setup: user open threads = %d, want 1", len(m.spec.doc.UserOpenThreads()))
+	}
+	// put the cursor on the FIRST marker (line 3) and resolve it
+	m.spec.cursor = 3
+	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if !strings.Contains(m.spec.content, "%% @user(2026-07-03): resolved") {
+		t.Fatalf("resolution not written:\n%s", m.spec.content)
+	}
+	// the resolution lands immediately under the first marker; the second
+	// marker stays open, so the gate must remain blocked
+	if len(m.spec.doc.UserOpenThreads()) != 1 {
+		t.Fatalf("second marker was closed: user open threads = %d, want 1\n%s", len(m.spec.doc.UserOpenThreads()), m.spec.content)
+	}
+	open := m.spec.doc.UserOpenThreads()
+	u := spec.UnresolvedUserMarker(open[0])
+	if u == nil || u.Text != "what about SSR?" {
+		t.Fatalf("open user marker = %+v, want the SSR question", u)
+	}
+}
+
+func TestSpecApproveFromSurface(t *testing.T) {
+	// A from the spec surface advances the gate exactly as board g does.
+	m := specWorkspace(t)
+	ctx := context.Background()
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StageSpec {
+		t.Fatalf("setup: feature at %s, want spec", f.Stage)
+	}
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if m.spec != nil {
+		t.Fatal("A did not close the spec surface")
+	}
+	f, _ = m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StagePlan {
+		t.Errorf("A did not advance the gate: stage = %s, want plan", f.Stage)
+	}
+
+	// with an open @user marker the surface still closes but the gate
+	// stays shut and the blocking notice surfaces.
+	m2 := specWorkspace(t)
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m2 = openSpecFor(t, m2)
+	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyTab})
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m2 = typeString(t, m2, "still open")
+	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if m2.spec != nil {
+		t.Fatal("A should close the surface even when blocked")
+	}
+	f2, _ := m2.store.GetFeature(ctx, "FD-001")
+	if f2.Stage != domain.StageSpec {
+		t.Errorf("open marker did not hold the gate: stage = %s, want spec", f2.Stage)
+	}
+	if !strings.Contains(m2.notice.text, "block approval") {
+		t.Errorf("blocked notice = %q, want a blocking message", m2.notice.text)
+	}
+}
+
+func TestSpecViewAnnotateResolvedGolden(t *testing.T) {
+	m := specWorkspace(t)
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	// one resolved thread, nothing open → no "N open" in the header and
+	// the resolution renders success-tinted
+	content := "## Problem\nResolved design question.\n" +
+		"%% @user(2026-07-03): was this the right call?\n" +
+		"%% @user(2026-07-03): resolved\n## Chosen approach\n"
+	m.spec.content = content
+	m.spec.doc = spec.Parse(content)
+	golden.RequireEqual(t, []byte(m.View().Content))
+}
+
+func TestSpecBindingsIncludeXAndA(t *testing.T) {
+	has := func(bindings []binding, key string) bool {
+		for _, b := range bindings {
+			if b.key == key {
+				return true
+			}
+		}
+		return false
+	}
+	m := specWorkspace(t)
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if !has(m.spec.bindings(), "x") || !has(m.spec.bindings(), "A") {
+		t.Errorf("annotate bindings missing x/A: %+v", m.spec.bindings())
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // read mode
+	if !has(m.spec.bindings(), "A") {
+		t.Errorf("read bindings missing A: %+v", m.spec.bindings())
+	}
+}

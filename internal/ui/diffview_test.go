@@ -397,3 +397,40 @@ func TestDiffResolveTogglesOpenCount(t *testing.T) {
 		t.Errorf("openCount = %d after resolve, want 0", m.diff.openCount())
 	}
 }
+
+func TestDiffApproveFromSurface(t *testing.T) {
+	// A from the diff surface advances the gate (Review → Verify).
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	m = openDiffFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if m.diff != nil {
+		t.Fatal("A did not close the diff surface")
+	}
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StageVerify {
+		t.Errorf("A did not advance the gate: stage = %s, want verify", f.Stage)
+	}
+
+	// with an open diff comment the surface closes but the gate stays shut.
+	m2, _ := diffWorkspace(t)
+	ann := domain.DiffAnnotation{
+		Feature: "FD-001", File: "README.md",
+		Anchor: "second line", Excerpt: "+second line", Comment: "open",
+	}
+	if _, err := m2.store.AddDiffAnnotation(ctx, ann, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	m2 = openDiffFor(t, m2)
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if m2.diff != nil {
+		t.Fatal("A should close the surface even when blocked")
+	}
+	f2, _ := m2.store.GetFeature(ctx, "FD-001")
+	if f2.Stage != domain.StageReview {
+		t.Errorf("open diff comment did not hold the gate: stage = %s, want review", f2.Stage)
+	}
+	if !strings.Contains(m2.notice.text, "diff comment") {
+		t.Errorf("blocked notice = %q, want a diff blocking message", m2.notice.text)
+	}
+}

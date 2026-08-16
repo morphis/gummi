@@ -253,6 +253,34 @@ func AddComment(content string, line int, author, date, text string) (string, er
 	return strings.Join(out, "\n"), nil
 }
 
+// ResolveComment closes the marker at line by appending
+// `%% @author(date): resolved` immediately after it, and returns the new
+// content. The resolution flows through the normal %% grammar, so the
+// gate's open-question count drops to zero. line is a 1-based marker
+// line; it errors when out of range or not a marker line. Every other
+// thread is left untouched.
+//
+// The resolution is spliced in after line itself — never after the
+// thread's last marker — because a resolution closes only the markers
+// above it in the run. That keeps any marker below the cursor open when a
+// thread carries more than one (per-marker model); single-marker threads
+// are unaffected.
+func ResolveComment(content string, line int, author, date string) (string, error) {
+	lines := strings.Split(content, "\n")
+	if line < 1 || line > len(lines) {
+		return "", fmt.Errorf("line %d out of range (1..%d)", line, len(lines))
+	}
+	if !IsMarkerLine(lines[line-1]) {
+		return "", fmt.Errorf("line %d is not a marker", line)
+	}
+	res := fmt.Sprintf("%%%% @%s(%s): resolved", author, date)
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:line]...)
+	out = append(out, res)
+	out = append(out, lines[line:]...)
+	return strings.Join(out, "\n"), nil
+}
+
 // section prompts are the %% guidance a blank draft carries in each
 // section; a seeded draft replaces the prompt with extracted content
 // where ingestion supplied it (DESIGN §11.2).

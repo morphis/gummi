@@ -120,6 +120,44 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 	}
 }
 
+// resolveSpecComment writes a resolution for the thread at the given
+// marker line and reloads the doc. Same writer discipline as
+// addSpecComment: serialize under the per-file lock, re-read the current
+// file, splice, and write atomically.
+func (m *Shell) resolveSpecComment(line int) tea.Cmd {
+	sv := m.spec
+	if sv == nil {
+		return nil
+	}
+	reload := m.reloadSpec()
+	path := sv.path
+	return func() tea.Msg {
+		date := m.now().Format("2006-01-02")
+		unlock := spec.LockFile(path)
+		defer unlock()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		out, err := spec.ResolveComment(string(raw), line, "user", date)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return reload()
+	}
+}
+
+// approveSurface leaves the active spec/diff surface and runs the same
+// gate the board's g does — advanceStage. Exactly one approve path, so
+// the two surfaces can't disagree about what "approved" means.
+func (m *Shell) approveSurface(f domain.Feature) tea.Cmd {
+	m.spec, m.diff = nil, nil
+	return m.advanceStage(f.ID)
+}
+
 // editSpec suspends the TUI and opens the doc in $EDITOR at the cursor
 // line (best effort — plain `$EDITOR file` when unknown).
 func (m *Shell) editSpec() tea.Cmd {
@@ -144,6 +182,20 @@ func (m *Shell) editSpec() tea.Cmd {
 	})
 }
 
+// threadAtCursor returns the thread whose markers include the cursor
+// line, or nil when the cursor is not on a marker line — the target for
+// the resolve key.
+func (sv *specView) threadAtCursor() *spec.Thread {
+	for _, t := range sv.doc.Threads() {
+		for _, mk := range t.Markers {
+			if mk.Line == sv.cursor {
+				return &t
+			}
+		}
+	}
+	return nil
+}
+
 // bindings is the spec surface's key table (see keymap.go), split by
 // mode like handleSpecKey routes.
 func (sv *specView) bindings() []binding {
@@ -153,6 +205,8 @@ func (sv *specView) bindings() []binding {
 			{key: "j/k", label: "line", help: "move the line cursor"},
 			{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
 			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
+			{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
+			{key: "A", label: "approve", help: "approve the gate", bar: true},
 			{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
 			{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
 			{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
@@ -165,6 +219,7 @@ func (sv *specView) bindings() []binding {
 		{key: "j/k", label: "scroll", bar: true},
 		{key: "pgup/pgdn", label: "page", help: "scroll by a page"},
 		{key: "R", label: "request changes", help: "send the open %% questions to the architect"},
+		{key: "A", label: "approve", help: "approve the gate", bar: true},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 		{key: "?", label: "help", bar: true},
@@ -189,6 +244,9 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	case "R":
 		// request changes: send the open %% questions to the architect
 		return m.requestSpecChanges(sv)
+	case "A":
+		// approve the gate: leave the surface and run the board's g
+		return m.approveSurface(sv.f)
 	}
 	if !sv.annotate {
 		switch key {
@@ -223,6 +281,17 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		m.Overlay.Push(newCommentDialog(func(text string) tea.Cmd {
 			return m.addSpecComment(line, text)
 		}))
+	case "x":
+		t := sv.threadAtCursor()
+		if t == nil {
+			m.notice = noticeMsg{text: "no marker on this line"}
+			return nil
+		}
+		if t.Resolved {
+			m.notice = noticeMsg{text: "already resolved"}
+			return nil
+		}
+		return m.resolveSpecComment(sv.cursor)
 	}
 	return nil
 }
