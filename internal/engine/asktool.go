@@ -505,6 +505,10 @@ func (e *Engine) handleSpecReplaceSection(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, "could not read the spec: "+err.Error())
 		return
 	}
+	// Heal any headings a pre-normalization splice welded mid-line before
+	// applying this write, so a corrupted artifact recovers through the same
+	// mediated path that once damaged it.
+	raw = []byte(spec.HealWeldedHeadings(string(raw)))
 	out, matchedTitle, err := spec.ReplaceSection(string(raw), a.Section, a.Body)
 	if err != nil {
 		e.resolveNow(s, tc.ID, err.Error())
