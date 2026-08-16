@@ -72,7 +72,7 @@ func (m *Shell) execChecks(f domain.Feature, workDir string, checks []domain.Che
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 		defer cancel()
-		results := verify.Run(ctx, workDir, checks)
+		results := verify.RunBounded(ctx, workDir, checks, verify.CheckTimeout)
 		return verifyResultMsg{feature: f.ID, results: results}
 	}
 }
@@ -130,8 +130,15 @@ func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
 			continue
 		}
 		reason := fmt.Sprintf("FAILS on the fresh branch (exit %d) — pre-existing failure or wrong command", r.ExitCode)
-		if r.ExitCode == -1 {
-			reason = "could not run — malformed command"
+		switch r.Status {
+		case verify.StatusTimeout:
+			reason = "did not finish — timed out"
+		case verify.StatusNotRun:
+			reason = "could not run — check budget exhausted"
+		case verify.StatusFail:
+			if r.ExitCode == -1 {
+				reason = "could not run — malformed command"
+			}
 		}
 		return noticeMsg{isErr: true, text: fmt.Sprintf(
 			"%s: baseline — check '%s' %s; fix the gummi-checks block or it reads FAIL (pre-existing) at verify",

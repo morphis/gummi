@@ -46,7 +46,7 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 	}
 	runCtx, cancel := context.WithTimeout(ctx, verifyStageTimeout)
 	defer cancel()
-	results := verify.Run(runCtx, workDir, checks)
+	results := verify.RunBounded(runCtx, workDir, checks, verify.CheckTimeout)
 
 	baseline := make([]state.CheckResult, 0, len(results))
 	now := time.Now().UTC()

@@ -603,7 +603,9 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	workDir := filepath.Join(e.cfg.Worktrees.Root(), s.Feature.WorktreePath())
 	ctx, cancel := context.WithTimeout(context.Background(), verifyStageTimeout)
 	defer cancel()
-	results := verify.Run(ctx, workDir, checks)
+	// The shared context bounds the whole set; a per-check bound stops one
+	// hung command from consuming it and starving the rest (verify.CheckTimeout).
+	results := verify.RunBounded(ctx, workDir, checks, verify.CheckTimeout)
 
 	// The approval-time baseline separates failures the feature caused
 	// from ones the branch was born with. A baseline entry speaks for a
@@ -621,8 +623,15 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	preexisting := false
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
-		status := "pass"
-		if !r.OK {
+		var status string
+		switch r.Status {
+		case verify.StatusPass:
+			status = "pass"
+		case verify.StatusTimeout:
+			status = "TIMEOUT (killed by deadline)"
+		case verify.StatusNotRun:
+			status = "NOT RUN (check budget exhausted)"
+		default:
 			if base, ok := baseline[r.Name]; ok && base.Cmd == r.Cmd && !base.OK {
 				status = fmt.Sprintf("FAIL (pre-existing, exit %d)", r.ExitCode)
 				preexisting = true
@@ -632,7 +641,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
-		if !r.OK {
+		if !r.OK && len(r.Output) > 0 {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
 		}
 	}

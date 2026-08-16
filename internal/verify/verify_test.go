@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -56,7 +57,53 @@ func TestRunStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	res := Run(ctx, t.TempDir(), []domain.Check{{Name: "x", Cmd: "echo hi"}})
-	if len(res) != 0 {
-		t.Errorf("cancelled context should run no checks, got %+v", res)
+	if len(res) != 1 {
+		t.Fatalf("cancelled context should still report every check, got %d", len(res))
+	}
+	if res[0].Status != StatusNotRun || res[0].OK {
+		t.Errorf("unstarted check should be StatusNotRun, got %+v", res[0])
+	}
+}
+
+// A check that exhausts the shared budget must not swallow the checks
+// behind it: every configured check appears in the results, and one that
+// never started is explicitly not-run rather than absent.
+func TestRunEmitsNotRunWhenBudgetExhausted(t *testing.T) {
+	dir := t.TempDir()
+	checks := []domain.Check{
+		{Name: "slow", Cmd: "sleep 5"},
+		{Name: "mustfail", Cmd: "exit 7"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	res := Run(ctx, dir, checks)
+	if len(res) != len(checks) {
+		t.Fatalf("got %d results for %d checks: checks behind a slow one must not vanish", len(res), len(checks))
+	}
+	if res[0].Status != StatusTimeout {
+		t.Errorf("deadline-killed check should be StatusTimeout, got %+v", res[0])
+	}
+	if res[1].Status != StatusNotRun {
+		t.Errorf("check behind the slow one should be StatusNotRun (present, not absent), got %+v", res[1])
+	}
+}
+
+// A check killed by the deadline must be distinguishable from one that
+// failed to start (both surface as ExitCode -1): only the former is a
+// timeout.
+func TestRunDistinguishesTimeoutFromSpawnFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	// "exit 7" is fast; it runs and fails before the deadline. A timed-out
+	// sibling is reported as StatusTimeout, not as a spawn failure.
+	res := RunBounded(ctx, t.TempDir(), []domain.Check{
+		{Name: "fail", Cmd: "exit 7"},
+		{Name: "slow", Cmd: "sleep 5"},
+	}, 100*time.Millisecond)
+	if res[0].Status != StatusFail || res[0].ExitCode != 7 {
+		t.Errorf("fast failing check: %+v", res[0])
+	}
+	if res[1].Status != StatusTimeout {
+		t.Errorf("killed check should be StatusTimeout, got %+v", res[1])
 	}
 }

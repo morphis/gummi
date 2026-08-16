@@ -44,7 +44,6 @@ type ReverifyResult struct {
 	Feature domain.Feature
 	Reason  string        // ReverifyUnavailable: why not
 	Failed  []string      // ReverifyFailed: names of the live-failing checks
-	Ran     int           // number of checks executed
 	Advance AdvanceResult // ReverifyFinalized/ReverifyBlocked: the finalize outcome
 }
 
@@ -108,9 +107,7 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	workDir := filepath.Join(e.cfg.Worktrees.Root(), f.WorktreePath())
 	rctx, cancel := context.WithTimeout(ctx, verifyStageTimeout)
 	defer cancel()
-	results := verify.Run(rctx, workDir, checks)
-	res.Ran = len(results)
-
+	results := verify.RunBounded(rctx, workDir, checks, verify.CheckTimeout)
 	// classify against the approval-time baseline: a failure the branch was
 	// born with (same command, already failing) is pre-existing and does not
 	// count against this feature — only regressions do. No baseline degrades
