@@ -558,4 +558,29 @@ func TestMigrations(t *testing.T) {
 	if got.Severity != domain.SeverityCritical {
 		t.Errorf("severity = %q, want %q after reopen", got.Severity, domain.SeverityCritical)
 	}
+
+	// The sessions flavor column exists after migration and round-trips a
+	// session's pass identity through a fresh open.
+	var fn int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='flavor'`,
+	).Scan(&fn); err != nil {
+		t.Fatal(err)
+	}
+	if fn != 1 {
+		t.Fatalf("flavor column missing from sessions schema (count=%d)", fn)
+	}
+	if err := s3.SaveSession(ctx, SessionSnapshot{
+		Feature: f.ID, Stage: f.Stage, Role: "implementer",
+		Flavor: "rebase", State: "done",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := s3.LoadSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 1 || snaps[0].Flavor != "rebase" {
+		t.Errorf("restored sessions = %+v, want one rebase-flavored session", snaps)
+	}
 }

@@ -40,6 +40,7 @@ func (e *Engine) persist(s *Session) {
 		Feature:      snap.Feature.ID,
 		Stage:        snap.Feature.Stage,
 		Role:         string(snap.Role),
+		Flavor:       flavorString(s.flavor()),
 		State:        string(snap.State),
 		AgentSession: snap.AgentSessionID,
 		SpendCredits: snap.Spend.Credits,
@@ -94,16 +95,20 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		// The pass flags aren't persisted; recover them from role/stage
-		// pairings the stage's own run can't produce. A plan-stage session
-		// with the reviewer role was the plan-critique pass (the plan
-		// writer is the architect); an implementer-role session on a stage
-		// whose own role isn't implementer was the rebase-resolve pass.
-		critique := f.Stage == domain.StagePlan && snap.Role == string(agent.RoleReviewer)
+		// The pass flavor is persisted on the session row, so a restored
+		// session keeps its identity (stage / critique / rebase) whatever
+		// stage it borrowed — a rebase pass on an implementer-owned stage
+		// must not be mistaken for the stage's own run. A legacy row
+		// predating the flavor column falls back to the role/stage
+		// inference the column replaced.
+		critique, rebase := parseFlavor(snap.Flavor)
+		if snap.Flavor == "" {
+			critique = f.Stage == domain.StagePlan && snap.Role == string(agent.RoleReviewer)
+			rebase = snap.Role == string(agent.RoleImplementer) && role != agent.RoleImplementer
+		}
 		if critique {
 			role = agent.RoleReviewer
 		}
-		rebase := snap.Role == string(agent.RoleImplementer) && role != agent.RoleImplementer
 		if rebase {
 			role = agent.RoleImplementer
 			// a crash mid-session can strand the worktree mid-rebase; abort

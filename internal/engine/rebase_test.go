@@ -164,3 +164,26 @@ func TestRestoreRecoversRebaseFlag(t *testing.T) {
 		t.Errorf("restored rebase = %v role = %s, want rebase implementer", snap.Rebase, snap.Role)
 	}
 }
+
+func TestRestoreRecoversRebaseOnImplement(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	f := feature(4, "BG-038", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+
+	e1 := persistEngine(t, agent.NewFake("Rebased."), ws, store, wt)
+	if err := e1.RunRebase(context.Background(), f, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e1, f.ID, StateDone)
+	e1.Close()
+
+	e2 := persistEngine(t, agent.NewFake("x"), ws, store, wt)
+	if err := e2.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	snap := e2.Get(f.ID).Snapshot()
+	if !snap.Rebase || snap.Role != agent.RoleImplementer {
+		t.Errorf("restored rebase = %v role = %s, want rebase implementer", snap.Rebase, snap.Role)
+	}
+}

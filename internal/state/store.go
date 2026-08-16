@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	feature_id    TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
 	stage         TEXT NOT NULL,
 	role          TEXT NOT NULL,
+	flavor        TEXT NOT NULL DEFAULT '',
 	state         TEXT NOT NULL,
 	agent_session TEXT NOT NULL DEFAULT '',
 	spend_credits REAL NOT NULL DEFAULT 0,
@@ -280,6 +281,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN plan_rounds INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN review_rounds INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE sessions ADD COLUMN flavor TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

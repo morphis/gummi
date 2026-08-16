@@ -23,9 +23,15 @@ type SessionMessage struct {
 // written by the engine and reloaded on restart. It uses primitive
 // fields so the state layer needn't depend on engine/agent types.
 type SessionSnapshot struct {
-	Feature      domain.FeatureID
-	Stage        domain.Stage
-	Role         string
+	Feature domain.FeatureID
+	Stage   domain.Stage
+	Role    string
+	// Flavor is the session's pass: "stage" (the stage's own work),
+	// "critique" (the plan-critique pass), or "rebase" (the rebase-resolve
+	// pass). Persisted so Restore can recover a session's identity without
+	// re-deriving it from role/stage. Empty for legacy rows predating the
+	// column.
+	Flavor       string
 	State        string
 	AgentSession string // backend session id (its on-disk log), "" if none
 	SpendCredits float64
@@ -54,16 +60,16 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 	defer tx.Rollback() //nolint:errcheck // no-op after commit
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO sessions (feature_id, stage, role, state, agent_session,
+		INSERT INTO sessions (feature_id, stage, role, flavor, state, agent_session,
 			spend_credits, spend_in, spend_out, spend_model, activity, error, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(feature_id) DO UPDATE SET
-			stage=excluded.stage, role=excluded.role, state=excluded.state,
-			agent_session=excluded.agent_session,
+			stage=excluded.stage, role=excluded.role, flavor=excluded.flavor,
+			state=excluded.state, agent_session=excluded.agent_session,
 			spend_credits=excluded.spend_credits, spend_in=excluded.spend_in,
 			spend_out=excluded.spend_out, spend_model=excluded.spend_model,
 			activity=excluded.activity, error=excluded.error, updated_at=excluded.updated_at`,
-		string(snap.Feature), string(snap.Stage), snap.Role, snap.State, snap.AgentSession,
+		string(snap.Feature), string(snap.Stage), snap.Role, snap.Flavor, snap.State, snap.AgentSession,
 		snap.SpendCredits, snap.SpendIn, snap.SpendOut, snap.SpendModel,
 		strings.Join(snap.Activity, activitySep), snap.Error, time.Now().UTC().Format(timeFmt)); err != nil {
 		return fmt.Errorf("saving session %s: %w", snap.Feature, err)
@@ -94,7 +100,7 @@ func (s *Store) DeleteSession(ctx context.Context, id domain.FeatureID) error {
 // ordered by feature number.
 func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.feature_id, s.stage, s.role, s.state, s.agent_session,
+		SELECT s.feature_id, s.stage, s.role, s.flavor, s.state, s.agent_session,
 			s.spend_credits, s.spend_in, s.spend_out, s.spend_model, s.activity, s.error
 		FROM sessions s JOIN features f ON f.id = s.feature_id
 		ORDER BY f.num`)
@@ -107,7 +113,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 	for rows.Next() {
 		var snap SessionSnapshot
 		var fid, stage, activity string
-		if err := rows.Scan(&fid, &stage, &snap.Role, &snap.State, &snap.AgentSession,
+		if err := rows.Scan(&fid, &stage, &snap.Role, &snap.Flavor, &snap.State, &snap.AgentSession,
 			&snap.SpendCredits, &snap.SpendIn, &snap.SpendOut, &snap.SpendModel, &activity, &snap.Error); err != nil {
 			return nil, err
 		}

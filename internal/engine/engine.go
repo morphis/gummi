@@ -52,6 +52,39 @@ const (
 	flavorRebase
 )
 
+// flavor strings are the durable form of runFlavor, persisted on the
+// session row so Restore recovers a session's pass identity without
+// re-deriving it from role/stage.
+const (
+	flavorStageString    = "stage"
+	flavorCritiqueString = "critique"
+	flavorRebaseString   = "rebase"
+)
+
+// flavorString is the persist form of a session's pass flavor.
+func flavorString(f runFlavor) string {
+	switch f {
+	case flavorCritique:
+		return flavorCritiqueString
+	case flavorRebase:
+		return flavorRebaseString
+	}
+	return flavorStageString
+}
+
+// parseFlavor recovers a restored session's pass identity from its
+// persisted form. An empty (legacy) or unknown flavor reads as a plain
+// stage run.
+func parseFlavor(s string) (critique, rebase bool) {
+	switch s {
+	case flavorCritiqueString:
+		return true, false
+	case flavorRebaseString:
+		return false, true
+	}
+	return false, false
+}
+
 // interactiveKickoff opens a fresh interactive session with the agent
 // leading — the user shouldn't have to know what to say to start an
 // interview (DESIGN §3: brainstorm develops a one-line description).
