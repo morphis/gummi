@@ -189,3 +189,29 @@ func TestTemplateParsesWithOpenQuestions(t *testing.T) {
 		t.Errorf("draft filename = %s", DraftFilename(f))
 	}
 }
+
+func TestResolutionDoesNotCloseLaterComment(t *testing.T) {
+	// Two user comments on one anchor line; the agent resolves the first
+	// and a later comment is added below the resolution, reopening the
+	// thread. A single resolution must not unblock the gate while the
+	// second comment is unanswered.
+	doc := "## Problem\n\nThe toggle persists via localStorage.\n" +
+		"%% @user(2026-08-16): per-device or synced?\n" +
+		"%% @architect: resolved — per-device.\n" +
+		"%% @user(2026-08-16): what about SSR?\n"
+	d := Parse(doc)
+
+	if got := len(d.Threads()); got != 1 {
+		t.Fatalf("Threads() = %d, want 1 (one anchor line)", got)
+	}
+
+	open := d.UserOpenThreads()
+	if len(open) != 1 {
+		t.Fatalf("UserOpenThreads() = %d, want 1 (SSR question is unanswered, gate must stay shut)", len(open))
+	}
+
+	m := UnresolvedUserMarker(open[0])
+	if m == nil || m.Text != "what about SSR?" {
+		t.Fatalf("unresolved user marker = %+v, want the SSR comment", m)
+	}
+}

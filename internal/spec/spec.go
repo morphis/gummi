@@ -7,7 +7,7 @@
 //	%% free-form question or note
 //	%% @author: text
 //	%% @author(date): text
-//	%% @author: resolved — text        ← resolves its thread
+//	%% @author: resolved — text        ← resolves that comment and the ones above it
 //
 // A resolution is a marker whose text is exactly "resolved" or starts
 // with "resolved" followed by ":", "—", "–", or "-" (case-insensitive);
@@ -15,8 +15,10 @@
 // unclear?") does not resolve anything.
 //
 // Markers attach to the nearest preceding content line (their anchor);
-// all markers under one anchor form a thread. A thread is open until
-// any marker in it is a resolution.
+// all markers under one anchor form a thread. A resolution closes only
+// the markers ABOVE it in the run (and itself); a comment below every
+// resolution stays open. Resolving one comment never closes the others
+// sharing the anchor, and a later question reopens the thread.
 package spec
 
 import (
@@ -120,11 +122,32 @@ func (d Doc) Threads() []Thread {
 	for _, mk := range d.Markers {
 		if i, ok := byAnchor[mk.Anchor]; ok {
 			out[i].Markers = append(out[i].Markers, mk)
-			out[i].Resolved = out[i].Resolved || mk.Resolved
 			continue
 		}
 		byAnchor[mk.Anchor] = len(out)
-		out = append(out, Thread{Anchor: mk.Anchor, Markers: []Marker{mk}, Resolved: mk.Resolved})
+		out = append(out, Thread{Anchor: mk.Anchor, Markers: []Marker{mk}})
+	}
+	// A resolution closes only the markers ABOVE it in the run, plus
+	// itself; a comment below every resolution stays open. So resolving
+	// one comment never closes the others sharing the anchor, and a later
+	// question reopens the thread. Scan bottom-up so a resolution
+	// propagates upward and a thread is resolved only when every marker
+	// in it is.
+	for i := range out {
+		t := &out[i]
+		t.Resolved = true
+		closed := false // a resolution seen below resolves everything above
+		for j := len(t.Markers) - 1; j >= 0; j-- {
+			if closed {
+				t.Markers[j].Resolved = true
+			}
+			if t.Markers[j].Resolved {
+				closed = true
+			}
+			if !t.Markers[j].Resolved {
+				t.Resolved = false
+			}
+		}
 	}
 	return out
 }
