@@ -254,6 +254,21 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 	switch res.Status {
 	case engine.ReverifyFinalized:
 		return d.done(ctx, res.Feature)
+	case engine.ReverifyBlocked:
+		// the checks passed but the finalize gate is held open by an
+		// unresolved thread or diff annotation (Advance's block check runs
+		// before the verify→done branch). Keep the feature at verify and
+		// report the same blocked outcome autoAdvance maps elsewhere — exit 3,
+		// matching status --json (verified:false) rather than "done".
+		switch res.Advance.Status {
+		case engine.StatusBlockedQuestions:
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), OpenSpec: res.Advance.Blockers, Resume: string(id)})
+		case engine.StatusBlockedDiff:
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), OpenDiff: res.Advance.Blockers, Resume: string(id)})
+		default:
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Resume: string(id)})
+		}
+		return Outcome{Status: StatusBlocked, ID: string(id)}, nil
 	case engine.ReverifyFailed:
 		return d.escalation(res.Feature,
 			"re-verify FAILED — acceptance checks still failing: "+strings.Join(res.Failed, ", ")), nil

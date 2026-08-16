@@ -22,6 +22,13 @@ const (
 	// reports the branch ready to land (or transitioned to Done). Result
 	// carries that AdvanceResult.
 	ReverifyFinalized ReverifyStatus = iota
+	// ReverifyBlocked: the checks passed but the finalize gate is held open
+	// by unresolved user %% threads or diff annotations. The feature stays
+	// at verify and verified_at is not stamped, so status reports
+	// verified:false — the caller must surface the block, not "done".
+	// Result.Advance carries the AdvanceResult whose Blocked status explains
+	// which blocker held the gate.
+	ReverifyBlocked
 	// ReverifyFailed: a live (non-pre-existing) acceptance check still
 	// fails on the branch. Result.Failed names them; nothing was stamped.
 	ReverifyFailed
@@ -38,7 +45,7 @@ type ReverifyResult struct {
 	Reason  string        // ReverifyUnavailable: why not
 	Failed  []string      // ReverifyFailed: names of the live-failing checks
 	Ran     int           // number of checks executed
-	Advance AdvanceResult // ReverifyFinalized: the finalize outcome
+	Advance AdvanceResult // ReverifyFinalized/ReverifyBlocked: the finalize outcome
 }
 
 // Reverify re-runs a feature's gummi-side acceptance checks on its existing
@@ -130,13 +137,23 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 
 	// all live checks pass — finalize via the shared floor, which stamps
 	// verified_at (once) and reports StatusNeedsMerge for a branch that is
-	// ahead, or transitions to Done when there is nothing to land.
+	// ahead, or transitions to Done when there is nothing to land. Advance
+	// checks open user threads and diff annotations before the verify→done
+	// branch (DESIGN §6.1), so a held-open gate comes back as a Blocked
+	// status with the feature still parked at verify and verified_at unset.
+	// Surface that rather than claiming finalize: the caller must map it to
+	// the blocked exit, or status --json and this result would disagree.
 	adv, err := e.Advance(ctx, id, actor)
 	if err != nil {
 		return res, err
 	}
 	res.Advance = adv
 	res.Feature = adv.Feature
-	res.Status = ReverifyFinalized
+	switch adv.Status {
+	case StatusBlockedQuestions, StatusBlockedDiff:
+		res.Status = ReverifyBlocked
+	default:
+		res.Status = ReverifyFinalized
+	}
 	return res, nil
 }

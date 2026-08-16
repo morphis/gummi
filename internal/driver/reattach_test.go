@@ -115,6 +115,49 @@ func TestVerifyReattachFinalizes(t *testing.T) {
 	}
 }
 
+// An unresolved user thread holds the finalize gate even when every
+// acceptance check passes: `gummi verify` reports blocked (exit 3), not
+// done, so the caller is not told the branch is ready to land while
+// status --json still reports verified:false and the stage never moved.
+func TestVerifyReattachBlockedByOpenThread(t *testing.T) {
+	h := newHarness(t, true, nil)
+	f := feature(1, domain.StageVerify) // parked at verify, verified_at unset
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.wt.Create(context.Background(), &f); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	// a passing check plus an unresolved USER thread that holds the gate open.
+	writePromotedSpec(t, h, f,
+		"## Verification plan\n\n```gummi-checks\n- name: smoke\n  cmd: \"true\"\n```\n"+
+			"\n%% @user: does the new export cover nested records?\n")
+
+	out, err := h.driver(Options{}).Verify(context.Background(), f.ID)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if out.Status != StatusBlocked {
+		t.Fatalf("status = %q, want blocked (open thread held the gate); stream=%v", out.Status, h.eventKinds())
+	}
+	if out.Status.ExitCode() != 3 {
+		t.Fatalf("exit code = %d, want 3 (blocked)", out.Status.ExitCode())
+	}
+	if ev := lastEvent(h, "blocked"); ev == nil || ev["open_questions"].(float64) != 1 {
+		t.Fatalf("blocked event = %v, want open_questions=1", ev)
+	}
+	got, err := h.store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stage != domain.StageVerify {
+		t.Fatalf("stage = %q, want verify (gate held open, not merged)", got.Stage)
+	}
+	if !got.VerifiedAt.IsZero() {
+		t.Fatal("verified_at was stamped while the gate was blocked — status would report verified:true")
+	}
+}
+
 // A live (non-pre-existing) acceptance-check failure blocks the cheap
 // re-attach: `gummi verify` escalates instead of finalizing.
 func TestVerifyReattachFailingChecksEscalate(t *testing.T) {
