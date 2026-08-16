@@ -15,6 +15,7 @@ import (
 	"github.com/morphis/gummi/internal/planround"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -443,7 +444,7 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 				kickoff := ""
 				result := "critiquing"
 				if d.planRounds > 0 {
-					kickoff = reCritiqueNote
+					kickoff = verdict.ReCritiqueNote
 					result = "re-critiquing"
 				}
 				if err := d.eng.RunCritique(f, kickoff); err != nil {
@@ -507,16 +508,16 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 	snap := d.snapshot(f.ID)
 	switch f.Stage {
 	case domain.StageReview:
-		v := sessionVerdict(snap)
+		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
 		switch v {
-		case verdictPass:
+		case verdict.Pass:
 			d.reviewRounds = 0
 			return d.stepTo(ctx, f.ID, domain.StageVerify)
-		case verdictChanges:
-			if d.reviewRounds >= maxReviewRounds {
+		case verdict.Changes:
+			if d.reviewRounds >= verdict.MaxReviewRounds {
 				d.reviewRounds = 0
-				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", maxReviewRounds)), nil
+				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", verdict.MaxReviewRounds)), nil
 			}
 			d.reviewRounds++
 			return d.stepTo(ctx, f.ID, workflow.WorkStage(f.Kind))
@@ -526,16 +527,16 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		}
 
 	case domain.StageVerify:
-		v := sessionVerdict(snap)
+		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
 		switch v {
-		case verdictPass:
+		case verdict.Pass:
 			// stop at the verified branch: Advance reports NeedsMerge (branch
 			// ahead) or transitions to Done (nothing to land). Never merges.
 			return d.crossGate(ctx, f)
-		case verdictBlocked:
+		case verdict.Blocked:
 			return d.escalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
-		case verdictFail, verdictChanges:
+		case verdict.Fail, verdict.Changes:
 			return d.bounceEscalation(f, "verify FAILED — read the evidence in the artifact"), nil
 		default:
 			return d.escalation(f, "verify finished with no clear verdict"), nil
@@ -588,28 +589,28 @@ func (d *Driver) awaitPlanCritique(ctx context.Context, f domain.Feature) (Outco
 // judgePlanCritique applies the critique verdict: pass crosses the plan
 // approval gate, changes replan under the cap, else escalate.
 func (d *Driver) judgePlanCritique(ctx context.Context, f domain.Feature, snap engine.Snapshot) (Outcome, error) {
-	v := sessionVerdict(snap)
+	v := verdict.SessionVerdict(snap)
 	d.emitResult(f, v)
 	switch v {
-	case verdictPass:
+	case verdict.Pass:
 		if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
 			return Outcome{}, err
 		}
 		d.planRounds = 0
 		return d.crossGate(ctx, f)
-	case verdictChanges:
-		if d.planRounds >= maxPlanRounds {
+	case verdict.Changes:
+		if d.planRounds >= verdict.MaxPlanRounds {
 			if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
 				return Outcome{}, err
 			}
 			d.planRounds = 0
-			return d.escalation(f, fmt.Sprintf("plan critique still requesting changes after %d rounds", maxPlanRounds)), nil
+			return d.escalation(f, fmt.Sprintf("plan critique still requesting changes after %d rounds", verdict.MaxPlanRounds)), nil
 		}
 		if err := planround.Bump(ctx, d.planStore, f.ID); err != nil {
 			return Outcome{}, err
 		}
 		d.planRounds++
-		if err := d.eng.RunWith(f, replanNote); err != nil {
+		if err := d.eng.RunWith(f, verdict.ReplanNote); err != nil {
 			return Outcome{}, err
 		}
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning", Round: d.planRounds})
@@ -640,25 +641,13 @@ func (d *Driver) awaitReplan(ctx context.Context, f domain.Feature) (Outcome, er
 		return d.tripwire(f, end.dirtyPaths), nil
 	default:
 		// re-critique the revised plan (mirrors reCritiqueNote intent).
-		if err := d.eng.RunCritique(f, reCritiqueNote); err != nil {
+		if err := d.eng.RunCritique(f, verdict.ReCritiqueNote); err != nil {
 			return Outcome{}, err
 		}
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "re-critiquing"})
 		return d.awaitPlanCritique(ctx, f)
 	}
 }
-
-// replanNote / reCritiqueNote mirror internal/ui/reviewloop.go: the
-// critique's findings live in the spec (single source of truth), so the
-// architect is pointed at the threads rather than handed a copy.
-const replanNote = "The plan critique found issues. Address each open `%% @reviewer:` " +
-	"thread in the spec: revise the plan in Implementation notes accordingly and " +
-	"mark each thread resolved with a line like `%% @architect: resolved — <how>`."
-
-const reCritiqueNote = "This is a re-critique: a prior round's findings were addressed " +
-	"and the plan revised. Start from the resolved `%% @reviewer:` threads and verify " +
-	"each resolution against the revised plan — reopen a thread only if its resolution " +
-	"does not hold. Raise a new finding only if it is blocking."
 
 // stepTo records an in-floor transition (actor "auto") and returns a
 // non-terminal Outcome so drive re-dispatches and runs the new stage. The
@@ -1023,8 +1012,8 @@ func (d *Driver) pendingAsk(id domain.FeatureID) *engine.Ask {
 
 // emitResult emits a stage result line (verify pass/fail, review pass/
 // changes) — the semantic milestone at a verdict boundary.
-func (d *Driver) emitResult(f domain.Feature, v verdict) {
-	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: verdictString(v)})
+func (d *Driver) emitResult(f domain.Feature, v verdict.Verdict) {
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: v.String()})
 }
 
 // UntilStops lists the stages --until may name for an item's route: the
@@ -1084,21 +1073,6 @@ func forwardEdge(f domain.Feature) domain.Stage {
 		return f.Stage
 	}
 	return nexts[len(nexts)-1]
-}
-
-func verdictString(v verdict) string {
-	switch v {
-	case verdictPass:
-		return "pass"
-	case verdictChanges:
-		return "changes"
-	case verdictFail:
-		return "fail"
-	case verdictBlocked:
-		return "blocked"
-	default:
-		return "unclear"
-	}
 }
 
 // firstErr returns a if non-nil, else fallback — for turning an optional error

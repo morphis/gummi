@@ -170,16 +170,6 @@ func recentTools(snap engine.Snapshot, n int) []engine.Message {
 	return out
 }
 
-// lastAssistant returns the most recent assistant message text.
-func lastAssistant(snap engine.Snapshot) string {
-	for i := len(snap.Transcript) - 1; i >= 0; i-- {
-		if snap.Transcript[i].Author == engine.AuthorAssistant {
-			return snap.Transcript[i].Content
-		}
-	}
-	return ""
-}
-
 // sessionMeta is the who-is-running line under the activity header:
 // backend · model · provider · running spend, each shown once known.
 func sessionMeta(snap engine.Snapshot) string {

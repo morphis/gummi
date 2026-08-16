@@ -2,84 +2,48 @@ package ui
 
 import (
 	"context"
-	"regexp"
 	"strconv"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/planround"
+	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
-// maxReviewRounds caps the automatic review→fix→review loop (DESIGN §10
-// decision 4). Past the cap, gummi escalates to the human instead of
-// looping.
-const maxReviewRounds = 3
-
-// maxPlanRounds caps the automatic plan→critique→replan loop. Lower
-// than the review cap: plan revisions are cheap to judge and the human
-// gate is right behind the critique anyway.
-const maxPlanRounds = 2
-
-// reviewVerdict is the outcome parsed from a review session's message.
-type reviewVerdict int
+// The verdict grammar — the type, both regexes, parse, the session
+// helpers, the round caps, and the kickoff notes — lives in the shared
+// internal/verdict package (it is the seam the headless driver uses
+// too). The unexported names below are thin aliases and one-line
+// wrappers so the review-loop call sites and tests read unchanged; they
+// carry no logic of their own.
+type reviewVerdict = verdict.Verdict
 
 const (
-	verdictUnclear reviewVerdict = iota
-	verdictPass
-	verdictChanges // review/critique: findings to bounce back
-	verdictFail    // verify: verification found real problems
-	verdictBlocked // verify: the environment can't run the plan
+	verdictUnclear = verdict.Unclear
+	verdictPass    = verdict.Pass
+	verdictChanges = verdict.Changes
+	verdictFail    = verdict.Fail
+	verdictBlocked = verdict.Blocked
 )
 
-var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes|fail|blocked)\s*$`)
+const (
+	maxReviewRounds = verdict.MaxReviewRounds
+	maxPlanRounds   = verdict.MaxPlanRounds
+)
 
-// verdictTailRe catches models that emit the verdict glued to the
-// preceding sentence ("…redundant.VERDICT: changes") with no newline
-// before it — the strict verdictRe misses those. It anchors to the end
-// of the trimmed text, so a stray mid-text mention still doesn't count.
-var verdictTailRe = regexp.MustCompile(`(?i)\bVERDICT:\s*(pass|changes|fail|blocked)\s*$`)
+const (
+	replanNote     = verdict.ReplanNote
+	reCritiqueNote = verdict.ReCritiqueNote
+)
 
-// verdictFromTool maps a submit_verdict tool result to a reviewVerdict.
-func verdictFromTool(v string) reviewVerdict {
-	switch v {
-	case "pass":
-		return verdictPass
-	case "changes":
-		return verdictChanges
-	case "fail":
-		return verdictFail
-	case "blocked":
-		return verdictBlocked
-	default:
-		return verdictUnclear
-	}
-}
+func parseVerdict(text string) reviewVerdict { return verdict.Parse(text) }
 
-// parseVerdict finds the last VERDICT line in review output.
-func parseVerdict(text string) reviewVerdict {
-	if matches := verdictRe.FindAllStringSubmatch(text, -1); len(matches) > 0 {
-		return verdictFromTool(strings.ToLower(matches[len(matches)-1][1]))
-	}
-	trimmed := strings.TrimRight(text, " \t\r\n")
-	if m := verdictTailRe.FindStringSubmatch(trimmed); m != nil {
-		return verdictFromTool(strings.ToLower(m[1]))
-	}
-	return verdictUnclear
-}
+func sessionVerdict(snap engine.Snapshot) reviewVerdict { return verdict.SessionVerdict(snap) }
 
-// sessionVerdict reads a session's outcome, preferring the structured
-// submit_verdict tool result and falling back to the VERDICT: line for
-// backends/agents that didn't use it.
-func sessionVerdict(snap engine.Snapshot) reviewVerdict {
-	if v := verdictFromTool(snap.Verdict); v != verdictUnclear {
-		return v
-	}
-	return parseVerdict(lastAssistant(snap))
-}
+func lastAssistant(snap engine.Snapshot) string { return verdict.LastAssistant(snap) }
 
 // onAutonomousDone drives the review loop when an autonomous session
 // finishes. It returns (handled, cmd): handled means the loop consumed
@@ -172,22 +136,6 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	// row state (landed, open-comment counts) is fresh
 	return m.loadRows
 }
-
-// replanNote is the kickoff for a replan run: the critique's findings
-// live in the spec (single source of truth), so the architect is
-// pointed at the threads rather than handed a copy.
-const replanNote = "The plan critique found issues. Address each open `%% @reviewer:` " +
-	"thread in the spec: revise the plan in Implementation notes accordingly and " +
-	"mark each thread resolved with a line like `%% @architect: resolved — <how>`."
-
-// reCritiqueNote is the kickoff for a critique after a replan round:
-// burn down the prior round's threads instead of re-judging the plan
-// from scratch, so the loop converges rather than churning out fresh
-// findings every round.
-const reCritiqueNote = "This is a re-critique: a prior round's findings were addressed " +
-	"and the plan revised. Start from the resolved `%% @reviewer:` threads and verify " +
-	"each resolution against the revised plan — reopen a thread only if its resolution " +
-	"does not hold. Raise a new finding only if it is blocking."
 
 // onPlanDone drives the plan-critique loop when a Plan-stage session
 // finishes. A finished plan writer triggers the critique pass; a
