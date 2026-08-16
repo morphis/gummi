@@ -733,7 +733,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 // agent has to fall back to raw file access, which a caged backend
 // cannot reach and reacts to with a blocked verdict.
 func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
-	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageReview, domain.StageVerify} {
+	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageReview, domain.StageVerify, domain.StagePlan} {
 		names := map[string]bool{}
 		for _, td := range stageTools(st, flavorStage) {
 			names[td.Name] = true

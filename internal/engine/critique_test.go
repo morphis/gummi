@@ -40,8 +40,16 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 	if !strings.Contains(got, "submit_verdict") || !strings.Contains(got, "spec_annotate") {
 		t.Errorf("critique tools = %s, want submit_verdict + spec_annotate", got)
 	}
-	if stageTools(domain.StagePlan, flavorStage) != nil {
-		t.Error("plan writer unexpectedly offered client tools")
+	var writerNames []string
+	for _, td := range stageTools(domain.StagePlan, flavorStage) {
+		writerNames = append(writerNames, td.Name)
+	}
+	writer := strings.Join(writerNames, ",")
+	if !strings.Contains(writer, "spec_view") || !strings.Contains(writer, "spec_replace_section") {
+		t.Errorf("plan writer tools = %s, want spec_view + spec_replace_section", writer)
+	}
+	if toolHint(domain.StagePlan, flavorStage) == "" {
+		t.Error("plan writer tool hint empty")
 	}
 	if toolHint(domain.StagePlan, flavorCritique) == "" {
 		t.Error("critique tool hint empty")

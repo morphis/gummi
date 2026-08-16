@@ -91,6 +91,8 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageImplement, domain.StageFix:
 		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
+	case domain.StagePlan:
+		return []agent.ToolDef{specViewTool(), specReplaceSectionTool()}
 	default:
 		return nil
 	}
@@ -336,6 +338,12 @@ heading and the next; re-emit any %% @user: marker lines yourself), then
 call the submit_verdict tool exactly once at the end (verdict "pass",
 "fail", or "blocked") instead of writing a VERDICT: line — gummi gates
 on it.`
+	case domain.StagePlan:
+		return `Write the plan into the design artifact with spec_view (pass a
+section heading for one section's body, omit it for the whole document)
+and spec_replace_section: rewrite the Implementation notes section body
+between its ## heading and the next, and re-emit any %% @user: marker
+lines yourself. Each replan round rewrites the section wholesale.`
 	default:
 		return ""
 	}
