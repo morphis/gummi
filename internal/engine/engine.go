@@ -710,7 +710,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// (DESIGN §6.1). The store is the source of truth, so this reaches
 	// every implement run, not just the one that triggered it.
 	if flavor == flavorStage && (f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
-		hints = append(hints, e.diffReviewHints(ctx, f.ID)...)
+		hints = append(hints, e.diffReviewHints(ctx, f.ID, ag.Capabilities().ClientTools)...)
 	}
 	var maxCredits float64
 	// autonomous stages get a budget cap + budget-aware hint (interactive
@@ -1390,6 +1390,7 @@ func (e *Engine) stageReceipt(s *Session) {
 	}
 	var total, estimated float64
 	var dom state.StageSpend
+	seen := make(map[string]bool)
 	models := 0
 	for _, r := range rows {
 		if r.Stage != s.Feature.Stage {
@@ -1402,7 +1403,10 @@ func (e *Engine) stageReceipt(s *Session) {
 		if dom.Model == "" || r.Credits > dom.Credits {
 			dom = r
 		}
-		models++
+		if r.Model != "" && !seen[r.Model] {
+			seen[r.Model] = true
+			models++
+		}
 	}
 	if models == 0 {
 		return

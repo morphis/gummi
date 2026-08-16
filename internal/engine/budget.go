@@ -67,7 +67,7 @@ func (e *Engine) currentFeature(f domain.Feature) domain.Feature {
 // diffReviewHints turns a feature's open diff annotations into system
 // hints for an implement run (DESIGN §6.1). Empty when the store is
 // absent or there is nothing open.
-func (e *Engine) diffReviewHints(ctx context.Context, id domain.FeatureID) []string {
+func (e *Engine) diffReviewHints(ctx context.Context, id domain.FeatureID, resolveTool bool) []string {
 	if e.cfg.Store == nil {
 		return nil
 	}
@@ -75,7 +75,7 @@ func (e *Engine) diffReviewHints(ctx context.Context, id domain.FeatureID) []str
 	if err != nil {
 		return nil
 	}
-	turn := CompileDiffComments(anns, e.ClientTools())
+	turn := CompileDiffComments(anns, resolveTool)
 	if turn == "" {
 		return nil
 	}

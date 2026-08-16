@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -579,5 +580,100 @@ func TestExhaustedPlanStillGatesDespiteFloor(t *testing.T) {
 	waitFor(t, e, EventExhausted)
 	if rec.opts().MaxCredits != 0 {
 		t.Errorf("a dry stage opened a session (MaxCredits=%v)", rec.opts().MaxCredits)
+	}
+}
+
+// TestDiffReviewHintsFollowRoleBackend pins the diff-comment hint path
+// to the backend the implement run actually runs on, not the engine's
+// default backend. Here the implementer resolves to a backend without
+// client tools while the default has them: the hints must not tell the
+// implementer to call resolve_annotation (nor hand it [id] prefixes it
+// has no tool to honor), though the comment text itself still reaches it.
+func TestDiffReviewHintsFollowRoleBackend(t *testing.T) {
+	good := recordingAgent()
+	good.name = "copilot"
+	good.Caps = agent.Capabilities{ClientTools: true}
+	head := recordingAgent()
+	head.name = "headless"
+	agents := map[string]agent.Agent{"": good, "copilot": good, "headless": head}
+	profiles := config.Profiles{
+		Default: "thrifty",
+		Profiles: map[string]config.Profile{
+			"thrifty": {"implementer": {Backend: "headless", Model: "qwen"}},
+		},
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: agents, Store: store, Worktrees: wt, Workspace: ws, Model: "fallback", MaxActive: 1, Profiles: profiles})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(2, "impl", domain.StageImplement)
+	f.Profile = "thrifty"
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if _, err := store.AddDiffAnnotation(context.Background(), domain.DiffAnnotation{
+		Feature: f.ID, File: "ui/toggle.go", Comment: "handle the nil case",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-002", StateDone)
+
+	hints := strings.Join(head.opts().SystemHints, "\n")
+	if strings.Contains(hints, "resolve_annotation") {
+		t.Errorf("implementer (no client tools) told to call resolve_annotation:\n%s", hints)
+	}
+	if strings.Contains(hints, "[1] ui/toggle.go") {
+		t.Errorf("implementer (no client tools) handed [id] prefixes:\n%s", hints)
+	}
+	if !strings.Contains(hints, "handle the nil case") {
+		t.Errorf("implementer hints lost the diff comment:\n%s", hints)
+	}
+}
+
+// TestStageReceiptCountsDistinctModels pins the spend receipt to the
+// distinct-model count, not the stage_spend row count. A backend side-
+// model call is booked to the helper role on the same model as the
+// working role, so two rows carry one model; the receipt must not read
+// "sonnet +1 more".
+func TestStageReceiptCountsDistinctModels(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 0.10, Model: "sonnet"}},
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 0.05, Model: "sonnet", Helper: true}},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+	// the spend receipt is appended just after the done transition; poll
+	// for it so the assertion below reads it once it has landed.
+	deadline := time.After(3 * time.Second)
+	for {
+		if joined := strings.Join(e.Get("FD-001").Snapshot().Activity, "\n"); strings.Contains(joined, "implement ·") {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("spend receipt never landed")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	joined := strings.Join(e.Get("FD-001").Snapshot().Activity, "\n")
+	if strings.Contains(joined, "+1 more") {
+		t.Errorf("receipt reported one model as two:\n%s", joined)
+	}
+	if !strings.Contains(joined, "implement ·") {
+		t.Errorf("receipt missing:\n%s", joined)
 	}
 }
