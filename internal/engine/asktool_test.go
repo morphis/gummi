@@ -1098,3 +1098,59 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 		t.Errorf("canceled dispatch left %d resolver entries", got)
 	}
 }
+
+// TestAnswerAbandonedResolverMustNotReturnNilSilently locks the Answer
+// contract for an MCP-bridged ask whose resolver waiter is gone: the
+// answer must either reach the agent (a turn is issued) or come back as a
+// non-nil error with the pending question restored — never a nil success
+// with the answer consumed into a buffer nobody reads. It exercises the
+// real production void — a waiter that was marked live and then gave up
+// (its backend went away) while its resolver is still registered with an
+// empty buffer — through the same liveness machinery DispatchClientTool
+// uses, plus the defensive buffer-full arm.
+func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StageBrainstorm)
+
+	run := func(t *testing.T, abandon func(s *Session)) {
+		e := newEngine(t, agent.NewFake("ack"))
+		s, err := e.Attach(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.setPendingAsk(&Ask{
+			CallID:   "mcp-1",
+			Question: "Persist where?",
+			Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
+		})
+		s.registerResolver("mcp-1")
+		abandon(s)
+		if err := e.Answer(ctx, f.ID, "per-device"); err == nil {
+			t.Fatal("Answer returned nil with no live waiter; want a non-nil error")
+		}
+		if s.Snapshot().PendingAsk == nil {
+			t.Error("pending ask not restored after a failed delivery")
+		}
+	}
+
+	t.Run("buffered-into-the-void", func(t *testing.T) {
+		// the exact reported shape: the waiter was marked live by the MCP
+		// dispatch (registerResolver + markResolverWaiting, the path
+		// DispatchClientTool uses), then its select gave up — ctx.Done,
+		// backend gone — which clears the liveness flag while leaving the
+		// resolver registered with an empty buffer. Answer must not drop
+		// the answer into that unread buffer and claim success.
+		run(t, func(s *Session) {
+			s.markResolverWaiting("mcp-1")
+			s.clearResolverWaiting("mcp-1")
+		})
+	})
+
+	t.Run("default-arm-silent-drop", func(t *testing.T) {
+		// a live waiter whose buffer is already full forces the drop arm
+		run(t, func(s *Session) {
+			s.markResolverWaiting("mcp-1")
+			s.resolvers["mcp-1"] <- "stale" // fill the capacity-1 buffer
+		})
+	})
+}

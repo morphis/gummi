@@ -205,6 +205,17 @@ type Session struct {
 	// way a native one does. Each entry is a buffered channel of capacity
 	// 1 that DispatchClientTool selects on.
 	resolvers map[string]chan string
+	// resolverWait mirrors resolvers, recording which call's waiter has
+	// entered its receive select (DispatchClientTool marks it live just
+	// before blocking) and, crucially, which waiter has since given up
+	// (the ctx.Done branch of that same select clears it without removing
+	// the resolver). Answer consults it to tell a bridge call that is
+	// still parked and will pick the answer up from one whose backend is
+	// gone: a buffered channel alone cannot distinguish "delivered to a
+	// live waiter" from "delivered into a buffer nobody reads", so the
+	// flag has to change on the read side, not just when the resolver is
+	// consumed.
+	resolverWait map[string]bool
 
 	// Outstanding estimated spend per model, awaiting a settle event
 	// that reconciles it to the provider-metered figure: pendingTokenEst
@@ -671,8 +682,41 @@ func (s *Session) takeResolver(callID string) (chan string, bool) {
 	ch, ok := s.resolvers[callID]
 	if ok {
 		delete(s.resolvers, callID)
+		delete(s.resolverWait, callID)
 	}
 	return ch, ok
+}
+
+// markResolverWaiting records that DispatchClientTool's receive select is
+// live on callID's waiter. Answer uses it to tell a bridge call that is
+// still blocked (and will pick the answer up) from one whose backend is
+// gone: a buffered channel alone cannot falsify delivery.
+func (s *Session) markResolverWaiting(callID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resolverWait == nil {
+		s.resolverWait = map[string]bool{}
+	}
+	s.resolverWait[callID] = true
+}
+
+// clearResolverWaiting records that callID's waiter has given up its
+// receive select without being answered (DispatchClientTool's ctx.Done
+// branch — the backend went away). It leaves the resolver registered so
+// Answer's takeResolver still finds it; the cleared flag is what tells
+// Answer the waiter is gone and the answer must not be dropped into a
+// buffer nobody will read.
+func (s *Session) clearResolverWaiting(callID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.resolverWait, callID)
+}
+
+// resolverWaiting reports whether callID's waiter is actively receiving.
+func (s *Session) resolverWaiting(callID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resolverWait[callID]
 }
 
 // resolverCount reports how many MCP call-waiters are still registered

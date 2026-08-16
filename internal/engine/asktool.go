@@ -386,13 +386,23 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 func (e *Engine) DispatchClientTool(ctx context.Context, s *Session, name string, args json.RawMessage) (string, error) {
 	callID := fmt.Sprintf("mcp-%d", e.mcpSeq.Add(1))
 	ch := s.registerResolver(callID)
+	// mark the waiter live before handling so Answer can distinguish a
+	// still-blocked bridge call from a stale one whose backend is gone
+	// (see Answer; a buffered channel cannot falsify delivery).
+	s.markResolverWaiting(callID)
 	e.handleClientTool(s, &agent.ToolCall{ID: callID, Name: name, Args: args})
 	select {
 	case result := <-ch:
 		return result, nil
 	case <-ctx.Done():
-		// the caller went away: drop the waiter so a late resolve is a
-		// no-op (the backend, not a ToolResolver, is silent on it).
+		// the caller went away: mark the waiter as no longer receiving
+		// (but still registered) so Answer can see it gave up and will
+		// not drop the answer into a buffer nobody reads, then drop the
+		// waiter so a late resolve is a no-op (the backend, not a
+		// ToolResolver, is silent on it). The cleared liveness flag is
+		// what tells Answer the difference between "still parked in the
+		// select" and "gone".
+		s.clearResolverWaiting(callID)
 		s.takeResolver(callID)
 		return "", ctx.Err()
 	}
@@ -739,12 +749,28 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 	// socket — resolves via its registered waiter channel first, so the
 	// bridge's blocked call resumes exactly like a native one.
 	if ask.CallID != "" {
+		// Only treat the bridge's blocked call as resolved when it is
+		// actually live. A buffered send alone proves nothing: the backend
+		// behind the call may be gone, leaving the answer in a buffer
+		// nobody reads. In that case restore the question and fail loudly
+		// instead of claiming a success that never lands. The liveness is
+		// read before takeResolver: DispatchClientTool marks the waiter
+		// live on entry and clears it again in its ctx.Done branch, so a
+		// waiter that has given up reads as not-waiting here while its
+		// resolver is still registered.
+		waiting := s.resolverWaiting(ask.CallID)
 		if ch, ok := s.takeResolver(ask.CallID); ok {
+			if !waiting {
+				s.trySetPendingAsk(ask)
+				return fmt.Errorf("answer for %s not delivered: the agent is no longer waiting on the question", ask.CallID)
+			}
 			select {
 			case ch <- answer:
-			default: // the waiter already gave up (ctx cancel): drop it
+				return nil
+			default: // live waiter but the buffer is unexpectedly full
+				s.trySetPendingAsk(ask)
+				return fmt.Errorf("answer for %s not delivered: the agent's blocked call could not accept it", ask.CallID)
 			}
-			return nil
 		}
 		a := s.agent()
 		if r, ok := a.(agent.ToolResolver); ok {
