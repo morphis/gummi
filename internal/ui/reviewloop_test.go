@@ -773,3 +773,123 @@ func TestRunStageResumesFinishedPlanAsCritique(t *testing.T) {
 		t.Error("resumed session is not a critique pass")
 	}
 }
+
+// failReviewStore fails reads, writes, or both — the fail-closed proof for
+// the TUI's review-rounds persistence seam (mirrors failPlanStore).
+type failReviewStore struct {
+	failLoad  bool
+	failWrite bool
+}
+
+func (f *failReviewStore) ReviewRounds(context.Context, domain.FeatureID) (int, error) {
+	if f.failLoad {
+		return 0, errors.New("read failed")
+	}
+	return 0, nil
+}
+
+func (f *failReviewStore) IncrementReviewRounds(context.Context, domain.FeatureID) error {
+	if f.failWrite {
+		return errors.New("bump failed")
+	}
+	return nil
+}
+
+func (f *failReviewStore) ClearReviewRounds(context.Context, domain.FeatureID) error {
+	if f.failWrite {
+		return errors.New("clear failed")
+	}
+	return nil
+}
+
+// A review resumed (or relaunched) through the TUI hydrates its round
+// counter from the store — a prior, possibly headless session's count —
+// then bumps it: seed(1) + one changes verdict(1) = 2, instead of
+// restarting at a fresh zero budget.
+func TestReviewRoundsSeedsFromStoreOnReviewEntry(t *testing.T) {
+	ag := verdictAgent(func(opts agent.SessionOpts) string {
+		if isReview(opts) {
+			return "Found a bug.\nVERDICT: changes"
+		}
+		return "done"
+	})
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageReview)
+	// a prior session burned one round; the store is the shared record
+	if err := m.store.SetReviewRounds(context.Background(), "FD-001", 1); err != nil {
+		t.Fatal(err)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run review → seed(1)
+	settleChat(t, eng)
+	m = drainUntil(t, m, func(m *Shell) bool { return m.reviewRounds["FD-001"] == 2 })
+	if got := m.reviewRounds["FD-001"]; got != 2 {
+		t.Errorf("m.reviewRounds = %d, want 2 (seed 1 + bump 1)", got)
+	}
+	if got, err := m.store.ReviewRounds(context.Background(), "FD-001"); err != nil || got != 2 {
+		t.Errorf("store.ReviewRounds = %d, %v; want 2", got, err)
+	}
+}
+
+// Every completion path that resets the in-memory counter also write-
+// throughs the clear, and a failed clear never re-grants budget.
+func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
+	t.Run("pass clears", func(t *testing.T) {
+		ag := verdictAgent(func(opts agent.SessionOpts) string {
+			if isReview(opts) {
+				return "Clean.\nVERDICT: pass"
+			}
+			return "done"
+		})
+		m, _ := chatWorkspace(t, ag)
+		m = advanceTo(t, m, domain.StageReview)
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = drainEngineLoop(t, m)
+		if got := m.reviewRounds["FD-001"]; got != 0 {
+			t.Errorf("m.reviewRounds after pass = %d, want 0", got)
+		}
+		if got, err := m.store.ReviewRounds(context.Background(), "FD-001"); err != nil || got != 0 {
+			t.Errorf("store.ReviewRounds after pass = %d, %v; want 0", got, err)
+		}
+	})
+	t.Run("exhaustion clears", func(t *testing.T) {
+		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
+		m.reviewRounds["FD-001"] = 1
+		if err := m.store.SetReviewRounds(context.Background(), "FD-001", 1); err != nil {
+			t.Fatal(err)
+		}
+		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageReview, Committed: false}))
+		if got := m.reviewRounds["FD-001"]; got != 0 {
+			t.Errorf("m.reviewRounds after exhaustion = %d, want 0", got)
+		}
+		if got, err := m.store.ReviewRounds(context.Background(), "FD-001"); err != nil || got != 0 {
+			t.Errorf("store.ReviewRounds after exhaustion = %d, %v; want 0", got, err)
+		}
+	})
+	t.Run("exhaustion write-fail keeps count", func(t *testing.T) {
+		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
+		m.reviewRounds["FD-001"] = 1
+		m.reviewStore = &failReviewStore{failWrite: true}
+		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageReview, Committed: false}))
+		if got := m.reviewRounds["FD-001"]; got != 1 {
+			t.Errorf("m.reviewRounds after failed exhaustion clear = %d, want 1 (count not lost)", got)
+		}
+		if !m.notice.isErr {
+			t.Error("no error notice raised on a failed exhaustion clear")
+		}
+	})
+}
+
+// Store failures are never silently ignored: a failed seed read aborts
+// review dispatch.
+func TestReviewRoundsWriteThroughFailsClosed(t *testing.T) {
+	m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
+	m = advanceTo(t, m, domain.StageReview)
+	m.reviewStore = &failReviewStore{failLoad: true}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.notice.isErr {
+		t.Error("no error notice on a failing seed read")
+	}
+	if s := eng.Get("FD-001"); s != nil && (s.State() == engine.StateRunning || s.State() == engine.StateQueued) {
+		t.Error("review session started despite a failing seed read")
+	}
+}

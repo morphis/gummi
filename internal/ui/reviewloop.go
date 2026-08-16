@@ -9,6 +9,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/planround"
+	"github.com/morphis/gummi/internal/reviewround"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
 )
@@ -77,20 +78,35 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	}
 	switch sessionVerdict(s.Snapshot()) {
 	case verdictPass:
+		// clear the persisted count so the next review loop starts fresh.
+		if err := reviewround.Reset(context.Background(), m.reviewStore, id); err != nil {
+			return m.writeHalt(id, err)
+		}
 		m.reviewRounds[id] = 0
 		return m.autoStep(id, domain.StageVerify, "review passed → verify")
 	case verdictChanges:
 		if m.reviewRounds[id] >= maxReviewRounds {
+			if err := reviewround.Reset(context.Background(), m.reviewStore, id); err != nil {
+				return m.writeHalt(id, err)
+			}
 			m.reviewRounds[id] = 0
 			m.raiseEscalation(id, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
 			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
 			return nil
+		}
+		// persist the burned round before it lands in the fast path, so a
+		// mid-loop resume observes it.
+		if err := reviewround.Bump(context.Background(), m.reviewStore, id); err != nil {
+			return m.writeHalt(id, err)
 		}
 		m.reviewRounds[id]++
 		return m.autoStep(id, workflow.WorkStage(id.Kind()), "review requested changes → fixing (round "+itoa(m.reviewRounds[id])+")")
 	default:
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
+		if err := reviewround.Reset(context.Background(), m.reviewStore, id); err != nil {
+			return m.writeHalt(id, err)
+		}
 		m.reviewRounds[id] = 0
 		m.raiseEscalation(id, "review finished with no clear verdict — review manually")
 		return nil

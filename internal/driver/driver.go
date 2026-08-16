@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/planround"
+	"github.com/morphis/gummi/internal/reviewround"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
@@ -55,13 +56,14 @@ type Options struct {
 // synchronously between reads, the same contract the TUI's update loop
 // relies on.
 type Driver struct {
-	eng       *engine.Engine
-	store     *state.Store
-	planStore planround.Store // plan-round persistence seam (defaults to store)
-	ws        state.Workspace
-	out       *emitter
-	opts      Options
-	actor     string // transition actor recorded in history ("auto" | "caller")
+	eng         *engine.Engine
+	store       *state.Store
+	planStore   planround.Store   // plan-round persistence seam (defaults to store)
+	reviewStore reviewround.Store // review-round persistence seam (defaults to store)
+	ws          state.Workspace
+	out         *emitter
+	opts        Options
+	actor       string // transition actor recorded in history ("auto" | "caller")
 
 	// loop state for the single feature this process governs.
 	reviewRounds int          // automatic review→fix rounds burned in the current loop
@@ -81,12 +83,13 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 		opts.GateApproval = GateAuto
 	}
 	d := &Driver{
-		eng:       eng,
-		store:     store,
-		planStore: store,
-		ws:        ws,
-		out:       newEmitter(out, opts.Verbose),
-		opts:      opts,
+		eng:         eng,
+		store:       store,
+		planStore:   store,
+		reviewStore: store,
+		ws:          ws,
+		out:         newEmitter(out, opts.Verbose),
+		opts:        opts,
 	}
 	d.setGate(opts.GateApproval)
 	return d
@@ -412,8 +415,20 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	round := 0
 	switch f.Stage {
 	case domain.StageReview:
+		// seed the in-memory counter from the persisted value so a resume
+		// into the loop honors (and reports) the rounds already burned this
+		// cycle. A failed read aborts entry: the count is the budget.
+		if err := d.seedReviewRounds(ctx, f); err != nil {
+			return Outcome{}, err
+		}
 		round = d.reviewsRun
 	case domain.StageImplement, domain.StageFix:
+		// the work leg of the review loop can be the resume landing point,
+		// so seed it too — the review-round budget must survive the fresh
+		// process, not just a review-stage entry.
+		if err := d.seedReviewRounds(ctx, f); err != nil {
+			return Outcome{}, err
+		}
 		round = d.reviewRounds
 	case domain.StagePlan:
 		// seed the in-memory counter from the persisted value so a resume
@@ -501,6 +516,20 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	}
 }
 
+// seedReviewRounds hydrates the in-memory review→fix round counter from
+// the store on review-loop entry, so a resume honors the rounds already
+// burned instead of a fresh budget. A failed read returns the error and
+// leaves the fast-path field untouched; the caller aborts rather than
+// proceeding on a guessed-zero count.
+func (d *Driver) seedReviewRounds(ctx context.Context, f domain.Feature) error {
+	persisted, err := reviewround.Load(ctx, d.reviewStore, f.ID)
+	if err != nil {
+		return err
+	}
+	d.reviewRounds = persisted
+	return nil
+}
+
 // applyVerdict routes a finished autonomous stage per the loop rules
 // (mirrors internal/ui/reviewloop.go), returning a terminal Outcome or a
 // non-terminal one (the stage advanced in-floor; drive loops).
@@ -512,16 +541,33 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		d.emitResult(f, v)
 		switch v {
 		case verdict.Pass:
+			// clear the persisted count so the next review loop starts fresh.
+			if err := reviewround.Reset(ctx, d.reviewStore, f.ID); err != nil {
+				return Outcome{}, err
+			}
 			d.reviewRounds = 0
 			return d.stepTo(ctx, f.ID, domain.StageVerify)
 		case verdict.Changes:
 			if d.reviewRounds >= verdict.MaxReviewRounds {
+				// escalation hands the loop to a human; clear the cap so the
+				// next review cycle starts a fresh budget.
+				if err := reviewround.Reset(ctx, d.reviewStore, f.ID); err != nil {
+					return Outcome{}, err
+				}
 				d.reviewRounds = 0
 				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", verdict.MaxReviewRounds)), nil
+			}
+			// persist the burned round before it lands in the fast path, so a
+			// mid-loop resume observes it.
+			if err := reviewround.Bump(ctx, d.reviewStore, f.ID); err != nil {
+				return Outcome{}, err
 			}
 			d.reviewRounds++
 			return d.stepTo(ctx, f.ID, workflow.WorkStage(f.Kind))
 		default:
+			if err := reviewround.Reset(ctx, d.reviewStore, f.ID); err != nil {
+				return Outcome{}, err
+			}
 			d.reviewRounds = 0
 			return d.escalation(f, "review finished with no clear verdict"), nil
 		}

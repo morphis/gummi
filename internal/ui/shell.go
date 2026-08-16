@@ -15,6 +15,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/planround"
+	"github.com/morphis/gummi/internal/reviewround"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/layout"
@@ -80,6 +81,7 @@ type Shell struct {
 	reviewRounds map[domain.FeatureID]int  // automatic review→fix→review counter
 	planRounds   map[domain.FeatureID]int  // automatic plan→critique→replan counter
 	planStore    planround.Store           // persistence seam for planRounds (defaults to store)
+	reviewStore  reviewround.Store         // persistence seam for reviewRounds (defaults to store)
 	profileNames []string                  // profile names for the new-feature form
 	envelope     int                       // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier          // bell/desktop hook for needs-attention events
@@ -121,6 +123,7 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Manager, ws state.Worksp
 	// the plan-rounds persistence seam defaults to the real store; tests
 	// may swap in a failing store to prove the fail-closed path.
 	m.planStore = store
+	m.reviewStore = store
 }
 
 // AttachEngine wires the agent orchestrator, enabling interactive chat
@@ -268,8 +271,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		}
 	case engine.EventExhausted:
 		// budget exhausted mid-stage: raise a gate, don't auto-continue.
-		m.reviewRounds[ev.Feature] = 0
-		// clear the persisted plan-rounds count first, and only zero the
+		// Clear the persisted plan-rounds count first, and only zero the
 		// in-memory counter once the write succeeds — a failed write must
 		// not re-grant budget on resume (the next entry rehydrates the
 		// persisted, nonzero value).
@@ -278,6 +280,14 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
 			m.planRounds[ev.Feature] = 0
+		}
+		// same write-through for the review-loop counter: a failed write
+		// must not lose the burned rounds recorded in the store.
+		if err := reviewround.Reset(context.Background(), m.reviewStore, ev.Feature); err != nil {
+			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
+		} else {
+			m.reviewRounds[ev.Feature] = 0
 		}
 		if ev.Committed {
 			// wrap-up exhaustion: the stage's work is committed, so this
@@ -1077,6 +1087,20 @@ func (m *Shell) seedPlanRounds(f domain.Feature) error {
 	return nil
 }
 
+// seedReviewRounds hydrates the in-memory review→fix round counter from
+// the store on review-loop entry, so a resumed (or relaunched) loop
+// resumes with the rounds already burned instead of a fresh review budget.
+// A failed read returns the error and leaves the fast-path map untouched;
+// the caller aborts dispatch rather than proceeding on a guessed-zero count.
+func (m *Shell) seedReviewRounds(f domain.Feature) error {
+	n, err := reviewround.Load(context.Background(), m.reviewStore, f.ID)
+	if err != nil {
+		return err
+	}
+	m.reviewRounds[f.ID] = n
+	return nil
+}
+
 // runStage enqueues an autonomous run for a feature's stage; the engine
 // schedules and kicks it off. Activity streams into the dashboard;
 // `p` pauses it. On an already-running session, enter attaches the chat
@@ -1088,6 +1112,15 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 	// failed read aborts dispatch rather than guessing at a fresh budget.
 	if f.Stage == domain.StagePlan {
 		if err := m.seedPlanRounds(f); err != nil {
+			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
+			return nil
+		}
+	}
+	// the review loop spans review → work(fix) → review, and any of those
+	// can be the resume landing point, so seed the counter on each of them.
+	if f.Stage == domain.StageReview || f.Stage == domain.StageImplement || f.Stage == domain.StageFix {
+		if err := m.seedReviewRounds(f); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
 			return nil

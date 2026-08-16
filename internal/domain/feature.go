@@ -172,6 +172,12 @@ type Feature struct {
 	// budget, and resets it to 0 when a plan cycle completes. Zero until a
 	// plan cycle has started.
 	PlanRounds int
+	// ReviewRounds is the live per-cycle review→fix round count. It is the
+	// review loop's analogue of PlanRounds: the engine reads it back on
+	// resume so a fresh process honors the rounds already burned instead of
+	// re-granting the whole review budget, and resets it to 0 when the
+	// review loop completes. Zero until a review loop has started.
+	ReviewRounds int
 }
 
 // Kind returns the feature's kind, treating the empty default as a
