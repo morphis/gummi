@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,6 +141,57 @@ done:
 	snap := e.Get("FD-001").Snapshot()
 	if len(snap.Activity) != 3 {
 		t.Errorf("nudge activity lines = %d, want 3", len(snap.Activity))
+	}
+}
+
+// TestBudgetNudgeFoldedIntoSentTurn locks in the layer-2 delivery half:
+// a threshold crossed mid-turn must reach the model on the next turn the
+// orchestrator sends (prepended to it), not just be recorded for the UI.
+// The nudge queued at the 50% crossing must ride the follow-up Send, and
+// it leads the turn rather than being buried.
+func TestBudgetNudgeFoldedIntoSentTurn(t *testing.T) {
+	var mu sync.Mutex
+	var sent []string
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		sent = append(sent, msg)
+		mu.Unlock()
+		// the kickoff turn crosses 60% (a 10-credit budget) and keeps
+		// working — no idle — so the threshold fires mid-session and the
+		// run stays live for a follow-up orchestrator turn.
+		if !strings.Contains(msg, "[budget]") {
+			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 6}}}
+		}
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 10})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventBudget) // the 50% threshold fires mid-session
+
+	// a follow-up turn is the next orchestrator-sent turn: the queued
+	// nudge must ride on it rather than being dropped.
+	if err := e.Send(context.Background(), "FD-001", "continue"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) < 2 {
+		t.Fatalf("agent received %d turns, want at least 2: %v", len(sent), sent)
+	}
+	if !strings.Contains(sent[1], "[budget] 50% consumed") {
+		t.Errorf("next turn did not carry the budget nudge:\n%q", sent[1])
+	}
+	if strings.HasPrefix(sent[1], "[budget]") != true {
+		t.Errorf("nudge should lead the turn, got:\n%q", sent[1])
 	}
 }
 

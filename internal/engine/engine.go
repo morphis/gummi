@@ -833,6 +833,12 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	if a == nil {
 		return fmt.Errorf("%s is queued, not yet running", id)
 	}
+	// deliver any queued budget nudge before the orchestrator's own text
+	// (DESIGN §5.1 layer 2: the mid-session threshold is folded into the
+	// next turn rather than injected mid-flight).
+	if n := s.takePendingNudge(); n != "" {
+		msg = n + "\n\n" + msg
+	}
 	s.appendUser(msg)
 	s.setBusy(true)
 	e.persist(s)
@@ -1265,10 +1271,12 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 					credits, estimated, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
 			}
 		}
-		// budget awareness: on crossing a threshold, record a nudge and
-		// signal the UI (DESIGN §5.1 layer 2).
+		// budget awareness: on crossing a threshold, record a nudge, queue
+		// it for the next turn sent to the model, and signal the UI
+		// (DESIGN §5.1 layer 2).
 		if pct, spent := s.crossedThreshold(); pct > 0 {
 			s.appendActivity(nudge(pct, spent, s.Budget()))
+			s.queueNudge(nudge(pct, spent, s.Budget()))
 			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventBudget, Threshold: pct})
 		}
 		// gummi-side enforcement: interrupt and checkpoint once spend

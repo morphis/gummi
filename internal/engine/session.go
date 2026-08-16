@@ -182,6 +182,7 @@ type Session struct {
 	budget         float64      // stage credit budget (0 = none)
 	creditRate     float64      // adapter's token→credit rate (0 = engine default)
 	threshold      int          // highest budget threshold crossed (%)
+	pendingNudge   string       // budget nudge awaiting the next sent turn
 	exhausted      bool         // hit the credit cap
 	tripped        bool         // main-checkout tripwire fired; the run is dead
 	clientTools    bool         // resolved backend's ClientTools capability (spawn-time cache)
@@ -853,6 +854,30 @@ func (s *Session) setBudget(b float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.budget = b
+}
+
+// queueNudge stores a budget nudge to be prepended to the next turn the
+// engine sends the agent (DESIGN §5.1 layer 2). It is appended to any
+// already-pending nudge so multiple threshold crossings in one turn are
+// all delivered in order.
+func (s *Session) queueNudge(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingNudge != "" {
+		s.pendingNudge += "\n"
+	}
+	s.pendingNudge += text
+}
+
+// takePendingNudge returns and clears the queued budget nudge text ("" if
+// none). Called at the top of a turn-send path so the model sees the
+// remaining-budget warning before the orchestrator's own message.
+func (s *Session) takePendingNudge() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	text := s.pendingNudge
+	s.pendingNudge = ""
+	return text
 }
 
 func (s *Session) setBusy(b bool) {
