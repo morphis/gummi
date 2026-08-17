@@ -14,6 +14,42 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
+func TestValidateCommitMessage(t *testing.T) {
+	valid := []string{
+		"feat(ui): sort the board",
+		"fix: handle empty input",
+		"docs(core): note the exit contract\n\nA body the caller owns.",
+		"refactor(engine): rename Advance\n\n- long body line is the caller's formatting, never rewritten",
+	}
+	for _, msg := range valid {
+		if err := ValidateCommitMessage(msg); err != nil {
+			t.Errorf("ValidateCommitMessage(%q) = %v, want nil", msg, err)
+		}
+	}
+	invalid := []struct {
+		msg  string
+		want string // substring of the failure reason
+	}{
+		{"", "empty"},
+		{"   \n\t", "empty"},
+		{"just a summary", "Conventional Commits"},
+		{"feat: ", "Conventional Commits"},
+		{"frobnicate(x): not a real type", "not a conventional commits type"},
+		{"feat(x): sum\n\nCo-authored-by: bot <b@e>", "attribution"},
+		{"feat(x): sum\ndiff --git a/b b/c\n@@ -1 +1 @@", "diff dump"},
+	}
+	for _, tc := range invalid {
+		err := ValidateCommitMessage(tc.msg)
+		if err == nil {
+			t.Errorf("ValidateCommitMessage(%q) accepted, want rejection", tc.msg)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("ValidateCommitMessage(%q) = %q, want reason containing %q", tc.msg, err.Error(), tc.want)
+		}
+	}
+}
+
 func TestParseCommitMsg(t *testing.T) {
 	fenced := "```gummi-commit\nfeat(ui): sort the board\n\n- sort by severity\n```"
 	cases := []struct {

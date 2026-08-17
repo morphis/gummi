@@ -18,6 +18,7 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // GateApproval selects who approves a design gate. The quality floor
@@ -279,6 +280,120 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 	default: // ReverifyUnavailable
 		return d.fail(ctx, string(id), errors.New(res.Reason))
 	}
+}
+
+// Merge lands a verified feature's branch on main as one squash commit
+// carrying the caller-supplied message, then moves the card to Done — the
+// headless counterpart of the TUI's ctrl+s at the verify→done gate. The
+// caller supplying the message IS the landing review: nothing is drafted or
+// auto-generated, and a missing or invalid message fails loudly. It enforces
+// the same floor Advance does (a verified branch with no open blockers) plus
+// message validation, and performs zero git mutations on any precondition or
+// validation failure. On success it emits a `merged` event carrying the
+// landed commit's sha and returns StatusDone.
+func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
+	f, err := d.store.GetFeature(ctx, id)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	wt := d.eng.Worktrees()
+
+	// the verified-branch precondition, stricter than the TUI's any-stage m
+	// key: this command exists to land a verified branch.
+	if f.Stage == domain.StageDone {
+		return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
+	}
+	if f.Stage != domain.StageVerify || f.VerifiedAt.IsZero() {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
+	}
+	// the same open-thread / open-diff floor Advance applies before the
+	// verify→done gate; unresolved ones hold the merge.
+	if specOpen, diffOpen, err := d.eng.GateBlockers(ctx, id); err != nil {
+		return d.fail(ctx, string(id), err)
+	} else if specOpen > 0 {
+		return d.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved spec threads blocking the merge", id, specOpen))
+	} else if diffOpen > 0 {
+		return d.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved diff annotations blocking the merge", id, diffOpen))
+	}
+	// SquashMerge re-enforces these, but checking first fails with a clear
+	// reason before any git mutation.
+	if dirty, err := wt.MainTrackedDirty(ctx); err != nil {
+		return d.fail(ctx, string(id), err)
+	} else if dirty {
+		return d.fail(ctx, string(id), errors.New("main checkout has uncommitted changes — commit or stash them before merging"))
+	}
+	if landed, err := wt.Landed(ctx, &f); err != nil {
+		return d.fail(ctx, string(id), err)
+	} else if landed {
+		return d.fail(ctx, string(id), fmt.Errorf("%s already landed on main — run `gummi clean %s`", id, id))
+	}
+	if ahead, err := wt.BranchAhead(ctx, &f); err != nil {
+		return d.fail(ctx, string(id), err)
+	} else if !ahead {
+		return d.fail(ctx, string(id), fmt.Errorf("%s branch has no commits to land", id))
+	}
+
+	// the headless sharp edge: the message must be valid before any git
+	// mutation, or the command refuses loudly rather than guessing.
+	if err := engine.ValidateCommitMessage(message); err != nil {
+		return d.fail(ctx, string(id), fmt.Errorf("invalid commit message: %w", err))
+	}
+
+	// commit any final uncommitted worktree work (matching the TUI's
+	// prepareMerge) so only committed work merges.
+	if _, err := wt.CommitAll(ctx, &f, string(id)+": final checkpoint"); err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+
+	sha, err := wt.SquashMerge(ctx, &f, message)
+	if err != nil {
+		var ce *worktree.MergeConflictError
+		if errors.As(err, &ce) {
+			return d.fail(ctx, string(id),
+				fmt.Errorf("%s: %s — rebase the branch onto main and retry the merge", id, ce.Error()))
+		}
+		return d.fail(ctx, string(id), err)
+	}
+	if _, err := d.store.Transition(ctx, id, domain.StageDone, d.actor); err != nil {
+		return d.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
+	}
+	d.out.emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha})
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
+}
+
+// Clean removes a landed card's worktree and branch — the headless
+// counterpart of the TUI's c key. It keeps the card record (it stays as a
+// done entry) and never removes anything that has not actually landed or
+// that carries tracked-dirty rework. On success it emits a `cleaned` event
+// and returns StatusDone.
+func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
+	f, err := d.store.GetFeature(ctx, id)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	wt := d.eng.Worktrees()
+
+	landed, err := wt.Landed(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	if !landed {
+		return d.fail(ctx, string(id), fmt.Errorf("%s has not landed on main — nothing to clean", id))
+	}
+	if dirty, err := wt.TrackedDirty(ctx, &f); err != nil {
+		return d.fail(ctx, string(id), err)
+	} else if dirty {
+		return d.fail(ctx, string(id), fmt.Errorf("%s worktree has tracked-dirty rework; resolve or commit it before cleaning", id))
+	}
+	if err := wt.Remove(ctx, &f, true); err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName()})
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
 // drive is the checkpoint loop: it advances the feature stage by stage

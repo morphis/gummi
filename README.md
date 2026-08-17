@@ -184,8 +184,9 @@ the same engine and the same quality floor with no human at the keyboard.
 Each `gummi run` ships **one PR-sized feature to a verified branch**, streams
 milestone + decision NDJSON on stdout, and exits with a **typed status** — so
 a calling agent (or a script) can drive it and branch on the result. It
-changes *who approves a gate*, not *whether* review and verify run; it never
-merges.
+changes *who approves a gate*, not *whether* review and verify run.
+`run`/`resume` never merge — they stop at a verified branch; landing is the
+separate `gummi merge` verb below.
 
 ```sh
 gummi run --envelope 500 "Add a --format=json flag to the export command"
@@ -204,19 +205,52 @@ auto-crosses design gates; `--full` adds brainstorm + plan, and
 | `gummi status <id\|ref> [--json]` | read-only: stage, blockers, spend, branch state |
 | `gummi spec <id\|ref>` | read-only: the current spec/report markdown |
 | `gummi diff <id\|ref>` | read-only: the worktree diff |
+| `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit (message required) |
+| `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
 | `gummi doctor [--json]` | readiness: repo, backend, auth, profile, envelope, lock |
 | `gummi skill show\|install\|list` | generate and install the calling-agent skill |
 
 `status`/`spec`/`diff` take no lock, so you can inspect a feature while a run
 is live. A run holds an exclusive `.gummi` lock, so a headless run and the TUI
-never touch the same workspace at once.
+never touch the same workspace at once. So do `gummi merge` and `gummi clean`,
+which mutate the workspace and main.
+
+### Landing and cleanup without the TUI
+
+A run stops at a **verified branch** — it deliberately never merges, because
+the squash-merge landing commit is a review decision. The headless way to make
+that decision is `gummi merge`, which takes the landing message explicitly and
+lands it:
+
+```sh
+gummi merge FD-042 -m "feat(export): add a --format=json flag"
+gummi merge FD-042 -m - <<'EOF'     # or read the message from stdin
+feat(export): add a --format=json flag
+
+The flag writes NDJSON to stdout instead of the table layout.
+EOF
+```
+
+`gummi merge` requires the card to be at a **verified branch** (the same
+`verified:true` state a run stops at), takes no other input, and is stricter
+than the TUI's dialog: the message must be a Conventional Commits
+`type(scope): summary` with no diff dump or agent attribution, or the command
+refuses with a non-zero exit before touching git. On success it emits a
+`merged` NDJSON event carrying the landed commit's sha and moves the card to
+`done`.
+
+`gummi clean <id>` is the headless counterpart of the board's `c` key: it
+removes a landed card's worktree and branch, keeping the card as a done entry.
+It refuses anything that has not actually landed, or that carries tracked-dirty
+rework. Both verbs stream their NDJSON and exit with the same typed statuses as
+a run (`done` = 0, `error` = 1).
 
 `status --json` carries two distinct terminal signals. `verified:true` means
 the verify gate passed and the branch is **ready to land** — the state a
 headless run stops at, and the flag a CI caller polls for. `done:true` means
-the branch was actually **squash-merged** into main (only `m` in the TUI, or a
-manual land, sets it) — so after a headless run, expect `verified:true` with
-`done:false` until you merge.
+the branch was actually **squash-merged** into main (the TUI's `m`, `gummi
+merge`, or a manual land sets it) — so after a headless run, expect
+`verified:true` with `done:false` until you merge.
 
 Every `run`/`resume` ends on a typed exit the caller branches on:
 

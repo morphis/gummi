@@ -74,7 +74,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		} else if landed {
 			return noticeMsg{text: string(f.ID) + " already landed on main — press c to clean up", isErr: true}
 		}
-		if err := m.wt.SquashMerge(ctx, &f, message); err != nil {
+		if _, err := m.wt.SquashMerge(ctx, &f, message); err != nil {
 			var ce *worktree.MergeConflictError
 			if errors.As(err, &ce) {
 				// ce carries git-derived file names; sanitize like every

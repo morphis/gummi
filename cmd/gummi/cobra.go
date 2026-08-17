@@ -39,6 +39,24 @@ var verifyCmd = &cobra.Command{
 	},
 }
 
+// mergeCmd implements `gummi merge <id|ref> -m <message|->`.
+var mergeCmd = &cobra.Command{
+	Use:   "merge <id|ref> -m <message|->",
+	Short: "Headlessly land a verified branch as one squash commit",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMerge(buildFlagArgs(cmd, args))
+	},
+}
+
+// cleanCmd implements `gummi clean <id|ref>`.
+var cleanCmd = &cobra.Command{
+	Use:   "clean <id|ref>",
+	Short: "Remove a landed card's worktree and branch",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runClean(buildFlagArgs(cmd, args))
+	},
+}
+
 // statusCmd implements `gummi status <id|ref> [--json]`.
 var statusCmd = &cobra.Command{
 	Use:   "status <id|ref> [--json]",
@@ -139,6 +157,7 @@ var skillListCmd = &cobra.Command{
 func init() {
 	bindRunFlags(runCmd)
 	bindResumeFlags(resumeCmd)
+	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")
 	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
 	doctorCmd.Flags().Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
 

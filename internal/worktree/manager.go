@@ -692,32 +692,33 @@ func (e *MergeConflictError) Error() string {
 }
 
 // SquashMerge lands the feature branch on the main checkout as a single
-// squash commit carrying message. It refuses when main has tracked
-// changes (they would be swept into the commit), when the branch has no
-// commits of its own, or when its content is already in main. A
-// conflicted merge is undone with reset --merge — a squash merge writes
-// no MERGE_HEAD, so merge --abort cannot — and reported as a
-// *MergeConflictError; main is left clean on every path short of a
-// failed reset.
-func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message string) error {
+// squash commit carrying message, returning the new commit's sha. It
+// refuses when main has tracked changes (they would be swept into the
+// commit), when the branch has no commits of its own, or when its content
+// is already in main. A conflicted merge is undone with reset --merge — a
+// squash merge writes no MERGE_HEAD, so merge --abort cannot — and
+// reported as a *MergeConflictError; main is left clean on every path
+// short of a failed reset. The returned sha is non-empty exactly when a
+// squash commit was created; every failure path returns ("", err).
+func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message string) (string, error) {
 	if strings.TrimSpace(message) == "" {
-		return fmt.Errorf("refusing squash merge of %s: empty commit message", f.ID)
+		return "", fmt.Errorf("refusing squash merge of %s: empty commit message", f.ID)
 	}
 	m.mainMu.Lock()
 	defer m.mainMu.Unlock()
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if ok, err := gitOK(ctx, m.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
-		return err
+		return "", err
 	} else if !ok {
-		return fmt.Errorf("feature %s has no branch %s", f.ID, branch)
+		return "", fmt.Errorf("feature %s has no branch %s", f.ID, branch)
 	}
 	if dirty, err := m.MainTrackedDirty(ctx); err != nil {
-		return err
+		return "", err
 	} else if dirty {
-		return fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging")
+		return "", fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging")
 	}
 	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
 	if err != nil {
@@ -727,43 +728,45 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 		// real rewind surfaces as the typed ForkDriftError; anything else
 		// propagates the merge-base failure.
 		if derr := m.AssertNoForkDrift(ctx, f); derr != nil {
-			return derr
+			return "", derr
 		}
-		return err
+		return "", err
 	}
 	if err := m.assertNoForkDriftAgainstBase(ctx, f, base); err != nil {
-		return err
+		return "", err
 	}
 	if n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch); err != nil {
-		return err
+		return "", err
 	} else if n == "0" {
-		return fmt.Errorf("branch %s has no commits to merge", branch)
+		return "", fmt.Errorf("branch %s has no commits to merge", branch)
 	}
 	if _, err := runGit(ctx, m.root, "merge", "--squash", branch); err != nil {
 		// capture what conflicted before the reset wipes the state
 		conflicts := m.conflictedFiles(ctx, m.root)
 		if _, resetErr := runGit(ctx, m.root, "reset", "--merge"); resetErr != nil {
-			return fmt.Errorf("squash merge failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
+			return "", fmt.Errorf("squash merge failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
 		}
 		if len(conflicts) > 0 {
-			return &MergeConflictError{Files: conflicts}
+			return "", &MergeConflictError{Files: conflicts}
 		}
-		return err
+		return "", err
 	}
 	// "Already up to date" stages nothing: the branch's content is in
 	// main already, i.e. it landed some other way.
 	if clean, err := gitOK(ctx, m.root, "diff", "--cached", "--quiet"); err != nil {
-		return err
+		return "", err
 	} else if clean {
-		return fmt.Errorf("nothing to merge — %s already landed on main", branch)
+		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
 	}
 	if _, err := runGit(ctx, m.root, "commit", "-m", message); err != nil {
 		if _, resetErr := runGit(ctx, m.root, "reset", "--merge"); resetErr != nil {
-			return fmt.Errorf("squash commit failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
+			return "", fmt.Errorf("squash commit failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
 		}
-		return err
+		return "", err
 	}
-	return nil
+	// the mainMu lock serializes main mutations, so HEAD is still the
+	// squash commit we just created — its sha is the landed commit.
+	return runGit(ctx, m.root, "rev-parse", "HEAD")
 }
 
 // ForkDriftRemedy is the single recovery phrase quoted verbatim by both

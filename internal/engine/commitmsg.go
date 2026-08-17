@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -120,6 +121,55 @@ func isDiffDump(s string) bool {
 		}
 	}
 	return false
+}
+
+// conventionalCommitTypes is the standard Conventional Commits type set a
+// headless landing-message subject must begin with. It is the closed set
+// recognized by the spec's `type(scope): summary` check — a subject that
+// leads with anything else is refused before it can reach main's history.
+var conventionalCommitTypes = map[string]struct{}{
+	"build": {}, "chore": {}, "ci": {}, "docs": {}, "feat": {}, "fix": {},
+	"perf": {}, "refactor": {}, "revert": {}, "style": {}, "test": {},
+}
+
+// ccSubjectRe matches a Conventional Commits `type(scope): summary` subject
+// line: a known type (checked separately), an optional parenthesized scope,
+// a colon+space separator, and a non-empty summary.
+var ccSubjectRe = regexp.MustCompile(`^[a-z]+(\([a-z0-9-]+\))?: .+$`)
+
+// ValidateCommitMessage rejects a commit message that must not reach main's
+// history through the headless landing path. It is deliberately stricter
+// than the TUI's commit-message dialog: headless has no human at the form to
+// catch a malformed message before it lands, so the machine enforces the
+// shape. It rejects an empty message, a non-Conventional-Commits subject
+// (unknown type, missing scope/summary form), a raw diff dump, and any agent
+// attribution — each with a distinct reason. It never rewrites the message:
+// the caller owns body formatting (the scribe's 72-column wrap is not run
+// here), so a message that passes is landed byte-for-byte.
+func ValidateCommitMessage(msg string) error {
+	trimmed := strings.TrimSpace(msg)
+	if trimmed == "" {
+		return errors.New("commit message is empty")
+	}
+	first := trimmed
+	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
+		first = trimmed[:i]
+	}
+	if !ccSubjectRe.MatchString(first) {
+		return fmt.Errorf("commit message subject %q is not Conventional Commits type(scope): summary", first)
+	}
+	typ, _, _ := strings.Cut(first, "(")
+	typ, _, _ = strings.Cut(typ, ":")
+	if _, ok := conventionalCommitTypes[strings.TrimSpace(typ)]; !ok {
+		return fmt.Errorf("commit message type %q is not a conventional commits type", typ)
+	}
+	if isDiffDump(msg) {
+		return errors.New("commit message looks like a raw diff dump")
+	}
+	if match := worktree.MatchesAttribution(msg); match != "" {
+		return fmt.Errorf("commit message carries agent attribution (%q)", match)
+	}
+	return nil
 }
 
 // wrapBodyLines hard-wraps any body line longer than width at the last

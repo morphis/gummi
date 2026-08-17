@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestSquashMerge(t *testing.T) {
 	m, f, _ := committedFeature(t, root)
 
 	msg := "FD-009: land me\n\nAdds sq.txt with the feature work."
-	if err := m.SquashMerge(ctx, f, msg); err != nil {
+	if _, err := m.SquashMerge(ctx, f, msg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "sq.txt")); err != nil {
@@ -47,8 +48,42 @@ func TestSquashMerge(t *testing.T) {
 		t.Errorf("main checkout not clean after merge:\n%s", out)
 	}
 	// a second merge of the same branch has nothing left to add
-	if err := m.SquashMerge(ctx, f, msg); err == nil {
+	if _, err := m.SquashMerge(ctx, f, msg); err == nil {
 		t.Error("re-merging an already-landed branch accepted")
+	}
+}
+
+// TestSquashMergeReturnsSha proves the sha plumbing behind the merged event:
+// a successful squash merge returns the newly created commit's full 40-hex
+// sha, and the already-landed / empty-message failure paths return "" (no
+// commit was created).
+func TestSquashMergeReturnsSha(t *testing.T) {
+	root := newRepo(t)
+	m, f, _ := committedFeature(t, root)
+
+	sha, err := m.SquashMerge(ctx, f, "FD-009: land me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(sha) {
+		t.Errorf("sha = %q, want a 40-hex sha", sha)
+	}
+	if got := mustGit(t, root, "rev-parse", "HEAD"); got != sha {
+		t.Errorf("returned sha %q != HEAD %q", sha, got)
+	}
+
+	// already-landed: the branch's content is in main, nothing to merge
+	if sha, err := m.SquashMerge(ctx, f, "FD-009: again"); err == nil {
+		t.Error("re-merging an already-landed branch accepted")
+	} else if sha != "" {
+		t.Errorf("already-landed sha = %q, want empty", sha)
+	}
+
+	// empty message: refused before any commit
+	if sha, err := m.SquashMerge(ctx, f, ""); err == nil {
+		t.Error("empty message accepted")
+	} else if sha != "" {
+		t.Errorf("empty-message sha = %q, want empty", sha)
 	}
 }
 
@@ -62,7 +97,7 @@ func TestSquashMergeConflict(t *testing.T) {
 	mustGit(t, root, "commit", "-qam", "main readme")
 	mainHead := mustGit(t, root, "rev-parse", "HEAD")
 
-	err := m.SquashMerge(ctx, f, "FD-009: conflicting")
+	_, err := m.SquashMerge(ctx, f, "FD-009: conflicting")
 	var ce *MergeConflictError
 	if !errors.As(err, &ce) {
 		t.Fatalf("err = %v, want *MergeConflictError", err)
@@ -84,7 +119,7 @@ func TestSquashMergeDirtyMainRefused(t *testing.T) {
 	m, f, _ := committedFeature(t, root)
 	writeFile(t, root, "README.md", "local edit\n")
 
-	err := m.SquashMerge(ctx, f, "FD-009: land me")
+	_, err := m.SquashMerge(ctx, f, "FD-009: land me")
 	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
 		t.Fatalf("err = %v, want dirty-main refusal", err)
 	}
@@ -106,7 +141,7 @@ func TestSquashMergeUntrackedMainFileOK(t *testing.T) {
 	if dirty, err := m.MainTrackedDirty(ctx); dirty || err != nil {
 		t.Errorf("MainTrackedDirty with only untracked file = %v, %v; want false", dirty, err)
 	}
-	if err := m.SquashMerge(ctx, f, "FD-009: land me"); err != nil {
+	if _, err := m.SquashMerge(ctx, f, "FD-009: land me"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -119,7 +154,7 @@ func TestSquashMergeNothingToMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	// fresh branch: no commits of its own
-	if err := m.SquashMerge(ctx, f, "FD-009: nothing"); err == nil || !strings.Contains(err.Error(), "no commits to merge") {
+	if _, err := m.SquashMerge(ctx, f, "FD-009: nothing"); err == nil || !strings.Contains(err.Error(), "no commits to merge") {
 		t.Fatalf("err = %v, want no-commits refusal", err)
 	}
 }
@@ -128,7 +163,7 @@ func TestSquashMergeEmptyMessageRefused(t *testing.T) {
 	root := newRepo(t)
 	m, f, _ := committedFeature(t, root)
 	for _, msg := range []string{"", "   \n\t"} {
-		if err := m.SquashMerge(ctx, f, msg); err == nil {
+		if _, err := m.SquashMerge(ctx, f, msg); err == nil {
 			t.Errorf("empty message %q accepted", msg)
 		}
 	}
@@ -138,7 +173,7 @@ func TestSquashMergeMissingBranch(t *testing.T) {
 	root := newRepo(t)
 	m := newManager(t, root)
 	f := feature(9, "Land me")
-	if err := m.SquashMerge(ctx, f, "FD-009: land me"); err == nil || !strings.Contains(err.Error(), "no branch") {
+	if _, err := m.SquashMerge(ctx, f, "FD-009: land me"); err == nil || !strings.Contains(err.Error(), "no branch") {
 		t.Fatalf("err = %v, want missing-branch refusal", err)
 	}
 }

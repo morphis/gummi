@@ -20,6 +20,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	registrars := map[string]func(*flag.FlagSet){
 		"run":    func(fs *flag.FlagSet) { registerRunFlags(fs) },
 		"resume": func(fs *flag.FlagSet) { registerResumeFlags(fs) },
+		"merge":  func(fs *flag.FlagSet) { registerMergeFlags(fs) },
 		"status": func(fs *flag.FlagSet) { registerStatusFlags(fs) },
 		"doctor": func(fs *flag.FlagSet) { registerDoctorFlags(fs) },
 	}
@@ -34,8 +35,8 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 
 	for _, cmd := range []string{
-		"gummi run", "gummi resume", "gummi verify", "gummi status", "gummi spec",
-		"gummi diff", "gummi doctor", "gummi skill",
+		"gummi run", "gummi resume", "gummi verify", "gummi merge", "gummi clean",
+		"gummi status", "gummi spec", "gummi diff", "gummi doctor", "gummi skill",
 	} {
 		if !strings.Contains(doc, cmd) {
 			t.Errorf("SKILL.md does not mention command %q", cmd)

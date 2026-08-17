@@ -79,7 +79,7 @@ func TestLandAfterUntrack(t *testing.T) {
 	if dirty, err := m.MainTrackedDirty(ctx); err != nil || dirty {
 		t.Fatalf("staged .gummi deletion must not block a land: dirty=%v err=%v", dirty, err)
 	}
-	if err := m.SquashMerge(ctx, f, "land feature"); err != nil {
+	if _, err := m.SquashMerge(ctx, f, "land feature"); err != nil {
 		t.Fatalf("land failed after untrack: %v", err)
 	}
 	if out := mustGit(t, root, "ls-files", "--", ".gummi"); out != "" {
@@ -153,7 +153,7 @@ func TestLandAfterWorktreeUntrack(t *testing.T) {
 	if made, err := m.CommitAll(ctx, f, "checkpoint"); err != nil || !made {
 		t.Fatalf("checkpoint: made=%v err=%v", made, err)
 	}
-	if err := m.SquashMerge(ctx, f, "land feature"); err != nil {
+	if _, err := m.SquashMerge(ctx, f, "land feature"); err != nil {
 		t.Fatalf("land failed: %v", err)
 	}
 	if out := mustGit(t, root, "ls-files", "--", ".gummi"); out != "" {

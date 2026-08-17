@@ -211,7 +211,7 @@ func TestSquashMergeRefusesOnDrift(t *testing.T) {
 	rewindMainBackward(t, root)
 
 	before := mustGit(t, root, "rev-parse", "HEAD")
-	err = m.SquashMerge(ctx, f, "land "+string(f.ID))
+	_, err = m.SquashMerge(ctx, f, "land "+string(f.ID))
 	if err == nil {
 		t.Fatal("SquashMerge succeeded despite drift")
 	}

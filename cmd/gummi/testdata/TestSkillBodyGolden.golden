@@ -92,6 +92,12 @@ gummi resume <id|ref> [decision]
 
 gummi verify <id|ref>
 
+gummi merge <id|ref> -m <message|->
+    --m string        landing commit message (required; - reads from stdin)
+    --message string  long form of -m
+
+gummi clean <id|ref>
+
 gummi status <id|ref>
     --json  emit machine-readable JSON instead of the text summary
 

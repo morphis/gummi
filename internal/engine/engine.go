@@ -238,6 +238,11 @@ func (e *Engine) ClientTools() bool {
 	return a != nil && a.Capabilities().ClientTools
 }
 
+// Worktrees returns the worktree manager the engine is bound to. It is
+// exposed for one-shot commands (headless merge/clean) that perform
+// worktree mutations directly but share the engine's manager and its lock.
+func (e *Engine) Worktrees() *worktree.Manager { return e.cfg.Worktrees }
+
 // Events is the UI-facing stream. It stays open for the engine's life
 // and closes on Close.
 func (e *Engine) Events() <-chan Event { return e.events }

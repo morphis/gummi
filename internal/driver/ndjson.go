@@ -190,6 +190,25 @@ type doneEvent struct {
 	ReviewRounds int     `json:"review_rounds"`
 }
 
+// mergedEvent reports a successful headless landing: the feature branch was
+// squash-merged onto main as one commit. Commit is the landed commit's sha —
+// exactly what SquashMerge created — so a driving script can record which
+// commit reached main without re-reading git.
+type mergedEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
+}
+
+// cleanedEvent reports a successful headless cleanup: a landed card's
+// worktree and branch were removed (the card record stays as a done entry).
+type cleanedEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Branch string `json:"branch"`
+}
+
 type errorEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id,omitempty"`
