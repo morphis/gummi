@@ -920,3 +920,101 @@ func putDraft(t *testing.T, h *harness, f *domain.Feature, body string) {
 		t.Fatal(err)
 	}
 }
+
+// A card at its coding gate with an unmet dependency drives to blocked; the
+// `blocked` event's blocking_deps names the outstanding dependency.
+func TestBlockedByDependency(t *testing.T) {
+	h := newHarness(t, true, planApproveScript())
+	f := feature(1, domain.StagePlan)
+	f.Skip = domain.SkipFlags{}
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.wt.Create(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	dep := feature(2, domain.StageImplement)
+	if err := h.store.CreateFeature(context.Background(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.AddDependency(context.Background(), f.ID, dep.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{}).drive(context.Background(), f.ID)
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	if out.Status != StatusBlocked {
+		t.Fatalf("status = %q, want blocked; stream=%v", out.Status, h.eventKinds())
+	}
+	b := lastEvent(h, "blocked")
+	if b == nil {
+		t.Fatalf("no blocked event; stream=%v", h.eventKinds())
+	}
+	deps, ok := b["blocking_deps"].([]interface{})
+	if !ok || len(deps) != 1 {
+		t.Fatalf("blocked blocking_deps = %v, want one dep", b["blocking_deps"])
+	}
+	dep0 := deps[0].(map[string]interface{})
+	if dep0["id"] != string(dep.ID) || dep0["stage"] != string(domain.StageImplement) {
+		t.Fatalf("blocking dep = %v, want %s@implement", dep0, dep.ID)
+	}
+	if h.stageOf(f.ID) != domain.StagePlan {
+		t.Fatalf("feature advanced past Plan on a blocked dep, want it parked")
+	}
+}
+
+// --gate-approval=caller pre-checks dependencies at the coding gate: it
+// reports blocked (naming the dep) instead of offering --approve.
+func TestCallerGatePreCheckDependency(t *testing.T) {
+	h := newHarness(t, true, planApproveScript())
+	f := feature(1, domain.StagePlan)
+	f.Skip = domain.SkipFlags{}
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.wt.Create(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	dep := feature(2, domain.StageSpec)
+	if err := h.store.CreateFeature(context.Background(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.AddDependency(context.Background(), f.ID, dep.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{GateApproval: GateCaller}).drive(context.Background(), f.ID)
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	if out.Status != StatusBlocked {
+		t.Fatalf("status = %q, want blocked (pre-check), not question; stream=%v", out.Status, h.eventKinds())
+	}
+	if h.has("gate") {
+		t.Fatalf("caller gate offered --approve despite an unmet dependency; stream=%v", h.eventKinds())
+	}
+	b := lastEvent(h, "blocked")
+	if b == nil {
+		t.Fatalf("no blocked event; stream=%v", h.eventKinds())
+	}
+	deps, ok := b["blocking_deps"].([]interface{})
+	if !ok || len(deps) != 1 || deps[0].(map[string]interface{})["id"] != string(dep.ID) {
+		t.Fatalf("blocking_deps = %v, want %s named", b["blocking_deps"], dep.ID)
+	}
+}
+
+// planApproveScript scripts the plan writer (no verdict) and its critique
+// (RoleReviewer, a passing verdict), so a feature parked at Plan can drive
+// through the plan approval gate to its coding gate.
+func planApproveScript() map[domain.Stage]stageFn {
+	return map[domain.Stage]stageFn{
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleReviewer {
+				return msgIdle(o.Model, "Critiqued.\nVERDICT: pass")
+			}
+			return msgIdle(o.Model, "Plan written.")
+		},
+	}
+}

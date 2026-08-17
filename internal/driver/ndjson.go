@@ -112,7 +112,10 @@ type blockedEvent struct {
 	Gate     string `json:"gate"`
 	OpenSpec int    `json:"open_questions,omitempty"`
 	OpenDiff int    `json:"open_diff,omitempty"`
-	Resume   string `json:"resume"`
+	// BlockingDeps names each outstanding dependency (its ID and current
+	// stage) when a coding gate is held by an unmet dependency.
+	BlockingDeps []engine.BlockingDep `json:"blocking_deps,omitempty"`
+	Resume       string               `json:"resume"`
 }
 
 type escalationEvent struct {

@@ -28,12 +28,28 @@ const (
 	StatusBlockedQuestions
 	// StatusBlockedDiff: unresolved diff annotations block the gate.
 	StatusBlockedDiff
+	// StatusBlockedDependency: the item cannot enter its coding stage while
+	// one of its direct dependencies is still short of Done — its work is
+	// not yet available to build on.
+	StatusBlockedDependency
 	// StatusNeedsMerge: the verify→done gate, where the branch is ahead of
 	// main and awaits a squash-merge decision. Advance never merges — the
 	// caller lands the branch (the TUI collects a commit message; the
 	// headless driver stops at the verified branch, DESIGN §10.6/§12).
 	StatusNeedsMerge
 )
+
+// BlockingDep names a single outstanding dependency blocking a card's
+// entry into its coding stage: the dependency's ID and the stage it is
+// currently at (anything short of Done counts as unmet).
+type BlockingDep struct {
+	ID    domain.FeatureID `json:"id"`
+	Stage domain.Stage     `json:"stage"`
+}
+
+// String formats a blocking dependency for a status notice, e.g.
+// "FD-003@implement".
+func (b BlockingDep) String() string { return fmt.Sprintf("%s@%s", b.ID, b.Stage) }
 
 // AdvanceResult reports the outcome of one Advance call. Only the fields
 // relevant to Status are populated.
@@ -47,6 +63,10 @@ type AdvanceResult struct {
 	// Blockers is the open-thread / open-comment count for the Blocked*
 	// statuses.
 	Blockers int
+	// BlockingDeps names each direct dependency still short of Done when
+	// Status is StatusBlockedDependency — its ID and the stage it is
+	// stuck at.
+	BlockingDeps []BlockingDep
 	// EnteredWorktree reports that this call created the item's worktree
 	// (the design→work approval gate), so the caller can kick off the
 	// one-shot check-discovery + baseline passes over the fresh branch.
@@ -79,18 +99,11 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	}
 	res := AdvanceResult{Feature: f, From: f.Stage}
 
-	nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
-	if len(nexts) == 0 {
+	next := e.nextStage(f)
+	if next == f.Stage {
+		// no forward edge — a terminal item has nothing to advance.
 		res.Status = StatusNoop
 		return res, nil
-	}
-	// prefer the skip edge when the flag opts the item out of the
-	// intermediate stage, otherwise take the primary edge.
-	next := nexts[len(nexts)-1]
-	if f.Stage == domain.StageReview || f.Stage == domain.StageVerify {
-		// the last edge out of review/verify is a rerun (→ implement/fix),
-		// a bounce, not a forward move; Advance always goes forward.
-		next = nexts[0]
 	}
 	res.To = next
 
@@ -104,6 +117,21 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	if n := e.openDiffCommentsBlockingGate(ctx, id); n > 0 {
 		res.Status, res.Blockers = StatusBlockedDiff, n
 		return res, nil
+	}
+
+	// A card cannot enter its coding stage while one of its direct
+	// dependencies is still short of Done — its work is not yet available
+	// to build on. The gate fires only at coding-stage entry (the resolved
+	// forward edge's target is the item's coding stage), and only on this
+	// call, read-on-Advance like every other blocker. The stored stage is
+	// left unchanged.
+	if e.nextStage(f) == workflow.WorkStage(f.Kind) {
+		if deps, err := e.unmetDeps(ctx, id); err != nil {
+			return res, err
+		} else if len(deps) > 0 {
+			res.Status, res.BlockingDeps = StatusBlockedDependency, deps
+			return res, nil
+		}
 	}
 
 	// Advancing out of Verify is the "this feature is done" decision: the
@@ -191,18 +219,68 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	return res, nil
 }
 
-// GateBlockers reports the open %%-thread and diff-annotation counts that
-// would block advancing id's current gate, without moving it — the
-// read-only view a caller-approval checkpoint needs before offering to
-// cross a gate (the headless driver's --gate-approval=caller path). It
-// reuses the exact floor checks Advance applies, so the pre-check and the
-// gate can never disagree.
-func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpen, diffOpen int, err error) {
+// nextStage resolves a feature's forward target — the single edge every
+// forward path into the coding stage resolves through. It prefers the skip
+// edge when the flag opts the item out of the intermediate stage, otherwise
+// the primary edge; out of Review/Verify it takes the forward edge (never
+// the rerun, which is a bounce Advance doesn't make). Returns the stage
+// unchanged when the item is terminal.
+func (e *Engine) nextStage(f domain.Feature) domain.Stage {
+	nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
+	if len(nexts) == 0 {
+		return f.Stage
+	}
+	next := nexts[len(nexts)-1]
+	if f.Stage == domain.StageReview || f.Stage == domain.StageVerify {
+		// the last edge out of review/verify is a rerun (→ implement/fix),
+		// a bounce, not a forward move; Advance always goes forward.
+		next = nexts[0]
+	}
+	return next
+}
+
+// unmetDeps returns each direct dependency of id still short of Done — its
+// ID and current stage. Empty when there are no dependencies or all are
+// done. Only direct edges are read: transitivity holds transitively,
+// because a card reaches Done only by passing its own coding gate.
+func (e *Engine) unmetDeps(ctx context.Context, id domain.FeatureID) ([]BlockingDep, error) {
+	ids, err := e.cfg.Store.ListDependencies(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var deps []BlockingDep
+	for _, depID := range ids {
+		dep, err := e.cfg.Store.GetFeature(ctx, depID)
+		if err != nil {
+			return nil, err
+		}
+		if dep.Stage != domain.StageDone {
+			deps = append(deps, BlockingDep{ID: depID, Stage: dep.Stage})
+		}
+	}
+	return deps, nil
+}
+
+// GateBlockers reports the open %%-thread and diff-annotation counts, and
+// the outstanding dependencies, that would block advancing id's current
+// gate, without moving it — the read-only view a caller-approval
+// checkpoint needs before offering to cross a gate (the headless driver's
+// --gate-approval=caller path). It reuses the exact floor checks Advance
+// applies — deps under the same coding-stage condition — so the pre-check
+// and the gate can never disagree.
+func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpen, diffOpen int, deps []BlockingDep, err error) {
 	f, err := e.cfg.Store.GetFeature(ctx, id)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
-	return e.openQuestionsBlockingGate(f), e.openDiffCommentsBlockingGate(ctx, id), nil
+	specOpen = e.openQuestionsBlockingGate(f)
+	diffOpen = e.openDiffCommentsBlockingGate(ctx, id)
+	if e.nextStage(f) == workflow.WorkStage(f.Kind) {
+		if deps, err = e.unmetDeps(ctx, id); err != nil {
+			return 0, 0, nil, err
+		}
+	}
+	return specOpen, diffOpen, deps, nil
 }
 
 // estimateEnvelope sizes a feature's spend-plan envelope from the median

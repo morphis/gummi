@@ -270,6 +270,8 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), OpenSpec: res.Advance.Blockers, Resume: string(id)})
 		case engine.StatusBlockedDiff:
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), OpenDiff: res.Advance.Blockers, Resume: string(id)})
+		case engine.StatusBlockedDependency:
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), BlockingDeps: res.Advance.BlockingDeps, Resume: string(id)})
 		default:
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Resume: string(id)})
 		}
@@ -309,7 +311,7 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	}
 	// the same open-thread / open-diff floor Advance applies before the
 	// verify→done gate; unresolved ones hold the merge.
-	if specOpen, diffOpen, err := d.eng.GateBlockers(ctx, id); err != nil {
+	if specOpen, diffOpen, _, err := d.eng.GateBlockers(ctx, id); err != nil {
 		return d.fail(ctx, string(id), err)
 	} else if specOpen > 0 {
 		return d.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved spec threads blocking the merge", id, specOpen))
@@ -838,7 +840,7 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 		// a caller gate on a design stage: report any blockers, else
 		// checkpoint for --approve/--request-changes. Verify is never a
 		// caller gate — it is the floor's stop-at-verified, always auto.
-		specOpen, diffOpen, err := d.eng.GateBlockers(ctx, f.ID)
+		specOpen, diffOpen, deps, err := d.eng.GateBlockers(ctx, f.ID)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -848,6 +850,10 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 		}
 		if diffOpen > 0 {
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage), OpenDiff: diffOpen, Resume: string(f.ID)})
+			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
+		}
+		if len(deps) > 0 {
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage), BlockingDeps: deps, Resume: string(f.ID)})
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		next := forwardEdge(f)
@@ -875,6 +881,9 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedDiff:
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), OpenDiff: res.Blockers, Resume: string(f.ID)})
+		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
+	case engine.StatusBlockedDependency:
+		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), BlockingDeps: res.BlockingDeps, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusNeedsMerge:
 		return d.done(ctx, res.Feature)

@@ -11,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -334,4 +335,187 @@ func TestEstimateEnvelopeNoHistory(t *testing.T) {
 	if credits != 0 || samples != 0 || f.Budget.Envelope != 0 {
 		t.Fatalf("no-history estimate applied: credits=%d samples=%d env=%d", credits, samples, f.Budget.Envelope)
 	}
+}
+
+// --- dependency gate (FD-059) ---
+
+// unmetDeps returns one BlockingDep per direct dependency short of Done,
+// skipping those already landed.
+func TestUnmetDeps(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dependent", domain.StagePlan)
+	putFeature(t, store, f)
+	implemented := feature(2, "dep in flight", domain.StageImplement)
+	putFeature(t, store, implemented)
+	done := feature(3, "dep landed", domain.StageDone)
+	putFeature(t, store, done)
+	if err := store.AddDependency(ctx, f.ID, implemented.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddDependency(ctx, f.ID, done.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	deps, err := e.unmetDeps(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps) != 1 || deps[0].ID != implemented.ID || deps[0].Stage != domain.StageImplement {
+		t.Fatalf("unmetDeps = %+v, want only the in-flight dep", deps)
+	}
+}
+
+// A card at Plan with an unmet dependency is blocked from entering its
+// coding stage: StatusBlockedDependency, BlockingDeps naming the dep, and
+// the stored stage left at Plan.
+func TestAdvanceBlockedByDependency(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dependent", domain.StagePlan)
+	putFeature(t, store, f)
+	dep := feature(2, "dep", domain.StageImplement)
+	putFeature(t, store, dep)
+	if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusBlockedDependency {
+		t.Fatalf("status=%d, want blocked-dependency", res.Status)
+	}
+	if len(res.BlockingDeps) != 1 || res.BlockingDeps[0].ID != dep.ID || res.BlockingDeps[0].Stage != domain.StageImplement {
+		t.Fatalf("BlockingDeps = %+v, want %s@implement", res.BlockingDeps, dep.ID)
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); got.Stage != domain.StagePlan {
+		t.Fatalf("blocked gate transitioned to %s, want Plan unchanged", got.Stage)
+	}
+}
+
+// Once the dependency reaches Done, the same Advance lands in Implement.
+func TestAdvanceDependencyMet(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dependent", domain.StagePlan)
+	putFeature(t, store, f)
+	dep := feature(2, "dep", domain.StageImplement)
+	putFeature(t, store, dep)
+	if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res := mustAdvance(t, e, f.ID); res.Status != StatusBlockedDependency {
+		t.Fatalf("pre-landing status=%d, want blocked-dependency", res.Status)
+	}
+
+	for _, st := range []domain.Stage{domain.StageReview, domain.StageVerify, domain.StageDone} {
+		if _, err := store.Transition(ctx, dep.ID, st, "test"); err != nil {
+			t.Fatalf("walking dep to %s: %v", st, err)
+		}
+	}
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageImplement {
+		t.Fatalf("post-landing status=%d to=%s, want advanced/implement", res.Status, res.To)
+	}
+}
+
+// Skip edges into the coding stage are gated too: Spec (plan skipped) →
+// Implement, and a bug's Diagnose → Fix.
+func TestAdvanceDependencyGateSkipEdges(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("feature spec skip-plan", func(t *testing.T) {
+		e, _, store, _ := advanceEngine(t)
+		f := feature(1, "dependent", domain.StageSpec)
+		f.Skip = domain.SkipFlags{Plan: true}
+		putFeature(t, store, f)
+		dep := feature(2, "dep", domain.StageImplement)
+		putFeature(t, store, dep)
+		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+			t.Fatal(err)
+		}
+		res := mustAdvance(t, e, f.ID)
+		if res.Status != StatusBlockedDependency {
+			t.Fatalf("status=%d, want blocked-dependency on skip edge", res.Status)
+		}
+	})
+
+	t.Run("bug diagnose", func(t *testing.T) {
+		e, _, store, _ := advanceEngine(t)
+		f := feature(1, "bug", domain.StageDiagnose)
+		f.ID = domain.FeatureID("BG-001")
+		f.Kind = domain.KindBug
+		putFeature(t, store, f)
+		dep := feature(2, "dep", domain.StageImplement)
+		putFeature(t, store, dep)
+		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+			t.Fatal(err)
+		}
+		res := mustAdvance(t, e, f.ID)
+		if res.Status != StatusBlockedDependency {
+			t.Fatalf("status=%d, want blocked-dependency on bug diagnose", res.Status)
+		}
+	})
+}
+
+// A forward edge that does not target the coding stage (Todo → Brainstorm)
+// is never dependency-gated.
+func TestAdvanceDependencyGateNotCoding(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dependent", domain.StageTodo)
+	putFeature(t, store, f)
+	dep := feature(2, "dep", domain.StageImplement)
+	putFeature(t, store, dep)
+	if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageBrainstorm {
+		t.Fatalf("status=%d to=%s, want advanced/brainstorm (design edge not gated)", res.Status, res.To)
+	}
+}
+
+// The invariant: every forward path into the coding stage resolves through
+// nextStage to the coding stage, so the Advance gate can never be bypassed.
+// Review/Verify rerun edges are excluded — nextStage takes the forward edge
+// (nexts[0]) there, never the coding rerun.
+func TestNextStageCoversEveryCodingEntry(t *testing.T) {
+	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
+		work := workflow.WorkStage(kind)
+		for _, from := range domain.Stages {
+			if from == domain.StageReview || from == domain.StageVerify {
+				continue // rerun edges are bounces, not forward moves
+			}
+			for _, skip := range skipCombos() {
+				f := feature(1, "invariant", from)
+				f.Kind = kind
+				f.Skip = skip
+				enters := false
+				for _, n := range workflow.Next(kind, from, skip) {
+					if n == work {
+						enters = true
+					}
+				}
+				if enters && (&Engine{}).nextStage(f) != work {
+					t.Fatalf("kind=%s from=%s skip=%+v: a forward path enters %s but nextStage resolves to %s — the Advance gate is bypassed",
+						kind, from, skip, work, (&Engine{}).nextStage(f))
+				}
+			}
+		}
+	}
+}
+
+func skipCombos() []domain.SkipFlags {
+	var out []domain.SkipFlags
+	for _, b := range []bool{false, true} {
+		for _, p := range []bool{false, true} {
+			for _, tr := range []bool{false, true} {
+				for _, dg := range []bool{false, true} {
+					out = append(out, domain.SkipFlags{Brainstorm: b, Plan: p, Triage: tr, Diagnose: dg})
+				}
+			}
+		}
+	}
+	return out
 }
