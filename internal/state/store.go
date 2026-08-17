@@ -19,6 +19,11 @@ import (
 // ErrNotFound is returned when a feature ID has no row.
 var ErrNotFound = errors.New("feature not found")
 
+// ErrDependedOn is returned by DeleteFeature when the card still has
+// dependents. The store pre-checks before deleting so the raw SQLite FK
+// constraint error never surfaces and no edge is silently dropped.
+var ErrDependedOn = errors.New("feature has dependents")
+
 // ErrForkPointStamped is returned by SetForkPoint when the feature row
 // already records a fork-point SHA. It is the "stamped once" refusal that
 // keeps Create and the lazy backfill from racing a stored SHA into being
@@ -156,6 +161,18 @@ CREATE TABLE IF NOT EXISTS check_baseline (
 	ran_at     TEXT    NOT NULL,
 	PRIMARY KEY (feature_id, name)
 );
+
+-- One directed edge per dependency: feature_id depends on depends_on_id.
+-- feature_id cascades on delete (a deleted card's outgoing edges go with
+-- it); depends_on_id does not, so SQLite FK enforcement refuses deleting
+-- a card others still depend on. The store pre-checks dependents before
+-- delete (ErrDependedOn) so the raw constraint error never surfaces.
+CREATE TABLE IF NOT EXISTS feature_deps (
+	feature_id    TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	depends_on_id TEXT NOT NULL REFERENCES features(id),
+	PRIMARY KEY (feature_id, depends_on_id)
+);
+CREATE INDEX IF NOT EXISTS feature_deps_depends_on ON feature_deps(depends_on_id);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.
@@ -881,8 +898,17 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	return nil
 }
 
-// DeleteFeature removes a feature and (via cascade) its history.
+// DeleteFeature removes a feature and (via cascade) its history. A card
+// that others still depend on is refused: dependents are checked first so
+// the raw SQLite FK constraint never surfaces and no edge is dropped.
 func (s *Store) DeleteFeature(ctx context.Context, id domain.FeatureID) error {
+	deps, err := s.ListDependents(ctx, id)
+	if err != nil {
+		return err
+	}
+	if len(deps) > 0 {
+		return fmt.Errorf("deleting %s: %w", id, ErrDependedOn)
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM features WHERE id=?`, string(id))
 	if err != nil {
 		return fmt.Errorf("deleting %s: %w", id, err)
