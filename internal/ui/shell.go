@@ -386,6 +386,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case noticeMsg:
+		// an outcome-driven clear: the action that produced this notice
+		// succeeded, so drop the attention item it resolved (see
+		// noticeMsg.clearInbox). It runs on the Update goroutine, never
+		// inside a command.
+		if msg.clearInbox != "" {
+			m.inbox.remove(msg.clearInbox)
+		}
 		m.notice = msg
 		// a reload is opt-in: only a notice emitted by a command that
 		// mutated row-rendered state carries the flag (see noticeMsg).
@@ -451,6 +458,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mergePrep = true
+		m.inbox.remove(msg.f.ID)
 		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main…"}
 		return m, m.prepareMerge(msg.f, true)
 
@@ -464,6 +472,8 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case worktreeEnteredMsg:
 		// show the transition notice, reload, and run the background
 		// one-shot passes: check discovery and/or the envelope estimate.
+		// The approval succeeded, so its attention item is resolved here.
+		m.inbox.remove(msg.id)
 		m.notice = noticeMsg{text: msg.note}
 		cmds := []tea.Cmd{m.loadRows}
 		if msg.discover {
@@ -619,6 +629,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.chat = newChatPane(msg.feature.ID, msg.session)
+		m.inbox.remove(msg.feature.ID)
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -672,6 +683,22 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch key {
 	case "q":
+		// quitting with autonomous work live stops sessions mid-turn,
+		// discarding the in-flight turn and its spend and leaving the
+		// stage uncommitted on disk; ask first so the user who means it
+		// can still get out (the confirm dialog's way-through). Idle quit
+		// stays a single keypress.
+		if live := m.liveSessions(); len(live) > 0 {
+			m.Overlay.Push(&confirmDialog{
+				id:       "confirm-quit",
+				question: "quit with live sessions " + strings.Join(live, ", ") + "?",
+				detail:   "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)",
+				onConfirm: func() tea.Cmd {
+					return tea.Quit
+				},
+			})
+			return nil
+		}
 		return tea.Quit
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
@@ -690,12 +717,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		if r, ok := m.selected(); ok {
 			m.clearTransientNotice()
-			m.inbox.remove(r.F.ID)
 			return m.attachOrRun(r.F)
 		}
 	case "p":
 		if r, ok := m.selected(); ok {
-			m.inbox.remove(r.F.ID)
 			return m.pauseRun(r.F)
 		}
 	case "v":
@@ -775,12 +800,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.Overlay.Push(newBugIngestForm(m.profileNames, m.startBugIngest))
 	case "g":
 		if r, ok := m.selected(); ok {
-			m.inbox.remove(r.F.ID)
 			return m.advanceStage(r.F.ID)
 		}
 	case "b":
 		if r, ok := m.selected(); ok {
-			m.inbox.remove(r.F.ID)
 			return m.bounceStage(r.F.ID)
 		}
 	case "u":
@@ -1161,7 +1184,7 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 					if err := m.engine.RunCritique(f, ""); err != nil {
 						return noticeMsg{text: sanitize(err.Error()), isErr: true}
 					}
-					return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)"}
+					return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)", clearInbox: f.ID}
 				}
 			}
 		}
@@ -1172,7 +1195,7 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " queued"}
+		return noticeMsg{text: string(f.ID) + " queued", clearInbox: f.ID}
 	}
 }
 
@@ -1201,7 +1224,7 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " paused"}
+		return noticeMsg{text: string(f.ID) + " paused", clearInbox: f.ID}
 	}
 }
 
@@ -1211,6 +1234,26 @@ func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
 		return nil
 	}
 	return m.engine.Get(id)
+}
+
+// liveSessions names every autonomous session that holds or is waiting
+// for a slot — StateRunning or StateQueued — as sorted "<id> (<stage>)"
+// display strings. Interactive chat holds no slot and has no budget, so
+// it is not live here. Empty when nothing is running or queued.
+func (m *Shell) liveSessions() []string {
+	if m.engine == nil {
+		return nil
+	}
+	var names []string
+	for id, s := range m.engine.Sessions() {
+		st := s.State()
+		if st != engine.StateRunning && st != engine.StateQueued {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s (%s)", id, s.Feature.Stage))
+	}
+	sort.Strings(names)
+	return names
 }
 
 // cycleAttention moves the selection to the next feature in the

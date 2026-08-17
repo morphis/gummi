@@ -49,6 +49,13 @@ type noticeMsg struct {
 	text   string
 	isErr  bool
 	reload bool
+	// clearInbox, when non-empty, names a feature whose needs-attention
+	// entry is removed on receipt of this notice — the outcome-driven
+	// counterpart to pre-dispatch removal (see the key handler). It is
+	// set only on the success returns of the board actions; error and
+	// gate-blocked returns leave it empty so the attention item survives
+	// until the thing is actually attended to.
+	clearInbox domain.FeatureID
 }
 
 // chatAttachedMsg carries the result of an interactive Attach that ran in
@@ -339,7 +346,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		}
 		switch res.Status {
 		case engine.StatusNoop:
-			return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id)}
+			return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id), clearInbox: id}
 		case engine.StatusBlockedQuestions:
 			// unresolved user %% annotations block every human gate — g
 			// re-gates only once they resolve (DESIGN §6.1).
@@ -373,7 +380,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		if discover || est {
 			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est}
 		}
-		return noticeMsg{text: note, reload: true}
+		return noticeMsg{text: note, reload: true, clearInbox: id}
 	}
 }
 
@@ -653,7 +660,7 @@ func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		m.dropSession(id)
-		return noticeMsg{text: fmt.Sprintf("%s bounced back to %s", id, back), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s bounced back to %s", id, back), reload: true, clearInbox: id}
 	}
 }
 

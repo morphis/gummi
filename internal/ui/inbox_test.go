@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestInboxOps(t *testing.T) {
@@ -90,6 +91,56 @@ func TestInboxErrorItem(t *testing.T) {
 	m = pumpEngine(t, m)
 	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnFailure {
 		t.Fatalf("error did not raise a failure item: %+v", m.inbox.list())
+	}
+}
+
+func TestNoticeClearInbox(t *testing.T) {
+	// a notice whose clearInbox names a feature removes its attention
+	// item on receipt — the outcome-driven clear, on the Update goroutine.
+	m := populatedShell(80, 24)
+	m.inbox.add("FD-001", attnGate, "spec approval pending")
+	model, _ := m.Update(noticeMsg{text: "FD-001 → plan", clearInbox: "FD-001"})
+	m = model.(*Shell)
+	if m.inbox.len() != 0 {
+		t.Fatalf("inbox len = %d, want 0 after clearInbox notice", m.inbox.len())
+	}
+}
+
+func TestNoticeClearInboxNoopWithoutField(t *testing.T) {
+	// a notice with an empty clearInbox (an error or gate-blocked return)
+	// leaves the item in the queue — the bug being fixed.
+	m := populatedShell(80, 24)
+	m.inbox.add("FD-001", attnGate, "spec approval pending")
+	model, _ := m.Update(noticeMsg{text: "boom", isErr: true})
+	m = model.(*Shell)
+	if m.inbox.len() != 1 {
+		t.Fatalf("inbox len = %d, want 1 — plain notice cleared the item", m.inbox.len())
+	}
+}
+
+func TestGateBlockedKeepsInboxItem(t *testing.T) {
+	// pressing g on a gate that turns out to be blocked leaves the
+	// needs-attention item in the queue: the advance's error notice carries
+	// no clearInbox, so the entry survives until the gate is actually
+	// attended to.
+	m := specWorkspace(t)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // todo → brainstorm
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "is this the right approach?")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	// a needs-attention item awaits the user on this feature
+	m.inbox.add("FD-001", attnGate, "spec approval pending")
+	// approving is blocked while the annotation is open
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageSpec {
+		t.Fatalf("blocked advance moved the stage to %s, want spec", m.rows[0].F.Stage)
+	}
+	if m.inbox.len() != 1 {
+		t.Fatalf("inbox len = %d, want 1 — blocked advance cleared the item", m.inbox.len())
 	}
 }
 

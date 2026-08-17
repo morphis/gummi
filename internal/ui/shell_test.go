@@ -3,10 +3,14 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -45,6 +49,123 @@ func TestShellQuitKeys(t *testing.T) {
 		_, cmd := m.Update(msg)
 		if cmd == nil {
 			t.Errorf("%s did not quit", key)
+		}
+	}
+}
+
+func TestQuitWithoutLiveSessionQuits(t *testing.T) {
+	// an idle shell has no live sessions, so q stays a single keypress.
+	m := populatedShell(80, 24)
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd == nil {
+		t.Fatal("idle q returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("idle q returned %T, want QuitMsg", cmd())
+	}
+	if m.Overlay.Top() != nil {
+		t.Fatal("idle q pushed a dialog when none should appear")
+	}
+}
+
+func TestQuitWithLiveSessionPushesDialog(t *testing.T) {
+	// hold a session in StateRunning (the plan writer) so the board has
+	// live autonomous work; q must then offer a confirm dialog instead of
+	// quitting.
+	release := make(chan struct{})
+	defer close(release)
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		// block only the plan writer (implementer) turn so its session
+		// stays live in StateRunning; the auto-discovery scribe pass and
+		// any other session must complete for the setup to finish.
+		if opts.Role == agent.RoleImplementer {
+			<-release
+		}
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec → plan
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})   // run plan (autonomous)
+	waitLive(t, eng, "FD-001")
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd != nil {
+		t.Fatalf("q with a live session returned a command, want the dialog")
+	}
+	d, ok := m.Overlay.Top().(*confirmDialog)
+	if !ok || d.id != "confirm-quit" {
+		t.Fatalf("top overlay = %v, want the confirm-quit dialog", m.Overlay.Top())
+	}
+}
+
+func TestQuitConfirmYesQuits(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleImplementer {
+			<-release
+		}
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	waitLive(t, eng, "FD-001")
+
+	// q pushes the dialog; confirming with y returns the quit command.
+	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil {
+		t.Fatal("confirming the quit dialog returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("confirmed quit returned %T, want QuitMsg", cmd())
+	}
+}
+
+func TestQuitLiveDialogCancelStays(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleImplementer {
+			<-release
+		}
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	waitLive(t, eng, "FD-001")
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if cmd != nil {
+		t.Fatalf("declining the quit dialog returned a command")
+	}
+	if m.Overlay.Top() != nil {
+		t.Fatal("declining the dialog did not close it")
+	}
+}
+
+// waitLive waits until the feature's engine session is running or queued
+// (holding or waiting for a slot) — i.e. live autonomous work.
+func waitLive(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		if s := eng.Get(id); s != nil {
+			switch s.State() {
+			case engine.StateRunning, engine.StateQueued:
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatal("session never went live")
+		case <-time.After(10 * time.Millisecond):
 		}
 	}
 }
