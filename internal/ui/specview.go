@@ -371,6 +371,10 @@ func (sv *specView) renderRead(m *Shell, w, h int) string {
 	s := m.styles
 	var b strings.Builder
 
+	// live per-dependency status replaces the static `> Depends on:` prose,
+	// resolved from the dependency store at render.
+	b.WriteString(sv.renderDependencyStatus(m, w))
+
 	// open threads split by who they wait on: an unresolved @user comment
 	// blocks the approval gate (DESIGN §6.1); agent-authored threads
 	// (questions, reviewer findings) are informational here and don't gate
@@ -409,7 +413,7 @@ func (sv *specView) renderRead(m *Shell, w, h int) string {
 	if err != nil {
 		return b.String() + s.Error.Render(err.Error())
 	}
-	out, err := r.Render(sv.content)
+	out, err := r.Render(stripDependsOnBlock(sv.content))
 	if err != nil {
 		return b.String() + s.Error.Render(err.Error())
 	}
@@ -424,6 +428,64 @@ func (sv *specView) renderRead(m *Shell, w, h int) string {
 	end := min(off+visible, len(lines))
 	b.WriteString(strings.Join(lines[off:end], "\n"))
 	return b.String()
+}
+
+// renderDependencyStatus renders each direct dependency of the spec's
+// feature with its live status — ID, current stage, and whether it is done
+// or still pending — resolved from the dependency store at render, plus an
+// all-done line when every dependency is Done. Returns empty when there is
+// no store or no dependencies, so it composes cleanly onto the read view.
+func (sv *specView) renderDependencyStatus(m *Shell, w int) string {
+	if m.store == nil {
+		return ""
+	}
+	ctx := context.Background()
+	ids, err := m.store.ListDependencies(ctx, sv.f.ID)
+	if err != nil || len(ids) == 0 {
+		return ""
+	}
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.Subtitle.Render("Dependencies") + "\n")
+	allDone := true
+	for _, id := range ids {
+		dep, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return ""
+		}
+		done := dep.Stage == domain.StageDone
+		if !done {
+			allDone = false
+		}
+		mark := s.Warning.Render("◌")
+		status := s.Warning.Render("pending")
+		if done {
+			mark = s.Success.Render("✔")
+			status = s.Success.Render("done")
+		}
+		line := fmt.Sprintf("  %s %s @ %s · %s",
+			mark, s.Base.Render(string(id)), s.Base.Render(string(dep.Stage)), status)
+		b.WriteString(ansi.Truncate(line, w, "…") + "\n")
+	}
+	if allDone {
+		b.WriteString(s.Success.Render("  all dependencies done") + "\n")
+	}
+	return b.String()
+}
+
+// stripDependsOnBlock removes the provenance `> Depends on:` blockquote
+// line from rendered content — the static prose the read view replaces with
+// live per-dependency status. Annotate mode reads the raw source, so it is
+// unaffected.
+func stripDependsOnBlock(content string) string {
+	var out []string
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "> Depends on:") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // renderAnnotate renders the source view: line numbers, gutter markers

@@ -457,6 +457,69 @@ func TestAdvanceDependencyGateSkipEdges(t *testing.T) {
 	})
 }
 
+// DependencyBlockers is the badge half of the Advance gate: at the coding
+// stage it withholds an unmet dep (matching StatusBlockedDependency); in
+// brainstorm/spec (next step not the coding stage) it returns nil even with
+// the same unmet dep; and once the dep reaches Done it returns nil. The
+// badge and the gate thus share one definition and can never disagree.
+func TestDependencyBlockers(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("blocked at coding stage", func(t *testing.T) {
+		e, _, store, _ := advanceEngine(t)
+		f := feature(1, "dependent", domain.StagePlan)
+		putFeature(t, store, f)
+		dep := feature(2, "dep", domain.StageImplement)
+		putFeature(t, store, dep)
+		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+			t.Fatal(err)
+		}
+		deps, err := e.DependencyBlockers(ctx, f.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(deps) != 1 || deps[0].ID != dep.ID || deps[0].Stage != domain.StageImplement {
+			t.Fatalf("DependencyBlockers = %+v, want %s@implement", deps, dep.ID)
+		}
+	})
+
+	t.Run("stage-aware: design stage not blocked", func(t *testing.T) {
+		e, _, store, _ := advanceEngine(t)
+		f := feature(1, "designing", domain.StageBrainstorm)
+		putFeature(t, store, f)
+		dep := feature(2, "dep", domain.StageImplement)
+		putFeature(t, store, dep)
+		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+			t.Fatal(err)
+		}
+		deps, err := e.DependencyBlockers(ctx, f.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(deps) != 0 {
+			t.Fatalf("design-stage DependencyBlockers = %+v, want nil", deps)
+		}
+	})
+
+	t.Run("all deps done", func(t *testing.T) {
+		e, _, store, _ := advanceEngine(t)
+		f := feature(1, "dependent", domain.StagePlan)
+		putFeature(t, store, f)
+		dep := feature(2, "dep", domain.StageDone)
+		putFeature(t, store, dep)
+		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
+			t.Fatal(err)
+		}
+		deps, err := e.DependencyBlockers(ctx, f.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(deps) != 0 {
+			t.Fatalf("all-done DependencyBlockers = %+v, want nil", deps)
+		}
+	})
+}
+
 // A forward edge that does not target the coding stage (Todo → Brainstorm)
 // is never dependency-gated.
 func TestAdvanceDependencyGateNotCoding(t *testing.T) {

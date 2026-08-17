@@ -206,6 +206,28 @@ func (r featureRow) withCreated(t time.Time) featureRow {
 	return r
 }
 
+// TestBoardBlockedBadgeGolden: a card at its coding gate with an unmet
+// dependency renders the blocked badge; the same card with all deps done,
+// and a brainstorm card whose next step isn't the coding stage, render none.
+func TestBoardBlockedBadgeGolden(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	blocked := row(1, "blocked card", domain.StagePlan, "", true)
+	blocked.DepBlocked = true
+	met := row(2, "deps met", domain.StagePlan, "", true)
+	met.DepBlocked = false
+	design := row(3, "design card", domain.StageBrainstorm, "", false)
+	design.DepBlocked = false
+	m.rows = []featureRow{blocked, met, design}
+	var b strings.Builder
+	b.WriteString("blocked@plan\n")
+	b.WriteString(m.cardLine(blocked, 1, false, 80) + "\n\n")
+	b.WriteString("met@plan\n")
+	b.WriteString(m.cardLine(met, 2, false, 80) + "\n\n")
+	b.WriteString("design@brainstorm\n")
+	b.WriteString(m.cardLine(design, 3, false, 80) + "\n")
+	golden.RequireEqual(t, []byte(b.String()))
+}
+
 // TestBoardCardLineSeverity golden-captures the severity badge rendering
 // for each canonical level plus the unclassified (empty) case.
 func TestBoardCardLineSeverity(t *testing.T) {

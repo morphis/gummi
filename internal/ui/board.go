@@ -89,8 +89,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 		id = s.Warning.Render(string(r.F.ID))
 	}
 	badge := ""
+	// a card the Advance gate would block on an unmet direct dependency
+	// shows a blocked badge alongside the severity badge — read-only
+	// feedback on the gate, never a state it owns.
+	if r.DepBlocked {
+		badge = " " + s.Warning.Render("⛔")
+	}
 	if sev := r.F.Severity; sev != "" {
-		badge = " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
+		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
 	}
 	title := s.CardTitle.Render(r.F.Title)
 	tag := ""

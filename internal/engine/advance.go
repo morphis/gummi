@@ -283,6 +283,26 @@ func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpe
 	return specOpen, diffOpen, deps, nil
 }
 
+// DependencyBlockers reports the direct dependencies of id still short of
+// Done, but only when the card's next forward step is entering its coding
+// stage — exactly the dependency half of the Advance gate, factored out so
+// the board badge can share one definition with the gate without re-running
+// the thread/comment IO GateBlockers also does. Returns nil when the next
+// forward step is not the coding stage (a card in brainstorm/spec never
+// shows a badge even with an unmet dependency listed), or when every direct
+// dependency is Done. The stored stage is left unchanged — this is a
+// read-only check, never a transition.
+func (e *Engine) DependencyBlockers(ctx context.Context, id domain.FeatureID) ([]BlockingDep, error) {
+	f, err := e.cfg.Store.GetFeature(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if e.nextStage(f) != workflow.WorkStage(f.Kind) {
+		return nil, nil
+	}
+	return e.unmetDeps(ctx, id)
+}
+
 // estimateEnvelope sizes a feature's spend-plan envelope from the median
 // spend of previously completed features and persists it, returning the
 // applied estimate and the number of metered samples behind it. It only

@@ -33,6 +33,11 @@ type featureRow struct {
 	OpenSpecQs       int // open user %% threads in the artifact
 	OpenDiffComments int // unresolved diff annotations
 	BaselineFails    int // gummi-checks already failing on the fresh branch
+	// DepBlocked is whether the Advance gate would block this card on an
+	// unmet direct dependency at its coding-stage entry — a load-time
+	// snapshot resolved against the live dependency store (never a
+	// persisted flag, so it cannot go stale and diverge from the gate).
+	DepBlocked bool
 }
 
 // rowsMsg delivers a fresh load of the board content.
@@ -100,9 +105,29 @@ func (m *Shell) loadRows() tea.Msg {
 				}
 			}
 		}
+		row.DepBlocked = len(m.dependencyBlockers(ctx, f.ID)) > 0
 		rows = append(rows, row)
 	}
 	return rowsMsg{rows: rows}
+}
+
+// dependencyBlockers reports the direct dependencies that would block the
+// card at its coding-stage entry — the read-only gate the board badge
+// mirrors. It resolves the same engine handle advanceStage shares (reuse a
+// wired engine, else a transient agent-less one that closes here), so a
+// static board derives the badge against the live store. An empty result on
+// any error keeps a failed read from wedging the badge.
+func (m *Shell) dependencyBlockers(ctx context.Context, id domain.FeatureID) []engine.BlockingDep {
+	eng := m.engine
+	if eng == nil {
+		eng = engine.New(engine.Config{Store: m.store, Worktrees: m.wt, Workspace: m.ws})
+		defer func() { _ = eng.Close() }()
+	}
+	deps, err := eng.DependencyBlockers(ctx, id)
+	if err != nil {
+		return nil
+	}
+	return deps
 }
 
 // canHaveLanded reports whether a card's branch could plausibly have

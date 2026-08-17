@@ -61,6 +61,71 @@ func TestSpecOpenCreatesDraftFromTemplate(t *testing.T) {
 	}
 }
 
+// depSpecShell builds a shell whose store has a feature at FD-001 with the
+// given dependencies, and returns a specView over that feature.
+func depSpecShell(t *testing.T, deps []domain.Feature) (*Shell, *specView) {
+	t.Helper()
+	m, _ := newWorkspace(t)
+	m.now = func() time.Time { return fixedTime }
+	ctx := context.Background()
+	f := &domain.Feature{
+		ID: "FD-001", Num: 1, Title: "dependent", Slug: "dependent",
+		Stage: domain.StagePlan, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
+	if err := m.store.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range deps {
+		if err := m.store.CreateFeature(ctx, &d); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.store.AddDependency(ctx, f.ID, d.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	content := "## Problem\nNeeds a dep.\n>\n> Depends on: static prose\n\n## Chosen approach\nBuild it.\n"
+	sv := &specView{f: *f, content: content, doc: spec.Parse(content), cursor: 1}
+	m.spec = sv
+	return m, sv
+}
+
+// TestSpecDependencyStatusGolden: each direct dependency renders with its
+// live status (ID, stage, done/pending), the static Depends-on prose is
+// gone from read mode, and an all-done line appears when all deps are done.
+func TestSpecDependencyStatusGolden(t *testing.T) {
+	pending := domain.Feature{
+		ID: "FD-002", Num: 2, Title: "pending", Slug: "pending",
+		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
+	done := domain.Feature{
+		ID: "FD-003", Num: 3, Title: "done", Slug: "done",
+		Stage: domain.StageDone, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
+	m, sv := depSpecShell(t, []domain.Feature{pending, done})
+	out := stripANSI(sv.renderRead(m, 90, 30))
+	if strings.Contains(out, "Depends on:") {
+		t.Fatal("static Depends on prose still rendered:\n" + out)
+	}
+	if strings.Contains(out, "all dependencies done") {
+		t.Fatal("all-done line shown with a pending dep:\n" + out)
+	}
+	golden.RequireEqual(t, []byte(out))
+}
+
+// TestSpecDependencyStatusAllDone: every dependency done renders the
+// all-done line.
+func TestSpecDependencyStatusAllDone(t *testing.T) {
+	done := domain.Feature{
+		ID: "FD-002", Num: 2, Title: "done", Slug: "done",
+		Stage: domain.StageDone, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
+	m, sv := depSpecShell(t, []domain.Feature{done})
+	out := stripANSI(sv.renderRead(m, 90, 30))
+	if !strings.Contains(out, "all dependencies done") {
+		t.Fatalf("missing all-done line:\n%s", out)
+	}
+}
+
 func TestSpecViewReadGolden(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
