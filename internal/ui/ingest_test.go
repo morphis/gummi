@@ -108,6 +108,19 @@ func TestIngestReviewFlowMaterializes(t *testing.T) {
 	if ingested != 2 {
 		t.Errorf("materialized %d ingested features, want 2 (of %d total)", ingested, len(all))
 	}
+
+	// the board rows reflect the new features: the materialize notice
+	// carries reload, so the freshly minted rows appear without a second,
+	// unrelated notice (regression: ingestion used to go stale on screen).
+	var seen int
+	for _, r := range m.rows {
+		if (r.F.Title == "Payment webhooks" || r.F.Title == "Webhook retries") && r.F.Stage == domain.StageTodo {
+			seen++
+		}
+	}
+	if seen != 2 {
+		t.Errorf("board shows %d of the ingested features, want 2 (rows %d)", seen, len(m.rows))
+	}
 }
 
 func TestIngestSingleInFlight(t *testing.T) {

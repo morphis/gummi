@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -104,6 +105,29 @@ func TestBugImportFilterKeyFlow(t *testing.T) {
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.bugIngest != nil {
 		t.Error("esc (not filtering) should discard the import")
+	}
+}
+
+// TestBugImportMaterializeUpdatesBoard proves the import's materialize
+// notice carries reload, so the freshly minted bug rows appear on the
+// board without a second, unrelated notice (regression: import used to go
+// stale on screen until some other reload happened to fire).
+func TestBugImportMaterializeUpdatesBoard(t *testing.T) {
+	m, _ := chatWorkspace(t, agent.NewFake("hi"))
+	m = pump(t, m, m.Init())
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	m = pump(t, m, m.materializeBugIngest())
+	if m.bugIngest != nil {
+		t.Error("review surface should close after materialization")
+	}
+	var seen int
+	for _, r := range m.rows {
+		if r.F.Kind == domain.KindBug && r.F.Stage == domain.StageTodo {
+			seen++
+		}
+	}
+	if seen != 3 {
+		t.Errorf("board shows %d imported bugs, want 3 (rows %d)", seen, len(m.rows))
 	}
 }
 

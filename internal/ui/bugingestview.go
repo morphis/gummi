@@ -399,7 +399,7 @@ func (m *Shell) materializeBugIngest() tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: "import: " + sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("imported %d bug(s) into todo", len(created))}
+		return noticeMsg{text: fmt.Sprintf("imported %d bug(s) into todo", len(created)), reload: true}
 	}
 }
 

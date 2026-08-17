@@ -267,7 +267,7 @@ func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note string) tea.
 		if err := m.engine.Run(nf); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: string(id) + ": " + note}
+		return noticeMsg{text: string(id) + ": " + note, reload: true}
 	}
 }
 

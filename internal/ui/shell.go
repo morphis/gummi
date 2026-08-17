@@ -387,7 +387,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case noticeMsg:
 		m.notice = msg
-		if m.attached() {
+		// a reload is opt-in: only a notice emitted by a command that
+		// mutated row-rendered state carries the flag (see noticeMsg).
+		// A routine status notice ("queued", "paused", a non-mutating
+		// error) never triggers a board reload.
+		if msg.reload && m.attached() {
 			return m, m.loadRows
 		}
 		return m, nil
@@ -1272,10 +1276,10 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 		}
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
-			return noticeMsg{text: string(id) + " topped up — resuming"}
+			return noticeMsg{text: string(id) + " topped up — resuming", reload: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s topped up — envelope raised to %d credits, resuming",
-			id, f.Budget.Envelope)}
+			id, f.Budget.Envelope), reload: true}
 	}
 }
 
@@ -1293,9 +1297,9 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if to == 0 {
-			return noticeMsg{text: string(id) + ": envelope removed — spend is uncapped"}
+			return noticeMsg{text: string(id) + ": envelope removed — spend is uncapped", reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: envelope set to %d credits (applies from the next agent session)", id, to)}
+		return noticeMsg{text: fmt.Sprintf("%s: envelope set to %d credits (applies from the next agent session)", id, to), reload: true}
 	}
 }
 

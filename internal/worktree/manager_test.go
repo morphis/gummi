@@ -426,6 +426,27 @@ func TestRebasedOnMain(t *testing.T) {
 	}
 }
 
+func TestBranchAhead(t *testing.T) {
+	// a branch created at main's HEAD with no commits of its own is not
+	// ahead of the fork (BranchAhead false); after a commit it is.
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(6, "Ahead check")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ahead, err := m.BranchAhead(ctx, f); ahead || err != nil {
+		t.Fatalf("fresh branch ahead=%v err=%v, want false", ahead, err)
+	}
+	writeFile(t, p, "work.txt", "wip\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "wip")
+	if ahead, err := m.BranchAhead(ctx, f); !ahead || err != nil {
+		t.Fatalf("branch with a commit ahead=%v err=%v, want true", ahead, err)
+	}
+}
+
 func TestLandedSquashMerge(t *testing.T) {
 	root := newRepo(t)
 	m := newManager(t, root)

@@ -229,7 +229,7 @@ func (m *Shell) materializeIngest() tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: "ingest: " + sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("ingested %d feature(s) into todo", len(created))}
+		return noticeMsg{text: fmt.Sprintf("ingested %d feature(s) into todo", len(created)), reload: true}
 	}
 }
 

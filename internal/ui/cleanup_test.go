@@ -10,8 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// landFeature commits work on the feature branch and merges it into main
-// so the branch is an ancestor of main's HEAD (i.e. landed).
+// landFeature commits work on the feature branch and squash-merges it into
+// main — the way gummi actually lands (a squash merge keeps the branch's
+// own commits, so it stays non-ancestor and reads as landed).
 func landFeature(t *testing.T, root, wt string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x\n"), 0o600); err != nil {
@@ -19,7 +20,8 @@ func landFeature(t *testing.T, root, wt string) {
 	}
 	git(t, wt, "add", ".")
 	git(t, wt, "commit", "-qm", "feature work")
-	git(t, root, "merge", "--no-ff", "-m", "land FD-001", "gummi/FD-001-rebase-me")
+	git(t, root, "merge", "--squash", "gummi/FD-001-rebase-me")
+	git(t, root, "commit", "-qm", "land FD-001")
 }
 
 func TestLandedDetectionAndCleanup(t *testing.T) {
@@ -66,6 +68,26 @@ func TestLandedDetectionAndCleanup(t *testing.T) {
 	}
 	if !strings.Contains(m.notice.text, "cleaned up") {
 		t.Errorf("notice = %q, want a cleanup confirmation", m.notice.text)
+	}
+}
+
+// TestFreshWorktreeNotLanded asserts a worktree whose branch has no
+// commits of its own reads as not-landed after loadRows, without walking
+// the Landed squash/merge-tree path (it is gated behind BranchAhead).
+func TestFreshWorktreeNotLanded(t *testing.T) {
+	m, _, _ := rebaseFeatureFixture(t)
+	m = pump(t, m, m.loadRows)
+	var row featureRow
+	for _, r := range m.rows {
+		if r.F.ID == "FD-001" {
+			row = r
+		}
+	}
+	if !row.HasWorktree {
+		t.Fatal("fixture worktree missing")
+	}
+	if row.Landed {
+		t.Fatal("a branch with no commits of its own read as landed")
 	}
 }
 

@@ -78,7 +78,7 @@ func (m *Shell) requestSpecChanges(sv *specView) tea.Cmd {
 		if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + ": sent " + strconv.Itoa(n) + " review comment(s) to the architect"}
+		return noticeMsg{text: string(f.ID) + ": sent " + strconv.Itoa(n) + " review comment(s) to the architect", reload: true}
 	}
 }
 
@@ -97,7 +97,7 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 				if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
-				return noticeMsg{text: fmt.Sprintf("%s: sent %d review comment(s) to the running %s agent", f.ID, n, f.Stage)}
+				return noticeMsg{text: fmt.Sprintf("%s: sent %d review comment(s) to the running %s agent", f.ID, n, f.Stage), reload: true}
 			case engine.StateQueued:
 				return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open comments when it starts", f.ID, f.Stage)}
 			}
@@ -105,7 +105,7 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 		if err := m.engine.RunWith(f, turn); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d review comment(s)", f.ID, f.Stage, n)}
+		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d review comment(s)", f.ID, f.Stage, n), reload: true}
 	}
 }
 

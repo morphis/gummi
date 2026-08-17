@@ -252,7 +252,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 					if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 						return noticeMsg{text: sanitize(err.Error()), isErr: true}
 					}
-					return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the running %s agent", f.ID, n, f.Stage)}
+					return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the running %s agent", f.ID, n, f.Stage), reload: true}
 				case engine.StateQueued:
 					return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open diff comments when it starts", f.ID, f.Stage)}
 				}
@@ -261,7 +261,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 			if err := m.engine.Run(f); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment(s)", f.ID, f.Stage, n)}
+			return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment(s)", f.ID, f.Stage, n), reload: true}
 		}
 		// transition first (it validates the edge); only then drop the
 		// stale session, so a rejected bounce is never destructive.
@@ -273,6 +273,6 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		if err := m.engine.Run(nf); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the implementer", f.ID, n)}
+		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment(s) to the implementer", f.ID, n), reload: true}
 	}
 }

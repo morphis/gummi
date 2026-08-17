@@ -56,6 +56,36 @@ func TestShellZeroSizeSafe(t *testing.T) {
 	}
 }
 
+// TestNoticeDoesNotReload proves the decouple: a routine status notice
+// (no reload flag) yields no command from an attached shell — a status
+// string no longer triggers a board reload.
+func TestNoticeDoesNotReload(t *testing.T) {
+	m, _ := newWorkspace(t)
+	m = pump(t, m, m.Init())
+	// a routine notice: "queued", "paused", a non-mutating error
+	model, cmd := m.Update(noticeMsg{text: "FD-001 queued"})
+	if cmd != nil {
+		t.Fatalf("routine notice produced a command: %v", cmd)
+	}
+	if got := model.(*Shell).notice.text; got != "FD-001 queued" {
+		t.Errorf("notice = %q, want the status text", got)
+	}
+}
+
+// TestNoticeReloadOnFlag proves the opt-in: a notice carrying reload:true
+// yields a reload command, so state-changing notices still refresh.
+func TestNoticeReloadOnFlag(t *testing.T) {
+	m, _ := newWorkspace(t)
+	m = pump(t, m, m.Init())
+	model, cmd := m.Update(noticeMsg{text: "FD-001 created", reload: true})
+	if cmd == nil {
+		t.Fatal("reload:true notice produced no command")
+	}
+	if got := model.(*Shell).notice.text; got != "FD-001 created" {
+		t.Errorf("notice = %q, want the status text", got)
+	}
+}
+
 func TestShellResizeRecomputesLayout(t *testing.T) {
 	m := shellAt(120, 34)
 	wide := m.View().Content

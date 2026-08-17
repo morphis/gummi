@@ -80,6 +80,6 @@ func (m *Shell) attachRaw(f domain.Feature) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: "raw agent exited: " + sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: resumed from raw %s", f.ID, argv[0])}
+		return noticeMsg{text: fmt.Sprintf("%s: resumed from raw %s", f.ID, argv[0]), reload: true}
 	})
 }

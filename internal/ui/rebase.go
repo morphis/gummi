@@ -119,6 +119,6 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " rebased onto main → re-verifying"}
+		return noticeMsg{text: string(f.ID) + " rebased onto main → re-verifying", reload: true}
 	}
 }

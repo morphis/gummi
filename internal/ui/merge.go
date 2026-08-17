@@ -85,12 +85,12 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		}
 		if thenDone {
 			if _, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user"); err != nil {
-				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into main, but moving to done failed: " + err.Error()), isErr: true}
+				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into main, but moving to done failed: " + err.Error()), isErr: true, reload: true}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — press c to clean up"}
+			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — press c to clean up", reload: true}
 		}
-		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up"}
+		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up", reload: true}
 	}
 }
 

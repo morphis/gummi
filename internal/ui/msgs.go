@@ -41,10 +41,14 @@ type rowsMsg struct {
 }
 
 // noticeMsg surfaces a transient outcome (success or failure) in the
-// status bar.
+// status bar. reload is set only by a command that mutated row-rendered
+// state (membership, stage, worktree/branch, envelope/budget, gate-blocker
+// counts); a routine status notice (queued, paused, a non-mutating error)
+// leaves it false so it never triggers a board reload.
 type noticeMsg struct {
-	text  string
-	isErr bool
+	text   string
+	isErr  bool
+	reload bool
 }
 
 // chatAttachedMsg carries the result of an interactive Attach that ran in
@@ -76,9 +80,7 @@ func (m *Shell) loadRows() tea.Msg {
 			// a branch that has merged into main no longer needs its
 			// worktree — flag it so the board can offer cleanup.
 			if ok {
-				if landed, err := m.wt.Landed(ctx, &f); err == nil {
-					row.Landed = landed
-				}
+				row.Landed = m.canHaveLanded(ctx, &f)
 			}
 		}
 		row.OpenSpecQs = m.openQuestionsBlockingGate(f)
@@ -93,6 +95,25 @@ func (m *Shell) loadRows() tea.Msg {
 		rows = append(rows, row)
 	}
 	return rowsMsg{rows: rows}
+}
+
+// canHaveLanded reports whether a card's branch could plausibly have
+// merged into main, gating the expensive Landed walk behind a cheap
+// precondition. A branch with no commits of its own ahead of the fork
+// cannot be landed: a squash merge needs the branch's own commits, and a
+// merged-then-advanced branch (an ancestor with main moved past it) never
+// arises from gummi's own squash-merge lands. For such a card Landed is
+// skipped and the row reads not-landed — a best-effort hint, re-checked
+// by the c/m handlers at run time, so a stale-negative only withholds the
+// cleanup prompt until the next reload. False on any git error, matching
+// the swallow-errors contract of the inline Landed call it replaces.
+func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
+	ahead, err := m.wt.BranchAhead(ctx, f)
+	if err != nil || !ahead {
+		return false
+	}
+	landed, err := m.wt.Landed(ctx, f)
+	return err == nil && landed
 }
 
 // formResult carries the new-feature form's fields. The description's
@@ -155,7 +176,7 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s created", id)}
+		return noticeMsg{text: fmt.Sprintf("%s created", id), reload: true}
 	}
 }
 
@@ -213,7 +234,7 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s created", id)}
+		return noticeMsg{text: fmt.Sprintf("%s created", id), reload: true}
 	}
 }
 
@@ -252,7 +273,7 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s created — fresh copy of %s", newID, id)}
+		return noticeMsg{text: fmt.Sprintf("%s created — fresh copy of %s", newID, id), reload: true}
 	}
 }
 
@@ -287,7 +308,7 @@ func (m *Shell) routeViaPlan(id domain.FeatureID) tea.Cmd {
 		if err := m.store.UpdateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s will route through plan — spec approval now leads there", id)}
+		return noticeMsg{text: fmt.Sprintf("%s will route through plan — spec approval now leads there", id), reload: true}
 	}
 }
 
@@ -352,7 +373,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		if discover || est {
 			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est}
 		}
-		return noticeMsg{text: note}
+		return noticeMsg{text: note, reload: true}
 	}
 }
 
@@ -456,7 +477,7 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 		if err := m.store.UpdateFeature(ctx, &f); err != nil {
 			return nil
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", id, blended)}
+		return noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", id, blended), reload: true}
 	}
 }
 
@@ -517,7 +538,7 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " rebased onto main"}
+		return noticeMsg{text: string(f.ID) + " rebased onto main", reload: true}
 	}
 }
 
@@ -568,7 +589,7 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}
-		return noticeMsg{text: string(f.ID) + " cleaned up — worktree and merged branch removed"}
+		return noticeMsg{text: string(f.ID) + " cleaned up — worktree and merged branch removed", reload: true}
 	}
 }
 
@@ -632,7 +653,7 @@ func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		m.dropSession(id)
-		return noticeMsg{text: fmt.Sprintf("%s bounced back to %s", id, back)}
+		return noticeMsg{text: fmt.Sprintf("%s bounced back to %s", id, back), reload: true}
 	}
 }
 
@@ -666,6 +687,6 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		_ = os.RemoveAll(filepath.Join(m.wt.Root(), f.ArtifactPath()))
 		_ = os.RemoveAll(filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f)))
 		m.dropSession(id)
-		return noticeMsg{text: fmt.Sprintf("%s deleted", id)}
+		return noticeMsg{text: fmt.Sprintf("%s deleted", id), reload: true}
 	}
 }
