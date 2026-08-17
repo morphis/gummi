@@ -589,12 +589,26 @@ func TestMigrations(t *testing.T) {
 // If a future column is added to featureCols but not to CREATE TABLE (or
 // vice versa), the written set and the real schema diverge and this test
 // fails.
+//
+// The database is built from the base schema constant alone - the
+// migration ALTERs are deliberately skipped - so the assertion proves the
+// CREATE TABLE block covers every written column. OpenStore's
+// migration-path coverage is TestOldSchemaStillOpens' job; running the
+// ALTERs here would let a column that exists only via a migration slip
+// past (the drift FD-048 exists to prevent).
 func TestFreshSchemaCoversWrites(t *testing.T) {
-	s := openStore(t)
 	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		t.Fatalf("building base schema: %v", err)
+	}
 
 	written := writtenFeatureColumns()
-	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info('features')`)
+	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info('features')`)
 	if err != nil {
 		t.Fatal(err)
 	}
