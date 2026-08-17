@@ -57,7 +57,10 @@ CREATE TABLE IF NOT EXISTS features (
 	quick           INTEGER NOT NULL DEFAULT 0,
 	verified_at     TEXT NOT NULL DEFAULT '',
 	gate_approval   TEXT NOT NULL DEFAULT '',
-	fork_point      TEXT NOT NULL DEFAULT ''
+	severity        TEXT NOT NULL DEFAULT '',
+	fork_point      TEXT NOT NULL DEFAULT '',
+	plan_rounds     INTEGER NOT NULL DEFAULT 0,
+	review_rounds   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
@@ -313,12 +316,12 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
-			budget_envelope, budget_spent, created_at, updated_at,
+			budget_envelope, created_at, updated_at,
 			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, plan_rounds, review_rounds)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
-		f.Budget.Envelope, f.Budget.Spent,
+		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
 		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.PlanRounds, f.ReviewRounds)
 	if err != nil {
@@ -329,9 +332,25 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 
 const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
-	budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
+	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, plan_rounds, review_rounds`
+
+// writtenFeatureColumns returns the set of feature columns the store
+// reads back (the SELECT list of featureCols), keyed by name. It is the
+// anti-drift guard for the schema: a fresh database's CREATE TABLE must
+// cover every column here, or a column the code writes would be missing
+// from the base schema.
+func writtenFeatureColumns() map[string]bool {
+	cols := map[string]bool{}
+	for _, c := range strings.Split(strings.ReplaceAll(featureCols, "\n", " "), ",") {
+		name := strings.TrimSpace(c)
+		if name != "" {
+			cols[name] = true
+		}
+	}
+	return cols
+}
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -340,7 +359,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	var id, stage, created, updated, kind, verified, severity string
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
-		&f.Budget.Envelope, &f.Budget.Spent,
+		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
 		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.PlanRounds, &f.ReviewRounds)
@@ -833,11 +852,11 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE features SET title=?, one_liner=?, slug=?,
 			skip_brainstorm=?, skip_plan=?, skip_triage=?, skip_diagnose=?, quick=?, profile=?,
-			budget_envelope=?, budget_spent=?, updated_at=?
+			budget_envelope=?, updated_at=?
 		WHERE id=?`,
 		f.Title, f.OneLiner, f.Slug,
 		f.Skip.Brainstorm, f.Skip.Plan, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.Profile,
-		f.Budget.Envelope, f.Budget.Spent,
+		f.Budget.Envelope,
 		now.Format(timeFmt), string(f.ID))
 	if err != nil {
 		return fmt.Errorf("updating %s: %w", f.ID, err)

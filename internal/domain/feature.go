@@ -91,7 +91,6 @@ func ParseFeatureID(s string) (FeatureID, error) {
 // (plan.go) for the budget math.
 type Budget struct {
 	Envelope int // credits allotted for the whole feature; 0 = no cap
-	Spent    int // credits consumed so far
 }
 
 // Spend is a feature's metered cost, accumulated across every stage's
@@ -242,7 +241,7 @@ func (f *Feature) Validate() error {
 	if !f.Stage.Valid() {
 		return fmt.Errorf("feature %s: unknown stage %q", f.ID, f.Stage)
 	}
-	if f.Budget.Envelope < 0 || f.Budget.Spent < 0 {
+	if f.Budget.Envelope < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)
 	}
 	if !ValidGateApproval(f.GateApproval) {

@@ -336,12 +336,11 @@ func TestStoreCRUD(t *testing.T) {
 	}
 
 	got.Title = "Dark mode toggle"
-	got.Budget.Spent = 12
 	if err := s.UpdateFeature(ctx, &got); err != nil {
 		t.Fatal(err)
 	}
 	got2, err := s.GetFeature(ctx, f.ID)
-	if err != nil || got2.Title != "Dark mode toggle" || got2.Budget.Spent != 12 {
+	if err != nil || got2.Title != "Dark mode toggle" {
 		t.Fatalf("update lost: %+v err=%v", got2, err)
 	}
 
@@ -582,5 +581,124 @@ func TestMigrations(t *testing.T) {
 	}
 	if len(snaps) != 1 || snaps[0].Flavor != "rebase" {
 		t.Errorf("restored sessions = %+v, want one rebase-flavored session", snaps)
+	}
+}
+
+// TestFreshSchemaCoversWrites locks in the invariant that a fresh
+// database's features table contains every column the store reads back.
+// If a future column is added to featureCols but not to CREATE TABLE (or
+// vice versa), the written set and the real schema diverge and this test
+// fails.
+func TestFreshSchemaCoversWrites(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+
+	written := writtenFeatureColumns()
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info('features')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	present := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		present[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	var missing []string
+	for name := range written {
+		if !present[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) != 0 {
+		t.Errorf("fresh features schema missing %d written column(s): %v", len(missing), missing)
+	}
+}
+
+// TestOldSchemaStillOpens hand-builds a database using the
+// pre-reconciliation features table (no severity/plan_rounds/review_rounds,
+// but with budget_spent), then opens the store over it. It must open
+// cleanly (the ALTERs backfill the three new columns with their defaults),
+// create and round-trip a feature, and leave budget_spent at its 0
+// default — proving the Budget.Spent removal broke nothing and old
+// databases are unharmed.
+func TestOldSchemaStillOpens(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE features (
+		id              TEXT PRIMARY KEY,
+		num             INTEGER NOT NULL UNIQUE,
+		title           TEXT NOT NULL,
+		one_liner       TEXT NOT NULL DEFAULT '',
+		slug            TEXT NOT NULL,
+		stage           TEXT NOT NULL,
+		skip_brainstorm INTEGER NOT NULL DEFAULT 0,
+		skip_plan       INTEGER NOT NULL DEFAULT 0,
+		profile         TEXT NOT NULL DEFAULT '',
+		budget_envelope INTEGER NOT NULL DEFAULT 0,
+		budget_spent    INTEGER NOT NULL DEFAULT 0,
+		spend_credits   REAL NOT NULL DEFAULT 0,
+		spend_est       REAL NOT NULL DEFAULT 0,
+		spend_in        INTEGER NOT NULL DEFAULT 0,
+		spend_out       INTEGER NOT NULL DEFAULT 0,
+		created_at      TEXT NOT NULL,
+		updated_at      TEXT NOT NULL,
+		kind            TEXT NOT NULL DEFAULT 'feature',
+		external_ref    TEXT NOT NULL DEFAULT '',
+		skip_triage     INTEGER NOT NULL DEFAULT 0,
+		skip_diagnose   INTEGER NOT NULL DEFAULT 0,
+		quick           INTEGER NOT NULL DEFAULT 0,
+		verified_at     TEXT NOT NULL DEFAULT '',
+		gate_approval   TEXT NOT NULL DEFAULT '',
+		fork_point      TEXT NOT NULL DEFAULT ''
+	);`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open over old schema: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	f := feat(1, "Old DB feature")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Old DB feature" {
+		t.Errorf("round-trip title = %q", got.Title)
+	}
+
+	var severity, budgetSpent string
+	var planRounds, reviewRounds int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT severity, plan_rounds, review_rounds, budget_spent FROM features WHERE id = ?`,
+		string(f.ID)).Scan(&severity, &planRounds, &reviewRounds, &budgetSpent); err != nil {
+		t.Fatal(err)
+	}
+	if severity != "" || planRounds != 0 || reviewRounds != 0 {
+		t.Errorf("backfilled defaults = severity %q, plan_rounds %d, review_rounds %d; want empty/0/0",
+			severity, planRounds, reviewRounds)
+	}
+	if budgetSpent != "0" {
+		t.Errorf("budget_spent = %q, want 0", budgetSpent)
 	}
 }

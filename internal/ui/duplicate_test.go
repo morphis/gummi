@@ -63,7 +63,7 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	if !dup.Skip.Brainstorm || dup.Profile != "fast" {
 		t.Errorf("copy lost run settings: skip=%+v profile=%q", dup.Skip, dup.Profile)
 	}
-	if dup.Budget.Envelope != 500 || dup.Budget.Spent != 0 {
+	if dup.Budget.Envelope != 500 {
 		t.Errorf("copy budget = %+v, want the envelope with nothing spent", dup.Budget)
 	}
 	if !dup.Spend.Zero() {

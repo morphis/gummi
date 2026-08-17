@@ -120,7 +120,6 @@ func TestFeatureValidate(t *testing.T) {
 		"bad slug":        func(f *Feature) { f.Slug = "../evil" },
 		"bad stage":       func(f *Feature) { f.Stage = "shipping" },
 		"neg envelope":    func(f *Feature) { f.Budget.Envelope = -1 },
-		"neg spent":       func(f *Feature) { f.Budget.Spent = -5 },
 	}
 	for name, mut := range mutations {
 		g := testFeature()
