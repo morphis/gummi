@@ -282,10 +282,16 @@ Escape hatches, because the assumption won't always hold:
   and session transcript — full audit trail, and git worktrees make any
   agent change revertible.
 
-On first run outside an obvious container (no `/.dockerenv`, no
-`$CONTAINER`-ish markers), gummi shows a one-time "you're on a bare host
-with allow-all permissions" warning rather than silently degrading either
-safety or flow.
+Instead of probing for a container or warning once, gummi ships the
+sandbox assumption as layered, always-on guards. The `permissions:
+allow-all | guarded` mode (above) is the first layer; per-profile
+`sandbox: enforce | warn | off` confinement is the second — `enforce`
+blocks operations that reach outside the sandbox, `warn` flags them,
+`off` (the default for allow-all) trusts the boundary. A main-checkout
+tripwire (approving a spec that would run the implementer in the main
+checkout rather than a worktree) is the third. Running gummi on a bare
+host with allow-all is possible and surfaced, not silently degraded —
+the escape hatches below stay the honest path.
 
 ### 4.5 Client tools & the ask protocol
 

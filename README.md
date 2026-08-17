@@ -144,11 +144,15 @@ Key surfaces on the board (press `?` anywhere for the full table):
 
 | key | action |
 |---|---|
-| `j/k`, `1..9` | select / jump to a card |
+| `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
 | `enter` | chat (interactive stages) · run / watch (autonomous stages) |
+| `p` / `t` | pause the running agent / read the session transcript |
 | `s` / `d` | spec / diff view — `tab` switches read ⇄ annotate |
 | `g` / `b` | advance a gate / bounce back to implement or fix |
+| `P` | restore the plan stage on a quick / skip-plan feature (design phase only) |
 | `v` | run the verify checks |
+| `u` | set the budget envelope (credits; 0 = uncapped) |
+| `S` | toggle severity sort (todo only) |
 | `tab` / `i` | cycle / open the needs-attention inbox |
 | `n` / `B` | new feature / new bug |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
@@ -301,8 +305,10 @@ worktrees, and gates all still work.
 Two files in `.gummi/`, both scaffolded on first run:
 
 - **`config.yaml`** — the permission mode: `allow-all` (default — gummi
-  assumes it runs in a sandbox, and warns once on a bare host) or
-  `guarded` (agent tool calls need approval through the inbox). The
+  assumes it runs in a sandbox) or `guarded` (agent tool calls need
+  approval through the inbox). The per-profile `sandbox: enforce|warn|off`
+  confinement and the main-checkout tripwire back the allow-all default;
+  see DESIGN §4.4. The
   Verify stage's check commands are not configured here: gummi
   auto-discovers the repo's build/test/lint commands at approval into
   each spec's Verification plan (a `gummi-checks` block), where you
@@ -330,6 +336,8 @@ Environment variables:
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
 | `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
+| `GUMMI_TURN_RESERVE` | one turn's credits — the floor under envelope-derived stage budgets (default `domain.TurnReserveCredits`; override for unusual models) |
+| `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (on by default; needs an authenticated `gh` CLI to show anything) |
 | `GUMMI_THEME` | `dark` (default) · `light` · `neon` |
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default) · `desktop` · `off` |
 | `GUMMI_ATTACH_CMD` | command for raw-attach (default: selected backend's CLI) |
