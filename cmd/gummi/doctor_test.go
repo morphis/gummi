@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,7 @@ func TestDoctorCodexUsesNativeLoginRemediation(t *testing.T) {
 	clearDoctorEnv(t)
 	fakeAgentOnPath(t, "codex")
 	t.Setenv("GUMMI_AGENT", "codex")
-	r := buildDoctorReport(gitRepo(t))
+	r := buildDoctorReport(gitRepo(t), doctorOpts{})
 	if c := checkByName(r, "backend:codex"); c.Status != statusOK || !strings.Contains(c.Detail, "codex") {
 		t.Fatalf("backend = %+v", c)
 	}
@@ -108,7 +109,7 @@ func TestDoctorReadyWithHeadlessAuth(t *testing.T) {
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
 	t.Setenv("GUMMI_ENVELOPE", "500")
 
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	if !r.Ready {
 		t.Fatalf("expected ready, got not ready: %+v", r.Checks)
 	}
@@ -129,7 +130,7 @@ func TestDoctorBackendMissingBinary(t *testing.T) {
 	t.Setenv("GUMMI_AGENT", "claude")
 	t.Setenv("GUMMI_CLAUDE_BIN", "gummi-no-such-binary-xyz")
 
-	r := buildDoctorReport(gitRepo(t))
+	r := buildDoctorReport(gitRepo(t), doctorOpts{})
 	if c := checkByName(r, "backend:claude"); c.Status != statusFail {
 		t.Errorf("backend = %+v, want fail", c)
 	}
@@ -149,7 +150,7 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
 	// no envelope, no BYOK (auth becomes n/a for headless).
 
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	if c := checkByName(r, "envelope"); c.Status != statusWarn {
 		t.Errorf("envelope = %+v, want warn", c)
 	}
@@ -158,7 +159,7 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 	}
 
 	t.Setenv("GUMMI_ENVELOPE", "5") // below one turn
-	r = buildDoctorReport(gitRepo(t))
+	r = buildDoctorReport(gitRepo(t), doctorOpts{})
 	if c := checkByName(r, "envelope"); c.Status != statusWarn {
 		t.Errorf("sub-turn envelope = %+v, want warn", c)
 	}
@@ -172,7 +173,7 @@ func TestDoctorClaudeBackendFlagsForeignSeedModels(t *testing.T) {
 	clearDoctorEnv(t)
 	t.Setenv("GUMMI_AGENT", "claude")
 
-	r := buildDoctorReport(gitRepo(t)) // no .gummi workspace → seed template
+	r := buildDoctorReport(gitRepo(t), doctorOpts{}) // no .gummi workspace → seed template
 	c := checkByName(r, "profile")
 	if c.Status != statusFail {
 		t.Fatalf("profile = %+v, want fail (claude can't drive the mixed thrifty default)", c)
@@ -197,7 +198,7 @@ func TestDoctorNonClaudeBackendIgnoresSeedModels(t *testing.T) {
 	t.Setenv("GUMMI_AGENT", "headless")
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
 
-	r := buildDoctorReport(gitRepo(t))
+	r := buildDoctorReport(gitRepo(t), doctorOpts{})
 	if c := checkByName(r, "profile"); c.Status == statusFail {
 		t.Errorf("profile = %+v, want non-fail for a non-claude backend", c)
 	}
@@ -206,7 +207,7 @@ func TestDoctorNonClaudeBackendIgnoresSeedModels(t *testing.T) {
 // A non-repo directory fails the repo check and blocks readiness.
 func TestDoctorNoRepoFails(t *testing.T) {
 	clearDoctorEnv(t)
-	r := buildDoctorReport(t.TempDir())
+	r := buildDoctorReport(t.TempDir(), doctorOpts{})
 	if c := checkByName(r, "repo"); c.Status != statusFail {
 		t.Errorf("repo = %+v, want fail", c)
 	}
@@ -242,7 +243,7 @@ profiles:
     reviewer: { backend: opencode, model: m }
     scribe: { backend: opencode, model: m }
 `)
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	c := checkByName(r, "sandbox:thrifty")
 	if c.Status != statusOK {
 		t.Fatalf("sandbox:thrifty = %+v, want ok", c)
@@ -266,7 +267,7 @@ profiles:
   opencode-only:
     implementer: { backend: opencode, model: m }
 `)
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	c := checkByName(r, "sandbox:opencode-only")
 	if c.Status != statusOK {
 		t.Fatalf("sandbox:opencode-only = %+v, want ok (MCP-only coverage)", c)
@@ -354,7 +355,7 @@ profiles:
 `)
 	fakeAgentOnPath(t, "opencode") // PATH has opencode but not copilot
 
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	if !r.Ready {
 		t.Fatalf("expected ready, got not ready: %+v", r.Checks)
 	}
@@ -385,7 +386,7 @@ profiles:
 	// PATH holds nothing — opencode (and the copilot default) are absent.
 	t.Setenv("PATH", t.TempDir())
 
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	if c := checkByName(r, "backend:opencode"); c.Status != statusFail {
 		t.Errorf("backend:opencode = %+v, want fail", c)
 	}
@@ -404,7 +405,7 @@ func TestDoctorDefaultRequiredWhenSeedTemplate(t *testing.T) {
 	t.Setenv("GUMMI_AGENT", "claude")
 	t.Setenv("GUMMI_CLAUDE_BIN", "gummi-no-such-binary-xyz")
 
-	r := buildDoctorReport(gitRepo(t))
+	r := buildDoctorReport(gitRepo(t), doctorOpts{})
 	if c := checkByName(r, "backend:claude"); c.Status != statusFail {
 		t.Errorf("backend:claude = %+v, want fail", c)
 	}
@@ -432,7 +433,7 @@ profiles:
 	t.Setenv("GUMMI_AGENT", "opencode")
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
 
-	r := buildDoctorReport(repo)
+	r := buildDoctorReport(repo, doctorOpts{})
 	c := checkByName(r, "backend:opencode")
 	if c.Status != statusFail {
 		t.Fatalf("backend:opencode = %+v, want fail", c)
@@ -463,7 +464,7 @@ profiles:
 	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
 
 	var got []string
-	for _, c := range buildDoctorReport(repo).Checks {
+	for _, c := range buildDoctorReport(repo, doctorOpts{}).Checks {
 		if strings.HasPrefix(c.Name, "backend:") {
 			got = append(got, c.Name)
 		}
@@ -473,7 +474,7 @@ profiles:
 		t.Errorf("backend order = %v, want %v", got, want)
 	}
 	var again []string
-	for _, c := range buildDoctorReport(repo).Checks {
+	for _, c := range buildDoctorReport(repo, doctorOpts{}).Checks {
 		if strings.HasPrefix(c.Name, "backend:") {
 			again = append(again, c.Name)
 		}
@@ -505,7 +506,7 @@ func TestDoctorForkDrift(t *testing.T) {
 	}
 
 	// clean: no drift.
-	r := buildDoctorReport(fi.root)
+	r := buildDoctorReport(fi.root, doctorOpts{})
 	if c := checkByName(r, "fork-drift"); c.Status != statusOK {
 		t.Fatalf("clean repo fork-drift = %+v, want ok", c)
 	}
@@ -513,7 +514,7 @@ func TestDoctorForkDrift(t *testing.T) {
 	// drift: rewrite main under the worktree.
 	fi.rewindMain()
 
-	r = buildDoctorReport(fi.root)
+	r = buildDoctorReport(fi.root, doctorOpts{})
 	c := checkByName(r, "fork-drift")
 	if c.Status != statusWarn {
 		t.Fatalf("drifted fork-drift = %+v, want warn", c)
@@ -611,4 +612,294 @@ func (f *doctorFixture) rewindMain() {
 	git("checkout", "-q", "--orphan", "tmp-rewound")
 	git("commit", "-q", "-m", "rewound main")
 	git("branch", "-M", "tmp-rewound", "main")
+}
+
+// --deep parses through registerDoctorFlags and defaults off, so the
+// default `gummi doctor` stays cheap and offline.
+func TestDoctorDeepFlag(t *testing.T) {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags := registerDoctorFlags(fs)
+	if *flags.deep {
+		t.Fatal("deep defaults on")
+	}
+	if err := fs.Parse([]string{"--deep"}); err != nil {
+		t.Fatal(err)
+	}
+	if !*flags.deep {
+		t.Fatal("--deep did not parse")
+	}
+}
+
+// headless has no model to reach (the role routes through the env command),
+// so its probe is trivially satisfied without constructing anything.
+func TestProbeModelHeadless(t *testing.T) {
+	clearDoctorEnv(t)
+	bi := backendInfoFor("headless")
+	if r := probeModel(bi, "qwen", time.Second); r != reachOK {
+		t.Fatalf("headless probe = %q, want reachOK", r)
+	}
+}
+
+// An opencode backend with no binary on PATH is unknown, not fail: the
+// backend:<name> check owns "not on PATH". No network is touched.
+func TestProbeModelUnknownOnMissingBackend(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("PATH", t.TempDir())
+	bi := backendInfoFor("opencode")
+	if r := probeModel(bi, "m", time.Second); r != reachUnknown {
+		t.Fatalf("probe = %q, want reachUnknown (no binary, no network)", r)
+	}
+}
+
+// A fresh TTL cache entry is reused verbatim: the live probe is never
+// called and the cached servable result is reported.
+func TestProbeCacheFreshHit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gummi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".gummi", probeCacheFile)
+	now := time.Now()
+	if err := recordProbe(path, "opencode|m", true, now); err != nil {
+		t.Fatal(err)
+	}
+	ws := state.Workspace{Root: dir}
+	profiles := config.Profiles{Default: "p", Profiles: map[string]config.Profile{
+		"p": {
+			"architect":   {Backend: "opencode", Model: "m"},
+			"implementer": {Backend: "opencode", Model: "m"},
+			"reviewer":    {Backend: "opencode", Model: "m"},
+			"scribe":      {Backend: "opencode", Model: "m"},
+		},
+	}}
+	calls := 0
+	probe := func(bi backendInfo, model string, timeout time.Duration) probeResult {
+		calls++
+		return reachFail
+	}
+	checks := reachChecks(ws, profiles, doctorOpts{Deep: true, Probe: probe}, now)
+	if calls != 0 {
+		t.Fatalf("fresh cache hit should skip the live probe, got %d calls", calls)
+	}
+	if c := checkByName(doctorReport{Checks: checks}, "reach:p/architect"); c.Status != statusOK {
+		t.Fatalf("reach:p/architect = %+v, want ok from cache", c)
+	}
+}
+
+// An entry older than the TTL is a miss: the live probe runs and the fresh
+// result (here a fail) is reported.
+func TestProbeCacheExpired(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gummi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".gummi", probeCacheFile)
+	now := time.Now()
+	// recorded longer ago than the TTL, so the entry is stale at `now`.
+	if err := recordProbe(path, "opencode|m", true, now.Add(-probeCacheTTL-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ws := state.Workspace{Root: dir}
+	profiles := config.Profiles{Default: "p", Profiles: map[string]config.Profile{
+		"p": {
+			"architect":   {Backend: "opencode", Model: "m"},
+			"implementer": {Backend: "opencode", Model: "m"},
+			"reviewer":    {Backend: "opencode", Model: "m"},
+			"scribe":      {Backend: "opencode", Model: "m"},
+		},
+	}}
+	calls := 0
+	probe := func(bi backendInfo, model string, timeout time.Duration) probeResult {
+		calls++
+		return reachFail
+	}
+	checks := reachChecks(ws, profiles, doctorOpts{Deep: true, Probe: probe}, now)
+	if calls != 1 {
+		t.Fatalf("expired cache should trigger a live probe, got %d calls", calls)
+	}
+	if c := checkByName(doctorReport{Checks: checks}, "reach:p/architect"); c.Status != statusFail {
+		t.Fatalf("reach:p/architect = %+v, want fail", c)
+	}
+}
+
+// The default (non-deep) doctor reports every reach:* as unknown ("not
+// probed"), stays ready, and never creates the probe-cache sidecar — the
+// offline invariant.
+func TestDoctorReachUnknownWhenNotDeep(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, headlessProfiles)
+	fakeAgentOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent")
+	t.Setenv("GUMMI_ENVELOPE", "500")
+
+	r := buildDoctorReport(repo, doctorOpts{})
+	var reach []string
+	for _, c := range r.Checks {
+		if strings.HasPrefix(c.Name, "reach:") {
+			reach = append(reach, c.Name)
+		}
+	}
+	if len(reach) != 4 {
+		t.Fatalf("expected 4 reach checks, got %v", reach)
+	}
+	for _, c := range r.Checks {
+		if strings.HasPrefix(c.Name, "reach:") {
+			if c.Status != statusUnknown {
+				t.Errorf("%s = %s, want unknown (not probed)", c.Name, c.Status)
+			}
+			if !strings.Contains(c.Detail, "not probed") {
+				t.Errorf("%s detail %q should say not probed", c.Name, c.Detail)
+			}
+		}
+	}
+	if !r.Ready {
+		t.Errorf("default doctor should stay ready with reach unknown: %+v", r.Checks)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".gummi", probeCacheFile)); !os.IsNotExist(err) {
+		t.Errorf("non-deep doctor must not create the probe cache sidecar (err=%v)", err)
+	}
+}
+
+// With an injected probe, reach:* reports ok/fail/unknown per role, a fail
+// flips Ready false, and unknown never does — all offline.
+func TestDoctorReachWithInjectedProbe(t *testing.T) {
+	clearDoctorEnv(t)
+	fakeAgentOnPath(t, "opencode")
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: good }
+    implementer: { backend: opencode, model: bad }
+    reviewer: { backend: opencode, model: unknown }
+    scribe: { backend: opencode, model: good }
+`)
+	probe := func(bi backendInfo, model string, timeout time.Duration) probeResult {
+		switch model {
+		case "good":
+			return reachOK
+		case "bad":
+			return reachFail
+		default:
+			return reachUnknown
+		}
+	}
+	r := buildDoctorReport(repo, doctorOpts{Deep: true, Probe: probe})
+	if c := checkByName(r, "reach:thrifty/architect"); c.Status != statusOK {
+		t.Errorf("architect = %+v, want ok", c)
+	}
+	if c := checkByName(r, "reach:thrifty/implementer"); c.Status != statusFail {
+		t.Errorf("implementer = %+v, want fail", c)
+	}
+	if c := checkByName(r, "reach:thrifty/reviewer"); c.Status != statusUnknown {
+		t.Errorf("reviewer = %+v, want unknown", c)
+	}
+	if c := checkByName(r, "reach:thrifty/scribe"); c.Status != statusOK {
+		t.Errorf("scribe = %+v, want ok", c)
+	}
+	if r.Ready {
+		t.Errorf("a failing reach check must flip Ready false: %+v", r.Checks)
+	}
+
+	// an unknown-only deep run never flips readiness (fresh repo so the
+	// probe cache from the run above is not reused).
+	repo2 := gitRepo(t)
+	writeProfiles(t, repo2, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: m }
+    implementer: { backend: opencode, model: m }
+    reviewer: { backend: opencode, model: m }
+    scribe: { backend: opencode, model: m }
+`)
+	r2 := buildDoctorReport(repo2, doctorOpts{Deep: true, Probe: func(bi backendInfo, model string, timeout time.Duration) probeResult {
+		return reachUnknown
+	}})
+	if !r2.Ready {
+		t.Errorf("unknown reach checks must not flip Ready: %+v", r2.Checks)
+	}
+}
+
+// An inconclusive probe (unknown) is never cached, so it is not replayed as
+// a hard fail on a later --deep run: a transient timeout, closed stream, or
+// auth-blocked interactive backend must report unknown, not fail. The sidecar
+// is left without the key (or uncreated) so the next deep run re-probes.
+func TestProbeUnknownNotCachedAsFail(t *testing.T) {
+	clearDoctorEnv(t)
+	fakeAgentOnPath(t, "opencode")
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: m }
+    implementer: { backend: opencode, model: m }
+    reviewer: { backend: opencode, model: m }
+    scribe: { backend: opencode, model: m }
+`)
+	r := buildDoctorReport(repo, doctorOpts{Deep: true, Probe: func(bi backendInfo, model string, timeout time.Duration) probeResult {
+		return reachUnknown
+	}})
+	for _, c := range r.Checks {
+		if strings.HasPrefix(c.Name, "reach:") && c.Status != statusUnknown {
+			t.Errorf("%s = %s, want unknown (an inconclusive probe is never fail)", c.Name, c.Status)
+		}
+	}
+	if !r.Ready {
+		t.Errorf("unknown reach checks must not flip Ready: %+v", r.Checks)
+	}
+	// The inconclusive result must not be persisted: a corrupt or absent
+	// sidecar degrades to a live probe, and a stale ok:false would be
+	// replayed as a fail. Here the sidecar must be absent (or lack the key).
+	if raw, err := os.ReadFile(filepath.Join(repo, ".gummi", probeCacheFile)); err == nil {
+		m := map[string]probeCacheEntry{}
+		if uerr := json.Unmarshal(raw, &m); uerr != nil {
+			t.Fatalf("sidecar unreadable: %v", uerr)
+		}
+		for k, e := range m {
+			if !e.OK {
+				t.Errorf("inconclusive probe persisted as ok:false for %q; would replay as a fail", k)
+			}
+		}
+	}
+}
+
+// A fresh workspace's first --deep run has no sidecar to seed the in-memory
+// dedupe map, so several roles resolving to the identical (backend, model)
+// pair must still probe it only once. Regression for the found gap: cache
+// started nil (loadProbeCache errors on a missing file), silently
+// disabling the within-run write and letting every role probe
+// independently on exactly the run this dedupe exists to protect.
+func TestDoctorReachDedupesWithinFreshRun(t *testing.T) {
+	clearDoctorEnv(t)
+	fakeAgentOnPath(t, "opencode")
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: opencode, model: same }
+    implementer: { backend: opencode, model: same }
+    reviewer: { backend: opencode, model: same }
+    scribe: { backend: opencode, model: same }
+`)
+	calls := map[string]int{}
+	probe := func(bi backendInfo, model string, timeout time.Duration) probeResult {
+		calls[probeCacheKey(bi.name, model)]++
+		return reachOK
+	}
+	r := buildDoctorReport(repo, doctorOpts{Deep: true, Probe: probe})
+	key := probeCacheKey("opencode", "same")
+	if calls[key] != 1 {
+		t.Errorf("probe called %d time(s) for %q on a fresh --deep run, want exactly 1 (four roles share this model)", calls[key], key)
+	}
+	for _, role := range []string{"architect", "implementer", "reviewer", "scribe"} {
+		if c := checkByName(r, "reach:thrifty/"+role); c.Status != statusOK {
+			t.Errorf("%s = %+v, want ok", role, c)
+		}
+	}
 }

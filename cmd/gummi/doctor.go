@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -23,17 +24,18 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// runDoctor implements `gummi doctor [--json]` (DESIGN §5, G1): a read-only
-// readiness checklist — repo, workspace, backend, profile, auth, envelope,
-// lock — that the skill's first-run setup flow consumes via --json. It
-// constructs no engine/agent and holds no lock beyond a momentary probe, so
-// it is safe to run while a feature is live. It reports; it never repairs
-// auth or writes secrets (G2/G4).
+// runDoctor implements `gummi doctor [--json] [--deep]` (DESIGN §5, G1): a
+// read-only readiness checklist — repo, workspace, backend, profile, auth,
+// envelope, lock, plus per-role model reachability under --deep — that the
+// skill's first-run setup flow consumes via --json. It constructs no
+// engine/agent and holds no lock beyond a momentary probe, so it is safe to
+// run while a feature is live. It reports; it never repairs auth or writes
+// secrets (G2/G4).
 func runDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	jsonOut := registerDoctorFlags(fs)
+	flags := registerDoctorFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi doctor [--json]")
+		fmt.Fprintln(os.Stderr, "usage: gummi doctor [--json] [--deep]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -43,8 +45,8 @@ func runDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildDoctorReport(cwd)
-	if *jsonOut {
+	report := buildDoctorReport(cwd, doctorOpts{Deep: *flags.deep, Probe: probeModel})
+	if *flags.json {
 		b, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
 			return err
@@ -56,10 +58,14 @@ func runDoctor(args []string) error {
 	return nil
 }
 
-// registerDoctorFlags binds `gummi doctor`'s only flag, so the skill's
-// grammar generator can enumerate it (see runFlagValues).
-func registerDoctorFlags(fs *flag.FlagSet) *bool {
-	return fs.Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
+// registerDoctorFlags binds `gummi doctor`'s flags, so the skill's grammar
+// generator can enumerate them (see runFlagValues). deep turns on the live
+// per-role reachability probe; the default stays cheap and offline.
+func registerDoctorFlags(fs *flag.FlagSet) *doctorFlags {
+	return &doctorFlags{
+		json: fs.Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)"),
+		deep: fs.Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)"),
+	}
 }
 
 // check statuses. fail blocks readiness; warn/unknown are advisory.
@@ -86,11 +92,30 @@ type doctorCheck struct {
 	Remediation string `json:"remediation,omitempty"`
 }
 
+// doctorFlags are the flag pointers `gummi doctor` binds. registerDoctorFlags
+// returns them so runDoctor can thread the parsed values into the report.
+type doctorFlags struct {
+	json *bool
+	deep *bool
+}
+
+// doctorOpts configures buildDoctorReport's reachability probe. Deep turns
+// on the live per-role probe; Probe is the injectable seam that runs it
+// (tests substitute a stub), defaulting to the real probeModel.
+type doctorOpts struct {
+	Deep  bool
+	Probe ProbeFn
+}
+
+// ProbeFn runs one per-role reachability probe against a backend and model,
+// bounded by timeout, returning a probeResult.
+type ProbeFn func(bi backendInfo, model string, timeout time.Duration) probeResult
+
 // buildDoctorReport assembles the checklist from the environment, the
 // workspace, and the filesystem — no engine, no network (auth is probed
 // offline; interactive-login backends degrade to "unknown"). It is the
 // testable core: tests call it with a temp repo root and env.
-func buildDoctorReport(cwd string) doctorReport {
+func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	var checks []doctorCheck
 	add := func(name, status, detail, remediation string) {
 		checks = append(checks, doctorCheck{Name: name, Status: status, Detail: detail, Remediation: remediation})
@@ -173,6 +198,12 @@ func buildDoctorReport(cwd string) doctorReport {
 	for _, name := range ordered {
 		checks = append(checks, authCheck(backendInfoFor(name)))
 	}
+
+	// 5b. reach — one line per declared profile/role, probing the model the
+	// engine would actually run for that (profile, role). Offline (default)
+	// these are all unknown ("not probed") and never touch a backend or the
+	// cache; --deep runs a live, TTL-cached probe per effective model.
+	checks = append(checks, reachChecks(ws, profiles, opts, time.Now())...)
 
 	// 6. envelope
 	checks = append(checks, envelopeCheck())
@@ -261,6 +292,116 @@ func authCheck(bi backendInfo) doctorCheck {
 		Name: "auth:" + bi.name, Status: statusUnknown, Detail: bi.name + " auth state is not checked offline",
 		Remediation: "if runs fail on auth, have the human run: " + bi.login,
 	}
+}
+
+// resolveRoleModel mirrors the engine's per-role fallback (Engine.resolveRole)
+// to find the effective (model, backend) a feature using profile would run
+// role with: the declared role, then the declared default profile's role,
+// then the single engine model (GUMMI_MODEL) on the default backend. An
+// empty backend means "use the default backend".
+func resolveRoleModel(profiles config.Profiles, profileName string, role agent.Role) (model, backend string) {
+	prof, ok := profiles.Profiles[profileName]
+	if !ok {
+		if def := profiles.Default; def != "" {
+			prof, ok = profiles.Profiles[def]
+		}
+	}
+	if ok {
+		if rc, ok := prof[string(role)]; ok {
+			return rc.Model, rc.Backend
+		}
+	}
+	return cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5"), ""
+}
+
+// reachChecks emits one reach:<profile>/<role> check per declared profile
+// and each of the four roles, treating all four uniformly. Offline (no
+// --deep) every check is unknown ("not probed") and no backend is ever
+// constructed. Under --deep it resolves the effective (backend, model) for
+// each role and probes it: a fresh TTL cache hit reuses the recorded result
+// (skipping the live call), otherwise opts.Probe runs a real turn and the
+// outcome is recorded. A fail check flips readiness via the existing loop;
+// unknown never does.
+func reachChecks(ws state.Workspace, profiles config.Profiles, opts doctorOpts, now time.Time) []doctorCheck {
+	if len(profiles.Profiles) == 0 {
+		return nil
+	}
+	def := defaultBackendName()
+	probe := opts.Probe
+	if probe == nil {
+		probe = probeModel // documented default: doctorOpts.Probe
+	}
+	var cache map[string]probeCacheEntry
+	cachePath := filepath.Join(ws.GummiDir(), probeCacheFile)
+	if opts.Deep {
+		// always a non-nil map on the deep path, even when no sidecar
+		// exists yet (a fresh workspace's first --deep run), so the
+		// within-run dedupe write below applies on that run too — not
+		// just on a run that finds a pre-populated cache on disk.
+		cache = map[string]probeCacheEntry{}
+		if loaded, err := loadProbeCache(cachePath); err == nil {
+			cache = loaded
+		}
+	}
+	var checks []doctorCheck
+	for _, pname := range profiles.Names() {
+		for _, role := range []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer, agent.RoleScribe} {
+			model, backend := resolveRoleModel(profiles, pname, role)
+			if backend == "" {
+				backend = def
+			}
+			bi := backendInfoFor(backend)
+			name := "reach:" + pname + "/" + string(role)
+			if !opts.Deep {
+				checks = append(checks, doctorCheck{
+					Name:        name,
+					Status:      statusUnknown,
+					Detail:      "not probed — run gummi doctor --deep",
+					Remediation: "run `gummi doctor --deep` to probe per-role model reachability",
+				})
+				continue
+			}
+			var res probeResult
+			key := probeCacheKey(bi.name, model)
+			if e, ok := cache[key]; ok && now.Sub(e.ProbedAt) < probeCacheTTL {
+				if e.OK {
+					res = reachOK
+				} else {
+					res = reachFail
+				}
+			} else {
+				res = probe(bi, model, probeTimeout)
+				// Only definitive outcomes (ok/fail) are cached; an
+				// inconclusive probe (timeout, closed stream, missing
+				// binary, auth-blocked interactive backend) is left
+				// uncached so it always re-probes and reports unknown —
+				// a transient hiccup must never be replayed as a hard
+				// fail on a later run. Within a run, the in-memory map
+				// is updated too, so several roles that resolve to the
+				// same (backend, model) probe once.
+				if res == reachOK || res == reachFail {
+					if cache != nil {
+						cache[key] = probeCacheEntry{OK: res == reachOK, ProbedAt: now}
+					}
+					_ = recordProbe(cachePath, key, res == reachOK, now)
+				}
+			}
+			switch res {
+			case reachOK:
+				checks = append(checks, doctorCheck{Name: name, Status: statusOK, Detail: fmt.Sprintf("%s on %s is servable", model, bi.name)})
+			case reachFail:
+				checks = append(checks, doctorCheck{
+					Name:        name,
+					Status:      statusFail,
+					Detail:      fmt.Sprintf("%s on %s is not servable", model, bi.name),
+					Remediation: "re-point this role's model in .gummi/profiles.yaml, or fix the backend's provider/auth config",
+				})
+			default:
+				checks = append(checks, doctorCheck{Name: name, Status: statusUnknown, Detail: fmt.Sprintf("could not probe %s on %s", model, bi.name)})
+			}
+		}
+	}
+	return checks
 }
 
 // envelopeCheck validates GUMMI_ENVELOPE. It never fails readiness: a run

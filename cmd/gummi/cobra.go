@@ -84,9 +84,9 @@ var diffCmd = &cobra.Command{
 	},
 }
 
-// doctorCmd implements `gummi doctor [--json]`.
+// doctorCmd implements `gummi doctor [--json] [--deep]`.
 var doctorCmd = &cobra.Command{
-	Use:   "doctor [--json]",
+	Use:   "doctor [--json] [--deep]",
 	Short: "Run a readiness checklist for the workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runDoctor(buildFlagArgs(cmd, args))
@@ -160,6 +160,7 @@ func init() {
 	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")
 	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
 	doctorCmd.Flags().Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
+	doctorCmd.Flags().Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
 
 	ingestCmd.Flags().String("profile", "", "profile the new features adopt (default: first configured)")
 	ingestCmd.Flags().Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)")

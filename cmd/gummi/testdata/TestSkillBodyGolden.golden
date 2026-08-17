@@ -106,6 +106,7 @@ gummi spec <id|ref>
 gummi diff <id|ref>
 
 gummi doctor
+    --deep  probe per-role model reachability with a live backend turn (TTL-cached)
     --json  emit the readiness checklist as JSON (the skill's setup path)
 
 gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]

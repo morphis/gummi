@@ -207,7 +207,7 @@ auto-crosses design gates; `--full` adds brainstorm + plan, and
 | `gummi diff <id\|ref>` | read-only: the worktree diff |
 | `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit (message required) |
 | `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
-| `gummi doctor [--json]` | readiness: repo, backend, auth, profile, envelope, lock |
+| `gummi doctor [--json] [--deep]` | readiness: repo, backend, auth, profile, envelope, lock, per-role reach (`--deep`) |
 | `gummi skill show\|install\|list` | generate and install the calling-agent skill |
 
 `status`/`spec`/`diff` take no lock, so you can inspect a feature while a run
