@@ -124,6 +124,36 @@ var bugsNewCmd = &cobra.Command{
 	},
 }
 
+// depsCmd groups the dependency-edge operations (add/rm/list).
+var depsCmd = &cobra.Command{
+	Use:   "deps",
+	Short: "Manage dependency edges between cards",
+}
+
+var depsAddCmd = &cobra.Command{
+	Use:   "add <dependent> <depends-on>",
+	Short: "Record that a card depends on another",
+	RunE: func(_ *cobra.Command, args []string) error {
+		return runDepsAdd(args)
+	},
+}
+
+var depsRmCmd = &cobra.Command{
+	Use:   "rm <dependent> <depends-on>",
+	Short: "Remove a dependency edge",
+	RunE: func(_ *cobra.Command, args []string) error {
+		return runDepsRm(args)
+	},
+}
+
+var depsListCmd = &cobra.Command{
+	Use:   "list <id>",
+	Short: "List a card's dependencies",
+	RunE: func(_ *cobra.Command, args []string) error {
+		return runDepsList(args)
+	},
+}
+
 // skillCmd groups the skill file operations.
 var skillCmd = &cobra.Command{
 	Use:   "skill",
@@ -171,6 +201,7 @@ func init() {
 	bindSkillInstallFlags(skillInstallCmd)
 
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
+	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 }
 

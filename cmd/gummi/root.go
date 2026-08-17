@@ -39,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(ingestCmd)
 	rootCmd.AddCommand(bugsCmd)
+	rootCmd.AddCommand(depsCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(verifyCmd)
