@@ -90,6 +90,19 @@ func (s Stage) SuperState() SuperState {
 	return SuperTodo
 }
 
+// AtOrPastCoding reports whether st is the coding stage or beyond — the
+// point at which a card's dependencies are considered settled and it may
+// no longer take on new ones. Kind is orthogonal: one stage list covers
+// both features and bugs. The dependency gate and the TUI dependency
+// picker share this single definition.
+func AtOrPastCoding(st Stage) bool {
+	switch st {
+	case StageImplement, StageFix, StageReview, StageVerify, StageDone:
+		return true
+	}
+	return false
+}
+
 // SkipFlags are the only per-item workflow flexibility, set at creation.
 // Brainstorm/Plan gate the feature workflow; Triage/Diagnose gate the bug
 // workflow; each workflow ignores the other's flags. Review and Verify

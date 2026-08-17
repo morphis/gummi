@@ -66,6 +66,7 @@ type Shell struct {
 	diff      *diffView      // non-nil while the diff surface is open
 	ingest    *ingestView    // non-nil while the ingest review surface is open
 	ingestRun *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
+	deps      *depPicker     // non-nil while the dependency picker is open
 
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
@@ -607,6 +608,29 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
 		return m, nil
 
+	case depsLoadedMsg:
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		// a reload from a closed picker (esc'd while the edge write was in
+		// flight) still refreshes the board; only apply the candidate set
+		// while the picker is open on the same card.
+		if msg.reload {
+			if m.deps != nil && m.deps.f.ID == msg.f.ID {
+				m.deps.cands = msg.cands
+				m.deps.removeOnly = msg.removeOnly
+				m.deps.setCursor(m.deps.cursor)
+			}
+			return m, m.loadRows
+		}
+		// initial open: install the surface for the selected card, snapped
+		// onto the first navigable row (buildCands sets the cursor while
+		// reading, which the open message doesn't carry).
+		m.deps = &depPicker{f: msg.f, cands: msg.cands, removeOnly: msg.removeOnly}
+		m.deps.setCursor(0)
+		return m, nil
+
 	case bugIngestLoadedMsg:
 		m.bugIngesting = false
 		if msg.err != nil {
@@ -702,6 +726,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.bugIngest != nil {
 		return m.handleBugIngestKey(msg)
 	}
+	if m.deps != nil {
+		return m.handleDepsKey(key)
+	}
 	switch key {
 	case "q":
 		// quitting with autonomous work live stops sessions mid-turn,
@@ -742,7 +769,14 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "p":
 		if r, ok := m.selected(); ok {
-			return m.pauseRun(r.F)
+			// p pauses the card's own autonomous session (running, queued,
+			// or a finished one p can park) — the existing pause binding —
+			// and otherwise opens the dependency picker for the selected card.
+			if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
+				return m.pauseRun(r.F)
+			}
+			m.clearTransientNotice()
+			return m.openDeps(r.F)
 		}
 	case "v":
 		if r, ok := m.selected(); ok {
@@ -1446,6 +1480,9 @@ func (m *Shell) mainView(w, h int) string {
 	}
 	if m.bugIngest != nil {
 		return m.bugIngestViewRender(w, h)
+	}
+	if m.deps != nil {
+		return m.depPickerView(w, h)
 	}
 	if m.ingestRun != nil && !m.ingestRun.hidden {
 		return m.ingestRunRender(w, h)

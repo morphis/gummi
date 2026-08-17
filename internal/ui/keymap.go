@@ -54,6 +54,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "ingest", m.ingest.bindings()
 	case m.bugIngest != nil:
 		return "import bugs", m.bugIngest.bindings()
+	case m.deps != nil:
+		return "deps", m.deps.bindings()
 	case m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
 	case len(m.rows) > 0:
@@ -75,7 +77,7 @@ func (m *Shell) helpOverlay() helpDialog {
 // "p pause" joins the bar alongside it.
 func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
-	pause := binding{key: "p", label: "pause", help: "pause the running agent"}
+	pause := binding{key: "p", label: "pause", help: "pause the running agent; else open the dependency picker"}
 	transcript := binding{key: "t", label: "transcript", help: "read the session transcript (tool calls and their outputs)"}
 	if r, ok := m.selected(); ok && autonomousStage(r.F.Stage) {
 		enter.label = "run"

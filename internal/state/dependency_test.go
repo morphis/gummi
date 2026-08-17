@@ -91,6 +91,14 @@ func TestDependencyRejectsCycle(t *testing.T) {
 	if err := s.AddDependency(ctx, b.ID, a.ID); !errors.Is(err, ErrCycle) {
 		t.Fatalf("AddDependency(B,A) = %v, want ErrCycle", err)
 	}
+	// WouldCycle pre-checks the same condition the store rejects: an edge
+	// the store would refuse as a cycle reads true here, without writing.
+	if cyc, err := s.WouldCycle(ctx, b.ID, a.ID); err != nil || !cyc {
+		t.Fatalf("WouldCycle(B,A) = %v, err=%v; want true", cyc, err)
+	}
+	if cyc, err := s.WouldCycle(ctx, a.ID, b.ID); err != nil || cyc {
+		t.Fatalf("WouldCycle(A,B) = %v, err=%v; want false (already the edge)", cyc, err)
+	}
 	// Still only the original edge.
 	if deps, _ := s.ListDependencies(ctx, b.ID); len(deps) != 0 {
 		t.Fatalf("b gained edges despite cycle rejection: %v", ids(deps))

@@ -57,18 +57,9 @@ func (s *Store) listEdgeIDs(ctx context.Context, idCol, whereCol string, id doma
 	return out, rows.Err()
 }
 
-// atOrPastCoding reports whether a stage is the coding stage or beyond —
-// the point at which a card's dependencies are considered settled and it
-// may no longer take on new ones. Kind is orthogonal: one stage list
-// covers both features and bugs.
-func atOrPastCoding(st domain.Stage) bool {
-	switch st {
-	case domain.StageImplement, domain.StageFix, domain.StageReview,
-		domain.StageVerify, domain.StageDone:
-		return true
-	}
-	return false
-}
+// atOrPastCoding delegates to the single domain definition so the store
+// and the TUI picker share one predicate.
+func atOrPastCoding(st domain.Stage) bool { return domain.AtOrPastCoding(st) }
 
 // hasPath reports whether to is reachable from from via forward edges.
 func (s *Store) hasPath(ctx context.Context, from, to domain.FeatureID) (bool, error) {
@@ -91,6 +82,14 @@ func (s *Store) hasPath(ctx context.Context, from, to domain.FeatureID) (bool, e
 		stack = append(stack, next...)
 	}
 	return false, nil
+}
+
+// WouldCycle reports whether adding the edge featureID→dependsOnID
+// would close a dependency cycle — exactly the condition AddDependency
+// rejects. It is a read-only pre-check so the TUI picker can reject a
+// cycle inline without mutating the store.
+func (s *Store) WouldCycle(ctx context.Context, featureID, dependsOnID domain.FeatureID) (bool, error) {
+	return s.hasPath(ctx, dependsOnID, featureID)
 }
 
 // AddDependency records that featureID depends on dependsOnID. It

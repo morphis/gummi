@@ -6,7 +6,7 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mpgup/pgdn[m  [38;2;191;188;200mjump to the first/last card[m
 [38;2;107;80;255m│[m  [38;2;191;188;200m1..9     [m  [38;2;191;188;200mjump to feature[m
 [38;2;107;80;255m│[m  [38;2;191;188;200menter    [m  [38;2;191;188;200mchat (brainstorm/spec) · run (autonomous)[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mp        [m  [38;2;191;188;200mpause the running agent[m
+[38;2;107;80;255m│[m  [38;2;191;188;200mp        [m  [38;2;191;188;200mpause the running agent; else open the dependency picker[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mt        [m  [38;2;191;188;200mread the session transcript (tool calls and their outputs)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200ms        [m  [38;2;191;188;200mspec (tab: read ⇄ annotate)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200md        [m  [38;2;191;188;200mdiff (tab: read ⇄ annotate)[m
