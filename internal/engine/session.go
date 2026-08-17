@@ -713,6 +713,21 @@ func (s *Session) clearResolverWaiting(callID string) {
 	delete(s.resolverWait, callID)
 }
 
+// clearResolversWaiting marks every registered MCP call-waiter as no
+// longer receiving, used when the backend process dies mid-flight (pump's
+// closed-event-stream path) so Answer treats any in-flight bridge call as
+// gone even though the session was never explicitly stopped. It leaves the
+// resolvers registered; takeResolver still finds them, and the cleared
+// flags are what tell Answer not to drop the answer into a buffer nobody
+// will read.
+func (s *Session) clearResolversWaiting() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.resolverWait {
+		delete(s.resolverWait, id)
+	}
+}
+
 // resolverWaiting reports whether callID's waiter is actively receiving.
 func (s *Session) resolverWaiting(callID string) bool {
 	s.mu.Lock()

@@ -1099,6 +1099,57 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 	}
 }
 
+// TestDeathMidAskClearsLiveness locks the backend-death liveness
+// gap: the MCP ask-answer flag must not stay stuck at "waiting" when the
+// backend process dies mid-ask with the session left un-stopped. The
+// production bridge context is bound only to session teardown, never to
+// backend liveness, so a death must release the waiter through the death
+// path itself — otherwise Answer would keep treating the call as live and
+// deliver the answer into a channel nobody reads, returning nil silently.
+// It reproduces the real shape: DispatchClientTool parked on the ask, the
+// backend's event stream closed without Session.stop(), then Answer must
+// fail loudly and restore the question.
+func TestDeathMidAskClearsLiveness(t *testing.T) {
+	ctx := context.Background()
+	e := newEngine(t, agent.NewFake("ack"))
+	f := feature(1, "Dark mode", domain.StageSpec)
+	seedDraft(t, e, f)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the MCP bridge context is bound only to teardown, never to backend
+	// liveness; canceling it at test end simulates the bridge going away.
+	epCtx, epCancel := context.WithCancel(context.Background())
+	defer epCancel()
+	done := make(chan error, 1)
+	go func() {
+		_, derr := e.DispatchClientTool(epCtx, s, askToolName,
+			json.RawMessage(`{"question":"theme?","options":[{"label":"dark"}]}`))
+		done <- derr
+	}()
+	deadline := time.After(3 * time.Second)
+	for s.Snapshot().PendingAsk == nil {
+		select {
+		case <-deadline:
+			t.Fatal("ask never became pending")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	// backend dies: event stream closes, but NO s.stop() runs. Wait for the
+	// death path (EventStopped) to have released the liveness flag before
+	// answering, mirroring the real interleaving where the death lands
+	// before the operator acts.
+	s.agent().Close()
+	waitFor(t, e, EventStopped)
+	if err := e.Answer(ctx, s.Feature.ID, "dark"); err == nil {
+		t.Fatal("Answer succeeded after backend death; want a loud failure")
+	}
+	if s.Snapshot().PendingAsk == nil {
+		t.Error("pending ask not restored after a failed delivery")
+	}
+}
+
 // TestAnswerAbandonedResolverMustNotReturnNilSilently locks the Answer
 // contract for an MCP-bridged ask whose resolver waiter is gone: the
 // answer must either reach the agent (a turn is issued) or come back as a

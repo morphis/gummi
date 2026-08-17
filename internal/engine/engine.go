@@ -1166,6 +1166,14 @@ func (e *Engine) pump(s *Session) {
 				// A death surfaces as an error so the driver escalates promptly
 				// instead of hanging out the whole stage timeout and misreading
 				// a dead agent as a backend stall.
+				// A backend death is not a teardown: nothing will run the
+				// session's MCP teardown to release in-flight bridge calls,
+				// so their liveness flag would otherwise stay stuck at
+				// "waiting" forever and Answer would keep delivering into a
+				// channel nobody will ever read. Clear every waiter's flag
+				// so Answer treats the in-flight calls as gone and fails
+				// loudly instead of silently succeeding into the void.
+				s.clearResolversWaiting()
 				if s.State() == StateRunning {
 					e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: errSessionDied})
 				}
