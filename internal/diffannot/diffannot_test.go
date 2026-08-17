@@ -97,3 +97,76 @@ func TestFileAt(t *testing.T) {
 		t.Errorf("FileAt(barLine) = %q, want bar.go", f)
 	}
 }
+
+func TestLocateAllMatchesLocate(t *testing.T) {
+	ls := lines()
+	// anchors for the target lines, plus a couple of orphaned/blank wants.
+	var targets []int
+	for i, l := range ls {
+		switch l {
+		case "+func New() {}", "+package baz", "index 111..222 100644":
+			targets = append(targets, i)
+		}
+	}
+	var wants []string
+	for _, i := range targets {
+		wants = append(wants, Anchor(ls, i))
+	}
+	wants = append(wants, "no-such-anchor", "")
+
+	got := LocateAll(ls, wants)
+	if len(got) != len(wants) {
+		t.Fatalf("LocateAll returned %d results for %d wants", len(got), len(wants))
+	}
+	for i, w := range wants {
+		want := Locate(ls, w)
+		if got[i] != want {
+			t.Errorf("LocateAll[%d] = %d, want Locate = %d", i, got[i], want)
+		}
+	}
+}
+
+func TestLocateAllLowestIndexOnRepeat(t *testing.T) {
+	// several identical payload lines in the middle of the diff share a
+	// full ±2 window, so they hash to the same anchor. LocateAll must keep
+	// the lowest index, matching Locate's first-match-wins.
+	dup := []string{"+same", "+same", "+same", "+same", "+same", "+same", "+same"}
+	a := Anchor(dup, 3)
+	if got := Locate(dup, a); got != 2 {
+		t.Fatalf("setup: Locate = %d, want 2", got)
+	}
+	got := LocateAll(dup, []string{a})
+	if got[0] != 2 {
+		t.Errorf("LocateAll = %d, want 2 (lowest index)", got[0])
+	}
+}
+
+func TestLocateAllHashesOnce(t *testing.T) {
+	ls := lines()
+	var wants []string
+	for i := range ls {
+		wants = append(wants, Anchor(ls, i))
+	}
+	// swap the seam for a counting wrapper, restored on the way out.
+	orig := sum
+	var calls int
+	sum = func(b []byte) [32]byte {
+		calls++
+		return orig(b)
+	}
+	defer func() { sum = orig }()
+
+	got := LocateAll(ls, wants)
+	if len(got) != len(ls) {
+		t.Fatalf("LocateAll returned %d results, want %d", len(got), len(ls))
+	}
+	if calls != len(ls) {
+		t.Errorf("hashing called %d times, want %d (once per line, not per annotation)", calls, len(ls))
+	}
+	// every want came from a real line, so none orphan.
+	for i, idx := range got {
+		if idx != i {
+			t.Errorf("LocateAll[%d] = %d, want %d", i, idx, i)
+		}
+	}
+}

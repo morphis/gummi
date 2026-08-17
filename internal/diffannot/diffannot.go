@@ -16,6 +16,11 @@ import (
 // uniqueness.
 const context = 2
 
+// sum is the hashing primitive Anchor routes through. It exists as a
+// package-level var (rather than a direct sha256.Sum256 call) as a test
+// seam so tests can count how many times the diff is hashed.
+var sum = func(b []byte) [32]byte { return sha256.Sum256(b) }
+
 // payload strips a unified-diff line's leading marker (+, -, space) so the
 // anchor is the same whether a line is added or already context — what
 // matters is the text, not its diff role.
@@ -45,8 +50,8 @@ func Anchor(lines []string, idx int) string {
 		}
 		b.WriteByte('\n')
 	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return hex.EncodeToString(sum[:])
+	digest := sum([]byte(b.String()))
+	return hex.EncodeToString(digest[:])
 }
 
 // Locate returns the index of the line whose Anchor matches want, or -1
@@ -61,6 +66,31 @@ func Locate(lines []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// LocateAll resolves many anchors against a diff in a single pass, hashing
+// each line at most once. Returns a slice parallel to wants; element i is
+// the index of the line in lines whose anchor equals wants[i], or -1 when
+// no line matches (orphaned). For an anchor matching more than one line it
+// resolves to the lowest index, identical to Locate's first-match-wins.
+func LocateAll(lines []string, wants []string) []int {
+	m := make(map[string]int, len(lines))
+	for i := range lines {
+		a := Anchor(lines, i)
+		if _, ok := m[a]; !ok {
+			m[a] = i
+		}
+	}
+	out := make([]int, len(wants))
+	for i, w := range wants {
+		out[i] = -1
+		if w != "" {
+			if idx, ok := m[w]; ok {
+				out[i] = idx
+			}
+		}
+	}
+	return out
 }
 
 // FileAt returns the new-side file path (from the nearest preceding

@@ -78,8 +78,12 @@ func newDiffView(f domain.Feature, diff string, anns []domain.DiffAnnotation) *d
 		located: map[int][]int{},
 		cursor:  1,
 	}
+	anchors := make([]string, len(anns))
 	for i, a := range anns {
-		if idx := diffannot.Locate(dv.lines, a.Anchor); idx >= 0 {
+		anchors[i] = a.Anchor
+	}
+	for i, idx := range diffannot.LocateAll(dv.lines, anchors) {
+		if idx >= 0 {
 			dv.located[idx] = append(dv.located[idx], i)
 		} else {
 			dv.orphans = append(dv.orphans, i)
