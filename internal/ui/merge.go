@@ -94,6 +94,23 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 	}
 }
 
+// recordCommitDraftFail persists a squash-merge scribe pass's outcome on
+// the feature (the failure reason, or "" cleared on a successful draft)
+// and, once written, reflects it on the row's dashboard in place. It runs
+// in a command because the store write can block on the single sqlite
+// connection (SetMaxOpenConns(1)); the row reflection needs no board
+// reload — CommitDraftFail is metadata for the feature's own already-open
+// dashboard, with no git-state change for the board list to re-walk.
+func (m *Shell) recordCommitDraftFail(id domain.FeatureID, reason string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := m.store.SetCommitDraftFail(ctx, id, reason); err != nil {
+			return noticeMsg{text: sanitize("recording commit-draft outcome: " + err.Error()), isErr: true}
+		}
+		return commitDraftPersistedMsg{id: id, reason: reason}
+	}
+}
+
 // commitDraftMsg carries a best-effort draft landing message for the open
 // commit-message dialog. gen tags the pass that produced it: only the
 // latest generation is applied, so a late reply from a re-draft (ctrl+r)
@@ -102,6 +119,20 @@ type commitDraftMsg struct {
 	f     domain.FeatureID
 	gen   int
 	draft string
+	// reason is a non-empty explanation when the draft pass failed (empty
+	// on success); guard marks a deliberate guard rejection so the dialog
+	// renders it as a warning rather than a config fault.
+	reason string
+	guard  bool
+}
+
+// commitDraftPersistedMsg reports that a scribe pass's outcome was
+// durably recorded on the feature (the failure reason, or "" cleared on a
+// successful draft). The shell reflects it on the feature's own dashboard
+// row in place — it is row metadata only, so no board reload is needed.
+type commitDraftPersistedMsg struct {
+	id     domain.FeatureID
+	reason string
 }
 
 // mergeThenDoneMsg asks the shell to run the merge flow as the

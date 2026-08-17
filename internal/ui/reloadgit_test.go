@@ -37,6 +37,9 @@ func gitShim(t *testing.T) (logPath string) {
 func gitLogLines(t *testing.T, logPath string) []string {
 	t.Helper()
 	data, err := os.ReadFile(logPath)
+	if os.IsNotExist(err) {
+		return nil // nothing spawned git yet
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

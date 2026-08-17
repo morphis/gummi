@@ -77,6 +77,12 @@ func (m *Shell) dashboardView(w, h int) string {
 		line(s.Muted.Render("baseline ") + s.Warning.Render(
 			fmt.Sprintf("%d check(s) already failing on the fresh branch — verify labels them pre-existing", r.BaselineFails)))
 	}
+	if f.CommitDraftFail != "" {
+		// a durable note from the last squash-merge scribe pass: the draft
+		// was unavailable and why, so the failure is not just a transient
+		// dialog line but survives for later inspection.
+		line(s.Muted.Render("draft    ") + s.Warning.Render(sanitize(f.CommitDraftFail)))
+	}
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
 

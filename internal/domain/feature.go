@@ -177,6 +177,11 @@ type Feature struct {
 	// re-granting the whole review budget, and resets it to 0 when the
 	// review loop completes. Zero until a review loop has started.
 	ReviewRounds int
+	// CommitDraftFail is the durable reason a squash-merge scribe pass last
+	// failed to produce a draft (a backend/config fault, a guard rejection,
+	// or a timeout), persisted so the failure survives the dialog and later
+	// inspection still sees it. Empty when the last pass drafted cleanly.
+	CommitDraftFail string
 }
 
 // Kind returns the feature's kind, treating the empty default as a

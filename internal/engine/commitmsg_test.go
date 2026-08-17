@@ -66,7 +66,9 @@ func TestDraftCommitMsgRunsScribe(t *testing.T) {
 }
 
 func TestDraftCommitMsgCarriesArtifactPath(t *testing.T) {
-	rec := recordingAgent()
+	// a fenced reply so the pass yields a clean draft (the scribe would
+	// otherwise be guard-rejected for the unparseable "ok" echo).
+	rec := &recorder{Fake: agent.NewFake("```gummi-commit\nfeat(ui): prefill the merge dialog\n\n- drafts from the spec\n```")}
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
@@ -91,8 +93,11 @@ func TestDraftCommitMsgNilBackend(t *testing.T) {
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
 	got, err := e.DraftCommitMessage(context.Background(), f)
-	if err != nil || got != "" {
-		t.Fatalf("nil backend: got (%q, %v), want (\"\", nil)", got, err)
+	if got != "" {
+		t.Fatalf("nil backend: draft = %q, want empty", got)
+	}
+	if err == nil {
+		t.Fatal("nil backend: expected a non-empty reason, got nil")
 	}
 }
 
@@ -106,8 +111,11 @@ func TestDraftCommitMsgBackendErrorIsEmpty(t *testing.T) {
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
 	got, err := e.DraftCommitMessage(context.Background(), f)
-	if err != nil || got != "" {
-		t.Fatalf("backend error: got (%q, %v), want (\"\", nil)", got, err)
+	if got != "" {
+		t.Fatalf("backend error: draft = %q, want empty", got)
+	}
+	if err == nil {
+		t.Fatal("backend error: expected a non-empty reason, got nil")
 	}
 }
 
@@ -124,8 +132,11 @@ func TestDraftCommitMsgChattyReplyFallsBackEmpty(t *testing.T) {
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
 	got, err := e.DraftCommitMessage(context.Background(), f)
-	if err != nil || got != "" {
-		t.Fatalf("chatty reply: got (%q, %v), want (\"\", nil)", got, err)
+	if got != "" {
+		t.Fatalf("chatty reply: draft = %q, want empty", got)
+	}
+	if _, ok := err.(*CommitDraftGuardError); !ok {
+		t.Fatalf("chatty reply: got reason %v, want a *CommitDraftGuardError", err)
 	}
 }
 
@@ -142,8 +153,11 @@ func TestDraftCommitMsgScrubsAttribution(t *testing.T) {
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
 	got, err := e.DraftCommitMessage(context.Background(), f)
-	if err != nil || got != "" {
-		t.Fatalf("attributed draft: got (%q, %v), want (\"\", nil)", got, err)
+	if got != "" {
+		t.Fatalf("attributed draft: draft = %q, want empty", got)
+	}
+	if _, ok := err.(*CommitDraftGuardError); !ok {
+		t.Fatalf("attributed draft: got reason %v, want a *CommitDraftGuardError", err)
 	}
 }
 
@@ -292,8 +306,11 @@ func TestDraftCommitMsgDiscardsDiffDump(t *testing.T) {
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
 	got, err := e.DraftCommitMessage(context.Background(), f)
-	if err != nil || got != "" {
-		t.Fatalf("diff-dump draft: got (%q, %v), want (\"\", nil)", got, err)
+	if got != "" {
+		t.Fatalf("diff-dump draft: draft = %q, want empty", got)
+	}
+	if _, ok := err.(*CommitDraftGuardError); !ok {
+		t.Fatalf("diff-dump draft: got reason %v, want a *CommitDraftGuardError", err)
 	}
 }
 
@@ -324,7 +341,133 @@ func TestDraftCommitMsgTimeoutReturnsEmpty(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	got, err := e.DraftCommitMessage(ctx, f)
-	if err != nil || got != "" {
-		t.Fatalf("timeout: got (%q, %v), want (\"\", nil)", got, err)
+	if got != "" {
+		t.Fatalf("timeout: draft = %q, want empty", got)
+	}
+	if err == nil {
+		t.Fatal("timeout: expected a non-empty reason, got nil")
+	}
+}
+
+// TestDraftCommitMsgSurfacesDistinctReasons pins the contract the bug
+// regressed: every failure mode returns a distinct, non-empty reason
+// alongside an empty draft (never a silent ("", nil)), and deliberate
+// guard rejections are typed so the dialog can render them differently
+// from a backend/session fault.
+func TestDraftCommitMsgSurfacesDistinctReasons(t *testing.T) {
+	newEngine := func(ag agent.Agent) (*Engine, domain.Feature) {
+		ws, store, wt := newRepo(t)
+		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+		t.Cleanup(func() { e.Close() })
+		f := feature(1, "impl", domain.StageImplement)
+		withWorktree(t, wt, f)
+		return e, f
+	}
+	fake := func(evs ...agent.Event) *agent.Fake {
+		return &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event { return evs }}
+	}
+	blocked := func() (*agent.Fake, chan struct{}) {
+		block := make(chan struct{})
+		return &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+			<-block
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}}, block
+	}
+
+	cases := []struct {
+		name  string
+		run   func(t *testing.T) (draft string, release func(), err error)
+		guard bool
+	}{
+		{
+			// a closed agent is the session-open failure: the scribe role
+			// points at an unservable backend (missing model, dead agent).
+			name: "session-open",
+			run: func(t *testing.T) (string, func(), error) {
+				ag := &agent.Fake{}
+				e, f := newEngine(ag)
+				if err := ag.Close(); err != nil {
+					t.Fatalf("closing fake: %v", err)
+				}
+				draft, err := e.DraftCommitMessage(context.Background(), f)
+				return draft, func() {}, err
+			},
+		},
+		{
+			name: "event-error",
+			run: func(t *testing.T) (string, func(), error) {
+				e, f := newEngine(fake(agent.Event{Kind: agent.EventError, Err: errors.New("boom")}))
+				draft, err := e.DraftCommitMessage(context.Background(), f)
+				return draft, func() {}, err
+			},
+		},
+		{
+			name:  "unparseable",
+			guard: true,
+			run: func(t *testing.T) (string, func(), error) {
+				e, f := newEngine(fake(
+					agent.Event{Kind: agent.EventMessage, Text: "Sure! feat(ui): x"},
+					agent.Event{Kind: agent.EventIdle},
+				))
+				draft, err := e.DraftCommitMessage(context.Background(), f)
+				return draft, func() {}, err
+			},
+		},
+		{
+			name:  "diff-dump",
+			guard: true,
+			run: func(t *testing.T) (string, func(), error) {
+				e, f := newEngine(fake(
+					agent.Event{Kind: agent.EventMessage, Text: "```gummi-commit\nfeat(ui): x\n\ndiff --git a/x.go b/x.go\n```"},
+					agent.Event{Kind: agent.EventIdle},
+				))
+				draft, err := e.DraftCommitMessage(context.Background(), f)
+				return draft, func() {}, err
+			},
+		},
+		{
+			name:  "attribution",
+			guard: true,
+			run: func(t *testing.T) (string, func(), error) {
+				e, f := newEngine(fake(
+					agent.Event{Kind: agent.EventMessage, Text: "```gummi-commit\nfeat(ui): x\n\nCo-authored-by: copilot <x@y>\n```"},
+					agent.Event{Kind: agent.EventIdle},
+				))
+				draft, err := e.DraftCommitMessage(context.Background(), f)
+				return draft, func() {}, err
+			},
+		},
+		{
+			name: "timeout",
+			run: func(t *testing.T) (string, func(), error) {
+				ag, block := blocked()
+				e, f := newEngine(ag)
+				ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+				defer cancel()
+				draft, err := e.DraftCommitMessage(ctx, f)
+				return draft, func() { close(block) }, err
+			},
+		},
+	}
+
+	seen := map[string]bool{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			draft, release, err := tc.run(t)
+			release()
+			if draft != "" {
+				t.Fatalf("draft = %q, want empty on failure", draft)
+			}
+			if err == nil {
+				t.Fatal("expected a non-empty reason, got nil")
+			}
+			if seen[err.Error()] {
+				t.Fatalf("reason %q is not distinct across failure modes", err.Error())
+			}
+			seen[err.Error()] = true
+			if _, ok := err.(*CommitDraftGuardError); ok != tc.guard {
+				t.Fatalf("guard classification = %v, want %v (reason: %v)", ok, tc.guard, err)
+			}
+		})
 	}
 }

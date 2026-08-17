@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -167,28 +168,47 @@ func wrapBodyLines(s string, width int) string {
 // textarea — so a longer bound can never delay, block, or clobber a merge.
 const commitDraftTimeout = 120 * time.Second
 
+// CommitDraftGuardError marks a deliberate draft rejection — a
+// correctness guard (diff dump, attribution) firing, not a fault. The
+// dialog reads these differently from a backend/session/transport
+// failure, because the right response is to regenerate or hand-write the
+// message, not to fix the profile.
+type CommitDraftGuardError struct{ reason string }
+
+func (e *CommitDraftGuardError) Error() string { return e.reason }
+
+// NewCommitDraftGuardError builds a guard rejection carrying reason, so
+// callers outside the engine package can construct (or inspect) one.
+func NewCommitDraftGuardError(reason string) *CommitDraftGuardError {
+	return &CommitDraftGuardError{reason: reason}
+}
+
 // DraftCommitMessage runs a best-effort, read-only scribe pass that
 // drafts a squash-merge landing commit message for the feature: the spec,
 // the branch's own commits, and its diffstat in, a candidate landing
 // message out. The transient session is never tracked on the board.
 //
-// Best-effort only: any unusable reply, backend error, or the commitDraftTimeout bound
-// returns an empty draft and no error, so a merge is never blocked or
-// delayed by this pass. The draft is scrubbed for agent attribution
-// before it returns; the human approving the merge remains the gate.
+// Best-effort only: a failure never blocks or delays the merge, and the
+// draft is scrubbed for agent attribution before it returns; the human
+// approving the merge remains the gate. But a failure is never silent:
+// every unusable reply, backend error, or the commitDraftTimeout bound
+// returns a distinct non-empty reason alongside the empty draft, so the
+// caller can tell a broken scribe config from a slow draft or a guard
+// rejection instead of seeing a blank box forever. Deliberate rejections
+// (diff dump / attribution) are returned as a *CommitDraftGuardError.
 func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (string, error) {
 	model, backend, _ := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
-		return "", nil
+		return "", errors.New("no scribe agent is configured for the scribe backend")
 	}
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
-		return "", nil
+		return "", fmt.Errorf("scribe could not locate the feature worktree: %w", err)
 	}
 	feed, err := e.cfg.Worktrees.BranchDraftFeed(ctx, &f)
 	if err != nil {
-		return "", nil
+		return "", fmt.Errorf("scribe could not gather the branch draft feed: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, commitDraftTimeout)
 	defer cancel()
@@ -205,23 +225,23 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		ExtraReadAllows: []string{specPath},
 	})
 	if err != nil {
-		return "", nil
+		return "", fmt.Errorf("scribe session could not open: %w", err)
 	}
 	defer func() { _ = sess.Close() }()
 	if err := sess.Send(ctx, commitmsgPrompt(feed)); err != nil {
-		return "", nil
+		return "", fmt.Errorf("scribe failed to start the draft: %w", err)
 	}
 	var text assistantText
-	drain := func() string {
+	drain := func() (string, error) {
 		draft, ok := parseGummiCommit(text.String())
 		if !ok {
-			return ""
+			return "", &CommitDraftGuardError{reason: "the scribe's reply was not a single fenced gummi-commit block"}
 		}
 		// the deterministic pass: guarantee the shape regardless of model
 		// compliance, so a diff-shaped or unwrapped draft never reaches
 		// main's history on ctrl+s.
 		if isDiffDump(draft) {
-			return ""
+			return "", &CommitDraftGuardError{reason: "the scribe pasted a diff instead of composing a message"}
 		}
 		if subject, body, ok := strings.Cut(draft, "\n"); ok {
 			draft = subject + "\n" + wrapBodyLines(body, 72)
@@ -229,15 +249,15 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		// the sharp edge: a generated message must never carry agent
 		// attribution into main's history on ctrl+s.
 		if worktree.MatchesAttribution(draft) != "" {
-			return ""
+			return "", &CommitDraftGuardError{reason: "the draft carried agent attribution and was discarded"}
 		}
-		return draft
+		return draft, nil
 	}
 	for {
 		select {
 		case ev, ok := <-sess.Events():
 			if !ok {
-				return drain(), nil
+				return drain()
 			}
 			switch ev.Kind {
 			case agent.EventTextDelta:
@@ -245,12 +265,12 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 			case agent.EventMessage:
 				text.message(ev.Text)
 			case agent.EventIdle:
-				return drain(), nil
+				return drain()
 			case agent.EventError:
-				return "", nil
+				return "", fmt.Errorf("scribe refused or returned nothing: %w", ev.Err)
 			}
 		case <-ctx.Done():
-			return "", nil
+			return "", errors.New("the scribe draft timed out")
 		}
 	}
 }

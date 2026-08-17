@@ -448,6 +448,27 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if d, ok := m.Overlay.Top().(*commitMsgDialog); ok && d.feature == msg.f {
 			d.apply(msg)
 		}
+		// Record the outcome durably on the feature so a failed draft
+		// survives the dialog and later inspection still sees it: the
+		// reason on a failed pass, cleared on a successful draft. The write
+		// runs in a command — never in Update (see the no-IO-in-Update
+		// contract above).
+		reason := ""
+		if msg.draft == "" && msg.reason != "" {
+			reason = msg.reason
+		}
+		return m, m.recordCommitDraftFail(msg.f, reason)
+
+	case commitDraftPersistedMsg:
+		// the durable note is written; reflect it on the feature's own
+		// dashboard row in place. It is row metadata only — no git state
+		// changed, so the board list has nothing to re-walk (no reload).
+		for i := range m.rows {
+			if m.rows[i].F.ID == msg.id {
+				m.rows[i].F.CommitDraftFail = msg.reason
+				break
+			}
+		}
 		return m, nil
 
 	case mergeThenDoneMsg:

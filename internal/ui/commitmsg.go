@@ -2,12 +2,14 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -35,6 +37,11 @@ type commitMsgDialog struct {
 	cancel   context.CancelFunc
 	drafting bool // a draft pass is in flight — show the "drafting…" affordance
 	modified bool // the user has typed; never overwrite their keystrokes
+	// reason is a non-empty failure explanation from the last draft pass
+	// (empty on success); guard marks a deliberate guard rejection (diff
+	// dump / attribution) so it reads differently from a config fault.
+	reason string
+	guard  bool
 }
 
 func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft func(ctx context.Context, f domain.Feature) (string, error)) *commitMsgDialog {
@@ -63,23 +70,36 @@ func (d *commitMsgDialog) startDraft() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.drafting = true
+	d.reason = ""
 	f := d.f
 	return func() tea.Msg {
-		draft, _ := d.draft(ctx, f)
+		draft, err := d.draft(ctx, f)
 		cancel() // release the bound even on the fast path
-		return commitDraftMsg{f: d.feature, gen: gen, draft: draft}
+		msg := commitDraftMsg{f: d.feature, gen: gen, draft: draft}
+		if err != nil {
+			var guard *engine.CommitDraftGuardError
+			if errors.As(err, &guard) {
+				msg.guard = true
+				msg.reason = guard.Error()
+			} else {
+				msg.reason = "draft unavailable: " + err.Error()
+			}
+		}
+		return msg
 	}
 }
 
 // apply fills the textarea with a completed draft, honoring the "only
 // while the user hasn't modified it" and "only the latest pass" rules.
 func (d *commitMsgDialog) apply(msg commitDraftMsg) {
-	if msg.gen != d.gen || d.modified {
-		return
+	if msg.gen != d.gen {
+		return // stale pass (a re-draft or a closed dialog) is dropped
 	}
 	d.drafting = false
-	if msg.draft == "" {
-		return // nothing usable — leave the dialog empty
+	d.reason = msg.reason
+	d.guard = msg.guard
+	if d.modified || msg.draft == "" {
+		return // keep the user's keystrokes, or keep the box empty on failure
 	}
 	d.input.SetValue(msg.draft)
 }
@@ -131,8 +151,17 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString(s.DialogTitle.Render("squash-merge "+string(d.feature)) + "\n")
 	b.WriteString(s.Subtle.Render(d.branch+" → main") + "\n\n")
 	b.WriteString(d.input.View() + "\n")
-	if d.drafting && !d.modified {
+	switch {
+	case d.drafting && !d.modified:
 		b.WriteString("\n" + s.Faint.Render("drafting a suggested message… (edit below to keep yours)"))
+	case d.reason != "":
+		// a deliberate guard rejection is a correctness guard firing, not a
+		// fault — warn rather than alarm, and never offer to fix a profile.
+		if d.guard {
+			b.WriteString("\n" + s.Warning.Render(d.reason))
+		} else {
+			b.WriteString("\n" + s.Error.Render(d.reason))
+		}
 	}
 	b.WriteString("\n" + s.Faint.Render("ctrl+s merge · ctrl+r regenerate · esc cancel"))
 	return s.DialogFrame.Render(b.String())
