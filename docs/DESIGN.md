@@ -786,9 +786,8 @@ The architect pass emits, per candidate FD, a structured record:
 - **open questions** — anything the decomposition is unsure about is emitted as
   a `%%` marker on its anchor, so **decomposition uncertainty becomes the FD's
   open-questions checklist for free**, with no new machinery.
-- **depends_on** — other proposals this one needs. gummi has no dependency model
-  today, so v1 records this as prose ("Depends on: FD-…") in the draft;
-  first-class edges are deferred (§11.5).
+- **depends_on** — other proposals this one needs, recorded as a first-class
+  edge in the dependency store (§11.4a), not prose.
 - **skip hint** — a well-specified slice may propose the Brainstorm skip flag.
 
 Plus one document-level **coverage map**: every source requirement mapped to an
@@ -837,9 +836,34 @@ coverage map is where the agent justifies its cut.
 - **C · materialization** *(engine)* — each approved proposal runs the existing
   create path (mint number → ID → slug → create in todo, with the proposed skip
   flags), but writes a **seeded** draft instead of the blank template:
-  provenance header, the mapped sections, the `%%` questions, and the
-  dependency prose. Features land in todo, pre-loaded, ready for the normal
-  workflow.
+  provenance header, the mapped sections, and the `%%` questions. Any
+  `depends_on` proposals are written as first-class edges (§11.4a) once both
+  sides have minted IDs. Features land in todo, pre-loaded, ready for the
+  normal workflow.
+
+### 11.4a First-class dependencies
+
+Shipped (FD-058–FD-062), superseding the prose-based `depends_on` this
+section originally described. A `feature_deps` store (`internal/state`) holds
+direct dependency edges between cards, independent of ingestion — added by
+`gummi deps add <dependent> <depends-on>` (`rm`/`list` remove or read them
+back), by the TUI's `p`-key picker (self- and cycle-checked), or populated
+automatically from an ingested spec's `depends_on` proposals.
+
+A dependency counts as **met** only at `StageDone` — verified and landed —
+so anything short of that is unmet. The gate lives at the single chokepoint
+every forward path into a card's coding stage (`Implement`/`Fix`) already
+resolves through, `Engine.Advance`: a `StatusBlockedDependency` result sits
+alongside `StatusBlockedQuestions`/`StatusBlockedDiff`, naming each
+outstanding dependency and its current stage (`BlockingDeps`) rather than
+just a count. `GateBlockers` — the read-only pre-check the headless
+`--gate-approval=caller` path uses — reports the same blockage before
+offering to approve a coding gate. Both TUI and headless drivers route
+through `Advance`, so the gate cannot be bypassed by a future driver; no
+transitive closure is walked (only direct dependencies block), and design
+stages (brainstorm/spec/plan, triage/diagnose) are never gated — only entry
+to the coding stage is. The board and spec view resolve and render each
+dependency's live status rather than static prose.
 
 Each piece is independently testable: domain types + the seeded template (golden
 tests, no agent), `Engine.Ingest` + the tool (unit-tested against the `Fake`
@@ -849,8 +873,6 @@ through simulated key presses against a `Fake` architect).
 
 ### 11.5 Deferred
 
-- **First-class dependencies** — `depends_on` as real edges the scheduler orders
-  on, rather than prose. Only if the prose approach proves insufficient.
 - **Persisted coverage report** — keeping the source→FD map queryable after
   ingestion, for traceability audits against the original document.
 
@@ -974,6 +996,18 @@ caller must decide, then exits.
   again — the CLI counterpart of the TUI's `b` key (§10 review floor's rerun
   edge). The `--note` becomes an addendum to the reborn implement kickoff,
   alongside any open `%%` diff/spec annotations the engine already folds in.
+- **Dependency gate** — a card cannot enter its coding stage while a direct
+  dependency (§11.4a) is unmet; `Advance` returns `StatusBlockedDependency`,
+  which the driver reports as the same `blocked` event as an open `%%`/diff
+  thread, naming the outstanding card(s) in `blocking_deps`.
+- **Landing and cleanup are separate verbs, not part of `run`/`resume`.**
+  `run`/`resume` never merge; `gummi merge <id> -m <message>` is the headless
+  counterpart of the TUI's `m`, requiring the card at a verified branch and a
+  Conventional Commits message with no diff dump or agent attribution before
+  it will touch git. `gummi clean <id>` is the counterpart of `c`, removing a
+  landed card's worktree and branch. Both hold the same per-card lock as
+  `run`/`resume` (Decision 12) and stream the same typed NDJSON/exit
+  contract.
 - **Envelope required** — a run refuses to start without one (`--envelope N` or
   `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
 - **Design questions are delegated** — an interactive stage's `ask_user`
@@ -1024,13 +1058,16 @@ only at `done` or an escalation.
 ### 13.3 Skill distribution
 
 `gummi skill install` generates a `SKILL.md` (YAML frontmatter + markdown body)
-and writes it where all three supported agents read it. **All converge on one
-primitive**, so there is no per-agent instruction format: a single
-**project-scope** install to `.claude/skills/gummi/` is read by Claude
-natively, Copilot natively, and opencode via Claude-compat — one file, not
-three. `--scope user` diverges per agent (Claude + opencode share
-`$CLAUDE_CONFIG_DIR`/`~/.claude`; Copilot uses `~/.copilot`); `--agent`
-overrides detection; scope is detect-and-ask with project recommended.
+and writes it where each supported agent reads it: Claude, Copilot, and
+opencode share one convention; Codex needs its own. **Content converges on
+one primitive** — there is no per-agent instruction format, only where it
+lands differs: a **project-scope** install writes `.claude/skills/gummi/` for
+Claude, Copilot, and opencode (Copilot and opencode both read the Claude-style
+skill layout), plus `.agents/skills/gummi/` for Codex — two files, not four.
+`--scope user` diverges per agent (Claude + opencode share
+`$CLAUDE_CONFIG_DIR`/`~/.claude`; Copilot uses `~/.copilot`; Codex uses
+`~/.agents`); `--agent` overrides detection; scope is detect-and-ask with
+project recommended.
 
 Two properties keep the doc honest:
 
@@ -1045,15 +1082,18 @@ Two properties keep the doc honest:
 
 ### 13.4 Guided setup (`gummi doctor`)
 
-`gummi doctor [--json]` emits a structured readiness checklist — repo,
-workspace, backend, profile, auth, envelope, lock — that the skill's first-run
-flow consumes. It **reports; it never repairs**. Auth is probed offline: a BYOK
-key is confirmed by environment-variable **name** (never its value), and an
-interactive-login backend degrades to `unknown` with the exact command handed
-to the human to run. The profile check steers toward a cost-tiered profile and
-carries the nesting-cost warning (§5). `ready` is false iff any check fails;
-warnings and unknowns are advisory (an unset envelope warns — a run can still
-take `--envelope` — rather than blocking).
+`gummi doctor [--json] [--deep]` emits a structured readiness checklist —
+repo, workspace, backend, profile, auth, envelope, lock — that the skill's
+first-run flow consumes. It **reports; it never repairs**. Auth is probed
+offline by default: a BYOK key is confirmed by environment-variable **name**
+(never its value), and an interactive-login backend degrades to `unknown`
+with the exact command handed to the human to run. `--deep` adds a live,
+TTL-cached probe per configured role that sends one real backend turn to
+confirm the role's model is actually reachable, catching a misconfigured
+model id that the offline checks can't see. The profile check steers toward
+a cost-tiered profile and carries the nesting-cost warning (§5). `ready` is
+false iff any check fails; warnings and unknowns are advisory (an unset
+envelope warns — a run can still take `--envelope` — rather than blocking).
 
 ## 14. References
 

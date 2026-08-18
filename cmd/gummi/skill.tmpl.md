@@ -118,9 +118,14 @@ The loop you run:
      `gummi resume <id> --answer "<text-or-option>"`. A caller gate (under
      `--gate-approval=caller`) is the same shape: `resume <id> --approve` or
      `--request-changes "<note>"`.
-   - **blocked (3)** — open `%%` spec threads or diff comments block a gate.
-     Resolve them, or `gummi resume <id> --request-changes "<note>"` to send it
-     back; if you can't, escalate to the human.
+   - **blocked (3)** — either open `%%` spec threads or diff comments block a
+     gate (resolve them, or `gummi resume <id> --request-changes "<note>"` to
+     send it back; if you can't, escalate to the human), or an unmet
+     dependency blocks entry to the coding stage — the event's `blocking_deps`
+     names the outstanding card(s) and their stage. There's no gate to
+     request changes on in that case: wait for the dependency to reach
+     `done`, or drop the edge with `gummi deps rm <id> <dep-id>` if it no
+     longer applies.
    - **escalation (4) / exhausted (5) / timeout (6)** — stop and report to the
      human. These are durable and resumable: the card stays on the board.
      `exhausted` resumes with `gummi resume <id> --envelope N`, where N is
@@ -210,6 +215,23 @@ have to re-run the whole verify stage. `gummi verify <id>` re-runs the spec's
 (stamps `verified`, emits `done`, exit 0) with no fresh agent pass. If the
 checks still fail it escalates (exit 4); if a cheap re-attach can't be trusted
 (not parked at verify, no checks) it exits 1 and points you back to `resume`.
+
+## Landing, cleanup, and dependencies
+
+`run`/`resume` stop at a verified branch and never merge. Landing that
+decision is a separate, explicit verb: `gummi merge <id> -m "<message>"`
+(or `-m -` to read the message from stdin) squash-merges the branch into
+main — but only once the card is at a verified branch, and only with a
+Conventional Commits `type(scope): summary` message with no diff dump or
+agent attribution, or it refuses before touching git. Draft that message
+from the spec and the branch's own commits, and have the human confirm it
+before you run `gummi merge` — don't invent a message and merge
+unattended. `gummi clean <id>` removes a landed card's worktree and branch
+afterward. Both hold the same per-card lock as `run`/`resume`.
+
+If a card depends on another (`gummi deps add <dependent> <depends-on>`,
+`rm`/`list` to remove or read them back), an unmet dependency blocks it
+from entering its coding stage — see the `blocked (3)` case above.
 
 ## What gummi guarantees
 

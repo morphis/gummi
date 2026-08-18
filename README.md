@@ -146,7 +146,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 |---|---|
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
 | `enter` | chat (interactive stages) · run / watch (autonomous stages) |
-| `p` / `t` | pause the running agent / read the session transcript |
+| `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |
 | `s` / `d` | spec / diff view — `tab` switches read ⇄ annotate |
 | `g` / `b` | advance a gate / bounce back to implement or fix |
 | `P` | restore the plan stage on a quick / skip-plan feature (design phase only) |
@@ -207,6 +207,7 @@ auto-crosses design gates; `--full` adds brainstorm + plan, and
 | `gummi diff <id\|ref>` | read-only: the worktree diff |
 | `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit (message required) |
 | `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
+| `gummi deps add\|rm <dependent> <depends-on>` / `gummi deps list <id>` | manage a card's direct dependency edges |
 | `gummi doctor [--json] [--deep]` | readiness: repo, backend, auth, profile, envelope, lock, per-role reach (`--deep`) |
 | `gummi skill show\|install\|list` | generate and install the calling-agent skill |
 
@@ -259,7 +260,7 @@ Every `run`/`resume` ends on a typed exit the caller branches on:
 | `0` | `done` | verified branch ready — report it, stop |
 | `0` | `stopped` | `--until` reached its clean stop — `resume --approve` to continue |
 | `2` | `question` | a delegated question or caller gate — `resume --answer`/`--approve`/`--request-changes` |
-| `3` | `blocked` | open `%%`/diff threads block a gate — resolve, or `resume --request-changes` |
+| `3` | `blocked` | open `%%`/diff threads block a gate (resolve, or `resume --request-changes`), or an unmet dependency blocks coding-stage entry (`blocking_deps` on the event — wait for it to land, or edit the edge with `gummi deps rm`) |
 | `4` | `escalation` | a rerun/critique cap or unclear verdict — report to a human; resumable |
 | `5` | `exhausted` | envelope dry — raise it, then `resume` |
 | `6` | `timeout` | a stage went quiet (likely hang) — report; resumable |
@@ -270,6 +271,19 @@ Useful `run` flags: `--ref <id>` correlates a feature with your own tracker
 seeds the spec's verification plan, `--until spec` stops cleanly for a human
 design review before implementation burns tokens, and `--autonomous`
 auto-takes the recommended answer instead of checkpointing questions.
+
+### Dependencies between cards
+
+A card can declare a direct dependency on another with `gummi deps add
+<dependent> <depends-on>` (`gummi deps rm`/`list` remove or read them back).
+A dependency counts as met only once the target reaches `done` — its branch
+is verified and landed — so anything short of that blocks the dependent
+card's entry into its coding stage (`Implement`/`Fix`) with a `blocked`
+status naming the outstanding card(s). The TUI exposes the same edges via the
+`p` key's dependency picker (on a card with nothing running) and shows live
+per-dependency status on the board and spec view. `gummi ingest` also seeds
+edges automatically when a decomposed spec calls one proposal out as
+depending on another.
 
 ### The calling-agent skill
 

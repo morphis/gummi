@@ -42,7 +42,7 @@ leaf services.
 | `domain` | Core types: features, bugs, stages, work items. No I/O. |
 | `workflow` | The single fixed state machine: stages, legal transitions, skip flags, rerun caps. **Compiled in, never configurable.** |
 | `spec` | The markdown spec artifact + its `gummi-checks` verification block. |
-| `state` | SQLite store: features, sessions, diff annotations, sequences, workspace. |
+| `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
 | `engine` | The orchestrator. Binds stages to agent sessions, schedules autonomous runs across attention slots, routes turns, streams activity. Start here to trace behavior. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
 | `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. |
@@ -101,10 +101,11 @@ make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 
 Running the real TUI (`bin/gummi`) needs a git repo and, for the default
 backend, an authenticated GitHub Copilot CLI. To drive agents without
-Copilot auth, set `GUMMI_AGENT=headless` with `GUMMI_AGENT_CMD`, or point
-a BYOK endpoint via `GUMMI_PROVIDER_BASE_URL`/`_TYPE`/`_KEY_ENV`. With no
-usable agent, creation/specs/worktrees/gates still work — the board just
-stays static. Key env vars are tabled in `README.md#configuration`.
+Copilot auth, set `GUMMI_AGENT=headless` with `GUMMI_AGENT_CMD` pointed at
+a BYOK/local endpoint's adapter (`GUMMI_HEADLESS_CREDITS_PER_1K` prices its
+spend into credits). With no usable agent, creation/specs/worktrees/gates
+still work — the board just stays static. Key env vars are tabled in
+`README.md#configuration`.
 
 ## Conventions & guardrails
 
