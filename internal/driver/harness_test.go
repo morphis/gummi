@@ -76,8 +76,8 @@ func newHarness(t *testing.T, clientTools bool, script map[domain.Stage]stageFn)
 	}
 	h.fake = fake
 	h.eng = engine.New(engine.Config{
-		Agents:  map[string]agent.Agent{"": fake, fake.Name(): fake},
-		Store:   store, Worktrees: wt, Workspace: ws,
+		Agents: map[string]agent.Agent{"": fake, fake.Name(): fake},
+		Store:  store, Worktrees: wt, Workspace: ws,
 		Persist: true, Model: "test-model",
 	})
 	t.Cleanup(func() { h.eng.Close(); fake.Close() })

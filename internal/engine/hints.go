@@ -130,14 +130,14 @@ put the scope back to the user (what to cut, what to split into a
 follow-up FD) rather than shipping an oversized plan — an oversized
 plan is a spec problem, not a plan problem.
 
-End the plan with ` + planClaimsRubric + ` (e.g. "SIGHUP arrives before
+End the plan with `+planClaimsRubric+` (e.g. "SIGHUP arrives before
 checkpoint flushes").
 
 Then, ONLY when the spec makes them relevant, add these closure
 subsections. Each is a bounded table the critique reads directly
 instead of re-deriving from source; skip a subsection entirely when
 its trigger does not apply, and do not manufacture rows to fill it:
-  - ` + "`Reference mapping`" + ` — when the spec cites ADRs, RFCs, or
+  - `+"`Reference mapping`"+` — when the spec cites ADRs, RFCs, or
     other normative documents by name (e.g. ADR-0014, RFC-9110, an
     internal SLO or API doc). For each cited document, enumerate its
     rules once and map each rule to a plan step, or mark it "not
@@ -145,18 +145,18 @@ its trigger does not apply, and do not manufacture rows to fill it:
     Out of scope). Every rule gets a row. Walk the doc yourself
     before shipping — an unmapped rule is a plan defect, not a
     critique finding.
-  - ` + "`Skip-gate ledger`" + ` — when the spec names tests, scenarios,
+  - `+"`Skip-gate ledger`"+` — when the spec names tests, scenarios,
     or property checks currently gated on a pending flag (e.g.
-    ` + "`t.Skip()`" + ` calls guarded by a ` + "`pendingXxx`" + ` sentinel, a
+    `+"`t.Skip()`"+` calls guarded by a `+"`pendingXxx`"+` sentinel, a
     feature-flag check that fences a harness). One row per gate: the
     gate, the step that lifts it, and the value it asserts (with a
     one-line trace if it is a golden).
-  - ` + "`Downstream handoffs`" + ` — when the spec names other features
+  - `+"`Downstream handoffs`"+` — when the spec names other features
     or systems that consume this feature's output (e.g. another FD
     in this workspace by ID, or a named external service or API).
     One row per consumer: the shape (type/contract) it receives and
     the step that produces it.
-  - ` + "`Out-of-scope confirmations`" + ` — when an Out-of-scope item lives
+  - `+"`Out-of-scope confirmations`"+` — when an Out-of-scope item lives
     at a seam the plan does touch (e.g. the plan adds a hook where
     the deferred behavior would naturally hang). One row per such
     item; a spec whose Out-of-scope items are far from any plan step
@@ -233,8 +233,8 @@ the commit message body — the branch lands on main as a single squash
 commit when the user accepts the fix, and gummi checkpoint-commits
 anything you leave uncommitted when the stage ends. Keep the report's
 Fix section current: what you changed and why. Before you finish, grep
-the worktree for the literal string [DEBUG- (use ` + "`grep -rF '[DEBUG-'`" + `
-or ` + "`rg -F '[DEBUG-'`" + ` so the [ is not read as a regex character
+the worktree for the literal string [DEBUG- (use `+"`grep -rF '[DEBUG-'`"+`
+or `+"`rg -F '[DEBUG-'`"+` so the [ is not read as a regex character
 class) and delete any temporary logs. If you are addressing review
 findings, resolve each thread in the Review section with how you fixed
 it. If you hit a blocker or need a decision, stop and say so rather than
