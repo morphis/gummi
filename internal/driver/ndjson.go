@@ -164,12 +164,14 @@ type timeoutEvent struct {
 // resumePreconditions is the small set of probes a caller should run before
 // following a terminal event's `next` command. Right now it carries just
 // check_running — the shell one-liner that detects an orphan gummi process
-// still holding the workspace lock. Structured (not a free-form hint) so a
-// programmatic caller can enumerate the checks rather than parse prose.
+// still driving a card. Structured (not a free-form hint) so a programmatic
+// caller can enumerate the checks rather than parse prose.
 type resumePreconditions struct {
 	// CheckRunning is a shell one-liner that prints a warning when the
 	// workspace's recorded pid is still alive — a caller should wait rather
-	// than immediately retrying `next`, which would hit ErrLocked.
+	// than immediately retrying `next`, which would hit ErrLocked. The pid
+	// file is a best-effort hint across concurrent drives, not a unique
+	// governor of the workspace.
 	CheckRunning string `json:"check_running,omitempty"`
 }
 

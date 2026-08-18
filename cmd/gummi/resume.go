@@ -55,14 +55,20 @@ func runResume(args []string) error {
 		Until: domain.Stage(*rv.until),
 	}
 
-	// resolve the id/ref inside the closure, once the store is open under the
-	// run lock; --until is validated against the resolved feature's route in
-	// driver.Resume.
-	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store) (driver.Outcome, error) {
+	// resolve the id/ref inside the closure, once the store is open; --until
+	// is validated against the resolved feature's route in driver.Resume. The
+	// resolved card's per-card lock guards a single card against double-drive
+	// while independent cards resume concurrently.
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer release()
 		return d.Resume(ctx, f.ID, in)
 	}, opts)
 }

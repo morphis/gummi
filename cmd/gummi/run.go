@@ -60,8 +60,20 @@ func runRun(args []string) error {
 		return err
 	}
 
-	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store) (driver.Outcome, error) {
-		return d.Run(ctx, desc)
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store, ws state.Workspace) (driver.Outcome, error) {
+		// mint the card first, then take its per-card lock for the drive so
+		// this run is the sole governor of the card it just created (two
+		// runs mint disjoint cards and so never contend on each other's lock).
+		f, err := d.Create(ctx, desc)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer release()
+		return d.Drive(ctx, f)
 	}, opts)
 }
 
@@ -152,12 +164,13 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 	}, nil
 }
 
-// withRunEngine wires the workspace, lock, store, worktree manager, and
-// agent engine (mirroring cmd/gummi/ingest.go), builds a driver over
-// os.Stdout, hands it to fn, and maps the terminal Outcome to a process
-// exit. The exclusive lock refuses to start while the TUI or another run
-// holds the workspace (D13).
-func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (driver.Outcome, error), opts driver.Options) error {
+// withRunEngine wires the workspace, store, worktree manager, and agent
+// engine (mirroring cmd/gummi/ingest.go), builds a driver over os.Stdout,
+// hands it to fn, and maps the terminal Outcome to a process exit. It takes
+// no whole-workspace lock: each command's fn resolves its card and holds
+// that card's per-card lock for the drive, so independent cards run
+// concurrently while a single card is still guarded against double-drive.
+func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store, state.Workspace) (driver.Outcome, error), opts driver.Options) error {
 	// A headless run/resume is routinely launched detached (backgrounded,
 	// nohup, a supervisor). Without this, gummi keeps the default SIGHUP
 	// disposition — terminate — so a controlling terminal that hangs up on
@@ -176,19 +189,12 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (drive
 	if err != nil {
 		return err
 	}
-	release, err := state.AcquireLock(ws.LockFile())
-	if err != nil {
-		return err
-	}
-	defer release()
-
 	// A caller whose bash wrapper is killed by the harness (SIGHUP-ignored
 	// gummi keeps running) has no way to tell whether gummi died with the
-	// wrapper or is still churning: probing the flock would fight the live
-	// run and taking the lock (a bare retry) hits ErrLocked and looks like a
-	// fresh failure. Recording our pid — after the lock is ours, so it always
-	// names the live governor — lets an external check use `kill -0` to
-	// answer the question without touching the lock. Clear on clean exit so
+	// wrapper or is still churning: recording our pid lets an external check
+	// use `kill -0` to answer the question without touching the flock (which
+	// would fight the live run). With per-card concurrency the file names the
+	// most recent drive, a best-effort liveness hint. Clear on clean exit so
 	// the absence is authoritative; a crash leaves the file behind but the
 	// pid it names no longer signals, so the same check still reads dead.
 	if err := state.WritePIDFile(ws.PIDFile(), os.Getpid()); err != nil {
@@ -222,7 +228,7 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store) (drive
 	defer func() { _ = eng.Close(); closeAgents(agents) }()
 
 	d := driver.New(eng, store, ws, io.MultiWriter(os.Stdout, events), opts)
-	out, derr := fn(context.Background(), d, store)
+	out, derr := fn(context.Background(), d, store, ws)
 	if out.Status == "" && derr != nil {
 		// the closure failed before the driver produced any outcome (e.g. an
 		// unknown id/ref in `resume`) — a plain setup/usage error to stderr,

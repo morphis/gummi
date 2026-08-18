@@ -113,8 +113,22 @@ func (d *Driver) setGate(mode string) {
 
 // Run creates one feature from a free-form description and drives it to a
 // terminal Outcome. The quick route is the default; --full opts into the
-// brainstorm+plan route (D3).
+// brainstorm+plan route (D3). It is the convenience form of Create + Drive
+// for callers that need no lock between the two; the CLI drives via the
+// split so it can hold the card's per-card lock for the whole drive.
 func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
+	f, err := d.Create(ctx, desc)
+	if err != nil {
+		return d.fail(ctx, "", err)
+	}
+	return d.Drive(ctx, f)
+}
+
+// Create mints one feature from a free-form description and persists it,
+// but does not drive it — the caller owns the drive (and any lock that
+// should span it). The quick route is the default; --full opts into the
+// brainstorm+plan route (D3).
+func (d *Driver) Create(ctx context.Context, desc string) (domain.Feature, error) {
 	// validate --until against the route this run will take before minting a
 	// feature, so a bad stop target never leaves a stray FD in the backlog.
 	skip := domain.QuickRoute()
@@ -122,11 +136,11 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 		skip = domain.SkipFlags{}
 	}
 	if err := ValidateUntil(d.opts.Until, domain.KindFeature, skip); err != nil {
-		return d.fail(ctx, "", err)
+		return domain.Feature{}, err
 	}
 	f, err := d.createFeature(ctx, desc)
 	if err != nil {
-		return d.fail(ctx, "", err)
+		return domain.Feature{}, err
 	}
 	route := "quick"
 	if d.opts.Full {
@@ -136,6 +150,13 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 		Event: "created", ID: string(f.ID), Ref: d.opts.Ref,
 		Branch: f.BranchName(), Route: route, Envelope: d.opts.Envelope,
 	})
+	return f, nil
+}
+
+// Drive runs an already-created feature to a terminal Outcome. It is the
+// driving half of Run, split out so a caller can mint a card with Create,
+// take its per-card lock, and only then drive it.
+func (d *Driver) Drive(ctx context.Context, f domain.Feature) (Outcome, error) {
 	return d.drive(ctx, f.ID)
 }
 

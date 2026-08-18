@@ -80,9 +80,10 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
-	// Hold the workspace's exclusive lock for the TUI's lifetime, so a
-	// headless `gummi run`/`resume` refuses to touch the same .gummi while
-	// the board is open (and vice versa) — DESIGN §8.2 D13.
+	// Hold the workspace's exclusive lock for the TUI's lifetime so a second
+	// interactive board refuses to open while one is up. It does NOT block
+	// headless run/resume/verify/merge/clean: those hold a per-card lock for
+	// the card they drive, so independent cards run while the board is open.
 	release, err := state.AcquireLock(ws.LockFile())
 	if err != nil {
 		return err

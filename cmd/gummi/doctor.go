@@ -432,15 +432,16 @@ func envelopeCheck() doctorCheck {
 }
 
 // lockCheck probes the workspace's exclusive lock and releases it
-// immediately — reporting "busy" when a TUI or another run holds it (D13),
-// so a caller learns a run would refuse before starting one.
+// immediately — reporting "busy" when another TUI holds it, so a caller
+// learns a second board would refuse before opening one. Headless drives
+// hold per-card locks (not this one), so a live run does not show up here.
 func lockCheck(ws state.Workspace) doctorCheck {
 	release, err := state.AcquireLock(ws.LockFile())
 	switch {
 	case errors.Is(err, state.ErrLocked):
 		return doctorCheck{
-			Name: "lock", Status: statusWarn, Detail: "workspace busy — a TUI or another run holds it",
-			Remediation: "close the other gummi process before running",
+			Name: "lock", Status: statusWarn, Detail: "workspace busy — another TUI holds it",
+			Remediation: "close the other TUI before opening the board",
 		}
 	case err != nil:
 		return doctorCheck{Name: "lock", Status: statusWarn, Detail: "could not probe the workspace lock: " + err.Error()}

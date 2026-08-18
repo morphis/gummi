@@ -57,11 +57,16 @@ func runMerge(args []string) error {
 		}
 		message = string(b)
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer release()
 		return d.Merge(ctx, f.ID, message)
 	})
 }
@@ -80,24 +85,30 @@ func runClean(args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer release()
 		return d.Clean(ctx, f.ID)
 	})
 }
 
-// withLandingWorkspace wires the workspace, exclusive lock, store, worktree
-// manager, and a minimal driver for the headless merge/clean verbs, then
-// hands it to fn and maps the Outcome to a process exit. It mirrors
-// withRunEngine but deliberately starts no agent: merge/clean only touch the
-// workspace, store, worktree manager, and the exclusive lock (so they cannot
-// race the TUI or another run). The driver still needs an engine object for
-// its gate-floor checks, so one is built with no agents — the engine is only
+// withLandingWorkspace wires the workspace, store, worktree manager, and a
+// minimal driver for the headless merge/clean verbs, then hands it to fn and
+// maps the Outcome to a process exit. It mirrors withRunEngine but
+// deliberately starts no agent: merge/clean only touch the workspace, store,
+// and worktree manager. Each fn resolves its card and holds that card's
+// per-card lock, so landing one card never races a drive or another landing
+// of a different card. The driver still needs an engine object for its
+// gate-floor checks, so one is built with no agents — the engine is only
 // ever read from here, never run.
-func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store) (driver.Outcome, error)) error {
+func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store, state.Workspace) (driver.Outcome, error)) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -106,11 +117,6 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store)
 	if err != nil {
 		return err
 	}
-	release, err := state.AcquireLock(ws.LockFile())
-	if err != nil {
-		return err
-	}
-	defer release()
 	store, err := state.OpenStore(ws.DBFile())
 	if err != nil {
 		return err
@@ -125,7 +131,7 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store)
 	defer func() { _ = eng.Close() }()
 
 	d := driver.New(eng, store, ws, os.Stdout, driver.Options{})
-	out, derr := fn(context.Background(), d, store)
+	out, derr := fn(context.Background(), d, store, ws)
 	if out.Status == "" && derr != nil {
 		// the closure failed before the driver produced an outcome (e.g. an
 		// unknown id/ref) — a plain setup/usage error to stderr, exit 1.

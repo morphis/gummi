@@ -29,11 +29,16 @@ func runVerify(args []string) error {
 	if err != nil {
 		return err
 	}
-	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store) (driver.Outcome, error) {
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer release()
 		return d.Verify(ctx, f.ID)
 	}, driver.Options{})
 }

@@ -11,9 +11,13 @@ import (
 )
 
 // AcquireLock takes an exclusive, non-blocking flock on path so at most
-// one gummi process governs a workspace at a time (the TUI and every
-// headless run share this one lock). It returns ErrLocked when the lock
-// is already held, and a release func that unlocks and closes the file.
+// one gummi process holds the given lock at a time. It backs both the
+// TUI's whole-workspace lock and the per-card locks that headless
+// run/resume/verify/merge/clean take for a drive, so disjoint cards lock
+// concurrently while two headless drives of the same card are mutually
+// excluded. It returns ErrLocked when the lock is already held, and a
+// release func
+// that unlocks and closes the file.
 // The advisory lock is tied to the open file, so a crash releases it too
 // — a stale lock file never wedges the next run.
 func AcquireLock(path string) (func(), error) {

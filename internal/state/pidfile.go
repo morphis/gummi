@@ -14,7 +14,9 @@ import (
 )
 
 // WritePIDFile records pid at path atomically. The state dir must already
-// exist (a live run has taken the workspace lock, which enforces that).
+// exist. With per-card locks, several drives can run at once, so the pid
+// file is a best-effort hint for an external orphan check, not a unique
+// governor of the workspace.
 func WritePIDFile(path string, pid int) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("preparing pid dir: %w", err)

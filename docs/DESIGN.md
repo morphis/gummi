@@ -716,6 +716,16 @@ Decided in the design interview (2026-07-03):
     life. The artifact is gummi workspace content: it never enters the
     worktree and is never committed, so the feature branch (and the
     squash commit that lands it) carries only product changes.
+ 12. **One process per card, not per workspace.** Headless
+     run/resume/verify/merge/clean each hold an exclusive per-card lock
+     (`.gummi/state/locks/<id>.lock`), so independent cards drive
+     concurrently while two headless drives of the same card are mutually
+     excluded. The TUI holds
+     the whole-workspace lock only for its own lifetime, so a second board
+     refuses to open; it no longer serializes headless drives. Shared
+     resources (worktree creation, merge) keep git's own serialization on
+     the repo's `.git` lock, and the SQLite store already serializes
+     writers via WAL + `busy_timeout`.
 
 Still open:
 
@@ -948,7 +958,7 @@ silent degradation.
 ### 13.1 The driver
 
 One `gummi run` process drives exactly one feature (a free-form description),
-via the quick route by default, holds the exclusive `.gummi` lock, streams
+via the quick route by default, holds the feature's per-card lock, streams
 milestone + decision NDJSON, and **stops at a verified branch — it never
 merges**. The engine's full restartability (SQLite state, spec on the branch,
 session resume) makes `resume` free: each invocation runs forward until the
