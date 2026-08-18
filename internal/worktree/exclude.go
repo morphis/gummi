@@ -30,18 +30,33 @@ const gummiExcludeLine = "/.gummi/"
 // though: .gummi content still tracked at HEAD reappears tracked in
 // every new worktree's index, which Create handles separately
 // (untrackGummiInWorktree).
+// gummiInsideRepo reports whether .gummi (at wsRoot/.gummi) lives inside
+// the managed repository tree. In the sibling layout wsRoot == repo, so
+// .gummi must be kept out of git tracking; in the nested layout .gummi
+// sits above the repo and there is nothing to exclude.
+func gummiInsideRepo(wsRoot, repo string) bool {
+	rel, err := filepath.Rel(repo, wsRoot)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err error) {
-	common, err := runGit(ctx, m.root, "rev-parse", "--git-common-dir")
+	// layout guard: only when .gummi is inside the repo is there repo
+	// hygiene to perform. Otherwise this is a no-op, never touching an
+	// unrelated repo's info/exclude.
+	if !gummiInsideRepo(m.wsRoot, m.repo) {
+		return false, nil
+	}
+	common, err := runGit(ctx, m.repo, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return false, err
 	}
 	if !filepath.IsAbs(common) {
-		common = filepath.Join(m.root, common)
+		common = filepath.Join(m.repo, common)
 	}
 	if err := ensureExcludeLine(filepath.Join(common, "info", "exclude")); err != nil {
 		return false, err
 	}
-	tracked, err := runGit(ctx, m.root, "ls-files", "--", ".gummi")
+	tracked, err := runGit(ctx, m.repo, "ls-files", "--", ".gummi")
 	if err != nil {
 		return false, err
 	}
@@ -49,7 +64,7 @@ func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err 
 		return false, nil
 	}
 	// --cached only: drops the paths from the index, never from disk.
-	if _, err := runGit(ctx, m.root, "rm", "-r", "-q", "--cached", "--", ".gummi"); err != nil {
+	if _, err := runGit(ctx, m.repo, "rm", "-r", "-q", "--cached", "--", ".gummi"); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -68,7 +83,13 @@ func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err 
 // dirty worktree refuses rebases, and the deletion would otherwise smear
 // into the first agent checkpoint). The commit rebases away or merges
 // cleanly once main's own untracking lands.
-func untrackGummiInWorktree(ctx context.Context, wt string) error {
+func untrackGummiInWorktree(ctx context.Context, wsRoot, repo, wt string) error {
+	// layout guard: a nested-layout worktree never owns .gummi, so there
+	// is nothing to untrack; skip rather than query a repo that does not
+	// track it.
+	if !gummiInsideRepo(wsRoot, repo) {
+		return nil
+	}
 	tracked, err := runGit(ctx, wt, "ls-files", "--", ".gummi")
 	if err != nil {
 		return err

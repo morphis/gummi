@@ -82,3 +82,43 @@ func TestLoadRejectsBadSandbox(t *testing.T) {
 		t.Error("unknown sandbox mode should error at load")
 	}
 }
+
+func TestLoadRepo(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("repo: git/lxd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Repo != "git/lxd" {
+		t.Errorf("repo = %q, want git/lxd", c.Repo)
+	}
+}
+
+func TestLoadAbsentRepoIsEmpty(t *testing.T) {
+	c, err := Load(filepath.Join(t.TempDir(), "nope.yaml"))
+	if err != nil {
+		t.Fatalf("missing config should be default: %v", err)
+	}
+	if c.Repo != "" {
+		t.Errorf("repo = %q, want empty default (the workspace root)", c.Repo)
+	}
+}
+
+func TestTemplateRepoParsesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte(Template), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("template does not parse: %v", err)
+	}
+	if c.Repo != "" {
+		t.Errorf("template repo = %q, want empty (sibling default)", c.Repo)
+	}
+}

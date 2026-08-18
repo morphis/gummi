@@ -302,7 +302,11 @@ func skillInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	targets, err := resolveTargets(scope, *agentFlag, cwd)
+	_, repoRoot, err := resolveRoots(cwd)
+	if err != nil {
+		return err
+	}
+	targets, err := resolveTargets(scope, *agentFlag, repoRoot)
 	if err != nil {
 		return err
 	}
@@ -364,10 +368,14 @@ func skillList(args []string) error {
 	if err != nil {
 		return err
 	}
+	_, repoRoot, err := resolveRoots(cwd)
+	if err != nil {
+		return err
+	}
 	curHash := skillBodyHash()
 	rows := []installTarget{
-		{path: projectSkillPath(cwd), label: "project (claude/copilot/opencode)"},
-		{path: codexProjectSkillPath(cwd), label: "project (codex)"},
+		{path: projectSkillPath(repoRoot), label: "project (claude/copilot/opencode)"},
+		{path: codexProjectSkillPath(repoRoot), label: "project (codex)"},
 		{path: userSkillPath(agentClaude), label: "user (claude/opencode)"},
 		{path: userSkillPath(agentCopilot), label: "user (copilot)"},
 		{path: userSkillPath(agentCodex), label: "user (codex)"},

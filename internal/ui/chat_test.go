@@ -46,7 +46,7 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 	git("add", ".")
 	git("commit", "-q", "-m", "init")
 
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}

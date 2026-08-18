@@ -28,7 +28,7 @@ func rewindMainBackward(t *testing.T, root string) {
 func TestCreateRecordsForkPoint(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestAssertNoForkDrift_ForwardOnlyPasses(t *testing.T) {
 func TestAssertNoForkDrift_DriftRefuses(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAssertNoForkDrift_BranchRebaseNotDrift(t *testing.T) {
 func TestAssertNoForkDrift_LazyBackfill(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestSquashMergeRefusesOnDrift(t *testing.T) {
 func TestRecreateClearsDrift(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestRecreateClearsDrift(t *testing.T) {
 func TestLandedRefusesOnDrift(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestCommitAllForwardAdvancePasses(t *testing.T) {
 func TestRemoveSurvivesDrift(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestRemoveSurvivesDrift(t *testing.T) {
 func TestDeleteBranchSurvivesDrift(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +476,7 @@ func TestDeleteLandedBranchBypassesGuard(t *testing.T) {
 func TestReanchorOnMain(t *testing.T) {
 	root := newRepo(t)
 	fs := &memForkStore{}
-	m, err := NewManager(ctx, root, fs)
+	m, err := NewManager(ctx, root, root, fs)
 	if err != nil {
 		t.Fatal(err)
 	}

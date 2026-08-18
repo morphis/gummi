@@ -185,7 +185,7 @@ func TestRecordStageSpendEmptyModel(t *testing.T) {
 // leave an already-rebuilt table alone on the next open.
 func TestStageSpendPKRebuild(t *testing.T) {
 	ctx := context.Background()
-	w, err := Init(gitRoot(t))
+	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}

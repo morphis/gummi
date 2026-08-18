@@ -42,7 +42,7 @@ func uiRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 	git("add", ".")
 	git("commit", "-q", "-m", "init")
 
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func uiRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}

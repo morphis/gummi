@@ -76,7 +76,7 @@ func (s *memForkStore) ClearForkPoint(_ context.Context, id domain.FeatureID) er
 // Failures call t.Fatal, mirroring the test helpers around it.
 func newManager(t *testing.T, root string) *Manager {
 	t.Helper()
-	m, err := NewManager(ctx, root, &memForkStore{})
+	m, err := NewManager(ctx, root, root, &memForkStore{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func feature(num int, title string) *domain.Feature {
 }
 
 func TestNewManagerRejectsNonRepo(t *testing.T) {
-	if _, err := NewManager(ctx, t.TempDir(), &memForkStore{}); err == nil {
+	if _, err := NewManager(ctx, t.TempDir(), t.TempDir(), &memForkStore{}); err == nil {
 		t.Fatal("non-repo accepted")
 	}
 }
@@ -144,7 +144,7 @@ func TestNewManagerRejectsSubdir(t *testing.T) {
 	if err := os.Mkdir(sub, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewManager(ctx, sub, &memForkStore{}); err == nil {
+	if _, err := NewManager(ctx, sub, sub, &memForkStore{}); err == nil {
 		t.Fatal("subdir accepted as repo root")
 	}
 }
@@ -622,5 +622,53 @@ func TestHostileFeatureRefused(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(os.TempDir(), "evil")); err == nil {
 		t.Error("path traversal escaped the repo")
+	}
+}
+
+func TestNestedManagerRoots(t *testing.T) {
+	ws := t.TempDir()
+	ws, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(ws, "git", "lxd")
+	if err := os.MkdirAll(repo, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "init", "-q", "-b", "main")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.invalid")
+	writeFile(t, repo, "README.md", "hello\n")
+	mustGit(t, repo, "add", ".")
+	mustGit(t, repo, "commit", "-q", "-m", "initial")
+
+	m, err := NewManager(ctx, ws, repo, &memForkStore{})
+	if err != nil {
+		t.Fatalf("NewManager nested: %v", err)
+	}
+	if got := m.Root(); got != ws {
+		t.Errorf("Root() = %q, want workspace root %q", got, ws)
+	}
+	if got := m.RepoRoot(); got != repo {
+		t.Errorf("RepoRoot() = %q, want repo %q", got, repo)
+	}
+	f := feature(1, "Nested")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if want := filepath.Join(ws, ".gummi", "worktrees", "FD-001"); p != want {
+		t.Errorf("worktree path = %s, want %s (under ws, outside the repo)", p, want)
+	}
+	if _, err := os.Stat(filepath.Join(p, "README.md")); err != nil {
+		t.Errorf("worktree missing checked-out file: %v", err)
+	}
+	// git worktree list, run against the repo, resolves the nested worktree
+	if paths, err := m.List(ctx); err != nil || len(paths) != 1 {
+		t.Fatalf("List = %v, %v; want 1 entry", paths, err)
+	}
+	// worktree remove resolves from the repo side
+	if err := m.Remove(ctx, f, false); err != nil {
+		t.Fatalf("Remove: %v", err)
 	}
 }

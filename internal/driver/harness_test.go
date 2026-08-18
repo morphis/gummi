@@ -45,7 +45,15 @@ type stageFn func(h *harness, n int, opts agent.SessionOpts, msg string) []agent
 func newHarness(t *testing.T, clientTools bool, script map[domain.Stage]stageFn) *harness {
 	t.Helper()
 	root := gitRepo(t)
-	ws, err := state.Init(root)
+	return newHarnessRoots(t, clientTools, script, root, root)
+}
+
+// newHarnessRoots wires a harness over an explicit workspace root and repo
+// root, so a test can drive the nested layout (.gummi at ws, repo at a
+// nested subdirectory) end-to-end.
+func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]stageFn, wsRoot, repoRoot string) *harness {
+	t.Helper()
+	ws, err := state.Init(wsRoot, repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +62,12 @@ func newHarness(t *testing.T, clientTools bool, script map[domain.Stage]stageFn)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), wsRoot, repoRoot, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	h := &harness{t: t, store: store, ws: ws, wt: wt, buf: &bytes.Buffer{}, root: root, calls: map[domain.Stage]int{}}
+	h := &harness{t: t, store: store, ws: ws, wt: wt, buf: &bytes.Buffer{}, root: repoRoot, calls: map[domain.Stage]int{}}
 	fake := agent.NewFake("")
 	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: clientTools}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {

@@ -45,7 +45,13 @@ type ForkPointStore interface {
 // verified to stay inside the worktrees directory before any git
 // command runs.
 type Manager struct {
-	root string // absolute physical path of the main checkout
+	// repo is the absolute physical path of the managed git repository
+	// (the main checkout). All git commands run here.
+	repo string
+	// wsRoot is the absolute physical path of the workspace root, where
+	// .gummi lives. Worktrees are nested under wsRoot/.gummi/worktrees,
+	// which is outside the repo tree in the nested layout.
+	wsRoot string
 
 	// forkStore persists each worktree's recorded fork-point SHA, the
 	// anchor diff-based stages check against for drift.
@@ -56,20 +62,27 @@ type Manager struct {
 	mainMu sync.Mutex
 }
 
-// NewManager binds a manager to the repo rooted at root. It verifies
-// root really is the top level of a git working tree.
-func NewManager(ctx context.Context, root string, fs ForkPointStore) (*Manager, error) {
-	abs, err := filepath.Abs(root)
+// NewManager binds a manager to the workspace rooted at ws and the git
+// repository rooted at repo. It verifies repo really is the top level of a
+// git working tree; ws may equal repo (sibling layout) or contain it
+// (nested layout).
+func NewManager(ctx context.Context, ws, repo string, fs ForkPointStore) (*Manager, error) {
+	absWs, err := filepath.Abs(ws)
 	if err != nil {
 		return nil, err
 	}
-	top, err := runGit(ctx, abs, "rev-parse", "--show-toplevel")
+	absRepo, err := filepath.Abs(repo)
 	if err != nil {
-		return nil, fmt.Errorf("%s is not inside a git repository: %w", abs, err)
+		return nil, err
 	}
-	// Resolve both through symlinks before comparing: git prints the
-	// physical path.
-	realAbs, err := filepath.EvalSymlinks(abs)
+	// --show-toplevel runs against the repo root and must equal the repo
+	// root's physical path — the equality check that once constrained the
+	// workspace root now constrains the repo root.
+	top, err := runGit(ctx, absRepo, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, fmt.Errorf("%s is not inside a git repository: %w", absRepo, err)
+	}
+	realRepo, err := filepath.EvalSymlinks(absRepo)
 	if err != nil {
 		return nil, err
 	}
@@ -77,20 +90,29 @@ func NewManager(ctx context.Context, root string, fs ForkPointStore) (*Manager, 
 	if err != nil {
 		return nil, err
 	}
-	if realAbs != realTop {
-		return nil, fmt.Errorf("%s is not the repository root (top level is %s); gummi must run from the main checkout", abs, top)
+	if realRepo != realTop {
+		return nil, fmt.Errorf("%s is not the repository root (top level is %s); gummi must run from the main checkout", absRepo, top)
 	}
-	// Keep the physical path: git prints physical paths (e.g. in
+	realWs, err := filepath.EvalSymlinks(absWs)
+	if err != nil {
+		return nil, err
+	}
+	// Keep the physical paths: git prints physical paths (e.g. in
 	// worktree list), so all later comparisons must share the namespace.
-	return &Manager{root: realAbs, forkStore: fs}, nil
+	return &Manager{repo: realRepo, wsRoot: realWs, forkStore: fs}, nil
 }
 
-// Root returns the absolute repo root the manager is bound to.
-func (m *Manager) Root() string { return m.root }
+// Root returns the absolute workspace root the manager is bound to — the
+// base .gummi-relative paths (WorktreePath/ArtifactPath) join onto.
+func (m *Manager) Root() string { return m.wsRoot }
+
+// RepoRoot returns the absolute git repository root the manager's git
+// commands run against — the base for agent workdirs and the main checkout.
+func (m *Manager) RepoRoot() string { return m.repo }
 
 // worktreesDir is the directory all feature worktrees must live in.
 func (m *Manager) worktreesDir() string {
-	return filepath.Join(m.root, ".gummi", "worktrees")
+	return filepath.Join(m.wsRoot, ".gummi", "worktrees")
 }
 
 // featurePaths validates the feature and derives its absolute worktree
@@ -108,7 +130,7 @@ func (m *Manager) featurePaths(f *domain.Feature) (wtPath, branch string, err er
 	// A hostile repo can commit .gummi or .gummi/worktrees as a symlink
 	// pointing outside the checkout; writing through it would escape
 	// the repo, which the lexical check above cannot see.
-	for _, p := range []string{filepath.Join(m.root, ".gummi"), base} {
+	for _, p := range []string{filepath.Join(m.wsRoot, ".gummi"), base} {
 		fi, err := os.Lstat(p)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -168,13 +190,13 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if _, err := runGit(ctx, m.root, "rev-parse", "--verify", "HEAD"); err != nil {
+	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "HEAD"); err != nil {
 		return "", fmt.Errorf("repository has no commits yet; commit something before creating a feature worktree: %w", err)
 	}
 	if _, err := os.Stat(p); err == nil {
 		return "", fmt.Errorf("worktree path %s already exists", p)
 	}
-	if ok, err := gitOK(ctx, m.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+	if ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return "", err
 	} else if ok {
 		return "", fmt.Errorf("branch %s already exists (leftover from an earlier worktree?); delete it first: git branch -D %s", branch, branch)
@@ -182,15 +204,15 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	if err := os.MkdirAll(m.worktreesDir(), 0o750); err != nil {
 		return "", err
 	}
-	if _, err := runGit(ctx, m.root, "worktree", "add", "-b", branch, "--", p); err != nil {
+	if _, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p); err != nil {
 		return "", err
 	}
 	// The checkout tracks whatever HEAD carries, including .gummi content
 	// the launch untracking only removed from main's index. Untrack it
 	// here too, or agent adds in this worktree sweep .gummi churn in.
-	if err := untrackGummiInWorktree(ctx, p); err != nil {
-		if _, rmErr := runGit(ctx, m.root, "worktree", "remove", "--force", "--", p); rmErr == nil {
-			_, _ = runGit(ctx, m.root, "branch", "-D", "--", branch)
+	if err := untrackGummiInWorktree(ctx, m.wsRoot, m.repo, p); err != nil {
+		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
 		}
 		return "", fmt.Errorf("untracking .gummi in new worktree: %w", err)
 	}
@@ -198,10 +220,10 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	// so diff-based stages can later detect if main is rewound past it.
 	// This happens after the untrack succeeds, so a rolled-back creation
 	// never leaves a stored SHA pointing at a nonexistent worktree.
-	recorded, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	recorded, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
 	if err != nil {
-		if _, rmErr := runGit(ctx, m.root, "worktree", "remove", "--force", "--", p); rmErr == nil {
-			_, _ = runGit(ctx, m.root, "branch", "-D", "--", branch)
+		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
 		}
 		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
 	}
@@ -210,8 +232,8 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	// never overwritten — stamped once), matching Remove/DeleteBranch, which
 	// clear it; only a genuine write error rolls the creation back.
 	if err := m.forkStore.SetForkPoint(ctx, f.ID, recorded); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
-		if _, rmErr := runGit(ctx, m.root, "worktree", "remove", "--force", "--", p); rmErr == nil {
-			_, _ = runGit(ctx, m.root, "branch", "-D", "--", branch)
+		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
 		}
 		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
 	}
@@ -231,7 +253,7 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 		args = append(args, "--force")
 	}
 	args = append(args, "--", p)
-	if _, err := runGit(ctx, m.root, args...); err != nil {
+	if _, err := runGit(ctx, m.repo, args...); err != nil {
 		return err
 	}
 	// The worktree is gone, so its recorded fork is meaningless. Clear it so
@@ -284,7 +306,7 @@ func (m *Manager) BranchExists(ctx context.Context, f *domain.Feature) (bool, er
 	if err != nil {
 		return false, err
 	}
-	return gitOK(ctx, m.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	return gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 }
 
 // DeleteBranch removes the feature's branch. Without force it refuses
@@ -298,7 +320,7 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 	if force {
 		flag = "-D"
 	}
-	if _, err := runGit(ctx, m.root, "branch", flag, "--", branch); err != nil {
+	if _, err := runGit(ctx, m.repo, "branch", flag, "--", branch); err != nil {
 		return err
 	}
 	// The branch is gone; a later Create makes a fresh branch from main's
@@ -319,7 +341,7 @@ func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) err
 	if err != nil {
 		return err
 	}
-	_, derr := runGit(ctx, m.root, "branch", "-d", "--", branch)
+	_, derr := runGit(ctx, m.repo, "branch", "-d", "--", branch)
 	if derr == nil {
 		return nil
 	}
@@ -327,7 +349,7 @@ func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) err
 	if err != nil || !landed {
 		return derr
 	}
-	_, err = runGit(ctx, m.root, "branch", "-D", "--", branch)
+	_, err = runGit(ctx, m.repo, "branch", "-D", "--", branch)
 	return err
 }
 
@@ -340,11 +362,11 @@ func (m *Manager) BranchAhead(ctx context.Context, f *domain.Feature) (bool, err
 	if err != nil {
 		return false, err
 	}
-	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
 	if err != nil {
 		return false, err
 	}
-	n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch)
+	n, err := runGit(ctx, m.repo, "rev-list", "--count", base+".."+branch)
 	if err != nil {
 		return false, err
 	}
@@ -391,7 +413,7 @@ func (m *Manager) TrackedDirty(ctx context.Context, f *domain.Feature) (bool, er
 // leaves after untracking a once-committed .gummi) and must never
 // deadlock a land.
 func (m *Manager) MainTrackedDirty(ctx context.Context) (bool, error) {
-	out, err := runGit(ctx, m.root, "status", "--porcelain", "--untracked-files=no", "--", ":(exclude).gummi")
+	out, err := runGit(ctx, m.repo, "status", "--porcelain", "--untracked-files=no", "--", ":(exclude).gummi")
 	if err != nil {
 		return false, err
 	}
@@ -407,7 +429,7 @@ func (m *Manager) MainTrackedDirty(ctx context.Context) (bool, error) {
 // and discarded. This is the tripwire's raw signal: on a clean→dirty
 // transition the caller aborts the run naming the newly-dirty paths.
 func (m *Manager) MainDirtyPaths(ctx context.Context) ([]string, error) {
-	out, err := runGitRaw(ctx, m.root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ":(exclude).gummi")
+	out, err := runGitRaw(ctx, m.repo, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ":(exclude).gummi")
 	if err != nil {
 		return nil, err
 	}
@@ -473,15 +495,15 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	anc, err := gitOK(ctx, m.root, "merge-base", "--is-ancestor", branch, "HEAD")
+	anc, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", branch, "HEAD")
 	if err != nil {
 		return false, err
 	}
-	branchTip, err := runGit(ctx, m.root, "rev-parse", branch)
+	branchTip, err := runGit(ctx, m.repo, "rev-parse", branch)
 	if err != nil {
 		return false, err
 	}
-	head, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	head, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
 	if err != nil {
 		return false, err
 	}
@@ -498,22 +520,22 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 // is in. Any merge-tree failure (conflict, or a git too old for
 // --write-tree) reads as not-landed, the safe default.
 func (m *Manager) squashLanded(ctx context.Context, branch string) (bool, error) {
-	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
 	if err != nil {
 		return false, err
 	}
-	n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch)
+	n, err := runGit(ctx, m.repo, "rev-list", "--count", base+".."+branch)
 	if err != nil {
 		return false, err
 	}
 	if n == "0" { // no commits of its own — a fresh/empty branch, not landed
 		return false, nil
 	}
-	merged, err := runGit(ctx, m.root, "merge-tree", "--write-tree", "HEAD", branch)
+	merged, err := runGit(ctx, m.repo, "merge-tree", "--write-tree", "HEAD", branch)
 	if err != nil {
 		return false, nil // conflict or unsupported: treat as not landed
 	}
-	mainTree, err := runGit(ctx, m.root, "rev-parse", "HEAD^{tree}")
+	mainTree, err := runGit(ctx, m.repo, "rev-parse", "HEAD^{tree}")
 	if err != nil {
 		return false, err
 	}
@@ -566,7 +588,7 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 	if err != nil {
 		return err
 	}
-	mainHead, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
 	if err != nil {
 		return err
 	}
@@ -618,7 +640,7 @@ func (m *Manager) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 // commit RebaseOnMain rebases onto, exposed so an agent-driven rebase
 // can be pointed at the exact same target.
 func (m *Manager) MainHead(ctx context.Context) (string, error) {
-	return runGit(ctx, m.root, "rev-parse", "HEAD")
+	return runGit(ctx, m.repo, "rev-parse", "HEAD")
 }
 
 // RebaseInProgress reports whether the feature's worktree has a rebase
@@ -710,7 +732,7 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	if err != nil {
 		return "", err
 	}
-	if ok, err := gitOK(ctx, m.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+	if ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return "", err
 	} else if !ok {
 		return "", fmt.Errorf("feature %s has no branch %s", f.ID, branch)
@@ -720,7 +742,7 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	} else if dirty {
 		return "", fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging")
 	}
-	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
 	if err != nil {
 		// merge-base gives up when main and branch share no common
 		// ancestor — the signature of a rewind that took main to a
@@ -735,15 +757,15 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	if err := m.assertNoForkDriftAgainstBase(ctx, f, base); err != nil {
 		return "", err
 	}
-	if n, err := runGit(ctx, m.root, "rev-list", "--count", base+".."+branch); err != nil {
+	if n, err := runGit(ctx, m.repo, "rev-list", "--count", base+".."+branch); err != nil {
 		return "", err
 	} else if n == "0" {
 		return "", fmt.Errorf("branch %s has no commits to merge", branch)
 	}
-	if _, err := runGit(ctx, m.root, "merge", "--squash", branch); err != nil {
+	if _, err := runGit(ctx, m.repo, "merge", "--squash", branch); err != nil {
 		// capture what conflicted before the reset wipes the state
-		conflicts := m.conflictedFiles(ctx, m.root)
-		if _, resetErr := runGit(ctx, m.root, "reset", "--merge"); resetErr != nil {
+		conflicts := m.conflictedFiles(ctx, m.repo)
+		if _, resetErr := runGit(ctx, m.repo, "reset", "--merge"); resetErr != nil {
 			return "", fmt.Errorf("squash merge failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
 		}
 		if len(conflicts) > 0 {
@@ -753,20 +775,20 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	}
 	// "Already up to date" stages nothing: the branch's content is in
 	// main already, i.e. it landed some other way.
-	if clean, err := gitOK(ctx, m.root, "diff", "--cached", "--quiet"); err != nil {
+	if clean, err := gitOK(ctx, m.repo, "diff", "--cached", "--quiet"); err != nil {
 		return "", err
 	} else if clean {
 		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
 	}
-	if _, err := runGit(ctx, m.root, "commit", "-m", message); err != nil {
-		if _, resetErr := runGit(ctx, m.root, "reset", "--merge"); resetErr != nil {
+	if _, err := runGit(ctx, m.repo, "commit", "-m", message); err != nil {
+		if _, resetErr := runGit(ctx, m.repo, "reset", "--merge"); resetErr != nil {
 			return "", fmt.Errorf("squash commit failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
 		}
 		return "", err
 	}
 	// the mainMu lock serializes main mutations, so HEAD is still the
 	// squash commit we just created — its sha is the landed commit.
-	return runGit(ctx, m.root, "rev-parse", "HEAD")
+	return runGit(ctx, m.repo, "rev-parse", "HEAD")
 }
 
 // ForkDriftRemedy is the single recovery phrase quoted verbatim by both
@@ -816,7 +838,7 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	// for worktrees predating drift detection. Drift already suffered by
 	// them is unreconstructable; detection starts from here.
 	if recorded == "" {
-		recorded, err = runGit(ctx, m.root, "merge-base", "HEAD", f.BranchName())
+		recorded, err = runGit(ctx, m.repo, "merge-base", "HEAD", f.BranchName())
 		if err != nil {
 			return err
 		}
@@ -845,14 +867,14 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	// into a caller's own merge-base computation: drift is defined against
 	// main HEAD, not the live merge-base, so reusing the latter would flag
 	// a legitimate branch rebase as drift.
-	ok, err := gitOK(ctx, m.root, "merge-base", "--is-ancestor", recorded, "HEAD")
+	ok, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", recorded, "HEAD")
 	if err != nil {
 		return err
 	}
 	if ok {
 		return nil
 	}
-	mainHead, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
 	if err != nil {
 		return err
 	}
@@ -890,7 +912,7 @@ func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 	if err := m.AssertNoForkDrift(ctx, f); err != nil {
 		return "", err
 	}
-	mainHead, err := runGit(ctx, m.root, "rev-parse", "HEAD")
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -921,7 +943,7 @@ func (m *Manager) rebaseInProgress(ctx context.Context, wt string) bool {
 // List returns the feature-worktree paths git currently knows about
 // under .gummi/worktrees (not the whole repo's worktrees).
 func (m *Manager) List(ctx context.Context) ([]string, error) {
-	out, err := runGit(ctx, m.root, "worktree", "list", "--porcelain")
+	out, err := runGit(ctx, m.repo, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}

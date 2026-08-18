@@ -121,15 +121,25 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		checks = append(checks, doctorCheck{Name: name, Status: status, Detail: detail, Remediation: remediation})
 	}
 
+	// 0. resolve the workspace root (where .gummi lives) and the managed
+	// repo root. A misconfigured repo key is a clear fail, never a
+	// downstream worktree error.
+	wsRoot, repoRoot, rerr := resolveRoots(cwd)
+	if rerr != nil {
+		wsRoot, repoRoot = cwd, cwd
+	}
+
 	// 1. repo
-	if isDir(filepath.Join(cwd, ".git")) || isFile(filepath.Join(cwd, ".git")) {
-		add("repo", statusOK, "git repository at "+cwd, "")
+	if rerr != nil {
+		add("repo", statusFail, rerr.Error(), "set `repo:` in .gummi/config.yaml to the workspace root or a subdirectory of it")
+	} else if isDir(filepath.Join(repoRoot, ".git")) || isFile(filepath.Join(repoRoot, ".git")) {
+		add("repo", statusOK, "git repository at "+repoRoot+" (workspace at "+wsRoot+")", "")
 	} else {
-		add("repo", statusFail, cwd+" is not a git repository", "run `git init` — gummi manages worktrees and must run from the repo root")
+		add("repo", statusFail, repoRoot+" is not a git repository", "set `repo:` in .gummi/config.yaml to a git toplevel root, or remove it to manage the workspace root")
 	}
 
 	// 2. workspace
-	ws, wsErr := state.Open(cwd)
+	ws, wsErr := state.Open(wsRoot, repoRoot)
 	if wsErr == nil {
 		add("workspace", statusOK, ".gummi workspace present", "")
 	} else {
@@ -648,7 +658,7 @@ func forkDriftStatus(ws state.Workspace) doctorCheck {
 		if f.ForkPoint == "" {
 			continue
 		}
-		head := exec.CommandContext(context.Background(), "git", "-C", ws.Root, "merge-base", "--is-ancestor", f.ForkPoint, "HEAD") //nolint:gosec // read-only ancestry probe against the validated repo root and a stored fork SHA
+		head := exec.CommandContext(context.Background(), "git", "-C", ws.RepoRoot, "merge-base", "--is-ancestor", f.ForkPoint, "HEAD") //nolint:gosec // read-only ancestry probe against the validated repo root and a stored fork SHA
 		if err := head.Run(); err != nil {
 			// HEAD is either unreadable (degrade to ok, never a false
 			// failure) or the fork is genuinely no longer an ancestor —

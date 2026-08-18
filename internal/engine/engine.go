@@ -804,7 +804,9 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		if err := spec.EnsureDraft(draft, &f); err != nil {
 			return "", "", err
 		}
-		return root, draft, nil
+		// interactive stages run in the repo root (the main checkout), not
+		// the workspace root: the repo may live in a nested subdirectory.
+		return e.cfg.Worktrees.RepoRoot(), draft, nil
 	}
 	hasWT, err := e.cfg.Worktrees.Exists(ctx, &f)
 	if err != nil {

@@ -40,7 +40,7 @@ func newRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 	git("add", ".")
 	git("commit", "-q", "-m", "init")
 
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func newRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,5 +665,82 @@ func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
 				t.Errorf("%s: SystemHints missing stage toolHint", name)
 			}
 		})
+	}
+}
+
+// nestedRepo builds a workspace whose .gummi sits at ws while the git repo
+// lives in a nested subdirectory ws/git/lxd — the motivating layout.
+func nestedRepo(t *testing.T) (ws state.Workspace, store *state.Store, wt *worktree.Manager) {
+	t.Helper()
+	wsRoot := t.TempDir()
+	wsRoot, err := filepath.EvalSymlinks(wsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(wsRoot, "git", "lxd")
+	if err := os.MkdirAll(repo, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "t")
+	git("config", "user.email", "t@e.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "init")
+
+	ws, err = state.Init(wsRoot, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err = state.OpenStore(ws.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	wt, err = worktree.NewManager(context.Background(), wsRoot, repo, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ws, store, wt
+}
+
+// TestNestedArtifactJoinsResolveUnderWorkspace locks in the engine's root
+// discipline: .gummi-relative artifact joins use the workspace root, while
+// the repo root is exposed separately for agent workdirs.
+func TestNestedArtifactJoinsResolveUnderWorkspace(t *testing.T) {
+	ws, store, wt := nestedRepo(t)
+	fake := agent.NewFake("")
+	eng := New(Config{
+		Agents: map[string]agent.Agent{"": fake, fake.Name(): fake},
+		Store:  store, Worktrees: wt, Workspace: ws,
+		Persist: true, Model: "test-model",
+	})
+	t.Cleanup(func() { eng.Close(); fake.Close() })
+
+	if got := wt.Root(); got != ws.Root {
+		t.Errorf("Worktrees.Root() = %q, want workspace root %q", got, ws.Root)
+	}
+	if got := wt.RepoRoot(); got != ws.RepoRoot {
+		t.Errorf("Worktrees.RepoRoot() = %q, want repo root %q", got, ws.RepoRoot)
+	}
+
+	f := feature(99, "Nested artifact", domain.StageSpec)
+	// the artifact workspace-home join must resolve under the workspace
+	// root, never the repo root.
+	got := filepath.Join(eng.cfg.Worktrees.Root(), f.ArtifactPath())
+	if !strings.HasPrefix(got, ws.Root+string(filepath.Separator)) {
+		t.Errorf("artifact join %q does not resolve under workspace root %q", got, ws.Root)
+	}
+	if strings.HasPrefix(got, ws.RepoRoot+string(filepath.Separator)) {
+		t.Errorf("artifact join %q resolves under the repo root; it must use the workspace root", got)
 	}
 }

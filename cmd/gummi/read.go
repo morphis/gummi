@@ -33,7 +33,11 @@ func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Manager,
 	if err != nil {
 		return err
 	}
-	ws, err := state.Open(cwd)
+	wsRoot, repo, err := resolveRoots(cwd)
+	if err != nil {
+		return err
+	}
+	ws, err := state.Open(wsRoot, repo)
 	if err != nil {
 		return err
 	}
@@ -42,7 +46,7 @@ func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Manager,
 		return err
 	}
 	defer store.Close()
-	wt, err := worktree.NewManager(context.Background(), cwd, store)
+	wt, err := worktree.NewManager(context.Background(), wsRoot, repo, store)
 	if err != nil {
 		return err
 	}

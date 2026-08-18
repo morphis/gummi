@@ -566,7 +566,7 @@ func newDoctorFixture(t *testing.T) *doctorFixture {
 	git("add", ".")
 	git("commit", "-q", "-m", "init")
 
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func newDoctorFixture(t *testing.T) *doctorFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -901,5 +901,72 @@ profiles:
 		if c := checkByName(r, "reach:thrifty/"+role); c.Status != statusOK {
 			t.Errorf("%s = %+v, want ok", role, c)
 		}
+	}
+}
+
+// TestDoctorNestedReady: a correctly configured nested layout — .gummi at
+// ws, the git repo at ws/git/lxd — reports ready and names both roots.
+func TestDoctorNestedReady(t *testing.T) {
+	clearDoctorEnv(t)
+	ws := t.TempDir()
+	repo := filepath.Join(ws, "git", "lxd")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, ws, "repo: git/lxd\n")
+	writeProfiles(t, ws, headlessProfiles)
+	fakeAgentOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
+	t.Setenv("GUMMI_ENVELOPE", "500")
+
+	r := buildDoctorReport(ws, doctorOpts{})
+	if !r.Ready {
+		t.Fatalf("nested layout not ready: %+v", r.Checks)
+	}
+	c := checkByName(r, "repo")
+	if c.Status != statusOK || !strings.Contains(c.Detail, repo) || !strings.Contains(c.Detail, ws) {
+		t.Errorf("repo check = %+v, want ok naming repo %s and workspace %s", c, repo, ws)
+	}
+	if c := checkByName(r, "workspace"); c.Status != statusOK {
+		t.Errorf("workspace check = %+v, want ok", c)
+	}
+}
+
+// TestDoctorNestedRepoNotToplevel: a repo: key pointing at a directory with
+// no .git is a clear fail naming the offending root, not a downstream error.
+func TestDoctorNestedRepoNotToplevel(t *testing.T) {
+	clearDoctorEnv(t)
+	ws := t.TempDir()
+	writeConfig(t, ws, "repo: git/lxd\n") // no .git under it
+	writeProfiles(t, ws, headlessProfiles)
+	fakeAgentOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
+	t.Setenv("GUMMI_ENVELOPE", "500")
+
+	r := buildDoctorReport(ws, doctorOpts{})
+	c := checkByName(r, "repo")
+	if c.Status != statusFail || !strings.Contains(c.Detail, "not a git repository") {
+		t.Errorf("repo check = %+v, want fail for a repo without .git", c)
+	}
+}
+
+// TestDoctorNestedRepoEscapesWorkspace: a repo: key that escapes the
+// workspace is a clear fail at resolve time.
+func TestDoctorNestedRepoEscapesWorkspace(t *testing.T) {
+	clearDoctorEnv(t)
+	ws := t.TempDir()
+	writeConfig(t, ws, "repo: ../outside\n")
+	writeProfiles(t, ws, headlessProfiles)
+	fakeAgentOnPath(t, "fakeagent")
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
+	t.Setenv("GUMMI_ENVELOPE", "500")
+
+	r := buildDoctorReport(ws, doctorOpts{})
+	c := checkByName(r, "repo")
+	if c.Status != statusFail || !strings.Contains(c.Remediation, "repo:") {
+		t.Errorf("repo check = %+v, want a fail with repo: remediation for an escaping root", c)
 	}
 }

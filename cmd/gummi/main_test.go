@@ -15,7 +15,7 @@ func TestEnsureWorkspaceLazyInit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := ensureWorkspace(dir)
+	ws, err := ensureWorkspace(dir, dir)
 	if err != nil {
 		t.Fatalf("ensureWorkspace: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestEnsureWorkspaceLazyInit(t *testing.T) {
 	if err := os.WriteFile(ws.ConfigFile(), []byte("custom"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureWorkspace(dir); err != nil {
+	if _, err := ensureWorkspace(dir, dir); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(ws.ConfigFile()); string(b) != "custom" {
@@ -37,7 +37,7 @@ func TestEnsureWorkspaceLazyInit(t *testing.T) {
 }
 
 func TestEnsureWorkspaceRejectsNonRepo(t *testing.T) {
-	if _, err := ensureWorkspace(t.TempDir()); err == nil {
+	if _, err := ensureWorkspace(t.TempDir(), t.TempDir()); err == nil {
 		t.Error("ensureWorkspace in a non-git dir should error")
 	}
 }
@@ -54,7 +54,7 @@ func TestEnsureWorkspaceRefusesNested(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: ../.git/worktrees/FD-042\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureWorkspace(wt); !errors.Is(err, state.ErrNestedInit) {
+	if _, err := ensureWorkspace(wt, wt); !errors.Is(err, state.ErrNestedInit) {
 		t.Fatalf("ensureWorkspace in nested worktree = %v, want ErrNestedInit", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(wt, ".gummi")); !os.IsNotExist(statErr) {
@@ -223,7 +223,7 @@ func TestProfileNamesFromYaml(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := state.Init(dir)
+	ws, err := state.Init(dir, dir)
 	if err != nil {
 		t.Fatalf("state.Init: %v", err)
 	}
@@ -268,11 +268,45 @@ func TestProfileNamesWithoutYaml(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := state.Init(dir)
+	ws, err := state.Init(dir, dir)
 	if err != nil {
 		t.Fatalf("state.Init: %v", err)
 	}
 	if got := profileNames(ws); len(got) != 0 {
 		t.Fatalf("profileNames without profiles.yaml = %v, want empty", got)
+	}
+}
+
+func TestResolveRootsNested(t *testing.T) {
+	ws := t.TempDir()
+	writeConfig(t, ws, "repo: git/lxd\n")
+	gotWS, gotRepo, err := resolveRoots(ws)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	if gotWS != ws {
+		t.Errorf("workspace root = %q, want %q", gotWS, ws)
+	}
+	if want := filepath.Join(ws, "git", "lxd"); gotRepo != want {
+		t.Errorf("repo root = %q, want %q", gotRepo, want)
+	}
+}
+
+func TestResolveRootsSiblingDefault(t *testing.T) {
+	dir := t.TempDir()
+	gotWS, gotRepo, err := resolveRoots(dir)
+	if err != nil {
+		t.Fatalf("resolveRoots (no config): %v", err)
+	}
+	if gotWS != dir || gotRepo != dir {
+		t.Errorf("roots = (%q, %q), want both %q", gotWS, gotRepo, dir)
+	}
+}
+
+func TestResolveRootsRejectsEscapingRepo(t *testing.T) {
+	ws := t.TempDir()
+	writeConfig(t, ws, "repo: ../outside\n")
+	if _, _, err := resolveRoots(ws); err == nil {
+		t.Fatal("resolveRoots accepted a repo escaping the workspace")
 	}
 }

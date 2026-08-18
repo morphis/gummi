@@ -44,7 +44,7 @@ func verifiedCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 	cliGit(t, root, "add", ".")
 	cliGit(t, root, "commit", "-q", "-m", "init")
 
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func verifiedCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestCleanCommandRemovesLanded(t *testing.T) {
 	if err := runClean([]string{string(f.ID)}); err != nil {
 		t.Fatalf("runClean: %v", err)
 	}
-	wt, err := worktree.NewManager(context.Background(), ".", store)
+	wt, err := worktree.NewManager(context.Background(), ".", ".", store)
 	if err != nil {
 		t.Fatal(err)
 	}

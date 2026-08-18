@@ -19,6 +19,11 @@ type Config struct {
 	// or "off". Empty means unset — profiles that omit their own value fall
 	// back to the built-in "warn".
 	Sandbox string `yaml:"sandbox"`
+	// Repo is the git repository root gummi manages, when it is not the
+	// workspace root. Empty = the workspace root (the sibling layout, where
+	// .gummi and .git share a directory). A nested repo is named relative
+	// to the workspace root (e.g. "git/lxd").
+	Repo string `yaml:"repo"`
 }
 
 // Load reads and parses config.yaml. A missing file yields the default
@@ -71,4 +76,9 @@ permissions: allow-all
 # for bootstrap/test sessions that legitimately touch main). Profiles may
 # override this per-profile in .gummi/profiles.yaml.
 # sandbox: warn
+
+# repo: <path> — the git repository root gummi manages. Omit when .gummi
+# and .git share the same directory (the default); name a nested repo
+# relative to the workspace root (e.g. git/lxd). Must be the workspace
+# root or a subdirectory of it.
 `

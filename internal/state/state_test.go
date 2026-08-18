@@ -25,14 +25,14 @@ func gitRoot(t *testing.T) string {
 }
 
 func TestInitRequiresGitRepo(t *testing.T) {
-	if _, err := Init(t.TempDir()); err == nil {
+	if _, err := Init(t.TempDir(), t.TempDir()); err == nil {
 		t.Fatal("Init outside a git repo: want error, got nil")
 	}
 }
 
 func TestInitCreatesSkeleton(t *testing.T) {
 	root := gitRoot(t)
-	w, err := Init(root)
+	w, err := Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,14 +62,14 @@ func TestInitCreatesSkeleton(t *testing.T) {
 
 func TestInitIdempotent(t *testing.T) {
 	root := gitRoot(t)
-	w, err := Init(root)
+	w, err := Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(w.SeqFile(), []byte("41\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Init(root); err != nil {
+	if _, err := Init(root, root); err != nil {
 		t.Fatalf("second Init: %v", err)
 	}
 	seq, _ := os.ReadFile(w.SeqFile())
@@ -87,7 +87,7 @@ func TestInitRefusesSymlinkedState(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(root, ".gummi", "state")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Init(root); err == nil {
+	if _, err := Init(root, root); err == nil {
 		t.Fatal("Init accepted a symlinked state dir")
 	}
 }
@@ -111,7 +111,7 @@ func nestedLayout(t *testing.T) string {
 
 func assertNestedRefusal(t *testing.T, p, root string) {
 	t.Helper()
-	_, err := Init(root)
+	_, err := Init(root, root)
 	if !errors.Is(err, ErrNestedInit) {
 		t.Fatalf("Init(%s) = %v, want ErrNestedInit", root, err)
 	}
@@ -140,7 +140,7 @@ func TestInitRefusesFromWorktreeSubdir(t *testing.T) {
 
 func TestInitSucceedsInUnrelatedRepo(t *testing.T) {
 	q := gitRoot(t)
-	w, err := Init(q)
+	w, err := Init(q, q)
 	if err != nil {
 		t.Fatalf("Init in unrelated repo: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestInitSucceedsInUnrelatedRepo(t *testing.T) {
 
 func TestInitAtEnclosingWorkspaceRoot(t *testing.T) {
 	p := nestedLayout(t)
-	if _, err := Init(p); err != nil {
+	if _, err := Init(p, p); err != nil {
 		t.Fatalf("Init at enclosing workspace root %s should proceed: %v", p, err)
 	}
 }
@@ -159,7 +159,7 @@ func TestInitAtEnclosingWorkspaceRoot(t *testing.T) {
 func TestInitNestingBeatsGitCheck(t *testing.T) {
 	p := nestedLayout(t)
 	root := filepath.Join(p, ".gummi", "worktrees", "FD-042")
-	_, err := Init(root)
+	_, err := Init(root, root)
 	if !errors.Is(err, ErrNestedInit) {
 		t.Fatalf("Init at nested worktree with .git pointer = %v, want ErrNestedInit", err)
 	}
@@ -174,7 +174,7 @@ func TestInitIgnoresSymlinkedAncestorGummi(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(q, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	w, err := Init(q)
+	w, err := Init(q, q)
 	if err != nil {
 		t.Fatalf("Init with symlinked ancestor .gummi: %v", err)
 	}
@@ -190,21 +190,21 @@ func TestInitNestingHasNoOverride(t *testing.T) {
 }
 
 func TestOpenRequiresInit(t *testing.T) {
-	if _, err := Open(t.TempDir()); err == nil {
+	if _, err := Open(t.TempDir(), t.TempDir()); err == nil {
 		t.Fatal("Open without init: want error")
 	}
 	root := gitRoot(t)
-	if _, err := Init(root); err != nil {
+	if _, err := Init(root, root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(root); err != nil {
+	if _, err := Open(root, root); err != nil {
 		t.Fatalf("Open after init: %v", err)
 	}
 }
 
 func TestNextSeqSequential(t *testing.T) {
 	root := gitRoot(t)
-	w, err := Init(root)
+	w, err := Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestNextSeqSequential(t *testing.T) {
 
 func TestNextSeqConcurrent(t *testing.T) {
 	root := gitRoot(t)
-	w, err := Init(root)
+	w, err := Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestNextSeqConcurrent(t *testing.T) {
 
 func TestNextSeqCorruptCounter(t *testing.T) {
 	root := gitRoot(t)
-	w, err := Init(root)
+	w, err := Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestNextSeqCorruptCounter(t *testing.T) {
 
 func TestNextSeqStaleLock(t *testing.T) {
 	root := gitRoot(t)
-	w, err := Init(root)
+	w, err := Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestNextSeqStaleLock(t *testing.T) {
 
 func openStore(t *testing.T) *Store {
 	t.Helper()
-	w, err := Init(gitRoot(t))
+	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestStoreTransition(t *testing.T) {
 }
 
 func TestMintFeatureNumSkipsUsedNumbers(t *testing.T) {
-	w, err := Init(gitRoot(t))
+	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestStoreRejectsCorruptRow(t *testing.T) {
 }
 
 func TestStorePersistsAcrossReopen(t *testing.T) {
-	w, err := Init(gitRoot(t))
+	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +501,7 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 // the store twice is idempotent (the ALTER TABLE duplicate-column error
 // is swallowed).
 func TestMigrations(t *testing.T) {
-	w, err := Init(gitRoot(t))
+	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -76,7 +76,11 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(cwd)
+	wsRoot, repo, err := resolveRoots(cwd)
+	if err != nil {
+		return err
+	}
+	ws, err := ensureWorkspace(wsRoot, repo)
 	if err != nil {
 		return err
 	}
@@ -94,7 +98,7 @@ func runBoard() error {
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), cwd, store)
+	wt, err := newManager(context.Background(), wsRoot, repo, store)
 	if err != nil {
 		return err
 	}
@@ -365,12 +369,13 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 	return agents, nil
 }
 
-// newManager binds the worktree manager to cwd and keeps .gummi out of
-// the product repo's tracking (exclude + untrack-if-tracked) before any
-// agent session can touch the repo. Exclusion problems warn rather than
-// block the launch: the board still works.
-func newManager(ctx context.Context, cwd string, fs worktree.ForkPointStore) (*worktree.Manager, error) {
-	wt, err := worktree.NewManager(ctx, cwd, fs)
+// newManager binds the worktree manager to the workspace root ws and the
+// repo root repo, then keeps .gummi out of the product repo's tracking
+// (exclude + untrack-if-tracked) before any agent session can touch the
+// repo. Exclusion is a no-op in the nested layout, where .gummi sits above
+// the repo. Exclusion problems warn rather than block the launch.
+func newManager(ctx context.Context, ws, repo string, fs worktree.ForkPointStore) (*worktree.Manager, error) {
+	wt, err := worktree.NewManager(ctx, ws, repo, fs)
 	if err != nil {
 		return nil, err
 	}
@@ -382,12 +387,12 @@ func newManager(ctx context.Context, cwd string, fs worktree.ForkPointStore) (*w
 	return wt, nil
 }
 
-// ensureWorkspace returns the .gummi workspace at cwd, creating it (and
-// scaffolding config.yaml + profiles.yaml) on first run. Idempotent: an
-// existing workspace and its files are left untouched. cwd must be a git
-// repository root (gummi manages worktrees).
-func ensureWorkspace(cwd string) (state.Workspace, error) {
-	w, err := state.Init(cwd)
+// ensureWorkspace returns the .gummi workspace at ws, creating it (and
+// scaffolding config.yaml + profiles.yaml) on first run. repo is the git
+// repository root gummi manages, validated by state.Init. Idempotent: an
+// existing workspace and its files are left untouched.
+func ensureWorkspace(ws, repo string) (state.Workspace, error) {
+	w, err := state.Init(ws, repo)
 	if err != nil {
 		return state.Workspace{}, err
 	}
@@ -402,4 +407,35 @@ func ensureWorkspace(cwd string) (state.Workspace, error) {
 		}
 	}
 	return w, nil
+}
+
+// resolveRoots resolves the workspace root (where .gummi lives) and the
+// managed git repository root from cwd. The workspace root is cwd; the repo
+// root comes from the config.yaml `repo:` key, defaulting to the workspace
+// root. A configured repo root that escapes the workspace is a config error.
+func resolveRoots(cwd string) (ws, repo string, err error) {
+	ws = cwd
+	cfg, err := config.Load(filepath.Join(ws, ".gummi", "config.yaml"))
+	if err != nil {
+		return "", "", err
+	}
+	repo = cfg.Repo
+	if repo == "" {
+		repo = ws
+	} else if filepath.IsAbs(repo) {
+		repo = filepath.Clean(repo)
+	} else {
+		repo = filepath.Clean(filepath.Join(ws, repo))
+	}
+	if !repoWithinWS(ws, repo) {
+		return "", "", fmt.Errorf("config error: repo %q escapes the workspace %s; the managed repository must be the workspace root or a subdirectory of it", cfg.Repo, ws)
+	}
+	return ws, repo, nil
+}
+
+// repoWithinWS reports whether repo is the workspace root or a descendant
+// of it.
+func repoWithinWS(ws, repo string) bool {
+	rel, err := filepath.Rel(ws, repo)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

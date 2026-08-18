@@ -48,7 +48,7 @@ func newReadFixture(t *testing.T) *readFixture {
 	git("add", ".")
 	git("commit", "-q", "-m", "init")
 
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func newReadFixture(t *testing.T) *readFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	wt, err := worktree.NewManager(context.Background(), root, store)
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
 	if err != nil {
 		t.Fatal(err)
 	}

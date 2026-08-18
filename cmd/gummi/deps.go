@@ -30,7 +30,11 @@ func openDepsEnv() (*depsEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	ws, err := ensureWorkspace(cwd)
+	wsRoot, repo, err := resolveRoots(cwd)
+	if err != nil {
+		return nil, err
+	}
+	ws, err := ensureWorkspace(wsRoot, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +42,7 @@ func openDepsEnv() (*depsEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wt, err := newManager(context.Background(), cwd, store)
+	wt, err := newManager(context.Background(), wsRoot, repo, store)
 	if err != nil {
 		_ = store.Close()
 		return nil, err

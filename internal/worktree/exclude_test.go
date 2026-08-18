@@ -201,3 +201,42 @@ func TestRebaseAfterWorktreeUntrack(t *testing.T) {
 		t.Errorf(".gummi re-entered worktree tracking via the rebase: %q", out)
 	}
 }
+
+// TestEnsureGummiExcludedNestedSkipped locks in the layout-aware guard:
+// in the nested layout .gummi sits above the repo, so EnsureGummiExcluded
+// must be a no-op that writes no /.gummi/ rule into the repo's
+// info/exclude and untracks nothing.
+func TestEnsureGummiExcludedNestedSkipped(t *testing.T) {
+	ws := t.TempDir()
+	ws, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(ws, "git", "lxd")
+	if err := os.MkdirAll(repo, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repo, "init", "-q", "-b", "main")
+	mustGit(t, repo, "config", "user.name", "test")
+	mustGit(t, repo, "config", "user.email", "test@example.invalid")
+	writeFile(t, repo, "README.md", "hello\n")
+	mustGit(t, repo, "add", ".")
+	mustGit(t, repo, "commit", "-q", "-m", "initial")
+
+	m, err := NewManager(ctx, ws, repo, &memForkStore{})
+	if err != nil {
+		t.Fatalf("NewManager nested: %v", err)
+	}
+	untracked, err := m.EnsureGummiExcluded(ctx)
+	if err != nil {
+		t.Fatalf("EnsureGummiExcluded: %v", err)
+	}
+	if untracked {
+		t.Error("nested layout reported .gummi untracked; expected no-op")
+	}
+	if b, err := os.ReadFile(filepath.Join(repo, ".git", "info", "exclude")); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(string(b), ".gummi") {
+		t.Errorf("nested layout wrote a .gummi rule into the repo's info/exclude:\n%s", b)
+	}
+}

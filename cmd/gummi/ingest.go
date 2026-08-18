@@ -41,7 +41,11 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(cwd)
+	wsRoot, repo, err := resolveRoots(cwd)
+	if err != nil {
+		return err
+	}
+	ws, err := ensureWorkspace(wsRoot, repo)
 	if err != nil {
 		return err
 	}
@@ -50,7 +54,7 @@ func runIngest(args []string) error {
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), cwd, store)
+	wt, err := newManager(context.Background(), wsRoot, repo, store)
 	if err != nil {
 		return err
 	}

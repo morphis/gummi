@@ -13,7 +13,13 @@ import (
 // gummi always runs from the main checkout; Root is that checkout's
 // root directory.
 type Workspace struct {
+	// Root is where .gummi lives — the workspace root. The managed git
+	// repository may live here too (sibling layout) or in a nested
+	// subdirectory (RepoRoot).
 	Root string
+	// RepoRoot is the git repository root gummi manages. Equal to Root in
+	// the sibling layout; a nested subdirectory of Root otherwise.
+	RepoRoot string
 }
 
 // GummiDir is the repo-committed gummi directory.
@@ -75,11 +81,11 @@ const gummiIgnore = `# written by gummi init — machinery, never commit
 
 // Open returns the Workspace rooted at root, requiring that gummi init
 // has already run there.
-func Open(root string) (Workspace, error) {
-	w := Workspace{Root: root}
+func Open(ws, repo string) (Workspace, error) {
+	w := Workspace{Root: ws, RepoRoot: repo}
 	fi, err := os.Lstat(w.GummiDir())
 	if err != nil {
-		return Workspace{}, fmt.Errorf("no .gummi directory in %s (run `gummi init` first): %w", root, err)
+		return Workspace{}, fmt.Errorf("no .gummi directory in %s (run `gummi init` first): %w", ws, err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
 		return Workspace{}, fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", w.GummiDir())
@@ -131,25 +137,26 @@ func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
 	}
 }
 
-// Init creates the .gummi skeleton in root. root must be the top of a
-// git repository (worktrees and branches make no sense elsewhere).
-// Init is idempotent: existing files, and in particular an existing
-// seq counter, are never clobbered.
-func Init(root string) (Workspace, error) {
-	w := Workspace{Root: root}
+// Init creates the .gummi skeleton in ws (the workspace root). The
+// managed repository repo must be the top of a git repository (worktrees
+// and branches make no sense elsewhere); it may equal ws or sit in a
+// nested subdirectory. Init is idempotent: existing files, and in
+// particular an existing seq counter, are never clobbered.
+func Init(ws, repo string) (Workspace, error) {
+	w := Workspace{Root: ws, RepoRoot: repo}
 	// Refuse to materialize a workspace inside another workspace's managed
 	// worktree: such an init would nest and silently mask the real
 	// workspace for any future command that runs there. This check runs
 	// before the .git check because a nested worktree has a .git
 	// gitdir-pointer file that would otherwise pass and mask the more
 	// specific diagnosis.
-	if parent, id, ok := enclosingWorkspace(root); ok {
-		return Workspace{}, fmt.Errorf("%s is inside %s's worktree %s; run gummi from %s instead: %w", root, parent, id, parent, ErrNestedInit)
+	if parent, id, ok := enclosingWorkspace(ws); ok {
+		return Workspace{}, fmt.Errorf("%s is inside %s's worktree %s; run gummi from %s instead: %w", ws, parent, id, parent, ErrNestedInit)
 	}
 	// .git is a directory in a normal checkout and a gitdir-pointer
 	// file in worktrees and submodules; both are valid repo roots.
-	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
-		return Workspace{}, fmt.Errorf("%s is not the root of a git repository (no .git); gummi manages worktrees and must run from the main checkout", root)
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		return Workspace{}, fmt.Errorf("%s is not the root of a git repository (no .git); gummi manages worktrees and must run from the main checkout", repo)
 	}
 	// A cloned repo can ship .gummi (or any of its subdirs) as a committed
 	// symlink pointing elsewhere, and a plain MkdirAll would follow it and

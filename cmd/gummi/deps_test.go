@@ -41,7 +41,7 @@ func depsFixture(t *testing.T) *state.Store {
 	}
 	git("add", ".")
 	git("commit", "-q", "-m", "init")
-	ws, err := state.Init(root)
+	ws, err := state.Init(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}

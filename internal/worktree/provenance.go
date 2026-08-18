@@ -50,13 +50,13 @@ func (m *Manager) BranchCommits(ctx context.Context, f *domain.Feature) ([]Commi
 	if err != nil {
 		return nil, err
 	}
-	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
 	if err != nil {
 		return nil, err
 	}
 	// %x1e separates commits, %x1f the hash from the body — both bytes
 	// cannot appear in git object text.
-	out, err := runGit(ctx, m.root, "log", "--format=%h%x1f%B%x1e", base+".."+branch)
+	out, err := runGit(ctx, m.repo, "log", "--format=%h%x1f%B%x1e", base+".."+branch)
 	if err != nil {
 		return nil, err
 	}
@@ -113,11 +113,11 @@ func (m *Manager) branchDiffstat(ctx context.Context, f *domain.Feature) (string
 	if err != nil {
 		return "", err
 	}
-	base, err := runGit(ctx, m.root, "merge-base", "HEAD", branch)
+	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
 	if err != nil {
 		return "", err
 	}
-	return runGit(ctx, m.root, "diff", "--stat", base+".."+branch)
+	return runGit(ctx, m.repo, "diff", "--stat", base+".."+branch)
 }
 
 // ProvenanceWarnings scans the feature branch's own commit messages

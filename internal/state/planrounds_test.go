@@ -139,7 +139,7 @@ func TestClearPlanRounds(t *testing.T) {
 // Reopening an existing DB applies the idempotent ALTER TABLE migration:
 // a second open succeeds and GetFeature still scans a valid row.
 func TestPlanRoundsMigrationIdempotent(t *testing.T) {
-	w, err := Init(gitRoot(t))
+	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ const planClaimsRubric = "a `Plan claims` subsection: a table (one " +
 	"    one bullet per claim"
 
 // interactiveWorkingDirGuard fences the interactive stages that run in
-// the main checkout (locate returns Worktrees.Root() for them, not an
+// the main checkout (locate returns Worktrees.RepoRoot() for them, not an
 // isolated worktree). Without this, a model may edit repo files or
 // commit on main, dirtying the user's tree — the design chat's writes
 // belong in the .gummi/ draft, nowhere else.

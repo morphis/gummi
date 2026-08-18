@@ -113,7 +113,11 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(cwd)
+	wsRoot, repo, err := resolveRoots(cwd)
+	if err != nil {
+		return err
+	}
+	ws, err := ensureWorkspace(wsRoot, repo)
 	if err != nil {
 		return err
 	}
@@ -122,7 +126,7 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), cwd, store)
+	wt, err := newManager(context.Background(), wsRoot, repo, store)
 	if err != nil {
 		return err
 	}

@@ -117,7 +117,7 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 		hints = append(hints, ingestConventionHint)
 	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:         e.cfg.Worktrees.Root(),
+		WorkDir:         e.cfg.Worktrees.RepoRoot(),
 		Role:            agent.RoleArchitect,
 		Model:           model,
 		Permission:      e.cfg.Permission,
