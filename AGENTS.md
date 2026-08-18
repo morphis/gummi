@@ -5,10 +5,14 @@ Guidance for AI agents working on **gummi**. Read this first, then
 
 ## What gummi is
 
-gummi is a **meta-harness for coding agents**: a single-binary TUI that
+gummi is a **meta-harness for coding agents**: a single binary that
 drives a fleet of coding agents through a fixed, spec-driven workflow,
 each work item on its own git worktree and branch. It orchestrates other
-agents — it is not itself a coding agent.
+agents — it is not itself a coding agent. There are two entry points onto
+the same engine and quality floor: an interactive TUI (a human at the
+keyboard) and a headless CLI driver (`gummi run`/`resume`, for scripts,
+CI, or a calling agent) — see `internal/driver` and README's "Running
+headlessly".
 
 - **Language:** Go 1.26, single module `github.com/morphis/gummi`.
 - **Binary:** `cmd/gummi` → `bin/gummi`. Run with no args inside a git repo.
@@ -52,8 +56,17 @@ leaf services.
 | `notify` | Terminal bell / desktop notification on needs-attention. |
 | `atomicfile` | Crash-safe file writes for pre-approval drafts (no git backstop). |
 | `ui` | The Bubbletea TUI: board, chat, diff/spec views, inbox, dialogs. |
+| `driver` | The headless counterpart of the TUI's autonomous loop: drives `run`/`resume` over the engine, emits NDJSON + typed exit statuses, holds the `.gummi` lock. |
+| `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |
+| `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
+| `verdict` | Shared stage-verdict grammar the TUI and headless driver both parse, per DESIGN §13. |
+| `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to the engine's live stage tools over the session socket. |
 
-`cmd/gummi` holds `main.go` plus the `ingest` (spec) and `bugs` subcommands.
+`cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
+(spec decomposition), `bugs` (GitHub issue import / manual add), and the
+headless driver surface — `run`, `resume`, `status`, `spec`, `diff`, `verify`,
+`merge`, `clean`, `deps`, `doctor`, `skill`. See README's "Running headlessly"
+for the driver's command grammar and exit-status table.
 
 `internal/deps.go` (build tag `pin`) blank-imports the pinned Charm stack
 — that's why `make build` runs `go build -tags pin ./...` too.
@@ -98,6 +111,9 @@ go test -tags pin ./...                # match the build tag when compiling ever
 make demo   # throwaway repo with gummi initialized — safe sandbox to poke the TUI
 make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 ```
+
+To try the headless driver instead of the TUI, `make demo` still gives you
+a throwaway repo — run `bin/gummi run --envelope 500 "<description>"` in it.
 
 Running the real TUI (`bin/gummi`) needs a git repo and, for the default
 backend, an authenticated GitHub Copilot CLI. To drive agents without

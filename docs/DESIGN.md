@@ -1,7 +1,8 @@
 # gummi — Design Document
 
 > A meta-harness for coding agents. Drive a fleet of agents through a
-> spec-driven workflow across git worktrees, from one beautiful TUI.
+> spec-driven workflow across git worktrees — from one beautiful TUI, or
+> headlessly from your own agents and CI.
 
 **Status:** brainstorm / v0 design — 2026-07-03
 

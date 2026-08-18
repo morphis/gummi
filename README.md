@@ -1,7 +1,8 @@
 # gummi
 
 > A meta-harness for coding agents. Drive a fleet of agents through a
-> spec-driven workflow across git worktrees, from one TUI.
+> spec-driven workflow across git worktrees — from one TUI, or headlessly
+> from your own agents and CI.
 
 ![the gummi board: features at different stages, a spec, a diff, and a new feature advancing](docs/assets/demo.gif)
 
