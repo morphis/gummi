@@ -18,6 +18,8 @@ func TestValidateCommitMessage(t *testing.T) {
 	valid := []string{
 		"feat(ui): sort the board",
 		"fix: handle empty input",
+		"feat(engine,driver,ui): enforce dependency gate at coding-stage entry",
+		"fix(a,b,c): apply several scopes",
 		"docs(core): note the exit contract\n\nA body the caller owns.",
 		"refactor(engine): rename Advance\n\n- long body line is the caller's formatting, never rewritten",
 	}
@@ -36,6 +38,11 @@ func TestValidateCommitMessage(t *testing.T) {
 		{"feat: ", "Conventional Commits"},
 		{"frobnicate(x): not a real type", "not a conventional commits type"},
 		{"feat(x): sum\n\nCo-authored-by: bot <b@e>", "attribution"},
+		{"feat(engine,): sum", "malformed"},
+		{"feat(,engine): sum", "malformed"},
+		{"feat(engine,,ui): sum", "malformed"},
+		{"feat(): sum", "malformed"},
+		{"feat(x): ", "Conventional Commits"},
 		{"feat(x): sum\ndiff --git a/b b/c\n@@ -1 +1 @@", "diff dump"},
 	}
 	for _, tc := range invalid {

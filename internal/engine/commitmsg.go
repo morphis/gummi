@@ -133,9 +133,36 @@ var conventionalCommitTypes = map[string]struct{}{
 }
 
 // ccSubjectRe matches a Conventional Commits `type(scope): summary` subject
-// line: a known type (checked separately), an optional parenthesized scope,
-// a colon+space separator, and a non-empty summary.
-var ccSubjectRe = regexp.MustCompile(`^[a-z]+(\([a-z0-9-]+\))?: .+$`)
+// line: a known type (checked separately), an optional parenthesized scope
+// (a single scope name or a comma-separated list of them), a colon+space
+// separator, and a non-empty summary.
+var ccSubjectRe = regexp.MustCompile(`^[a-z]+(\([a-z0-9-]+(,[a-z0-9-]+)*\))?: .+$`)
+
+// ccSubjectScopeRe matches a subject that leads with a parenthesized scope
+// group after the type and pulls out its raw contents. It exists only to
+// report a malformed multi-scope subject as such instead of the generic
+// type(scope): summary line; the contents are gated by validScopeList so a
+// well-formed scope (even one with an empty summary) still falls through
+// to the generic error rather than a misleading "malformed" line.
+var ccSubjectScopeRe = regexp.MustCompile(`^[a-z]+\(([^)]*)\): `)
+
+// scopeElRe matches a single valid scope name in a comma-separated list.
+var scopeElRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// validScopeList reports whether a scope-group's raw contents form a
+// non-empty comma-separated list of [a-z0-9-] names. A well-formed list
+// passes; a trailing/leading/empty element or an empty scope does not.
+func validScopeList(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, el := range strings.Split(s, ",") {
+		if !scopeElRe.MatchString(el) {
+			return false
+		}
+	}
+	return true
+}
 
 // ValidateCommitMessage rejects a commit message that must not reach main's
 // history through the headless landing path. It is deliberately stricter
@@ -156,6 +183,9 @@ func ValidateCommitMessage(msg string) error {
 		first = trimmed[:i]
 	}
 	if !ccSubjectRe.MatchString(first) {
+		if m := ccSubjectScopeRe.FindStringSubmatch(first); m != nil && !validScopeList(m[1]) {
+			return fmt.Errorf("commit message scope %q is malformed: scopes are comma-separated [a-z0-9-] names", m[1])
+		}
 		return fmt.Errorf("commit message subject %q is not Conventional Commits type(scope): summary", first)
 	}
 	typ, _, _ := strings.Cut(first, "(")
