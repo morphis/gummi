@@ -88,7 +88,7 @@ func (c *sockConn) nextID() string {
 func TestMCPSockBindOrderingDial(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestMCPSockBindOrderingDial(t *testing.T) {
 func TestMCPSockHandshakeFeatureMismatch(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestMCPSockHandshakeFeatureMismatch(t *testing.T) {
 func TestMCPSockListTools(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
 	// empty set flavorStage would compute for StagePlan.
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorCritique)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorCritique, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
 	// flavorStage would list verify's verdict tool here.
 	e2 := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f2 := domain.Feature{ID: "FD-002", Stage: domain.StageVerify, Profile: "default"}
-	path2, teardown2, err := e2.startMCPEndpoint(context.Background(), f2, flavorRebase)
+	path2, teardown2, err := e2.startMCPEndpoint(context.Background(), f2, flavorRebase, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
 func TestMCPSockCallToolNoSession(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestMCPSockCallToolInterleave(t *testing.T) {
 	}
 	defer s.stop()
 
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestMCPSockCallToolInterleave(t *testing.T) {
 func TestMCPSockTeardown(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
-	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage)
+	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
 	}

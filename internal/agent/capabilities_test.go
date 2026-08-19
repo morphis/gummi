@@ -34,6 +34,28 @@ func TestCapabilitiesForUnknown(t *testing.T) {
 	}
 }
 
+// TestReadOnlyEnforceBaseMap pins which backends can structurally strip
+// their native write tools for a ReadOnly research session: claude and
+// opencode can (their adapters cage file tools), while copilot, codex,
+// and headless cannot and must be refused at the engine gate instead.
+func TestReadOnlyEnforceBaseMap(t *testing.T) {
+	for name, want := range map[string]bool{
+		"claude":   true,
+		"opencode": true,
+		"copilot":  false,
+		"codex":    false,
+		"headless": false,
+	} {
+		c, ok := CapabilitiesFor(name)
+		if !ok {
+			t.Fatalf("CapabilitiesFor(%q) not found", name)
+		}
+		if c.ReadOnlyEnforce != want {
+			t.Errorf("CapabilitiesFor(%q).ReadOnlyEnforce = %v, want %v", name, c.ReadOnlyEnforce, want)
+		}
+	}
+}
+
 func TestRegisterCapabilitiesOverlayAndUndo(t *testing.T) {
 	unreg := RegisterCapabilities("synthetic", Capabilities{})
 	if c, ok := CapabilitiesFor("synthetic"); !ok || c.ClientTools || c.MCPTools {

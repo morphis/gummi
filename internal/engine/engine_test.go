@@ -592,7 +592,11 @@ type recorder struct {
 }
 
 func recordingAgent() *recorder {
-	return &recorder{Fake: agent.NewFake("ok")}
+	f := agent.NewFake("ok")
+	// research sessions are read-only; advertise the fake can enforce it,
+	// or the engine's fail-closed gate would refuse the session outright.
+	f.Caps.ReadOnlyEnforce = true
+	return &recorder{Fake: f}
 }
 
 func (r *recorder) Name() string {

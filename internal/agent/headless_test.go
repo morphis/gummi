@@ -255,3 +255,19 @@ func kindStrings(ks []EventKind) []string {
 	}
 	return out
 }
+
+// A ReadOnly research session must never run on a backend that cannot
+// structurally strip its write tools: headless advertises
+// ReadOnlyEnforce:false, so NewSession refuses instead of silently running
+// read-write over the main checkout.
+func TestHeadlessRejectsReadOnly(t *testing.T) {
+	ag, err := NewHeadless([]string{"sh", "-c", "cat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	if _, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), ReadOnly: true}); err == nil ||
+		!strings.Contains(err.Error(), "read-only") {
+		t.Errorf("ReadOnly session error = %v, want a clear read-only rejection", err)
+	}
+}

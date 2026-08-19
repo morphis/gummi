@@ -75,6 +75,14 @@ func roleForStage(s domain.Stage) (agent.Role, bool) {
 // package so the engine and the UI's worktree gate share one definition.
 func interactiveStage(s domain.Stage) bool { return workflow.Interactive(s) }
 
+// researchReadOnly reports whether a research feature's stage is an
+// autonomous pass that must never mutate the main checkout (it runs in
+// the repo root with no worktree): investigate and review-of-research
+// yes, shape no — shape is the single interactive gated-write seam.
+func researchReadOnly(f domain.Feature) bool {
+	return f.Kind == domain.KindResearch && !interactiveStage(f.Stage)
+}
+
 // stageHints builds the system instructions for a feature's stage: the
 // durable spec is the context carrier, so every stage gets the same
 // compiled-in contract — the authoritative facts, the spec's shape, and
@@ -239,8 +247,20 @@ class) and delete any temporary logs. If you are addressing review
 findings, resolve each thread in the Review section with how you fixed
 it. If you hit a blocker or need a decision, stop and say so rather than
 guessing.`))
+	case domain.StageInvestigate:
+		if f.Kind == domain.KindResearch {
+			hints = append(hints, investigateHint())
+		}
+	case domain.StageShape:
+		if f.Kind == domain.KindResearch {
+			hints = append(hints, shapeHint())
+		}
 	case domain.StageReview:
-		hints = append(hints, reviewHint(f.Kind))
+		if f.Kind == domain.KindResearch {
+			hints = append(hints, researchReviewHint())
+		} else {
+			hints = append(hints, reviewHint(f.Kind))
+		}
 	case domain.StageVerify:
 		hints = append(hints, verifyHint(f.Kind))
 	}
@@ -440,6 +460,51 @@ fix fallout your resolution caused. Skip if the repo has no such
 command; this is fallout detection, not full CI, so stop after.
 If a conflict cannot be reconciled, run ` + "`git rebase --abort`" + ` and end
 your final message explaining which conflict and why.`)
+}
+
+// investigateHint is the research investigate pass contract: an
+// autonomous, read-only survey of the main checkout (no worktree) that
+// grounds every finding in path:line citations so later stages can
+// navigate to it.
+func investigateHint() string {
+	return strings.TrimSpace(`
+Stage: Investigate (autonomous, read-only). Survey the research
+question against this repo. You run in the main checkout with no
+worktree: every tool that can write or commit is unavailable, so the
+survey is read-only by construction — do not expect to modify anything.
+Ground every finding with a path:line citation so later stages can
+navigate to it. Record your findings and open questions in the research
+document as you go, and stop when the survey answers the research
+question or names what blocks it.`)
+}
+
+// shapeHint is the research shape pass contract: an interactive
+// convergence gate that narrows the surveyed options to one and writes
+// the converged draft in place behind per-action confirmation.
+func shapeHint() string {
+	return strings.TrimSpace(`
+Stage: Shape (interactive; the user is in gummi's chat pane). Converge
+the surveyed options to exactly one, working with the user. You run in
+the main checkout with no worktree; the research document is yours to
+update, and one-off writes happen behind per-action confirmation —
+never modify repo files or commit. Ask one decision at a time with a
+recommended answer attached, and stop when the draft converges on one
+option.`)
+}
+
+// researchReviewHint is the research review pass contract: an
+// adversarial critique of the research document. It is autonomous and
+// read-only — findings are recorded via submit_verdict, never by
+// editing the artifact.
+func researchReviewHint() string {
+	return strings.TrimSpace(`
+Stage: Review (autonomous, fresh context, read-only). Adversarially
+critique the research document — the survey's evidence, the shaped
+option, and the open questions — for soundness, grounding, and
+completeness. You run in the main checkout with no worktree and cannot
+modify the artifact: record your findings in your final message and
+submit a verdict via the submit_verdict tool (pass or changes), exactly
+once, instead of writing to the document.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both

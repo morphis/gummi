@@ -23,13 +23,21 @@ import "encoding/json"
 // requires process-level confinement, which is out of scope for this feature
 // (see FD-014 sandbox mode). opencode strips // comments from its JSON config,
 // so this note lives in the Go source only.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool) ([]byte, error) {
 	worktreeOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
 
 	permission := map[string]any{
 		"edit":               worktreeOnly,
 		"write":              worktreeOnly,
 		"external_directory": "deny",
+	}
+	// A ReadOnly research session runs in the main checkout with no
+	// worktree: pin edit and write to "deny" outright so opencode's file
+	// tools are structurally absent regardless of the operator's sandbox
+	// mode, while read (and external_directory, above) stay open.
+	if readOnly {
+		permission["edit"] = "deny"
+		permission["write"] = "deny"
 	}
 	if len(extraReadAllows) > 0 {
 		permission["external_directory"] = "allow"

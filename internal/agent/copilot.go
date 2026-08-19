@@ -86,6 +86,16 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	}
 	c.mu.Unlock()
 
+	// A ReadOnly research session runs in the main checkout with no
+	// worktree. This backend has no structural read-only cage
+	// (ReadOnlyEnforce is false), so refuse rather than silently run
+	// read-write — the engine gate is the first line, this is the second
+	// so a stray direct call cannot drop the deny.
+	if opts.ReadOnly {
+		return nil, errors.New("copilot backend cannot enforce a read-only research session; " +
+			"point this role at `claude` or `opencode`, or accept that autonomous research cannot run on copilot")
+	}
+
 	// Deltas are opt-in: with Streaming unset the runtime defaults to
 	// non-streaming and assistant.message_delta / assistant.reasoning_delta
 	// events never arrive — sessions would look frozen until the first

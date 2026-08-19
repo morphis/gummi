@@ -520,7 +520,7 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -578,6 +578,21 @@ func (e *Engine) startAutonomous(s *Session) {
 	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !interactiveStage(s.Feature.Stage) {
 		e.exhaust(s)
 		return
+	}
+	// A research autonomous stage runs in the main checkout (no worktree),
+	// so the operator's pre-existing dirt is a hard stop before any
+	// session: a dirty main is exactly the state the tripwire exists to
+	// keep the agent out of, and with no session yet created nothing
+	// spawns against it. Fail-open on a git error (like beforeTurn) so a
+	// flaky snapshot never blocks a run; the mid-turn checkTrip remains
+	// the armed layer.
+	if s.ReadOnly {
+		if paths, derr := e.dirtyPathsFn(s.ctx, &s.Feature); derr != nil {
+			s.appendActivity("main-checkout tripwire: pre-start snapshot failed — skipping start check for this run: " + derr.Error())
+		} else if len(paths) > 0 {
+			e.trip(s, paths)
+			return
+		}
 	}
 	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor())
 	if err != nil {
@@ -780,6 +795,18 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		}
 		return nil, "", nil, fmt.Errorf("no agent registered for backend %q (feature %s role %s)", backend, f.ID, role)
 	}
+	// An autonomous research session runs in the main checkout with the
+	// artifact at its workspace home — no worktree, so a read-write agent
+	// could mutate the operator's repo. Fail closed: a backend that cannot
+	// structurally strip its write tools (copilot, headless, codex) is
+	// refused here, before any session, so "documented no-op" can never
+	// silently downgrade the read-only guarantee to the tripwire alone.
+	readOnly := researchReadOnly(f)
+	if readOnly && !ag.Capabilities().ReadOnlyEnforce {
+		return nil, "", nil, fmt.Errorf("backend %q cannot enforce a read-only research session "+
+			"(feature %s stage %s); point this role at `claude` or `opencode`, or accept that "+
+			"autonomous research cannot run on that backend", backend, f.ID, f.Stage)
+	}
 	hints := stageHints(f, specPath, flavor)
 	// implementation runs carry any open diff review comments so a fix-up
 	// (bounce from the diff surface's "request changes") addresses each
@@ -814,8 +841,11 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// same way, so its stage sessions still receive the toolHint.
 	var tools []agent.ToolDef
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
-		tools = stageTools(f.Stage, flavor)
-		if h := toolHint(f.Stage, flavor); h != "" {
+		tools = filterReadOnlyTools(stageTools(f.Stage, flavor), readOnly)
+		// A read-only session's standard toolHint would describe the
+		// stripped spec_replace_section; the research stage hints carry
+		// the read-only surface instead.
+		if h := toolHint(f.Stage, flavor); h != "" && !readOnly {
 			hints = append(hints, h)
 		}
 	} else if interactiveStage(f.Stage) {
@@ -828,7 +858,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// on start never races the bind. The teardown is returned for the caller
 	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
-	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor)
+	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor, readOnly)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -844,6 +874,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		OutputTokenMax: outputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(f.ID),
+		ReadOnly:       readOnly,
 	})
 	if specErr != nil {
 		mcpTeardown()

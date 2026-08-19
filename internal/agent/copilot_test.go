@@ -481,3 +481,15 @@ func TestCopilotUsageCostPrecedence(t *testing.T) {
 		t.Errorf("input = %d, want 0 (clamped, not negative)", u.InputTokens)
 	}
 }
+
+// A ReadOnly research session must never run on a backend that cannot
+// structurally strip its write tools: copilot advertises
+// ReadOnlyEnforce:false, so NewSession refuses instead of silently running
+// read-write over the main checkout.
+func TestCopilotRejectsReadOnly(t *testing.T) {
+	c := &Copilot{}
+	if _, err := c.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), ReadOnly: true}); err == nil ||
+		!strings.Contains(err.Error(), "read-only") {
+		t.Errorf("ReadOnly session error = %v, want a clear read-only rejection", err)
+	}
+}

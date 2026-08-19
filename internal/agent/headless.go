@@ -122,6 +122,16 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		return nil, errors.New("headless agent is closed")
 	}
 
+	// A ReadOnly research session runs in the main checkout with no
+	// worktree. This backend has no structural read-only cage
+	// (ReadOnlyEnforce is false), so refuse rather than silently run
+	// read-write — the engine gate is the first line, this is the second
+	// so a stray direct call cannot drop the deny.
+	if opts.ReadOnly {
+		return nil, errors.New("headless backend cannot enforce a read-only research session; " +
+			"point this role at `claude` or `opencode`, or accept that autonomous research cannot run on headless")
+	}
+
 	// spawn + init OUTSIDE the lock (fork/exec and the init write must not
 	// serialize session creation or block a concurrent Close).
 	procCtx, cancel := context.WithCancel(context.Background())

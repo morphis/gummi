@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -741,6 +742,95 @@ func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
 		if !names[specViewToolName] || !names[specReplaceSectionToolName] {
 			t.Errorf("stage %s tools %v lack spec_view/spec_replace_section", st, names)
 		}
+	}
+}
+
+// TestFilterReadOnlyTools: a read-only research session's gummi-mediated
+// surface strips the artifact-rewriting tools (spec_replace_section,
+// spec_annotate) while keeping the read/nav and gummi-state tools. A
+// non-read-only session is unchanged. Investigate and review both keep
+// spec_view; review keeps submit_verdict; investigate keeps
+// resolve_annotation.
+func TestFilterReadOnlyTools(t *testing.T) {
+	for _, tc := range []struct {
+		stage    domain.Stage
+		kept     []string
+		stripped []string
+	}{
+		{domain.StageInvestigate, []string{"resolve_annotation", "spec_view"}, []string{"spec_replace_section"}},
+		{domain.StageReview, []string{"submit_verdict", "spec_view"}, []string{"spec_replace_section"}},
+	} {
+		names := map[string]bool{}
+		for _, td := range filterReadOnlyTools(stageTools(tc.stage, flavorStage), true) {
+			names[td.Name] = true
+		}
+		for _, k := range tc.kept {
+			if !names[k] {
+				t.Errorf("stage %s read-only lost %s: %v", tc.stage, k, names)
+			}
+		}
+		for _, st := range tc.stripped {
+			if names[st] {
+				t.Errorf("stage %s read-only kept mutating tool %s: %v", tc.stage, st, names)
+			}
+		}
+	}
+	// a non-read-only session is unchanged: the filter is a no-op.
+	names := map[string]bool{}
+	for _, td := range filterReadOnlyTools(stageTools(domain.StageInvestigate, flavorStage), false) {
+		names[td.Name] = true
+	}
+	if !names[specReplaceSectionToolName] {
+		t.Errorf("non-read-only investigate lost spec_replace_section: %v", names)
+	}
+}
+
+// researchReadonlySession builds a live read-only research investigate
+// session (fake advertises ReadOnlyEnforce so the engine admits it) for
+// testing the read-only client-tool refusal path directly.
+func researchReadonlySession(t *testing.T) (*Engine, *Session) {
+	t.Helper()
+	fk := agent.NewFake("ack")
+	fk.Caps.ReadOnlyEnforce = true
+	e := newEngine(t, &fakeNoTools{fk})
+	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	seedDraft(t, e, f)
+	if err := e.Run(f); err != nil {
+		t.Fatalf("run research investigate: %v", err)
+	}
+	s := e.Get("RS-001")
+	if s == nil {
+		t.Fatal("no session for research investigate")
+	}
+	t.Cleanup(func() { s.stop() })
+	return e, s
+}
+
+// TestReadonlyDispatchRefusesSpecReplace: a hand-crafted spec_replace_section
+// through DispatchClientTool on a read-only session is refused (and the
+// artifact untouched), so the MCP bridge cannot rewrite the main checkout.
+func TestReadonlyDispatchRefusesSpecReplace(t *testing.T) {
+	e, s := researchReadonlySession(t)
+	before, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.DispatchClientTool(context.Background(), s, "spec_replace_section",
+		json.RawMessage(`{"section":"Problem","body":"pwned"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "not available") {
+		t.Errorf("refusal result = %q, want a not-available refusal", result)
+	}
+	after, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("read-only session's spec_replace_section mutated the artifact")
 	}
 }
 

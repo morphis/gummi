@@ -238,6 +238,60 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	}
 }
 
+// Research stages carry their own stage contracts: investigate is an
+// autonomous read-only survey (ground findings with path:line
+// citations), shape is an interactive convergence gate with gated
+// writes, and review-of-a-document is an autonomous read-only critique
+// that records findings via submit_verdict instead of editing the
+// artifact.
+func TestResearchStageHints(t *testing.T) {
+	cases := []struct {
+		stage domain.Stage
+		want  []string
+	}{
+		{domain.StageInvestigate, []string{
+			"read-only", "path:line citation", "no worktree",
+		}},
+		{domain.StageShape, []string{
+			"Converge", "exactly one", "behind per-action confirmation",
+			"not an isolated worktree",
+		}},
+		{domain.StageReview, []string{
+			"read-only", "submit_verdict", "critique",
+		}},
+	}
+	for _, tc := range cases {
+		f := feature(1, "RS topic", tc.stage)
+		f.Kind = domain.KindResearch
+		h := unwrap(strings.Join(stageHints(f, "research.md", flavorStage), "\n"))
+		for _, want := range tc.want {
+			if !strings.Contains(h, unwrap(want)) {
+				t.Errorf("%s hint missing %q", tc.stage, want)
+			}
+		}
+	}
+
+	// review-of-a-document must not carry the worktree-diff review hint
+	// (it is read-only and has no spec_replace_section to record with).
+	rf := feature(1, "RS topic", domain.StageReview)
+	rf.Kind = domain.KindResearch
+	review := unwrap(strings.Join(stageHints(rf, "research.md", flavorStage), "\n"))
+	for _, absent := range []string{"spec_replace_section", "Review the worktree diff"} {
+		if strings.Contains(review, absent) {
+			t.Errorf("research review hint contains %q; it must be absent", absent)
+		}
+	}
+
+	// non-research review is unchanged: it still records findings by
+	// editing the artifact.
+	nf := feature(1, "Dark mode", domain.StageReview)
+	nf.Kind = domain.KindFeature
+	nrev := unwrap(strings.Join(stageHints(nf, "spec.md", flavorStage), "\n"))
+	if !strings.Contains(nrev, "Review the worktree diff") {
+		t.Error("feature review hint lost the worktree-diff contract")
+	}
+}
+
 // TestRebaseHintCarriesBuildCheck: F15 concretized the rebase's
 // post-conflict check — name the discoverable build commands rather
 // than "if the repo has one".

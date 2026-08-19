@@ -139,7 +139,76 @@ func TestRunResearchInvestigateSpawnsArchitectNoWorktree(t *testing.T) {
 	if got.WorkDir != wt.RepoRoot() {
 		t.Errorf("investigate workdir = %s, want repo root %s", got.WorkDir, wt.RepoRoot())
 	}
+	if !got.ReadOnly {
+		t.Error("investigate session ReadOnly = false, want true (autonomous pass over the main checkout)")
+	}
 	if ok, _ := wt.Exists(context.Background(), &f); ok {
 		t.Fatal("running research investigate materialized a worktree")
+	}
+}
+
+// TestRunResearchReviewSpawnsReviewerReadOnly: review-of-a-document maps
+// to a reviewer session, is read-only (an autonomous pass over the main
+// checkout), and materializes no worktree.
+func TestRunResearchReviewSpawnsReviewerReadOnly(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(2, "run rs review", domain.StageReview)
+	f.ID = domain.FeatureID("RS-002")
+	f.Kind = domain.KindResearch
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Run(f); err != nil {
+		t.Fatalf("run research review: %v", err)
+	}
+	got := rec.opts()
+	if got.Role != agent.RoleReviewer {
+		t.Errorf("review session role = %s, want reviewer", got.Role)
+	}
+	if got.WorkDir != wt.RepoRoot() {
+		t.Errorf("review workdir = %s, want repo root %s", got.WorkDir, wt.RepoRoot())
+	}
+	if !got.ReadOnly {
+		t.Error("review session ReadOnly = false, want true (autonomous pass over the main checkout)")
+	}
+	if ok, _ := wt.Exists(context.Background(), &f); ok {
+		t.Fatal("running research review materialized a worktree")
+	}
+}
+
+// TestAttachResearchShapeNotReadOnly: shape is the interactive gated-write
+// seam, so a research shape session does not set ReadOnly while still
+// resolving WorkDir to the repo root (no worktree for a research card).
+func TestAttachResearchShapeNotReadOnly(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(3, "run rs shape", domain.StageShape)
+	f.ID = domain.FeatureID("RS-003")
+	f.Kind = domain.KindResearch
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Attach(context.Background(), f); err != nil {
+		t.Fatalf("attach research shape: %v", err)
+	}
+	got := rec.opts()
+	if got.Role != agent.RoleArchitect {
+		t.Errorf("shape session role = %s, want architect", got.Role)
+	}
+	if got.WorkDir != wt.RepoRoot() {
+		t.Errorf("shape workdir = %s, want repo root %s", got.WorkDir, wt.RepoRoot())
+	}
+	if got.ReadOnly {
+		t.Error("shape session ReadOnly = true, want false (interactive gated-write seam)")
+	}
+	if ok, _ := wt.Exists(context.Background(), &f); ok {
+		t.Fatal("running research shape materialized a worktree")
 	}
 }

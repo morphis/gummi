@@ -148,6 +148,12 @@ type Session struct {
 	// the current stage without doing its work. Set at construction,
 	// immutable.
 	Rebase bool
+	// ReadOnly marks an autonomous research pass (investigate,
+	// review-of-research) that must never mutate the main checkout. Set at
+	// construction from researchReadOnly, immutable. The engine uses it to
+	// refuse mutating client tools (spec_replace_section, spec_annotate)
+	// even when a hand-crafted MCP call names them.
+	ReadOnly bool
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).

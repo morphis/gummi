@@ -116,6 +116,15 @@ type SessionOpts struct {
 	// read outside WorkDir. Adapters without a per-file allowlist (or
 	// without a cage of any kind) ignore it.
 	ExtraReadAllows []string
+	// ReadOnly marks an autonomous research session that must never
+	// mutate the main checkout (it runs in the repo root, no worktree).
+	// The adapter enforces it structurally — stripping every mutating
+	// tool — independent of sandbox resolution, so enforce/warn/off
+	// cannot re-arm write access. Backends without ReadOnlyEnforce in
+	// their Capabilities must refuse a ReadOnly session rather than run
+	// it read-write; the engine also gates on the capability before
+	// constructing one.
+	ReadOnly bool
 }
 
 // Agent creates sessions and reports what its backend can do.
@@ -154,6 +163,12 @@ type Capabilities struct {
 	// Distinct from ClientTools so callers that do not bind an MCP endpoint
 	// (transient sessions) still fall back to the prompt convention.
 	MCPTools bool
+	// ReadOnlyEnforce reports that the backend can structurally strip its
+	// native write tools for a ReadOnly session (SessionOpts.ReadOnly), so
+	// the read-only guarantee does not depend on the operator's sandbox
+	// choice. Backends without it must refuse a ReadOnly session rather
+	// than silently run read-write.
+	ReadOnlyEnforce bool
 }
 
 // Session is one live agent conversation bound to a feature + stage.

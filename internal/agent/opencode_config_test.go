@@ -8,7 +8,7 @@ import (
 
 func buildConfig(t *testing.T, extra []string) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil)
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,5 +112,29 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 	}
 	if read["*"] != "deny" {
 		t.Errorf("read[*] = %v, want deny", read["*"])
+	}
+}
+
+// A ReadOnly research session runs in the main checkout with no worktree:
+// edit and write are pinned to "deny" outright (never a worktree-shaped
+// pattern map), while read stays open — the deny is structural, so
+// enforce/warn/off sandbox modes cannot re-arm the write tools.
+func TestBuildOpencodeConfigReadOnly(t *testing.T) {
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true)
+	if err != nil {
+		t.Fatalf("buildOpencodeConfig: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
+	}
+	perm := m["permission"].(map[string]any)
+	for _, key := range []string{"edit", "write"} {
+		if perm[key] != "deny" {
+			t.Errorf("%s = %v, want deny for a ReadOnly session", key, perm[key])
+		}
+	}
+	if perm["external_directory"] != "deny" {
+		t.Errorf("external_directory = %v, want deny", perm["external_directory"])
 	}
 }

@@ -99,6 +99,29 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	}
 }
 
+// filterReadOnlyTools strips the artifact-rewriting tools from a stage's
+// gummi-mediated surface for a read-only research session. The read-only
+// contract is all-or-nothing at the adapter boundary, so only the tools
+// that never mutate the main checkout remain: spec_view (a read) and the
+// gummi-state tools (submit_verdict / resolve_annotation / verify_verdict,
+// which write to the store, never the artifact). spec_replace_section and
+// spec_annotate rewrite the artifact and are structurally absent, so the
+// engine serves — over opts.Tools, MCP list_tools, and the prompt's
+// toolHint — exactly the stripped set.
+func filterReadOnlyTools(defs []agent.ToolDef, readOnly bool) []agent.ToolDef {
+	if !readOnly {
+		return defs
+	}
+	out := make([]agent.ToolDef, 0, len(defs))
+	for _, d := range defs {
+		if d.Name == specReplaceSectionToolName || d.Name == annotateToolName {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 func askUserTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: askToolName,
@@ -366,6 +389,15 @@ const askConventionHint = "When you need a decision from the user, end your mess
 // agent's turn never hangs on a call gummi won't answer.
 func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 	if tc == nil {
+		return
+	}
+	// Defense in depth: a read-only research session refuses the stripped
+	// mutating tools outright, so a hand-crafted MCP call that names them
+	// cannot rewrite the artifact even though filterReadOnlyTools kept
+	// them out of the advertised surface (and no prompt told the model
+	// they exist).
+	if s.ReadOnly && (tc.Name == specReplaceSectionToolName || tc.Name == annotateToolName) {
+		e.resolveNow(s, tc.ID, "read-only research session: "+tc.Name+" is not available")
 		return
 	}
 	switch tc.Name {

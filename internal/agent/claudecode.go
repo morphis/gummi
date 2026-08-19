@@ -75,7 +75,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -83,6 +83,21 @@ func (c *ClaudeCode) Capabilities() Capabilities {
 // (see mapResult), so the engine must not re-price its tokens. Zero here
 // disables the token-priced fallback for Claude sessions.
 func (c *ClaudeCode) CreditRate(string) float64 { return 0 }
+
+// claudeReadOnlyTools is the --allowedTools allowlist for a ReadOnly
+// research session: read/navigation tools and read-only git subcommands
+// only. Edit/Write/MultiEdit, bare Bash, and git add/commit/branch are
+// structurally absent, and --add-dir is never passed for the main
+// checkout, so the session cannot mutate the repo regardless of sandbox
+// mode. mcp__gummi stays because the engine serves a read-only surface
+// over it (spec_view/submit_verdict, never spec_replace_section).
+func claudeReadOnlyTools() []string {
+	return []string{
+		"Read", "Grep", "Glob",
+		"mcp__gummi",
+		"Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)",
+	}
+}
 
 // NewSession implements Agent: spawn one claude process in opts.WorkDir.
 func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
@@ -119,7 +134,13 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		// and no message_delta usage, so sessions would look frozen and the
 		// engine's budget check would only move at turn ends.
 		"--verbose", "--include-partial-messages",
-		"--permission-mode", "acceptEdits",
+	}
+	// A ReadOnly research session runs in the main checkout with no
+	// worktree and no write cage to fall back on: drop --permission-mode
+	// acceptEdits (no auto-approved edits in cwd) so the deny is enforced
+	// by the tool surface itself, never by the operator's sandbox choice.
+	if !opts.ReadOnly {
+		args = append(args, "--permission-mode", "acceptEdits")
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -148,7 +169,11 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// above. And never pass --add-dir for the main checkout: it lifts the
 	// write cage alongside the read allowance. Both invariants are
 	// load-bearing; breaking either silently re-opens the write hole.
-	args = append(args, "--allowedTools", "Bash Read Grep Glob mcp__gummi")
+	if opts.ReadOnly {
+		args = append(args, "--allowedTools", strings.Join(claudeReadOnlyTools(), " "))
+	} else {
+		args = append(args, "--allowedTools", "Bash Read Grep Glob mcp__gummi")
+	}
 
 	// spawn OUTSIDE the lock (fork/exec must not serialize session creation
 	// or block a concurrent Close).

@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,8 +59,12 @@ type mcpChild struct {
 }
 
 func startChild(t *testing.T, socket string) *mcpChild {
+	return startChildFor(t, socket, "FD-001")
+}
+
+func startChildFor(t *testing.T, socket, featureID string) *mcpChild {
 	t.Helper()
-	cmd := exec.CommandContext(context.Background(), gummiBin, "__mcp", "--feature", "FD-001")
+	cmd := exec.CommandContext(context.Background(), gummiBin, "__mcp", "--feature", featureID)
 	cmd.Env = append(os.Environ(), "GUMMI_MCP_SOCK="+socket)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -328,5 +334,79 @@ func TestMCPEndToEndUnknownMethod(t *testing.T) {
 	er := resp["error"].(map[string]any)
 	if int(er["code"].(float64)) != -32601 {
 		t.Fatalf("error code = %v, want -32601", er["code"])
+	}
+}
+
+// mcpE2EReadonlySetup builds a live in-test engine with a read-only
+// autonomous research investigate session (fake advertises
+// ReadOnlyEnforce so the engine admits it), binding the MCP socket, and
+// returns the engine, the socket path, and the session.
+func mcpE2EReadonlySetup(t *testing.T) (*Engine, string, *Session) {
+	t.Helper()
+	fk := agent.NewFake("ack")
+	fk.Caps.ReadOnlyEnforce = true
+	e := newEngine(t, &fakeNoTools{fk})
+	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	seedDraft(t, e, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	s := e.Get("RS-001")
+	if s == nil {
+		t.Fatal("no session for research investigate")
+	}
+	socket := mcpSockPath(e.cfg.Workspace, f.ID)
+	t.Cleanup(func() { s.stop() })
+	return e, socket, s
+}
+
+// TestMCPEndToEndReadonlySurface: a read-only research session's MCP
+// tool surface is the stripped set — spec_replace_section and
+// spec_annotate are absent (tools/list), and a hand-crafted
+// call_tool spec_replace_section is refused without touching the
+// artifact, so the MCP shim cannot rewrite the main checkout.
+func TestMCPEndToEndReadonlySurface(t *testing.T) {
+	_, socket, s := mcpE2EReadonlySetup(t)
+	child := startChildFor(t, socket, "RS-001")
+
+	id := child.nextID()
+	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
+	child.receive(id)
+
+	id = child.nextID()
+	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list"}`)
+	resp := child.receive(id)
+	tools := resp["result"].(map[string]any)["tools"].([]any)
+	names := make([]string, 0, len(tools))
+	for _, tl := range tools {
+		names = append(names, tl.(map[string]any)["name"].(string))
+	}
+	for _, gone := range []string{"spec_replace_section", "spec_annotate"} {
+		for _, n := range names {
+			if n == gone {
+				t.Fatalf("read-only tools/list contains %s: %v", gone, names)
+			}
+		}
+	}
+	if !slices.Contains(names, "spec_view") {
+		t.Fatalf("read-only tools/list lost spec_view: %v", names)
+	}
+
+	before, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _ := child.call("spec_replace_section", `{"section":"Problem","body":"pwned"}`)
+	if !strings.Contains(text, "not available") {
+		t.Fatalf("spec_replace_section on a read-only session resolved to %q, want a not-available refusal", text)
+	}
+	after, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("read-only session's spec_replace_section mutated the artifact")
 	}
 }

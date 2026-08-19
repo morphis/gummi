@@ -19,9 +19,9 @@ var (
 
 var capsBase = map[string]Capabilities{
 	"copilot":  {Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true},
-	"claude":   {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
+	"claude":   {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true},
 	"codex":    {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
-	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
+	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true},
 	"headless": {Interrupt: true, UsageEvents: true, ClientTools: true},
 }
 

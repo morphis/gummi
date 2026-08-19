@@ -52,10 +52,11 @@ func mcpSockPath(w state.Workspace, id domain.FeatureID) string {
 // dispatch), closes the listener, joins the goroutines, and removes the
 // socket file.
 type mcpEndpoint struct {
-	engine  *Engine
-	feature domain.Feature
-	flavor  runFlavor
-	ln      net.Listener
+	engine   *Engine
+	feature  domain.Feature
+	flavor   runFlavor
+	readOnly bool
+	ln       net.Listener
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -75,7 +76,7 @@ type mcpEndpoint struct {
 // for the accept and per-connection goroutines, and removes the socket
 // file. It must be stashed on the Session (setMCPTeardown) so Session.stop
 // invokes it exactly once; an error here leaves nothing behind to release.
-func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor runFlavor) (string, func(), error) {
+func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor runFlavor, readOnly bool) (string, func(), error) {
 	path := mcpSockPath(e.cfg.Workspace, f.ID)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -94,13 +95,14 @@ func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor 
 	}
 	epCtx, epCancel := context.WithCancel(context.Background())
 	ep := &mcpEndpoint{
-		engine:  e,
-		feature: f,
-		flavor:  flavor,
-		ln:      ln,
-		ctx:     epCtx,
-		cancel:  epCancel,
-		conns:   map[net.Conn]struct{}{},
+		engine:   e,
+		feature:  f,
+		flavor:   flavor,
+		readOnly: readOnly,
+		ln:       ln,
+		ctx:      epCtx,
+		cancel:   epCancel,
+		conns:    map[net.Conn]struct{}{},
 	}
 	ep.wg.Add(1)
 	go func() {
@@ -251,7 +253,7 @@ func (ep *mcpEndpoint) dispatch(conn net.Conn, wmu *sync.Mutex, req *mcp.Request
 // session's stageHints/toolHint, so the tool list it advertises matches
 // what that pass's prompt told the model existed.
 func (ep *mcpEndpoint) listTools() (json.RawMessage, error) {
-	defs := stageTools(ep.feature.Stage, ep.flavor)
+	defs := filterReadOnlyTools(stageTools(ep.feature.Stage, ep.flavor), ep.readOnly)
 	return mcp.MarshalTools(defs)
 }
 

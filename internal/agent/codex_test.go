@@ -317,3 +317,16 @@ func TestCodexRealArgvParses(t *testing.T) {
 		})
 	}
 }
+
+// A ReadOnly research session must never run on a backend that cannot
+// structurally strip its write tools: codex advertises
+// ReadOnlyEnforce:false, so NewSession refuses instead of silently running
+// read-write over the main checkout.
+func TestCodexRejectsReadOnly(t *testing.T) {
+	c := &Codex{bin: "codex"}
+	defer c.Close()
+	if _, err := c.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "gpt-x", ReadOnly: true}); err == nil ||
+		!strings.Contains(err.Error(), "read-only") {
+		t.Errorf("ReadOnly session error = %v, want a clear read-only rejection", err)
+	}
+}

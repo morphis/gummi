@@ -290,3 +290,55 @@ func TestTripwireDisarmedOnOff(t *testing.T) {
 		t.Fatalf("dirtyPathsFn called %d times, want 0: off mode must skip the pre-turn snapshot", calls)
 	}
 }
+
+// TestResearchPreExistingDirtKillsBeforeSession: a research autonomous
+// stage on a pre-dirty main checkout aborts with a tripwire-style stop
+// before any session is created — an RS run never spawns against the
+// operator's dirt, so nothing can be misattributed to it.
+func TestResearchPreExistingDirtKillsBeforeSession(t *testing.T) {
+	rec := &recorder{Fake: agent.NewFake("ack")}
+	rec.Caps.ReadOnlyEnforce = true
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	writeAt(t, wt.Root(), "README.md", "operator dirty\n")
+	if err := e.Run(f); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	waitFor(t, e, EventTripwire)
+	if rec.count() != 0 {
+		t.Fatalf("session count = %d, want 0 (killed before any session was created)", rec.count())
+	}
+	if out := gitOut(t, wt.Root(), "status", "--porcelain"); !strings.Contains(out, "README.md") {
+		t.Fatal("operator's README.md dirt vanished")
+	}
+}
+
+// TestResearchMidRunTripwire: a research autonomous pass that dirties a
+// clean main checkout mid-turn trips with EventTripwire naming the new
+// path — the generic checkTrip path covers research passes too.
+func TestResearchMidRunTripwire(t *testing.T) {
+	r := newTripRig(t)
+	r.ag.Caps.ReadOnlyEnforce = true
+	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	if err := r.e.cfg.Store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	r.write("cmd/gummi/main.go")
+	if err := r.e.Run(f); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	ev := waitFor(t, r.e, EventTripwire)
+	if want := []string{"cmd/gummi/main.go"}; !reflect.DeepEqual(ev.DirtyPaths, want) {
+		t.Fatalf("DirtyPaths = %v, want %v", ev.DirtyPaths, want)
+	}
+}
