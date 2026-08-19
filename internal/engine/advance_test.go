@@ -582,3 +582,58 @@ func skipCombos() []domain.SkipFlags {
 	}
 	return out
 }
+
+// --- research workflow (worktree-less routing) ---
+
+// A research card walks its whole graph without ever materializing a
+// worktree: NeedsWorktree routes investigate/shape/review/verify/done all
+// to the main checkout, so Advance never reports EnteredWorktree and no
+// worktree exists.
+func TestAdvanceResearchNoWorktree(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "rs topic", domain.StageTodo)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	putFeature(t, store, f)
+
+	for _, want := range []domain.Stage{
+		domain.StageInvestigate, domain.StageShape, domain.StageReview,
+		domain.StageVerify, domain.StageDone,
+	} {
+		res := mustAdvance(t, e, f.ID)
+		if res.Status != StatusAdvanced || res.To != want {
+			t.Fatalf("advance to %s: status=%d to=%s", want, res.Status, res.To)
+		}
+		if res.EnteredWorktree {
+			t.Fatalf("research card created a worktree at %s", want)
+		}
+	}
+	if ok, _ := wt.Exists(ctx, &f); ok {
+		t.Fatal("research card materialized a worktree")
+	}
+}
+
+// Verify→done for a research card never reports NeedsMerge: there is no
+// branch to land, so the merge gate falls through straight to the
+// transition, and the squash-merge/commit-message scribe path (only ever
+// reached from StatusNeedsMerge) is never entered.
+func TestAdvanceResearchVerifyDoneNoMerge(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	f := feature(1, "research no land", domain.StageInvestigate)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	putFeature(t, store, f)
+
+	for stage := domain.StageInvestigate; stage != domain.StageVerify; {
+		res := mustAdvance(t, e, f.ID)
+		stage = res.To
+	}
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageDone {
+		t.Fatalf("research verify→done: status=%d to=%s, want advanced/done", res.Status, res.To)
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDone {
+		t.Fatalf("research card did not reach done: %s", got.Stage)
+	}
+}

@@ -29,6 +29,7 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -114,6 +115,10 @@ func interactiveKickoff(f domain.Feature) string {
 		return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
 			"interview: state the problem as you understand it in a sentence or two and ask the " +
 			"single highest-leverage question, with your recommended answer. Keep it short."
+	case domain.StageShape:
+		return "The user just opened the shape chat. Read the research artifact at its workspace " +
+			"home, then drive convergence: recommend how the topic should be shaped into its " +
+			"final form, and put the most consequential open question to the user first. Keep it short."
 	default:
 		// Every interactive stage is enumerated above; a fall-through
 		// means a new interactive stage landed without a kickoff opener,
@@ -868,6 +873,18 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		// interactive stages run in the repo root (the main checkout), not
 		// the workspace root: the repo may live in a nested subdirectory.
 		return wt.RepoRoot(), draft, nil
+	}
+	// Worktree-less autonomous stages (research investigate/review/verify)
+	// run in the main checkout too, with the artifact at its workspace home
+	// — never in a throwaway worktree, since a research branch never
+	// receives a commit. Promote the artifact here in case a crash left
+	// promotion undone.
+	if !workflow.NeedsWorktree(f.Kind, f.Stage) {
+		artifact := filepath.Join(root, f.ArtifactPath())
+		if err := spec.Promote(artifact, draft, "", &f); err != nil {
+			return "", "", err
+		}
+		return wt.RepoRoot(), artifact, nil
 	}
 	hasWT, err := wt.Exists(ctx, &f)
 	if err != nil {

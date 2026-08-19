@@ -1411,7 +1411,7 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 // (as opposed to interactive chat or no agent).
 func autonomousStage(s domain.Stage) bool {
 	switch s {
-	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageReview, domain.StageVerify:
+	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageInvestigate, domain.StageReview, domain.StageVerify:
 		return true
 	default:
 		return false

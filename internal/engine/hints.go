@@ -59,7 +59,7 @@ describe it in the artifact and let the implementation stage make it.`
 func roleForStage(s domain.Stage) (agent.Role, bool) {
 	switch s {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
-		domain.StageTriage, domain.StageDiagnose:
+		domain.StageTriage, domain.StageDiagnose, domain.StageInvestigate, domain.StageShape:
 		return agent.RoleArchitect, true
 	case domain.StageImplement, domain.StageFix:
 		return agent.RoleImplementer, true

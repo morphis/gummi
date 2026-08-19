@@ -178,7 +178,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// promotes the artifact (spec or bug report) to its workspace home.
 	// Bounces (review/verify → work stage) already have a worktree, so this
 	// fires exactly once, whichever design stage is being left.
-	enteringWorktree := next != domain.StageTodo && !workflow.Interactive(next)
+	enteringWorktree := workflow.NeedsWorktree(f.Kind, next)
 	existed := true
 	var wt *worktree.Manager
 	if enteringWorktree {
@@ -214,7 +214,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// Manager.Diff(), so this transition is the last place the engine can
 	// fail cleanly before the reviewer sees a poisoned diff: refuse to
 	// enter Review if main was rewound past the recorded fork.
-	if next == domain.StageReview {
+	if next == domain.StageReview && workflow.NeedsWorktree(f.Kind, next) {
 		wt, err := e.mgr(ctx, &f)
 		if err != nil {
 			return res, err

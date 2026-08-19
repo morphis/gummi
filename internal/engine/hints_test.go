@@ -304,3 +304,18 @@ func TestInteractiveKickoffQuickSpec(t *testing.T) {
 		t.Errorf("quick spec kickoff = %q, want the one-pass opener", got)
 	}
 }
+
+// Research investigate/shape are architect work (exploring and converging
+// a research topic), and shape is a gated interactive chat that must have
+// its own opener — a missing case panics in interactiveKickoff.
+func TestResearchRolesAndShapeKickoff(t *testing.T) {
+	for _, st := range []domain.Stage{domain.StageInvestigate, domain.StageShape} {
+		if role, ok := roleForStage(st); !ok || role != agent.RoleArchitect {
+			t.Errorf("roleForStage(%s) = %s/%v, want architect", st, role, ok)
+		}
+	}
+	f := feature(1, "RS", domain.StageShape)
+	if got := interactiveKickoff(f); !strings.Contains(got, "shape") {
+		t.Errorf("shape kickoff = %q, want the shape opener", got)
+	}
+}

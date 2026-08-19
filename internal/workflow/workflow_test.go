@@ -69,6 +69,28 @@ func legalForBug(skip domain.SkipFlags) map[edge]bool {
 	return m
 }
 
+// --- research workflow expectations ---
+
+// research has no skip edges: every edge is always legal and no skip flag
+// can open one, so legalForResearch ignores the skip combo entirely.
+var researchAlways = []edge{
+	{domain.StageTodo, domain.StageInvestigate},
+	{domain.StageInvestigate, domain.StageShape},
+	{domain.StageShape, domain.StageReview},
+	{domain.StageReview, domain.StageVerify},
+	{domain.StageVerify, domain.StageDone},
+	{domain.StageReview, domain.StageInvestigate},
+	{domain.StageVerify, domain.StageInvestigate},
+}
+
+func legalForResearch(skip domain.SkipFlags) map[edge]bool {
+	m := map[edge]bool{}
+	for _, e := range researchAlways {
+		m[e] = true
+	}
+	return m
+}
+
 func allSkipCombos() []domain.SkipFlags {
 	return []domain.SkipFlags{
 		{},
@@ -91,6 +113,7 @@ func TestTransitionTableExhaustive(t *testing.T) {
 	}{
 		{domain.KindFeature, legalForFeature},
 		{domain.KindBug, legalForBug},
+		{domain.KindResearch, legalForResearch},
 	}
 	for _, k := range kinds {
 		for _, skip := range allSkipCombos() {
@@ -208,7 +231,7 @@ func TestNextBug(t *testing.T) {
 }
 
 func TestInitialTerminalAndWorkStage(t *testing.T) {
-	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
+	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
 		if Initial(kind) != domain.StageTodo {
 			t.Errorf("Initial(%s) = %s, want todo", kind, Initial(kind))
 		}
@@ -224,5 +247,47 @@ func TestInitialTerminalAndWorkStage(t *testing.T) {
 	}
 	if WorkStage(domain.KindBug) != domain.StageFix {
 		t.Error("bug work stage should be fix")
+	}
+	if WorkStage(domain.KindResearch) != domain.StageInvestigate {
+		t.Error("research work stage should be investigate")
+	}
+}
+
+// shape is the research gate: interactive (a chat stage), while investigate
+// is the autonomous work stage.
+func TestResearchInteractiveShape(t *testing.T) {
+	if !Interactive(domain.StageShape) {
+		t.Error("shape should be interactive")
+	}
+	if Interactive(domain.StageInvestigate) {
+		t.Error("investigate should not be interactive")
+	}
+}
+
+// NeedsWorktree routes research away from worktrees while preserving the
+// exact feature/bug predicate.
+func TestNeedsWorktree(t *testing.T) {
+	for _, st := range []domain.Stage{
+		domain.StageInvestigate, domain.StageShape, domain.StageReview, domain.StageVerify,
+	} {
+		if NeedsWorktree(domain.KindResearch, st) {
+			t.Errorf("NeedsWorktree(research, %s) should be false", st)
+		}
+	}
+	if NeedsWorktree(domain.KindResearch, domain.StageTodo) {
+		t.Error("NeedsWorktree(research, todo) should be false")
+	}
+	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageReview, domain.StageVerify} {
+		if !NeedsWorktree(domain.KindFeature, st) {
+			t.Errorf("NeedsWorktree(feature, %s) should be true", st)
+		}
+	}
+	for _, st := range []domain.Stage{domain.StageFix, domain.StageReview, domain.StageVerify} {
+		if !NeedsWorktree(domain.KindBug, st) {
+			t.Errorf("NeedsWorktree(bug, %s) should be true", st)
+		}
+	}
+	if NeedsWorktree(domain.KindFeature, domain.StageTodo) || NeedsWorktree(domain.KindFeature, domain.StageBrainstorm) {
+		t.Error("feature todo/brainstorm should not need a worktree")
 	}
 }

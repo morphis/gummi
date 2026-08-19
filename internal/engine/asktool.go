@@ -83,13 +83,14 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 		return nil
 	}
 	switch stage {
-	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
+	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
+		domain.StageShape:
 		return []agent.ToolDef{askUserTool(), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageReview:
 		return []agent.ToolDef{submitVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageVerify:
 		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StagePlan:
 		return []agent.ToolDef{specViewTool(), specReplaceSectionTool()}
@@ -308,7 +309,8 @@ to drive gummi's critique→replan loop, instead of writing a VERDICT:
 line.`
 	}
 	switch stage {
-	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose:
+	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
+		domain.StageShape:
 		return `You have four gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
 (faster for the user, cheaper); lead with your recommended option,
