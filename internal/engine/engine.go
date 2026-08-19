@@ -218,6 +218,19 @@ type Engine struct {
 	// can substitute a call-counter or fault-injecting closure without
 	// reaching into the worktree package or swapping the concrete pool.
 	dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
+
+	// envOnce reads and caches the workspace environment card. The card is
+	// loaded lazily and read once per Engine lifetime; editing the file
+	// requires an Engine restart.
+	envOnce sync.Once
+	envCard string
+
+	// envWarn buffers environment-card warnings so they can be flushed onto
+	// a live session's activity feed. Warnings are emitted at most once per
+	// Engine lifetime because they sit inside envOnce.
+	envMu      sync.Mutex
+	envNotices []string
+	envWarn    func(string)
 }
 
 // New builds an engine from the config. The caller owns every agent's
@@ -259,6 +272,11 @@ func New(cfg Config) *Engine {
 		live:         map[domain.FeatureID]*Session{},
 		pool:         pool,
 		dirtyPathsFn: dirtyPathsFn,
+	}
+	e.envWarn = func(msg string) {
+		e.envMu.Lock()
+		e.envNotices = append(e.envNotices, msg)
+		e.envMu.Unlock()
 	}
 	go e.forward()
 	return e
@@ -409,6 +427,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		s.stop() // engine closed during startup: don't leave the agent live
 		return nil, errors.New("engine is closed")
 	}
+	e.flushEnvNotices(s)
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.pump(s) }()
 	var ko string
@@ -615,6 +634,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	}
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.pump(s) }()
+	e.flushEnvNotices(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
 
 	s.appendUser(s.kickoffMessage())
@@ -808,6 +828,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 			"autonomous research cannot run on that backend", backend, f.ID, f.Stage)
 	}
 	hints := stageHints(f, specPath, flavor)
+	if card := e.environmentCard(); card != "" {
+		hints = append([]string{card}, hints...)
+	}
 	// implementation runs carry any open diff review comments so a fix-up
 	// (bounce from the diff surface's "request changes") addresses each
 	// (DESIGN §6.1). The store is the source of truth, so this reaches

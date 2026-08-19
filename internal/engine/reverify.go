@@ -67,34 +67,34 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	}
 	res := ReverifyResult{Feature: f}
 
-	unavailable := func(reason string) (ReverifyResult, error) {
+	unavailable := func(reason string) ReverifyResult {
 		res.Status = ReverifyUnavailable
 		res.Reason = reason
-		return res, nil
+		return res
 	}
 
 	if f.Stage != domain.StageVerify {
 		return unavailable(fmt.Sprintf(
-			"re-attach only finalizes a feature parked at the verify stage; %s is at %q — resume it instead", id, f.Stage))
+			"re-attach only finalizes a feature parked at the verify stage; %s is at %q — resume it instead", id, f.Stage)), nil
 	}
 	// Guarded mode never auto-runs the acceptance checks (the agent verifies
 	// instead), so there is nothing cheap to re-run here.
 	if e.cfg.Permission == agent.PermissionGuarded {
-		return unavailable("re-attach runs the acceptance checks itself, which guarded mode does not allow — resume to let the agent verify")
+		return unavailable("re-attach runs the acceptance checks itself, which guarded mode does not allow — resume to let the agent verify"), nil
 	}
 
 	// the spec's fixed gummi-checks are what a cheap re-attach re-runs.
 	path := e.artifactFile(&f)
 	if path == "" {
-		return unavailable("the feature's spec could not be located — resume to let the agent verify")
+		return unavailable("the feature's spec could not be located — resume to let the agent verify"), nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return unavailable(fmt.Sprintf("reading the spec failed (%v) — resume to let the agent verify", err))
+		return unavailable(fmt.Sprintf("reading the spec failed (%v) — resume to let the agent verify", err)), nil
 	}
 	checks, _, _ := spec.ParseChecks(string(raw))
 	if len(checks) == 0 {
-		return unavailable("the spec lists no gummi-checks to re-run — resume to let the agent verify")
+		return unavailable("the spec lists no gummi-checks to re-run — resume to let the agent verify"), nil
 	}
 
 	wt, err := e.mgr(ctx, &f)
@@ -104,7 +104,7 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	if exists, err := wt.Exists(ctx, &f); err != nil {
 		return res, err
 	} else if !exists {
-		return unavailable("the feature's worktree is gone — resume to recreate it and verify")
+		return unavailable("the feature's worktree is gone — resume to recreate it and verify"), nil
 	}
 
 	// run the checks in the worktree, bounded like the Verify stage's own

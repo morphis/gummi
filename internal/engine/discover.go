@@ -27,6 +27,22 @@ YAML list, 1-5 entries) and nothing else:
 Every cmd must run non-interactively from the repo root, exit non-zero
 on failure, and stay offline — no dependency installs, no watch modes.`
 
+// containerLocalRule is appended to the discovery prompt when a workspace
+// environment card is present. It reminds the scribe that the checks block
+// is only for fast, container-local commands, even though the environment
+// card may describe slow or external machinery.
+const containerLocalRule = `Only fast, container-local commands belong in the checks block. Any command this environment describes that is slow, or that needs machinery outside this container (a remote host, hardware, or a network service), must NOT go in the block — the block is only for commands that build, test, and lint the repository locally.`
+
+// discoverPromptWith prepends the environment card to the discovery prompt
+// when the card is non-empty, and appends the container-local rule so the
+// scribe does not fold slow/external commands into the checks block.
+func discoverPromptWith(card string) string {
+	if card == "" {
+		return discoverPrompt
+	}
+	return card + "\n\n" + discoverPrompt + "\n\n" + containerLocalRule
+}
+
 // DiscoverChecks runs a one-shot scribe pass over the feature's fresh
 // worktree to learn the repo's build/test/lint commands and writes them
 // into the artifact's Verification section as a gummi-checks block —
@@ -69,7 +85,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		return nil, err
 	}
 	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, discoverPrompt); err != nil {
+	if err := sess.Send(ctx, discoverPromptWith(e.environmentCard())); err != nil {
 		return nil, err
 	}
 	var text assistantText

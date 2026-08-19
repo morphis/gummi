@@ -169,6 +169,39 @@ func TestDiscoverChecksPassesSpecPathAsExtraRead(t *testing.T) {
 	}
 }
 
+func TestDiscoverChecksCarriesEnvironmentCard(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	writeEnvironmentCard(t, ws.Root, testCard)
+
+	var gotMsg string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		gotMsg = msg
+		return []agent.Event{{Kind: agent.EventMessage, Text: "```gummi-checks\n- name: test\n  cmd: go test ./...\n```"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "discover env", domain.StagePlan)
+	withWorktree(t, wt, f)
+	p := filepath.Join(wt.Root(), f.ArtifactPath())
+	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(spec.Template(&f)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.DiscoverChecks(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotMsg, testCard) {
+		t.Errorf("discovery prompt missing environment card:\n%s", gotMsg)
+	}
+	if !strings.Contains(gotMsg, containerLocalRule) {
+		t.Errorf("discovery prompt missing container-local rule:\n%s", gotMsg)
+	}
+}
+
 func readFile(t *testing.T, p string) string {
 	t.Helper()
 	raw, err := os.ReadFile(p)
