@@ -55,7 +55,7 @@ type Shell struct {
 
 	// workspace wiring (nil store means detached: splash only)
 	store *state.Store
-	wt    *worktree.Manager
+	wt    *worktree.Pool
 	ws    state.Workspace
 
 	rows      []featureRow
@@ -84,6 +84,7 @@ type Shell struct {
 	planStore    planround.Store           // persistence seam for planRounds (defaults to store)
 	reviewStore  reviewround.Store         // persistence seam for reviewRounds (defaults to store)
 	profileNames []string                  // profile names for the new-feature form
+	repoNames    []string                  // configured managed-repo names for the new-card forms
 	envelope     int                       // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier          // bell/desktop hook for needs-attention events
 
@@ -117,9 +118,10 @@ func NewShell(t theme.Theme, version string) *Shell {
 	}
 }
 
-// Attach wires the shell to a workspace: its store, worktree manager,
-// and paths. Must be called before Run for board functionality.
-func (m *Shell) Attach(store *state.Store, wt *worktree.Manager, ws state.Workspace) {
+// Attach wires the shell to a workspace: its store, worktree pool (one
+// manager per managed repository), and paths. Must be called before Run for
+// board functionality.
+func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace) {
 	m.store, m.wt, m.ws = store, wt, ws
 	// the plan-rounds persistence seam defaults to the real store; tests
 	// may swap in a failing store to prove the fail-closed path.
@@ -134,6 +136,10 @@ func (m *Shell) AttachEngine(e *engine.Engine) { m.engine = e }
 // SetProfileNames sets the profile names offered by the new-feature
 // form (from profiles.yaml). Empty leaves the built-in presets.
 func (m *Shell) SetProfileNames(names []string) { m.profileNames = names }
+
+// SetRepoNames sets the configured managed-repository names offered by the
+// new-feature and new-bug forms. Empty leaves only the workspace default.
+func (m *Shell) SetRepoNames(names []string) { m.repoNames = names }
 
 // SetEnvelope sets the default spend-plan envelope (credits) stamped on
 // new features, enabling layer-3 per-stage budgets. 0 leaves features
@@ -814,9 +820,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.sel = order[len(order)-1]
 		}
 	case "n":
-		m.Overlay.Push(newFeatureForm(m.profileNames, m.envelope, m.createFeature))
+		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.envelope, m.createFeature))
 	case "B":
-		m.Overlay.Push(newBugForm(m.profileNames, m.envelope, m.createBug))
+		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.envelope, m.createBug))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation

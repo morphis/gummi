@@ -36,18 +36,25 @@ type featureForm struct {
 	env      textinput.Model
 	profiles []string
 	profile  int
-	skip     domain.SkipFlags
-	focus    int
-	errText  string
+	// repos are the configured selectable managed repositories; repoIdx
+	// indexes a list whose first (0) entry is the workspace default (empty
+	// name) and whose rest are the configured names.
+	repos   []string
+	repoIdx int
+	skip    domain.SkipFlags
+	focus   int
+	errText string
 
 	onSubmit func(formResult) tea.Cmd
 }
 
 // newFeatureForm builds the dialog; profiles are the selectable profile
 // names in display order, first selected (falling back to the built-in
-// presets when empty), defaultEnvelope is the global default pre-filled
-// into the envelope input, and onSubmit receives the validated fields.
-func newFeatureForm(profiles []string, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *featureForm {
+// presets when empty), repos are the configured managed repository names
+// (empty = only the workspace default), defaultEnvelope is the global
+// default pre-filled into the envelope input, and onSubmit receives the
+// validated fields.
+func newFeatureForm(profiles []string, repos []string, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *featureForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -63,7 +70,24 @@ func newFeatureForm(profiles []string, defaultEnvelope int, onSubmit func(formRe
 	env.SetWidth(46)
 	env.CharLimit = 12
 	env.SetValue(strconv.Itoa(defaultEnvelope))
-	return &featureForm{desc: desc, env: env, profiles: profiles, onSubmit: onSubmit}
+	return &featureForm{desc: desc, env: env, profiles: profiles, repos: repos, onSubmit: onSubmit}
+}
+
+// repoName returns the currently selected repository name: "" for the
+// workspace default, else the configured name.
+func (d *featureForm) repoName() string {
+	if d.repoIdx == 0 || len(d.repos) == 0 {
+		return ""
+	}
+	return d.repos[d.repoIdx-1]
+}
+
+// repoLabel is the display label for the selected repository.
+func (d *featureForm) repoLabel() string {
+	if name := d.repoName(); name != "" {
+		return name
+	}
+	return "default"
 }
 
 // ID implements overlay.Dialog.
@@ -103,6 +127,7 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			Profile:  d.profiles[d.profile],
 			Skip:     d.skip,
 			Envelope: env,
+			Repo:     d.repoName(),
 		}
 		return true, d.onSubmit(res)
 	case "alt+enter", "ctrl+j":
@@ -139,6 +164,13 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 				d.skip = domain.SkipFlags{}
 			} else {
 				d.skip = domain.QuickRoute()
+			}
+		case "r":
+			// cycle the managed repository (default + configured names); no
+			// repos configured means a no-op on a single-entry list.
+			total := len(d.repos) + 1
+			if total > 1 {
+				d.repoIdx = (d.repoIdx + 1) % total
 			}
 		}
 	case fieldDesc:
@@ -199,24 +231,38 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	marker := "  "
 	profile := s.Faint.Render(d.profiles[d.profile])
 	skips := s.Faint.Render(d.skipLabel())
+	repo := s.Faint.Render("[" + d.repoLabel() + "]")
 	if d.focus == fieldOpts {
 		marker = s.Cursor.Render("▸ ")
 		profile = s.Subtle.Render(d.profiles[d.profile])
+		repo = s.Subtle.Render("[" + d.repoLabel() + "]")
 	}
 	if d.skip.Brainstorm || d.skip.Plan {
 		skips = s.Warning.Render(d.skipLabel())
 	}
-	b.WriteString(marker + profile + s.Faint.Render(" · ") + skips + "\n")
+	row := marker + profile + s.Faint.Render(" · ") + skips
+	if len(d.repos) > 0 {
+		// only when there is more than the default to choose among
+		row += s.Faint.Render(" · ") + repo
+	}
+	b.WriteString(row + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
 	hint := "enter create · alt+enter newline · tab envelope · esc cancel"
+	if len(d.repos) > 0 {
+		hint += " · r repo"
+	}
 	switch d.focus {
 	case fieldEnvelope:
 		hint = "numeric credits (0 = uncapped) · enter create · esc cancel"
 	case fieldOpts:
-		hint = "←/→ profile · q quick · b/p toggle skips · enter create · esc cancel"
+		hint = "←/→ profile · q quick · b/p toggle skips"
+		if len(d.repos) > 0 {
+			hint = "←/→ profile · q quick · b/p skips · r repo"
+		}
+		hint += " · enter create · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

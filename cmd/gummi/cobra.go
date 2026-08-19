@@ -219,6 +219,7 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
+	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)")
 	f.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
 }
@@ -265,6 +266,7 @@ func bindBugsNewFlags(cmd *cobra.Command) {
 	f.String("desc", "", "summary of what's broken")
 	f.String("profile", "", "profile the bug adopts (default: first configured)")
 	f.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)")
+	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; default: the workspace default repo)")
 	f.Bool("yes", false, "create without the confirmation prompt")
 }
 

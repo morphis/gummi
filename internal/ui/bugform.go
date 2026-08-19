@@ -23,9 +23,14 @@ type bugForm struct {
 	profile  int
 	sevs     []domain.Severity
 	sev      int
-	skip     domain.SkipFlags
-	focus    int
-	errText  string
+	// repos are the configured selectable managed repositories; repoIdx
+	// indexes a list whose first (0) entry is the workspace default (empty
+	// name) and whose rest are the configured names.
+	repos   []string
+	repoIdx int
+	skip    domain.SkipFlags
+	focus   int
+	errText string
 
 	onSubmit func(bugFormResult) tea.Cmd
 }
@@ -34,7 +39,7 @@ type bugForm struct {
 // first ("") means unset — triage classifies it later.
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
-func newBugForm(profiles []string, defaultEnvelope int, onSubmit func(bugFormResult) tea.Cmd) *bugForm {
+func newBugForm(profiles []string, repos []string, defaultEnvelope int, onSubmit func(bugFormResult) tea.Cmd) *bugForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -48,7 +53,24 @@ func newBugForm(profiles []string, defaultEnvelope int, onSubmit func(bugFormRes
 	env.SetWidth(46)
 	env.CharLimit = 12
 	env.SetValue(strconv.Itoa(defaultEnvelope))
-	return &bugForm{desc: desc, env: env, profiles: profiles, sevs: bugSeverityChoices, onSubmit: onSubmit}
+	return &bugForm{desc: desc, env: env, profiles: profiles, sevs: bugSeverityChoices, repos: repos, onSubmit: onSubmit}
+}
+
+// repoName returns the currently selected repository name: "" for the
+// workspace default, else the configured name.
+func (d *bugForm) repoName() string {
+	if d.repoIdx == 0 || len(d.repos) == 0 {
+		return ""
+	}
+	return d.repos[d.repoIdx-1]
+}
+
+// repoLabel is the display label for the selected repository.
+func (d *bugForm) repoLabel() string {
+	if name := d.repoName(); name != "" {
+		return name
+	}
+	return "default"
 }
 
 // ID implements overlay.Dialog.
@@ -84,6 +106,7 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			Profile:  d.profiles[d.profile],
 			Skip:     d.skip,
 			Envelope: env,
+			Repo:     d.repoName(),
 		})
 	case "tab", "down":
 		d.setFocus((d.focus + 1) % fieldCount)
@@ -106,6 +129,13 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.skip.Triage = !d.skip.Triage
 		case "d":
 			d.skip.Diagnose = !d.skip.Diagnose
+		case "r":
+			// cycle the managed repository (default + configured names); no
+			// repos configured means a no-op on a single-entry list.
+			total := len(d.repos) + 1
+			if total > 1 {
+				d.repoIdx = (d.repoIdx + 1) % total
+			}
 		}
 	case fieldDesc:
 		d.desc, _ = d.desc.Update(key)
@@ -170,9 +200,11 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	profile := s.Faint.Render(d.profiles[d.profile])
 	sev := s.Faint.Render(d.sevLabel())
 	skips := s.Faint.Render(d.skipLabel())
+	repo := s.Faint.Render("[" + d.repoLabel() + "]")
 	if d.focus == fieldOpts {
 		marker = s.Cursor.Render("▸ ")
 		profile = s.Subtle.Render(d.profiles[d.profile])
+		repo = s.Subtle.Render("[" + d.repoLabel() + "]")
 	}
 	if d.sevs[d.sev] != "" {
 		sev = s.Warning.Render(d.sevLabel())
@@ -180,17 +212,29 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	if d.skip.Triage || d.skip.Diagnose {
 		skips = s.Warning.Render(d.skipLabel())
 	}
-	b.WriteString(marker + profile + s.Faint.Render(" · ") + sev + s.Faint.Render(" · ") + skips + "\n")
+	row := marker + profile + s.Faint.Render(" · ") + sev + s.Faint.Render(" · ") + skips
+	if len(d.repos) > 0 {
+		// only when there is more than the default to choose among
+		row += s.Faint.Render(" · ") + repo
+	}
+	b.WriteString(row + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
 	hint := "enter create · tab envelope · esc cancel"
+	if len(d.repos) > 0 {
+		hint += " · r repo"
+	}
 	switch d.focus {
 	case fieldEnvelope:
 		hint = "numeric credits (0 = uncapped) · enter create · esc cancel"
 	case fieldOpts:
-		hint = "←/→ profile · s severity · t/d toggle skips · enter create · esc cancel"
+		hint = "←/→ profile · s severity · t/d toggle skips"
+		if len(d.repos) > 0 {
+			hint = "←/→ profile · s severity · t/d skips · r repo"
+		}
+		hint += " · enter create · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

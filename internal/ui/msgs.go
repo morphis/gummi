@@ -120,7 +120,7 @@ func (m *Shell) loadRows() tea.Msg {
 func (m *Shell) dependencyBlockers(ctx context.Context, id domain.FeatureID) []engine.BlockingDep {
 	eng := m.engine
 	if eng == nil {
-		eng = engine.New(engine.Config{Store: m.store, Worktrees: m.wt, Workspace: m.ws})
+		eng = engine.New(engine.Config{Store: m.store, Pool: m.wt, Workspace: m.ws})
 		defer func() { _ = eng.Close() }()
 	}
 	deps, err := eng.DependencyBlockers(ctx, id)
@@ -157,6 +157,7 @@ type formResult struct {
 	Profile  string
 	Skip     domain.SkipFlags
 	Envelope *int
+	Repo     string
 }
 
 // createFeature mints a number and persists a new feature in todo,
@@ -190,7 +191,7 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 			ID: id, Num: num, Title: title, OneLiner: oneLiner,
 			Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
-			CreatedAt: now, UpdatedAt: now,
+			Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		// Seed the draft first (so the description survives), then persist —
 		// a persisted feature with no draft would be reseeded blank. A
@@ -223,6 +224,7 @@ type bugFormResult struct {
 	Profile  string
 	Skip     domain.SkipFlags
 	Envelope *int
+	Repo     string
 }
 
 // createBug mints a BG number and persists a new bug in todo, seeding its
@@ -252,7 +254,7 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 			ID: id, Num: num, Kind: domain.KindBug, Title: res.Title, OneLiner: res.OneLiner,
 			Slug: slug, Stage: workflow.Initial(domain.KindBug), Skip: res.Skip,
 			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
-			Severity: res.Severity, CreatedAt: now, UpdatedAt: now,
+			Severity: res.Severity, Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		// Seed the report draft first (so severity/one-liner survive), then
 		// persist — a persisted bug with no draft would be reseeded blank.
@@ -363,7 +365,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		// is wired, its Advance also drops the stale stage session.
 		eng := m.engine
 		if eng == nil {
-			eng = engine.New(engine.Config{Store: m.store, Worktrees: m.wt, Workspace: m.ws})
+			eng = engine.New(engine.Config{Store: m.store, Pool: m.wt, Workspace: m.ws})
 			defer func() { _ = eng.Close() }()
 		}
 		res, err := eng.Advance(ctx, id, "user")

@@ -85,3 +85,36 @@ func TestBugFollowsBugWorkflow(t *testing.T) {
 		t.Errorf("bug todo → diagnose (triage skipped) should be legal: %v", err)
 	}
 }
+
+// TestStoreRoundTripsRepo: the repo column round-trips; an empty value
+// (the default) reads back empty, and a named repo persists.
+func TestStoreRoundTripsRepo(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+
+	b := bug(7, "Repo drift", "")
+	b.Repo = "lxd"
+	if err := s.CreateFeature(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeature(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Repo != "lxd" {
+		t.Errorf("repo = %q, want lxd", got.Repo)
+	}
+
+	// a card created with no repo (a legacy row) reads back empty.
+	d := bug(8, "No repo", "")
+	if err := s.CreateFeature(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := s.GetFeature(ctx, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.Repo != "" {
+		t.Errorf("repo = %q, want empty default", got2.Repo)
+	}
+}

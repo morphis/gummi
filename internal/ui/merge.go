@@ -38,7 +38,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
 			return mergeReadyMsg{err: err}
 		}
-		if dirty, err := m.wt.MainTrackedDirty(ctx); err != nil {
+		if dirty, err := m.wt.MainTrackedDirty(ctx, &f); err != nil {
 			return mergeReadyMsg{err: err}
 		} else if dirty {
 			return mergeReadyMsg{err: errors.New("main checkout has uncommitted changes — commit or stash them before merging")}

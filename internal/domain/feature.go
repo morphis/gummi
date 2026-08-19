@@ -150,7 +150,14 @@ type Feature struct {
 	// unclassified bugs. It is a bug-only field (features created through
 	// normal channels never carry one) but lives on the card so the board
 	// can badge and sort by it without a join.
-	Severity  Severity
+	Severity Severity
+	// Repo is the configured name of the git repository this card belongs
+	// to, chosen at creation and immutable thereafter. Empty names the
+	// workspace's default repo (the `repo:` key when set, else the
+	// workspace root), so every pre-existing row needs no migration value.
+	// It is metadata for routing git operations; it never feeds a branch,
+	// worktree, or spec path.
+	Repo      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	// VerifiedAt is stamped when the item's verify gate passes and its
@@ -251,6 +258,13 @@ func (f *Feature) Validate() error {
 	}
 	if !ValidGateApproval(f.GateApproval) {
 		return fmt.Errorf("feature %s: unknown gate-approval mode %q", f.ID, f.GateApproval)
+	}
+	// Repo, when set, must be a plain configured name: no whitespace and no
+	// path separators, so it can never be mistaken for a path and can never
+	// smuggle a repo root outside the configured set. Empty is always legal
+	// (it names the workspace default).
+	if strings.TrimSpace(f.Repo) != f.Repo || strings.Contains(f.Repo, "/") || strings.Contains(f.Repo, "\\") {
+		return fmt.Errorf("feature %s: repo name %q is not a plain configured name", f.ID, f.Repo)
 	}
 	return nil
 }

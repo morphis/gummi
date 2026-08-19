@@ -1,11 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // captureStdout runs fn with the process-wide stdout redirected to a pipe and
@@ -93,5 +96,30 @@ func TestCobraUnknownCommand(t *testing.T) {
 	rootCmd.SetArgs([]string{"frobnicate"})
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("Execute(frobnicate): want error, got nil")
+	}
+}
+
+// canonicalAndCobra pairs a cobra command with the function that registers
+// its canonical flag grammar, so the test can assert the two never drift.
+func TestCobraFlagsMirrorCanonical(t *testing.T) {
+	cases := []struct {
+		name     string
+		cmd      *cobra.Command
+		register func(fs *flag.FlagSet)
+	}{
+		{name: "run", cmd: runCmd, register: func(fs *flag.FlagSet) { registerRunFlags(fs) }},
+		{name: "bugs new", cmd: bugsNewCmd, register: func(fs *flag.FlagSet) { registerBugsNewFlags(fs) }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			canonical := flag.NewFlagSet(c.name, flag.ContinueOnError)
+			c.register(canonical)
+
+			canonical.VisitAll(func(f *flag.Flag) {
+				if c.cmd.Flags().Lookup(f.Name) == nil {
+					t.Errorf("%s: canonical flag --%s is not bound on the cobra command", c.name, f.Name)
+				}
+			})
+		})
 	}
 }

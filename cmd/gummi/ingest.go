@@ -41,11 +41,11 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(wsRoot, repo)
+	ws, err := ensureWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return err
 	}
@@ -54,11 +54,11 @@ func runIngest(args []string) error {
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), wsRoot, repo, store)
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		return err
 	}
-	eng, agents, names := newEngineFromEnv(store, wt, ws)
+	eng, agents, names := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
 		return fmt.Errorf("no coding agent is configured; ingestion needs one (GitHub Copilot, or set GUMMI_AGENT_CMD)")
 	}

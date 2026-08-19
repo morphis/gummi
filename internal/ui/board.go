@@ -98,6 +98,13 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if sev := r.F.Severity; sev != "" {
 		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
 	}
+	// a card's managed repository badge, naming the configured repo, so
+	// multi-repo boards read at a glance. Cards in the workspace default
+	// repo render no badge (the default is implicit); it is metadata only,
+	// no filtering or grouping is implied.
+	if r.F.Repo != "" {
+		badge += " " + s.RepoBadge.Render("["+r.F.Repo+"]")
+	}
 	title := s.CardTitle.Render(r.F.Title)
 	tag := ""
 	if r.F.Profile != "" {

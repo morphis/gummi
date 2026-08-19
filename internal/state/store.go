@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS features (
 	fork_point      TEXT NOT NULL DEFAULT '',
 	plan_rounds     INTEGER NOT NULL DEFAULT 0,
 	review_rounds   INTEGER NOT NULL DEFAULT 0,
-	commit_draft_fail TEXT NOT NULL DEFAULT ''
+	commit_draft_fail TEXT NOT NULL DEFAULT '',
+	repo            TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 CREATE TABLE IF NOT EXISTS transitions (
@@ -304,6 +305,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN review_rounds INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN flavor TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN commit_draft_fail TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -336,13 +338,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, plan_rounds, review_rounds, commit_draft_fail)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, plan_rounds, review_rounds, commit_draft_fail, repo)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.PlanRounds, f.ReviewRounds, f.CommitDraftFail)
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.PlanRounds, f.ReviewRounds, f.CommitDraftFail, f.Repo)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -353,7 +355,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, plan_rounds, review_rounds, commit_draft_fail`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, plan_rounds, review_rounds, commit_draft_fail, repo`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -381,7 +383,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.PlanRounds, &f.ReviewRounds, &f.CommitDraftFail)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.PlanRounds, &f.ReviewRounds, &f.CommitDraftFail, &f.Repo)
 	if err != nil {
 		return f, err
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // AdvanceStatus classifies what Advance did (or why it could not move the
@@ -141,13 +142,17 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// of its own (nothing to land — the artifact lives in the workspace,
 	// not on the branch) skips straight to the transition.
 	if next == domain.StageDone {
-		if exists, err := e.cfg.Worktrees.BranchExists(ctx, &f); err != nil {
+		wt, err := e.mgr(ctx, &f)
+		if err != nil {
+			return res, err
+		}
+		if exists, err := wt.BranchExists(ctx, &f); err != nil {
 			return res, err
 		} else if exists {
-			if landed, err := e.cfg.Worktrees.Landed(ctx, &f); err != nil {
+			if landed, err := wt.Landed(ctx, &f); err != nil {
 				return res, err
 			} else if !landed {
-				if ahead, err := e.cfg.Worktrees.BranchAhead(ctx, &f); err != nil {
+				if ahead, err := wt.BranchAhead(ctx, &f); err != nil {
 					return res, err
 				} else if ahead {
 					res.Status = StatusNeedsMerge
@@ -175,14 +180,19 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// fires exactly once, whichever design stage is being left.
 	enteringWorktree := next != domain.StageTodo && !workflow.Interactive(next)
 	existed := true
+	var wt *worktree.Manager
 	if enteringWorktree {
-		if existed, err = e.cfg.Worktrees.Exists(ctx, &f); err != nil {
+		wt, err = e.mgr(ctx, &f)
+		if err != nil {
+			return res, err
+		}
+		if existed, err = wt.Exists(ctx, &f); err != nil {
 			return res, err
 		}
 	}
 	if enteringWorktree && !existed {
 		res.EnteredWorktree = true
-		if _, err := e.cfg.Worktrees.Create(ctx, &f); err != nil {
+		if _, err := wt.Create(ctx, &f); err != nil {
 			return res, err
 		}
 		// approval promotes the draft to the artifact's workspace home
@@ -205,7 +215,11 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// fail cleanly before the reviewer sees a poisoned diff: refuse to
 	// enter Review if main was rewound past the recorded fork.
 	if next == domain.StageReview {
-		if err := e.cfg.Worktrees.AssertNoForkDrift(ctx, &f); err != nil {
+		wt, err := e.mgr(ctx, &f)
+		if err != nil {
+			return res, err
+		}
+		if err := wt.AssertNoForkDrift(ctx, &f); err != nil {
 			return res, err
 		}
 	}
@@ -354,7 +368,7 @@ func (r AdvanceResult) EstimateNotice() string {
 // committed. An item that never had a draft gets a fresh template — the
 // artifact always exists from approval on.
 func (e *Engine) promoteDraft(f *domain.Feature) error {
-	root := e.cfg.Worktrees.Root()
+	root := e.pool.Root()
 	return spec.Promote(
 		filepath.Join(root, f.ArtifactPath()),
 		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(f)),
@@ -368,7 +382,7 @@ func (e *Engine) promoteDraft(f *domain.Feature) error {
 // copy of an item mid-flight from the committed-artifact era. Empty when
 // none exists yet.
 func (e *Engine) artifactFile(f *domain.Feature) string {
-	root := e.cfg.Worktrees.Root()
+	root := e.pool.Root()
 	return spec.LocateArtifact(
 		filepath.Join(root, f.ArtifactPath()),
 		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(f)),

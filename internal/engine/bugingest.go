@@ -72,6 +72,11 @@ func (e *Engine) IngestBugs(ctx context.Context, src BugSource) (BugIngestResult
 // pre-pass — bugs carry no depends_on. Best-effort on failure: bugs
 // created before an error are returned alongside it.
 func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal, opts MaterializeOpts) ([]domain.Feature, error) {
+	// Pre-flight: the target repository must be configured, so an unknown
+	// name fails the whole batch before any number is consumed.
+	if opts.Repo != "" && (e.pool == nil || !e.pool.Known(opts.Repo)) {
+		return nil, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", opts.Repo)
+	}
 	// Pre-flight: every title must slugify before we mint anything, so a
 	// bad title fails the batch cleanly instead of after consuming numbers.
 	slugs := make([]string, len(props))
@@ -98,7 +103,7 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 			ID: id, Num: num, Kind: domain.KindBug, Title: p.Title, OneLiner: p.OneLiner,
 			Slug: slugs[i], Stage: workflow.Initial(domain.KindBug), Skip: p.Skip,
 			Profile: opts.Profile, Budget: domain.Budget{Envelope: opts.Envelope},
-			ExternalRef: p.ExternalRef, Severity: p.Severity, CreatedAt: now, UpdatedAt: now,
+			ExternalRef: p.ExternalRef, Severity: p.Severity, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		// Draft first so a write failure aborts before the bug exists — a
 		// persisted bug with no draft would be reseeded blank on first open.

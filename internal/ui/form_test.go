@@ -14,7 +14,7 @@ import (
 // TestFormEnvelopeDefault: the envelope input pre-fills from the global
 // default, so the intended budget is visible before the user edits it.
 func TestFormEnvelopeDefault(t *testing.T) {
-	form := newFeatureForm(nil, 5000, func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, nil, 5000, func(formResult) tea.Cmd { return nil })
 	if got := form.env.Value(); got != "5000" {
 		t.Fatalf("envelope pre-fill = %q, want \"5000\"", got)
 	}
@@ -24,7 +24,7 @@ func TestFormEnvelopeDefault(t *testing.T) {
 // Envelope pointer on submit.
 func TestFormEnvelopeCustom(t *testing.T) {
 	var got *int
-	form := newFeatureForm(nil, 5000, func(res formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, 5000, func(res formResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -42,7 +42,7 @@ func TestFormEnvelopeCustom(t *testing.T) {
 // the enter branch, showing an error and never reaching onSubmit.
 func TestFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newFeatureForm(nil, 5000, func(formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, 5000, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -63,7 +63,7 @@ func TestFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 // the same way, so a typo can't silently clear the envelope.
 func TestFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newFeatureForm(nil, 5000, func(formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, 5000, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -84,7 +84,7 @@ func TestFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 // "use the global default" signal distinct from an explicit 0.
 func TestFormEnvelopeEmpty(t *testing.T) {
 	var got *int
-	form := newFeatureForm(nil, 5000, func(res formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, 5000, func(res formResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -101,7 +101,7 @@ func TestFormEnvelopeEmpty(t *testing.T) {
 // TestFormEnvelopeTabOrder: tab cycles description → envelope → options,
 // so the new field is reachable without breaking the options row.
 func TestFormEnvelopeTabOrder(t *testing.T) {
-	form := newFeatureForm(nil, 0, func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
 	for _, want := range []int{fieldDesc, fieldEnvelope, fieldOpts} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)

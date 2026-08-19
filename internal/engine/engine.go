@@ -132,9 +132,15 @@ type Config struct {
 	// backend used when no profile applies or a role omits `backend:`.
 	// buildAgents in cmd/gummi seeds both the default's Name() and ""
 	// with the same adapter, so lookups by either always resolve.
-	Agents     map[string]agent.Agent
-	Store      *state.Store
-	Worktrees  *worktree.Manager
+	Agents map[string]agent.Agent
+	Store  *state.Store
+	// Worktrees is a single repository's manager, retained for callers that
+	// bind one repository directly. New callers pass Pool instead.
+	Worktrees *worktree.Manager
+	// Pool caches one manager per configured repository; every per-card git
+	// operation resolves its manager here. New selects Pool when set and
+	// otherwise wraps Worktrees as a single-repo pool.
+	Pool       *worktree.Pool
 	Workspace  state.Workspace
 	Model      string
 	Permission agent.Permission
@@ -198,15 +204,20 @@ type Engine struct {
 	// resurrect a dropped row.
 	persistMu sync.Mutex
 
-	// dirtyPathsFn returns the sorted set of paths dirty on the main
-	// checkout. Bound at construction to cfg.Worktrees.MainDirtyPaths; it
-	// is the tripwire's sole injection seam, so tests can substitute a
-	// call-counter or fault-injecting closure without reaching into the
-	// worktree package or swapping the concrete Config.Worktrees pointer.
-	dirtyPathsFn func(context.Context) ([]string, error)
+	// pool resolves each card to its repository's manager (see mgr).
+	pool *worktree.Pool
+
+	// dirtyPathsFn returns the sorted set of paths dirty on the card's own
+	// main checkout. Bound at construction to the pool's ManagerFor(...)
+	// MainDirtyPaths; it is the tripwire's sole injection point, so tests
+	// can substitute a call-counter or fault-injecting closure without
+	// reaching into the worktree package or swapping the concrete pool.
+	dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
 }
 
-// New builds an engine. The caller owns every agent's lifetime.
+// New builds an engine from the config. The caller owns every agent's
+// lifetime. A single-repository config (Worktrees) is wrapped into a
+// one-repo pool so every per-card path resolves uniformly.
 func New(cfg Config) *Engine {
 	if cfg.Permission == "" {
 		cfg.Permission = agent.PermissionAllowAll
@@ -214,6 +225,24 @@ func New(cfg Config) *Engine {
 	max := cfg.MaxActive
 	if max < 1 {
 		max = 1
+	}
+	pool := cfg.Pool
+	if pool == nil && cfg.Worktrees != nil {
+		pool = worktree.WrapSingle(cfg.Worktrees)
+	}
+	var dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
+	if pool != nil {
+		dirtyPathsFn = func(ctx context.Context, f *domain.Feature) ([]string, error) {
+			wt, err := pool.ManagerFor(ctx, f)
+			if err != nil {
+				return nil, err
+			}
+			return wt.MainDirtyPaths(ctx)
+		}
+	} else {
+		dirtyPathsFn = func(_ context.Context, _ *domain.Feature) ([]string, error) {
+			return nil, nil
+		}
 	}
 	e := &Engine{
 		cfg:          cfg,
@@ -223,10 +252,21 @@ func New(cfg Config) *Engine {
 		events:       make(chan Event),
 		stopped:      make(chan struct{}),
 		live:         map[domain.FeatureID]*Session{},
-		dirtyPathsFn: cfg.Worktrees.MainDirtyPaths,
+		pool:         pool,
+		dirtyPathsFn: dirtyPathsFn,
 	}
 	go e.forward()
 	return e
+}
+
+// mgr resolves the manager for a card's repository. With a pool configured
+// it routes through the pool (per-card); the single-manager wrap falls back
+// to that manager.
+func (e *Engine) mgr(ctx context.Context, f *domain.Feature) (*worktree.Manager, error) {
+	if e.pool != nil {
+		return e.pool.ManagerFor(ctx, f)
+	}
+	return e.cfg.Worktrees, nil
 }
 
 // ClientTools reports whether the default backend supports gummi's
@@ -238,10 +278,23 @@ func (e *Engine) ClientTools() bool {
 	return a != nil && a.Capabilities().ClientTools
 }
 
-// Worktrees returns the worktree manager the engine is bound to. It is
-// exposed for one-shot commands (headless merge/clean) that perform
-// worktree mutations directly but share the engine's manager and its lock.
-func (e *Engine) Worktrees() *worktree.Manager { return e.cfg.Worktrees }
+// WorktreesFor returns the worktree manager for a card's repository. It is
+// exposed for one-shot commands (headless merge/clean) that perform worktree
+// mutations directly but share the engine's manager and its lock.
+func (e *Engine) WorktreesFor(ctx context.Context, f *domain.Feature) (*worktree.Manager, error) {
+	return e.mgr(ctx, f)
+}
+
+// RepoKnown reports whether name is a configured managed repository (the
+// empty name is the workspace default and is always known). Creation
+// surfaces reject an unknown repo name at creation, before any drive-time
+// resolution.
+func (e *Engine) RepoKnown(name string) bool {
+	if e.pool != nil {
+		return e.pool.Known(name)
+	}
+	return name == ""
+}
 
 // Events is the UI-facing stream. It stays open for the engine's life
 // and closes on Close.
@@ -407,7 +460,11 @@ func (e *Engine) RunCritique(f domain.Feature, note string) error {
 // critique, it borrows the current stage without advancing it; the
 // caller judges success by the resulting git state, not the transcript.
 func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string) error {
-	head, err := e.cfg.Worktrees.MainHead(ctx)
+	wt, err := e.mgr(ctx, &f)
+	if err != nil {
+		return err
+	}
+	head, err := wt.MainHead(ctx)
 	if err != nil {
 		return err
 	}
@@ -605,7 +662,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	if len(checks) == 0 {
 		return ""
 	}
-	workDir := filepath.Join(e.cfg.Worktrees.Root(), s.Feature.WorktreePath())
+	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
 	ctx, cancel := context.WithTimeout(context.Background(), verifyStageTimeout)
 	defer cancel()
 	// The shared context bounds the whole set; a per-check bound stops one
@@ -798,7 +855,11 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 // (.gummi/specs|bugs, never committed) — promoted here in case a crash
 // or a legacy committed-artifact item left promotion undone.
 func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPath string, err error) {
-	root := e.cfg.Worktrees.Root()
+	wt, err := e.mgr(ctx, &f)
+	if err != nil {
+		return "", "", err
+	}
+	root := e.pool.Root()
 	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
 	if interactiveStage(f.Stage) {
 		if err := spec.EnsureDraft(draft, &f); err != nil {
@@ -806,9 +867,9 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		}
 		// interactive stages run in the repo root (the main checkout), not
 		// the workspace root: the repo may live in a nested subdirectory.
-		return e.cfg.Worktrees.RepoRoot(), draft, nil
+		return wt.RepoRoot(), draft, nil
 	}
-	hasWT, err := e.cfg.Worktrees.Exists(ctx, &f)
+	hasWT, err := wt.Exists(ctx, &f)
 	if err != nil {
 		return "", "", err
 	}
@@ -819,7 +880,7 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	// on-disk branch's base incoherent with main; refuse before promoting the
 	// artifact or handing the agent a workdir it can only deepen the
 	// divergence in. The operator recreates the worktree from current main.
-	if err := e.cfg.Worktrees.AssertNoForkDrift(ctx, &f); err != nil {
+	if err := wt.AssertNoForkDrift(ctx, &f); err != nil {
 		return "", "", err
 	}
 	workDir = filepath.Join(root, f.WorktreePath())
@@ -1019,7 +1080,7 @@ func (e *Engine) beforeTurn(s *Session) {
 	if s.SandboxMode() == sandbox.ModeOff {
 		return
 	}
-	paths, err := e.dirtyPathsFn(s.ctx)
+	paths, err := e.dirtyPathsFn(s.ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("main-checkout tripwire: pre-turn snapshot failed — skipping trip check for this turn: " + err.Error())
 		return
@@ -1042,7 +1103,7 @@ func (e *Engine) checkTrip(s *Session) []string {
 	if pre == nil {
 		return nil
 	}
-	post, err := e.dirtyPathsFn(s.ctx)
+	post, err := e.dirtyPathsFn(s.ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("main-checkout tripwire: post-turn snapshot failed — checking skipped: " + err.Error())
 		return nil
@@ -1114,11 +1175,15 @@ func (e *Engine) stageWorkCommitted(s *Session) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
-	dirty, err := e.cfg.Worktrees.Dirty(ctx, &s.Feature)
+	wt, err := e.mgr(ctx, &s.Feature)
+	if err != nil {
+		return false
+	}
+	dirty, err := wt.Dirty(ctx, &s.Feature)
 	if err != nil || dirty {
 		return false // uncommitted work remains, or can't tell
 	}
-	ahead, err := e.cfg.Worktrees.BranchAhead(ctx, &s.Feature)
+	ahead, err := wt.BranchAhead(ctx, &s.Feature)
 	return err == nil && ahead
 }
 
@@ -1372,7 +1437,12 @@ func (e *Engine) settle(s *Session) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
-	aborted, err := e.cfg.Worktrees.AbortRebase(ctx, &s.Feature)
+	wt, err := e.mgr(ctx, &s.Feature)
+	if err != nil {
+		s.appendActivity("rebase cleanup failed: " + err.Error())
+		return
+	}
+	aborted, err := wt.AbortRebase(ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("rebase cleanup failed: " + err.Error())
 		return
@@ -1397,7 +1467,12 @@ func (e *Engine) checkpoint(s *Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
-	committed, err := e.cfg.Worktrees.CommitAll(ctx, &s.Feature, msg)
+	wt, err := e.mgr(ctx, &s.Feature)
+	if err != nil {
+		s.appendActivity("checkpoint commit failed: " + err.Error())
+		return
+	}
+	committed, err := wt.CommitAll(ctx, &s.Feature, msg)
 	if err != nil {
 		s.appendActivity("checkpoint commit failed: " + err.Error())
 		return

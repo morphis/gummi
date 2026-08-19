@@ -22,7 +22,7 @@ type readFixture struct {
 	root  string
 	ws    state.Workspace
 	store *state.Store
-	wt    *worktree.Manager
+	wt    *worktree.Pool
 }
 
 func newReadFixture(t *testing.T) *readFixture {
@@ -61,7 +61,7 @@ func newReadFixture(t *testing.T) *readFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &readFixture{ctx: context.Background(), root: root, ws: ws, store: store, wt: wt}
+	return &readFixture{ctx: context.Background(), root: root, ws: ws, store: store, wt: worktree.WrapSingle(wt)}
 }
 
 // mkFeature persists a minimal quick-route feature (FD-001) at the Spec

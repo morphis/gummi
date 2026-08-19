@@ -716,3 +716,42 @@ func TestOldSchemaStillOpens(t *testing.T) {
 		t.Errorf("budget_spent = %q, want 0", budgetSpent)
 	}
 }
+
+// TestMintNumGlobalAcrossRepos: the id sequence is workspace-global, not
+// per-repository, so cards created against different repos never collide
+// and never restart their numbering.
+func TestMintNumGlobalAcrossRepos(t *testing.T) {
+	w, err := Init(gitRoot(t), gitRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(w.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	mk := func(repo string) int {
+		t.Helper()
+		n, err := s.MintFeatureNum(ctx, w.SeqFile())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := feat(n, "Card in "+repo)
+		f.Repo = repo
+		if err := s.CreateFeature(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if a := mk("lxd"); a != 1 {
+		t.Errorf("first mint = %d, want 1", a)
+	}
+	if b := mk("incus"); b != 2 {
+		t.Errorf("second mint (different repo) = %d, want 2 (sequence is global)", b)
+	}
+	if c := mk("lxd"); c != 3 {
+		t.Errorf("third mint = %d, want 3", c)
+	}
+}

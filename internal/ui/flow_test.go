@@ -53,7 +53,7 @@ func newWorkspace(t *testing.T) (*Shell, string) {
 		t.Fatal(err)
 	}
 	m := NewShell(theme.GummiDark(), "v0-test")
-	m.Attach(store, wt, ws)
+	m.Attach(store, worktree.WrapSingle(wt), ws)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return model.(*Shell), root
 }

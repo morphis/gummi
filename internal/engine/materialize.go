@@ -18,6 +18,9 @@ import (
 type MaterializeOpts struct {
 	Profile  string
 	Envelope int
+	// Repo is the managed repository the created bugs belong to (a
+	// configured `repos:` name, or "" for the workspace default).
+	Repo string
 }
 
 // Materialize turns an approved IngestResult into real features (DESIGN

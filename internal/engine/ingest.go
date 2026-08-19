@@ -116,8 +116,12 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 	} else {
 		hints = append(hints, ingestConventionHint)
 	}
+	wt, err := e.mgr(ctx, &domain.Feature{})
+	if err != nil {
+		return domain.IngestResult{}, fmt.Errorf("resolving ingest repository: %w", err)
+	}
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:         e.cfg.Worktrees.RepoRoot(),
+		WorkDir:         wt.RepoRoot(),
 		Role:            agent.RoleArchitect,
 		Model:           model,
 		Permission:      e.cfg.Permission,

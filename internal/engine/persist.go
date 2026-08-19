@@ -113,7 +113,9 @@ func (e *Engine) Restore(ctx context.Context) error {
 			role = agent.RoleImplementer
 			// a crash mid-session can strand the worktree mid-rebase; abort
 			// so it comes back clean (best-effort, like the live settle).
-			_, _ = e.cfg.Worktrees.AbortRebase(ctx, &f)
+			if wt, merr := e.mgr(ctx, &f); merr == nil {
+				_, _ = wt.AbortRebase(ctx, &f)
+			}
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		s := &Session{

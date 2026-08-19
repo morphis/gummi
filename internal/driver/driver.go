@@ -49,6 +49,9 @@ type Options struct {
 	Ref             string        // optional external correlation id, echoed in NDJSON + persisted as ExternalRef (D11)
 	Acceptance      string        // optional acceptance-criteria text, seeded into the draft's Verification plan (D10)
 	Until           domain.Stage  // stop cleanly before crossing the gate that leaves this design stage (B3); "" runs to verified
+	// Repo is the managed repository the created card belongs to (a
+	// configured `repos:` name, or "" for the workspace default).
+	Repo string
 }
 
 // Driver runs one feature through the engine's gate floor headlessly. It
@@ -319,7 +322,10 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	if err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	wt := d.eng.Worktrees()
+	wt, err := d.eng.WorktreesFor(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
 
 	// the verified-branch precondition, stricter than the TUI's any-stage m
 	// key: this command exists to land a verified branch.
@@ -395,7 +401,10 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	wt := d.eng.Worktrees()
+	wt, err := d.eng.WorktreesFor(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
 
 	landed, err := wt.Landed(ctx, &f)
 	if err != nil {
@@ -1126,6 +1135,11 @@ func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature
 	if err != nil {
 		return domain.Feature{}, err
 	}
+	// Reject an unconfigured repo before minting a sequence number, so a
+	// typo'd --repo never silently burns an id (matches MaterializeBugs).
+	if d.opts.Repo != "" && !d.eng.RepoKnown(d.opts.Repo) {
+		return domain.Feature{}, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", d.opts.Repo)
+	}
 	num, err := d.store.MintFeatureNum(ctx, d.ws.SeqFile())
 	if err != nil {
 		return domain.Feature{}, err
@@ -1144,7 +1158,7 @@ func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature
 		Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: skip,
 		Profile: d.opts.Profile, Budget: domain.Budget{Envelope: d.opts.Envelope},
 		GateApproval: d.opts.GateApproval,
-		ExternalRef:  d.opts.Ref, CreatedAt: now, UpdatedAt: now,
+		ExternalRef:  d.opts.Ref, Repo: d.opts.Repo, CreatedAt: now, UpdatedAt: now,
 	}
 	// seed the draft before persisting: the description's overflow fills the
 	// Problem section (a title-sized description seeds nothing there), and

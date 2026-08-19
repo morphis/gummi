@@ -195,3 +195,100 @@ func TestCleanRefusesUnlanded(t *testing.T) {
 		t.Fatal("refused clean still emitted a cleaned event")
 	}
 }
+
+// driveVerifiedNamed drives a verified card whose Repo is the configured
+// named repo "b", via the multi-repo harness.
+func driveVerifiedNamed(t *testing.T) (*harness, *Driver, domain.FeatureID) {
+	t.Helper()
+	h := newMultiRepoHarness(t, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+	out, err := h.driver(Options{Repo: "b"}).Run(context.Background(), "add a json export")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done", out.Status)
+	}
+	return h, h.driver(Options{}), domain.FeatureID(out.ID)
+}
+
+// TestMergeLandsOnNamedRepo: a card in a configured named repo merges onto
+// that repo's main and never the default's.
+func TestMergeLandsOnNamedRepo(t *testing.T) {
+	h, d, id := driveVerifiedNamed(t)
+	f, _ := h.store.GetFeature(context.Background(), id)
+	if f.Repo != "b" {
+		t.Fatalf("card repo = %q, want b", f.Repo)
+	}
+	defBefore := gitHead(t, h.root)
+	namedBefore := gitHead(t, h.byName["b"])
+
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export")
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done", out.Status)
+	}
+	if st := h.stageOf(id); st != domain.StageDone {
+		t.Fatalf("feature at %s after merge, want done", st)
+	}
+	if got := gitHead(t, h.byName["b"]); got == namedBefore {
+		t.Errorf("named repo main did not advance: %s", got)
+	}
+	if got := gitHead(t, h.root); got != defBefore {
+		t.Errorf("default repo main advanced on a named-repo merge: %s -> %s", defBefore, got)
+	}
+	merged := lastEvent(h, "merged")
+	if merged == nil {
+		t.Fatalf("no merged event; got %v", h.eventKinds())
+	}
+	commit, _ := merged["commit"].(string)
+	if want := gitHead(t, h.byName["b"]); commit != want {
+		t.Fatalf("merged.commit %q != named-repo main HEAD %q", commit, want)
+	}
+}
+
+// TestCleanNamedRepo: clean removes a landed named-repo card's worktree and
+// branch through the card's own manager.
+func TestCleanNamedRepo(t *testing.T) {
+	h, _, id := driveVerifiedNamed(t)
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	f, _ := h.store.GetFeature(context.Background(), id)
+	branch := f.BranchName()
+
+	if ex, _ := h.pool.Exists(context.Background(), &f); !ex {
+		t.Fatal("setup: worktree missing before clean")
+	}
+	out, err := h.driver(Options{}).Clean(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done", out.Status)
+	}
+	if ex, _ := h.pool.Exists(context.Background(), &f); ex {
+		t.Error("worktree still present after clean")
+	}
+	if ok, _ := h.pool.BranchExists(context.Background(), &f); ok {
+		t.Error("branch still present after clean")
+	}
+	if got := lastEvent(h, "cleaned"); got == nil || got["branch"] != branch {
+		t.Fatalf("cleaned event = %v, want branch %s", got, branch)
+	}
+}

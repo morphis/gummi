@@ -284,3 +284,32 @@ func TestDependencyKindsAreOrthogonal(t *testing.T) {
 		t.Fatalf("bug deps = %v, want [%s]", ids(deps), c.ID)
 	}
 }
+
+// TestDependencyCrossRepo: feature_dependencies references cards with no
+// repo awareness, so an edge between cards in different repositories lists
+// and reverse-lists exactly like a same-repo edge.
+func TestDependencyCrossRepo(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+
+	a := feat(1, "Alpha")
+	a.Repo = "lxd"
+	b := feat(2, "Beta")
+	b.Repo = "incus"
+	for _, f := range []*domain.Feature{a, b} {
+		if err := s.CreateFeature(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.AddDependency(ctx, a.ID, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	deps, err := s.ListDependencies(ctx, a.ID)
+	if err != nil || len(deps) != 1 || deps[0] != b.ID {
+		t.Fatalf("cross-repo ListDependencies = %v, err=%v; want [%s]", ids(deps), err, b.ID)
+	}
+	deps, err = s.ListDependents(ctx, b.ID)
+	if err != nil || len(deps) != 1 || deps[0] != a.ID {
+		t.Fatalf("cross-repo ListDependents = %v, err=%v; want [%s]", ids(deps), err, a.ID)
+	}
+}

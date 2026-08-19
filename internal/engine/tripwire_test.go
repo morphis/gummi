@@ -191,7 +191,7 @@ func TestTripPreTurnErrorDoesNotSpuriouslyTrip(t *testing.T) {
 
 	calls := 0
 	real := r.wt.MainDirtyPaths
-	r.e.dirtyPathsFn = func(ctx context.Context) ([]string, error) {
+	r.e.dirtyPathsFn = func(ctx context.Context, _ *domain.Feature) ([]string, error) {
 		calls++
 		if calls == 1 {
 			return nil, errors.New("injected fault")
@@ -227,7 +227,7 @@ func TestCloseCancelsInFlightTripSnapshot(t *testing.T) {
 	// worktree: the post-turn one blocks until the session context is
 	// canceled. The pre-turn snapshot (call 1) returns immediately so the
 	// turn can actually run and reach the post-turn check.
-	r.e.dirtyPathsFn = func(ctx context.Context) ([]string, error) {
+	r.e.dirtyPathsFn = func(ctx context.Context, _ *domain.Feature) ([]string, error) {
 		calls++
 		if calls == 1 {
 			return nil, nil
@@ -277,7 +277,7 @@ func TestTripwireDisarmedOnOff(t *testing.T) {
 	}
 	calls := 0
 	real := wt.MainDirtyPaths
-	e.dirtyPathsFn = func(ctx context.Context) ([]string, error) {
+	e.dirtyPathsFn = func(ctx context.Context, _ *domain.Feature) ([]string, error) {
 		calls++
 		return real(ctx)
 	}

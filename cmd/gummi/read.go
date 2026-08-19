@@ -28,16 +28,16 @@ import (
 // .gummi workspace to already exist (state.Open, not Init — a read has
 // nothing to scaffold) and binds the worktree manager directly, skipping
 // newManager's EnsureGummiExcluded so a read never mutates the git index.
-func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Manager, state.Workspace) error) error {
+func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Pool, state.Workspace) error) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return err
 	}
-	ws, err := state.Open(wsRoot, repo)
+	ws, err := state.Open(wsRoot, defaultRoot)
 	if err != nil {
 		return err
 	}
@@ -46,11 +46,13 @@ func withReadWorkspace(fn func(context.Context, *state.Store, *worktree.Manager,
 		return err
 	}
 	defer store.Close()
-	wt, err := worktree.NewManager(context.Background(), wsRoot, repo, store)
+	// A read never mutates the git index, so the pool skips the .gummi
+	// exclusion pass (exclude=false).
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, false)
 	if err != nil {
 		return err
 	}
-	return fn(context.Background(), store, wt, ws)
+	return fn(context.Background(), store, pool, ws)
 }
 
 // resolveFeatureID loads the work item named by arg, which is either a
@@ -94,7 +96,7 @@ func idFirstArg(fs *flag.FlagSet, args []string) (string, error) {
 // artifactPath resolves where an item's design artifact lives right now,
 // using the same precedence and helper the engine does (spec.LocateArtifact)
 // so the read commands and the gate floor can never disagree.
-func artifactPath(wt *worktree.Manager, ws state.Workspace, f *domain.Feature) string {
+func artifactPath(wt *worktree.Pool, ws state.Workspace, f *domain.Feature) string {
 	root := wt.Root()
 	return spec.LocateArtifact(
 		filepath.Join(root, f.ArtifactPath()),
@@ -108,7 +110,7 @@ func artifactPath(wt *worktree.Manager, ws state.Workspace, f *domain.Feature) s
 // engine.GateBlockers applies, replicated here because the read commands
 // run agent-free (no engine to build). A missing/unreadable artifact or a
 // store error reads as zero, exactly as the engine degrades.
-func gateBlockers(ctx context.Context, store *state.Store, wt *worktree.Manager, ws state.Workspace, f *domain.Feature) (specOpen, diffOpen int) {
+func gateBlockers(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace, f *domain.Feature) (specOpen, diffOpen int) {
 	if p := artifactPath(wt, ws, f); p != "" {
 		if raw, err := os.ReadFile(p); err == nil {
 			specOpen = len(spec.Parse(string(raw)).UserOpenThreads())

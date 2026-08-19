@@ -27,10 +27,14 @@ type harness struct {
 	store *state.Store
 	ws    state.Workspace
 	wt    *worktree.Manager
-	fake  *agent.Fake
-	eng   *engine.Engine
-	buf   *bytes.Buffer
-	root  string
+	pool  *worktree.Pool
+	// byName maps a configured named repo to its resolved root (nil for the
+	// single-repo harness); the multi-repo harness fills it.
+	byName map[string]string
+	fake   *agent.Fake
+	eng    *engine.Engine
+	buf    *bytes.Buffer
+	root   string
 
 	mu    sync.Mutex
 	calls map[domain.Stage]int
@@ -86,6 +90,78 @@ func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]sta
 	h.eng = engine.New(engine.Config{
 		Agents: map[string]agent.Agent{"": fake, fake.Name(): fake},
 		Store:  store, Worktrees: wt, Workspace: ws,
+		Persist: true, Model: "test-model",
+	})
+	t.Cleanup(func() { h.eng.Close(); fake.Close() })
+	return h
+}
+
+// newMultiRepoHarness wires a harness over a pool whose default repo is the
+// workspace root plus two nested named repos ("a", "b"), so a test can drive
+// a named-repo card end-to-end. The returned harness resolves cards through
+// the pool; byName maps each configured name to its repo root.
+func newMultiRepoHarness(t *testing.T, script map[domain.Stage]stageFn) *harness {
+	t.Helper()
+	wsRoot := gitRepo(t)
+	roots := map[string]string{}
+	for _, name := range []string{"a", "b"} {
+		r := filepath.Join(wsRoot, "git", name)
+		if err := os.MkdirAll(r, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		git := func(args ...string) {
+			if out, err := exec.CommandContext(context.Background(), "git",
+				append([]string{"-C", r}, args...)...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		git("init", "-q", "-b", "main")
+		git("config", "user.name", "t")
+		git("config", "user.email", "t@e.invalid")
+		if err := os.WriteFile(filepath.Join(r, "README.md"), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git("add", ".")
+		git("commit", "-q", "-m", "init")
+		roots[name] = r
+	}
+	ws, err := state.Init(wsRoot, wsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	var named []worktree.NamedRepo
+	for _, name := range []string{"a", "b"} {
+		named = append(named, worktree.NamedRepo{Name: name, Root: roots[name]})
+	}
+	pool, err := worktree.NewPool(context.Background(), ws.Root, ws.Root, named, store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := &harness{t: t, store: store, ws: ws, pool: pool, byName: roots, buf: &bytes.Buffer{}, root: wsRoot, calls: map[domain.Stage]int{}}
+	fake := agent.NewFake("")
+	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
+	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		stage := h.stageFromWorkDir(opts.WorkDir)
+		fn := script[stage]
+		if fn == nil {
+			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
+		}
+		h.mu.Lock()
+		n := h.calls[stage]
+		h.calls[stage]++
+		h.mu.Unlock()
+		return fn(h, n, opts, msg)
+	}
+	h.fake = fake
+	h.eng = engine.New(engine.Config{
+		Agents: map[string]agent.Agent{"": fake, fake.Name(): fake},
+		Store:  store, Pool: pool, Workspace: ws,
 		Persist: true, Model: "test-model",
 	})
 	t.Cleanup(func() { h.eng.Close(); fake.Close() })

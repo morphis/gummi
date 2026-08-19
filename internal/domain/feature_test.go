@@ -232,3 +232,24 @@ func TestSplitFreeform(t *testing.T) {
 		t.Errorf("whitespace-only body seeded %q", seed)
 	}
 }
+
+// TestFeatureRepoValidate: the repo name is plain metadata — empty (the
+// default) is always legal, a configured name is legal, and a whitespace or
+// path-like name is rejected so it can never be mistaken for a path.
+func TestFeatureRepoValidate(t *testing.T) {
+	g := testFeature()
+	g.Repo = ""
+	if err := g.Validate(); err != nil {
+		t.Errorf("empty repo should be legal: %v", err)
+	}
+	g.Repo = "lxd"
+	if err := g.Validate(); err != nil {
+		t.Errorf("a plain configured name should be legal: %v", err)
+	}
+	for _, bad := range []string{" lxd", "lxd ", "a/b", `a\b`, "../x"} {
+		g.Repo = bad
+		if err := g.Validate(); err == nil {
+			t.Errorf("repo %q should be rejected", bad)
+		}
+	}
+}

@@ -280,6 +280,10 @@ func TestProfileNamesWithoutYaml(t *testing.T) {
 func TestResolveRootsNested(t *testing.T) {
 	ws := t.TempDir()
 	writeConfig(t, ws, "repo: git/lxd\n")
+	// the resolver now validates each configured root is a git toplevel.
+	if err := os.MkdirAll(filepath.Join(ws, "git", "lxd", ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	gotWS, gotRepo, err := resolveRoots(ws)
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -294,6 +298,9 @@ func TestResolveRootsNested(t *testing.T) {
 
 func TestResolveRootsSiblingDefault(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	gotWS, gotRepo, err := resolveRoots(dir)
 	if err != nil {
 		t.Fatalf("resolveRoots (no config): %v", err)

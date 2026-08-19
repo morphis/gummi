@@ -76,11 +76,11 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(wsRoot, repo)
+	ws, err := ensureWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return err
 	}
@@ -98,23 +98,26 @@ func runBoard() error {
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), wsRoot, repo, store)
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		return err
 	}
 	// GUMMI_THEME selects the palette (dark|light|neon); default dark.
 	th, _ := theme.ByName(cmp.Or(os.Getenv("GUMMI_THEME"), "dark"))
 	shell := ui.NewShell(th, version())
-	shell.Attach(store, wt, ws)
+	shell.Attach(store, pool, ws)
 
 	// Profile names for the new-feature/bug/ingest dialogs come purely
 	// from .gummi/profiles.yaml and are available whether or not any agent
 	// backend can start — surface them unconditionally so the dialogs show
 	// the real profiles even on a static board.
 	shell.SetProfileNames(profileNames(ws))
+	// The configured managed repositories feed the new-card forms' repo
+	// selector; the default is always implicit, so only named repos here.
+	shell.SetRepoNames(pool.Names())
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
-	if eng, _, cleanup := buildEngine(store, wt, ws); eng != nil {
+	if eng, _, cleanup := buildEngine(store, pool, ws); eng != nil {
 		shell.AttachEngine(eng)
 		defer cleanup()
 	}
@@ -159,8 +162,8 @@ func runBoard() error {
 //	                        headless adapter's token→credit rate, for a
 //	                        local endpoint (llama.cpp) that the engine
 //	                        still needs to meter against a credit budget
-func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, []string, func()) {
-	eng, agents, names := newEngineFromEnv(store, wt, ws)
+func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, []string, func()) {
+	eng, agents, names := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
 		return nil, nil, nil
 	}
@@ -189,7 +192,7 @@ func buildEngine(store *state.Store, wt *worktree.Manager, ws state.Workspace) (
 // the board (adding Restore + a combined cleanup); one-shot commands like
 // `gummi ingest` use it directly and own the agents' lifetimes. Returns
 // (nil, nil, nil) when no agent can be started.
-func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string) {
+func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string) {
 	// per-role model routing from .gummi/profiles.yaml (falls back to
 	// the single env model when absent or a role isn't covered)
 	profiles, err := config.LoadProfiles(ws.ProfilesFile())
@@ -242,7 +245,7 @@ func newEngineFromEnv(store *state.Store, wt *worktree.Manager, ws state.Workspa
 		sandboxMode = cfg.Sandbox
 	}
 	eng := engine.New(engine.Config{
-		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
+		Agents: agents, Store: store, Pool: pool, Workspace: ws,
 		Model: model, MaxActive: maxActive, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode,
@@ -369,22 +372,14 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 	return agents, nil
 }
 
-// newManager binds the worktree manager to the workspace root ws and the
-// repo root repo, then keeps .gummi out of the product repo's tracking
-// (exclude + untrack-if-tracked) before any agent session can touch the
-// repo. Exclusion is a no-op in the nested layout, where .gummi sits above
-// the repo. Exclusion problems warn rather than block the launch.
-func newManager(ctx context.Context, ws, repo string, fs worktree.ForkPointStore) (*worktree.Manager, error) {
-	wt, err := worktree.NewManager(ctx, ws, repo, fs)
-	if err != nil {
-		return nil, err
-	}
-	if untracked, err := wt.EnsureGummiExcluded(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "gummi: excluding .gummi from tracking:", err)
-	} else if untracked {
-		fmt.Fprintln(os.Stderr, "gummi: .gummi was tracked in this repo — untracked it (index only; the removal rides into your next commit)")
-	}
-	return wt, nil
+// newPool builds the per-repository manager pool from the workspace root,
+// the default repo root, and the configured named roots, then keeps .gummi
+// out of each product repo's tracking (exclude + untrack-if-tracked) as
+// each manager is created — the default eagerly, named repos lazily on
+// first use. Exclusion is a no-op for a repo that does not contain .gummi,
+// and exclusion problems warn rather than block the launch.
+func newPool(ctx context.Context, ws, defaultRoot string, named []worktree.NamedRepo, fs worktree.ForkPointStore, exclude bool) (*worktree.Pool, error) {
+	return worktree.NewPool(ctx, ws, defaultRoot, named, fs, exclude)
 }
 
 // ensureWorkspace returns the .gummi workspace at ws, creating it (and
@@ -409,33 +404,32 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 	return w, nil
 }
 
-// resolveRoots resolves the workspace root (where .gummi lives) and the
-// managed git repository root from cwd. The workspace root is cwd; the repo
-// root comes from the config.yaml `repo:` key, defaulting to the workspace
-// root. A configured repo root that escapes the workspace is a config error.
-func resolveRoots(cwd string) (ws, repo string, err error) {
+// resolveAllRoots resolves the workspace root (where .gummi lives), the
+// default managed repo root, and the ordered list of named repositories from
+// cwd. The workspace root is cwd; the repo roots come from config.yaml's
+// `repo:` and `repos:` keys, defaulting to the workspace root. A configured
+// root that escapes the workspace, or that is not a git toplevel, is a
+// resolution-time config error naming the offending repo.
+func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.NamedRepo, err error) {
 	ws = cwd
 	cfg, err := config.Load(filepath.Join(ws, ".gummi", "config.yaml"))
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
-	repo = cfg.Repo
-	if repo == "" {
-		repo = ws
-	} else if filepath.IsAbs(repo) {
-		repo = filepath.Clean(repo)
-	} else {
-		repo = filepath.Clean(filepath.Join(ws, repo))
+	def, list, err := config.ResolveRepos(ws, cfg)
+	if err != nil {
+		return "", "", nil, err
 	}
-	if !repoWithinWS(ws, repo) {
-		return "", "", fmt.Errorf("config error: repo %q escapes the workspace %s; the managed repository must be the workspace root or a subdirectory of it", cfg.Repo, ws)
+	for _, n := range list {
+		named = append(named, worktree.NamedRepo{Name: n.Name, Root: n.Root})
 	}
-	return ws, repo, nil
+	return ws, def, named, nil
 }
 
-// repoWithinWS reports whether repo is the workspace root or a descendant
-// of it.
-func repoWithinWS(ws, repo string) bool {
-	rel, err := filepath.Rel(ws, repo)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+// resolveRoots resolves the workspace root and the default managed repo
+// root. Most call sites that only ever touch the default repository use this
+// convenience; multi-repo call sites use resolveAllRoots.
+func resolveRoots(cwd string) (ws, repo string, err error) {
+	ws, repo, _, err = resolveAllRoots(cwd)
+	return ws, repo, err
 }

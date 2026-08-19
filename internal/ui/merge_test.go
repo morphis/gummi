@@ -80,7 +80,7 @@ func attachDraftEngine(t *testing.T, m *Shell, drafts ...string) *Shell {
 			}
 			return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
 		}}),
-		Store: m.store, Worktrees: m.wt, Workspace: m.ws, MaxActive: 1,
+		Store: m.store, Pool: m.wt, Workspace: m.ws, MaxActive: 1,
 	})
 	t.Cleanup(func() { eng.Close() })
 	m.AttachEngine(eng)

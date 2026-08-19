@@ -55,7 +55,7 @@ func runRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.full, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until)
+	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.full, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func runRun(args []string) error {
 type runFlagValues struct {
 	envelope                       *int
 	profile, gate, ref, acceptance *string
-	until                          *string
+	repo, until                    *string
 	full, autonomous, verbose      *bool
 	timeout                        *time.Duration
 }
@@ -104,6 +104,7 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
+		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)"),
 		acceptance: fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
 	}
@@ -134,7 +135,7 @@ func readAcceptance(pathOrDash string) (string, error) {
 
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
-func driverOptions(envelope int, profile string, full bool, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until string) (driver.Options, error) {
+func driverOptions(envelope int, profile string, full bool, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until, repo string) (driver.Options, error) {
 	if envelope == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -160,7 +161,7 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 	return driver.Options{
 		Envelope: envelope, Profile: profile, Full: full, GateApproval: gate,
 		StageTimeout: timeout, Autonomous: autonomous, Verbose: verbose, Ref: ref,
-		Acceptance: acceptance, Until: domain.Stage(until),
+		Acceptance: acceptance, Until: domain.Stage(until), Repo: repo,
 	}, nil
 }
 
@@ -185,11 +186,11 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store, state.
 	if err != nil {
 		return err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(wsRoot, repo)
+	ws, err := ensureWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return err
 	}
@@ -221,11 +222,11 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store, state.
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), wsRoot, repo, store)
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		return err
 	}
-	eng, agents, _ := newEngineFromEnv(store, wt, ws)
+	eng, agents, _ := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
 		return fmt.Errorf("no coding agent is configured; a run needs one (GitHub Copilot, or set GUMMI_AGENT/GUMMI_AGENT_CMD)")
 	}

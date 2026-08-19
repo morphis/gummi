@@ -119,9 +119,30 @@ func TestConfirmOverlay(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
+// TestBoardRepoBadge: a card in a non-default repo carries a repo badge on
+// its board line; a card in the default repo renders no repo badge (the
+// default is implicit).
+func TestBoardRepoBadge(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.now = func() time.Time { return fixedTime }
+	named := row(51, "rate limits", domain.StageTodo, "thrifty", false)
+	named.F.Repo = "lxd"
+	def := row(52, "plain feature", domain.StageTodo, "thrifty", false)
+	m.rows = []featureRow{named, def}
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	m = model.(*Shell)
+	content := m.View().Content
+	if !strings.Contains(content, "[lxd]") {
+		t.Error("a named-repo card should render its repo badge")
+	}
+	if strings.Contains(content, "[default]") {
+		t.Error("a default-repo card should not render an explicit repo badge")
+	}
+}
+
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
-	form := newFeatureForm(nil, 0, func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
 	form.skip.Brainstorm = true
 	form.focus = fieldOpts
 	form.desc.SetValue("dark mode toggle")

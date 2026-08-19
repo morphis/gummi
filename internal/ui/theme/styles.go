@@ -33,6 +33,7 @@ type Styles struct {
 	CardID     lipgloss.Style // FD-042
 	CardTitle  lipgloss.Style
 	ProfileTag lipgloss.Style // [thrifty]
+	RepoBadge  lipgloss.Style // [lxd] / [default] — a card's managed repository
 
 	// Severity badges (bug impact) on board cards, tinted to read
 	// by color: coral for critical, mustard, julep, oyster for low.
@@ -88,6 +89,7 @@ func New(t Theme) *Styles {
 		CardID:     base.Foreground(t.FgSubtle).Bold(true),
 		CardTitle:  base,
 		ProfileTag: base.Foreground(t.FgFaint),
+		RepoBadge:  base.Foreground(t.FgSubtle),
 
 		SeverityCritical: base.Foreground(charmtone.Coral),
 		SeverityHigh:     base.Foreground(charmtone.Mustard),

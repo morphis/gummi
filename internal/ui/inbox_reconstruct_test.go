@@ -19,7 +19,7 @@ import (
 
 // uiRepo wires a throwaway repo, store, and worktree manager for tests
 // that need direct store access (chatWorkspace hides the store).
-func uiRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
+func uiRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Pool) {
 	t.Helper()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
@@ -55,7 +55,7 @@ func uiRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ws, store, wt
+	return ws, store, worktree.WrapSingle(wt)
 }
 
 func mkFeature(t *testing.T, store *state.Store, num int, title string, stage domain.Stage) domain.Feature {
@@ -95,7 +95,7 @@ func TestReconstructInboxAfterRestart(t *testing.T) {
 	save(fGate, "done", "reviewer", "")
 	save(fFail, "paused", "implementer", "provider boom")
 
-	eng := engine.New(engine.Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	eng := engine.New(engine.Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Pool: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { eng.Close() })
 	if err := eng.Restore(ctx); err != nil {
 		t.Fatal(err)

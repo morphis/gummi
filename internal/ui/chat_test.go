@@ -59,12 +59,13 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
+	pool := worktree.WrapSingle(wt)
+	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model"})
 	t.Cleanup(func() { eng.Close() })
 
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.now = func() time.Time { return fixedTime }
-	m.Attach(store, wt, ws)
+	m.Attach(store, pool, ws)
 	m.AttachEngine(eng)
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = model.(*Shell)

@@ -9,7 +9,7 @@ import (
 // TestBugFormEnvelopeDefault: the bug form pre-fills its envelope from
 // the global default, mirroring the feature form.
 func TestBugFormEnvelopeDefault(t *testing.T) {
-	form := newBugForm(nil, 3000, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, 3000, func(bugFormResult) tea.Cmd { return nil })
 	if got := form.env.Value(); got != "3000" {
 		t.Fatalf("envelope pre-fill = %q, want \"3000\"", got)
 	}
@@ -19,7 +19,7 @@ func TestBugFormEnvelopeDefault(t *testing.T) {
 // explicit Envelope on submit.
 func TestBugFormEnvelopeCustom(t *testing.T) {
 	var got *int
-	form := newBugForm(nil, 1000, func(res bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, 1000, func(res bugFormResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -37,7 +37,7 @@ func TestBugFormEnvelopeCustom(t *testing.T) {
 // and blocks submission.
 func TestBugFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newBugForm(nil, 1000, func(bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, 1000, func(bugFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -58,7 +58,7 @@ func TestBugFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 // rejected the same way.
 func TestBugFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newBugForm(nil, 1000, func(bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, 1000, func(bugFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -79,7 +79,7 @@ func TestBugFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 // use-default signal.
 func TestBugFormEnvelopeEmpty(t *testing.T) {
 	var got *int
-	form := newBugForm(nil, 1000, func(res bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, 1000, func(res bugFormResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -96,7 +96,7 @@ func TestBugFormEnvelopeEmpty(t *testing.T) {
 // TestBugFormEnvelopeTabOrder: tab cycles description → envelope →
 // options in the bug form too.
 func TestBugFormEnvelopeTabOrder(t *testing.T) {
-	form := newBugForm(nil, 0, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
 	for _, want := range []int{fieldDesc, fieldEnvelope, fieldOpts} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)

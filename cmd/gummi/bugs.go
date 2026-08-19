@@ -31,11 +31,11 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return nil, err
 	}
-	ws, err := ensureWorkspace(wsRoot, repo)
+	ws, err := ensureWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wt, err := newManager(context.Background(), wsRoot, repo, store)
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		_ = store.Close()
 		return nil, err
@@ -52,9 +52,9 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	// so they don't need a coding agent — construct a bare engine when none
 	// is configured. Running the bugs later needs an agent; creating them
 	// does not.
-	eng, agents, names := newEngineFromEnv(store, wt, ws)
+	eng, agents, names := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
-		eng = engine.New(engine.Config{Store: store, Worktrees: wt, Workspace: ws})
+		eng = engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	}
 	prof := profile
 	if prof == "" && len(names) > 0 {
@@ -144,7 +144,7 @@ func runBugIngest(args []string) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals)
+	return materializeBugs(ctx, be, res.Proposals, "")
 }
 
 // ingestGitHubSource builds the GitHub source from parsed ingest flags.
@@ -160,50 +160,70 @@ func ingestGitHubSource(repo, label, state string, comments bool, dir string) en
 	}
 }
 
+// bugNewFlagValues holds the pointers registerBugsNewFlags binds, so
+// runBugNew and the cobra adapter share one flag grammar.
+type bugNewFlagValues struct {
+	title, oneLiner, severity, repro, expected, actual, env, desc *string
+	profile, repo                                                 *string
+	envelope                                                      *int
+	yes                                                           *bool
+}
+
+// registerBugsNewFlags binds `gummi bugs new`'s flags onto fs and returns
+// their pointers. It defines the flags only — parsing and validation stay in
+// runBugNew — so a throwaway FlagSet can be handed here purely to enumerate
+// the grammar (and the cobra adapter stays in lockstep with it).
+func registerBugsNewFlags(fs *flag.FlagSet) *bugNewFlagValues {
+	return &bugNewFlagValues{
+		title:    fs.String("title", "", "bug title (required)"),
+		oneLiner: fs.String("one-liner", "", "short one-line summary"),
+		severity: fs.String("severity", "", "severity: critical|high|medium|low"),
+		repro:    fs.String("repro", "", "reproduction steps"),
+		expected: fs.String("expected", "", "expected behavior"),
+		actual:   fs.String("actual", "", "actual behavior"),
+		env:      fs.String("env", "", "environment (versions, OS, config)"),
+		desc:     fs.String("desc", "", "summary of what's broken"),
+		profile:  fs.String("profile", "", "profile the bug adopts (default: first configured)"),
+		envelope: fs.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)"),
+		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; default: the workspace default repo)"),
+		yes:      fs.Bool("yes", false, "create without the confirmation prompt"),
+	}
+}
+
 // runBugNew implements `gummi bugs new`: one hand-entered bug straight
 // into the todo backlog with a seeded report.
 func runBugNew(args []string) error {
 	fs := flag.NewFlagSet("bugs new", flag.ContinueOnError)
-	title := fs.String("title", "", "bug title (required)")
-	oneLiner := fs.String("one-liner", "", "short one-line summary")
-	severity := fs.String("severity", "", "severity: critical|high|medium|low")
-	repro := fs.String("repro", "", "reproduction steps")
-	expected := fs.String("expected", "", "expected behavior")
-	actual := fs.String("actual", "", "actual behavior")
-	env := fs.String("env", "", "environment (versions, OS, config)")
-	desc := fs.String("desc", "", "summary of what's broken")
-	profile := fs.String("profile", "", "profile the bug adopts (default: first configured)")
-	envelope := fs.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)")
-	yes := fs.Bool("yes", false, "create without the confirmation prompt")
+	f := registerBugsNewFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--envelope n] [--yes]")
+		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--repo r] [--envelope n] [--yes]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*title) == "" {
+	if strings.TrimSpace(*f.title) == "" {
 		fs.Usage()
 		return fmt.Errorf("bugs new needs a --title")
 	}
 
-	be, err := openBugEnv(*profile, *envelope)
+	be, err := openBugEnv(*f.profile, *f.envelope)
 	if err != nil {
 		return err
 	}
 	defer be.cleanup()
 
 	prop := domain.BugProposal{
-		Title:    strings.TrimSpace(*title),
-		OneLiner: strings.TrimSpace(*oneLiner),
+		Title:    strings.TrimSpace(*f.title),
+		OneLiner: strings.TrimSpace(*f.oneLiner),
 		Source:   "manual",
-		Severity: domain.NormalizeSeverity(*severity),
+		Severity: domain.NormalizeSeverity(*f.severity),
 		Report: domain.BugReport{
-			Description:  strings.TrimSpace(*desc),
-			Reproduction: strings.TrimSpace(*repro),
-			Expected:     strings.TrimSpace(*expected),
-			Actual:       strings.TrimSpace(*actual),
-			Environment:  strings.TrimSpace(*env),
+			Description:  strings.TrimSpace(*f.desc),
+			Reproduction: strings.TrimSpace(*f.repro),
+			Expected:     strings.TrimSpace(*f.expected),
+			Actual:       strings.TrimSpace(*f.actual),
+			Environment:  strings.TrimSpace(*f.env),
 		},
 	}
 	ctx := context.Background()
@@ -212,18 +232,18 @@ func runBugNew(args []string) error {
 		return err
 	}
 	renderBugProposals(os.Stdout, res)
-	if !*yes {
+	if !*f.yes {
 		if !confirm(os.Stdin, os.Stdout, "Create this bug in todo?") {
 			fmt.Println("Aborted — nothing created.")
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals)
+	return materializeBugs(ctx, be, res.Proposals, *f.repo)
 }
 
 // materializeBugs mints the proposals and prints what was created.
-func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal) error {
-	created, err := be.eng.MaterializeBugs(ctx, props, engine.MaterializeOpts{Profile: be.profile, Envelope: be.env})
+func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo string) error {
+	created, err := be.eng.MaterializeBugs(ctx, props, engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo})
 	for _, f := range created {
 		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))
 	}

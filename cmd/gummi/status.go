@@ -28,7 +28,7 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	return withReadWorkspace(func(ctx context.Context, store *state.Store, wt *worktree.Manager, ws state.Workspace) error {
+	return withReadWorkspace(func(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace) error {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return err
@@ -97,7 +97,7 @@ type statusSpend struct {
 // worktree manager. Blocker counts mirror the gate floor; branch state is a
 // best-effort read (each git query is guarded, so a not-yet-created branch
 // or worktree simply reads as "none").
-func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Manager, ws state.Workspace, f *domain.Feature) statusView {
+func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace, f *domain.Feature) statusView {
 	kind := f.Kind
 	if kind == "" {
 		kind = domain.KindFeature
@@ -132,7 +132,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Manager, 
 // word: none (no branch yet), created (branch exists, no commits of its
 // own), ahead (has commits not on main — the verified-branch state), or
 // landed (already merged). Any query error degrades to the safe "none".
-func branchState(ctx context.Context, wt *worktree.Manager, f *domain.Feature) string {
+func branchState(ctx context.Context, wt *worktree.Pool, f *domain.Feature) string {
 	exists, err := wt.BranchExists(ctx, f)
 	if err != nil || !exists {
 		return "none"

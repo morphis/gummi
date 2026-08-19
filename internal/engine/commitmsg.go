@@ -286,7 +286,11 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 	if err != nil {
 		return "", fmt.Errorf("scribe could not locate the feature worktree: %w", err)
 	}
-	feed, err := e.cfg.Worktrees.BranchDraftFeed(ctx, &f)
+	wt, err := e.mgr(ctx, &f)
+	if err != nil {
+		return "", fmt.Errorf("scribe could not resolve the feature's repository: %w", err)
+	}
+	feed, err := wt.BranchDraftFeed(ctx, &f)
 	if err != nil {
 		return "", fmt.Errorf("scribe could not gather the branch draft feed: %w", err)
 	}

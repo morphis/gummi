@@ -122,24 +122,29 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	}
 
 	// 0. resolve the workspace root (where .gummi lives) and the managed
-	// repo root. A misconfigured repo key is a clear fail, never a
-	// downstream worktree error.
-	wsRoot, repoRoot, rerr := resolveRoots(cwd)
+	// repository set — the default plus any named `repos:`. A misconfigured
+	// key is a clear fail naming the offending repo, never a downstream
+	// worktree error.
+	wsRoot, defaultRoot, namedRepos, rerr := resolveAllRoots(cwd)
 	if rerr != nil {
-		wsRoot, repoRoot = cwd, cwd
+		wsRoot, defaultRoot = cwd, cwd
 	}
 
-	// 1. repo
+	// 1. repo — one check per configured managed repository, each naming
+	// its repo (the default keeps the bare "repo" name for compatibility).
 	if rerr != nil {
-		add("repo", statusFail, rerr.Error(), "set `repo:` in .gummi/config.yaml to the workspace root or a subdirectory of it")
-	} else if isDir(filepath.Join(repoRoot, ".git")) || isFile(filepath.Join(repoRoot, ".git")) {
-		add("repo", statusOK, "git repository at "+repoRoot+" (workspace at "+wsRoot+")", "")
+		add("repo", statusFail, rerr.Error(), "set `repo:` (and `repos:`) in .gummi/config.yaml to git toplevels inside the workspace")
+	} else if isGitRepoRoot(defaultRoot) {
+		add("repo", statusOK, "git repository at "+defaultRoot+" (workspace at "+wsRoot+")", "")
+		for _, n := range namedRepos {
+			add("repo:"+n.Name, statusOK, "git repository at "+n.Root+" (workspace at "+wsRoot+")", "")
+		}
 	} else {
-		add("repo", statusFail, repoRoot+" is not a git repository", "set `repo:` in .gummi/config.yaml to a git toplevel root, or remove it to manage the workspace root")
+		add("repo", statusFail, defaultRoot+" is not a git repository", "set `repo:` in .gummi/config.yaml to a git toplevel root, or remove it to manage the workspace root")
 	}
 
 	// 2. workspace
-	ws, wsErr := state.Open(wsRoot, repoRoot)
+	ws, wsErr := state.Open(wsRoot, defaultRoot)
 	if wsErr == nil {
 		add("workspace", statusOK, ".gummi workspace present", "")
 	} else {
@@ -228,7 +233,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// 8. fork-drift — read-only report of features whose recorded fork
 	// point is no longer an ancestor of main's HEAD. Advisory (warn): one
 	// recoverable, per-feature condition must not block readiness.
-	fd := forkDriftStatus(ws)
+	fd := forkDriftStatus(ws, defaultRoot, namedRepos)
 	add(fd.Name, fd.Status, fd.Detail, fd.Remediation)
 
 	ready := true
@@ -628,12 +633,14 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 }
 
 // forkDriftStatus reports whether any feature's recorded fork point is no
-// longer an ancestor of main's HEAD. It is read-only and safe to run while a
-// feature is live: it reads the store's fork points and runs local git
-// ancestry checks only, never re-anchoring or backfilling. It degrades to
-// a quiet ok when the store or main's HEAD is unreadable, so doctor never
+// longer an ancestor of its own repository's main HEAD. It is read-only and
+// safe to run while a feature is live: it reads the store's fork points,
+// resolves each card to its repository's manager, and runs local git
+// ancestry checks against that repo only, never re-anchoring or backfilling.
+// Each drifted card is listed with its repository name. It degrades to a
+// quiet ok when the store or a main HEAD is unreadable, so doctor never
 // fails on a workspace it cannot read.
-func forkDriftStatus(ws state.Workspace) doctorCheck {
+func forkDriftStatus(ws state.Workspace, defaultRoot string, named []worktree.NamedRepo) doctorCheck {
 	detail := "no drifted work items"
 	ok := func() doctorCheck {
 		return doctorCheck{Name: "fork-drift", Status: statusOK, Detail: detail}
@@ -648,6 +655,13 @@ func forkDriftStatus(ws state.Workspace) doctorCheck {
 		return ok()
 	}
 	defer st.Close()
+	// A read-only pool (no exclusion pass): one manager per configured repo,
+	// so each card is probed against its own repository's main. The default
+	// manager is created eagerly; named repos lazily on first card access.
+	pool, err := worktree.NewPool(context.Background(), ws.Root, defaultRoot, named, st, false)
+	if err != nil {
+		return ok()
+	}
 	features, err := st.ListFeatures(context.Background())
 	if err != nil {
 		return ok()
@@ -658,7 +672,14 @@ func forkDriftStatus(ws state.Workspace) doctorCheck {
 		if f.ForkPoint == "" {
 			continue
 		}
-		head := exec.CommandContext(context.Background(), "git", "-C", ws.RepoRoot, "merge-base", "--is-ancestor", f.ForkPoint, "HEAD") //nolint:gosec // read-only ancestry probe against the validated repo root and a stored fork SHA
+		m, err := pool.ManagerFor(context.Background(), f)
+		if err != nil {
+			// a stored-but-unconfigured repository: name the card and the
+			// missing repo so the operator knows where to look.
+			drifted = append(drifted, fmt.Sprintf("%s (%s) [%s — not configured]", f.ID, f.BranchName(), repoLabel(f.Repo)))
+			continue
+		}
+		head := exec.CommandContext(context.Background(), "git", "-C", m.RepoRoot(), "merge-base", "--is-ancestor", f.ForkPoint, "HEAD") //nolint:gosec // read-only ancestry probe against a validated repo root and a stored fork SHA
 		if err := head.Run(); err != nil {
 			// HEAD is either unreadable (degrade to ok, never a false
 			// failure) or the fork is genuinely no longer an ancestor —
@@ -666,7 +687,7 @@ func forkDriftStatus(ws state.Workspace) doctorCheck {
 			// ancestor" (the process exit status path) as drift below and
 			// anything else as unreadable.
 			if isAncestorFailure(err) {
-				drifted = append(drifted, fmt.Sprintf("%s (%s)", f.ID, f.BranchName()))
+				drifted = append(drifted, fmt.Sprintf("%s (%s) [%s]", f.ID, f.BranchName(), repoLabel(f.Repo)))
 			}
 		}
 	}
@@ -680,6 +701,22 @@ func forkDriftStatus(ws state.Workspace) doctorCheck {
 		Detail:      "fork point is no longer in main's history for: " + strings.Join(drifted, ", "),
 		Remediation: worktree.ForkDriftRemedy,
 	}
+}
+
+// repoLabel renders a card's repository name for doctor's fork-drift
+// report; the empty name (the workspace default) reads as "default".
+func repoLabel(name string) string {
+	if name == "" {
+		return "default"
+	}
+	return name
+}
+
+// isGitRepoRoot reports whether dir looks like a git working-tree root:
+// .git is either a directory (normal checkout) or a gitdir-pointer file
+// (worktrees, submodules).
+func isGitRepoRoot(dir string) bool {
+	return isDir(filepath.Join(dir, ".git")) || isFile(filepath.Join(dir, ".git"))
 }
 
 // isAncestorFailure reports whether err means "not an ancestor" (git's

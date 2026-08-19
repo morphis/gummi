@@ -113,11 +113,11 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 	if err != nil {
 		return err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return err
 	}
-	ws, err := ensureWorkspace(wsRoot, repo)
+	ws, err := ensureWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return err
 	}
@@ -126,12 +126,12 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 		return err
 	}
 	defer store.Close()
-	wt, err := newManager(context.Background(), wsRoot, repo, store)
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		return err
 	}
 	// no agents: the driver's Merge/Clean never run a session.
-	eng := engine.New(engine.Config{Store: store, Worktrees: wt, Workspace: ws})
+	eng := engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	defer func() { _ = eng.Close() }()
 
 	d := driver.New(eng, store, ws, os.Stdout, driver.Options{})

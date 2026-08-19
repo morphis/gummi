@@ -24,7 +24,7 @@ func runDiff(args []string) error {
 	if err != nil {
 		return err
 	}
-	return withReadWorkspace(func(ctx context.Context, store *state.Store, wt *worktree.Manager, ws state.Workspace) error {
+	return withReadWorkspace(func(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace) error {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return err

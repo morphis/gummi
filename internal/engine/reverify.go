@@ -96,7 +96,11 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 		return unavailable("the spec lists no gummi-checks to re-run — resume to let the agent verify")
 	}
 
-	if exists, err := e.cfg.Worktrees.Exists(ctx, &f); err != nil {
+	wt, err := e.mgr(ctx, &f)
+	if err != nil {
+		return res, err
+	}
+	if exists, err := wt.Exists(ctx, &f); err != nil {
 		return res, err
 	} else if !exists {
 		return unavailable("the feature's worktree is gone — resume to recreate it and verify")
@@ -104,7 +108,7 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 
 	// run the checks in the worktree, bounded like the Verify stage's own
 	// gummi-side run.
-	workDir := filepath.Join(e.cfg.Worktrees.Root(), f.WorktreePath())
+	workDir := filepath.Join(e.pool.Root(), f.WorktreePath())
 	rctx, cancel := context.WithTimeout(ctx, verifyStageTimeout)
 	defer cancel()
 	results := verify.RunBounded(rctx, workDir, checks, verify.CheckTimeout)

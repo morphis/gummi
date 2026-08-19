@@ -947,7 +947,7 @@ func TestDoctorNestedRepoNotToplevel(t *testing.T) {
 
 	r := buildDoctorReport(ws, doctorOpts{})
 	c := checkByName(r, "repo")
-	if c.Status != statusFail || !strings.Contains(c.Detail, "not a git repository") {
+	if c.Status != statusFail || !strings.Contains(c.Detail, "not the root of a git repository") {
 		t.Errorf("repo check = %+v, want fail for a repo without .git", c)
 	}
 }

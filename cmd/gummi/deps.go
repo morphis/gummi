@@ -18,7 +18,7 @@ import (
 // Add/Remove/ListDependency, never re-implementing dependency policy.
 type depsEnv struct {
 	store   *state.Store
-	wt      *worktree.Manager
+	wt      *worktree.Pool
 	cleanup func()
 }
 
@@ -30,11 +30,11 @@ func openDepsEnv() (*depsEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wsRoot, repo, err := resolveRoots(cwd)
+	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
 	if err != nil {
 		return nil, err
 	}
-	ws, err := ensureWorkspace(wsRoot, repo)
+	ws, err := ensureWorkspace(wsRoot, defaultRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -42,13 +42,13 @@ func openDepsEnv() (*depsEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	wt, err := newManager(context.Background(), wsRoot, repo, store)
+	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		_ = store.Close()
 		return nil, err
 	}
 	return &depsEnv{
-		store: store, wt: wt,
+		store: store, wt: pool,
 		cleanup: func() { _ = store.Close() },
 	}, nil
 }
