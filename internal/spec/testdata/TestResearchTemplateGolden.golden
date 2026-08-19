@@ -1,0 +1,52 @@
+# RS-007: Widget perf
+
+> study
+
+## Brief
+
+%% @gummi: the ask, in the requester's own words — what to investigate and why
+
+## Questions
+
+%% @gummi: the open questions this research must answer to be useful
+
+## Findings
+
+%% @gummi: what the investigation learned — prose with inline `path:line` / `path:start-end` citations
+
+## Constraints
+
+%% @gummi: the constraints the investigation is bound by (time, scope, invariants)
+
+## Options
+
+%% @gummi: the candidate directions considered, with tradeoffs
+
+## Direction
+
+%% @gummi: the recommended direction, and why it wins
+
+## Slices
+
+%% @gummi: the proposed follow-on work, one row per slice — see the scaffold below
+
+```yaml
+# title / one-liner / depends-on / requirements (keys) / id (back-annotated)
+- title: example slice
+  one-liner: what it mints
+  depends-on: []
+  requirements: []
+  id: ""
+```
+
+## Out of scope
+
+%% @gummi: what this research deliberately won't cover — each line is `- key: prose`
+
+## Open risks
+
+%% @gummi: open risks and what would de-risk each
+
+## Review
+
+%% @gummi: reviewer findings land here; the researcher resolves each one

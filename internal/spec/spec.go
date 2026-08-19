@@ -535,11 +535,14 @@ func EnsureDraft(path string, f *domain.Feature) error {
 	return atomicfile.Write(path, []byte(blankTemplate(f)), 0o600)
 }
 
-// blankTemplate is the initial artifact for a work item: a bug report
-// for bugs, a spec draft for features.
+// blankTemplate is the initial artifact for a work item: a bug report for
+// bugs, a research document for research cards, a spec draft for features.
 func blankTemplate(f *domain.Feature) string {
 	if f.Kind == domain.KindBug {
 		return BugTemplate(f)
+	}
+	if f.Kind == domain.KindResearch {
+		return ResearchTemplate(f)
 	}
 	return Template(f)
 }

@@ -160,6 +160,15 @@ var knownSectionTitles = map[string]struct{}{
 	"root cause":            {},
 	"fix":                   {},
 	"verification":          {},
+	// research document sections (FD-076)
+	"brief":       {},
+	"questions":   {},
+	"findings":    {},
+	"constraints": {},
+	"options":     {},
+	"direction":   {},
+	"slices":      {},
+	"open risks":  {},
 }
 
 // splitWelds inserts a newline before every mid-line `## ` in line whose glued

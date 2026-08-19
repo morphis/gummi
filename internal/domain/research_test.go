@@ -128,3 +128,22 @@ func TestResearchKindSurface(t *testing.T) {
 	f := researchFeature()
 	golden.RequireEqual(t, []byte(renderResearchSurface(f)))
 }
+
+// TestResearchSeedShape locks the seed surface a creation form (FD-083)
+// drives: exactly the two request-owned sections — Brief and Questions —
+// and nothing the investigate/shape stages are supposed to own.
+func TestResearchSeedShape(t *testing.T) {
+	tp := reflect.TypeOf(ResearchSeed{})
+	var fields []string
+	for i := 0; i < tp.NumField(); i++ {
+		fields = append(fields, tp.Field(i).Name)
+	}
+	want := []string{"Brief", "Questions"}
+	if len(fields) != len(want) || !reflect.DeepEqual(fields, want) {
+		t.Errorf("ResearchSeed fields = %v, want %v", fields, want)
+	}
+	got := ResearchSeed{Brief: "ask", Questions: []string{"why?"}}
+	if got.Brief != "ask" || got.Questions[0] != "why?" {
+		t.Errorf("ResearchSeed field round-trip failed: %+v", got)
+	}
+}
