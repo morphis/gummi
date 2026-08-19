@@ -610,7 +610,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// meanwhile (chat detaches, its session keeps running) so the review
 		// surface is never installed hidden behind another view.
 		m.chat, m.spec, m.diff = nil, nil, nil
-		m.ingest = newIngestView(msg.res, msg.profile, msg.envelope)
+		m.ingest = newIngestView(msg.res, msg.profile, msg.envelope, msg.repo)
 		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
 		return m, nil
 
@@ -842,7 +842,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.notice = noticeMsg{text: "an ingest is already decomposing — showing its progress"}
 			return nil
 		}
-		m.Overlay.Push(newIngestForm(m.profileNames, m.startIngest))
+		m.Overlay.Push(newIngestForm(m.profileNames, m.repoNames, m.startIngest))
 	case "esc":
 		if m.ingestRun != nil && !m.ingestRun.hidden {
 			// background the feed; the pass keeps running and the review

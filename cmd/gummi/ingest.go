@@ -15,17 +15,36 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
+// ingestFlagValues holds the pointers registerIngestFlags binds, so
+// runIngest and the cobra adapter share one flag grammar.
+type ingestFlagValues struct {
+	profile, repo *string
+	envelope      *int
+	yes           *bool
+}
+
+// registerIngestFlags binds `gummi ingest`'s flags onto fs and returns
+// their pointers. It defines the flags only — parsing and validation stay
+// in runIngest — so a throwaway FlagSet can be handed here purely to
+// enumerate the grammar (and the cobra adapter stays in lockstep with it).
+func registerIngestFlags(fs *flag.FlagSet) *ingestFlagValues {
+	return &ingestFlagValues{
+		profile:  fs.String("profile", "", "profile the new features adopt (default: first configured)"),
+		envelope: fs.Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)"),
+		yes:      fs.Bool("yes", false, "materialize without the confirmation prompt"),
+		repo:     fs.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; default: the workspace default repo)"),
+	}
+}
+
 // runIngest implements `gummi ingest <spec-file>` (DESIGN §11): an
 // architect pass decomposes the document into feature proposals, gummi
 // prints them plus a coverage map, and — after confirmation (or with
 // --yes) — materializes them into the todo backlog with seeded drafts.
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	profile := fs.String("profile", "", "profile the new features adopt (default: first configured)")
-	envelope := fs.Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)")
-	yes := fs.Bool("yes", false, "materialize without the confirmation prompt")
+	f := registerIngestFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi ingest [--profile p] [--envelope n] [--yes] <spec-file>")
+		fmt.Fprintln(os.Stderr, "usage: gummi ingest [--profile p] [--envelope n] [--repo r] [--yes] <spec-file>")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -64,11 +83,11 @@ func runIngest(args []string) error {
 	}
 	defer func() { _ = eng.Close(); closeAgents(agents) }()
 
-	prof := *profile
+	prof := *f.profile
 	if prof == "" && len(names) > 0 {
 		prof = names[0]
 	}
-	env := *envelope
+	env := *f.envelope
 	if env == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -78,7 +97,7 @@ func runIngest(args []string) error {
 	}
 
 	ctx := context.Background()
-	fmt.Printf("Ingesting %s (architect / profile %q) …\n", source, cmpOrDefault(prof))
+	fmt.Printf("Ingesting %s (architect / profile %q / repo %q) …\n", source, cmpOrDefault(prof), cmpOrDefault(*f.repo))
 	// stream the pass's discrete steps (milestones + tool calls) so the
 	// wait isn't silent; the architect's prose commentary stays quiet.
 	res, err := eng.Ingest(ctx, source, prof, func(st engine.IngestStep) {
@@ -94,7 +113,7 @@ func runIngest(args []string) error {
 	}
 	renderProposal(os.Stdout, res)
 
-	if !*yes {
+	if !*f.yes {
 		prompt := fmt.Sprintf("Materialize %d feature(s) into todo?", len(res.Proposals))
 		if len(res.Unmapped()) > 0 {
 			prompt = fmt.Sprintf("%d requirement(s) are UNMAPPED. %s", len(res.Unmapped()), prompt)
@@ -105,7 +124,7 @@ func runIngest(args []string) error {
 		}
 	}
 
-	created, err := eng.Materialize(ctx, res, engine.MaterializeOpts{Profile: prof, Envelope: env})
+	created, err := eng.Materialize(ctx, res, engine.MaterializeOpts{Profile: prof, Envelope: env, Repo: *f.repo})
 	for _, f := range created {
 		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))
 	}

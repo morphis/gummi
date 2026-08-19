@@ -94,40 +94,63 @@ func closeAgents(agents map[string]agent.Agent) {
 	}
 }
 
+// bugIngestFlagValues holds the pointers registerBugIngestFlags binds, so
+// runBugIngest and the cobra adapter share one flag grammar. The --repo
+// flag is the GitHub owner/repo to import from; --target-repo is the
+// managed repository the minted bugs belong to. The two are never one
+// flag: --repo's existing meaning is untouched.
+type bugIngestFlagValues struct {
+	repo, targetRepo, label, stateFilter, profile *string
+	envelope                                      *int
+	yes, comments                                 *bool
+}
+
+// registerBugIngestFlags binds `gummi bugs ingest`'s flags onto fs and
+// returns their pointers. It defines the flags only — parsing and
+// validation stay in runBugIngest — so a throwaway FlagSet can be handed
+// here purely to enumerate the grammar (and the cobra adapter stays in
+// lockstep with it).
+func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
+	return &bugIngestFlagValues{
+		repo:        fs.String("repo", "", "owner/repo to import from (default: this repo's origin remote)"),
+		targetRepo:  fs.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; default: the workspace default repo)"),
+		label:       fs.String("label", "bug", "issue label filter (\"\" imports all issues)"),
+		stateFilter: fs.String("state", "open", "issue state: open|closed|all"),
+		profile:     fs.String("profile", "", "profile the new bugs adopt (default: first configured)"),
+		envelope:    fs.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)"),
+		yes:         fs.Bool("yes", false, "materialize without the confirmation prompt"),
+		comments:    fs.Bool("comments", false, "fetch issue comments into the report's Discussion section"),
+	}
+}
+
 // runBugIngest implements `gummi bugs ingest`: pull open issues from a
 // GitHub repo (default: this repo's origin remote), print them, and —
 // after confirmation — materialize the fresh ones into the todo backlog.
 func runBugIngest(args []string) error {
 	fs := flag.NewFlagSet("bugs ingest", flag.ContinueOnError)
-	repo := fs.String("repo", "", "owner/repo to import from (default: this repo's origin remote)")
-	label := fs.String("label", "bug", "issue label filter (\"\" imports all issues)")
-	stateFilter := fs.String("state", "open", "issue state: open|closed|all")
-	profile := fs.String("profile", "", "profile the new bugs adopt (default: first configured)")
-	envelope := fs.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)")
-	yes := fs.Bool("yes", false, "materialize without the confirmation prompt")
-	comments := fs.Bool("comments", false, "fetch issue comments into the report's Discussion section")
+	f := registerBugIngestFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--label bug] [--state open] [--profile p] [--envelope n] [--comments] [--yes]")
+		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--target-repo r] [--label bug] [--state open] [--profile p] [--envelope n] [--comments] [--yes]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	be, err := openBugEnv(*profile, *envelope)
+	be, err := openBugEnv(*f.profile, *f.envelope)
 	if err != nil {
 		return err
 	}
 	defer be.cleanup()
 
 	cwd, _ := os.Getwd()
-	src := ingestGitHubSource(*repo, *label, *stateFilter, *comments, cwd)
+	src := ingestGitHubSource(*f.repo, *f.label, *f.stateFilter, *f.comments, cwd)
 	ctx := context.Background()
-	target := *repo
+	target := *f.repo
 	if target == "" {
 		target = "origin"
 	}
-	fmt.Printf("Importing GitHub issues from %s (label %q, state %s) …\n", target, *label, *stateFilter)
+	fmt.Printf("Importing GitHub issues from %s (label %q, state %s) …\n", target, *f.label, *f.stateFilter)
 	res, err := be.eng.IngestBugs(ctx, src)
 	if err != nil {
 		return err
@@ -138,13 +161,13 @@ func runBugIngest(args []string) error {
 		return nil
 	}
 
-	if !*yes {
+	if !*f.yes {
 		if !confirm(os.Stdin, os.Stdout, fmt.Sprintf("Materialize %d bug(s) into todo?", len(res.Proposals))) {
 			fmt.Println("Aborted — nothing created.")
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, "")
+	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo)
 }
 
 // ingestGitHubSource builds the GitHub source from parsed ingest flags.

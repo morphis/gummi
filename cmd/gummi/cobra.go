@@ -192,10 +192,7 @@ func init() {
 	doctorCmd.Flags().Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
 	doctorCmd.Flags().Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
 
-	ingestCmd.Flags().String("profile", "", "profile the new features adopt (default: first configured)")
-	ingestCmd.Flags().Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)")
-	ingestCmd.Flags().Bool("yes", false, "materialize without the confirmation prompt")
-
+	bindIngestFlags(ingestCmd)
 	bindBugsIngestFlags(bugsIngestCmd)
 	bindBugsNewFlags(bugsNewCmd)
 	bindSkillInstallFlags(skillInstallCmd)
@@ -224,6 +221,17 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
 }
 
+// bindIngestFlags mirrors the flags registerIngestFlags defines on
+// runIngest's FlagSet, so cobra parses the same surface (runIngest still
+// re-parses the reconstructed slice).
+func bindIngestFlags(cmd *cobra.Command) {
+	f := cmd.Flags()
+	f.String("profile", "", "profile the new features adopt (default: first configured)")
+	f.Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)")
+	f.Bool("yes", false, "materialize without the confirmation prompt")
+	f.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; default: the workspace default repo)")
+}
+
 // bindResumeFlags mirrors registerResumeFlags.
 func bindResumeFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
@@ -245,6 +253,7 @@ func bindResumeFlags(cmd *cobra.Command) {
 func bindBugsIngestFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("repo", "", "owner/repo to import from (default: this repo's origin remote)")
+	f.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; default: the workspace default repo)")
 	f.String("label", "bug", "issue label filter (\"\" imports all issues)")
 	f.String("state", "open", "issue state: open|closed|all")
 	f.String("profile", "", "profile the new bugs adopt (default: first configured)")

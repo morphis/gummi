@@ -100,3 +100,51 @@ func TestMaterializeRejectsUnslugifiableTitle(t *testing.T) {
 		t.Errorf("no features should exist after a rejected batch, got %d", len(all))
 	}
 }
+
+// TestMaterializeNamesRepo: features minted with a repo target persist the
+// repository name; every card in the batch shares the same repo.
+func TestMaterializeNamesRepo(t *testing.T) {
+	e := multiRepoEngine(t)
+	ctx := context.Background()
+	created, err := e.Materialize(ctx, sampleResult(), MaterializeOpts{Repo: "b"})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("created %d, want 2", len(created))
+	}
+	for i, f := range created {
+		if f.Repo != "b" {
+			t.Errorf("feature[%d] repo = %q, want b", i, f.Repo)
+		}
+		got, err := e.cfg.Store.GetFeature(ctx, f.ID)
+		if err != nil || got.Repo != "b" {
+			t.Errorf("feature[%d] persisted repo = %q (err=%v), want b", i, got.Repo, err)
+		}
+	}
+}
+
+// TestMaterializeUnknownRepo: an unconfigured repository name fails the
+// whole batch before any feature number is consumed, with the same
+// repos:-pointing message MaterializeBugs uses.
+func TestMaterializeUnknownRepo(t *testing.T) {
+	e := multiRepoEngine(t)
+	ctx := context.Background()
+	_, err := e.Materialize(ctx, sampleResult(), MaterializeOpts{Repo: "nope"})
+	if err == nil {
+		t.Fatal("expected an error materializing into an unconfigured repo")
+	}
+	if !strings.Contains(err.Error(), `repository "nope" is not configured`) ||
+		!strings.Contains(err.Error(), "repos:") {
+		t.Errorf("error should name the repo and point at `repos:` in config, got: %v", err)
+	}
+	// the repo check is Materialize's first pre-flight, before the mint
+	// loop, so the whole batch fails atomically with nothing created.
+	all, err := e.cfg.Store.ListFeatures(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Errorf("no features should exist after a rejected batch, got %d", len(all))
+	}
+}

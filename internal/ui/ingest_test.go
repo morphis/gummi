@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 const uiProposalJSON = `{
@@ -57,7 +58,7 @@ func TestIngestReviewFlowMaterializes(t *testing.T) {
 	src := writeRepoFile(t, m, "prd.md", "# PRD\nrequirements\n")
 
 	// run the pass and open the review surface
-	m = pump(t, m, m.startIngest(src, "premium"))
+	m = pump(t, m, m.startIngest(src, "premium", ""))
 	if m.ingest == nil {
 		t.Fatal("ingest review surface did not open")
 	}
@@ -131,7 +132,7 @@ func TestIngestSingleInFlight(t *testing.T) {
 	// result yet, then confirm a second start is refused and 'I' won't open
 	// the form.
 	m.ingestRun = newIngestRunView(src)
-	if cmd := m.startIngest(src, ""); cmd != nil {
+	if cmd := m.startIngest(src, "", ""); cmd != nil {
 		t.Error("a second ingest should be refused while one is in flight")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'I', Text: "I"})
@@ -140,7 +141,7 @@ func TestIngestSingleInFlight(t *testing.T) {
 	}
 
 	// delivering the result clears the in-flight run and opens the surface
-	m = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
+	m = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium", repo: ""})
 	if m.ingestRun != nil {
 		t.Error("in-flight run should clear when the result arrives")
 	}
@@ -154,7 +155,7 @@ func TestIngestRunFeedShowsProgress(t *testing.T) {
 	src := writeRepoFile(t, m, "prd.md", "# PRD\nx\n")
 
 	// starting a pass installs the live feed in the main pane
-	cmd := m.startIngest(src, "premium")
+	cmd := m.startIngest(src, "premium", "")
 	if m.ingestRun == nil {
 		t.Fatal("startIngest did not install the live feed")
 	}
@@ -220,7 +221,7 @@ func TestIngestResultTakesForegroundOverSpecPane(t *testing.T) {
 	m, _ := chatWorkspace(t, fakeProposer())
 	// a spec pane is open when the ingest result lands
 	m.spec = &specView{}
-	m = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium"})
+	m = update(m, ingestLoadedMsg{res: mustDecode(t), profile: "premium", repo: ""})
 	if m.spec != nil {
 		t.Error("spec pane should be cleared so the review surface isn't hidden")
 	}
@@ -241,7 +242,7 @@ func TestIngestViewMerge(t *testing.T) {
 	iv := newIngestView(domain.IngestResult{Proposals: []domain.FeatureProposal{
 		{Title: "A", SourceRefs: []string{"s1"}, Draft: domain.DraftSeed{Problem: "pa", OpenQuestions: []string{"qa"}}},
 		{Title: "B", SourceRefs: []string{"s2"}, DependsOn: []string{"A", "C"}, Draft: domain.DraftSeed{Problem: "pb", OpenQuestions: []string{"qb"}}},
-	}}, "premium", 0)
+	}}, "premium", 0, "")
 	iv.setCursor(1)
 	if !iv.mergeIntoPrev() {
 		t.Fatal("merge should succeed for the second proposal")
@@ -272,7 +273,7 @@ func TestIngestViewMerge(t *testing.T) {
 
 func TestIngestFormRejectsMissingFile(t *testing.T) {
 	var called bool
-	f := newIngestForm([]string{"premium"}, func(string, string) tea.Cmd { called = true; return nil })
+	f := newIngestForm([]string{"premium"}, nil, func(string, string, string) tea.Cmd { called = true; return nil })
 	// type a path that doesn't exist, then submit
 	for _, r := range "/no/such/spec.md" {
 		f.HandleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -287,4 +288,63 @@ func TestIngestFormRejectsMissingFile(t *testing.T) {
 	if f.errText == "" {
 		t.Error("missing file should set an error message")
 	}
+}
+
+// TestIngestFormRepoCyclesAndForwards: the ingest form cycles the managed
+// repository (default + configured names) on 'r' and forwards the selection
+// through onSubmit; the repo chip is hidden entirely when none are
+// configured.
+func TestIngestFormRepo(t *testing.T) {
+	t.Run("cycles and forwards", func(t *testing.T) {
+		prd := filepath.Join(t.TempDir(), "prd.md")
+		if err := os.WriteFile(prd, []byte("# PRD\nx\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var gotPath, gotProfile, gotRepo string
+		f := newIngestForm([]string{"premium"}, []string{"a", "b"}, func(path, profile, repo string) tea.Cmd {
+			gotPath, gotProfile, gotRepo = path, profile, repo
+			return nil
+		})
+		f.path.SetValue(prd)
+		// focus the profile field, then cycle the repo twice: default -> a -> b
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+		f.HandleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		f.HandleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		if got := f.repoName(); got != "b" {
+			t.Fatalf("repoName after two cycles = %q, want b", got)
+		}
+		if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done {
+			t.Fatal("form did not submit")
+		}
+		if gotPath != prd || gotProfile != "premium" || gotRepo != "b" {
+			t.Fatalf("onSubmit = (%q, %q, %q), want (%s, premium, b)", gotPath, gotProfile, gotRepo, prd)
+		}
+	})
+
+	t.Run("chip shown when repos configured", func(t *testing.T) {
+		f := newIngestForm(nil, []string{"b"}, func(string, string, string) tea.Cmd { return nil })
+		s := theme.New(theme.GummiDark())
+		view := f.View(s, 60, 12)
+		if !strings.Contains(view, "[default]") || !strings.Contains(view, "r repo") {
+			t.Errorf("repo chip/hint missing when repos configured:\n%s", view)
+		}
+	})
+
+	t.Run("hidden when none configured", func(t *testing.T) {
+		f := newIngestForm(nil, nil, func(string, string, string) tea.Cmd { return nil })
+		s := theme.New(theme.GummiDark())
+		view := f.View(s, 60, 12)
+		if strings.Contains(view, "[default]") || strings.Contains(view, "r repo") {
+			t.Errorf("repo chip/hint should be hidden when no repos configured:\n%s", view)
+		}
+	})
+
+	t.Run("r is a no-op with none configured", func(t *testing.T) {
+		f := newIngestForm(nil, nil, func(string, string, string) tea.Cmd { return nil })
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+		f.HandleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		if got := f.repoName(); got != "" {
+			t.Fatalf("repoName = %q, want empty default", got)
+		}
+	})
 }

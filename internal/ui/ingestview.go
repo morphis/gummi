@@ -25,6 +25,7 @@ type ingestView struct {
 	cursor   int
 	profile  string
 	envelope int
+	repo     string // managed repository the batch belongs to ("" = default)
 }
 
 // ingestProposal is one proposed feature plus its review state.
@@ -33,14 +34,14 @@ type ingestProposal struct {
 	dropped bool // excluded from materialization, kept visible for undo
 }
 
-func newIngestView(res domain.IngestResult, profile string, envelope int) *ingestView {
+func newIngestView(res domain.IngestResult, profile string, envelope int, repo string) *ingestView {
 	props := make([]ingestProposal, len(res.Proposals))
 	for i, p := range res.Proposals {
 		props[i] = ingestProposal{p: p}
 	}
 	return &ingestView{
 		source: res.SourcePath, coverage: res.Coverage, props: props,
-		profile: profile, envelope: envelope,
+		profile: profile, envelope: envelope, repo: repo,
 	}
 }
 
@@ -222,7 +223,7 @@ func (m *Shell) materializeIngest() tea.Cmd {
 	}
 	eng := m.engine
 	res := iv.kept()
-	opts := engine.MaterializeOpts{Profile: iv.profile, Envelope: iv.envelope}
+	opts := engine.MaterializeOpts{Profile: iv.profile, Envelope: iv.envelope, Repo: iv.repo}
 	m.ingest = nil
 	return func() tea.Msg {
 		created, err := eng.Materialize(context.Background(), res, opts)
@@ -238,7 +239,7 @@ func (m *Shell) materializeIngest() tea.Cmd {
 // session, so it runs in a command (off the main loop); its live steps
 // stream through a channel into the ingestRun feed so the user can watch
 // the architect work instead of staring at a static notice.
-func (m *Shell) startIngest(path, profile string) tea.Cmd {
+func (m *Shell) startIngest(path, profile, repo string) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
 		return nil
@@ -262,7 +263,7 @@ func (m *Shell) startIngest(path, profile string) tea.Cmd {
 		if err != nil {
 			return ingestLoadedMsg{err: err}
 		}
-		return ingestLoadedMsg{res: res, profile: profile, envelope: envelope}
+		return ingestLoadedMsg{res: res, profile: profile, envelope: envelope, repo: repo}
 	}
 	return tea.Batch(pass, listenIngestSteps(steps))
 }
@@ -295,6 +296,7 @@ type ingestLoadedMsg struct {
 	res      domain.IngestResult
 	profile  string
 	envelope int
+	repo     string
 	err      error
 }
 

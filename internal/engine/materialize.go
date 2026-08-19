@@ -18,8 +18,8 @@ import (
 type MaterializeOpts struct {
 	Profile  string
 	Envelope int
-	// Repo is the managed repository the created bugs belong to (a
-	// configured `repos:` name, or "" for the workspace default).
+	// Repo is the managed repository the created bugs and features belong
+	// to (a configured `repos:` name, or "" for the workspace default).
 	Repo string
 }
 
@@ -34,6 +34,11 @@ type MaterializeOpts struct {
 // alongside it, so a mid-batch failure leaves a diagnosable partial state
 // rather than silently losing work.
 func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts MaterializeOpts) ([]domain.Feature, error) {
+	// Pre-flight: the target repository must be configured, so an unknown
+	// name fails the whole batch before any feature number is consumed.
+	if opts.Repo != "" && (e.pool == nil || !e.pool.Known(opts.Repo)) {
+		return nil, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", opts.Repo)
+	}
 	// Pre-flight: every title must slugify before we mint anything, so a
 	// bad title fails the batch cleanly instead of after consuming feature
 	// numbers for the proposals ahead of it.
@@ -65,7 +70,7 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 		f := domain.Feature{
 			ID: id, Num: num, Title: p.Title, OneLiner: p.OneLiner, Slug: slugs[i],
 			Kind: domain.KindFeature, Stage: workflow.Initial(domain.KindFeature), Skip: p.Skip, Profile: opts.Profile,
-			Budget: domain.Budget{Envelope: opts.Envelope}, CreatedAt: now, UpdatedAt: now,
+			Budget: domain.Budget{Envelope: opts.Envelope}, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		feats[i] = f
 		if _, seen := byTitle[p.Title]; !seen {

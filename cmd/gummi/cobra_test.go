@@ -108,7 +108,9 @@ func TestCobraFlagsMirrorCanonical(t *testing.T) {
 		register func(fs *flag.FlagSet)
 	}{
 		{name: "run", cmd: runCmd, register: func(fs *flag.FlagSet) { registerRunFlags(fs) }},
+		{name: "ingest", cmd: ingestCmd, register: func(fs *flag.FlagSet) { registerIngestFlags(fs) }},
 		{name: "bugs new", cmd: bugsNewCmd, register: func(fs *flag.FlagSet) { registerBugsNewFlags(fs) }},
+		{name: "bugs ingest", cmd: bugsIngestCmd, register: func(fs *flag.FlagSet) { registerBugIngestFlags(fs) }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
