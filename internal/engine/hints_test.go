@@ -67,9 +67,17 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}},
 		{domain.StageTriage, domain.KindBug, []string{
 			"Verify the claim first", "one question per turn",
+			// F19: Triage must use the described environment as a first-class
+			// input instead of treating an unfamiliar environment as grounds
+			// to defer.
+			"environment gummi described",
 		}},
 		{domain.StageDiagnose, domain.KindBug, []string{
 			"red-capable command", "falsifiable hypotheses", "[DEBUG-",
+			// F20: Diagnose must write a live reproduction tagged [env: ...]
+			// when the agent lacks the environment locally; a prose deferral
+			// is a contract violation.
+			"[env:", "contract violation",
 		}},
 		{domain.StageFix, domain.KindBug, []string{
 			"correct seam", "root cause in the commit message",
@@ -121,6 +129,24 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		for _, want := range wants {
 			if !strings.Contains(joined, unwrap(want)) {
 				t.Errorf("%s/%s hint missing %q", tc.stage, tc.kind, want)
+			}
+		}
+	}
+
+	// F19/F20: the new Triage/Diagnose environment-contract language must
+	// not leak into other stages; the tags are scoped to those contracts.
+	for _, tc := range cases {
+		f := feature(1, "Dark mode", tc.stage)
+		f.Kind = tc.kind
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		if tc.stage != domain.StageTriage && tc.stage != domain.StageDiagnose {
+			if strings.Contains(joined, "environment gummi described") {
+				t.Errorf("%s/%s hint leaked Triage/Diagnose environment-contract language", tc.stage, tc.kind)
+			}
+		}
+		if tc.stage != domain.StageDiagnose {
+			if strings.Contains(joined, "contract violation") {
+				t.Errorf("%s/%s hint leaked Diagnose contract-violation language", tc.stage, tc.kind)
 			}
 		}
 	}

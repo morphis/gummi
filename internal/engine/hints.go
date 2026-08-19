@@ -198,15 +198,17 @@ hit a blocker, stop and say so clearly rather than guessing.`))
 		hints = append(hints, strings.TrimSpace(`
 Stage: Triage (interactive; the user is in gummi's chat pane). Your job:
 confirm the bug is real and reproduce it. Verify the claim first: try
-to reproduce it from the report and the repo before interviewing, and
-tell the user what you found — reproduced, could not reproduce, or
-insufficient detail. Then pin down exact reproduction steps, the
-expected vs actual behavior, the environment, and a severity, and
-write them into the bug report (Reproduction, Expected vs actual,
-Environment). Ask exactly one question per turn — specific and
-actionable, with your recommended answer attached — and keep turns
-short. Flag anything still uncertain as its own marker thread. Do NOT
-diagnose the root cause yet — that is the Diagnose stage's job.`))
+to reproduce it from the report, the repo, and the environment gummi
+described in your instructions before interviewing, and tell the user
+what you found — reproduced, could not reproduce, or insufficient
+detail. Treat the described environment as a first-class input, not as
+a reason to defer. Then pin down exact reproduction steps, the expected
+vs actual behavior, the environment, and a severity, and write them
+into the bug report (Reproduction, Expected vs actual, Environment).
+Ask exactly one question per turn — specific and actionable, with your
+recommended answer attached — and keep turns short. Flag anything still
+uncertain as its own marker thread. Do NOT diagnose the root cause yet
+— that is the Diagnose stage's job.`))
 	case domain.StageDiagnose:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Diagnose (interactive; the user is in gummi's chat pane). Your
@@ -216,10 +218,15 @@ why it happens, and the shape of the fix (not the fix itself). Build
 the feedback loop first: before any hypothesizing, produce one
 red-capable command — run it at least once and keep the output — that
 asserts the user's exact symptom, deterministically, in seconds, and
-write it into the Reproduction section (Verify reruns it). No
-red-capable command, no hypotheses: if you cannot build one, stop and
-tell the user what you tried and what you need (a captured artifact,
-environment access, or permission to add temporary instrumentation).
+write it into the Reproduction section (Verify reruns it). If the
+symptom needs an environment you cannot create locally, still write a
+live reproduction step and tag it [env: <prereq>] using a prerequisite
+name from the environment gummi described in your instructions. A prose
+deferral such as "cannot be exercised in this environment" is a contract
+violation, not an acceptable outcome. If you genuinely cannot build a
+red-capable command or a tagged live step, stop and tell the user what
+you tried and what you need (a captured artifact, environment access, or
+permission to add temporary instrumentation).
 Then rank 3-5 falsifiable hypotheses — "if X is the cause, changing Y
 makes the bug disappear" — and put the ranking to the user before
 testing them. Probe one variable at a time, and tag any temporary
