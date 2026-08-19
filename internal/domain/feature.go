@@ -24,8 +24,8 @@ func ValidGateApproval(s string) bool {
 	return s == "" || s == GateAuto || s == GateCaller
 }
 
-// Kind distinguishes the two units of work gummi tracks. Both share the
-// store, engine, worktree, and board; they differ only in which workflow
+// Kind distinguishes the units of work gummi tracks. They share the
+// store, engine, worktree, and board; they differ in which workflow
 // governs them (see internal/workflow) and which artifact template seeds
 // them (see internal/spec). An empty Kind reads as a feature, so features
 // created or scanned before bugs existed need no backfill.
@@ -36,34 +36,46 @@ const (
 	KindFeature Kind = "feature"
 	// KindBug is diagnosis-driven work: triage → diagnose → fix → …
 	KindBug Kind = "bug"
+	// KindResearch is investigation-driven work: investigate → shape →
+	// review → verify. It is a third kind with its own workflow, a
+	// dedicated artifact home, and no quick one-pass route.
+	KindResearch Kind = "research"
 )
 
-// prefix is the ID prefix for a kind: FD for features, BG for bugs.
+// prefix is the ID prefix for a kind: FD for features, BG for bugs,
+// RS for research.
 func (k Kind) prefix() string {
-	if k == KindBug {
+	switch k {
+	case KindBug:
 		return "BG"
+	case KindResearch:
+		return "RS"
 	}
 	return "FD" // KindFeature and the empty default
 }
 
 // Valid reports whether k is a recognized kind (empty is not — callers
 // that accept a default normalize it before validating).
-func (k Kind) Valid() bool { return k == KindFeature || k == KindBug }
+func (k Kind) Valid() bool { return k == KindFeature || k == KindBug || k == KindResearch }
 
-// FeatureID is a work item's identifier, e.g. "FD-042" (feature) or
-// "BG-007" (bug). IDs are minted from the monotonic counter in
-// .gummi/seq — shared across kinds, so numbers never collide — and
-// zero-padded to three digits.
+// FeatureID is a work item's identifier, e.g. "FD-042" (feature),
+// "BG-007" (bug), or "RS-003" (research). IDs are minted from the
+// monotonic counter in .gummi/seq — shared across kinds, so numbers
+// never collide — and zero-padded to three digits.
 type FeatureID string
 
-var featureIDRe = regexp.MustCompile(`^(FD|BG)-[0-9]{3,}$`)
+var featureIDRe = regexp.MustCompile(`^(FD|BG|RS)-[0-9]{3,}$`)
 
 // Kind reports the work kind an ID's prefix encodes.
 func (id FeatureID) Kind() Kind {
-	if strings.HasPrefix(string(id), "BG-") {
+	switch {
+	case strings.HasPrefix(string(id), "BG-"):
 		return KindBug
+	case strings.HasPrefix(string(id), "RS-"):
+		return KindResearch
+	default:
+		return KindFeature
 	}
-	return KindFeature
 }
 
 // NewID builds the canonical ID for kind and sequence number n (n >= 1).
@@ -77,10 +89,11 @@ func NewID(kind Kind, n int) (FeatureID, error) {
 // NewFeatureID builds the canonical feature ID for sequence number n.
 func NewFeatureID(n int) (FeatureID, error) { return NewID(KindFeature, n) }
 
-// ParseFeatureID validates s as a canonical work-item ID (feature or bug).
+// ParseFeatureID validates s as a canonical work-item ID (feature, bug,
+// or research).
 func ParseFeatureID(s string) (FeatureID, error) {
 	if !featureIDRe.MatchString(s) {
-		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN or BG-NNN)", s)
+		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN, BG-NNN, or RS-NNN)", s)
 	}
 	return FeatureID(s), nil
 }
@@ -128,7 +141,7 @@ func (s Spend) Zero() bool {
 type Feature struct {
 	ID       FeatureID
 	Num      int    // numeric part of ID, unique
-	Kind     Kind   // feature (default) or bug; selects workflow + template
+	Kind     Kind   // feature (default), bug, or research; selects workflow + template
 	Title    string // human title, free text
 	OneLiner string // short description from the creation form
 	Slug     string // allowlist-sanitized, used in branch and file names
@@ -191,13 +204,17 @@ type Feature struct {
 	CommitDraftFail string
 }
 
-// Kind returns the feature's kind, treating the empty default as a
+// kind returns the feature's kind, treating the empty default as a
 // feature so items predating bugs read correctly.
 func (f *Feature) kind() Kind {
-	if f.Kind == KindBug {
+	switch f.Kind {
+	case KindBug:
 		return KindBug
+	case KindResearch:
+		return KindResearch
+	default:
+		return KindFeature
 	}
-	return KindFeature
 }
 
 // BranchName is the feature's git branch: gummi/FD-042-slug.
@@ -218,15 +235,20 @@ func (f *Feature) SpecPath() string {
 }
 
 // ArtifactPath is the item's durable design artifact relative to the
-// repo root: a feature's spec (.gummi/specs/…) or a bug's report
-// (.gummi/bugs/…). Both live in the main checkout's gummi workspace —
-// never in the worktree, never committed — and are what the stage
-// agents read and write.
+// repo root: a feature's spec (.gummi/specs/…), a bug's report
+// (.gummi/bugs/…), or a research item's artifact (.gummi/research/…).
+// All live in the main checkout's gummi workspace — never in the
+// worktree, never committed — and are what the stage agents read and
+// write.
 func (f *Feature) ArtifactPath() string {
-	if f.kind() == KindBug {
+	switch f.kind() {
+	case KindBug:
 		return path.Join(".gummi", "bugs", string(f.ID)+"-"+f.Slug+".md")
+	case KindResearch:
+		return path.Join(".gummi", "research", string(f.ID)+"-"+f.Slug+".md")
+	default:
+		return f.SpecPath()
 	}
-	return f.SpecPath()
 }
 
 // Validate checks the invariants every stored feature must satisfy.

@@ -32,15 +32,23 @@ func TestNewFeatureID(t *testing.T) {
 }
 
 func TestParseFeatureID(t *testing.T) {
-	valid := []string{"FD-001", "FD-042", "FD-1234"}
+	valid := []string{"FD-001", "FD-042", "FD-1234", "RS-007", "RS-1234"}
 	for _, s := range valid {
 		if _, err := ParseFeatureID(s); err != nil {
 			t.Errorf("ParseFeatureID(%q) = %v, want nil", s, err)
 		}
 	}
+	id, err := ParseFeatureID("RS-007")
+	if err != nil {
+		t.Fatalf("ParseFeatureID(\"RS-007\") errored: %v", err)
+	}
+	if id.Kind() != KindResearch {
+		t.Error("ParseFeatureID(\"RS-007\").Kind() should be KindResearch")
+	}
 	invalid := []string{
 		"", "FD-", "FD-42", "fd-042", "FD-04a", "FD-042 ", " FD-042",
 		"FD--042", "FD-042/../evil", "XX-042", "FD-042\n",
+		"rs-007", "RS-42", "RS-",
 	}
 	for _, s := range invalid {
 		if _, err := ParseFeatureID(s); err == nil {
@@ -145,17 +153,19 @@ func TestDerivedPaths(t *testing.T) {
 
 func TestStageSuperState(t *testing.T) {
 	want := map[Stage]SuperState{
-		StageTodo:       SuperTodo,
-		StageBrainstorm: SuperInProgress,
-		StageSpec:       SuperInProgress,
-		StagePlan:       SuperInProgress,
-		StageTriage:     SuperInProgress,
-		StageDiagnose:   SuperInProgress,
-		StageFix:        SuperInProgress,
-		StageImplement:  SuperInProgress,
-		StageReview:     SuperReviewVerify,
-		StageVerify:     SuperReviewVerify,
-		StageDone:       SuperDone,
+		StageTodo:        SuperTodo,
+		StageInvestigate: SuperResearch,
+		StageShape:       SuperResearch,
+		StageBrainstorm:  SuperInProgress,
+		StageSpec:        SuperInProgress,
+		StagePlan:        SuperInProgress,
+		StageTriage:      SuperInProgress,
+		StageDiagnose:    SuperInProgress,
+		StageFix:         SuperInProgress,
+		StageImplement:   SuperInProgress,
+		StageReview:      SuperReviewVerify,
+		StageVerify:      SuperReviewVerify,
+		StageDone:        SuperDone,
 	}
 	if len(want) != len(Stages) {
 		t.Fatalf("test table covers %d stages, domain has %d", len(want), len(Stages))

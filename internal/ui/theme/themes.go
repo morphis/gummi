@@ -39,17 +39,19 @@ func GummiLight() Theme {
 		Destructive: charmtone.Chili,
 
 		StageAccents: map[domain.Stage]color.Color{
-			domain.StageTodo:       charmtone.Squid,
-			domain.StageBrainstorm: charmtone.Grape,
-			domain.StageSpec:       charmtone.Damson,
-			domain.StagePlan:       charmtone.Sapphire,
-			domain.StageTriage:     charmtone.Coral,
-			domain.StageDiagnose:   charmtone.Mustard,
-			domain.StageFix:        charmtone.Pickle,
-			domain.StageImplement:  charmtone.Pickle,
-			domain.StageReview:     charmtone.Cumin,
-			domain.StageVerify:     charmtone.Chili,
-			domain.StageDone:       charmtone.Gator, // dark settled green
+			domain.StageTodo:        charmtone.Squid,
+			domain.StageInvestigate: charmtone.Turtle,
+			domain.StageShape:       charmtone.Cherry,
+			domain.StageBrainstorm:  charmtone.Grape,
+			domain.StageSpec:        charmtone.Damson,
+			domain.StagePlan:        charmtone.Sapphire,
+			domain.StageTriage:      charmtone.Coral,
+			domain.StageDiagnose:    charmtone.Mustard,
+			domain.StageFix:         charmtone.Pickle,
+			domain.StageImplement:   charmtone.Pickle,
+			domain.StageReview:      charmtone.Cumin,
+			domain.StageVerify:      charmtone.Chili,
+			domain.StageDone:        charmtone.Gator, // dark settled green
 		},
 	}
 }
@@ -85,17 +87,19 @@ func GummiNeon() Theme {
 		Destructive: charmtone.Coral,
 
 		StageAccents: map[domain.Stage]color.Color{
-			domain.StageTodo:       charmtone.Oyster,
-			domain.StageBrainstorm: charmtone.Guppy,
-			domain.StageSpec:       charmtone.Sardine,
-			domain.StageImplement:  charmtone.Julep,
-			domain.StagePlan:       charmtone.Malibu,
-			domain.StageTriage:     charmtone.Coral,
-			domain.StageDiagnose:   charmtone.Cumin,
-			domain.StageFix:        charmtone.Julep,
-			domain.StageReview:     charmtone.Mustard,
-			domain.StageVerify:     charmtone.Cherry,
-			domain.StageDone:       charmtone.Turtle,
+			domain.StageTodo:        charmtone.Oyster,
+			domain.StageInvestigate: charmtone.Sapphire,
+			domain.StageShape:       charmtone.Citron,
+			domain.StageBrainstorm:  charmtone.Guppy,
+			domain.StageSpec:        charmtone.Sardine,
+			domain.StageImplement:   charmtone.Julep,
+			domain.StagePlan:        charmtone.Malibu,
+			domain.StageTriage:      charmtone.Coral,
+			domain.StageDiagnose:    charmtone.Cumin,
+			domain.StageFix:         charmtone.Julep,
+			domain.StageReview:      charmtone.Mustard,
+			domain.StageVerify:      charmtone.Cherry,
+			domain.StageDone:        charmtone.Turtle,
 		},
 	}
 }

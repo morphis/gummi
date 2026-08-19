@@ -7,7 +7,9 @@ import "testing"
 // is orthogonal — one list covers both feature and bug stages.
 func TestAtOrPastCoding(t *testing.T) {
 	at := map[Stage]bool{
-		StageTodo: false, StageBrainstorm: false, StageSpec: false, StagePlan: false,
+		StageTodo:        false,
+		StageInvestigate: false, StageShape: false,
+		StageBrainstorm: false, StageSpec: false, StagePlan: false,
 		StageTriage: false, StageDiagnose: false,
 		StageImplement: true, StageFix: true, StageReview: true, StageVerify: true, StageDone: true,
 	}

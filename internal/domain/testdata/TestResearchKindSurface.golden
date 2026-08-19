@@ -1,0 +1,6 @@
+kind: research
+id: RS-007
+prefix: RS
+artifact: .gummi/research/RS-007-my-topic.md
+stages: investigate shape
+superstate: research

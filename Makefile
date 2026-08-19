@@ -16,9 +16,10 @@ vet:
 lint: vet
 	golangci-lint run --timeout=5m
 
-# Regenerate golden files for UI snapshot tests. Only packages that
-# import x/exp/golden define the -update flag.
+# Regenerate golden files for snapshot tests. Only packages that import
+# x/exp/golden define the -update flag.
 golden-update:
+	go test ./internal/domain/... -update
 	go test ./internal/ui/... -update
 
 ci: build test lint

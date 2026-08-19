@@ -8,6 +8,13 @@ type Stage string
 const (
 	// StageTodo is the backlog: the feature exists but no work has started.
 	StageTodo Stage = "todo"
+	// StageInvestigate explores a research topic and gathers evidence;
+	// mandatory, never skippable (role: architect).
+	StageInvestigate Stage = "investigate"
+	// StageShape converges a research topic into a shaped artifact; gated
+	// on human approval (interactive, role: architect). Mandatory, never
+	// skippable.
+	StageShape Stage = "shape"
 	// StageBrainstorm explores the problem and candidate approaches
 	// (interactive, role: architect). Skippable at creation.
 	StageBrainstorm Stage = "brainstorm"
@@ -45,6 +52,7 @@ const (
 // verify → done).
 var Stages = []Stage{
 	StageTodo,
+	StageInvestigate, StageShape,
 	StageBrainstorm, StageSpec, StagePlan,
 	StageTriage, StageDiagnose,
 	StageFix, StageImplement,
@@ -67,12 +75,13 @@ type SuperState string
 const (
 	SuperTodo         SuperState = "todo"
 	SuperInProgress   SuperState = "in progress"
+	SuperResearch     SuperState = "research"
 	SuperReviewVerify SuperState = "review / verify"
 	SuperDone         SuperState = "done"
 )
 
 // SuperStates lists the kanban groups in display order.
-var SuperStates = []SuperState{SuperTodo, SuperInProgress, SuperReviewVerify, SuperDone}
+var SuperStates = []SuperState{SuperTodo, SuperInProgress, SuperResearch, SuperReviewVerify, SuperDone}
 
 // SuperState returns the kanban group s belongs to.
 func (s Stage) SuperState() SuperState {
@@ -82,6 +91,8 @@ func (s Stage) SuperState() SuperState {
 	case StageBrainstorm, StageSpec, StagePlan, StageImplement,
 		StageTriage, StageDiagnose, StageFix:
 		return SuperInProgress
+	case StageInvestigate, StageShape:
+		return SuperResearch
 	case StageReview, StageVerify:
 		return SuperReviewVerify
 	case StageDone:

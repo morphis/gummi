@@ -39,17 +39,19 @@ func GummiDark() Theme {
 		Destructive: charmtone.Coral,
 
 		StageAccents: map[domain.Stage]color.Color{
-			domain.StageTodo:       charmtone.Squid,   // waiting: grey
-			domain.StageBrainstorm: charmtone.Charple, // grape
-			domain.StageSpec:       charmtone.Malibu,  // blueberry
-			domain.StagePlan:       charmtone.Sardine, // ice-blue
-			domain.StageTriage:     charmtone.Coral,   // bug: warm salmon
-			domain.StageDiagnose:   charmtone.Mustard, // bug: amber
-			domain.StageFix:        charmtone.Julep,   // bug: lime (the fix)
-			domain.StageImplement:  charmtone.Julep,   // lime
-			domain.StageReview:     charmtone.Citron,  // lemon
-			domain.StageVerify:     charmtone.Dolly,   // berry
-			domain.StageDone:       charmtone.Guac,    // settled green
+			domain.StageTodo:        charmtone.Squid,   // waiting: grey
+			domain.StageInvestigate: charmtone.Turtle,  // research: cyan
+			domain.StageShape:       charmtone.Guppy,   // research: indigo
+			domain.StageBrainstorm:  charmtone.Charple, // grape
+			domain.StageSpec:        charmtone.Malibu,  // blueberry
+			domain.StagePlan:        charmtone.Sardine, // ice-blue
+			domain.StageTriage:      charmtone.Coral,   // bug: warm salmon
+			domain.StageDiagnose:    charmtone.Mustard, // bug: amber
+			domain.StageFix:         charmtone.Julep,   // bug: lime (the fix)
+			domain.StageImplement:   charmtone.Julep,   // lime
+			domain.StageReview:      charmtone.Citron,  // lemon
+			domain.StageVerify:      charmtone.Dolly,   // berry
+			domain.StageDone:        charmtone.Guac,    // settled green
 		},
 	}
 }

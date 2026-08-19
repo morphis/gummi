@@ -19,11 +19,15 @@ func TestNewIDByKind(t *testing.T) {
 }
 
 func TestFeatureIDKind(t *testing.T) {
-	if FeatureID("BG-007").Kind() != KindBug {
-		t.Error("BG- prefix should read as a bug")
+	cases := map[FeatureID]Kind{
+		"FD-001": KindFeature,
+		"BG-007": KindBug,
+		"RS-042": KindResearch,
 	}
-	if FeatureID("FD-001").Kind() != KindFeature {
-		t.Error("FD- prefix should read as a feature")
+	for id, want := range cases {
+		if got := id.Kind(); got != want {
+			t.Errorf("%s.Kind() = %s, want %s", id, got, want)
+		}
 	}
 }
 
