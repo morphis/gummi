@@ -1,9 +1,11 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -137,5 +139,44 @@ func TestPoolConcurrent(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Errorf("concurrent ManagerFor: %v", err)
+	}
+}
+
+// TestPoolReposOnlyNoDefault: a repos:-only pool (empty defaultRoot) does not
+// eagerly construct a default manager and reports no default: pool creation
+// succeeds even when the workspace root is not a git repo, the empty name is
+// unknown, and the failure to pick a repo surfaces only at the point a card
+// needs it.
+func TestPoolReposOnlyNoDefault(t *testing.T) {
+	ctx := context.Background()
+	ws := t.TempDir() // ws is deliberately NOT a git repo (multi-repo parent)
+	repoA := filepath.Join(ws, "git", "a")
+	if err := os.MkdirAll(repoA, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repoA, "init", "-q", "-b", "main")
+
+	p, err := NewPool(ctx, ws, "", []NamedRepo{{Name: "a", Root: repoA}}, &memForkStore{}, false)
+	if err != nil {
+		t.Fatalf("repos:-only pool with a non-git workspace root should build: %v", err)
+	}
+	if p.Known("") {
+		t.Error("empty name should not be known with no default configured")
+	}
+	if !p.Known("a") {
+		t.Error("configured named repo should be known")
+	}
+	// naming a configured repo resolves fine; the default does not exist.
+	m, err := p.ManagerForName(ctx, "a")
+	if err != nil {
+		t.Fatalf("ManagerForName(a): %v", err)
+	}
+	if m.RepoRoot() != repoA {
+		t.Errorf("repo root = %q, want %q", m.RepoRoot(), repoA)
+	}
+	if _, err := p.ManagerForName(ctx, ""); err == nil {
+		t.Fatal("expected a no-default error for the empty name")
+	} else if !strings.Contains(err.Error(), "no default repository configured") {
+		t.Errorf("unexpected no-default error: %v", err)
 	}
 }

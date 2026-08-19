@@ -132,15 +132,21 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 
 	// 1. repo — one check per configured managed repository, each naming
 	// its repo (the default keeps the bare "repo" name for compatibility).
+	// A repos:-only workspace has no default: report only the named repos,
+	// and never require the workspace root to be a git toplevel.
 	if rerr != nil {
 		add("repo", statusFail, rerr.Error(), "set `repo:` (and `repos:`) in .gummi/config.yaml to git toplevels inside the workspace")
-	} else if isGitRepoRoot(defaultRoot) {
-		add("repo", statusOK, "git repository at "+defaultRoot+" (workspace at "+wsRoot+")", "")
+	} else {
+		if defaultRoot != "" {
+			if isGitRepoRoot(defaultRoot) {
+				add("repo", statusOK, "git repository at "+defaultRoot+" (workspace at "+wsRoot+")", "")
+			} else {
+				add("repo", statusFail, defaultRoot+" is not a git repository", "set `repo:` in .gummi/config.yaml to a git toplevel root, or remove it to manage the workspace root")
+			}
+		}
 		for _, n := range namedRepos {
 			add("repo:"+n.Name, statusOK, "git repository at "+n.Root+" (workspace at "+wsRoot+")", "")
 		}
-	} else {
-		add("repo", statusFail, defaultRoot+" is not a git repository", "set `repo:` in .gummi/config.yaml to a git toplevel root, or remove it to manage the workspace root")
 	}
 
 	// 2. workspace

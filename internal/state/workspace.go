@@ -137,11 +137,13 @@ func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
 	}
 }
 
-// Init creates the .gummi skeleton in ws (the workspace root). The
-// managed repository repo must be the top of a git repository (worktrees
-// and branches make no sense elsewhere); it may equal ws or sit in a
-// nested subdirectory. Init is idempotent: existing files, and in
-// particular an existing seq counter, are never clobbered.
+// Init creates the .gummi skeleton in ws (the workspace root). The managed
+// repository repo must be the top of a git repository (worktrees and
+// branches make no sense elsewhere) unless it is empty — the repos:-only
+// layout, where there is no default repo and the workspace root is a mere
+// parent of checkouts. It may equal ws or sit in a nested subdirectory.
+// Init is idempotent: existing files, and in particular an existing seq
+// counter, are never clobbered.
 func Init(ws, repo string) (Workspace, error) {
 	w := Workspace{Root: ws, RepoRoot: repo}
 	// Refuse to materialize a workspace inside another workspace's managed
@@ -154,9 +156,14 @@ func Init(ws, repo string) (Workspace, error) {
 		return Workspace{}, fmt.Errorf("%s is inside %s's worktree %s; run gummi from %s instead: %w", ws, parent, id, parent, ErrNestedInit)
 	}
 	// .git is a directory in a normal checkout and a gitdir-pointer
-	// file in worktrees and submodules; both are valid repo roots.
-	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
-		return Workspace{}, fmt.Errorf("%s is not the root of a git repository (no .git); gummi manages worktrees and must run from the main checkout", repo)
+	// file in worktrees and submodules; both are valid repo roots. The
+	// empty repo marks a repos:-only workspace with no default: there is
+	// no single repo to validate, so the check is skipped (the workspace
+	// root is a mere parent of checkouts in that layout).
+	if repo != "" {
+		if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+			return Workspace{}, fmt.Errorf("%s is not the root of a git repository (no .git); gummi manages worktrees and must run from the main checkout", repo)
+		}
 	}
 	// A cloned repo can ship .gummi (or any of its subdirs) as a committed
 	// symlink pointing elsewhere, and a plain MkdirAll would follow it and

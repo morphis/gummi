@@ -28,10 +28,10 @@ type Config struct {
 	// to the workspace root (e.g. "git/lxd").
 	Repo string `yaml:"repo"`
 	// Repos maps a selectable name to a git repository path relative to
-	// the workspace root. Cards may name any of these; the empty name
-	// always means the default repo (Repo when set, else the workspace
-	// root). Each value must resolve inside the workspace and be a git
-	// toplevel (enforced by ResolveRepos).
+	// the workspace root. Cards may name any of these; the empty name means
+	// the default repo when one is set (Repo), and is invalid when Repo is
+	// absent and Repos is set. Each value must resolve inside the workspace
+	// and be a git toplevel (enforced by ResolveRepos).
 	Repos map[string]string `yaml:"repos"`
 }
 
@@ -76,12 +76,17 @@ type NamedRepo struct {
 
 // ResolveRepos resolves the workspace's selectable repository set from ws
 // (the workspace root) and the config. It returns the default repo root
-// (the `repo:` key when set, else ws) and the ordered list of named
-// repositories (sorted by name, deterministic). Every configured root must
-// resolve to a directory inside the workspace and be the top of a git
-// repository; a violation is a resolution-time error naming the offending
-// repo. An absent `repo:`/`repos:` yields exactly the workspace root as the
-// sole (default) repository, so upgrading needs no config edit.
+// (the `repo:` key when set) and the ordered list of named repositories
+// (sorted by name, deterministic). Every configured root must resolve to a
+// directory inside the workspace and be the top of a git repository; a
+// violation is a resolution-time error naming the offending repo.
+//
+// The default root is empty when `repos:` is configured with no `repo:` key:
+// there is no default at all, so a card must name one of the configured
+// repos and the workspace root is never validated as a git toplevel (in the
+// natural multi-repo layout it is a parent directory of checkouts, not a
+// repo itself). An absent `repo:`/`repos:` yields exactly the workspace
+// root as the sole (default) repository, so upgrading needs no config edit.
 func ResolveRepos(ws string, c Config) (defaultRoot string, named []NamedRepo, err error) {
 	// Setting both `repo:` and `repos:` is a config error: they are two
 	// ways to define the default repository, and composing them would need
@@ -112,10 +117,22 @@ func ResolveRepos(ws string, c Config) (defaultRoot string, named []NamedRepo, e
 		}
 		return root, nil
 	}
-	defaultRoot, err = resolve(c.Repo)
-	if err != nil {
-		return "", nil, err
+	if c.Repo != "" {
+		defaultRoot, err = resolve(c.Repo)
+		if err != nil {
+			return "", nil, err
+		}
+	} else if len(c.Repos) == 0 {
+		// No repo: and no repos: — the workspace root is the sole default,
+		// so a single-repo upgrade needs no config edit.
+		defaultRoot, err = resolve("")
+		if err != nil {
+			return "", nil, err
+		}
 	}
+	// repos: configured with no repo: — no default at all: a card must name
+	// a configured repo, and the workspace root (a mere parent of checkouts
+	// in the multi-repo layout) is never validated as a git toplevel.
 	names := make([]string, 0, len(c.Repos))
 	for name := range c.Repos {
 		names = append(names, name)

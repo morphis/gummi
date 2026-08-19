@@ -244,3 +244,93 @@ func TestMaterializeBugsNamesRepo(t *testing.T) {
 		t.Fatal("expected an error materializing into an unconfigured repo")
 	}
 }
+
+// reposOnlyEngine builds an engine over a pool with no default repo: a
+// repos:-only workspace whose root is NOT a git repository (the natural
+// multi-repo parent layout). Card creation must target a named repo.
+func reposOnlyEngine(t *testing.T) *Engine {
+	t.Helper()
+	wsRoot := t.TempDir()
+	wsRoot, err := filepath.EvalSymlinks(wsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(root string, args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	init := func(root string) {
+		git(root, "init", "-q", "-b", "main")
+		git(root, "config", "user.name", "t")
+		git(root, "config", "user.email", "t@e.invalid")
+		if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git(root, "add", ".")
+		git(root, "commit", "-q", "-m", "init")
+	}
+	repoA := filepath.Join(wsRoot, "git", "a")
+	repoB := filepath.Join(wsRoot, "git", "b")
+	if err := os.MkdirAll(repoA, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	init(repoA)
+	if err := os.MkdirAll(repoB, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	init(repoB)
+
+	// wsRoot itself is deliberately left a non-git parent.
+	ws, err := state.Init(wsRoot, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	pool, err := worktree.NewPool(context.Background(), ws.Root, "",
+		[]worktree.NamedRepo{{Name: "a", Root: repoA}, {Name: "b", Root: repoB}}, store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	return e
+}
+
+// TestMaterializeBugsReposOnlyNamedRepo: in a repos:-only workspace (no
+// default, non-git root) `bugs new --repo a` succeeds and persists the card
+// in repo a, without ever resolving a default. This is the bug's call site:
+// the eagerly-resolved default used to poison the command at pool build.
+func TestMaterializeBugsReposOnlyNamedRepo(t *testing.T) {
+	e := reposOnlyEngine(t)
+	ctx := context.Background()
+	props := []domain.BugProposal{{
+		Title: "Multi-repo crash", Source: "manual", ExternalRef: "https://x/9",
+		Severity: domain.SeverityHigh, Skip: domain.SkipFlags{Triage: true},
+		Report: domain.BugReport{Description: "explodes"},
+	}}
+
+	created, err := e.MaterializeBugs(ctx, props, MaterializeOpts{Repo: "a"})
+	if err != nil {
+		t.Fatalf("MaterializeBugs with a named repo in a repos:-only workspace: %v", err)
+	}
+	if len(created) != 1 || created[0].Repo != "a" {
+		t.Fatalf("created = %+v, want one bug in repo a", created)
+	}
+	if got, err := e.cfg.Store.GetFeature(ctx, created[0].ID); err != nil || got.Repo != "a" {
+		t.Errorf("persisted repo = %q (err=%v), want a", got.Repo, err)
+	}
+
+	// materializing with no repo fails at the point the default is needed.
+	if _, err := e.MaterializeBugs(ctx, props, MaterializeOpts{}); err == nil {
+		t.Fatal("expected a no-default error materializing without --repo")
+	} else if !strings.Contains(err.Error(), "no default repository configured") {
+		t.Errorf("unexpected no-default error: %v", err)
+	}
+}

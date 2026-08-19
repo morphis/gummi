@@ -39,22 +39,27 @@ type Pool struct {
 }
 
 // NewPool builds the pool from the workspace root, the default repo root, and
-// the configured named roots, then eagerly resolves the default manager.
-// Named roots are validated (git toplevel) lazily on first use. When exclude
-// is set, each manager gets the .gummi exclusion treatment at creation.
+// the configured named roots, then eagerly resolves the default manager when
+// one exists (an empty defaultRoot marks a repos:-only workspace with no
+// default). Named roots are validated (git toplevel) lazily on first use.
+// When exclude is set, each manager gets the .gummi exclusion treatment at
+// creation.
 func NewPool(ctx context.Context, wsRoot, defaultRoot string, named []NamedRepo, fs ForkPointStore, exclude bool) (*Pool, error) {
 	absWs, err := filepath.Abs(wsRoot)
 	if err != nil {
 		return nil, err
 	}
-	absDef, err := filepath.Abs(defaultRoot)
-	if err != nil {
-		return nil, err
-	}
 	p := &Pool{
-		root: absWs, defaultRoot: absDef,
+		root: absWs, defaultRoot: "",
 		byName: map[string]string{}, fs: fs, exclude: exclude,
 		byRoot: map[string]*Manager{},
+	}
+	if defaultRoot != "" {
+		absDef, err := filepath.Abs(defaultRoot)
+		if err != nil {
+			return nil, err
+		}
+		p.defaultRoot = absDef
 	}
 	for _, n := range named {
 		abs, aerr := filepath.Abs(n.Root)
@@ -63,8 +68,10 @@ func NewPool(ctx context.Context, wsRoot, defaultRoot string, named []NamedRepo,
 		}
 		p.byName[n.Name] = abs
 	}
-	if _, err := p.manager(ctx, absDef); err != nil {
-		return nil, err
+	if p.defaultRoot != "" {
+		if _, err := p.manager(ctx, p.defaultRoot); err != nil {
+			return nil, err
+		}
 	}
 	return p, nil
 }
@@ -90,12 +97,13 @@ func WrapSingle(m *Manager) *Pool {
 func (p *Pool) DefaultName() string { return "" }
 
 // Known reports whether name is a configured repository. The empty name
-// (the workspace default) is always known; any other name must be a key of
-// the configured `repos:` set. Creation surfaces use it to reject an
-// unknown repo at creation, before any drive-time resolution.
+// (the workspace default) is known only when a default exists; any other
+// name must be a key of the configured `repos:` set. Creation surfaces use
+// it to reject an unselectable repo at creation, before any drive-time
+// resolution.
 func (p *Pool) Known(name string) bool {
 	if name == "" {
-		return true
+		return p.defaultRoot != ""
 	}
 	_, ok := p.byName[name]
 	return ok
@@ -120,9 +128,16 @@ func (p *Pool) ManagerFor(ctx context.Context, f *domain.Feature) (*Manager, err
 }
 
 // ManagerForName resolves a repo name ("" = default) to its cached manager.
+// An empty name with no default configured fails here — at the point a card
+// actually needs the default — never at pool construction.
 func (p *Pool) ManagerForName(ctx context.Context, name string) (*Manager, error) {
-	root := p.defaultRoot
-	if name != "" {
+	var root string
+	if name == "" {
+		if p.defaultRoot == "" {
+			return nil, fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
+		}
+		root = p.defaultRoot
+	} else {
 		r, ok := p.byName[name]
 		if !ok {
 			return nil, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or recreate the card against a configured repository", name)

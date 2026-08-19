@@ -56,8 +56,9 @@ func TestDoctorMultiRepoForkDrift(t *testing.T) {
 	git(incus, "commit", "-q", "-m", "incus init")
 	incusHead := git(incus, "rev-parse", "HEAD")
 
-	// config: default is the workspace root; named repo "incus".
-	writeConfig(t, ws, "repos:\n  incus: git/incus\n")
+	// config: the workspace root is the named default repo; plus "incus".
+	// (A repos:-only workspace has no default, so the root is named.)
+	writeConfig(t, ws, "repos:\n  default: .\n  incus: git/incus\n")
 
 	wsInfo, err := state.Init(ws, ws)
 	if err != nil {
@@ -87,7 +88,7 @@ func TestDoctorMultiRepoForkDrift(t *testing.T) {
 		}
 		return f
 	}
-	cleanDefault := mk(1, "Clean default", "", wsHead)
+	cleanDefault := mk(1, "Clean default", "default", wsHead)
 	driftedIncus := mk(2, "Drifted incus", "incus", incusHead)
 
 	// rewind the incus repo's main to an unrelated lineage so incusHead is

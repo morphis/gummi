@@ -74,8 +74,8 @@ func (e *Engine) IngestBugs(ctx context.Context, src BugSource) (BugIngestResult
 func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal, opts MaterializeOpts) ([]domain.Feature, error) {
 	// Pre-flight: the target repository must be configured, so an unknown
 	// name fails the whole batch before any number is consumed.
-	if opts.Repo != "" && (e.pool == nil || !e.pool.Known(opts.Repo)) {
-		return nil, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", opts.Repo)
+	if err := e.requireRepo(opts.Repo); err != nil {
+		return nil, err
 	}
 	// Pre-flight: every title must slugify before we mint anything, so a
 	// bad title fails the batch cleanly instead of after consuming numbers.

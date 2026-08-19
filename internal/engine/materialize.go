@@ -34,10 +34,11 @@ type MaterializeOpts struct {
 // alongside it, so a mid-batch failure leaves a diagnosable partial state
 // rather than silently losing work.
 func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts MaterializeOpts) ([]domain.Feature, error) {
-	// Pre-flight: the target repository must be configured, so an unknown
-	// name fails the whole batch before any feature number is consumed.
-	if opts.Repo != "" && (e.pool == nil || !e.pool.Known(opts.Repo)) {
-		return nil, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", opts.Repo)
+	// Pre-flight: the target repository must be selectable, so an unset or
+	// unknown name fails the whole batch before any feature number is
+	// consumed.
+	if err := e.requireRepo(opts.Repo); err != nil {
+		return nil, err
 	}
 	// Pre-flight: every title must slugify before we mint anything, so a
 	// bad title fails the batch cleanly instead of after consuming feature
@@ -128,4 +129,25 @@ func resolveDeps(titles []string, byTitle map[string]domain.Feature) []string {
 		}
 	}
 	return out
+}
+
+// requireRepo validates that the materialization target repo is selectable:
+// the empty name is the workspace default, valid only when a default exists.
+// In a repos:-only workspace there is no default, so materializing without
+// naming a repo fails here — at the point the card needs a repository —
+// rather than at startup for every command.
+func (e *Engine) requireRepo(repo string) error {
+	if e.pool == nil {
+		if repo == "" {
+			return fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
+		}
+		return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", repo)
+	}
+	if e.pool.Known(repo) {
+		return nil
+	}
+	if repo == "" {
+		return fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
+	}
+	return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", repo)
 }
