@@ -995,3 +995,48 @@ func TestDoctorNestedRepoEscapesWorkspace(t *testing.T) {
 		t.Errorf("repo check = %+v, want a fail with repo: remediation for an escaping root", c)
 	}
 }
+
+func TestDoctorEnvSection(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, headlessProfiles)
+	writeConfig(t, repo, `env:
+  present-tool:
+    probe: "true"
+    describe: a tool that is present
+  absent-tool:
+    probe: "false"
+    describe: a tool that is absent
+`)
+	// Put a fake headless agent on PATH without stripping /bin/sh.
+	agentDir := t.TempDir()
+	p := filepath.Join(agentDir, "fakeagent")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", agentDir+":"+os.Getenv("PATH"))
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
+	t.Setenv("GUMMI_ENVELOPE", "500")
+
+	r := buildDoctorReport(repo, doctorOpts{})
+	if !r.Ready {
+		t.Fatalf("env section must not flip readiness: %+v", r.Checks)
+	}
+
+	present := checkByName(r, "env:present-tool")
+	if present.Status != statusOK {
+		t.Errorf("present env check = %+v, want ok", present)
+	}
+	if !strings.Contains(present.Detail, "a tool that is present") || !strings.Contains(present.Detail, "PRESENT") {
+		t.Errorf("present env detail = %q, want describe and PRESENT", present.Detail)
+	}
+
+	absent := checkByName(r, "env:absent-tool")
+	if absent.Status != statusWarn {
+		t.Errorf("absent env check = %+v, want warn", absent)
+	}
+	if !strings.Contains(absent.Detail, "a tool that is absent") || !strings.Contains(absent.Detail, "ABSENT") {
+		t.Errorf("absent env detail = %q, want describe and ABSENT", absent.Detail)
+	}
+}

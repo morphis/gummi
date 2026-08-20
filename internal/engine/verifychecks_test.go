@@ -193,3 +193,88 @@ func TestVerifyStageGuardedSkipsGummiSide(t *testing.T) {
 		t.Errorf("guarded mode should not run checks gummi-side:\n%s", got)
 	}
 }
+
+func TestVerifyKickoffRunsEnvProbes(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	// write operator-configured env prerequisites into the workspace root
+	cfg := `env:
+  present-thing:
+    probe: "true"
+    describe: a present prerequisite
+  absent-thing:
+    probe: "false"
+    describe: an absent prerequisite
+`
+	if err := os.WriteFile(ws.ConfigFile(), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var got string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		got = msg
+		mu.Unlock()
+		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify me", domain.StageVerify)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, want := range []string{"Environment prerequisites probed", "present-thing: PRESENT", "absent-thing: ABSENT", "a present prerequisite", "an absent prerequisite"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verify kickoff missing %q:\n%s", want, got)
+		}
+	}
+
+	snap := e.Get("FD-001").Snapshot()
+	if len(snap.EnvProbes) != 2 {
+		t.Fatalf("got %d env probes, want 2", len(snap.EnvProbes))
+	}
+	names := []string{snap.EnvProbes[0].Name, snap.EnvProbes[1].Name}
+	if names[0] != "absent-thing" || names[1] != "present-thing" {
+		t.Errorf("probe order = %v, want [absent-thing present-thing]", names)
+	}
+}
+
+func TestVerifyKickoffRunsEnvProbesInGuardedMode(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  ok:\n    probe: \"true\"\n    describe: present\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var got string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		got = msg
+		mu.Unlock()
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify me", domain.StageVerify)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(got, "Environment prerequisites probed") {
+		t.Errorf("guarded mode should still run env probes:\n%s", got)
+	}
+	if strings.Contains(got, "gummi already ran") {
+		t.Errorf("guarded mode should not run spec checks gummi-side:\n%s", got)
+	}
+}

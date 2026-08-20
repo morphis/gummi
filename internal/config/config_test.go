@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +122,73 @@ func TestTemplateRepoParsesEmpty(t *testing.T) {
 	}
 	if c.Repo != "" {
 		t.Errorf("template repo = %q, want empty (sibling default)", c.Repo)
+	}
+}
+
+func TestLoadEnvPrereqs(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	content := `env:
+  docker:
+    probe: docker info >/dev/null 2>&1
+    describe: local Docker daemon
+  gpu:
+    probe: nvidia-smi -L >/dev/null 2>&1
+    describe: NVIDIA GPU
+`
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("loading env config: %v", err)
+	}
+	if len(c.Env) != 2 {
+		t.Fatalf("got %d env prereqs, want 2", len(c.Env))
+	}
+	if c.Env["docker"].Probe != "docker info >/dev/null 2>&1" || c.Env["docker"].Describe != "local Docker daemon" {
+		t.Errorf("docker prereq = %+v", c.Env["docker"])
+	}
+}
+
+func TestLoadEnvRejectsEmptyProbe(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("env:\n  bad:\n    probe: \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "empty probe") {
+		t.Fatalf("expected empty-probe error naming file, got: %v", err)
+	}
+}
+
+func TestLoadEnvRejectsEmptyName(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("env:\n  \"\":\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "empty name") {
+		t.Fatalf("expected empty-name error naming file, got: %v", err)
+	}
+}
+
+func TestLoadEnvRejectsBadNameCharacters(t *testing.T) {
+	cases := []string{"has space", "has\ttab", "has]bracket", "has\nnewline"}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "config.yaml")
+			content := fmt.Sprintf("env:\n  %q:\n    probe: \"true\"\n", name)
+			if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "']' or whitespace") {
+				t.Fatalf("expected bad-name error naming file, got: %v", err)
+			}
+		})
 	}
 }

@@ -33,6 +33,23 @@ type Config struct {
 	// absent and Repos is set. Each value must resolve inside the workspace
 	// and be a git toplevel (enforced by ResolveRepos).
 	Repos map[string]string `yaml:"repos"`
+	// Env is the operator-configured environment prerequisite map. Each
+	// entry names a prerequisite that may be referenced by [env: <name>]
+	// tags in a verification plan; gummi probes each entry's Probe command
+	// at Verify kickoff and in `gummi doctor`.
+	Env map[string]EnvPrereq `yaml:"env"`
+}
+
+// EnvPrereq is one operator-configured environment prerequisite.
+type EnvPrereq struct {
+	// Probe is the shell command that decides whether the prerequisite is
+	// present. It runs via `sh -c` in the card's worktree. A clean exit 0
+	// means PRESENT; a clean non-zero exit (other than the shell's 126/127
+	// "not executable"/"command not found" codes) means ABSENT.
+	Probe string `yaml:"probe"`
+	// Describe is a short human-readable description of the prerequisite,
+	// included in kickoff reports and `gummi doctor` output.
+	Describe string `yaml:"describe"`
 }
 
 // Load reads and parses config.yaml. A missing file yields the default
@@ -58,6 +75,17 @@ func Load(path string) (Config, error) {
 	case "", "enforce", "warn", "off":
 	default:
 		return Config{}, fmt.Errorf("%s: sandbox must be \"enforce\", \"warn\", or \"off\", got %q", path, c.Sandbox)
+	}
+	for name, p := range c.Env {
+		if name == "" {
+			return Config{}, fmt.Errorf("%s: env: entry has an empty name", path)
+		}
+		if strings.ContainsAny(name, "]") || strings.ContainsAny(name, " \t\n\r") {
+			return Config{}, fmt.Errorf("%s: env: name %q contains a ']' or whitespace character", path, name)
+		}
+		if strings.TrimSpace(p.Probe) == "" {
+			return Config{}, fmt.Errorf("%s: env: %q has an empty probe", path, name)
+		}
 	}
 	return c, nil
 }

@@ -1295,3 +1295,25 @@ func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
 		})
 	})
 }
+
+func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
+	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
+		h := verifyHint(kind)
+		for _, want := range []string{
+			"gummi's own probe reported a clean ABSENT",
+			"the agent's own impression",
+			"environment is not evidence",
+			"Skipping an [env:] step",
+			"probed PRESENT is a fail",
+			"A probe that errored or timed out",
+			"grants no",
+			"skip permission",
+			"every [env:] prerequisite probed clean ABSENT",
+			"verdict is blocked",
+		} {
+			if !strings.Contains(h, want) {
+				t.Errorf("verifyHint(%v) missing %q", kind, want)
+			}
+		}
+	}
+}

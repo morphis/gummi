@@ -25,6 +25,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -219,14 +220,14 @@ type Engine struct {
 	// reaching into the worktree package or swapping the concrete pool.
 	dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
 
-	// envOnce reads and caches the workspace environment card. The card is
-	// loaded lazily and read once per Engine lifetime; editing the file
-	// requires an Engine restart.
+	// envOnce reads and caches the workspace environment card once per
+	// Engine lifetime; envCard holds the (possibly truncated) card text.
+	// Editing the file requires an Engine restart.
 	envOnce sync.Once
 	envCard string
-
-	// envWarn buffers environment-card warnings so they can be flushed onto
-	// a live session's activity feed. Warnings are emitted at most once per
+	// envMu guards envNotices buffered before a session exists to flush
+	// them onto its activity feed. A nil envWarn disables warning
+	// collection (tests); otherwise warnings are emitted at most once per
 	// Engine lifetime because they sit inside envOnce.
 	envMu      sync.Mutex
 	envNotices []string
@@ -656,9 +657,16 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 	msg := s.kickoffMessage()
 	// only the stage's own run gets the pre-run check results: a rebase
 	// session borrowing the Verify stage isn't verifying anything yet.
-	if s.Feature.Stage == domain.StageVerify && !s.Rebase && e.cfg.Permission != agent.PermissionGuarded {
-		if pre := e.runSpecChecks(s); pre != "" {
+	if s.Feature.Stage == domain.StageVerify && !s.Rebase {
+		// env probes run even in guarded mode — they are operator config
+		// from .gummi/config.yaml, not agent-authored artifact checks.
+		if pre := e.runEnvProbes(s); pre != "" {
 			msg = pre + "\n\n" + msg
+		}
+		if e.cfg.Permission != agent.PermissionGuarded {
+			if pre := e.runSpecChecks(s); pre != "" {
+				msg = pre + "\n\n" + msg
+			}
 		}
 	}
 	e.beforeTurn(s)
@@ -687,6 +695,35 @@ func (e *Engine) failRun(s *Session, err error) {
 // verifyStageTimeout bounds the gummi-side check run at the Verify stage
 // (mirrors the manual verify dialog's cap).
 const verifyStageTimeout = 10 * time.Minute
+
+// runEnvProbes loads the workspace-root config, probes every declared
+// environment prerequisite in the card's worktree, records each result in
+// the activity feed, persists the snapshot, and returns a compact report
+// block. Env probes run in all sandbox/permission modes because their
+// command source is operator config from outside the worktree.
+func (e *Engine) runEnvProbes(s *Session) string {
+	cfg, err := config.Load(e.cfg.Workspace.ConfigFile())
+	if err != nil {
+		msg := "Environment prerequisites could not be probed: " + err.Error()
+		s.appendActivity(msg)
+		e.persist(s)
+		return msg
+	}
+	if len(cfg.Env) == 0 {
+		return ""
+	}
+	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
+	results := envprobe.Run(context.Background(), workDir, cfg.Env)
+	s.mu.Lock()
+	s.envProbes = results
+	s.mu.Unlock()
+	for _, r := range results {
+		ok := r.Err == nil && r.Present
+		s.appendToolDone(fmt.Sprintf("env %s: %s", r.Name, envprobe.StatusString(r)), ok, r.Output)
+	}
+	e.persist(s)
+	return "Environment prerequisites probed in this worktree:\n" + envprobe.FormatReport(results)
+}
 
 // runSpecChecks executes the artifact's gummi-checks commands in the
 // feature's worktree, records each outcome in the activity feed, and

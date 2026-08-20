@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -15,6 +16,17 @@ import (
 
 const testCard = "ENVIRONMENT CARD: this repo is built inside a container; the real hardware is a remote ARM dev VM at 10.0.0.7."
 
+// bugFeatureAt builds a bug-kind work item at the requested stage, mirroring
+// the package helper but with a stage override.
+func bugFeatureAt(num int, title string, stage domain.Stage) domain.Feature {
+	id, _ := domain.NewID(domain.KindBug, num)
+	slug, _ := domain.Slugify(title)
+	now := time.Now()
+	return domain.Feature{
+		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: stage,
+		CreatedAt: now, UpdatedAt: now,
+	}
+}
 func writeEnvironmentCard(t *testing.T, wsRoot, content string) {
 	t.Helper()
 	p := filepath.Join(wsRoot, ".gummi", "environment.md")
@@ -73,7 +85,7 @@ func TestEnvironmentCardStageAgnostic(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	// Triage is an interactive bug stage: the card should still be first.
-	f := bugFeature(1, "x", domain.StageTriage)
+	f := bugFeatureAt(1, "x", domain.StageTriage)
 	ctx := context.Background()
 	if _, err := e.Attach(ctx, f); err != nil {
 		t.Fatal(err)

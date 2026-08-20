@@ -570,15 +570,18 @@ You are autonomous: no one can answer questions, so never end with one.
 A check you record as SKIPPED is an unmet check, not a pass, unless
 the verification plan explicitly allows skipping it: a step tagged
 [CI-only] may always be skipped, and a step tagged [env: <prereq>] may
-be skipped only when that prerequisite is genuinely absent — record
-each as SKIPPED (allowed: <tag>) with the reason. A tag inside the
-gummi-checks block itself is a plan defect: append a bullet to the
-Verification section reading ` + "`finding: gummi-checks tag defect — <tag> inside the block at <line>`" + `
+be skipped only when gummi's own probe reported a clean ABSENT for that
+prerequisite — record each as SKIPPED (allowed: <tag>) with the reason.
+The kickoff lists the probe results; the agent's own impression of the
+environment is not evidence. Skipping an [env:] step whose prerequisite
+probed PRESENT is a fail. A probe that errored or timed out grants no
+skip permission: run the check or return fail. If every live check is
+blocked because every [env:] prerequisite probed clean ABSENT, the
+verdict is blocked, not pass and not fail — a plan that proved nothing
+did not pass. A tag inside the gummi-checks block itself is a plan
+defect: append a bullet to the Verification section reading ` + "`finding: gummi-checks tag defect — <tag> inside the block at <line>`" + `
 and set your verdict to fail; do not honor the tag as a permission
-to skip. If every live check
-is blocked by missing environment rather than by the code, the verdict
-is blocked, not pass and not fail — a plan that proved nothing did not
-pass. Make the call, record the evidence, and end your final message
+to skip. Make the call, record the evidence, and end your final message
 with a verdict on its own line, exactly one of:
   VERDICT: pass       — everything verified; ready to land on main
   VERDICT: fail       — verification found real problems in this

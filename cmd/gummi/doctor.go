@@ -19,6 +19,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
@@ -158,6 +159,11 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		add("workspace", statusWarn, "no .gummi workspace yet", "created automatically on the first `gummi run` (or `gummi` TUI)")
 	}
 
+	// 2b. env prerequisites — operator-configured probes reported as
+	// status, never readiness. A missing/absent prerequisite is legitimate.
+	wsCfg, _ := config.Load(ws.ConfigFile())
+	checks = append(checks, envChecks(wsCfg, defaultRoot)...)
+
 	// profiles are parsed once and shared by the backend check (they decide
 	// which backends are required) and the profile cross-check below.
 	profiles, seeded, perr := effectiveProfiles(ws.ProfilesFile())
@@ -205,10 +211,6 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 			add("profile", statusOK, fmt.Sprintf("profiles: %s (default %q)%s", strings.Join(profiles.Names(), ", "), profiles.Default, note), nestingGuidance)
 		}
 	}
-
-	// config.yaml is loaded for the workspace sandbox default (a missing
-	// or unparsable file degrades to the built-in warn, matching a run).
-	wsCfg, _ := config.Load(ws.ConfigFile())
 
 	// sandbox — one check per defined profile, reporting the resolved mode
 	// and flagging any enforce profile whose tool coverage is incomplete.
@@ -589,6 +591,28 @@ func isDir(p string) bool {
 func isFile(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// envChecks emits one env:<name> check per configured prerequisite,
+// probing it in dir. The result is advisory: PRESENT maps to ok, while
+// ABSENT or errored maps to warn so that missing machinery never flips
+// doctor's Ready bit.
+func envChecks(cfg config.Config, dir string) []doctorCheck {
+	if len(cfg.Env) == 0 {
+		return nil
+	}
+	results := envprobe.Run(context.Background(), dir, cfg.Env)
+	checks := make([]doctorCheck, 0, len(results))
+	for _, r := range results {
+		status := statusWarn
+		if r.Present && r.Err == nil {
+			status = statusOK
+		}
+		probe := cfg.Env[r.Name].Probe
+		detail := fmt.Sprintf("%s — probe: %s — %s", r.Describe, probe, envprobe.StatusString(r))
+		checks = append(checks, doctorCheck{Name: "env:" + r.Name, Status: status, Detail: detail})
+	}
+	return checks
 }
 
 // sandboxChecks emits one sandbox:<profile> check per defined profile. It

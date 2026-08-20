@@ -70,7 +70,7 @@ func feature(num int, title string, stage domain.Stage) domain.Feature {
 // way feature does, so tests can cover the artifact-path naming across
 // kinds.
 func bugFeature(title string) domain.Feature {
-	const num = 2
+const num = 2
 	id, _ := domain.NewID(domain.KindBug, num)
 	slug, _ := domain.Slugify(title)
 	now := time.Now()

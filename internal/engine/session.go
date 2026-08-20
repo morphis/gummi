@@ -7,6 +7,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
 )
 
@@ -132,6 +133,7 @@ type Snapshot struct {
 	PendingAsk     *Ask          // the agent's open ask_user question, if any
 	Verdict        string        // review verdict via submit_verdict, if submitted
 	Err            error
+	EnvProbes      []envprobe.Result
 }
 
 // Session is one live agent conversation bound to a feature + stage.
@@ -200,6 +202,10 @@ type Session struct {
 	// snapshot was taken this turn (see takePreTurn).
 	preTurnDirt map[string]struct{}
 
+	// envProbes holds the most recent env prerequisite probe results for
+	// this session, produced at Verify kickoff and surfaced on Snapshot.
+	envProbes []envprobe.Result
+
 	// mcpTeardown releases the session's MCP inbound endpoint (closes the
 	// listener, joins its goroutines, removes the socket file) exactly
 	// once, hand-in-hand with stop (see setMCPTeardown).
@@ -255,6 +261,7 @@ func (s *Session) Snapshot() Snapshot {
 		PendingAsk:     s.pendingAsk,
 		Verdict:        s.verdict,
 		Err:            s.err,
+		EnvProbes:      append([]envprobe.Result(nil), s.envProbes...),
 	}
 }
 
