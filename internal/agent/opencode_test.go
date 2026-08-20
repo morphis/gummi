@@ -485,6 +485,64 @@ func TestOpencodeInterruptYieldsIdle(t *testing.T) {
 	}
 }
 
+// A backend that exits cleanly (status 0) with zero stdout — no text, no
+// tool call, no usage, no error line — is indistinguishable from a real
+// empty pass today: the engine marks the session done with empty spend and
+// no error, and the verdict falls to "unclear". Surface it as a legible
+// EventError so the operator can tell a silent backend outage from a model
+// that genuinely failed to reach a verdict.
+func TestOpencodeZeroEventSessionSurfacesError(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	binary := dir + "/opencode"
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	defer cancel()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(ctx, "critique the plan"); err != nil {
+		t.Fatal(err)
+	}
+	var kinds []EventKind
+	var errMsg string
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			kinds = append(kinds, e.Kind)
+			if e.Kind == EventError && e.Err != nil {
+				errMsg = e.Err.Error()
+			}
+			if e.Kind == EventIdle {
+				t.Fatalf("zero-event opencode session ended idle (kinds=%v); must surface EventError", kinds)
+			}
+			if e.Kind == EventError {
+				goto gotError
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for an event")
+		}
+	}
+gotError:
+	if !strings.Contains(strings.ToLower(errMsg), "no output") &&
+		!strings.Contains(strings.ToLower(errMsg), "no events") &&
+		!strings.Contains(strings.ToLower(errMsg), "empty") {
+		t.Errorf("EventError present but wording %q does not name the empty-session failure mode", errMsg)
+	}
+}
+
 func TestOpencodeRejectsConcurrentSend(t *testing.T) {
 	ag, err := NewOpencode(fakeOC(t))
 	if err != nil {

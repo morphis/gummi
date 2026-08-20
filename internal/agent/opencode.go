@@ -283,12 +283,14 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	var msg strings.Builder
+	sawAny := false // any event forwarded, or prose accumulated, this turn
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 		for _, ev := range s.mapEvent(line, &msg) {
+			sawAny = true
 			select {
 			case s.raw <- ev:
 			case <-s.stop:
@@ -322,6 +324,7 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 		return // session torn down; the forwarder is closing
 	}
 	if text := strings.TrimSpace(msg.String()); text != "" {
+		sawAny = true
 		s.emit(Event{Kind: EventMessage, Text: text})
 	}
 	// an interrupted turn ends idle (the orchestrator's pause/budget path
@@ -342,6 +345,15 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 			detail = waitErr.Error()
 		}
 		s.emit(Event{Kind: EventError, Err: fmt.Errorf("opencode run failed: %s", detail)})
+		return
+	}
+	// a clean exit that produced zero events (no text, no tool call, no
+	// usage, no error line) is a backend/gateway that died silently — not a
+	// real empty pass. Surface it so the operator can tell an outage from a
+	// genuine unclear verdict on sight instead of getting the generic bucket.
+	if !sawAny {
+		s.emit(Event{Kind: EventError, Err: fmt.Errorf(
+			"opencode run produced no output (backend/gateway may have failed silently)")})
 		return
 	}
 	s.emit(Event{Kind: EventIdle})
