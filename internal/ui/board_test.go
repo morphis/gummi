@@ -208,13 +208,14 @@ func TestMeteredSpendGolden(t *testing.T) {
 
 func populatedShellView(m *Shell) string { return m.View().Content }
 
-// bugRow builds a bug card with the given severity for cardLine tests.
-func bugRow(num int, title string, stage domain.Stage, sev domain.Severity) featureRow {
+// bugRow builds a bug card parked at Todo with the given severity for
+// cardLine tests.
+func bugRow(num int, title string, sev domain.Severity) featureRow {
 	id, _ := domain.NewID(domain.KindBug, num)
 	slug, _ := domain.Slugify(title)
 	f := domain.Feature{
 		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug,
-		Stage: stage, Severity: sev, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		Stage: domain.StageTodo, Severity: sev, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	r := featureRow{F: f}
 	return r
@@ -266,7 +267,7 @@ func TestBoardCardLineSeverity(t *testing.T) {
 	var b strings.Builder
 	for _, c := range cases {
 		b.WriteString(c.name + "\n")
-		r := bugRow(1, c.name, domain.StageTodo, c.sev)
+		r := bugRow(1, c.name, c.sev)
 		b.WriteString(m.cardLine(r, 1, false, 80) + "\n\n")
 	}
 	golden.RequireEqual(t, []byte(b.String()))
@@ -278,11 +279,11 @@ func TestBoardCardLineSeverity(t *testing.T) {
 func TestDisplayOrderSortsTodoBySeverity(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
 	m.rows = []featureRow{
-		bugRow(1, "low bug", domain.StageTodo, domain.SeverityLow),
-		bugRow(2, "critical bug", domain.StageTodo, domain.SeverityCritical),
-		bugRow(3, "unclassified", domain.StageTodo, ""),
-		bugRow(4, "high bug", domain.StageTodo, domain.SeverityHigh),
-		bugRow(5, "medium bug", domain.StageTodo, domain.SeverityMedium),
+		bugRow(1, "low bug", domain.SeverityLow),
+		bugRow(2, "critical bug", domain.SeverityCritical),
+		bugRow(3, "unclassified", ""),
+		bugRow(4, "high bug", domain.SeverityHigh),
+		bugRow(5, "medium bug", domain.SeverityMedium),
 	}
 	order := m.displayOrder(SortSeverity)
 	var got []domain.Severity
@@ -319,9 +320,9 @@ func TestDisplayOrderStable(t *testing.T) {
 	late := fixedTime.Add(2 * time.Hour)
 	mid := fixedTime.Add(time.Hour)
 	m.rows = []featureRow{
-		bugRow(3, "newest high", domain.StageTodo, domain.SeverityHigh).withCreated(late),
-		bugRow(1, "oldest high", domain.StageTodo, domain.SeverityHigh).withCreated(early),
-		bugRow(2, "middle high", domain.StageTodo, domain.SeverityHigh).withCreated(mid),
+		bugRow(3, "newest high", domain.SeverityHigh).withCreated(late),
+		bugRow(1, "oldest high", domain.SeverityHigh).withCreated(early),
+		bugRow(2, "middle high", domain.SeverityHigh).withCreated(mid),
 	}
 	first := m.displayOrder(SortSeverity)
 	second := m.displayOrder(SortSeverity)

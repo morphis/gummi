@@ -105,7 +105,7 @@ func TestSeededBugTemplate_DiscussionSection(t *testing.T) {
 	if envIdx < 0 || discIdx < 0 || rootIdx < 0 {
 		t.Fatalf("missing section\n---\n%s", out)
 	}
-	if !(envIdx < discIdx && discIdx < rootIdx) {
+	if envIdx >= discIdx || discIdx >= rootIdx {
 		t.Errorf("Discussion must sit between Environment and Root cause\n---\n%s", out)
 	}
 	if !strings.Contains(out, "likely the SAML session cookie") || !strings.Contains(out, "**bob:** repros") {

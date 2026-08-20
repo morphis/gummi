@@ -524,8 +524,9 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	ctx := context.Background()
 	var n int
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pragma_table_info('features') WHERE name='severity'`,
 	).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -534,7 +535,6 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("severity column missing from features schema (count=%d)", n)
 	}
 
-	ctx := context.Background()
 	id, _ := domain.NewID(domain.KindBug, 1)
 	f := feat(1, "Severe bug")
 	f.ID = id
@@ -561,7 +561,7 @@ func TestMigrations(t *testing.T) {
 	// The sessions flavor column exists after migration and round-trips a
 	// session's pass identity through a fresh open.
 	var fn int
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='flavor'`,
 	).Scan(&fn); err != nil {
 		t.Fatal(err)

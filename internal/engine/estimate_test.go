@@ -131,7 +131,7 @@ func TestEstimateRunsScribe(t *testing.T) {
 func TestEstimateCarriesArtifactPath(t *testing.T) {
 	for _, f := range []domain.Feature{
 		feature(1, "impl", domain.StageImplement),
-		bugFeature(2, "flaky", domain.StageFix),
+		bugFeature("flaky"),
 	} {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)
@@ -153,7 +153,7 @@ func TestEstimateCarriesArtifactPath(t *testing.T) {
 func TestEstimatePassesSpecPathAsExtraRead(t *testing.T) {
 	for _, f := range []domain.Feature{
 		feature(1, "impl", domain.StageImplement),
-		bugFeature(2, "flaky", domain.StageFix),
+		bugFeature("flaky"),
 	} {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)

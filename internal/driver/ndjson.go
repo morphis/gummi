@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/verifydoc"
 )
 
 // emitter serializes the run's event stream as NDJSON — one compact JSON
@@ -115,7 +116,29 @@ type blockedEvent struct {
 	// BlockingDeps names each outstanding dependency (its ID and current
 	// stage) when a coding gate is held by an unmet dependency.
 	BlockingDeps []engine.BlockingDep `json:"blocking_deps,omitempty"`
-	Resume       string               `json:"resume"`
+	// Document summarizes a research card's failing citation/coverage
+	// floor when a StatusBlockedDocument gate holds the card at verify.
+	Document *documentSummary `json:"document,omitempty"`
+	Resume   string           `json:"resume"`
+}
+
+// documentSummary is the NDJSON-facing shape of a verifydoc.Report: counts
+// only, so the stream stays compact — the full report is available in the
+// TUI's spec view for anyone who needs the detail.
+type documentSummary struct {
+	OpenThreads int `json:"open_threads,omitempty"`
+	Citations   int `json:"citations,omitempty"`
+	Coverage    int `json:"coverage,omitempty"`
+}
+
+// newDocumentSummary converts an engine document report to its NDJSON
+// summary.
+func newDocumentSummary(r verifydoc.Report) *documentSummary {
+	return &documentSummary{
+		OpenThreads: r.OpenThreads,
+		Citations:   len(r.Citations),
+		Coverage:    len(r.Coverage),
+	}
 }
 
 type escalationEvent struct {

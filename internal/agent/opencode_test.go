@@ -312,6 +312,13 @@ func TestOpencodeSendInjectsOutputTokenMax(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
+	// The harness may already export this var; scrub it for the test's
+	// duration so the "unset" subtest's absence assertion isn't confounded
+	// by an ambient value leaking into the fake opencode's env dump.
+	if old, ok := os.LookupEnv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"); ok {
+		os.Unsetenv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX")
+		t.Cleanup(func() { os.Setenv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX", old) })
+	}
 	run := func(t *testing.T, otm int) string {
 		dir := t.TempDir()
 		envFile := dir + "/env"
@@ -505,7 +512,7 @@ func TestOpencodeZeroEventSessionSurfacesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ag.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
 	if err != nil {

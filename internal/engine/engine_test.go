@@ -66,14 +66,16 @@ func feature(num int, title string, stage domain.Stage) domain.Feature {
 	}
 }
 
-// bugFeature builds a bug-kind work item (BG-NNN) the same way feature
-// does, so tests can cover the artifact-path naming across kinds.
-func bugFeature(num int, title string, stage domain.Stage) domain.Feature {
+// bugFeature builds a bug-kind work item (BG-002) parked at Fix, the same
+// way feature does, so tests can cover the artifact-path naming across
+// kinds.
+func bugFeature(title string) domain.Feature {
+	const num = 2
 	id, _ := domain.NewID(domain.KindBug, num)
 	slug, _ := domain.Slugify(title)
 	now := time.Now()
 	return domain.Feature{
-		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: stage,
+		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: domain.StageFix,
 		CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -516,7 +518,7 @@ func TestWorktreeStageLocatesWorktree(t *testing.T) {
 func TestArtifactPathOnStageSession(t *testing.T) {
 	for _, f := range []domain.Feature{
 		feature(1, "impl me", domain.StageImplement),
-		bugFeature(2, "flaky test", domain.StageFix),
+		bugFeature("flaky test"),
 	} {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)

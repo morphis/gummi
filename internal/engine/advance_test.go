@@ -637,3 +637,60 @@ func TestAdvanceResearchVerifyDoneNoMerge(t *testing.T) {
 		t.Fatalf("research card did not reach done: %s", got.Stage)
 	}
 }
+
+// TestAdvanceVerifyDocument mirrors verifychecks_test.go's shape for the
+// new deterministic document gate: a research card at verify whose
+// artifact fails the citation floor (no open user threads, so the new
+// verifydoc gate is exercised rather than StatusBlockedQuestions) stays at
+// verify with the broken citation named in the report; fixing the
+// citation advances it straight to done.
+func TestAdvanceVerifyDocument(t *testing.T) {
+	e, ws, store, wt := advanceEngine(t)
+	f := feature(1, "rs verify", domain.StageVerify)
+	f.ID = domain.FeatureID("RS-001")
+	f.Kind = domain.KindResearch
+	putFeature(t, store, f)
+
+	if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	failing := "# RS-001: rs verify\n\n## Findings\n\n" +
+		"Broken cite `internal/missing.go:1` here.\n"
+	if err := os.WriteFile(draft, []byte(failing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusBlockedDocument {
+		t.Fatalf("status=%d, want StatusBlockedDocument", res.Status)
+	}
+	if len(res.DocumentReport.Citations) != 1 {
+		t.Fatalf("DocumentReport.Citations = %+v, want exactly 1 issue", res.DocumentReport.Citations)
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageVerify {
+		t.Fatalf("blocked document gate still transitioned to %s", got.Stage)
+	}
+
+	// fix the citation: an existing, in-range file under the repo root
+	if err := os.MkdirAll(filepath.Join(wt.RepoRoot(), "internal"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	cited := filepath.Join(wt.RepoRoot(), "internal", "foo.go")
+	if err := os.WriteFile(cited, []byte("package foo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	passing := "# RS-001: rs verify\n\n## Findings\n\n" +
+		"Cite `internal/foo.go:1` here.\n"
+	if err := os.WriteFile(draft, []byte(passing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res = mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageDone {
+		t.Fatalf("passing document: status=%d to=%s, want advanced/done", res.Status, res.To)
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDone {
+		t.Fatalf("research card did not reach done: %s", got.Stage)
+	}
+}

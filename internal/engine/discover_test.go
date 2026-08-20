@@ -109,7 +109,7 @@ func TestDiscoverChecksUnusableReplyIsSoft(t *testing.T) {
 func TestDiscoverChecksCarriesArtifactPath(t *testing.T) {
 	for _, f := range []domain.Feature{
 		feature(1, "discover spec", domain.StagePlan),
-		bugFeature(2, "discover bug", domain.StageFix),
+		bugFeature("discover bug"),
 	} {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)
@@ -142,7 +142,7 @@ func TestDiscoverChecksCarriesArtifactPath(t *testing.T) {
 func TestDiscoverChecksPassesSpecPathAsExtraRead(t *testing.T) {
 	for _, f := range []domain.Feature{
 		feature(1, "discover spec", domain.StagePlan),
-		bugFeature(2, "discover bug", domain.StageFix),
+		bugFeature("discover bug"),
 	} {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)

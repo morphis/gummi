@@ -23,7 +23,8 @@ const (
 	// carries that AdvanceResult.
 	ReverifyFinalized ReverifyStatus = iota
 	// ReverifyBlocked: the checks passed but the finalize gate is held open
-	// by unresolved user %% threads or diff annotations. The feature stays
+	// by unresolved user %% threads, diff annotations, or (for a research
+	// card) a failing document floor. The feature stays
 	// at verify and verified_at is not stamped, so status reports
 	// verified:false — the caller must surface the block, not "done".
 	// Result.Advance carries the AdvanceResult whose Blocked status explains
@@ -151,7 +152,7 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	res.Advance = adv
 	res.Feature = adv.Feature
 	switch adv.Status {
-	case StatusBlockedQuestions, StatusBlockedDiff:
+	case StatusBlockedQuestions, StatusBlockedDiff, StatusBlockedDocument:
 		res.Status = ReverifyBlocked
 	default:
 		res.Status = ReverifyFinalized

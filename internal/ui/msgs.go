@@ -400,6 +400,16 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 				text:  fmt.Sprintf("%s: blocked by unmet dependency %s — land it before this card can start coding", id, strings.Join(names, ", ")),
 				isErr: true,
 			}
+		case engine.StatusBlockedDocument:
+			// the deterministic citation/coverage floor (internal/verifydoc)
+			// failed — the document stays at verify rather than reaching done
+			// on a broken citation or an unmapped brief question.
+			rep := res.DocumentReport
+			return noticeMsg{
+				text: fmt.Sprintf("%s: document floor failed — %d open thread(s), %d broken citation(s), %d unmapped question(s)",
+					id, rep.OpenThreads, len(rep.Citations), len(rep.Coverage)),
+				isErr: true,
+			}
 		case engine.StatusNeedsMerge:
 			// verify→done is the user's "this feature is done" decision: the
 			// merge flow (user-written message → squash merge) finishes the

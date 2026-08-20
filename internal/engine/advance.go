@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -33,6 +35,11 @@ const (
 	// one of its direct dependencies is still short of Done — its work is
 	// not yet available to build on.
 	StatusBlockedDependency
+	// StatusBlockedDocument: a research card's Verify→done gate, where the
+	// document fails the deterministic citation/coverage floor
+	// (internal/verifydoc). The feature stays at verify; DocumentReport
+	// carries the broken citations and unmapped questions.
+	StatusBlockedDocument
 	// StatusNeedsMerge: the verify→done gate, where the branch is ahead of
 	// main and awaits a squash-merge decision. Advance never merges — the
 	// caller lands the branch (the TUI collects a commit message; the
@@ -68,6 +75,9 @@ type AdvanceResult struct {
 	// Status is StatusBlockedDependency — its ID and the stage it is
 	// stuck at.
 	BlockingDeps []BlockingDep
+	// DocumentReport carries the broken citations and unmapped coverage
+	// items when Status is StatusBlockedDocument.
+	DocumentReport verifydoc.Report
 	// EnteredWorktree reports that this call created the item's worktree
 	// (the design→work approval gate), so the caller can kick off the
 	// one-shot check-discovery + baseline passes over the fresh branch.
@@ -118,6 +128,22 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	if n := e.openDiffCommentsBlockingGate(ctx, id); n > 0 {
 		res.Status, res.Blockers = StatusBlockedDiff, n
 		return res, nil
+	}
+
+	// A research card's Verify→done gate additionally runs the
+	// deterministic citation/coverage floor (internal/verifydoc): a broken
+	// citation or an unmapped brief question bounces the card back to
+	// investigate the same way an open thread does, before any worktree or
+	// merge bookkeeping runs.
+	if next == domain.StageDone && f.Kind == domain.KindResearch {
+		report, err := e.documentReport(ctx, &f)
+		if err != nil {
+			return res, err
+		}
+		if !report.Pass() {
+			res.Status, res.DocumentReport = StatusBlockedDocument, report
+			return res, nil
+		}
 	}
 
 	// A card cannot enter its coding stage while one of its direct
@@ -388,6 +414,50 @@ func (e *Engine) artifactFile(f *domain.Feature) string {
 		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(f)),
 		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
 	)
+}
+
+// documentReport runs the deterministic verifydoc floor against a research
+// card's artifact: the file map covers only the paths its Findings
+// citations name, read from the card's managed repo checkout, so the
+// report never leaks existence or line counts of any other file.
+func (e *Engine) documentReport(ctx context.Context, f *domain.Feature) (verifydoc.Report, error) {
+	path := e.artifactFile(f)
+	if path == "" {
+		return verifydoc.Report{}, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return verifydoc.Report{}, nil
+	}
+	artifact := string(raw)
+	wt, err := e.mgr(ctx, f)
+	if err != nil {
+		return verifydoc.Report{}, err
+	}
+	files := fileMap(wt.RepoRoot(), verifydoc.CitedPaths(artifact))
+	return verifydoc.Check(artifact, files), nil
+}
+
+// fileMap reads each cited path's lines from root, keyed by the path as
+// cited. A path that would resolve outside root is skipped and never
+// read — containment is enforced once at citation-parse time too
+// (verifydoc.Check), but fileMap asserts it independently so the file set
+// handed to the report can never extend past the checkout.
+func fileMap(root string, paths []string) map[string][]string {
+	out := make(map[string][]string, len(paths))
+	for _, p := range paths {
+		full := filepath.Join(root, p)
+		rel, err := filepath.Rel(root, full)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		data, err := os.ReadFile(full) //nolint:gosec // rel is checked above to stay under root
+		if err != nil {
+			continue // missing file: verifydoc.Check reports it as a citation issue
+		}
+		out[p] = strings.Split(string(data), "\n")
+	}
+	return out
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored `%%`

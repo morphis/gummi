@@ -488,6 +488,58 @@ func TestBlockedGate(t *testing.T) {
 	}
 }
 
+// A research card whose document fails the deterministic citation floor
+// (internal/verifydoc) drives to blocked at verify — no worktree involved,
+// since research cards never materialize one — and the blocked event
+// carries the document report's counts.
+func TestBlockedByDocument(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+	// research stages run read-only in the main checkout; only a backend
+	// that can structurally enforce that is allowed to drive them.
+	h.fake.Caps.ReadOnlyEnforce = true
+	id, err := domain.NewID(domain.KindResearch, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := domain.Slugify("research card")
+	now := time.Now()
+	f := domain.Feature{
+		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
+		Stage: domain.StageVerify, CreatedAt: now, UpdatedAt: now,
+	}
+	putDraft(t, h, &f, "# RS-001: research card\n\n## Findings\n\n"+
+		"Broken cite `internal/missing.go:1` here.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{}).drive(context.Background(), f.ID)
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	if out.Status != StatusBlocked {
+		t.Fatalf("status = %q, want blocked; stream=%v", out.Status, h.eventKinds())
+	}
+	b := lastEvent(h, "blocked")
+	if b == nil {
+		t.Fatalf("no blocked event; stream=%v", h.eventKinds())
+	}
+	doc, ok := b["document"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("blocked event missing document summary: %v", b)
+	}
+	if doc["citations"].(float64) != 1 {
+		t.Fatalf("document summary = %v, want citations=1", doc)
+	}
+	if h.stageOf(f.ID) != domain.StageVerify {
+		t.Fatalf("feature advanced past verify on a failing document, want it parked")
+	}
+}
+
 // A stage that never idles trips the per-stage inactivity timeout.
 func TestStageTimeout(t *testing.T) {
 	block := make(chan struct{})
