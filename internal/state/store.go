@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	spend_model   TEXT NOT NULL DEFAULT '',
 	activity      TEXT NOT NULL DEFAULT '',
 	error         TEXT NOT NULL DEFAULT '',
+	verdict       TEXT NOT NULL DEFAULT '',
 	updated_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_messages (
@@ -304,6 +305,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN plan_rounds INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN review_rounds INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN flavor TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE sessions ADD COLUMN verdict TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN commit_draft_fail TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 }

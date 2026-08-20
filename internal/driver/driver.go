@@ -617,7 +617,19 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 			}
 			if snap.State == engine.StateDone && snap.Critique {
 				// awaiting replan/approval: the judge decides (replan writer
-				// on changes, gate on pass). Never re-run the critique.
+				// on changes, gate on pass). Never re-run the critique —
+				// unless its verdict is unrecoverable: a session judged in
+				// a prior process whose structured verdict never persisted
+				// re-derives Unclear from an empty field, and re-judging
+				// that dead snapshot would escalate identically forever.
+				// Run a fresh critique instead so the loop recovers.
+				if verdict.SessionVerdict(snap) == verdict.Unclear {
+					if err := d.eng.RunCritique(f, verdict.ReCritiqueNote); err != nil {
+						return Outcome{}, err
+					}
+					d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "re-critiquing"})
+					return d.awaitPlanCritique(ctx, f)
+				}
 				return d.judgePlanCritique(ctx, f, snap)
 			}
 			// still in flight: keep awaiting the running pass, spawn nothing.

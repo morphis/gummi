@@ -42,7 +42,11 @@ type SessionSnapshot struct {
 	// Error is the last run error's text, persisted so a failed run can be
 	// reconstructed into the needs-attention queue after a restart. Empty
 	// for clean sessions.
-	Error      string
+	Error string
+	// Verdict is the structured review/critique verdict submitted via
+	// submit_verdict, persisted so a resumed process judges a finished
+	// session the way the live one did instead of re-deriving Unclear.
+	Verdict    string
 	Transcript []SessionMessage
 }
 
@@ -61,17 +65,17 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO sessions (feature_id, stage, role, flavor, state, agent_session,
-			spend_credits, spend_in, spend_out, spend_model, activity, error, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+			spend_credits, spend_in, spend_out, spend_model, activity, error, verdict, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(feature_id) DO UPDATE SET
 			stage=excluded.stage, role=excluded.role, flavor=excluded.flavor,
 			state=excluded.state, agent_session=excluded.agent_session,
 			spend_credits=excluded.spend_credits, spend_in=excluded.spend_in,
 			spend_out=excluded.spend_out, spend_model=excluded.spend_model,
-			activity=excluded.activity, error=excluded.error, updated_at=excluded.updated_at`,
+			activity=excluded.activity, error=excluded.error, verdict=excluded.verdict, updated_at=excluded.updated_at`,
 		string(snap.Feature), string(snap.Stage), snap.Role, snap.Flavor, snap.State, snap.AgentSession,
 		snap.SpendCredits, snap.SpendIn, snap.SpendOut, snap.SpendModel,
-		strings.Join(snap.Activity, activitySep), snap.Error, time.Now().UTC().Format(timeFmt)); err != nil {
+		strings.Join(snap.Activity, activitySep), snap.Error, snap.Verdict, time.Now().UTC().Format(timeFmt)); err != nil {
 		return fmt.Errorf("saving session %s: %w", snap.Feature, err)
 	}
 
@@ -101,7 +105,7 @@ func (s *Store) DeleteSession(ctx context.Context, id domain.FeatureID) error {
 func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.feature_id, s.stage, s.role, s.flavor, s.state, s.agent_session,
-			s.spend_credits, s.spend_in, s.spend_out, s.spend_model, s.activity, s.error
+			s.spend_credits, s.spend_in, s.spend_out, s.spend_model, s.activity, s.error, s.verdict
 		FROM sessions s JOIN features f ON f.id = s.feature_id
 		ORDER BY f.num`)
 	if err != nil {
@@ -114,7 +118,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 		var snap SessionSnapshot
 		var fid, stage, activity string
 		if err := rows.Scan(&fid, &stage, &snap.Role, &snap.Flavor, &snap.State, &snap.AgentSession,
-			&snap.SpendCredits, &snap.SpendIn, &snap.SpendOut, &snap.SpendModel, &activity, &snap.Error); err != nil {
+			&snap.SpendCredits, &snap.SpendIn, &snap.SpendOut, &snap.SpendModel, &activity, &snap.Error, &snap.Verdict); err != nil {
 			return nil, err
 		}
 		snap.Feature = domain.FeatureID(fid)

@@ -12,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // The quick route runs end to end to a verified branch and STOPS there —
@@ -1016,5 +1017,51 @@ func planApproveScript() map[domain.Stage]stageFn {
 			}
 			return msgIdle(o.Model, "Plan written.")
 		},
+	}
+}
+
+// A resume that lands on a finished plan critique whose structured
+// verdict was lost (a prior process that never persisted it) must not
+// re-judge the dead snapshot as Unclear forever — it runs a fresh
+// critique so the card recovers instead of escalating identically.
+func TestResumeRejudgesLostCritiqueVerdict(t *testing.T) {
+	h := newHarness(t, true, planApproveScript())
+	f := feature(1, domain.StagePlan)
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.wt.Create(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	// a previous process finished the plan critique but its structured
+	// verdict never crossed the persistence boundary: the restored session
+	// is Done and the last assistant line is prose ("Verdict recorded:
+	// **changes**") with no VERDICT: token, so SessionVerdict is Unclear.
+	if err := h.store.SaveSession(context.Background(), state.SessionSnapshot{
+		Feature: f.ID,
+		Stage:   domain.StagePlan,
+		Role:    string(agent.RoleReviewer),
+		Flavor:  "critique",
+		State:   "done",
+		Transcript: []state.SessionMessage{
+			{Author: "system", Content: "critique the plan"},
+			{Author: "assistant", Content: "Verdict recorded: **changes**"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	// before the fix this resumed to "plan critique finished with no clear
+	// verdict" and never left Plan; now a fresh critique ran and its verdict
+	// carried the card past the plan gate.
+	if h.stageOf(f.ID) == domain.StagePlan {
+		t.Fatalf("feature stuck re-judging the lost critique verdict; status=%s stream=%v", out.Status, h.eventKinds())
+	}
+	if h.calls[domain.StagePlan] == 0 {
+		t.Fatal("no fresh critique session was spawned on resume")
 	}
 }

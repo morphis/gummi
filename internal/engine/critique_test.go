@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -137,5 +138,42 @@ func TestRestoreRecoversCritiqueFlag(t *testing.T) {
 	snap := s.Snapshot()
 	if !snap.Critique || snap.Role != agent.RoleReviewer {
 		t.Errorf("restored critique = %v role = %s, want critique reviewer", snap.Critique, snap.Role)
+	}
+}
+
+func TestCritiqueVerdictPersistsAndRestores(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StagePlan)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+
+	// the real flow: the critique submits a structured verdict via the
+	// submit_verdict client tool, which sets the session verdict and
+	// persists it on the session row.
+	args := json.RawMessage(`{"verdict":"changes","summary":"closure table is missing"}`)
+	e1 := persistEngine(t, toolCallFake("submit_verdict", args), ws, store, wt)
+	if err := e1.RunCritique(f, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e1, f.ID, StateDone)
+	if got := e1.Get(f.ID).Snapshot().Verdict; got != "changes" {
+		t.Fatalf("live verdict = %q, want changes", got)
+	}
+	e1.Close()
+
+	// a fresh engine restores the finished critique and must recover the
+	// same verdict the live session reached — otherwise a resume re-judges
+	// it as Unclear regardless of what was actually decided.
+	e2 := persistEngine(t, agent.NewFake("x"), ws, store, wt)
+	if err := e2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := e2.Get(f.ID)
+	if s == nil {
+		t.Fatal("critique session not restored")
+	}
+	if got := s.Snapshot().Verdict; got != "changes" {
+		t.Fatalf("restored verdict = %q, want changes", got)
 	}
 }

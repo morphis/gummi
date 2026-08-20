@@ -48,6 +48,7 @@ func (e *Engine) persist(s *Session) {
 		SpendOut:     snap.Spend.OutputTokens,
 		SpendModel:   snap.Spend.Model,
 		Activity:     snap.Activity,
+		Verdict:      snap.Verdict,
 	}
 	if snap.Err != nil {
 		rec.Error = snap.Err.Error()
@@ -140,6 +141,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if snap.Error != "" {
 			s.err = restoredErr(snap.Error)
 		}
+		s.verdict = snap.Verdict
 		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
 		// A resumable live session is being rehydrated (a parked interactive
