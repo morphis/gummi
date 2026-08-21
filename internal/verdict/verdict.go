@@ -11,18 +11,23 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
 
-// MaxReviewRounds caps the automatic review→fix→review loop (DESIGN §10
-// decision 4). Past the cap, both consumers escalate to the human
-// instead of looping.
-const MaxReviewRounds = 3
-
-// MaxPlanRounds caps the automatic plan→critique→replan loop. Lower
-// than the review cap: plan revisions are cheap to judge and the human
-// gate is right behind the critique anyway.
-const MaxPlanRounds = 2
+// MaxRounds caps the automatic loop for round kind k (DESIGN §10 decision
+// 4): 3 for the review→fix→review loop (RoundKindReview — the research
+// slice's review loop reuses this cap verbatim, with no separate
+// constant), 2 for the plan→critique→replan loop (RoundKindPlan — lower
+// than the review cap, since plan revisions are cheap to judge and the
+// human gate is right behind the critique anyway). Past the cap, every
+// consumer escalates to the human instead of looping.
+func MaxRounds(k domain.RoundKind) int {
+	if k == domain.RoundKindPlan {
+		return 2
+	}
+	return 3
+}
 
 // Verdict is the outcome parsed from a review/verify/critique session.
 type Verdict int

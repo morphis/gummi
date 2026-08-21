@@ -64,12 +64,22 @@ CREATE TABLE IF NOT EXISTS features (
 	gate_approval   TEXT NOT NULL DEFAULT '',
 	severity        TEXT NOT NULL DEFAULT '',
 	fork_point      TEXT NOT NULL DEFAULT '',
-	plan_rounds     INTEGER NOT NULL DEFAULT 0,
-	review_rounds   INTEGER NOT NULL DEFAULT 0,
 	commit_draft_fail TEXT NOT NULL DEFAULT '',
 	repo            TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
+
+-- One row per (feature, round kind) live loop counter: the collapsed
+-- seam behind internal/rounds, replacing the former plan_rounds and
+-- review_rounds columns above. A missing row reads as 0 (no cycle
+-- started); IncrementRounds is a single atomic UPDATE, never a
+-- read-modify-write.
+CREATE TABLE IF NOT EXISTS rounds (
+	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	round_kind TEXT NOT NULL,
+	count      INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (feature_id, round_kind)
+);
 CREATE TABLE IF NOT EXISTS transitions (
 	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
 	feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
@@ -210,7 +220,130 @@ func OpenStore(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
+	if err := rebuildRoundsKeyed(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// rebuildRoundsKeyed migrates the two live per-feature round columns
+// (plan_rounds, review_rounds) into the keyed rounds table, then drops
+// them from features — the two columns the collapsed internal/rounds
+// seam replaces. Idempotent gate: it runs only when features still
+// carries a plan_rounds column (SQLite cannot drop a column that was
+// never added, and a fresh DB's base schema never adds one), so a
+// fresh DB and a re-opened already-migrated DB are both no-ops. When it
+// does run, one transaction creates the rounds table (if not already
+// present), copies each feature's nonzero plan_rounds/review_rounds
+// into a row, then rebuilds features without the two columns — the
+// same copy+rename shape as rebuildStageSpendPK.
+func rebuildRoundsKeyed(db *sql.DB) error {
+	ctx := context.Background()
+	// A single-row aggregate scan (rather than Query+Next+Close) needs no
+	// explicit Close: db has a single pooled connection (SetMaxOpenConns(1)),
+	// and QueryRowContext releases it as soon as Scan returns, before the
+	// PRAGMA/transaction calls further down this same function reuse it.
+	var hasColumn bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) > 0 FROM pragma_table_info('features') WHERE name = 'plan_rounds'`,
+	).Scan(&hasColumn); err != nil {
+		return err
+	}
+	if !hasColumn {
+		return nil
+	}
+
+	// features is the parent of several FK-referencing tables (transitions,
+	// sessions, diff_annotations, stage_spend, check_baseline, feature_deps,
+	// and now rounds); recreating it must run with FK enforcement off, per
+	// SQLite's documented recipe for schema changes ALTER TABLE cannot
+	// express. PRAGMA foreign_keys cannot be toggled inside a transaction,
+	// so it brackets the transaction rather than living inside it.
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer db.ExecContext(ctx, `PRAGMA foreign_keys=ON`) //nolint:errcheck // best-effort restore
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS rounds (
+			feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+			round_kind TEXT NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (feature_id, round_kind)
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO rounds (feature_id, round_kind, count)
+		SELECT id, 'plan', plan_rounds FROM features WHERE plan_rounds > 0`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO rounds (feature_id, round_kind, count)
+		SELECT id, 'review', review_rounds FROM features WHERE review_rounds > 0`); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE features_new (
+			id              TEXT PRIMARY KEY,
+			num             INTEGER NOT NULL UNIQUE,
+			title           TEXT NOT NULL,
+			one_liner       TEXT NOT NULL DEFAULT '',
+			slug            TEXT NOT NULL,
+			stage           TEXT NOT NULL,
+			skip_brainstorm INTEGER NOT NULL DEFAULT 0,
+			skip_plan       INTEGER NOT NULL DEFAULT 0,
+			profile         TEXT NOT NULL DEFAULT '',
+			budget_envelope INTEGER NOT NULL DEFAULT 0,
+			budget_spent    INTEGER NOT NULL DEFAULT 0,
+			spend_credits   REAL NOT NULL DEFAULT 0,
+			spend_est       REAL NOT NULL DEFAULT 0,
+			spend_in        INTEGER NOT NULL DEFAULT 0,
+			spend_out       INTEGER NOT NULL DEFAULT 0,
+			created_at      TEXT NOT NULL,
+			updated_at      TEXT NOT NULL,
+			kind            TEXT NOT NULL DEFAULT 'feature',
+			external_ref    TEXT NOT NULL DEFAULT '',
+			skip_triage     INTEGER NOT NULL DEFAULT 0,
+			skip_diagnose   INTEGER NOT NULL DEFAULT 0,
+			quick           INTEGER NOT NULL DEFAULT 0,
+			verified_at     TEXT NOT NULL DEFAULT '',
+			gate_approval   TEXT NOT NULL DEFAULT '',
+			severity        TEXT NOT NULL DEFAULT '',
+			fork_point      TEXT NOT NULL DEFAULT '',
+			commit_draft_fail TEXT NOT NULL DEFAULT '',
+			repo            TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO features_new
+			(id, num, title, one_liner, slug, stage,
+			 skip_brainstorm, skip_plan, profile,
+			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
+			 created_at, updated_at,
+			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
+			 severity, fork_point, commit_draft_fail, repo)
+		 SELECT id, num, title, one_liner, slug, stage,
+			 skip_brainstorm, skip_plan, profile,
+			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
+			 created_at, updated_at,
+			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
+			 severity, fork_point, commit_draft_fail, repo
+		 FROM features`,
+		`DROP TABLE features`,
+		`ALTER TABLE features_new RENAME TO features`,
+		`CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref)`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // rebuildStageSpendPK migrates stage_spend rows keyed (feature_id,
@@ -302,8 +435,6 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN gate_approval TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN severity TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE features ADD COLUMN plan_rounds INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE features ADD COLUMN review_rounds INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN flavor TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE sessions ADD COLUMN verdict TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN commit_draft_fail TEXT NOT NULL DEFAULT ''`,
@@ -340,13 +471,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, plan_rounds, review_rounds, commit_draft_fail, repo)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, commit_draft_fail, repo)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.PlanRounds, f.ReviewRounds, f.CommitDraftFail, f.Repo)
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.CommitDraftFail, f.Repo)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -357,7 +488,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, plan_rounds, review_rounds, commit_draft_fail, repo`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, commit_draft_fail, repo`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -385,7 +516,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.PlanRounds, &f.ReviewRounds, &f.CommitDraftFail, &f.Repo)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.CommitDraftFail, &f.Repo)
 	if err != nil {
 		return f, err
 	}
@@ -560,107 +691,72 @@ func (s *Store) ClearForkPoint(ctx context.Context, id domain.FeatureID) error {
 	return nil
 }
 
-// PlanRounds reads a feature's live plan-critique round count — the
-// per-cycle counter the engine reads back on resume to size the remaining
-// critique budget. A feature without a row reads 0 (it has not started a
-// plan cycle). Unlike fork_point it is a running counter, not an anchor.
-func (s *Store) PlanRounds(ctx context.Context, id domain.FeatureID) (int, error) {
-	var rounds int
+// Rounds reads a feature's live round count for the given kind — the
+// per-cycle counter the engine reads back on resume to size the
+// remaining round budget (plan-critique or review→fix). A feature with
+// no row for (id, kind) reads 0 (it has not started that cycle).
+func (s *Store) Rounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) (int, error) {
+	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT plan_rounds FROM features WHERE id = ?`, string(id)).Scan(&rounds)
+		`SELECT count FROM rounds WHERE feature_id = ? AND round_kind = ?`, string(id), string(kind)).Scan(&count)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
 		}
-		return 0, fmt.Errorf("reading plan-rounds for %s: %w", id, err)
+		return 0, fmt.Errorf("reading %s-rounds for %s: %w", kind, id, err)
 	}
-	return rounds, nil
+	return count, nil
 }
 
-// SetPlanRounds sets a feature's plan-critique round count by value — the
-// set-by-value write for the side-channel. It is a side-channel write (it
-// neither touches updated_at nor moves the stage), matching SetForkPoint.
-// No cap is enforced here; that stays a driver/verdict constant.
+// IncrementRounds bumps a feature's round count for the given kind by one
+// in a single atomic upsert — never a read-modify-write — so concurrent
+// processes can't lose an increment across a resume. It is unbounded: no
+// cap lives here (see verdict.MaxRounds).
+func (s *Store) IncrementRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) error {
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, 1)
+		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = count + 1`,
+		string(id), string(kind)); err != nil {
+		return fmt.Errorf("incrementing %s-rounds for %s: %w", kind, id, err)
+	}
+	return nil
+}
+
+// ClearRounds resets a feature's round count for the given kind to 0 —
+// the reset that happens when a cycle completes or escalates. A
+// live-cycle counter, so clearing a row that doesn't exist yet is
+// harmless.
+func (s *Store) ClearRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind) error {
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, 0)
+		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = 0`,
+		string(id), string(kind)); err != nil {
+		return fmt.Errorf("clearing %s-rounds for %s: %w", kind, id, err)
+	}
+	return nil
+}
+
+// SetPlanRounds sets a feature's plan-critique round count by value — a
+// test-only side-channel write routed to the keyed rounds storage. No cap
+// is enforced here; that stays verdict.MaxRounds.
 func (s *Store) SetPlanRounds(ctx context.Context, id domain.FeatureID, rounds int) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET plan_rounds = ? WHERE id = ?`, rounds, string(id)); err != nil {
-		return fmt.Errorf("setting plan-rounds for %s: %w", id, err)
-	}
-	return nil
+	return s.setRounds(ctx, id, domain.RoundKindPlan, rounds)
 }
 
-// IncrementPlanRounds bumps a feature's plan-critique round count by one in
-// a single atomic UPDATE — never a read-modify-write — so concurrent
-// processes can't lose an increment across a resume. It is unbounded: no
-// maxPlanRounds cap lives here.
-func (s *Store) IncrementPlanRounds(ctx context.Context, id domain.FeatureID) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET plan_rounds = plan_rounds + 1 WHERE id = ?`, string(id)); err != nil {
-		return fmt.Errorf("incrementing plan-rounds for %s: %w", id, err)
-	}
-	return nil
-}
-
-// ClearPlanRounds resets a feature's plan-critique round count to 0 — the
-// reset that happens when a plan cycle completes. A live-cycle counter, so
-// resetting an already-0 row is harmless.
-func (s *Store) ClearPlanRounds(ctx context.Context, id domain.FeatureID) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET plan_rounds = 0 WHERE id = ?`, string(id)); err != nil {
-		return fmt.Errorf("clearing plan-rounds for %s: %w", id, err)
-	}
-	return nil
-}
-
-// ReviewRounds reads a feature's live review→fix round count — the
-// per-cycle counter the engine reads back on resume so a fresh process
-// honors the rounds already burned instead of re-granting the whole review
-// budget. A feature without a row reads 0 (it has not started a review
-// loop). Like plan_rounds it is a running counter, not an anchor.
-func (s *Store) ReviewRounds(ctx context.Context, id domain.FeatureID) (int, error) {
-	var rounds int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT review_rounds FROM features WHERE id = ?`, string(id)).Scan(&rounds)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("reading review-rounds for %s: %w", id, err)
-	}
-	return rounds, nil
-}
-
-// SetReviewRounds sets a feature's review→fix round count by value — the
-// set-by-value write for the side-channel. It is a side-channel write (it
-// neither touches updated_at nor moves the stage), matching SetPlanRounds.
-// No cap is enforced here; that stays a driver/verdict constant.
+// SetReviewRounds sets a feature's review→fix round count by value — a
+// test-only side-channel write routed to the keyed rounds storage,
+// matching SetPlanRounds. No cap is enforced here; that stays
+// verdict.MaxRounds.
 func (s *Store) SetReviewRounds(ctx context.Context, id domain.FeatureID, rounds int) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET review_rounds = ? WHERE id = ?`, rounds, string(id)); err != nil {
-		return fmt.Errorf("setting review-rounds for %s: %w", id, err)
-	}
-	return nil
+	return s.setRounds(ctx, id, domain.RoundKindReview, rounds)
 }
 
-// IncrementReviewRounds bumps a feature's review→fix round count by one in
-// a single atomic UPDATE — never a read-modify-write — so concurrent
-// processes can't lose an increment across a resume. It is unbounded: no
-// MaxReviewRounds cap lives here.
-func (s *Store) IncrementReviewRounds(ctx context.Context, id domain.FeatureID) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET review_rounds = review_rounds + 1 WHERE id = ?`, string(id)); err != nil {
-		return fmt.Errorf("incrementing review-rounds for %s: %w", id, err)
-	}
-	return nil
-}
-
-// ClearReviewRounds resets a feature's review→fix round count to 0 — the
-// reset that happens when a review loop completes or escalates. A
-// live-cycle counter, so resetting an already-0 row is harmless.
-func (s *Store) ClearReviewRounds(ctx context.Context, id domain.FeatureID) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE features SET review_rounds = 0 WHERE id = ?`, string(id)); err != nil {
-		return fmt.Errorf("clearing review-rounds for %s: %w", id, err)
+func (s *Store) setRounds(ctx context.Context, id domain.FeatureID, kind domain.RoundKind, rounds int) error {
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO rounds (feature_id, round_kind, count) VALUES (?, ?, ?)
+		ON CONFLICT (feature_id, round_kind) DO UPDATE SET count = ?`,
+		string(id), string(kind), rounds, rounds); err != nil {
+		return fmt.Errorf("setting %s-rounds for %s: %w", kind, id, err)
 	}
 	return nil
 }

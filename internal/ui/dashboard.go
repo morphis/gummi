@@ -43,7 +43,7 @@ func (m *Shell) dashboardView(w, h int) string {
 	line(s.Separator.Render(strings.Repeat("─", max(min(w, 60), 0))))
 
 	stageLine := s.Muted.Render("stage    ") + s.StagePill(f.Stage).Render(string(f.Stage)) + "  " + s.Faint.Render(string(f.Stage.SuperState()))
-	if rr := m.reviewRounds[f.ID]; rr > 0 {
+	if rr := m.round(f.ID, domain.RoundKindReview); rr > 0 {
 		stageLine += s.Faint.Render("  ·  review round " + itoa(rr) + "/" + itoa(maxReviewRounds))
 	}
 	line(stageLine)

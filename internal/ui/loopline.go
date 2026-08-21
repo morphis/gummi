@@ -58,7 +58,7 @@ func (m *Shell) planLoopLine(f domain.Feature) string {
 	}
 	s := m.styles
 	names := []string{"plan", "critique", "approve"}
-	if m.planRounds[f.ID] > 0 {
+	if m.round(f.ID, domain.RoundKindPlan) > 0 {
 		names[planLegWrite] = "replan"
 	}
 	parts := make([]string, len(names))
@@ -77,7 +77,7 @@ func (m *Shell) planLoopLine(f domain.Feature) string {
 		}
 	}
 	line := strings.Join(parts, s.Faint.Render(" → "))
-	if r := m.planRounds[f.ID]; r > 0 {
+	if r := m.round(f.ID, domain.RoundKindPlan); r > 0 {
 		line += s.Faint.Render("  ·  round " + itoa(r) + "/" + itoa(maxPlanRounds))
 	}
 	if escalated {
@@ -95,7 +95,7 @@ func (m *Shell) planLoopWord(sess *engine.Session) string {
 	switch {
 	case sess.Critique:
 		return "critiquing"
-	case m.planRounds[sess.Feature.ID] > 0:
+	case m.round(sess.Feature.ID, domain.RoundKindPlan) > 0:
 		return "replanning"
 	default:
 		return "planning"
@@ -112,7 +112,7 @@ func (m *Shell) runningLabel(snap engine.Snapshot) string {
 	switch {
 	case snap.Critique:
 		return "critiquing plan"
-	case m.planRounds[snap.Feature.ID] > 0:
+	case m.round(snap.Feature.ID, domain.RoundKindPlan) > 0:
 		return "replanning"
 	default:
 		return "writing plan"

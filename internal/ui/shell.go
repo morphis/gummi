@@ -14,8 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
-	"github.com/morphis/gummi/internal/planround"
-	"github.com/morphis/gummi/internal/reviewround"
+	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/layout"
@@ -79,10 +78,8 @@ type Shell struct {
 	inbox        *inbox    // needs-attention queue
 	checks       map[domain.FeatureID][]verify.Result
 	baselining   map[domain.FeatureID]bool // a baseline check run is in flight
-	reviewRounds map[domain.FeatureID]int  // automatic review→fix→review counter
-	planRounds   map[domain.FeatureID]int  // automatic plan→critique→replan counter
-	planStore    planround.Store           // persistence seam for planRounds (defaults to store)
-	reviewStore  reviewround.Store         // persistence seam for reviewRounds (defaults to store)
+	rounds       map[roundKey]int          // automatic loop round counters, keyed by (id, round_kind)
+	roundStore   rounds.Store              // persistence seam for rounds (defaults to store)
 	profileNames []string                  // profile names for the new-feature form
 	repoNames    []string                  // configured managed-repo names for the new-card forms
 	envelope     int                       // default spend-plan envelope for new features (0 = none)
@@ -103,18 +100,34 @@ type Shell struct {
 	now func() time.Time
 }
 
+// roundKey is the fast-path round-counter map's key: one entry per
+// (feature, round kind), matching the keyed store row.
+type roundKey struct {
+	id   domain.FeatureID
+	kind domain.RoundKind
+}
+
+// round reads the fast-path count for (id, kind), defaulting to 0.
+func (m *Shell) round(id domain.FeatureID, kind domain.RoundKind) int {
+	return m.rounds[roundKey{id, kind}]
+}
+
+// setRound writes the fast-path count for (id, kind).
+func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
+	m.rounds[roundKey{id, kind}] = n
+}
+
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
 	return &Shell{
-		styles:       theme.New(t),
-		version:      version,
-		now:          time.Now,
-		inbox:        newInbox(),
-		checks:       map[domain.FeatureID][]verify.Result{},
-		baselining:   map[domain.FeatureID]bool{},
-		reviewRounds: map[domain.FeatureID]int{},
-		planRounds:   map[domain.FeatureID]int{},
-		copilotHint:  true,
+		styles:      theme.New(t),
+		version:     version,
+		now:         time.Now,
+		inbox:       newInbox(),
+		checks:      map[domain.FeatureID][]verify.Result{},
+		baselining:  map[domain.FeatureID]bool{},
+		rounds:      map[roundKey]int{},
+		copilotHint: true,
 	}
 }
 
@@ -123,10 +136,9 @@ func NewShell(t theme.Theme, version string) *Shell {
 // board functionality.
 func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace) {
 	m.store, m.wt, m.ws = store, wt, ws
-	// the plan-rounds persistence seam defaults to the real store; tests
-	// may swap in a failing store to prove the fail-closed path.
-	m.planStore = store
-	m.reviewStore = store
+	// the rounds persistence seam defaults to the real store; tests may
+	// swap in a failing store to prove the fail-closed path.
+	m.roundStore = store
 }
 
 // AttachEngine wires the agent orchestrator, enabling interactive chat
@@ -282,19 +294,19 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// in-memory counter once the write succeeds — a failed write must
 		// not re-grant budget on resume (the next entry rehydrates the
 		// persisted, nonzero value).
-		if err := planround.Reset(context.Background(), m.planStore, ev.Feature); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindPlan); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
-			m.planRounds[ev.Feature] = 0
+			m.setRound(ev.Feature, domain.RoundKindPlan, 0)
 		}
 		// same write-through for the review-loop counter: a failed write
 		// must not lose the burned rounds recorded in the store.
-		if err := reviewround.Reset(context.Background(), m.reviewStore, ev.Feature); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindReview); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
-			m.reviewRounds[ev.Feature] = 0
+			m.setRound(ev.Feature, domain.RoundKindReview, 0)
 		}
 		if ev.Committed {
 			// wrap-up exhaustion: the stage's work is committed, so this
@@ -1161,31 +1173,17 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	}
 }
 
-// seedPlanRounds hydrates the in-memory plan-critique round counter from
-// the store on plan-stage entry, so a resumed plan resumes with the rounds
-// already burned instead of a fresh two-round budget. A failed read returns
-// the error and leaves the fast-path map untouched; the caller aborts
-// dispatch rather than proceeding on a guessed-zero count.
-func (m *Shell) seedPlanRounds(f domain.Feature) error {
-	n, err := planround.Load(context.Background(), m.planStore, f.ID)
+// seedRounds hydrates the in-memory round counter for kind from the store
+// on loop entry, so a resumed (or relaunched) loop resumes with the rounds
+// already burned instead of a fresh budget. A failed read returns the
+// error and leaves the fast-path map untouched; the caller aborts dispatch
+// rather than proceeding on a guessed-zero count.
+func (m *Shell) seedRounds(f domain.Feature, kind domain.RoundKind) error {
+	n, err := rounds.Load(context.Background(), m.roundStore, f.ID, kind)
 	if err != nil {
 		return err
 	}
-	m.planRounds[f.ID] = n
-	return nil
-}
-
-// seedReviewRounds hydrates the in-memory review→fix round counter from
-// the store on review-loop entry, so a resumed (or relaunched) loop
-// resumes with the rounds already burned instead of a fresh review budget.
-// A failed read returns the error and leaves the fast-path map untouched;
-// the caller aborts dispatch rather than proceeding on a guessed-zero count.
-func (m *Shell) seedReviewRounds(f domain.Feature) error {
-	n, err := reviewround.Load(context.Background(), m.reviewStore, f.ID)
-	if err != nil {
-		return err
-	}
-	m.reviewRounds[f.ID] = n
+	m.setRound(f.ID, kind, n)
 	return nil
 }
 
@@ -1199,16 +1197,19 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 	// store, so a resumed plan resumes with the rounds already burned. A
 	// failed read aborts dispatch rather than guessing at a fresh budget.
 	if f.Stage == domain.StagePlan {
-		if err := m.seedPlanRounds(f); err != nil {
+		if err := m.seedRounds(f, domain.RoundKindPlan); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
 			return nil
 		}
 	}
-	// the review loop spans review → work(fix) → review, and any of those
-	// can be the resume landing point, so seed the counter on each of them.
-	if f.Stage == domain.StageReview || f.Stage == domain.StageImplement || f.Stage == domain.StageFix {
-		if err := m.seedReviewRounds(f); err != nil {
+	// the review loop spans review → work(fix/investigate) → review, and
+	// any of those can be the resume landing point, so seed the counter on
+	// each of them. Investigate is research's work leg — a resume landing
+	// on the RS work leg must not re-grant the review budget either.
+	if f.Stage == domain.StageReview || f.Stage == domain.StageImplement ||
+		f.Stage == domain.StageFix || f.Stage == domain.StageInvestigate {
+		if err := m.seedRounds(f, domain.RoundKindReview); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
 			return nil

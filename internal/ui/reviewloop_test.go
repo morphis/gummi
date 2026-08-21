@@ -113,8 +113,8 @@ func TestReviewChangesBouncesAndLoops(t *testing.T) {
 	m = drainEngineLoop(t, m)
 
 	// after the cap, the loop stops and escalates
-	if m.reviewRounds["FD-001"] != 0 {
-		t.Errorf("rounds not reset after escalation: %d", m.reviewRounds["FD-001"])
+	if m.round("FD-001", domain.RoundKindReview) != 0 {
+		t.Errorf("rounds not reset after escalation: %d", m.round("FD-001", domain.RoundKindReview))
 	}
 	found := false
 	for _, it := range m.inbox.list() {
@@ -384,8 +384,8 @@ func TestPlanCritiqueChangesReplansThenPasses(t *testing.T) {
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Errorf("critique loop moved the stage to %s", m.rows[0].F.Stage)
 	}
-	if m.planRounds["FD-001"] != 0 {
-		t.Errorf("rounds not reset after pass: %d", m.planRounds["FD-001"])
+	if m.round("FD-001", domain.RoundKindPlan) != 0 {
+		t.Errorf("rounds not reset after pass: %d", m.round("FD-001", domain.RoundKindPlan))
 	}
 	if m.inbox.len() != 1 || m.inbox.list()[0].Kind != attnGate {
 		t.Fatalf("clean critique did not raise the approval gate: %+v", m.inbox.list())
@@ -497,11 +497,11 @@ func TestPlanCritiqueEscalatesAfterCap(t *testing.T) {
 	var critiques atomic.Int32
 	m := runPlan(t, planAgent(&critiques, "Still broken.\nVERDICT: changes"))
 
-	if got := critiques.Load(); got != maxPlanRounds+1 {
+	if got := critiques.Load(); got != int32(maxPlanRounds)+1 {
 		t.Errorf("critique ran %d times, want %d (initial + %d replans)", got, maxPlanRounds+1, maxPlanRounds)
 	}
-	if m.planRounds["FD-001"] != 0 {
-		t.Errorf("rounds not reset after escalation: %d", m.planRounds["FD-001"])
+	if m.round("FD-001", domain.RoundKindPlan) != 0 {
+		t.Errorf("rounds not reset after escalation: %d", m.round("FD-001", domain.RoundKindPlan))
 	}
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Errorf("escalation moved the stage to %s", m.rows[0].F.Stage)
@@ -539,28 +539,29 @@ func drainEngineLoop(t *testing.T, m *Shell) *Shell {
 	return m
 }
 
-// failPlanStore fails reads, writes, or both — the fail-closed proof for
-// the TUI's plan-rounds persistence seam (mirrors the headless driver).
-type failPlanStore struct {
+// failRoundStore fails reads, writes, or both on the keyed rounds seam —
+// the fail-closed proof for the TUI's round persistence, shared by the
+// plan and review round tests (mirrors the headless driver's fake).
+type failRoundStore struct {
 	failLoad  bool
 	failWrite bool
 }
 
-func (f *failPlanStore) PlanRounds(context.Context, domain.FeatureID) (int, error) {
+func (f *failRoundStore) Rounds(context.Context, domain.FeatureID, domain.RoundKind) (int, error) {
 	if f.failLoad {
 		return 0, errors.New("read failed")
 	}
 	return 0, nil
 }
 
-func (f *failPlanStore) IncrementPlanRounds(context.Context, domain.FeatureID) error {
+func (f *failRoundStore) IncrementRounds(context.Context, domain.FeatureID, domain.RoundKind) error {
 	if f.failWrite {
 		return errors.New("bump failed")
 	}
 	return nil
 }
 
-func (f *failPlanStore) ClearPlanRounds(context.Context, domain.FeatureID) error {
+func (f *failRoundStore) ClearRounds(context.Context, domain.FeatureID, domain.RoundKind) error {
 	if f.failWrite {
 		return errors.New("clear failed")
 	}
@@ -601,12 +602,12 @@ func TestPlanRoundsSeedsFromStoreOnPlanEntry(t *testing.T) {
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run plan → seed(1)
 	settleChat(t, eng)
-	m = drainUntil(t, m, func(m *Shell) bool { return m.planRounds["FD-001"] == 2 })
-	if got := m.planRounds["FD-001"]; got != 2 {
-		t.Errorf("m.planRounds = %d, want 2 (seed 1 + bump 1)", got)
+	m = drainUntil(t, m, func(m *Shell) bool { return m.round("FD-001", domain.RoundKindPlan) == 2 })
+	if got := m.round("FD-001", domain.RoundKindPlan); got != 2 {
+		t.Errorf("m.round(plan) = %d, want 2 (seed 1 + bump 1)", got)
 	}
-	if got, err := m.store.PlanRounds(context.Background(), "FD-001"); err != nil || got != 2 {
-		t.Errorf("store.PlanRounds = %d, %v; want 2", got, err)
+	if got, err := m.store.Rounds(context.Background(), "FD-001", domain.RoundKindPlan); err != nil || got != 2 {
+		t.Errorf("store.Rounds(plan) = %d, %v; want 2", got, err)
 	}
 }
 
@@ -616,34 +617,34 @@ func TestPlanRoundsClearOnPassAndExhaustion(t *testing.T) {
 	t.Run("pass clears", func(t *testing.T) {
 		var critiques atomic.Int32
 		m := runPlan(t, planAgent(&critiques, "Sound.\nVERDICT: pass"))
-		if got := m.planRounds["FD-001"]; got != 0 {
-			t.Errorf("m.planRounds after pass = %d, want 0", got)
+		if got := m.round("FD-001", domain.RoundKindPlan); got != 0 {
+			t.Errorf("m.round(plan) after pass = %d, want 0", got)
 		}
-		if got, err := m.store.PlanRounds(context.Background(), "FD-001"); err != nil || got != 0 {
-			t.Errorf("store.PlanRounds after pass = %d, %v; want 0", got, err)
+		if got, err := m.store.Rounds(context.Background(), "FD-001", domain.RoundKindPlan); err != nil || got != 0 {
+			t.Errorf("store.Rounds(plan) after pass = %d, %v; want 0", got, err)
 		}
 	})
 	t.Run("exhaustion clears", func(t *testing.T) {
 		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
-		m.planRounds["FD-001"] = 1
+		m.setRound("FD-001", domain.RoundKindPlan, 1)
 		if err := m.store.SetPlanRounds(context.Background(), "FD-001", 1); err != nil {
 			t.Fatal(err)
 		}
 		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StagePlan, Committed: false}))
-		if got := m.planRounds["FD-001"]; got != 0 {
-			t.Errorf("m.planRounds after exhaustion = %d, want 0", got)
+		if got := m.round("FD-001", domain.RoundKindPlan); got != 0 {
+			t.Errorf("m.round(plan) after exhaustion = %d, want 0", got)
 		}
-		if got, err := m.store.PlanRounds(context.Background(), "FD-001"); err != nil || got != 0 {
-			t.Errorf("store.PlanRounds after exhaustion = %d, %v; want 0", got, err)
+		if got, err := m.store.Rounds(context.Background(), "FD-001", domain.RoundKindPlan); err != nil || got != 0 {
+			t.Errorf("store.Rounds(plan) after exhaustion = %d, %v; want 0", got, err)
 		}
 	})
 	t.Run("exhaustion write-fail keeps count", func(t *testing.T) {
 		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
-		m.planRounds["FD-001"] = 1
-		m.planStore = &failPlanStore{failWrite: true}
+		m.setRound("FD-001", domain.RoundKindPlan, 1)
+		m.roundStore = &failRoundStore{failWrite: true}
 		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StagePlan, Committed: false}))
-		if got := m.planRounds["FD-001"]; got != 1 {
-			t.Errorf("m.planRounds after failed exhaustion clear = %d, want 1 (count not lost)", got)
+		if got := m.round("FD-001", domain.RoundKindPlan); got != 1 {
+			t.Errorf("m.round(plan) after failed exhaustion clear = %d, want 1 (count not lost)", got)
 		}
 		if !m.notice.isErr {
 			t.Error("no error notice raised on a failed exhaustion clear")
@@ -657,7 +658,7 @@ func TestPlanRoundsWriteThroughFailsClosed(t *testing.T) {
 	t.Run("read aborts plan dispatch", func(t *testing.T) {
 		m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "plan written" }))
 		m = advanceTo(t, m, domain.StagePlan)
-		m.planStore = &failPlanStore{failLoad: true}
+		m.roundStore = &failRoundStore{failLoad: true}
 		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		if !m.notice.isErr {
 			t.Error("no error notice on a failing seed read")
@@ -670,7 +671,7 @@ func TestPlanRoundsWriteThroughFailsClosed(t *testing.T) {
 		var critiques atomic.Int32
 		m, eng := chatWorkspace(t, planAgent(&critiques, "Missing authz check.\nVERDICT: changes"))
 		m = advanceTo(t, m, domain.StagePlan)
-		m.planStore = &failPlanStore{failWrite: true}
+		m.roundStore = &failRoundStore{failWrite: true}
 		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		settleChat(t, eng)
 		m = drainEngineLoop(t, m)
@@ -774,34 +775,6 @@ func TestRunStageResumesFinishedPlanAsCritique(t *testing.T) {
 	}
 }
 
-// failReviewStore fails reads, writes, or both — the fail-closed proof for
-// the TUI's review-rounds persistence seam (mirrors failPlanStore).
-type failReviewStore struct {
-	failLoad  bool
-	failWrite bool
-}
-
-func (f *failReviewStore) ReviewRounds(context.Context, domain.FeatureID) (int, error) {
-	if f.failLoad {
-		return 0, errors.New("read failed")
-	}
-	return 0, nil
-}
-
-func (f *failReviewStore) IncrementReviewRounds(context.Context, domain.FeatureID) error {
-	if f.failWrite {
-		return errors.New("bump failed")
-	}
-	return nil
-}
-
-func (f *failReviewStore) ClearReviewRounds(context.Context, domain.FeatureID) error {
-	if f.failWrite {
-		return errors.New("clear failed")
-	}
-	return nil
-}
-
 // A review resumed (or relaunched) through the TUI hydrates its round
 // counter from the store — a prior, possibly headless session's count —
 // then bumps it: seed(1) + one changes verdict(1) = 2, instead of
@@ -821,12 +794,12 @@ func TestReviewRoundsSeedsFromStoreOnReviewEntry(t *testing.T) {
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run review → seed(1)
 	settleChat(t, eng)
-	m = drainUntil(t, m, func(m *Shell) bool { return m.reviewRounds["FD-001"] == 2 })
-	if got := m.reviewRounds["FD-001"]; got != 2 {
-		t.Errorf("m.reviewRounds = %d, want 2 (seed 1 + bump 1)", got)
+	m = drainUntil(t, m, func(m *Shell) bool { return m.round("FD-001", domain.RoundKindReview) == 2 })
+	if got := m.round("FD-001", domain.RoundKindReview); got != 2 {
+		t.Errorf("m.round(review) = %d, want 2 (seed 1 + bump 1)", got)
 	}
-	if got, err := m.store.ReviewRounds(context.Background(), "FD-001"); err != nil || got != 2 {
-		t.Errorf("store.ReviewRounds = %d, %v; want 2", got, err)
+	if got, err := m.store.Rounds(context.Background(), "FD-001", domain.RoundKindReview); err != nil || got != 2 {
+		t.Errorf("store.Rounds(review) = %d, %v; want 2", got, err)
 	}
 }
 
@@ -844,34 +817,34 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 		m = advanceTo(t, m, domain.StageReview)
 		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = drainEngineLoop(t, m)
-		if got := m.reviewRounds["FD-001"]; got != 0 {
-			t.Errorf("m.reviewRounds after pass = %d, want 0", got)
+		if got := m.round("FD-001", domain.RoundKindReview); got != 0 {
+			t.Errorf("m.round(review) after pass = %d, want 0", got)
 		}
-		if got, err := m.store.ReviewRounds(context.Background(), "FD-001"); err != nil || got != 0 {
-			t.Errorf("store.ReviewRounds after pass = %d, %v; want 0", got, err)
+		if got, err := m.store.Rounds(context.Background(), "FD-001", domain.RoundKindReview); err != nil || got != 0 {
+			t.Errorf("store.Rounds(review) after pass = %d, %v; want 0", got, err)
 		}
 	})
 	t.Run("exhaustion clears", func(t *testing.T) {
 		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
-		m.reviewRounds["FD-001"] = 1
+		m.setRound("FD-001", domain.RoundKindReview, 1)
 		if err := m.store.SetReviewRounds(context.Background(), "FD-001", 1); err != nil {
 			t.Fatal(err)
 		}
 		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageReview, Committed: false}))
-		if got := m.reviewRounds["FD-001"]; got != 0 {
-			t.Errorf("m.reviewRounds after exhaustion = %d, want 0", got)
+		if got := m.round("FD-001", domain.RoundKindReview); got != 0 {
+			t.Errorf("m.round(review) after exhaustion = %d, want 0", got)
 		}
-		if got, err := m.store.ReviewRounds(context.Background(), "FD-001"); err != nil || got != 0 {
-			t.Errorf("store.ReviewRounds after exhaustion = %d, %v; want 0", got, err)
+		if got, err := m.store.Rounds(context.Background(), "FD-001", domain.RoundKindReview); err != nil || got != 0 {
+			t.Errorf("store.Rounds(review) after exhaustion = %d, %v; want 0", got, err)
 		}
 	})
 	t.Run("exhaustion write-fail keeps count", func(t *testing.T) {
 		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
-		m.reviewRounds["FD-001"] = 1
-		m.reviewStore = &failReviewStore{failWrite: true}
+		m.setRound("FD-001", domain.RoundKindReview, 1)
+		m.roundStore = &failRoundStore{failWrite: true}
 		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageReview, Committed: false}))
-		if got := m.reviewRounds["FD-001"]; got != 1 {
-			t.Errorf("m.reviewRounds after failed exhaustion clear = %d, want 1 (count not lost)", got)
+		if got := m.round("FD-001", domain.RoundKindReview); got != 1 {
+			t.Errorf("m.round(review) after failed exhaustion clear = %d, want 1 (count not lost)", got)
 		}
 		if !m.notice.isErr {
 			t.Error("no error notice raised on a failed exhaustion clear")
@@ -884,7 +857,7 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 func TestReviewRoundsWriteThroughFailsClosed(t *testing.T) {
 	m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
 	m = advanceTo(t, m, domain.StageReview)
-	m.reviewStore = &failReviewStore{failLoad: true}
+	m.roundStore = &failRoundStore{failLoad: true}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.notice.isErr {
 		t.Error("no error notice on a failing seed read")

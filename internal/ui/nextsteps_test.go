@@ -113,7 +113,7 @@ func TestNextInputForAssembly(t *testing.T) {
 		OpenDiffComments: 2,
 	}
 	m.inbox.addEscalated("FD-001", attnGate, "escalated")
-	m.reviewRounds["FD-001"] = 2
+	m.setRound("FD-001", domain.RoundKindReview, 2)
 	m.checks["FD-001"] = []verify.Result{{Name: "lint", OK: true}, {Name: "unit", OK: false}}
 
 	in := m.nextInputFor(row)

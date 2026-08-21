@@ -12,8 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/planround"
-	"github.com/morphis/gummi/internal/reviewround"
+	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
@@ -60,24 +59,39 @@ type Options struct {
 // synchronously between reads, the same contract the TUI's update loop
 // relies on.
 type Driver struct {
-	eng         *engine.Engine
-	store       *state.Store
-	planStore   planround.Store   // plan-round persistence seam (defaults to store)
-	reviewStore reviewround.Store // review-round persistence seam (defaults to store)
-	ws          state.Workspace
-	out         *emitter
-	opts        Options
-	actor       string // transition actor recorded in history ("auto" | "caller")
+	eng        *engine.Engine
+	store      *state.Store
+	roundStore rounds.Store // round-counter persistence seam (defaults to store)
+	ws         state.Workspace
+	out        *emitter
+	opts       Options
+	actor      string // transition actor recorded in history ("auto" | "caller")
 
 	// loop state for the single feature this process governs.
-	reviewRounds int          // automatic review→fix rounds burned in the current loop
-	planRounds   int          // automatic plan→critique rounds burned
-	reviewsRun   int          // review stages entered so far (for the done receipt)
-	opening      string       // one-shot message to send on the next interactive stage (resume answer / change note)
-	bounceNote   string       // one-shot addendum to the next implement/fix kickoff after a --bounce resume
-	curStage     domain.Stage // stage currently being driven (for verbose activity lines)
-	activityCur  int          // cursor into the live session's activity feed
-	sentTurn     bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
+	rounds      map[roundKey]int // automatic loop rounds burned, keyed by (id, round_kind)
+	reviewsRun  int              // review stages entered so far (for the done receipt)
+	opening     string           // one-shot message to send on the next interactive stage (resume answer / change note)
+	bounceNote  string           // one-shot addendum to the next implement/fix kickoff after a --bounce resume
+	curStage    domain.Stage     // stage currently being driven (for verbose activity lines)
+	activityCur int              // cursor into the live session's activity feed
+	sentTurn    bool             // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
+}
+
+// roundKey is the fast-path round-counter map's key: one entry per
+// (feature, round kind), matching the keyed store row.
+type roundKey struct {
+	id   domain.FeatureID
+	kind domain.RoundKind
+}
+
+// round reads the fast-path count for (id, kind), defaulting to 0.
+func (d *Driver) round(id domain.FeatureID, kind domain.RoundKind) int {
+	return d.rounds[roundKey{id, kind}]
+}
+
+// setRound writes the fast-path count for (id, kind).
+func (d *Driver) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
+	d.rounds[roundKey{id, kind}] = n
 }
 
 // New builds a driver writing its NDJSON stream to out. The caller owns
@@ -87,13 +101,13 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 		opts.GateApproval = GateAuto
 	}
 	d := &Driver{
-		eng:         eng,
-		store:       store,
-		planStore:   store,
-		reviewStore: store,
-		ws:          ws,
-		out:         newEmitter(out, opts.Verbose),
-		opts:        opts,
+		eng:        eng,
+		store:      store,
+		roundStore: store,
+		rounds:     map[roundKey]int{},
+		ws:         ws,
+		out:        newEmitter(out, opts.Verbose),
+		opts:       opts,
 	}
 	d.setGate(opts.GateApproval)
 	return d
@@ -567,28 +581,28 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 		// seed the in-memory counter from the persisted value so a resume
 		// into the loop honors (and reports) the rounds already burned this
 		// cycle. A failed read aborts entry: the count is the budget.
-		if err := d.seedReviewRounds(ctx, f); err != nil {
+		if err := d.seedRounds(ctx, f, domain.RoundKindReview); err != nil {
 			return Outcome{}, err
 		}
 		round = d.reviewsRun
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		// the work leg of the review loop can be the resume landing point,
 		// so seed it too — the review-round budget must survive the fresh
-		// process, not just a review-stage entry.
-		if err := d.seedReviewRounds(ctx, f); err != nil {
+		// process, not just a review-stage entry. Investigate is research's
+		// work leg (workflow.WorkStage(KindResearch)), exactly as Implement
+		// and Fix are for features and bugs.
+		if err := d.seedRounds(ctx, f, domain.RoundKindReview); err != nil {
 			return Outcome{}, err
 		}
-		round = d.reviewRounds
+		round = d.round(f.ID, domain.RoundKindReview)
 	case domain.StagePlan:
 		// seed the in-memory counter from the persisted value so a resume
 		// honors (and reports) the rounds already burned this cycle. A
 		// failed read aborts plan-stage entry: the count is the budget.
-		persisted, err := planround.Load(ctx, d.planStore, f.ID)
-		if err != nil {
+		if err := d.seedRounds(ctx, f, domain.RoundKindPlan); err != nil {
 			return Outcome{}, err
 		}
-		d.planRounds = persisted
-		round = persisted
+		round = d.round(f.ID, domain.RoundKindPlan)
 	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Round: round})
 
@@ -607,7 +621,7 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 				// re-critique kickoff when a prior round was burned.
 				kickoff := ""
 				result := "critiquing"
-				if d.planRounds > 0 {
+				if d.round(f.ID, domain.RoundKindPlan) > 0 {
 					kickoff = verdict.ReCritiqueNote
 					result = "re-critiquing"
 				}
@@ -677,17 +691,17 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	}
 }
 
-// seedReviewRounds hydrates the in-memory review→fix round counter from
-// the store on review-loop entry, so a resume honors the rounds already
-// burned instead of a fresh budget. A failed read returns the error and
-// leaves the fast-path field untouched; the caller aborts rather than
-// proceeding on a guessed-zero count.
-func (d *Driver) seedReviewRounds(ctx context.Context, f domain.Feature) error {
-	persisted, err := reviewround.Load(ctx, d.reviewStore, f.ID)
+// seedRounds hydrates the in-memory round counter for kind from the store
+// on loop entry, so a resume honors the rounds already burned instead of
+// a fresh budget. A failed read returns the error and leaves the
+// fast-path map untouched; the caller aborts rather than proceeding on a
+// guessed-zero count.
+func (d *Driver) seedRounds(ctx context.Context, f domain.Feature, kind domain.RoundKind) error {
+	persisted, err := rounds.Load(ctx, d.roundStore, f.ID, kind)
 	if err != nil {
 		return err
 	}
-	d.reviewRounds = persisted
+	d.setRound(f.ID, kind, persisted)
 	return nil
 }
 
@@ -703,33 +717,34 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		switch v {
 		case verdict.Pass:
 			// clear the persisted count so the next review loop starts fresh.
-			if err := reviewround.Reset(ctx, d.reviewStore, f.ID); err != nil {
+			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 				return Outcome{}, err
 			}
-			d.reviewRounds = 0
+			d.setRound(f.ID, domain.RoundKindReview, 0)
 			return d.stepTo(ctx, f.ID, domain.StageVerify)
 		case verdict.Changes:
-			if d.reviewRounds >= verdict.MaxReviewRounds {
+			max := verdict.MaxRounds(domain.RoundKindReview)
+			if d.round(f.ID, domain.RoundKindReview) >= max {
 				// escalation hands the loop to a human; clear the cap so the
 				// next review cycle starts a fresh budget.
-				if err := reviewround.Reset(ctx, d.reviewStore, f.ID); err != nil {
+				if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 					return Outcome{}, err
 				}
-				d.reviewRounds = 0
-				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", verdict.MaxReviewRounds)), nil
+				d.setRound(f.ID, domain.RoundKindReview, 0)
+				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", max)), nil
 			}
 			// persist the burned round before it lands in the fast path, so a
 			// mid-loop resume observes it.
-			if err := reviewround.Bump(ctx, d.reviewStore, f.ID); err != nil {
+			if err := rounds.Bump(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 				return Outcome{}, err
 			}
-			d.reviewRounds++
+			d.setRound(f.ID, domain.RoundKindReview, d.round(f.ID, domain.RoundKindReview)+1)
 			return d.stepTo(ctx, f.ID, workflow.WorkStage(f.Kind))
 		default:
-			if err := reviewround.Reset(ctx, d.reviewStore, f.ID); err != nil {
+			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 				return Outcome{}, err
 			}
-			d.reviewRounds = 0
+			d.setRound(f.ID, domain.RoundKindReview, 0)
 			return d.escalation(f, "review finished with no clear verdict"), nil
 		}
 
@@ -753,6 +768,13 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		// the implementation floor always continues into review — review is
 		// mandatory and never skipped; the driver never waits for a human here.
 		return d.stepTo(ctx, f.ID, domain.StageReview)
+
+	case domain.StageInvestigate:
+		// research's work leg: the forward edge to shape (never straight to
+		// review — research has no direct investigate→review edge). This is
+		// what makes the review loop's changes bounce (review→investigate)
+		// re-enter the loop instead of parking with no case to drive it.
+		return d.stepTo(ctx, f.ID, domain.StageShape)
 
 	case domain.StagePlan:
 		if !snap.Critique {
@@ -800,33 +822,34 @@ func (d *Driver) judgePlanCritique(ctx context.Context, f domain.Feature, snap e
 	d.emitResult(f, v)
 	switch v {
 	case verdict.Pass:
-		if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
+		if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
 			return Outcome{}, err
 		}
-		d.planRounds = 0
+		d.setRound(f.ID, domain.RoundKindPlan, 0)
 		return d.crossGate(ctx, f)
 	case verdict.Changes:
-		if d.planRounds >= verdict.MaxPlanRounds {
-			if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
+		max := verdict.MaxRounds(domain.RoundKindPlan)
+		if d.round(f.ID, domain.RoundKindPlan) >= max {
+			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
 				return Outcome{}, err
 			}
-			d.planRounds = 0
-			return d.escalation(f, fmt.Sprintf("plan critique still requesting changes after %d rounds", verdict.MaxPlanRounds)), nil
+			d.setRound(f.ID, domain.RoundKindPlan, 0)
+			return d.escalation(f, fmt.Sprintf("plan critique still requesting changes after %d rounds", max)), nil
 		}
-		if err := planround.Bump(ctx, d.planStore, f.ID); err != nil {
+		if err := rounds.Bump(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
 			return Outcome{}, err
 		}
-		d.planRounds++
+		d.setRound(f.ID, domain.RoundKindPlan, d.round(f.ID, domain.RoundKindPlan)+1)
 		if err := d.eng.RunWith(f, verdict.ReplanNote); err != nil {
 			return Outcome{}, err
 		}
-		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning", Round: d.planRounds})
+		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning", Round: d.round(f.ID, domain.RoundKindPlan)})
 		return d.awaitReplan(ctx, f)
 	default:
-		if err := planround.Reset(ctx, d.planStore, f.ID); err != nil {
+		if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
 			return Outcome{}, err
 		}
-		d.planRounds = 0
+		d.setRound(f.ID, domain.RoundKindPlan, 0)
 		return d.escalation(f, "plan critique finished with no clear verdict"), nil
 	}
 }

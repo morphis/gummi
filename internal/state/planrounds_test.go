@@ -3,30 +3,28 @@ package state
 import (
 	"context"
 	"testing"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
-// A feature's plan-round count set before CreateFeature survives create →
-// read, and the PlanRounds side-channel reads the same value back — the
-// record the engine uses to size the remaining critique budget on resume.
+// A feature's plan-round count set via the SetPlanRounds side-channel
+// survives a round-trip through Rounds — the record the engine uses to
+// size the remaining critique budget on resume.
 func TestPlanRoundsRoundtrip(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
 
 	f := feat(1, "Add a healthz endpoint")
-	f.PlanRounds = 2
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.GetFeature(ctx, f.ID)
-	if err != nil {
+	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
 		t.Fatal(err)
 	}
-	if got.PlanRounds != 2 {
-		t.Fatalf("plan-rounds lost in roundtrip: %d, want 2", got.PlanRounds)
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
+		t.Fatalf("Rounds(plan) = %d, %v; want 2", got, err)
 	}
-
-	// direct read via the side-channel.
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 2 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
 		t.Fatalf("PlanRounds = %d, %v; want 2", got, err)
 	}
 }
@@ -40,20 +38,16 @@ func TestPlanRoundsDefaultsZero(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.GetFeature(ctx, f.ID)
-	if err != nil {
-		t.Fatal(err)
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 0 {
+		t.Fatalf("Rounds(plan) = %d, %v; want 0", got, err)
 	}
-	if got.PlanRounds != 0 {
-		t.Fatalf("default plan-rounds = %d, want 0", got.PlanRounds)
-	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 0 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 0 {
 		t.Fatalf("PlanRounds = %d, %v; want 0", got, err)
 	}
 }
 
-// IncrementPlanRounds is the live-cycle atomic bump: each call steps the
-// counter by one via a single UPDATE, from a fresh 0.
+// IncrementRounds(plan) is the live-cycle atomic bump: each call steps the
+// counter by one via a single upsert, from a fresh 0.
 func TestIncrementPlanRounds(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
@@ -62,25 +56,25 @@ func TestIncrementPlanRounds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.IncrementPlanRounds(ctx, f.ID); err != nil {
+	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 1 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 1 {
 		t.Fatalf("PlanRounds after first increment = %d, %v; want 1", got, err)
 	}
-	if err := s.IncrementPlanRounds(ctx, f.ID); err != nil {
+	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.IncrementPlanRounds(ctx, f.ID); err != nil {
+	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 3 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 3 {
 		t.Fatalf("PlanRounds after three increments = %d, %v; want 3", got, err)
 	}
 }
 
-// SetPlanRounds is the set-by-value side-channel write; the value it stores
-// round-trips through both the side-channel read and GetFeature.
+// SetPlanRounds is the set-by-value side-channel write; the value it
+// stores round-trips through both Rounds(plan) and PlanRounds.
 func TestSetPlanRounds(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
@@ -92,20 +86,16 @@ func TestSetPlanRounds(t *testing.T) {
 	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 2 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
 		t.Fatalf("PlanRounds after set = %d, %v; want 2", got, err)
 	}
-	got, err := s.GetFeature(ctx, f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.PlanRounds != 2 {
-		t.Fatalf("GetFeature plan-rounds = %d, want 2", got.PlanRounds)
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
+		t.Fatalf("Rounds(plan) after set = %d, %v; want 2", got, err)
 	}
 }
 
-// ClearPlanRounds resets the live-cycle counter to 0 and is harmless on a
-// row that is already 0 — the reset a completed plan cycle performs.
+// ClearRounds(plan) resets the live-cycle counter to 0 and is harmless on
+// a row that is already 0 — the reset a completed plan cycle performs.
 func TestClearPlanRounds(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
@@ -114,30 +104,30 @@ func TestClearPlanRounds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.IncrementPlanRounds(ctx, f.ID); err != nil {
+	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.IncrementPlanRounds(ctx, f.ID); err != nil {
+	if err := s.IncrementRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClearPlanRounds(ctx, f.ID); err != nil {
+	if err := s.ClearRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 0 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 0 {
 		t.Fatalf("PlanRounds after clear = %d, %v; want 0", got, err)
 	}
 
 	// clearing an already-0 row succeeds and stays 0.
-	if err := s.ClearPlanRounds(ctx, f.ID); err != nil {
+	if err := s.ClearRounds(ctx, f.ID, domain.RoundKindPlan); err != nil {
 		t.Fatalf("clear on zero row: %v", err)
 	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 0 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 0 {
 		t.Fatalf("PlanRounds after second clear = %d, %v; want 0", got, err)
 	}
 }
 
-// Reopening an existing DB applies the idempotent ALTER TABLE migration:
-// a second open succeeds and GetFeature still scans a valid row.
+// Reopening an existing DB applies the idempotent rounds migration: a
+// second open succeeds and the plan-round count survives.
 func TestPlanRoundsMigrationIdempotent(t *testing.T) {
 	w, err := Init(gitRoot(t), gitRoot(t))
 	if err != nil {
@@ -149,8 +139,10 @@ func TestPlanRoundsMigrationIdempotent(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := feat(6, "Migrate")
-	f.PlanRounds = 2
 	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPlanRounds(ctx, f.ID, 2); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -163,14 +155,7 @@ func TestPlanRoundsMigrationIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	got, err := s.GetFeature(ctx, f.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.PlanRounds != 2 {
-		t.Fatalf("plan-rounds lost on reopen: %d, want 2", got.PlanRounds)
-	}
-	if got, err := s.PlanRounds(ctx, f.ID); err != nil || got != 2 {
+	if got, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || got != 2 {
 		t.Fatalf("PlanRounds after reopen = %d, %v; want 2", got, err)
 	}
 }

@@ -8,8 +8,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/planround"
-	"github.com/morphis/gummi/internal/reviewround"
+	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
 )
@@ -30,9 +29,9 @@ const (
 	verdictBlocked = verdict.Blocked
 )
 
-const (
-	maxReviewRounds = verdict.MaxReviewRounds
-	maxPlanRounds   = verdict.MaxPlanRounds
+var (
+	maxReviewRounds = verdict.MaxRounds(domain.RoundKindReview)
+	maxPlanRounds   = verdict.MaxRounds(domain.RoundKindPlan)
 )
 
 const (
@@ -61,8 +60,20 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 		return true, m.onVerifyDone(id)
 	case domain.StageImplement, domain.StageFix:
 		// only auto-continue work stages that are part of a review loop
-		if m.reviewRounds[id] > 0 {
+		if m.round(id, domain.RoundKindReview) > 0 {
 			return true, m.autoStep(id, domain.StageReview, "re-reviewing")
+		}
+	case domain.StageInvestigate:
+		// research's work leg: mirrors Implement/Fix, but the forward edge
+		// is to shape (never straight to review — research has no direct
+		// investigate→review edge), and shape is interactive (a chat stage,
+		// unlike review), so the stage only steps forward — the human's
+		// chat turn opens it via the normal Enter, not an auto-run. Only
+		// auto-continue when this completion is part of a review loop (a
+		// review→investigate bounce burned a round); a fresh, loop-free
+		// investigate still raises the generic gate, matching Implement/Fix.
+		if m.round(id, domain.RoundKindReview) > 0 {
+			return true, m.autoStepStage(id, domain.StageShape, "re-shaping")
 		}
 	}
 	return false, nil
@@ -79,35 +90,35 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	switch sessionVerdict(s.Snapshot()) {
 	case verdictPass:
 		// clear the persisted count so the next review loop starts fresh.
-		if err := reviewround.Reset(context.Background(), m.reviewStore, id); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.reviewRounds[id] = 0
+		m.setRound(id, domain.RoundKindReview, 0)
 		return m.autoStep(id, domain.StageVerify, "review passed → verify")
 	case verdictChanges:
-		if m.reviewRounds[id] >= maxReviewRounds {
-			if err := reviewround.Reset(context.Background(), m.reviewStore, id); err != nil {
+		if m.round(id, domain.RoundKindReview) >= maxReviewRounds {
+			if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 				return m.writeHalt(id, err)
 			}
-			m.reviewRounds[id] = 0
+			m.setRound(id, domain.RoundKindReview, 0)
 			m.raiseEscalation(id, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
 			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
 			return nil
 		}
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.
-		if err := reviewround.Bump(context.Background(), m.reviewStore, id); err != nil {
+		if err := rounds.Bump(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.reviewRounds[id]++
-		return m.autoStep(id, workflow.WorkStage(id.Kind()), "review requested changes → fixing (round "+itoa(m.reviewRounds[id])+")")
+		m.setRound(id, domain.RoundKindReview, m.round(id, domain.RoundKindReview)+1)
+		return m.autoStep(id, workflow.WorkStage(id.Kind()), "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")")
 	default:
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
-		if err := reviewround.Reset(context.Background(), m.reviewStore, id); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.reviewRounds[id] = 0
+		m.setRound(id, domain.RoundKindReview, 0)
 		m.raiseEscalation(id, "review finished with no clear verdict — review manually")
 		return nil
 	}
@@ -185,36 +196,36 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 	switch sessionVerdict(snap) {
 	case verdictPass:
 		// clear the persisted count so the next plan cycle starts fresh.
-		if err := planround.Reset(context.Background(), m.planStore, id); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.planRounds[id] = 0
+		m.setRound(id, domain.RoundKindPlan, 0)
 		m.raiseAttention(id, attnGate, "plan critiqued: clean — review & approve")
 		return nil
 	case verdictChanges:
-		if m.planRounds[id] >= maxPlanRounds {
-			if err := planround.Reset(context.Background(), m.planStore, id); err != nil {
+		if m.round(id, domain.RoundKindPlan) >= maxPlanRounds {
+			if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
 				return m.writeHalt(id, err)
 			}
-			m.planRounds[id] = 0
+			m.setRound(id, domain.RoundKindPlan, 0)
 			m.raiseEscalation(id, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
 			m.notice = noticeMsg{text: string(id) + " plan critique escalated after " + itoa(maxPlanRounds) + " rounds", isErr: true}
 			return nil
 		}
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.
-		if err := planround.Bump(context.Background(), m.planStore, id); err != nil {
+		if err := rounds.Bump(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.planRounds[id]++
-		return m.planStep(id, false, "critique requested changes → replanning (round "+itoa(m.planRounds[id])+")")
+		m.setRound(id, domain.RoundKindPlan, m.round(id, domain.RoundKindPlan)+1)
+		return m.planStep(id, false, "critique requested changes → replanning (round "+itoa(m.round(id, domain.RoundKindPlan))+")")
 	default:
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
-		if err := planround.Reset(context.Background(), m.planStore, id); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.planRounds[id] = 0
+		m.setRound(id, domain.RoundKindPlan, 0)
 		m.raiseEscalation(id, "plan critique finished with no clear verdict — review the plan manually")
 		return nil
 	}
@@ -228,7 +239,7 @@ func (m *Shell) planStep(id domain.FeatureID, critique bool, note string) tea.Cm
 	// goroutine: planRounds > 0 means this critique follows a replan, so
 	// it burns down the prior threads instead of re-judging from scratch.
 	var kickoff string
-	if critique && m.planRounds[id] > 0 {
+	if critique && m.round(id, domain.RoundKindPlan) > 0 {
 		kickoff = reCritiqueNote
 	}
 	return func() tea.Msg {
@@ -265,6 +276,23 @@ func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note string) tea.
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if err := m.engine.Run(nf); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: string(id) + ": " + note, reload: true}
+	}
+}
+
+// autoStepStage transitions a feature to the next loop stage without
+// auto-running it — the counterpart to autoStep for a target that is
+// interactive (Shape, research's design leg): an interactive stage needs
+// a human's chat turn, so the loop only clears the way to it; opening it
+// (attachChat) happens on the same plain Enter as any other interactive
+// stage entry, exactly like a design-gate approval elsewhere in the TUI.
+func (m *Shell) autoStepStage(id domain.FeatureID, to domain.Stage, note string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		m.dropSession(id) // the completed session is stale
+		if _, err := m.store.Transition(ctx, id, to, "review"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return noticeMsg{text: string(id) + ": " + note, reload: true}

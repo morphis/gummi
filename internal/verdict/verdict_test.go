@@ -3,6 +3,7 @@ package verdict
 import (
 	"testing"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
 
@@ -99,5 +100,14 @@ func TestSessionVerdict(t *testing.T) {
 	snap.Verdict = "garbage"
 	if got := SessionVerdict(snap); got != Pass {
 		t.Errorf("SessionVerdict unclear-tool fallback = %v, want Pass", got)
+	}
+}
+
+func TestMaxRounds(t *testing.T) {
+	if got := MaxRounds(domain.RoundKindPlan); got != 2 {
+		t.Errorf("MaxRounds(RoundKindPlan) = %d, want 2", got)
+	}
+	if got := MaxRounds(domain.RoundKindReview); got != 3 {
+		t.Errorf("MaxRounds(RoundKindReview) = %d, want 3", got)
 	}
 }

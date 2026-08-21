@@ -702,18 +702,22 @@ func TestOldSchemaStillOpens(t *testing.T) {
 	}
 
 	var severity, budgetSpent string
-	var planRounds, reviewRounds int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT severity, plan_rounds, review_rounds, budget_spent FROM features WHERE id = ?`,
-		string(f.ID)).Scan(&severity, &planRounds, &reviewRounds, &budgetSpent); err != nil {
+		`SELECT severity, budget_spent FROM features WHERE id = ?`,
+		string(f.ID)).Scan(&severity, &budgetSpent); err != nil {
 		t.Fatal(err)
 	}
-	if severity != "" || planRounds != 0 || reviewRounds != 0 {
-		t.Errorf("backfilled defaults = severity %q, plan_rounds %d, review_rounds %d; want empty/0/0",
-			severity, planRounds, reviewRounds)
+	if severity != "" {
+		t.Errorf("backfilled default severity = %q, want empty", severity)
 	}
 	if budgetSpent != "0" {
 		t.Errorf("budget_spent = %q, want 0", budgetSpent)
+	}
+	if planRounds, err := s.Rounds(ctx, f.ID, domain.RoundKindPlan); err != nil || planRounds != 0 {
+		t.Errorf("Rounds(plan) = %d, %v; want 0", planRounds, err)
+	}
+	if reviewRounds, err := s.Rounds(ctx, f.ID, domain.RoundKindReview); err != nil || reviewRounds != 0 {
+		t.Errorf("Rounds(review) = %d, %v; want 0", reviewRounds, err)
 	}
 }
 

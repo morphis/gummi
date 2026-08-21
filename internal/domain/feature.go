@@ -185,18 +185,6 @@ type Feature struct {
 	// the worktree is created (or, for pre-existing worktrees, until the
 	// first diff-based access lazily backfills it).
 	ForkPoint string
-	// PlanRounds is the live per-cycle plan-critique round count. Unlike
-	// fork_point it is a running cycle counter, not a stamped-once anchor:
-	// the engine reads it back on resume to size the remaining critique
-	// budget, and resets it to 0 when a plan cycle completes. Zero until a
-	// plan cycle has started.
-	PlanRounds int
-	// ReviewRounds is the live per-cycle review→fix round count. It is the
-	// review loop's analogue of PlanRounds: the engine reads it back on
-	// resume so a fresh process honors the rounds already burned instead of
-	// re-granting the whole review budget, and resets it to 0 when the
-	// review loop completes. Zero until a review loop has started.
-	ReviewRounds int
 	// CommitDraftFail is the durable reason a squash-merge scribe pass last
 	// failed to produce a draft (a backend/config fault, a guard rejection,
 	// or a timeout), persisted so the failure survives the dialog and later

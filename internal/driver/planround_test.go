@@ -92,8 +92,8 @@ func TestPlanRoundsResumeSurvivesFreshDriver(t *testing.T) {
 		t.Fatalf("run-1 status = %q, want exhausted; stream=%v", out.Status, h.eventKinds())
 	}
 	id := h.only()
-	if got, err := h.store.PlanRounds(context.Background(), id); err != nil || got != 1 {
-		t.Fatalf("run-1 PlanRounds = %d, %v; want 1 (one changes-round burned)", got, err)
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindPlan); err != nil || got != 1 {
+		t.Fatalf("run-1 Rounds(plan) = %d, %v; want 1 (one changes-round burned)", got, err)
 	}
 	if st := h.stageOf(id); st != domain.StagePlan {
 		t.Fatalf("feature at %s, want Plan (parked mid-cycle)", st)
@@ -113,8 +113,8 @@ func TestPlanRoundsResumeSurvivesFreshDriver(t *testing.T) {
 	if r := planStageRound(h); r != 1 {
 		t.Fatalf("resumed plan stage-event round = %d, want 1 (the persisted count)", r)
 	}
-	if got, err := h.store.PlanRounds(context.Background(), id); err != nil || got != 1 {
-		t.Fatalf("post-resume PlanRounds = %d, %v; want 1 (never re-mutated)", got, err)
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindPlan); err != nil || got != 1 {
+		t.Fatalf("post-resume Rounds(plan) = %d, %v; want 1 (never re-mutated)", got, err)
 	}
 }
 
@@ -129,8 +129,8 @@ func TestPlanRoundsClearedOnPassGate(t *testing.T) {
 	if out.Status != StatusStopped {
 		t.Fatalf("status = %q, want stopped; stream=%v", out.Status, h.eventKinds())
 	}
-	if got, err := h.store.PlanRounds(context.Background(), h.only()); err != nil || got != 0 {
-		t.Fatalf("PlanRounds after pass gate = %d, %v; want 0", got, err)
+	if got, err := h.store.Rounds(context.Background(), h.only(), domain.RoundKindPlan); err != nil || got != 0 {
+		t.Fatalf("Rounds(plan) after pass gate = %d, %v; want 0", got, err)
 	}
 }
 
@@ -145,32 +145,33 @@ func TestPlanRoundsClearedOnEscalation(t *testing.T) {
 	if out.Status != StatusEscalation {
 		t.Fatalf("status = %q, want escalation; stream=%v", out.Status, h.eventKinds())
 	}
-	if got, err := h.store.PlanRounds(context.Background(), h.only()); err != nil || got != 0 {
-		t.Fatalf("PlanRounds after escalation = %d, %v; want 0", got, err)
+	if got, err := h.store.Rounds(context.Background(), h.only(), domain.RoundKindPlan); err != nil || got != 0 {
+		t.Fatalf("Rounds(plan) after escalation = %d, %v; want 0", got, err)
 	}
 }
 
-// failPlanStore fails reads, writes, or both — the fail-closed proof.
-type failPlanStore struct {
+// failRoundStore fails reads, writes, or both on the keyed rounds seam —
+// the fail-closed proof, shared by the plan and review round tests.
+type failRoundStore struct {
 	failLoad  bool
 	failWrite bool
 }
 
-func (f *failPlanStore) PlanRounds(context.Context, domain.FeatureID) (int, error) {
+func (f *failRoundStore) Rounds(context.Context, domain.FeatureID, domain.RoundKind) (int, error) {
 	if f.failLoad {
 		return 0, errors.New("read failed")
 	}
 	return 0, nil
 }
 
-func (f *failPlanStore) IncrementPlanRounds(context.Context, domain.FeatureID) error {
+func (f *failRoundStore) IncrementRounds(context.Context, domain.FeatureID, domain.RoundKind) error {
 	if f.failWrite {
 		return errors.New("bump failed")
 	}
 	return nil
 }
 
-func (f *failPlanStore) ClearPlanRounds(context.Context, domain.FeatureID) error {
+func (f *failRoundStore) ClearRounds(context.Context, domain.FeatureID, domain.RoundKind) error {
 	if f.failWrite {
 		return errors.New("clear failed")
 	}
@@ -187,7 +188,7 @@ func TestPlanRoundsStoreFailureFailsClosed(t *testing.T) {
 			domain.StagePlan:       idleTurn,
 		})
 		d := h.driver(Options{Full: true})
-		d.planStore = &failPlanStore{failLoad: true}
+		d.roundStore = &failRoundStore{failLoad: true}
 		out, err := d.Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 		if err == nil {
 			t.Fatal("Run with a failing read: want error, got nil")
@@ -199,7 +200,7 @@ func TestPlanRoundsStoreFailureFailsClosed(t *testing.T) {
 	t.Run("write aborts the round", func(t *testing.T) {
 		h := newHarness(t, true, planLoopScript("changes"))
 		d := h.driver(Options{Full: true})
-		d.planStore = &failPlanStore{failWrite: true}
+		d.roundStore = &failRoundStore{failWrite: true}
 		out, err := d.Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 		if err == nil {
 			t.Fatal("Run with a failing write: want error, got nil")
@@ -279,8 +280,8 @@ func TestPlanRoundsResumeReCritiquesRevisedPlan(t *testing.T) {
 		t.Fatalf("run-1 status = %q, want exhausted; stream=%v", out.Status, h.eventKinds())
 	}
 	id := h.only()
-	if got, err := h.store.PlanRounds(context.Background(), id); err != nil || got != 1 {
-		t.Fatalf("run-1 PlanRounds = %d, %v; want 1", got, err)
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindPlan); err != nil || got != 1 {
+		t.Fatalf("run-1 Rounds(plan) = %d, %v; want 1", got, err)
 	}
 	if st := h.stageOf(id); st != domain.StagePlan {
 		t.Fatalf("feature at %s, want Plan (parked mid-cycle)", st)
@@ -348,8 +349,8 @@ func TestPlanRoundsResumeCritiquesFreshPlan(t *testing.T) {
 		t.Fatalf("run-1 status = %q, want exhausted; stream=%v", out.Status, h.eventKinds())
 	}
 	id := h.only()
-	if got, err := h.store.PlanRounds(context.Background(), id); err != nil || got != 0 {
-		t.Fatalf("run-1 PlanRounds = %d, %v; want 0", got, err)
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindPlan); err != nil || got != 0 {
+		t.Fatalf("run-1 Rounds(plan) = %d, %v; want 0", got, err)
 	}
 
 	h.buf.Reset()

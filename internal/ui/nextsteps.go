@@ -71,7 +71,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		kind:             r.F.Kind,
 		landed:           r.Landed,
 		quick:            r.F.Skip.Quick,
-		reviewRound:      m.reviewRounds[r.F.ID],
+		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),
 		verifyBounces:    verifyBounces(r.History, r.F.Kind),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,

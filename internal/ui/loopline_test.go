@@ -76,7 +76,7 @@ func TestRunningLabelNamesPlanLegs(t *testing.T) {
 		{"other stage", engine.Snapshot{Feature: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}, 0, "running"},
 	}
 	for _, c := range cases {
-		m.planRounds["FD-001"] = c.rounds
+		m.setRound("FD-001", domain.RoundKindPlan, c.rounds)
 		if got := m.runningLabel(c.snap); got != c.want {
 			t.Errorf("%s: runningLabel = %q, want %q", c.name, got, c.want)
 		}
@@ -86,7 +86,7 @@ func TestRunningLabelNamesPlanLegs(t *testing.T) {
 func TestPlanLoopRoundCounterInBreadcrumb(t *testing.T) {
 	m := loopShell()
 	m.inbox.add("FD-001", attnGate, "escalated")
-	m.planRounds["FD-001"] = 1
+	m.setRound("FD-001", domain.RoundKindPlan, 1)
 	line := m.planLoopLine(planFeature())
 	if !strings.Contains(line, "replan") || !strings.Contains(line, "round 1/2") {
 		t.Errorf("bounced loop breadcrumb missing replan/round: %q", line)

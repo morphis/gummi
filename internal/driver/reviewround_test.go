@@ -2,9 +2,9 @@ package driver
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -53,8 +53,8 @@ func TestReviewRoundsResumeSurvivesFreshDriver(t *testing.T) {
 		t.Fatalf("run-1 status = %q, want exhausted; stream=%v", out.Status, h.eventKinds())
 	}
 	id := h.only()
-	if got, err := h.store.ReviewRounds(context.Background(), id); err != nil || got != 1 {
-		t.Fatalf("run-1 ReviewRounds = %d, %v; want 1 (one changes-round burned)", got, err)
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindReview); err != nil || got != 1 {
+		t.Fatalf("run-1 Rounds(review) = %d, %v; want 1 (one changes-round burned)", got, err)
 	}
 	if st := h.stageOf(id); st != domain.StageImplement {
 		t.Fatalf("feature at %s, want Implement (parked mid-loop)", st)
@@ -71,8 +71,8 @@ func TestReviewRoundsResumeSurvivesFreshDriver(t *testing.T) {
 	if r := firstWorkStageRound(h); r != 1 {
 		t.Fatalf("first resumed work-stage event round = %d, want 1 (the round burned in run-1, not a fresh grant)", r)
 	}
-	if got, err := h.store.ReviewRounds(context.Background(), id); err != nil || got != 1 {
-		t.Fatalf("post-resume ReviewRounds = %d, %v; want 1 (never re-mutated)", got, err)
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindReview); err != nil || got != 1 {
+		t.Fatalf("post-resume Rounds(review) = %d, %v; want 1 (never re-mutated)", got, err)
 	}
 }
 
@@ -106,8 +106,8 @@ func TestReviewRoundsClearedOnPassGate(t *testing.T) {
 	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
-	if got, err := h.store.ReviewRounds(context.Background(), h.only()); err != nil || got != 0 {
-		t.Fatalf("ReviewRounds after pass gate = %d, %v; want 0", got, err)
+	if got, err := h.store.Rounds(context.Background(), h.only(), domain.RoundKindReview); err != nil || got != 0 {
+		t.Fatalf("Rounds(review) after pass gate = %d, %v; want 0", got, err)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestReviewRoundsStoreFailureFailsClosed(t *testing.T) {
 	t.Run("read aborts review entry", func(t *testing.T) {
 		h := newHarness(t, true, reviewLoopScript("changes"))
 		d := h.driver(Options{})
-		d.reviewStore = &failReviewStore{failLoad: true}
+		d.roundStore = &failRoundStore{failLoad: true}
 		out, err := d.Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 		if err == nil {
 			t.Fatal("Run with a failing read: want error, got nil")
@@ -129,7 +129,7 @@ func TestReviewRoundsStoreFailureFailsClosed(t *testing.T) {
 	t.Run("write aborts the round", func(t *testing.T) {
 		h := newHarness(t, true, reviewLoopScript("changes"))
 		d := h.driver(Options{})
-		d.reviewStore = &failReviewStore{failWrite: true}
+		d.roundStore = &failRoundStore{failWrite: true}
 		out, err := d.Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 		if err == nil {
 			t.Fatal("Run with a failing write: want error, got nil")
@@ -138,33 +138,6 @@ func TestReviewRoundsStoreFailureFailsClosed(t *testing.T) {
 			t.Fatalf("status = %q, want error", out.Status)
 		}
 	})
-}
-
-// failReviewStore fails reads, writes, or both — the fail-closed proof.
-type failReviewStore struct {
-	failLoad  bool
-	failWrite bool
-}
-
-func (f *failReviewStore) ReviewRounds(context.Context, domain.FeatureID) (int, error) {
-	if f.failLoad {
-		return 0, errors.New("read failed")
-	}
-	return 0, nil
-}
-
-func (f *failReviewStore) IncrementReviewRounds(context.Context, domain.FeatureID) error {
-	if f.failWrite {
-		return errors.New("bump failed")
-	}
-	return nil
-}
-
-func (f *failReviewStore) ClearReviewRounds(context.Context, domain.FeatureID) error {
-	if f.failWrite {
-		return errors.New("clear failed")
-	}
-	return nil
 }
 
 // firstWorkStageRound returns the round of the first implement/fix stage
@@ -180,6 +153,72 @@ func firstWorkStageRound(h *harness) int {
 		}
 		if r, ok := e["round"].(float64); ok {
 			return int(r)
+		}
+	}
+	return -1
+}
+
+// TestRSReviewLegLanding proves the research review-loop routing this
+// feature adds: a research card that was bounced review→investigate (one
+// review round already burned) parks/resumes at Investigate with the
+// review counter seeded from the store — round 1, not a fresh grant — and
+// the driver's applyVerdict investigate case steps it forward to Shape
+// (the existing investigate→shape forward edge), rather than hitting the
+// "unexpected autonomous stage investigate" default.
+func TestRSReviewLegLanding(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageInvestigate: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Investigated further.")
+		},
+		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Shaped.")
+		},
+	})
+	// research stages run read-only in the main checkout; only a backend
+	// that can structurally enforce that is allowed to drive them.
+	h.fake.Caps.ReadOnlyEnforce = true
+	id, err := domain.NewID(domain.KindResearch, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug, _ := domain.Slugify("research card")
+	now := time.Now()
+	f := domain.Feature{
+		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
+		Stage: domain.StageInvestigate, CreatedAt: now, UpdatedAt: now,
+	}
+	putDraft(t, h, &f, "# RS-001: research card\n\n## Findings\n\nNothing yet.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	// simulate the prior review→investigate bounce: one round already burned.
+	if err := h.store.SetReviewRounds(context.Background(), f.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{Until: domain.StageShape}).drive(context.Background(), f.ID)
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	if out.Status != StatusStopped {
+		t.Fatalf("status = %q, want stopped; stream=%v", out.Status, h.eventKinds())
+	}
+	if got := h.stageOf(f.ID); got != domain.StageShape {
+		t.Fatalf("feature at %s, want Shape (investigate stepped forward)", got)
+	}
+	if r := investigateStageRound(h); r != 1 {
+		t.Fatalf("investigate stage-event round = %d, want 1 (the burned round, not a fresh grant)", r)
+	}
+}
+
+// investigateStageRound returns the round of the investigate stage event
+// in the stream, or -1 if none was emitted.
+func investigateStageRound(h *harness) int {
+	for _, e := range h.events() {
+		if e["event"] == "stage" && e["stage"] == "investigate" {
+			if r, ok := e["round"].(float64); ok {
+				return int(r)
+			}
 		}
 	}
 	return -1
