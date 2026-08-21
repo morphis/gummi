@@ -236,19 +236,26 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	// parsed value was inert and "permissions: guarded" silently ran allow-all.
 	perm := agent.PermissionAllowAll
 	var sandboxMode string
-	if cfg, err := config.Load(ws.ConfigFile()); err != nil {
+	var instructions []string
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		userPath = ""
+	}
+	if cfg, _, err := config.LoadLayered(userPath, ws.ConfigFile()); err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
 	} else {
 		if cfg.Guarded() {
 			perm = agent.PermissionGuarded
 		}
 		sandboxMode = cfg.Sandbox
+		instructions = cfg.Instructions
 	}
 	eng := engine.New(engine.Config{
 		Agents: agents, Store: store, Pool: pool, Workspace: ws,
 		Model: model, MaxActive: maxActive, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
-		Permission: perm, Sandbox: sandboxMode,
+		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
 	})
 	// Names() already orders the declared default first (the rest sorted) so
 	// index 0 is the intended default for the forms and the CLI --profile
@@ -416,7 +423,12 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 // resolution-time config error naming the offending repo.
 func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.NamedRepo, err error) {
 	ws = cwd
-	cfg, err := config.Load(filepath.Join(ws, ".gummi", "config.yaml"))
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, filepath.Join(ws, ".gummi", "config.yaml"))
 	if err != nil {
 		return "", "", nil, err
 	}

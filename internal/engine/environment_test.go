@@ -216,6 +216,85 @@ func TestEnvironmentCardOversizeSurfacesOnNextSession(t *testing.T) {
 	}
 }
 
+func TestEnvironmentCardAppendsInstructions(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	writeEnvironmentCard(t, ws.Root, testCard)
+
+	inst := filepath.Join(t.TempDir(), "extra.md")
+	if err := os.WriteFile(inst, []byte("EXTRA: use the staging DB."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Instructions: []string{inst}})
+	t.Cleanup(func() { e.Close() })
+
+	ctx := context.Background()
+	if _, err := e.Attach(ctx, feature(1, "x", domain.StageSpec)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+
+	hints := rec.opts().SystemHints
+	if len(hints) == 0 {
+		t.Fatal("no SystemHints captured")
+	}
+	want := testCard + "\n\nEXTRA: use the staging DB."
+	if hints[0] != want {
+		t.Errorf("SystemHints[0] = %q, want %q", hints[0], want)
+	}
+}
+
+func TestEnvironmentCardCapWithInstructions(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	prefix := strings.Repeat("a", maxEnvironmentCard-50)
+	writeEnvironmentCard(t, ws.Root, prefix)
+
+	inst := filepath.Join(t.TempDir(), "extra.md")
+	if err := os.WriteFile(inst, []byte(strings.Repeat("b", 200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Instructions: []string{inst}})
+	t.Cleanup(func() { e.Close() })
+
+	var warnings int32
+	e.envWarn = func(msg string) {
+		atomic.AddInt32(&warnings, 1)
+	}
+
+	card := e.environmentCard()
+	if len(card) != maxEnvironmentCard {
+		t.Errorf("len(card) = %d, want %d", len(card), maxEnvironmentCard)
+	}
+	if atomic.LoadInt32(&warnings) != 1 {
+		t.Errorf("warnings = %d, want 1", atomic.LoadInt32(&warnings))
+	}
+}
+
+func TestEnvironmentCardMissingInstructionWarns(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	writeEnvironmentCard(t, ws.Root, testCard)
+
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Instructions: []string{"/no/such/file.md"}})
+	t.Cleanup(func() { e.Close() })
+
+	var warnings int32
+	e.envWarn = func(msg string) {
+		atomic.AddInt32(&warnings, 1)
+	}
+
+	card := e.environmentCard()
+	if card != testCard {
+		t.Errorf("card = %q, want %q", card, testCard)
+	}
+	if atomic.LoadInt32(&warnings) != 1 {
+		t.Errorf("warnings = %d, want 1", atomic.LoadInt32(&warnings))
+	}
+}
+
 func TestEnvironmentCardOversizeSurfacesAfterDiscoverChecks(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	oversize := strings.Repeat("x", maxEnvironmentCard+100)

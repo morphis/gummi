@@ -31,6 +31,84 @@ func clearDoctorEnv(t *testing.T) {
 	}
 }
 
+func TestConfigLayeringChecksSourceFiles(t *testing.T) {
+	clearDoctorEnv(t)
+	wsDir := gitRepo(t)
+	userPath := filepath.Join(t.TempDir(), "user.yaml")
+	wsPath := filepath.Join(wsDir, ".gummi", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(wsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("permissions: guarded\nenv:\n  docker:\n    probe: docker info\n    describe: Docker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wsPath, []byte("permissions: allow-all\nenv:\n  docker:\n    probe: docker version\n    describe: Docker daemon\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, sources, err := config.LoadLayered(userPath, wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := configLayeringChecks(cfg, sources, userPath, wsPath)
+	c := checkByName(doctorReport{Checks: checks}, "config:permissions")
+	if c.Status != statusOK || !strings.Contains(c.Detail, "workspace: "+wsPath) {
+		t.Errorf("permissions check = %+v", c)
+	}
+	c = checkByName(doctorReport{Checks: checks}, "config:env.docker")
+	if c.Status != statusOK || !strings.Contains(c.Detail, "workspace: "+wsPath) {
+		t.Errorf("env.docker check = %+v", c)
+	}
+	c = checkByName(doctorReport{Checks: checks}, "config:repo")
+	if c.Status != statusOK || !strings.Contains(c.Detail, "(default)") {
+		t.Errorf("repo check = %+v", c)
+	}
+}
+
+func TestConfigLayeringChecksMissingInstruction(t *testing.T) {
+	clearDoctorEnv(t)
+	wsDir := gitRepo(t)
+	wsPath := filepath.Join(wsDir, ".gummi", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(wsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wsPath, []byte("instructions:\n  - /no/such/file.md\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, sources, err := config.LoadLayered(filepath.Join(t.TempDir(), "missing.yaml"), wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := configLayeringChecks(cfg, sources, "", wsPath)
+	c := checkByName(doctorReport{Checks: checks}, "config:instructions./no/such/file.md")
+	if c.Status != statusFail || !strings.Contains(c.Detail, "/no/such/file.md") {
+		t.Errorf("missing instruction check = %+v", c)
+	}
+}
+
+func TestDoctorConfigLoadErrorProducesFailingCheck(t *testing.T) {
+	clearDoctorEnv(t)
+	wsDir := gitRepo(t)
+	wsPath := filepath.Join(wsDir, ".gummi", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(wsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Invalid YAML triggers a config:load fail, but the rest of the report
+	// still renders (workspace falls back to empty config).
+	if err := os.WriteFile(wsPath, []byte("permissions: yolo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := buildDoctorReport(wsDir, doctorOpts{})
+	if c := checkByName(r, "config:load"); c.Status != statusFail || !strings.Contains(c.Detail, "permissions") {
+		t.Errorf("config:load check = %+v", c)
+	}
+	if c := checkByName(r, "config:permissions"); c.Status != statusOK {
+		t.Errorf("config:permissions should still render, got %+v", c)
+	}
+}
+
 func TestDoctorCodexUsesNativeLoginRemediation(t *testing.T) {
 	clearDoctorEnv(t)
 	fakeAgentOnPath(t, "codex")

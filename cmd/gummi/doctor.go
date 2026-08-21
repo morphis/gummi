@@ -161,8 +161,19 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 
 	// 2b. env prerequisites — operator-configured probes reported as
 	// status, never readiness. A missing/absent prerequisite is legitimate.
-	wsCfg, _ := config.Load(ws.ConfigFile())
+	userPath, upErr := config.UserConfigPath()
+	if upErr != nil {
+		add("config:user-path", statusWarn, upErr.Error(), "set XDG_CONFIG_HOME or ensure HOME is available")
+		userPath = ""
+	}
+	wsCfg, sources, cfgErr := config.LoadLayered(userPath, ws.ConfigFile())
+	if cfgErr != nil {
+		add("config:load", statusFail, cfgErr.Error(), "fix the offending config file")
+		wsCfg = config.Config{}
+		sources = map[string]string{}
+	}
 	checks = append(checks, envChecks(wsCfg, defaultRoot)...)
+	checks = append(checks, configLayeringChecks(wsCfg, sources, userPath, ws.ConfigFile())...)
 
 	// profiles are parsed once and shared by the backend check (they decide
 	// which backends are required) and the profile cross-check below.
@@ -662,6 +673,114 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 		}
 	}
 	return checks
+}
+
+// configLayeringChecks renders one line per top-level config field showing
+// which file supplied the winning value, plus one existence check per
+// configured instruction path so bad entries are visible rather than silently
+// skipped.
+func configLayeringChecks(cfg config.Config, sources map[string]string, userPath, workspacePath string) []doctorCheck {
+	var checks []doctorCheck
+
+	sourceLabel := func(src string) string {
+		switch src {
+		case "default":
+			return "default"
+		case userPath:
+			return "user: " + userPath
+		case workspacePath:
+			return "workspace: " + workspacePath
+		default:
+			// Instructions concatenates both layers; render the combined
+			// source as explicit user/workspace labels to match scalar fields.
+			parts := strings.Split(src, ",")
+			labels := make([]string, 0, len(parts))
+			for _, p := range parts {
+				switch p {
+				case userPath:
+					labels = append(labels, "user: "+p)
+				case workspacePath:
+					labels = append(labels, "workspace: "+p)
+				default:
+					labels = append(labels, "source: "+p)
+				}
+			}
+			return strings.Join(labels, ", ")
+		}
+	}
+
+	render := func(key string) {
+		src := sources[key]
+		if src == "" {
+			src = "default"
+		}
+		var value string
+		switch key {
+		case "permissions":
+			value = cfg.Permissions
+		case "sandbox":
+			value = cfg.Sandbox
+		case "repo":
+			value = cfg.Repo
+		case "repos":
+			value = strings.Join(sortedStringKeys(cfg.Repos), ", ")
+		case "instructions":
+			value = strings.Join(cfg.Instructions, ", ")
+		}
+		if value == "" {
+			value = "(unset)"
+		}
+		detail := fmt.Sprintf("%s (%s)", value, sourceLabel(src))
+		checks = append(checks, doctorCheck{Name: "config:" + key, Status: statusOK, Detail: detail})
+	}
+
+	render("permissions")
+	render("sandbox")
+	render("repo")
+	render("repos")
+	render("instructions")
+
+	var envKeys []string
+	for k := range cfg.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		src := sources["env."+k]
+		if src == "" {
+			src = "default"
+		}
+		detail := cfg.Env[k].Describe
+		if detail == "" {
+			detail = cfg.Env[k].Probe
+		}
+		detail += " (" + sourceLabel(src) + ")"
+		checks = append(checks, doctorCheck{Name: "config:env." + k, Status: statusOK, Detail: detail})
+	}
+
+	for _, inst := range cfg.Instructions {
+		var status, detail string
+		if _, err := os.Stat(inst); err != nil {
+			status = statusFail
+			detail = fmt.Sprintf("%s: %v", inst, err)
+		} else {
+			status = statusOK
+			detail = inst + " exists"
+		}
+		detail += " (" + sourceLabel(sources["instructions"]) + ")"
+		checks = append(checks, doctorCheck{Name: "config:instructions." + inst, Status: status, Detail: detail})
+	}
+
+	return checks
+}
+
+func sortedStringKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // forkDriftStatus reports whether any feature's recorded fork point is no

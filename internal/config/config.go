@@ -38,6 +38,11 @@ type Config struct {
 	// tags in a verification plan; gummi probes each entry's Probe command
 	// at Verify kickoff and in `gummi doctor`.
 	Env map[string]EnvPrereq `yaml:"env"`
+	// Instructions is a list of extra instruction-file paths that are
+	// appended to the workspace environment card, in user-then-workspace
+	// order. Every entry must be an absolute path; Load rejects relative or
+	// empty entries so a path cannot silently walk out of the workspace.
+	Instructions []string `yaml:"instructions"`
 }
 
 // EnvPrereq is one operator-configured environment prerequisite.
@@ -87,6 +92,14 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: env: %q has an empty probe", path, name)
 		}
 	}
+	for i, inst := range c.Instructions {
+		if inst == "" {
+			return Config{}, fmt.Errorf("%s: instructions: entry %d is empty", path, i)
+		}
+		if !filepath.IsAbs(inst) {
+			return Config{}, fmt.Errorf("%s: instructions: entry %q is not an absolute path", path, inst)
+		}
+	}
 	return c, nil
 }
 
@@ -94,6 +107,119 @@ func Load(path string) (Config, error) {
 // (agents' tool calls require approval). The default (empty or "allow-all")
 // is not guarded.
 func (c Config) Guarded() bool { return c.Permissions == "guarded" }
+
+// UserConfigPath returns the path to the user-level gummi config file:
+// $XDG_CONFIG_HOME/gummi/config.yaml when XDG_CONFIG_HOME is set and
+// non-empty, otherwise ~/.config/gummi/config.yaml. It returns an error only
+// when neither XDG_CONFIG_HOME nor os.UserHomeDir() can produce a path.
+func UserConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "gummi", "config.yaml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving user config path: %w", err)
+	}
+	return filepath.Join(home, ".config", "gummi", "config.yaml"), nil
+}
+
+// LoadLayered loads the user-level and workspace config files and returns a
+// merged Config plus a source map describing which file supplied each value.
+// A missing user config is treated as an empty Config. The returned map has
+// one entry per top-level field: "permissions", "sandbox", "repo", "repos",
+// "instructions", and "env.<name>" for each distinct env key. Scalar fields
+// that are unset in both files use the literal "default". Instructions list
+// both contributing paths when both files supply entries.
+func LoadLayered(userPath, workspacePath string) (Config, map[string]string, error) {
+	user, err := Load(userPath)
+	if err != nil {
+		return Config{}, nil, err
+	}
+	ws, err := Load(workspacePath)
+	if err != nil {
+		return Config{}, nil, err
+	}
+	merged, sources, err := merge(user, ws, userPath, workspacePath)
+	if err != nil {
+		return Config{}, nil, err
+	}
+	return merged, sources, nil
+}
+
+// merge applies the per-field layering rules and returns the merged Config
+// alongside a source map for doctor to render. Repo/Repos are workspace-only:
+// if the user file sets either, merge returns an error.
+func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]string, error) {
+	if user.Repo != "" {
+		return Config{}, nil, fmt.Errorf("%s: repo is workspace-only and cannot be set in the user config", userPath)
+	}
+	if len(user.Repos) > 0 {
+		return Config{}, nil, fmt.Errorf("%s: repos is workspace-only and cannot be set in the user config", userPath)
+	}
+
+	sources := map[string]string{}
+	var merged Config
+
+	if ws.Permissions != "" {
+		merged.Permissions = ws.Permissions
+		sources["permissions"] = workspacePath
+	} else if user.Permissions != "" {
+		merged.Permissions = user.Permissions
+		sources["permissions"] = userPath
+	} else {
+		sources["permissions"] = "default"
+	}
+
+	if ws.Sandbox != "" {
+		merged.Sandbox = ws.Sandbox
+		sources["sandbox"] = workspacePath
+	} else if user.Sandbox != "" {
+		merged.Sandbox = user.Sandbox
+		sources["sandbox"] = userPath
+	} else {
+		sources["sandbox"] = "default"
+	}
+
+	if ws.Repo != "" {
+		merged.Repo = ws.Repo
+		sources["repo"] = workspacePath
+	} else {
+		sources["repo"] = "default"
+	}
+
+	if len(ws.Repos) > 0 {
+		merged.Repos = ws.Repos
+		sources["repos"] = workspacePath
+	} else {
+		sources["repos"] = "default"
+	}
+
+	merged.Env = make(map[string]EnvPrereq, len(user.Env)+len(ws.Env))
+	for k, v := range user.Env {
+		merged.Env[k] = v
+		sources["env."+k] = userPath
+	}
+	for k, v := range ws.Env {
+		merged.Env[k] = v
+		sources["env."+k] = workspacePath
+	}
+
+	merged.Instructions = make([]string, 0, len(user.Instructions)+len(ws.Instructions))
+	merged.Instructions = append(merged.Instructions, user.Instructions...)
+	merged.Instructions = append(merged.Instructions, ws.Instructions...)
+	switch {
+	case len(user.Instructions) > 0 && len(ws.Instructions) > 0:
+		sources["instructions"] = userPath + "," + workspacePath
+	case len(user.Instructions) > 0:
+		sources["instructions"] = userPath
+	case len(ws.Instructions) > 0:
+		sources["instructions"] = workspacePath
+	default:
+		sources["instructions"] = "default"
+	}
+
+	return merged, sources, nil
+}
 
 // NamedRepo is one selectable named repository: a configured name and its
 // resolved absolute root (joined against the workspace root).
@@ -221,6 +347,14 @@ permissions: allow-all
 # for bootstrap/test sessions that legitimately touch main). Profiles may
 # override this per-profile in .gummi/profiles.yaml.
 # sandbox: warn
+
+# instructions: — a list of absolute paths to extra instruction files that
+# are appended to the workspace environment card, in user-then-workspace
+# order. User-level instructions live at $XDG_CONFIG_HOME/gummi/config.yaml
+# (falling back to ~/.config/gummi/config.yaml); workspace instructions live
+# here. Every path must be absolute.
+# instructions:
+#   - /home/you/.config/gummi/instructions.md
 
 # repo: <path> — the git repository root gummi manages. Omit when .gummi
 # and .git share the same directory (the default); name a nested repo

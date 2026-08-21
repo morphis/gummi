@@ -173,6 +173,9 @@ type Config struct {
 	// every envelope-derived budget (0 = domain.TurnReserveCredits).
 	// Enforcement runs between turns, so smaller caps cannot be held.
 	TurnReserve float64
+	// Instructions are absolute paths to extra instruction files appended
+	// to the workspace environment card, in user-then-workspace order.
+	Instructions []string
 }
 
 // Engine orchestrates all live sessions and the autonomous run queue.
@@ -699,13 +702,20 @@ func (e *Engine) failRun(s *Session, err error) {
 // (mirrors the manual verify dialog's cap).
 const verifyStageTimeout = 10 * time.Minute
 
-// runEnvProbes loads the workspace-root config, probes every declared
-// environment prerequisite in the card's worktree, records each result in
-// the activity feed, persists the snapshot, and returns a compact report
-// block. Env probes run in all sandbox/permission modes because their
+// runEnvProbes loads the layered user+workspace config, probes every
+// declared environment prerequisite in the card's worktree, records each
+// result in the activity feed, persists the snapshot, and returns a compact
+// report block. Env probes run in all sandbox/permission modes because their
 // command source is operator config from outside the worktree.
 func (e *Engine) runEnvProbes(s *Session) string {
-	cfg, err := config.Load(e.cfg.Workspace.ConfigFile())
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		if e.envWarn != nil {
+			e.envWarn(fmt.Sprintf("user config path could not be resolved: %v", err))
+		}
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, e.cfg.Workspace.ConfigFile())
 	if err != nil {
 		msg := "Environment prerequisites could not be probed: " + err.Error()
 		s.appendActivity(msg)

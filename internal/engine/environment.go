@@ -2,9 +2,9 @@ package engine
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // maxEnvironmentCard caps the workspace environment card that is prepended
@@ -15,29 +15,41 @@ const maxEnvironmentCard = 8 << 10
 // environmentCard returns the workspace's environment card — the operator-
 // authored description of machinery outside the repo (dev VMs, hardware,
 // services) that stage agents must know exists. It reads
-// <workspaceRoot>/.gummi/environment.md once per Engine lifetime; edits to
-// the file require an Engine restart. A missing or unreadable file yields ""
-// and never returns an error.
+// <workspaceRoot>/.gummi/environment.md once per Engine lifetime, then
+// appends any configured instruction files. Edits to these files require an
+// Engine restart. A missing or unreadable file yields "" and never returns
+// an error.
 func (e *Engine) environmentCard() string {
 	e.envOnce.Do(func() {
-		path := filepath.Join(e.cfg.Workspace.GummiDir(), "environment.md")
-		f, err := os.Open(path)
-		if err != nil {
-			return
-		}
-		defer f.Close()
+		var b strings.Builder
 
-		raw, err := io.ReadAll(io.LimitReader(f, maxEnvironmentCard+1))
-		if err != nil {
-			return
+		path := filepath.Join(e.cfg.Workspace.GummiDir(), "environment.md")
+		if raw, err := os.ReadFile(path); err == nil {
+			b.Write(raw)
 		}
+
+		for _, inst := range e.cfg.Instructions {
+			raw, err := os.ReadFile(inst)
+			if err != nil {
+				if e.envWarn != nil {
+					e.envWarn(fmt.Sprintf("instruction file %s could not be read: %v", inst, err))
+				}
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.Write(raw)
+		}
+
+		raw := b.String()
 		if len(raw) > maxEnvironmentCard {
-			e.envCard = string(raw[:maxEnvironmentCard])
+			e.envCard = raw[:maxEnvironmentCard]
 			if e.envWarn != nil {
-				e.envWarn(fmt.Sprintf("environment card %s exceeds %d bytes; using the first %d", path, maxEnvironmentCard, maxEnvironmentCard))
+				e.envWarn(fmt.Sprintf("environment card exceeds %d bytes; using the first %d", maxEnvironmentCard, maxEnvironmentCard))
 			}
 		} else {
-			e.envCard = string(raw)
+			e.envCard = raw
 		}
 	})
 	return e.envCard

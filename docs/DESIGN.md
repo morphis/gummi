@@ -314,6 +314,37 @@ checkout rather than a worktree) is the third. Running gummi on a bare
 host with allow-all is possible and surfaced, not silently degraded —
 the escape hatches below stay the honest path.
 
+#### Config layering
+
+Settings are merged from two files: a user-level config at
+`$XDG_CONFIG_HOME/gummi/config.yaml` (falling back to
+`~/.config/gummi/config.yaml`), and the workspace config at
+`.gummi/config.yaml`. `config.LoadLayered` loads both and applies explicit
+per-field rules:
+
+- `permissions` and `sandbox`: workspace wins when set, otherwise user,
+  otherwise the built-in default.
+- `env`: keys are merged; the workspace entry wins on a name collision.
+- `instructions`: a list of absolute paths to extra instruction files,
+  concatenated user-first then workspace; the engine appends each file's
+  content to the environment card. Every path must be absolute — a relative
+  or empty entry is rejected at load time so a path cannot silently walk out
+  of the workspace.
+- `repo` and `repos`: workspace-only. Setting either in the user-level file
+  is a load error.
+
+`UserConfigPath` returning an error (no XDG dir and no home directory) is
+treated as "no user config" everywhere: a warning is surfaced, but gummi
+continues with workspace-only settings. A `LoadLayered` error is handled at
+each call site exactly like the previous `config.Load` error: it aborts
+environment probing in the engine and aborts startup in `resolveAllRoots`;
+the engine-build path prints a warning and falls back to defaults; doctor
+reports it as a failing `config:load` check and continues the rest of the
+report. `gummi doctor` prints one `config:*` line per field, naming the file
+that supplied the winning value (`user: ...`, `workspace: ...`, or
+`default`), and one `config:instructions.<path>` line per instruction path
+reporting whether the path exists.
+
 ### 4.5 Client tools & the ask protocol
 
 Beyond reading and writing the spec, agents need a first-class way to
