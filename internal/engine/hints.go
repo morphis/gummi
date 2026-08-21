@@ -553,6 +553,11 @@ review→%s→review loop; without it the loop stalls.`,
 		artifact, artifact, artifact, scopeRef, artifact, artifact, bounce, bounce))
 }
 
+// armedVerifyNote warns the verify agent that a bug with a present
+// environment prerequisite and no [env:] live check will have its raw
+// Pass downgraded to Blocked unless a live check or human waiver is added.
+const armedVerifyNote = `Omission gate: this bug has at least one environment prerequisite that probed PRESENT, and the Verification section currently tags no [env:] live checks. A raw VERDICT: pass will be downgraded to blocked. To avoid this, either add a live check tagged [env: <prereq>] in the Verification section, or add a human waiver line reading "%% @user: no-live-check <reason>".`
+
 // verifyHint is the Verify stage contract. The deterministic repo-check
 // floor is identical; the adaptive part differs — a feature runs its
 // spec's verification plan, a bug proves the reproduction is gone and a

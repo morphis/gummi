@@ -95,12 +95,19 @@ func (v Verdict) String() string {
 
 // SessionVerdict reads a session's outcome, preferring the structured
 // submit_verdict tool result and falling back to the VERDICT: line for
-// backends/agents that didn't use it.
+// backends/agents that didn't use it. A stamped verdict floor is applied
+// before returning: it only ever downgrades a raw Pass to Blocked.
 func SessionVerdict(snap engine.Snapshot) Verdict {
+	var raw Verdict
 	if v := FromTool(snap.Verdict); v != Unclear {
-		return v
+		raw = v
+	} else {
+		raw = Parse(LastAssistant(snap))
 	}
-	return Parse(LastAssistant(snap))
+	if snap.VerdictFloor == "blocked" && raw == Pass {
+		return Blocked
+	}
+	return raw
 }
 
 // LastAssistant returns the content of the most recent assistant message

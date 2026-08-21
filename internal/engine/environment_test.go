@@ -27,6 +27,7 @@ func bugFeatureAt(num int, title string, stage domain.Stage) domain.Feature {
 		CreatedAt: now, UpdatedAt: now,
 	}
 }
+
 func writeEnvironmentCard(t *testing.T, wsRoot, content string) {
 	t.Helper()
 	p := filepath.Join(wsRoot, ".gummi", "environment.md")

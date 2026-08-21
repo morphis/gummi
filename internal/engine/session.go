@@ -122,18 +122,20 @@ type Snapshot struct {
 	AgentName   string // backend running this session ("copilot", "opencode", …)
 	// AgentSessionID is the backend's own session id (agent.Identified),
 	// pointing at its on-disk log; empty for backends without one.
-	AgentSessionID string
-	Model          string // model resolved at spawn (Spend.Model is the reported one)
-	Transcript     []Message
-	Activity       []string // recent tool-call lines
-	Spend          agent.Usage
-	SpentCredits   float64       // Spend as a credit-equivalent at the provider's rate
-	Context        agent.Context // latest context-window occupancy
-	Busy           bool          // agent is mid-turn
-	PendingAsk     *Ask          // the agent's open ask_user question, if any
-	Verdict        string        // review verdict via submit_verdict, if submitted
-	Err            error
-	EnvProbes      []envprobe.Result
+	AgentSessionID     string
+	Model              string // model resolved at spawn (Spend.Model is the reported one)
+	Transcript         []Message
+	Activity           []string // recent tool-call lines
+	Spend              agent.Usage
+	SpentCredits       float64       // Spend as a credit-equivalent at the provider's rate
+	Context            agent.Context // latest context-window occupancy
+	Busy               bool          // agent is mid-turn
+	PendingAsk         *Ask          // the agent's open ask_user question, if any
+	Verdict            string        // review verdict via submit_verdict, if submitted
+	VerdictFloor       string        // deterministic ceiling applied before returning the stage verdict
+	VerdictFloorReason string        // human-readable reason for the floor, if any
+	Err                error
+	EnvProbes          []envprobe.Result
 }
 
 // Session is one live agent conversation bound to a feature + stage.
@@ -206,6 +208,13 @@ type Session struct {
 	// this session, produced at Verify kickoff and surfaced on Snapshot.
 	envProbes []envprobe.Result
 
+	// verdictFloor is a deterministic ceiling applied to the raw agent
+	// verdict. Currently only "blocked" is used, and only for a bug whose
+	// Verify finish omitted every [env:] live check while a prerequisite
+	// probed present. It only ever downgrades Pass -> Blocked.
+	verdictFloor       string
+	verdictFloorReason string
+
 	// mcpTeardown releases the session's MCP inbound endpoint (closes the
 	// listener, joins its goroutines, removes the socket file) exactly
 	// once, hand-in-hand with stop (see setMCPTeardown).
@@ -243,25 +252,27 @@ func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Snapshot{
-		Feature:        s.Feature,
-		Role:           s.Role,
-		Interactive:    s.Interactive,
-		Critique:       s.Critique,
-		Rebase:         s.Rebase,
-		State:          s.state,
-		AgentName:      s.agentName,
-		AgentSessionID: s.agentSessionID,
-		Model:          s.model,
-		Transcript:     append([]Message(nil), s.transcript...),
-		Activity:       append([]string(nil), s.activity...),
-		Spend:          s.spend,
-		SpentCredits:   s.spentForBudgetLocked(),
-		Context:        s.context,
-		Busy:           s.busy,
-		PendingAsk:     s.pendingAsk,
-		Verdict:        s.verdict,
-		Err:            s.err,
-		EnvProbes:      append([]envprobe.Result(nil), s.envProbes...),
+		Feature:            s.Feature,
+		Role:               s.Role,
+		Interactive:        s.Interactive,
+		Critique:           s.Critique,
+		Rebase:             s.Rebase,
+		State:              s.state,
+		AgentName:          s.agentName,
+		AgentSessionID:     s.agentSessionID,
+		Model:              s.model,
+		Transcript:         append([]Message(nil), s.transcript...),
+		Activity:           append([]string(nil), s.activity...),
+		Spend:              s.spend,
+		SpentCredits:       s.spentForBudgetLocked(),
+		Context:            s.context,
+		Busy:               s.busy,
+		PendingAsk:         s.pendingAsk,
+		Verdict:            s.verdict,
+		VerdictFloor:       s.verdictFloor,
+		VerdictFloorReason: s.verdictFloorReason,
+		Err:                s.err,
+		EnvProbes:          append([]envprobe.Result(nil), s.envProbes...),
 	}
 }
 
@@ -623,6 +634,13 @@ func (s *Session) setVerdict(v string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.verdict = v
+}
+
+func (s *Session) setVerdictFloor(v, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.verdictFloor = v
+	s.verdictFloorReason = reason
 }
 
 // takePendingAsk clears and returns the open ask (nil if none), so the

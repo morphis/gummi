@@ -663,6 +663,9 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 		if pre := e.runEnvProbes(s); pre != "" {
 			msg = pre + "\n\n" + msg
 		}
+		if s.Feature.Kind == domain.KindBug && hasCleanPresentProbe(s) {
+			msg = armedVerifyNote + "\n\n" + msg
+		}
 		if e.cfg.Permission != agent.PermissionGuarded {
 			if pre := e.runSpecChecks(s); pre != "" {
 				msg = pre + "\n\n" + msg
@@ -1551,6 +1554,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 				return
 			}
 			e.stageReceipt(s)
+			e.gateVerifyVerdict(s)
 			e.freeSlot(s)
 		}
 	case agent.EventError:

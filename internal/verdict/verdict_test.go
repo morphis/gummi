@@ -111,3 +111,35 @@ func TestMaxRounds(t *testing.T) {
 		t.Errorf("MaxRounds(RoundKindReview) = %d, want 3", got)
 	}
 }
+
+func TestSessionVerdictFloor(t *testing.T) {
+	cases := []struct {
+		name    string
+		verdict string
+		tail    string
+		floor   string
+		want    Verdict
+	}{
+		{"blocked floor downgrades raw pass", "", "VERDICT: pass", "blocked", Blocked},
+		{"blocked floor leaves raw fail", "", "VERDICT: fail", "blocked", Fail},
+		{"blocked floor leaves raw changes", "", "VERDICT: changes", "blocked", Changes},
+		{"blocked floor leaves raw blocked", "", "VERDICT: blocked", "blocked", Blocked},
+		{"blocked floor leaves unclear", "", "no verdict", "blocked", Unclear},
+		{"tool pass downgraded by floor", "pass", "", "blocked", Blocked},
+		{"tool fail not downgraded", "fail", "", "blocked", Fail},
+		{"no floor returns raw pass", "", "VERDICT: pass", "", Pass},
+		{"unknown floor returns raw pass", "", "VERDICT: pass", "something-else", Pass},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := engine.Snapshot{
+				Verdict:      tc.verdict,
+				VerdictFloor: tc.floor,
+				Transcript:   []engine.Message{{Author: engine.AuthorAssistant, Content: tc.tail}},
+			}
+			if got := SessionVerdict(snap); got != tc.want {
+				t.Errorf("SessionVerdict = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
