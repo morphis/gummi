@@ -386,15 +386,27 @@ func neutralizeMarkers(body string) string {
 	return strings.Join(lines, "\n")
 }
 
+// rsSourceRe matches the "<FeatureID> <slug>" shape IngestResearch (FD-080)
+// writes into IngestResult.SourcePath when the source is an RS card: an
+// RS-NNN id, a single space, then a kebab-case slug — never a path
+// separator, backtick, or whitespace beyond that one divider.
+var rsSourceRe = regexp.MustCompile(`^RS-\d{3,} [a-z0-9]+(-[a-z0-9]+)*$`)
+
 // renderProvenance writes the "Ingested from …" header for a seeded
 // draft: source path, the source refs it was cut from, and its
-// dependencies. Nothing is written for a blank (non-ingested) draft.
+// dependencies. Nothing is written for a blank (non-ingested) draft. A
+// source naming an RS card (rsSourceRe) renders verbatim, without
+// backticks — it is a card reference, not a file path; every other
+// source (a stashed `.gummi/ingest/…` copy) keeps the backticked form.
 func renderProvenance(b *strings.Builder, p domain.DraftProvenance) {
 	if p.Empty() {
 		return
 	}
 	b.WriteString("> _Ingested")
-	if p.Source != "" {
+	switch {
+	case p.Source != "" && rsSourceRe.MatchString(p.Source):
+		fmt.Fprintf(b, " from %s", p.Source)
+	case p.Source != "":
 		fmt.Fprintf(b, " from `%s`", p.Source)
 	}
 	if len(p.Refs) > 0 {

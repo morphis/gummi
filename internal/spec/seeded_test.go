@@ -112,3 +112,23 @@ func TestSeededTemplateNoProvenanceMatchesShape(t *testing.T) {
 		t.Error("no provenance should render no Ingested header")
 	}
 }
+
+// TestSeededTemplateResearchProvenance covers renderProvenance's two
+// branches: a source naming an RS card renders without backticks, and the
+// pre-existing PRD/stashed-path source keeps its backticked form.
+func TestSeededTemplateResearchProvenance(t *testing.T) {
+	f := &domain.Feature{ID: "FD-014", Num: 14, Title: "Y", Slug: "y", Stage: domain.StageTodo}
+
+	rs := SeededTemplate(f, domain.DraftSeed{}, domain.DraftProvenance{Source: "RS-042 topic-slug"})
+	if !strings.Contains(rs, "> _Ingested from RS-042 topic-slug_") {
+		t.Errorf("RS source should render verbatim without backticks\n---\n%s", rs)
+	}
+	if strings.Contains(rs, "`RS-042 topic-slug`") {
+		t.Errorf("RS source should not be backticked\n---\n%s", rs)
+	}
+
+	prd := SeededTemplate(f, domain.DraftSeed{}, domain.DraftProvenance{Source: ".gummi/ingest/foo.md"})
+	if !strings.Contains(prd, "> _Ingested from `.gummi/ingest/foo.md`_") {
+		t.Errorf("PRD source should keep its backticked form\n---\n%s", prd)
+	}
+}
