@@ -170,6 +170,18 @@ func nextActions(in nextInput) []nextAction {
 	case domain.StageTodo:
 		return []nextAction{{"g", "start", "advance into the design flow"}}
 
+	case domain.StageInvestigate:
+		return []nextAction{
+			{"enter", "chat with the researcher", "explore the question and shape the doc"},
+			{"g", "advance", "move on to " + string(domain.StageShape)},
+		}
+
+	case domain.StageShape:
+		return []nextAction{
+			{"enter", "shape the doc", "converge the findings into the answer"},
+			{"g", "advance", "move on to " + string(domain.StageReview)},
+		}
+
 	case domain.StageBrainstorm, domain.StageTriage:
 		return []nextAction{
 			{"enter", "chat with the architect", "explore the problem and candidate approaches"},
@@ -285,6 +297,12 @@ func nextActions(in nextInput) []nextAction {
 				{"s", "read the verify results", why},
 				{"b", "bounce to " + string(work), "send the failures back as rework"},
 				{"g", "land on main", "overrule if the failure doesn't hold up"},
+			}
+		}
+		if in.kind == domain.KindResearch {
+			return []nextAction{
+				{"g", "mark done", "verify passed — advance to done"},
+				{"b", "bounce to investigate", "not convinced — send it back with comments"},
 			}
 		}
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"

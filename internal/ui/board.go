@@ -34,7 +34,7 @@ func (m *Shell) boardView(w int) string {
 		var b strings.Builder
 		b.WriteString("\n " + s.PaneTitle.Render("BOARD") + "\n\n")
 		b.WriteString(" " + s.Faint.Render("nothing on the board yet") + "\n")
-		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" new feature · ") + s.KeyHint.Render("B") + s.Muted.Render(" new bug") + "\n")
+		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" new feature · ") + s.KeyHint.Render("B") + s.Muted.Render(" new bug · ") + s.KeyHint.Render("R") + s.Muted.Render(" new research") + "\n")
 		return b.String()
 	}
 
@@ -85,8 +85,11 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	// a bug's ID reads in a warm tint so bugs stand out among features in
 	// the shared board (the BG- prefix already distinguishes them).
 	id := s.CardID.Render(string(r.F.ID))
-	if r.F.Kind == domain.KindBug {
+	switch r.F.Kind {
+	case domain.KindBug:
 		id = s.Warning.Render(string(r.F.ID))
+	case domain.KindResearch:
+		id = s.CardIDResearch.Render(string(r.F.ID))
 	}
 	badge := ""
 	// a card the Advance gate would block on an unmet direct dependency

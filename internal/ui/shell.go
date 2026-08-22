@@ -823,6 +823,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "d":
 		if r, ok := m.selected(); ok {
+			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": no diff — research cards carry no branch"}
+				return nil
+			}
 			m.clearTransientNotice()
 			return m.openDiff(r.F)
 		}
@@ -846,6 +850,8 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.envelope, m.createFeature))
 	case "B":
 		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.envelope, m.createBug))
+	case "R":
+		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.envelope, m.createResearch))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
@@ -908,10 +914,18 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "r":
 		if r, ok := m.selected(); ok {
+			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": no rebase — research cards carry no branch"}
+				return nil
+			}
 			return m.rebaseFeature(r.F)
 		}
 	case "m":
 		if r, ok := m.selected(); ok {
+			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": no merge — research cards carry no branch"}
+				return nil
+			}
 			if !r.HasWorktree {
 				m.notice = noticeMsg{text: string(r.F.ID) + " has no worktree yet (created at spec approval)", isErr: true}
 				return nil
@@ -930,6 +944,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "c":
 		if r, ok := m.selected(); ok {
+			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": no cleanup — research cards carry no branch"}
+				return nil
+			}
 			if !r.Landed {
 				m.notice = noticeMsg{text: string(r.F.ID) + " hasn't landed on main yet", isErr: true}
 				return nil

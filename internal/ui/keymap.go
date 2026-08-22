@@ -102,7 +102,7 @@ func (m *Shell) boardBindings() []binding {
 			pause.bar = true
 		}
 	}
-	return []binding{
+	bs := []binding{
 		{key: "j/k ↓↑", label: "select", help: "select feature"},
 		{key: "pgup/pgdn", label: "ends", help: "jump to the first/last card"},
 		{key: "1..9", label: "jump", help: "jump to feature"},
@@ -124,6 +124,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
 		{key: "n", label: "new", help: "new feature", bar: true},
 		{key: "B", label: "bug", help: "new bug"},
+		{key: "R", label: "research", help: "new research card"},
 		{key: "I", label: "ingest", help: "ingest a spec into features"},
 		{key: "G", label: "import", help: "import bugs from GitHub"},
 		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
@@ -132,6 +133,22 @@ func (m *Shell) boardBindings() []binding {
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},
 	}
+	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch {
+		// research cards carry no branch: the four worktree-verb keys
+		// refuse with a notice (shell.go), so surfacing them here — in
+		// both the status bar and the ? help overlay, the single slice
+		// both render from — would mislead.
+		filtered := bs[:0:0]
+		for _, b := range bs {
+			switch b.key {
+			case "d", "r", "m", "c":
+				continue
+			}
+			filtered = append(filtered, b)
+		}
+		bs = filtered
+	}
+	return bs
 }
 
 // splashBindings is the empty-board table: only creation and global

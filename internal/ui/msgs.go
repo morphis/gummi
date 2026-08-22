@@ -273,6 +273,62 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 	}
 }
 
+// rsFormResult carries the new-research form's fields. The brief is the
+// raw, unparsed text — createResearch splits it into title/one-liner and
+// seeds the doc's Brief section, so the form stays a pure input surface.
+// Envelope is always non-nil at submit: the form's own guard rejects an
+// empty or non-integer envelope inline before the callback fires.
+type rsFormResult struct {
+	Brief    string
+	Profile  string
+	Repo     string
+	Envelope *int
+}
+
+// createResearch mints an RS number and persists a new research card in
+// todo, seeding its doc's Brief section with the full trimmed brief
+// verbatim — investigate and shape develop the rest.
+func (m *Shell) createResearch(res rsFormResult) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		title, oneLiner, _ := domain.SplitFreeform(res.Brief)
+		slug, err := domain.Slugify(title)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		id, err := domain.NewID(domain.KindResearch, num)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		now := m.now()
+		f := domain.Feature{
+			ID: id, Num: num, Kind: domain.KindResearch, Title: title, OneLiner: oneLiner,
+			Slug: slug, Stage: workflow.Initial(domain.KindResearch),
+			Profile: res.Profile, Budget: domain.Budget{Envelope: *res.Envelope},
+			Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
+		}
+		// Seed the draft first (so nothing typed is lost on a persist
+		// failure), then persist — a persisted card with no draft would be
+		// reseeded blank.
+		draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
+		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: strings.TrimSpace(res.Brief)}, domain.DraftProvenance{Source: "manual"})
+		if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := m.store.CreateFeature(ctx, &f); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s created", id), reload: true}
+	}
+}
+
 // duplicateFeature mints a fresh card from an existing one: same title,
 // one-liner, kind, skip flags, profile, and budget envelope, starting
 // over in todo with nothing spent. The original stays untouched — the

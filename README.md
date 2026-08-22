@@ -155,7 +155,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `u` | set the budget envelope (credits; 0 = uncapped) |
 | `S` | toggle severity sort (todo only) |
 | `tab` / `i` | cycle / open the needs-attention inbox |
-| `n` / `B` | new feature / new bug |
+| `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
 | `a` | raw-attach the agent CLI in the worktree (escape hatch) |
 | `r` / `m` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) |

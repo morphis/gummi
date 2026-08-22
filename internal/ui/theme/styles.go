@@ -24,16 +24,17 @@ type Styles struct {
 	Subtitle lipgloss.Style
 
 	// Chrome.
-	Separator  lipgloss.Style
-	PaneTitle  lipgloss.Style // section headers in panes (TODO, IN PROGRESS…)
-	KeyHint    lipgloss.Style // "enter" in key hints
-	KeyLabel   lipgloss.Style // "attach" in key hints
-	Cursor     lipgloss.Style // the ▸ selection/focus marker
-	Selection  lipgloss.Style // selected row highlight
-	CardID     lipgloss.Style // FD-042
-	CardTitle  lipgloss.Style
-	ProfileTag lipgloss.Style // [thrifty]
-	RepoBadge  lipgloss.Style // [lxd] / [default] — a card's managed repository
+	Separator      lipgloss.Style
+	PaneTitle      lipgloss.Style // section headers in panes (TODO, IN PROGRESS…)
+	KeyHint        lipgloss.Style // "enter" in key hints
+	KeyLabel       lipgloss.Style // "attach" in key hints
+	Cursor         lipgloss.Style // the ▸ selection/focus marker
+	Selection      lipgloss.Style // selected row highlight
+	CardID         lipgloss.Style // FD-042
+	CardIDResearch lipgloss.Style // RS-### cool/info tint, distinct from CardID and Warning
+	CardTitle      lipgloss.Style
+	ProfileTag     lipgloss.Style // [thrifty]
+	RepoBadge      lipgloss.Style // [lxd] / [default] — a card's managed repository
 
 	// Severity badges (bug impact) on board cards, tinted to read
 	// by color: coral for critical, mustard, julep, oyster for low.
@@ -86,10 +87,11 @@ func New(t Theme) *Styles {
 		Cursor:    base.Foreground(t.Accent),
 		Selection: base.Foreground(t.FgBase).Background(t.BgRaised),
 
-		CardID:     base.Foreground(t.FgSubtle).Bold(true),
-		CardTitle:  base,
-		ProfileTag: base.Foreground(t.FgFaint),
-		RepoBadge:  base.Foreground(t.FgSubtle),
+		CardID:         base.Foreground(t.FgSubtle).Bold(true),
+		CardIDResearch: base.Foreground(t.Info).Bold(true),
+		CardTitle:      base,
+		ProfileTag:     base.Foreground(t.FgFaint),
+		RepoBadge:      base.Foreground(t.FgSubtle),
 
 		SeverityCritical: base.Foreground(charmtone.Coral),
 		SeverityHigh:     base.Foreground(charmtone.Mustard),
