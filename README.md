@@ -50,11 +50,12 @@ feature.
 
 ## The workflow
 
-Two kinds of work item share the machinery:
+Three kinds of work item share the machinery:
 
 ```
 feature  FD-NNN   todo → brainstorm → spec → plan → implement → review → verify → done
 bug      BG-NNN   todo → triage → diagnose → fix ──────────────↗ (same quality floor)
+research RS-NNN   todo → investigate → shape ──────────────────↗ (done = approved doc)
 ```
 
 - **Design is a conversation.** Brainstorm and Spec (Triage and Diagnose
@@ -83,6 +84,12 @@ bug      BG-NNN   todo → triage → diagnose → fix ────────�
   different model) with nothing but the spec and the diff. Findings
   bounce the work back automatically, capped before it escalates to you.
   Verify runs the repo's checks plus the spec's own verification plan.
+- **Research is a document, not a branch.** Investigate runs worktree-less
+  in the main checkout, grounding a brief against the repo; Shape is the
+  convergence stage where findings become a recommended direction and a
+  slice breakdown. Verify is a deterministic citation + coverage check
+  that spends no tokens. Crossing `done` decomposes the approved document
+  into pre-seeded features with first-class dependency edges.
 
 ## Install
 

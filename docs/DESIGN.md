@@ -287,8 +287,8 @@ Instead of probing for a container or warning once, gummi ships the
 sandbox assumption as layered, always-on guards. The `permissions:
 allow-all | guarded` mode (above) is the first layer; per-profile
 `sandbox: enforce | warn | off` confinement is the second — `enforce`
-blocks operations that reach outside the sandbox, `warn` flags them,
-`off` (the default for allow-all) trusts the boundary. A main-checkout
+blocks operations that reach outside the sandbox, `warn` (the default for
+allow-all) flags them, `off` trusts the boundary. A main-checkout
 tripwire (approving a spec that would run the implementer in the main
 checkout rather than a worktree) is the third. Running gummi on a bare
 host with allow-all is possible and surfaced, not silently degraded —
@@ -727,6 +727,15 @@ Decided in the design interview (2026-07-03):
      resources (worktree creation, merge) keep git's own serialization on
      the repo's `.git` lock, and the SQLite store already serializes
      writers via WAL + `busy_timeout`.
+13. **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
+    `.gummi/research/`, no branch or worktree, reusing Review/Verify
+    verbatim as the quality floor.
+14. **Decomposition is wired into the RS `verify → done` gate** —
+    re-runnable from `done`, back-annotates minted FD ids into `## Slices`,
+    never wedges the crossing, reserves envelope for its own architect
+    pass.
+15. **`investigate` as a borrowed pass on an existing FD/BG** is deferred
+    to a follow-up.
 
 Still open:
 
@@ -968,7 +977,134 @@ the filter and not dropped is exactly what materializes.
 - **Agent triage-at-ingest** — an optional pass that dedupes/clusters near-
   duplicate issues before the gate, if verbatim import proves too noisy.
 
-## 13. Non-interactive driver & skill distribution
+## 13. Research — the third workflow
+
+Features are design-driven and bugs are diagnosis-driven; research is
+investigation-driven: the ask is open enough that neither a spec nor a bug
+report fits, and the work is to ground an answer before anything gets built.
+gummi models research as a third **kind** of work item that shares everything
+structural with a feature or a bug — the store, the engine, the worktree
+machinery, the board, the never-skippable Review → Verify quality floor —
+but runs its own compiled-in workflow and carries a research document instead
+of a spec or a bug report.
+
+### 13.1 The third kind
+
+A work item's `Kind` gains a third value: `research`. `RS-NNN` IDs draw from
+the same monotonic counter features and bugs share, so numbers never
+collide. Unlike a feature or a bug, an `RS` card has **no branch and no
+worktree** — its artifact resolves to `.gummi/research/RS-NNN-slug.md` in the
+main checkout, and investigate runs there directly. Only three things branch
+on kind, same as bugs: which workflow governs transitions, which template
+seeds the artifact, and a board badge. The empty kind still reads as a
+feature, so nothing predating research needs a backfill.
+
+### 13.2 The research workflow
+
+One more fixed graph, still never configurable, and with **no skip edges at
+all**:
+
+```
+  todo ──▶ Investigate ──▶ Shape ──▶ Review ──▶ Verify ──▶ Done
+           (autonomous)    (interactive)  (shared quality floor)
+```
+
+- **Investigate** *(autonomous, architect)* — the work stage: ground the
+  brief against the repo (and any cited external sources) and write up
+  findings with citations. Worktree-less — it runs in the main checkout, not
+  a branch. It is also the stage rerun/bounce edges land on, the research
+  analog of Implement/Fix.
+- **Shape** *(interactive, architect)* — converge the findings into a
+  recommended direction and a proposed slice breakdown; the convergence gate
+  analogous to Spec (features) or Diagnose (bugs).
+- **Review / Verify are reused verbatim** — same stages, same reviewround
+  cap, same escalation, same board columns as features and bugs, sharpened
+  only in *what content they enforce* (§13.4).
+
+Unlike the feature and bug graphs, `researchGraph`
+(`internal/workflow/workflow.go` L80–98) carries no skip edges at all —
+Investigate and Shape are both first-class stages that always run before the
+shared Review/Verify floor. Roles reuse `architect` and `reviewer`; there is
+no `profiles.yaml` migration for research.
+
+### 13.3 The research document
+
+The template's sections and the decompose gate's `propose_features`-shaped
+input (§13.5) are designed together, so turning an approved document into
+FDs is nearly free — the template *is* the ingest contract:
+
+| section | seeded by | consumed by |
+|---|---|---|
+| `## Brief` | the ask, in the requester's own words | Investigate (the question to ground) |
+| `## Questions` | the open questions the research must answer | Investigate (grounding target), §13.4's coverage check |
+| `## Findings` | Investigate — prose with inline `path:line`/`path:start-end` citations | §13.4's citation check, Shape |
+| `## Constraints` | the constraints the investigation is bound by | Shape (direction must fit them) |
+| `## Options` | Shape — candidate directions with tradeoffs | Shape's own convergence |
+| `## Direction` | Shape — the recommended direction and why it wins | the reviewer, and the reader of `done` |
+| `## Slices` | Shape — one row per proposed follow-on (title/one-liner/depends-on/requirements/id) | §13.5's decompose gate (`propose_features`-shaped rows), back-annotated with minted FD ids |
+| `## Out of scope` | Shape — what the research deliberately won't cover | §13.4's coverage check (an explicit out-of-scope line settles a question without a slice) |
+| `## Open risks` | Shape — risks and what would de-risk each | the reviewer |
+| `## Review` | reviewer findings | the researcher, resolving each one |
+
+The durable artifact lives at `.gummi/research/RS-NNN-slug.md` (§13.1).
+
+### 13.4 Deterministic verify
+
+Research's Verify is agent-free and spends no tokens — "tool owns
+mechanics, model owns content" (§11.1), applied to grounding. Three checks,
+all deterministic:
+
+- **No open user `%%` threads** — the existing gate rule, reused verbatim.
+- **Citations resolve** — for every `path:line`/`path:start-end` reference in
+  `## Findings`, the file exists, the line is in range, and the quoted
+  snippet (when the doc quotes one) still matches the file.
+- **Coverage reconciles** — every `## Questions` thread and every
+  requirement referenced from `## Slices` maps to a slice row or an explicit
+  `## Out of scope` line; anything left unmapped is surfaced loudly rather
+  than silently dropped.
+
+A safety note: research's autonomous Investigate runs in the main checkout
+rather than a worktree, under the sandbox `warn` tripwire and the reviewer's
+per-role read-only deny policy — both defined in §4.4.
+
+### 13.5 The decompose gate
+
+Decompose is to the RS `done` gate what worktree creation and draft
+promotion are to the feature spec gate — a side effect of crossing an edge:
+
+```
+verify (checks pass) ──▶ [decompose → proposal gate → materialize FDs + deps] ──▶ done
+```
+
+- **Crossing is decoupled** — the document is approved on its own merit; a
+  failed or dropped decomposition never un-approves it. Research lands
+  `done` either way, and the decompose pass is re-runnable from `done`.
+- **Metering** — the pass reserves envelope like `TurnReserve` and reports
+  `exhausted` before starting a doomed session, so a card without headroom
+  fails loudly instead of partially materializing.
+- **Back-annotation** — the minted FD ids are written back into `## Slices`
+  rows, so the RS↔FD traceability link is bidirectional without a new store
+  type.
+- **Headless surface** — the gate exits `question` with proposals and a
+  coverage map on the NDJSON event; `resume --approve` mints all of them,
+  `resume --request-changes "<note>"` re-runs the pass with the note
+  attached, and per-proposal edit/drop/merge stays a TUI-only affordance
+  (the existing ingest-review pane, §11.4).
+
+### 13.6 Deferred
+
+- **`investigate` as a borrowed pass on an existing FD/BG** — grounding a
+  single feature or bug before planning it, the way plan critique borrows
+  the plan stage.
+- **A dedicated `researcher` role** and its own profile key.
+- **RS→FD provenance as a first-class edge** in the dependency store — the
+  back-annotated `## Slices` rows plus the seeded FD's header line are
+  enough for now.
+- **Non-repo research** (web, external docs).
+- **A new TUI review pane for proposals** — the existing ingest-review pane
+  is reused meanwhile.
+
+## 14. Non-interactive driver & skill distribution
 
 The TUI assumes a human at the keyboard. A second driver runs the **same
 engine and the same quality floor** unattended, so a calling agent can ship a
@@ -978,7 +1114,7 @@ a gate*, not *whether* the floor runs. Anything a human would resolve becomes a
 durable, resumable escalation with a non-zero exit — deterministic failure over
 silent degradation.
 
-### 13.1 The driver
+### 14.1 The driver
 
 One `gummi run` process drives exactly one feature (a free-form description),
 via the quick route by default, holds the feature's per-card lock, streams
@@ -1031,7 +1167,7 @@ caller must decide, then exits.
   A headless run ends at `verified:true`/`done:false`; only a land flips
   `done`.
 
-### 13.2 The exit contract
+### 14.2 The exit contract
 
 Each `run`/`resume` ends on a typed `Status` with a stable exit code, so a
 caller branches on the result without parsing stdout:
@@ -1050,13 +1186,13 @@ caller branches on the result without parsing stdout:
 The exit/event `done` above names the run outcome — *a verified branch is
 ready* — not a merge; it is deliberately distinct from `status --json`'s `done`
 field, which is true only once the branch is **merged**. A caller keying off a
-completed run should poll `status`'s `verified`, not its `done` (§13.1).
+completed run should poll `status`'s `verified`, not its `done` (§14.1).
 
 Long autonomous stretches (implement → review → verify) carry no caller
 decisions under `auto`, so one `resume` streams that whole tail and returns
 only at `done` or an escalation.
 
-### 13.3 Skill distribution
+### 14.3 Skill distribution
 
 `gummi skill install` generates a `SKILL.md` (YAML frontmatter + markdown body)
 and writes it where each supported agent reads it: Claude, Copilot, and
@@ -1081,7 +1217,7 @@ Two properties keep the doc honest:
   stale or hand-edited file and refuse to overwrite without `--force` — safe by
   default, never silently stale.
 
-### 13.4 Guided setup (`gummi doctor`)
+### 14.4 Guided setup (`gummi doctor`)
 
 `gummi doctor [--json] [--deep]` emits a structured readiness checklist —
 repo, workspace, backend, profile, auth, envelope, lock — that the skill's
@@ -1096,7 +1232,7 @@ a cost-tiered profile and carries the nesting-cost warning (§5). `ready` is
 false iff any check fails; warnings and unknowns are advisory (an unset
 envelope warns — a run can still take `--envelope` — rather than blocking).
 
-## 14. References
+## 15. References
 
 - Spec-driven parallel agents workflow: <https://schipper.ai/posts/parallel-coding-agents/>
 - Copilot SDK (Go): <https://github.com/github/copilot-sdk>
