@@ -631,8 +631,10 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	// writer: the restored/live session tells us where the loop was when it
 	// stopped. A finished writer (revised plan already on disk) resumes the
 	// critique; a finished critique routes to the judge (replan on changes /
-	// approve on pass); an in-flight session keeps awaiting. Only a fresh
-	// plan entry — no restored Plan-stage session — starts the writer below.
+	// approve on pass); a paused critique (its session died mid-turn, e.g. a
+	// recoverable backend failure) re-dispatches the critique; an in-flight
+	// session keeps awaiting. Only a fresh plan entry — no restored Plan-stage
+	// session, or a restored paused writer — starts/restarts the writer below.
 	// The snapshot's feature stage is the guard, so a leftover done session
 	// from a prior stage is never mistaken for a plan resume.
 	if f.Stage == domain.StagePlan {
@@ -669,8 +671,30 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 				}
 				return d.judgePlanCritique(ctx, f, snap)
 			}
-			// still in flight: keep awaiting the running pass, spawn nothing.
-			return d.awaitPlanCritique(ctx, f)
+			if snap.State == engine.StatePaused && snap.Critique {
+				// the critique session died mid-turn and was restored
+				// paused: re-dispatch it instead of awaiting a pass that
+				// already ended (the bug this guards against: awaiting
+				// forever burns the whole --stage-timeout with nothing
+				// dispatched). Mirrors the TUI's StatePaused+Critique
+				// branch (internal/ui/shell.go:1279-1286).
+				if err := d.eng.RunCritique(f, ""); err != nil {
+					return Outcome{}, err
+				}
+				d.sentTurn = true
+				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "resuming plan critique"})
+				return d.awaitPlanCritique(ctx, f)
+			}
+			if snap.State != engine.StatePaused {
+				// still in flight (running/queued): keep awaiting the
+				// running pass, spawn nothing.
+				return d.awaitPlanCritique(ctx, f)
+			}
+			// a restored paused writer (!Critique): the writer died
+			// mid-turn before producing a plan to critique. Fall through
+			// to the fresh-writer dispatch below — mirrors the TUI's
+			// paused/non-critique fallthrough to engine.Run
+			// (internal/ui/shell.go:1279-1296).
 		}
 	}
 
