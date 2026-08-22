@@ -29,6 +29,7 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -882,6 +883,25 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	return sess, specPath, mcpTeardown, nil
 }
 
+// recoverMissingWorktree rebuilds a work-stage feature's worktree after it
+// vanished out from under an active branch (an environment or sandbox
+// filesystem glitch, not a clean Remove) — the self-heal the operator
+// otherwise has to perform by hand. It refuses when the feature
+// has no recorded fork point: recreating from current main would silently
+// re-anchor the branch onto a base it never actually forked from, which
+// AssertNoForkDrift exists specifically to catch elsewhere.
+func (e *Engine) recoverMissingWorktree(ctx context.Context, wt *worktree.Manager, f *domain.Feature) error {
+	fork, err := wt.ForkPoint(ctx, f)
+	if err != nil {
+		return err
+	}
+	if fork == "" {
+		return errors.New("no recorded fork point to recover from")
+	}
+	_, err = wt.Recreate(ctx, f)
+	return err
+}
+
 // locate resolves the working directory and spec path for a feature's
 // stage. Interactive pre-worktree stages run in the main checkout
 // against the draft — materialized here so the agent never starts
@@ -926,7 +946,9 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		return "", "", err
 	}
 	if !hasWT {
-		return "", "", fmt.Errorf("feature %s at stage %s has no worktree; approve the spec to create one first", f.ID, f.Stage)
+		if rerr := e.recoverMissingWorktree(ctx, wt, &f); rerr != nil {
+			return "", "", fmt.Errorf("feature %s at stage %s has no worktree and could not be recreated (%v); recreate .gummi/worktrees/%s from the feature's branch manually, or approve the spec again if the design phase was never completed", f.ID, f.Stage, rerr, f.ID)
+		}
 	}
 	// A rewrite of main reported after the worktree was created makes the
 	// on-disk branch's base incoherent with main; refuse before promoting the
@@ -1199,7 +1221,12 @@ func (e *Engine) exhaust(s *Session) {
 	if !s.markExhausted() {
 		return // already checkpointed; a re-raised event must not duplicate the gate
 	}
-	e.settle(s) // partial work survives on the branch across the gate
+	// partial work survives on the branch across the gate; a fatal
+	// (worktree-gone) checkpoint is reported below via stageWorkCommitted
+	// returning false rather than by failing the run — exhaustion parks
+	// the stage for review either way, it never advances it (unlike the
+	// EventIdle completion path settle also serves).
+	_ = e.settle(s)
 	committed := e.stageWorkCommitted(s)
 	if committed {
 		s.appendActivity("budget reached — stage work committed, ready to review")
@@ -1452,7 +1479,16 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// an autonomous turn completing frees the slot (atomically, so a
 		// racing Pause isn't overwritten)
 		if !s.Interactive && s.finishRunning() {
-			e.settle(s)
+			// a fatal settle (the worktree itself is gone, not just dirty or
+			// uncommitted) must fail the run instead of reading as a clean
+			// finish — otherwise the caller advances the stage with no
+			// worktree left to review it against. failRun already frees the
+			// slot and sends its own terminal event, so return here rather
+			// than fall into the idle-finish send below.
+			if err := e.settle(s); err != nil {
+				e.failRun(s, err)
+				return
+			}
 			e.stageReceipt(s)
 			e.freeSlot(s)
 		}
@@ -1481,27 +1517,29 @@ const checkpointTimeout = 30 * time.Second
 // must never CommitAll (a mid-rebase commit would capture conflict
 // markers onto a detached HEAD) — the abort of anything the agent left
 // mid-rebase, restoring the worktree's never-at-rest-mid-rebase
-// invariant.
-func (e *Engine) settle(s *Session) {
+// invariant. Returns a non-nil error only for checkpoint's one fatal
+// case (the worktree itself is gone) — every other failure stays
+// best-effort and surfaces through the activity feed instead.
+func (e *Engine) settle(s *Session) error {
 	if !s.Rebase {
-		e.checkpoint(s)
-		return
+		return e.checkpoint(s)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	wt, err := e.mgr(ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("rebase cleanup failed: " + err.Error())
-		return
+		return nil
 	}
 	aborted, err := wt.AbortRebase(ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("rebase cleanup failed: " + err.Error())
-		return
+		return nil
 	}
 	if aborted {
 		s.appendActivity("rebase left mid-flight — aborted, worktree restored")
 	}
+	return nil
 }
 
 // checkpoint commits whatever the stage left in the feature's worktree
@@ -1509,29 +1547,40 @@ func (e *Engine) settle(s *Session) {
 // gummi owns the branch's commits; the user lands it as one squash
 // commit, so checkpoint granularity never reaches main's history). It
 // runs as an autonomous turn completes and at the budget-exhaustion
-// gate. Best-effort: a failure surfaces in the activity feed but never
-// fails the run — the work is still on disk and the merge flow commits
-// leftovers itself.
-func (e *Engine) checkpoint(s *Session) {
+// gate. Best-effort for every failure but one: a missing worktree means
+// there are no leftovers on disk for the merge flow to pick up later, so
+// that case is reported back instead of swallowed — callers on the
+// completion path (not the exhaustion gate, which never advances a
+// stage) must fail the run rather than let it read as a clean finish.
+func (e *Engine) checkpoint(s *Session) error {
 	if s.Interactive || interactiveStage(s.Feature.Stage) {
-		return // design-phase chats run in the main checkout; never auto-commit there
+		return nil // design-phase chats run in the main checkout; never auto-commit there
 	}
+	// Research stages are worktree-less by design (workflow.NeedsWorktree),
+	// not merely worktree-less because one went missing — CommitAll's
+	// ErrNoWorktree there is the expected, permanently-benign case, never
+	// the total-loss one this function otherwise treats as fatal.
+	needsWT := workflow.NeedsWorktree(s.Feature.Kind, s.Feature.Stage)
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
 	wt, err := e.mgr(ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("checkpoint commit failed: " + err.Error())
-		return
+		return nil
 	}
 	committed, err := wt.CommitAll(ctx, &s.Feature, msg)
 	if err != nil {
 		s.appendActivity("checkpoint commit failed: " + err.Error())
-		return
+		if needsWT && errors.Is(err, worktree.ErrNoWorktree) {
+			return err
+		}
+		return nil
 	}
 	if committed {
 		s.appendActivity("worktree committed: " + msg)
 	}
+	return nil
 }
 
 // stageReceipt appends a muted one-line spend receipt to the session's

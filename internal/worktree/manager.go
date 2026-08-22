@@ -166,9 +166,16 @@ func (m *Manager) Exists(ctx context.Context, f *domain.Feature) (bool, error) {
 	return true, nil
 }
 
+// ErrNoWorktree marks a requireWorktree failure caused by the worktree
+// directory being absent — as opposed to a transient git error — so a
+// caller like checkpoint can tell "nothing to commit, leftovers are
+// still on disk" apart from "there is no disk to leave anything on".
+var ErrNoWorktree = errors.New("no worktree")
+
 // requireWorktree returns the worktree path, erroring clearly when the
 // directory is absent (git's own "cannot change to directory" is
-// opaque).
+// opaque). The error wraps ErrNoWorktree so callers can distinguish
+// total loss from other failure modes.
 func (m *Manager) requireWorktree(f *domain.Feature) (string, error) {
 	p, _, err := m.featurePaths(f)
 	if err != nil {
@@ -176,7 +183,7 @@ func (m *Manager) requireWorktree(f *domain.Feature) (string, error) {
 	}
 	if _, err := os.Stat(p); err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("feature %s has no worktree at %s", f.ID, p)
+			return "", fmt.Errorf("feature %s has no worktree at %s: %w", f.ID, p, ErrNoWorktree)
 		}
 		return "", err
 	}
@@ -236,6 +243,50 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
 		}
 		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
+	}
+	return p, nil
+}
+
+// ForkPoint returns the feature's recorded fork-point SHA, or the empty
+// string if none is stamped yet (a worktree that predates drift
+// detection, or one that never had a worktree at all).
+func (m *Manager) ForkPoint(ctx context.Context, f *domain.Feature) (string, error) {
+	return m.forkStore.ForkPoint(ctx, f.ID)
+}
+
+// Recreate rebuilds a feature's worktree directory after it vanished out
+// from under an active branch — e.g. an environment/filesystem glitch
+// that removed .gummi/worktrees/<ID> without going through git, unlike a
+// clean Remove. It reattaches the existing branch when git still knows
+// about it (the common case: only the working directory was lost), or
+// falls back to a fresh Create when the branch is gone too. Either way
+// the feature's already-stamped fork point is left untouched — Create's
+// own stamp is a no-op once one exists (state.ErrForkPointStamped).
+func (m *Manager) Recreate(ctx context.Context, f *domain.Feature) (string, error) {
+	p, branch, err := m.featurePaths(f)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(p); err == nil {
+		return "", fmt.Errorf("worktree path %s already exists", p)
+	}
+	// Stale admin metadata left behind by the vanished directory would
+	// otherwise make git refuse to attach a fresh checkout at the same path.
+	if _, err := runGit(ctx, m.repo, "worktree", "prune"); err != nil {
+		return "", err
+	}
+	branchExists, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	if !branchExists {
+		return m.Create(ctx, f)
+	}
+	if err := os.MkdirAll(m.worktreesDir(), 0o750); err != nil {
+		return "", err
+	}
+	if _, err := runGit(ctx, m.repo, "worktree", "add", "--", p, branch); err != nil {
+		return "", err
 	}
 	return p, nil
 }

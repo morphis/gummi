@@ -58,6 +58,78 @@ func TestLocateRefusesOnDriftForFeatureWorktree(t *testing.T) {
 	}
 }
 
+// TestLocateRecreatesWorktreeAfterFilesystemLoss: when the worktree
+// directory vanishes out from under a feature that already has a stamped
+// fork point (an environment/filesystem glitch, not a clean
+// Remove — git's own branch and worktree admin metadata survive), locate
+// self-heals by reattaching the branch to a fresh checkout instead of
+// refusing with "approve the spec to create one first", which is the
+// wrong remedy once the design phase is long done and only recovery
+// advice for parked cards.
+func TestLocateRecreatesWorktreeAfterFilesystemLoss(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "locate recover", domain.StageReview)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+
+	p, err := wt.Path(&f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := wt.Exists(context.Background(), &f); err != nil || exists {
+		t.Fatalf("worktree still reports existing after the directory was removed: %v, %v", exists, err)
+	}
+
+	workDir, specPath, err := e.locate(context.Background(), f)
+	if err != nil {
+		t.Fatalf("locate failed to self-heal: %v", err)
+	}
+	if workDir == "" || specPath == "" {
+		t.Fatalf("locate returned empty paths: workDir=%q specPath=%q", workDir, specPath)
+	}
+	if exists, err := wt.Exists(context.Background(), &f); err != nil || !exists {
+		t.Fatalf("worktree not recreated: %v, %v", exists, err)
+	}
+}
+
+// TestLocateRefusesRecreateWithNoForkPoint: self-healing from current main
+// would silently re-anchor a branch onto a base it never actually forked
+// from when there is no recorded fork point to recreate from — refuse and
+// name the manual recovery instead of guessing a base.
+func TestLocateRefusesRecreateWithNoForkPoint(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "locate no fork", domain.StageReview)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	// git refuses to delete a branch still checked out in a worktree, so
+	// remove the worktree cleanly first; DeleteBranch then clears the
+	// recorded fork point (its own remedy for a stale-drift recreate),
+	// leaving nothing for locate to self-heal from.
+	if err := wt.Remove(context.Background(), &f, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.DeleteBranch(context.Background(), &f, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := e.locate(context.Background(), f); err == nil {
+		t.Fatal("expected locate to refuse recreating with no recorded fork point")
+	}
+}
+
 // Interactive stages resolve to the main checkout before the worktree
 // guard is reached, so a rewind must not refuse an interactive attach.
 func TestLocateInteractiveStageIgnoresDrift(t *testing.T) {
