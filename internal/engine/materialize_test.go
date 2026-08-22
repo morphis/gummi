@@ -85,6 +85,62 @@ func TestMaterializeCreatesFeaturesAndDrafts(t *testing.T) {
 	}
 }
 
+// TestMaterializeWritesDependencyEdges: a depends_on title that names
+// another proposal in the batch is persisted as a first-class feature_deps
+// edge (what `deps list` and the coding-stage gate read), not only the
+// draft's provenance prose; a title outside the batch stays prose only and
+// adds no edge.
+func TestMaterializeWritesDependencyEdges(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	ctx := context.Background()
+	created, err := e.Materialize(ctx, sampleResult(), MaterializeOpts{Profile: "thrifty", Envelope: 200})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	deps, err := store.ListDependencies(ctx, created[1].ID)
+	if err != nil {
+		t.Fatalf("ListDependencies: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != created[0].ID {
+		t.Fatalf("ingest should persist the in-batch dependency edge; got %v, want [%s]", deps, created[0].ID)
+	}
+	if deps, _ := store.ListDependencies(ctx, created[0].ID); len(deps) != 0 {
+		t.Errorf("feature[0] declares no dependencies, got %v", deps)
+	}
+}
+
+// TestMaterializeWiresForwardDependency: a proposal may name a later
+// proposal in the batch; the edge is wired once every ID is minted, so
+// document order is no constraint.
+func TestMaterializeWiresForwardDependency(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	res := domain.IngestResult{
+		SourcePath: filepath.Join(".gummi", "ingest", "prd.md"),
+		Proposals: []domain.FeatureProposal{
+			{Title: "Webhook retries", OneLiner: "retry failed", DependsOn: []string{"Payment webhooks"}},
+			{Title: "Payment webhooks", OneLiner: "receive callbacks"},
+		},
+	}
+	ctx := context.Background()
+	created, err := e.Materialize(ctx, res, MaterializeOpts{Profile: "thrifty", Envelope: 200})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	deps, err := store.ListDependencies(ctx, created[0].ID)
+	if err != nil {
+		t.Fatalf("ListDependencies: %v", err)
+	}
+	if len(deps) != 1 || deps[0] != created[1].ID {
+		t.Fatalf("forward reference should persist as an edge; got %v, want [%s]", deps, created[1].ID)
+	}
+}
+
 func TestMaterializeRejectsUnslugifiableTitle(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})

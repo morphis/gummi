@@ -99,6 +99,23 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 		}
 		created = append(created, f)
 	}
+
+	// Pass 3: wire the first-class feature_deps edges now that every
+	// feature in the batch is persisted (AddDependency requires both
+	// sides to already exist, which rules out doing this inline in pass
+	// 2 for a forward reference). This is the enforced counterpart to the
+	// prose already written into each draft's provenance above; a title
+	// outside the batch stays prose-only, same as resolveDeps leaves it.
+	// Errors are ignored here as in the decompose path's equivalent loop
+	// (decompose.go): a self-loop or cycle in one declared dependency
+	// should not unwind an otherwise-successful batch of created features.
+	for i, f := range created {
+		for _, dep := range res.Proposals[i].DependsOn {
+			if target, ok := byTitle[dep]; ok {
+				_ = e.cfg.Store.AddDependency(ctx, f.ID, target.ID)
+			}
+		}
+	}
 	return created, nil
 }
 
