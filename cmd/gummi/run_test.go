@@ -32,7 +32,9 @@ func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	}
 }
 
-// An unknown --gate-approval value is rejected.
+// An unknown --gate-approval value is rejected. --until is no longer
+// validated by driverOptions (that moved to runRun, ahead of the kind
+// widening — TestRunUntilValidation), so any string threads through as-is.
 func TestDriverOptionsGateValidation(t *testing.T) {
 	if _, err := driverOptions(100, "", false, "sometimes", time.Minute, false, false, "", "", "", ""); err == nil {
 		t.Fatal("bad gate-approval accepted")
@@ -49,24 +51,20 @@ func TestDriverOptionsGateValidation(t *testing.T) {
 	}
 }
 
-// --until is validated against the route: plan is legal on the full route
-// but not on the quick route (where plan is skipped); spec is legal on both.
-func TestDriverOptionsUntilRouteValidation(t *testing.T) {
-	// quick route (full=false): --until plan is off-route → rejected.
-	if _, err := driverOptions(100, "", false, driver.GateAuto, time.Minute, false, false, "", "", "plan", ""); err == nil {
-		t.Fatal("--until plan accepted on the quick route (plan is skipped)")
-	}
-	// quick route: --until spec is valid.
-	if _, err := driverOptions(100, "", false, driver.GateAuto, time.Minute, false, false, "", "", "spec", ""); err != nil {
-		t.Fatalf("--until spec rejected on the quick route: %v", err)
-	}
-	// full route: --until plan is valid.
-	if _, err := driverOptions(100, "", true, driver.GateAuto, time.Minute, false, false, "", "", "plan", ""); err != nil {
-		t.Fatalf("--until plan rejected on the full route: %v", err)
+// --until is validated against the feature route before any workspace work
+// begins: an off-route or unknown stage fails as a plain usage error,
+// straight out of runRun, before driverOptions or withRunEngine ever run.
+// The positive (accepted) cases are covered at the driver level by
+// internal/driver/steer_test.go's TestUntilStops family.
+func TestRunUntilValidation(t *testing.T) {
+	t.Setenv("GUMMI_ENVELOPE", "100")
+	// quick route (default, no --full): --until plan is off-route → rejected.
+	if err := runRun([]string{"--until", "plan", "a feature"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
+		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
 	}
 	// an unknown stage is always rejected.
-	if _, err := driverOptions(100, "", true, driver.GateAuto, time.Minute, false, false, "", "", "banana", ""); err == nil {
-		t.Fatal("--until banana accepted")
+	if err := runRun([]string{"--until", "banana", "a feature"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
+		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
 	}
 }
 

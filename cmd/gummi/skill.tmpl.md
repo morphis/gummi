@@ -198,6 +198,19 @@ at that stage — event `stopped`, exit 0 — with the feature parked and resuma
 Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
 --approve` continues to the verified branch.
 
+## Research cards: `gummi research`
+
+`gummi research "<brief>"` mints one RS card from a free-form brief and drives
+it headlessly through investigate and shape to the decompose gate — no
+brainstorm, no plan, no worktree. `--until shape` is the only pre-decompose
+stop on its route. At the gate the stream emits a `question` event whose
+payload carries the proposed follow-on FD slices plus a coverage map, and the
+run exits `question` (code 2). From there, `gummi resume RS-NNN --approve`
+mints each proposed FD and moves the RS card to `done`; `gummi resume RS-NNN
+--request-changes "<note>"` re-runs the decompose pass with the note attached
+and emits a fresh `question`. `gummi status RS-NNN` and `gummi spec RS-NNN`
+work the same as for any other card.
+
 ## Worktrees, and re-attaching a proven branch
 
 Each feature is checked out in its **own linked git worktree** under

@@ -18,11 +18,12 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	doc := skillBody()
 
 	registrars := map[string]func(*flag.FlagSet){
-		"run":    func(fs *flag.FlagSet) { registerRunFlags(fs) },
-		"resume": func(fs *flag.FlagSet) { registerResumeFlags(fs) },
-		"merge":  func(fs *flag.FlagSet) { registerMergeFlags(fs) },
-		"status": func(fs *flag.FlagSet) { registerStatusFlags(fs) },
-		"doctor": func(fs *flag.FlagSet) { registerDoctorFlags(fs) },
+		"run":      func(fs *flag.FlagSet) { registerRunFlags(fs) },
+		"research": func(fs *flag.FlagSet) { registerResearchFlags(fs) },
+		"resume":   func(fs *flag.FlagSet) { registerResumeFlags(fs) },
+		"merge":    func(fs *flag.FlagSet) { registerMergeFlags(fs) },
+		"status":   func(fs *flag.FlagSet) { registerStatusFlags(fs) },
+		"doctor":   func(fs *flag.FlagSet) { registerDoctorFlags(fs) },
 	}
 	for cmd, reg := range registrars {
 		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
@@ -35,7 +36,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 
 	for _, cmd := range []string{
-		"gummi run", "gummi resume", "gummi verify", "gummi merge", "gummi clean",
+		"gummi run", "gummi research", "gummi resume", "gummi verify", "gummi merge", "gummi clean",
 		"gummi status", "gummi spec", "gummi diff", "gummi doctor", "gummi skill",
 	} {
 		if !strings.Contains(doc, cmd) {

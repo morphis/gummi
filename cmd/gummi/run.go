@@ -55,6 +55,15 @@ func runRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	// validate --until against the route --full selects, before any work
+	// begins (so a bad target fails as a plain usage error, not mid-run).
+	skip := domain.QuickRoute()
+	if *rv.full {
+		skip = domain.SkipFlags{}
+	}
+	if err := driver.ValidateUntil(domain.Stage(*rv.until), domain.KindFeature, skip); err != nil {
+		return err
+	}
 	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.full, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo)
 	if err != nil {
 		return err
@@ -64,7 +73,7 @@ func runRun(args []string) error {
 		// mint the card first, then take its per-card lock for the drive so
 		// this run is the sole governor of the card it just created (two
 		// runs mint disjoint cards and so never contend on each other's lock).
-		f, err := d.Create(ctx, desc)
+		f, err := d.Create(ctx, domain.KindFeature, desc)
 		if err != nil {
 			return driver.Outcome{}, err
 		}
@@ -148,15 +157,6 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 	}
 	if gate != driver.GateAuto && gate != driver.GateCaller {
 		return driver.Options{}, fmt.Errorf("--gate-approval must be %q or %q, got %q", driver.GateAuto, driver.GateCaller, gate)
-	}
-	// validate --until against the route --full selects, before any work
-	// begins (so a bad target fails as a plain usage error, not mid-run).
-	skip := domain.QuickRoute()
-	if full {
-		skip = domain.SkipFlags{}
-	}
-	if err := driver.ValidateUntil(domain.Stage(until), domain.KindFeature, skip); err != nil {
-		return driver.Options{}, err
 	}
 	return driver.Options{
 		Envelope: envelope, Profile: profile, Full: full, GateApproval: gate,

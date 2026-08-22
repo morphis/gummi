@@ -9,6 +9,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -210,5 +211,55 @@ func TestAttachResearchShapeNotReadOnly(t *testing.T) {
 	}
 	if ok, _ := wt.Exists(context.Background(), &f); ok {
 		t.Fatal("running research shape materialized a worktree")
+	}
+}
+
+// TestAttachResearchShapeUsesRealArtifactNotDraft: shape is worktree-less
+// like every other research stage, so its session must read and write the
+// card's real artifact — never an orphaned draft under DraftsDir. Research
+// has no draft-then-promote step (Create seeds the artifact directly, and
+// a research card never enters a worktree, the only path that promotes a
+// draft into its artifact), so routing shape through EnsureDraft the way
+// brainstorm/spec do would silently lose the seeded Brief and any
+// client-tool edits the shape session makes — nothing ever merges them
+// back into the artifact decompose reads.
+func TestAttachResearchShapeUsesRealArtifactNotDraft(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(3, "run rs shape", domain.StageShape)
+	f.ID = domain.FeatureID("RS-003")
+	f.Kind = domain.KindResearch
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(ws.Root, f.ArtifactPath())
+	if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	const seeded = "# RS-003: run rs shape\n\n## Brief\n\nseeded brief text\n"
+	if err := os.WriteFile(artifact, []byte(seeded), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.Attach(context.Background(), f); err != nil {
+		t.Fatalf("attach research shape: %v", err)
+	}
+	got := rec.opts()
+	if got.ArtifactPath != artifact {
+		t.Fatalf("shape ArtifactPath = %q, want the real artifact %q", got.ArtifactPath, artifact)
+	}
+	raw, err := os.ReadFile(got.ArtifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != seeded {
+		t.Fatalf("shape session artifact content = %q, want the seeded doc preserved", raw)
+	}
+	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	if _, err := os.Stat(draft); !os.IsNotExist(err) {
+		t.Fatalf("shape materialized a draft at %s (research has no draft step)", draft)
 	}
 }

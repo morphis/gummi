@@ -215,6 +215,8 @@ func commandGrammar() string {
 	}
 	writeCmd(`gummi run [flags] "<description>"`, flagLines(func(fs *flag.FlagSet) { registerRunFlags(fs) }))
 	b.WriteString("\n")
+	writeCmd(`gummi research [flags] "<brief>"`, flagLines(func(fs *flag.FlagSet) { registerResearchFlags(fs) }))
+	b.WriteString("\n")
 	writeCmd("gummi resume <id|ref> [decision]", flagLines(func(fs *flag.FlagSet) { registerResumeFlags(fs) }))
 	b.WriteString("\n")
 	b.WriteString("gummi verify <id|ref>\n\n")

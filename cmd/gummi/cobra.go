@@ -21,6 +21,15 @@ var runCmd = &cobra.Command{
 	},
 }
 
+// researchCmd implements `gummi research [flags] "<brief>"`.
+var researchCmd = &cobra.Command{
+	Use:   "research [flags] \"<brief>\"",
+	Short: "Headlessly drive one research card through decompose",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runResearch(buildFlagArgs(cmd, args))
+	},
+}
+
 // resumeCmd implements `gummi resume <id|ref> [decision]`.
 var resumeCmd = &cobra.Command{
 	Use:   "resume <id|ref> [decision]",
@@ -186,6 +195,7 @@ var skillListCmd = &cobra.Command{
 
 func init() {
 	bindRunFlags(runCmd)
+	bindResearchFlags(researchCmd)
 	bindResumeFlags(resumeCmd)
 	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")
 	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
@@ -219,6 +229,24 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)")
 	f.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
+}
+
+// bindResearchFlags mirrors the flags registerResearchFlags defines on
+// runResearch's FlagSet, so cobra parses the same surface (runResearch
+// still re-parses the reconstructed slice, and the SKILL grammar stays
+// sourced from registerResearchFlags). No --full or --acceptance: RS has
+// no brainstorm/plan and no Verification-plan section to seed.
+func bindResearchFlags(cmd *cobra.Command) {
+	f := cmd.Flags()
+	f.Int("envelope", 0, "credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)")
+	f.String("profile", "", "profile mapping roles to models (default: first configured)")
+	f.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller (persisted on the card; resume keeps it)")
+	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
+	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
+	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
+	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
+	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)")
+	f.String("until", "", `stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)`)
 }
 
 // bindIngestFlags mirrors the flags registerIngestFlags defines on

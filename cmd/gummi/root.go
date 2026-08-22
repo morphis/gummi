@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(bugsCmd)
 	rootCmd.AddCommand(depsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(researchCmd)
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(mergeCmd)

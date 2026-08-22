@@ -77,6 +77,17 @@ gummi run [flags] "<description>"
     --until string            stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)
     --verbose                 add per-tool-call activity lines to the stream
 
+gummi research [flags] "<brief>"
+    --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --envelope int            credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)
+    --gate-approval string    who approves design gates: auto|caller (persisted on the card; resume keeps it)
+    --profile string          profile mapping roles to models (default: first configured)
+    --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
+    --repo string             managed repository to create the card in (a configured repos: name; default: the workspace default repo)
+    --stage-timeout duration  per-stage inactivity timeout (0 disables)
+    --until string            stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)
+    --verbose                 add per-tool-call activity lines to the stream
+
 gummi resume <id|ref> [decision]
     --answer string           answer a delegated ask_user question
     --approve                 approve a caller design gate
@@ -252,6 +263,19 @@ tokens, add `--until spec` (or `--until plan` on `--full`). The run stops cleanl
 at that stage — event `stopped`, exit 0 — with the feature parked and resumable.
 Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
 --approve` continues to the verified branch.
+
+## Research cards: `gummi research`
+
+`gummi research "<brief>"` mints one RS card from a free-form brief and drives
+it headlessly through investigate and shape to the decompose gate — no
+brainstorm, no plan, no worktree. `--until shape` is the only pre-decompose
+stop on its route. At the gate the stream emits a `question` event whose
+payload carries the proposed follow-on FD slices plus a coverage map, and the
+run exits `question` (code 2). From there, `gummi resume RS-NNN --approve`
+mints each proposed FD and moves the RS card to `done`; `gummi resume RS-NNN
+--request-changes "<note>"` re-runs the decompose pass with the note attached
+and emits a fresh `question`. `gummi status RS-NNN` and `gummi spec RS-NNN`
+work the same as for any other card.
 
 ## Worktrees, and re-attaching a proven branch
 

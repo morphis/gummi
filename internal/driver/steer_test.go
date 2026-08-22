@@ -127,7 +127,7 @@ func TestAcceptanceSeedsDraft(t *testing.T) {
 	h := newHarness(t, true, nil)
 	d := h.driver(Options{Acceptance: "The export MUST be valid JSON and round-trip."})
 	desc := "Add a JSON export\n\nUsers need to export their data as JSON."
-	f, err := d.createFeature(context.Background(), desc)
+	f, err := d.createFeature(context.Background(), domain.KindFeature, desc)
 	if err != nil {
 		t.Fatalf("createFeature: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestAcceptanceSeedsDraft(t *testing.T) {
 func TestAcceptanceAloneWritesDraft(t *testing.T) {
 	h := newHarness(t, true, nil)
 	d := h.driver(Options{Acceptance: "Round-trips through the parser."})
-	f, err := d.createFeature(context.Background(), "Add JSON export")
+	f, err := d.createFeature(context.Background(), domain.KindFeature, "Add JSON export")
 	if err != nil {
 		t.Fatalf("createFeature: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestAcceptanceAloneWritesDraft(t *testing.T) {
 func TestRefPersistedAsExternalRef(t *testing.T) {
 	h := newHarness(t, true, nil)
 	d := h.driver(Options{Ref: "JIRA-42"})
-	f, err := d.createFeature(context.Background(), "Add export")
+	f, err := d.createFeature(context.Background(), domain.KindFeature, "Add export")
 	if err != nil {
 		t.Fatalf("createFeature: %v", err)
 	}

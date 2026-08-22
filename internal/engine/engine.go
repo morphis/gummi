@@ -29,7 +29,6 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
-	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -897,6 +896,23 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	}
 	root := e.pool.Root()
 	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
+	// Every research stage — interactive (shape) or autonomous (investigate/
+	// review/verify) — is worktree-less and runs in the main checkout
+	// against the artifact at its workspace home. Research has no
+	// draft-then-promote step (Create seeds the artifact directly, never a
+	// draft), and never enters a worktree — the only path that promotes a
+	// draft into its artifact — so routing shape through a draft the way
+	// brainstorm/spec do would orphan its edits: nothing ever merges them
+	// back. Promote here is a no-op cleanup once the artifact exists (the
+	// common case); it only materializes a fresh one for a crash-recovery
+	// or legacy edge case.
+	if f.Kind == domain.KindResearch {
+		artifact := filepath.Join(root, f.ArtifactPath())
+		if err := spec.Promote(artifact, draft, "", &f); err != nil {
+			return "", "", err
+		}
+		return wt.RepoRoot(), artifact, nil
+	}
 	if interactiveStage(f.Stage) {
 		if err := spec.EnsureDraft(draft, &f); err != nil {
 			return "", "", err
@@ -904,18 +920,6 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		// interactive stages run in the repo root (the main checkout), not
 		// the workspace root: the repo may live in a nested subdirectory.
 		return wt.RepoRoot(), draft, nil
-	}
-	// Worktree-less autonomous stages (research investigate/review/verify)
-	// run in the main checkout too, with the artifact at its workspace home
-	// — never in a throwaway worktree, since a research branch never
-	// receives a commit. Promote the artifact here in case a crash left
-	// promotion undone.
-	if !workflow.NeedsWorktree(f.Kind, f.Stage) {
-		artifact := filepath.Join(root, f.ArtifactPath())
-		if err := spec.Promote(artifact, draft, "", &f); err != nil {
-			return "", "", err
-		}
-		return wt.RepoRoot(), artifact, nil
 	}
 	hasWT, err := wt.Exists(ctx, &f)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -41,7 +42,7 @@ func TestCreatePersistsRepo(t *testing.T) {
 	d2 := *d
 	d2.opts = d.opts
 	d2.opts.Repo = "a"
-	f, err := d2.Create(ctx, "A feature in repo a")
+	f, err := d2.Create(ctx, domain.KindFeature, "A feature in repo a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func TestCreatePersistsRepo(t *testing.T) {
 		t.Errorf("persisted repo = %q, err=%v; want a", got.Repo, err)
 	}
 
-	f2, err := d.Create(ctx, "A feature in the default repo")
+	f2, err := d.Create(ctx, domain.KindFeature, "A feature in the default repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestCreateRejectsUnknownRepo(t *testing.T) {
 	d := h.driver(Options{})
 	d.opts.Repo = "nope"
 	seq := readSeq(t, h.ws.SeqFile())
-	if _, err := d.Create(context.Background(), "should not exist"); err == nil {
+	if _, err := d.Create(context.Background(), domain.KindFeature, "should not exist"); err == nil {
 		t.Fatal("expected an error creating against an unconfigured repo")
 	}
 	// the unknown repo is rejected before a sequence number is consumed.

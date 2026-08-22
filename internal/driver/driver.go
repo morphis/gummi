@@ -134,7 +134,7 @@ func (d *Driver) setGate(mode string) {
 // for callers that need no lock between the two; the CLI drives via the
 // split so it can hold the card's per-card lock for the whole drive.
 func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
-	f, err := d.Create(ctx, desc)
+	f, err := d.Create(ctx, domain.KindFeature, desc)
 	if err != nil {
 		return d.fail(ctx, "", err)
 	}
@@ -144,18 +144,23 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 // Create mints one feature from a free-form description and persists it,
 // but does not drive it — the caller owns the drive (and any lock that
 // should span it). The quick route is the default; --full opts into the
-// brainstorm+plan route (D3).
-func (d *Driver) Create(ctx context.Context, desc string) (domain.Feature, error) {
+// brainstorm+plan route (D3). kind selects the route: KindFeature/KindBug
+// use the existing draft-seeded shape; KindResearch mints an RS card and
+// seeds its `## Brief` directly (research has no draft step).
+func (d *Driver) Create(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
 	// validate --until against the route this run will take before minting a
 	// feature, so a bad stop target never leaves a stray FD in the backlog.
 	skip := domain.QuickRoute()
 	if d.opts.Full {
 		skip = domain.SkipFlags{}
 	}
-	if err := ValidateUntil(d.opts.Until, domain.KindFeature, skip); err != nil {
+	if kind == domain.KindResearch {
+		skip = domain.SkipFlags{}
+	}
+	if err := ValidateUntil(d.opts.Until, kind, skip); err != nil {
 		return domain.Feature{}, err
 	}
-	f, err := d.createFeature(ctx, desc)
+	f, err := d.createFeature(ctx, kind, desc)
 	if err != nil {
 		return domain.Feature{}, err
 	}
@@ -1253,11 +1258,19 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 
 // --- helpers -----------------------------------------------------------
 
-// createFeature mints and persists a new feature, seeding the spec draft
-// from the description's overflow (mirrors ui/msgs.go:createFeature). The
-// quick route is default; --full keeps brainstorm+plan.
-func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature, error) {
-	title, oneLiner, seed := domain.SplitFreeform(desc)
+// createFeature mints and persists a new item, seeding its design artifact
+// from the description (mirrors ui/msgs.go:createFeature). For
+// KindFeature/KindBug the quick route is default (--full keeps
+// brainstorm+plan) and the overflow seeds a draft under ws.DraftsDir().
+// KindResearch has no brainstorm/plan and no draft step: the brief is
+// rendered straight to the RS artifact path via SeededResearchTemplate.
+func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
+	var title, oneLiner, seed string
+	if kind == domain.KindResearch {
+		title, oneLiner = domain.SplitDescription(desc)
+	} else {
+		title, oneLiner, seed = domain.SplitFreeform(desc)
+	}
 	slug, err := domain.Slugify(title)
 	if err != nil {
 		return domain.Feature{}, err
@@ -1271,28 +1284,37 @@ func (d *Driver) createFeature(ctx context.Context, desc string) (domain.Feature
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	id, err := domain.NewFeatureID(num)
+	id, err := domain.NewID(kind, num)
 	if err != nil {
 		return domain.Feature{}, err
 	}
 	skip := domain.QuickRoute()
-	if d.opts.Full {
+	if d.opts.Full || kind == domain.KindResearch {
 		skip = domain.SkipFlags{}
 	}
 	now := time.Now()
 	f := domain.Feature{
-		ID: id, Num: num, Kind: domain.KindFeature, Title: title, OneLiner: oneLiner,
-		Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: skip,
+		ID: id, Num: num, Kind: kind, Title: title, OneLiner: oneLiner,
+		Slug: slug, Stage: workflow.Initial(kind), Skip: skip,
 		Profile: d.opts.Profile, Budget: domain.Budget{Envelope: d.opts.Envelope},
 		GateApproval: d.opts.GateApproval,
 		ExternalRef:  d.opts.Ref, Repo: d.opts.Repo, CreatedAt: now, UpdatedAt: now,
 	}
-	// seed the draft before persisting: the description's overflow fills the
-	// Problem section (a title-sized description seeds nothing there), and
-	// --acceptance fills the Verification plan (D10). Either input alone is
-	// enough to warrant a draft; both are just a pre-fill the spec agent
-	// still owns and approves.
-	if seed != "" || d.opts.Acceptance != "" {
+	if kind == domain.KindResearch {
+		artifact := filepath.Join(d.ws.Root, f.ArtifactPath())
+		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: desc}, domain.DraftProvenance{})
+		if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
+			return domain.Feature{}, err
+		}
+		if err := atomicfile.Write(artifact, []byte(content), 0o600); err != nil {
+			return domain.Feature{}, err
+		}
+	} else if seed != "" || d.opts.Acceptance != "" {
+		// seed the draft before persisting: the description's overflow fills
+		// the Problem section (a title-sized description seeds nothing
+		// there), and --acceptance fills the Verification plan (D10). Either
+		// input alone is enough to warrant a draft; both are just a pre-fill
+		// the spec agent still owns and approves.
 		draft := filepath.Join(d.ws.DraftsDir(), spec.DraftFilename(&f))
 		content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed, Acceptance: d.opts.Acceptance}, domain.DraftProvenance{})
 		if err := os.MkdirAll(d.ws.DraftsDir(), 0o750); err != nil {
@@ -1357,6 +1379,9 @@ func (d *Driver) emitResult(f domain.Feature, v verdict.Verdict) {
 // (brainstorm + plan skipped) only Spec remains.
 func UntilStops(kind domain.Kind, skip domain.SkipFlags) []domain.Stage {
 	var out []domain.Stage
+	if kind == domain.KindResearch {
+		return []domain.Stage{domain.StageShape}
+	}
 	if kind == domain.KindBug {
 		if !skip.Triage {
 			out = append(out, domain.StageTriage)
