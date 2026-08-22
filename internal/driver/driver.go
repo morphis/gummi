@@ -525,8 +525,20 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 	// blockers rather than hanging, and neither path waits on a turn that
 	// was never sent. (A resume carrying an answer / change note does have a
 	// turn to send, so it falls through to Attach + Send below.)
-	if d.opening == "" && d.reattachSilent(f) {
-		return d.crossGate(ctx, f)
+	if d.opening == "" {
+		if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage && snap.Err != nil {
+			// The backend died mid-turn on this interactive stage: failRun
+			// leaves an Interactive session at state='interactive' with the
+			// kickoff message already on the transcript, so it reads
+			// identically to a completed interview to reattachSilent's
+			// transcript-emptiness proxy. Drop the dead session so Attach
+			// below opens a fresh one (empty transcript -> fresh kickoff
+			// send) instead of crossing the gate on an interview that never
+			// ran.
+			d.eng.Drop(f.ID)
+		} else if d.reattachSilent(f) {
+			return d.crossGate(ctx, f)
+		}
 	}
 
 	if _, err := d.eng.Attach(ctx, f); err != nil {
