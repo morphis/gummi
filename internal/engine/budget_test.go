@@ -575,6 +575,58 @@ func TestBudgetExhaustedRaisesCheckpoint(t *testing.T) {
 	}
 }
 
+// TestStageBudgetRSReserveFloorHoldsUnderTurnReserveFloorUp proves the
+// FD-081 decompose reserve: an RS card's non-decompose stages (shape,
+// etc.) can spend down to the reserve boundary but never past it — and,
+// critically, the shared turnReserve floor-up (which would otherwise
+// bump a small positive remainder up to a full 30-credit turn) is
+// skipped for KindResearch, so a Shape-stage session 5 credits shy of
+// the boundary sees exactly that headroom, not a full turn's worth.
+func TestStageBudgetRSReserveFloorHoldsUnderTurnReserveFloorUp(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := researchCard(1, "topic")
+	f.Budget.Envelope = 100
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSpend(context.Background(), f.ID, 65, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := e.stageBudget(f, 0); got != 5 {
+		t.Errorf("stageBudget = %v, want 5 (100 envelope - 65 spent - 30 reserve, not floored to turnReserve=30)", got)
+	}
+}
+
+// TestStageBudgetRSReserveUnderByok proves the reserve floor holds
+// identically for BYOK (token-only) spend: reading spend through
+// CreditEquivalentAt rather than Spend.Credits raw means a BYOK Shape
+// session that has driven the card's credit-equivalent spend up to the
+// reserve boundary is capped exactly like a hosted one.
+func TestStageBudgetRSReserveUnderByok(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := researchCard(1, "topic")
+	f.Budget.Envelope = 100
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	const rate = 2.0
+	// 35000 tokens at 2.0/1k = 70 credit-equivalent = Envelope(100) - DecomposeReserveCredits(30).
+	if err := store.AddSpend(context.Background(), f.ID, 0, 0, 20000, 15000); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := e.stageBudget(f, rate); got != 0 {
+		t.Errorf("stageBudget = %v, want 0 (BYOK Shape spend already at the reserve boundary)", got)
+	}
+}
+
 func TestStageCapFlooredAtTurnReserve(t *testing.T) {
 	// enforcement runs between turns, so a sliver of remaining budget
 	// (here 5 credits) cannot be held as a cap — the first turn would

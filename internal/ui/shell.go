@@ -622,7 +622,18 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// meanwhile (chat detaches, its session keeps running) so the review
 		// surface is never installed hidden behind another view.
 		m.chat, m.spec, m.diff = nil, nil, nil
-		m.ingest = newIngestView(msg.res, msg.profile, msg.envelope, msg.repo)
+		if msg.decomposeFor != "" && len(msg.res.Proposals) == 0 {
+			// every `## Slices` row is already settled (or there were none) —
+			// mirrors the headless auto-trigger's zero-slice no-op instead of
+			// opening a review surface with nothing to approve.
+			m.notice = noticeMsg{text: string(msg.decomposeFor) + ": nothing unsettled to decompose"}
+			return m, nil
+		}
+		if msg.decomposeFor != "" {
+			m.ingest = newDecomposeReviewView(msg.res, msg.decomposeFor)
+		} else {
+			m.ingest = newIngestView(msg.res, msg.profile, msg.envelope, msg.repo)
+		}
 		m.notice = noticeMsg{text: "proposed " + strconv.Itoa(len(msg.res.Proposals)) + " feature(s) — review & approve"}
 		return m, nil
 
@@ -873,6 +884,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.Overlay.Push(newBugIngestForm(m.profileNames, m.startBugIngest))
 	case "g":
 		if r, ok := m.selected(); ok {
+			if r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
+				// FD-081: a done RS card has nothing left to advance — g
+				// re-runs decompose instead, the board-key counterpart to
+				// the headless --request-changes re-run.
+				return m.startDecomposeReRun(r.F)
+			}
 			return m.advanceStage(r.F.ID)
 		}
 	case "b":

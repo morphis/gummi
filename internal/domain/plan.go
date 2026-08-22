@@ -69,6 +69,23 @@ func (s Spend) CreditEquivalentAt(ratePer1K float64) float64 {
 	return float64(s.InputTokens+s.OutputTokens) / 1000 * ratePer1K
 }
 
+// DecomposeCreditEquivalentAt mirrors CreditEquivalentAt over the
+// decompose-only scalars (FD-081): the metered credits from the
+// decompose pass, or a token-derived equivalent for BYOK, at the same
+// per-1K rate the caller prices the rest of the feature's spend at.
+// Store.AddDecomposeSpend always grows this in lockstep with the
+// overall total, so this is guaranteed <= CreditEquivalentAt(ratePer1K)
+// at every rate.
+func (s Spend) DecomposeCreditEquivalentAt(ratePer1K float64) float64 {
+	if s.DecomposeCredits > 0 {
+		return s.DecomposeCredits
+	}
+	if ratePer1K <= 0 {
+		ratePer1K = ByokCreditsPer1KTokens
+	}
+	return float64(s.DecomposeInputTokens+s.DecomposeOutputTokens) / 1000 * ratePer1K
+}
+
 // estimateHeadroom pads the historical median so an estimated envelope
 // isn't sized right at the typical cost — a feature a bit above the median
 // still finishes without a top-up.
@@ -81,6 +98,16 @@ const estimateHeadroom = 1.25
 // floored at it and top-ups raise by at least it. Overridable per engine
 // (Config.TurnReserve); this is the default.
 const TurnReserveCredits = 30
+
+// DecomposeReserveCredits (FD-081) is the credit floor an RS card's
+// envelope reserves upfront for its decompose pass. Non-decompose stages
+// cannot spend into it (see Engine.stageBudget's KindResearch branch);
+// the decompose pass itself debits from it via
+// Spend.DecomposeCreditEquivalentAt, and an insufficient remainder exits
+// exhausted with no partial mint rather than spending past it. Sized the
+// same as TurnReserveCredits — one agentic turn's worth of headroom is
+// enough for the transient decompose pass this reserves for.
+const DecomposeReserveCredits = 30
 
 // MinEnvelope floors every estimated envelope. Estimation signals skew
 // low — a scribe guesses from the spec without seeing the agent's real

@@ -81,6 +81,35 @@ func (e *Engine) IngestResearch(ctx context.Context, rsCard domain.Feature) (dom
 	}, nil
 }
 
+// unsettledSliceRows reads rsCard's artifact and returns the `## Slices`
+// rows still lacking a minted FD id, in document order, with the scaffold
+// row dropped. It is the single source of "not yet decomposed" state
+// FD-081's decompose gate reads — no store column, no session flag: a row
+// settles the moment its `id:` is filled in (by this pass or by hand) and
+// reopens the moment that field is cleared.
+func unsettledSliceRows(artifact string) ([]sliceRow, error) {
+	sliceBody, ok := spec.ViewSection(artifact, "Slices")
+	if !ok || strings.TrimSpace(sliceBody) == "" {
+		return nil, fmt.Errorf("`## Slices` section is missing or blank")
+	}
+	m := sliceYAMLFenceRe.FindStringSubmatch(sliceBody)
+	if m == nil {
+		return nil, fmt.Errorf("`## Slices` has no fenced ```yaml block")
+	}
+	rows, err := parseSliceRows(m[1])
+	if err != nil {
+		return nil, fmt.Errorf("`## Slices` yaml is unparseable: %w", err)
+	}
+	var out []sliceRow
+	for _, r := range rows {
+		if isScaffoldRow(r) || strings.TrimSpace(r.ID) != "" {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 // sliceRow is one row of the `## Slices` fenced-YAML scaffold (FD-076's
 // internal/spec/research.go). id is decoded but never read here — it is
 // the back-annotation slot FD-081's decompose gate fills in.

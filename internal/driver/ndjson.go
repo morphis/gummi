@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/verifydoc"
 )
@@ -146,8 +147,74 @@ type escalationEvent struct {
 	ID     string `json:"id"`
 	Stage  string `json:"stage"`
 	Reason string `json:"reason"`
-	Resume string `json:"resume"`
-	Next   string `json:"next,omitempty"`
+	// MintedIDs carries the FD ids a decompose partial-mint failure managed
+	// to create (and back-annotate) before it hit the error — present only
+	// on that exit, so a caller can see exactly which rows settled.
+	MintedIDs []string `json:"minted_ids,omitempty"`
+	Resume    string   `json:"resume"`
+	Next      string   `json:"next,omitempty"`
+}
+
+// decomposeProposalWire is the NDJSON-facing shape of one decompose
+// proposal — enough for an operator (or a scripted caller) to review
+// before approving, without the full draft-seed prose.
+type decomposeProposalWire struct {
+	Title     string   `json:"title"`
+	OneLiner  string   `json:"one_liner,omitempty"`
+	DependsOn []string `json:"depends_on,omitempty"`
+}
+
+// decomposeCoverageWire is the NDJSON-facing shape of one coverage entry.
+type decomposeCoverageWire struct {
+	Requirement string `json:"requirement"`
+	Feature     string `json:"feature,omitempty"`
+	Status      string `json:"status"`
+}
+
+// decomposeQuestionEvent is the RS card's verify→done decompose gate's
+// checkpoint: the architect's proposals + coverage map, awaiting
+// --approve (mint them) or --request-changes (re-run with a note). The RS
+// card stays at done throughout — this is a side-effect of the crossing,
+// never a gate the crossing itself waits on.
+type decomposeQuestionEvent struct {
+	Event     string                  `json:"event"`
+	ID        string                  `json:"id"`
+	Proposals []decomposeProposalWire `json:"proposals"`
+	Coverage  []decomposeCoverageWire `json:"coverage,omitempty"`
+	Resume    string                  `json:"resume"`
+	Next      string                  `json:"next,omitempty"`
+}
+
+// decomposeMintedEvent reports a successful `--approve`: every pending
+// proposal was minted into a real FD and back-annotated into its source
+// `## Slices` row, in doc order.
+type decomposeMintedEvent struct {
+	Event      string   `json:"event"`
+	ID         string   `json:"id"`
+	FeatureIDs []string `json:"feature_ids"`
+}
+
+// wireDecomposeProposals converts an IngestResult's proposals to their
+// NDJSON-facing shape, in doc order.
+func wireDecomposeProposals(res domain.IngestResult) []decomposeProposalWire {
+	out := make([]decomposeProposalWire, 0, len(res.Proposals))
+	for _, p := range res.Proposals {
+		out = append(out, decomposeProposalWire{Title: p.Title, OneLiner: p.OneLiner, DependsOn: p.DependsOn})
+	}
+	return out
+}
+
+// wireDecomposeCoverage converts an IngestResult's coverage map to its
+// NDJSON-facing shape.
+func wireDecomposeCoverage(res domain.IngestResult) []decomposeCoverageWire {
+	if len(res.Coverage) == 0 {
+		return nil
+	}
+	out := make([]decomposeCoverageWire, 0, len(res.Coverage))
+	for _, c := range res.Coverage {
+		out = append(out, decomposeCoverageWire{Requirement: c.Requirement, Feature: c.Feature, Status: string(c.Status)})
+	}
+	return out
 }
 
 type exhaustedEvent struct {

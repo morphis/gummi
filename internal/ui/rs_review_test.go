@@ -2,9 +2,11 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,5 +136,109 @@ func TestRSInvestigateNoLoopNotAutoStepped(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Fatal("onAutonomousDone(investigate, round==0) returned a non-nil command")
+	}
+}
+
+const boardKeyDecomposeTwoRows = "# RS-001: research card\n\n## Findings\n\nNothing cited.\n\n## Slices\n\n" +
+	"```yaml\n" +
+	"- title: Row one\n  one-liner: first\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
+	"- title: Row two\n  one-liner: second\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
+	"```\n"
+
+// decomposeProposer answers a decompose pass with a fixed two-feature
+// proposal set, in the same propose_features shape a real architect
+// backend would emit.
+func decomposeProposer() *agent.Fake {
+	wire, _ := json.Marshal(struct {
+		Features []map[string]any `json:"features"`
+	}{Features: []map[string]any{
+		{"title": "Row one", "one_liner": "first"},
+		{"title": "Row two", "one_liner": "second"},
+	}})
+	return &agent.Fake{
+		Caps: agent.Capabilities{ClientTools: true},
+		Responder: func(agent.SessionOpts, string) []agent.Event {
+			return []agent.Event{
+				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "c1", Name: "propose_features", Args: json.RawMessage(wire)}},
+			}
+		},
+	}
+}
+
+// TestBoardKeyGReDecomposesDoneRS proves the board-key re-run surface
+// FD-081's Chosen approach promises alongside the headless verb: pressing
+// g on a done RS card runs DecomposeForCard and opens the ingest-review
+// pane tagged so its approve path dispatches to MintProposals (not
+// Materialize) — the same two engine ops the auto-trigger and
+// --request-changes already share.
+func TestBoardKeyGReDecomposesDoneRS(t *testing.T) {
+	m, _ := researchWorkspace(t, decomposeProposer(), domain.StageDone)
+	path := filepath.Join(m.ws.Root, "RS-001.md")
+	if f, err := m.store.GetFeature(context.Background(), "RS-001"); err == nil {
+		path = filepath.Join(m.ws.Root, f.ArtifactPath())
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(boardKeyDecomposeTwoRows), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m = pump(t, m, m.loadRows)
+	if _, ok := m.selected(); !ok {
+		t.Fatal("no row selected after loadRows — RS-001 should be on the board")
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.ingest == nil {
+		t.Fatal("g on a done RS card did not open the ingest-review pane")
+	}
+	if m.ingest.decomposeFor != "RS-001" {
+		t.Fatalf("ingest.decomposeFor = %q, want RS-001", m.ingest.decomposeFor)
+	}
+	if m.ingest.keptCount() != 2 {
+		t.Fatalf("keptCount = %d, want 2", m.ingest.keptCount())
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if !m.Overlay.Contains("confirm-ingest") {
+		t.Fatal("approve did not raise the confirmation dialog")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.ingest != nil {
+		t.Error("review surface should close after mint")
+	}
+
+	feats, err := m.store.ListFeatures(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var minted int
+	var mintedIDs []string
+	for _, f := range feats {
+		if f.Title == "Row one" || f.Title == "Row two" {
+			minted++
+			mintedIDs = append(mintedIDs, string(f.ID))
+		}
+	}
+	if minted != 2 {
+		t.Fatalf("minted %d FDs, want 2 (of %d total features)", minted, len(feats))
+	}
+
+	rs, err := m.store.GetFeature(context.Background(), "RS-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs.Stage != domain.StageDone {
+		t.Fatalf("RS-001 stage = %s, want done (mint never un-approves)", rs.Stage)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range mintedIDs {
+		if !strings.Contains(string(raw), id) {
+			t.Errorf("minted id %s not back-annotated into the doc:\n%s", id, raw)
+		}
 	}
 }

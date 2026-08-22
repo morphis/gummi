@@ -33,6 +33,22 @@ var budgetThresholds = []int{50, 80, 95}
 func (e *Engine) stageBudget(f domain.Feature, creditRate float64) float64 {
 	if f.Budget.Envelope > 0 {
 		cur := e.currentFeature(f)
+		// RS cards (FD-081) reserve a decompose floor upfront: a
+		// non-decompose stage (shape, etc.) may only spend down to that
+		// floor, never into it, so decompose is guaranteed
+		// DecomposeReserveCredits of headroom on its first pass. This
+		// reads spend through CreditEquivalentAt/DecomposeCreditEquivalentAt
+		// (never Spend.Credits raw) so hosted and BYOK spend are treated
+		// identically.
+		if cur.Kind == domain.KindResearch {
+			nonDecompose := cur.Spend.CreditEquivalentAt(creditRate) - cur.Spend.DecomposeCreditEquivalentAt(creditRate)
+			return cur.Budget.Remaining(nonDecompose + domain.DecomposeReserveCredits)
+			// Deliberately skips the shared turnReserve floor-up below: with
+			// TurnReserveCredits defaulting to the same value as
+			// DecomposeReserveCredits, flooring a small positive remainder up
+			// to a full turn would let a non-decompose session spend into the
+			// reserved block — exactly what the floor exists to prevent.
+		}
 		b := cur.Budget.Remaining(cur.Spend.CreditEquivalentAt(creditRate))
 		if reserve := e.turnReserve(); b > 0 && b < reserve {
 			b = reserve

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/statusbar"
 )
@@ -79,6 +80,13 @@ func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
 	pause := binding{key: "p", label: "pause", help: "pause the running agent; else open the dependency picker"}
 	transcript := binding{key: "t", label: "transcript", help: "read the session transcript (tool calls and their outputs)"}
+	advance := binding{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true}
+	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
+		// FD-081: a done RS card has nothing left to advance — g re-runs
+		// decompose instead.
+		advance.label = "decompose"
+		advance.help = "on a done RS: re-run decompose"
+	}
 	if r, ok := m.selected(); ok && autonomousStage(r.F.Stage) {
 		enter.label = "run"
 		if s := m.sessionFor(r.F.ID); s != nil {
@@ -103,7 +111,7 @@ func (m *Shell) boardBindings() []binding {
 		transcript,
 		{key: "s", label: "spec", help: "spec (tab: read ⇄ annotate)", bar: true},
 		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)", bar: true},
-		{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true},
+		advance,
 		{key: "b", label: "bounce", help: "bounce back to implement/fix"},
 		{key: "P", label: "add plan", help: "restore the plan stage on a quick/skip-plan feature (design phase only)"},
 		{key: "v", label: "verify", help: "run verify checks"},

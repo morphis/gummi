@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS features (
 	spend_est       REAL NOT NULL DEFAULT 0,
 	spend_in        INTEGER NOT NULL DEFAULT 0,
 	spend_out       INTEGER NOT NULL DEFAULT 0,
+	spend_decompose_credits REAL NOT NULL DEFAULT 0,
+	spend_decompose_in      INTEGER NOT NULL DEFAULT 0,
+	spend_decompose_out     INTEGER NOT NULL DEFAULT 0,
 	created_at      TEXT NOT NULL,
 	updated_at      TEXT NOT NULL,
 	kind            TEXT NOT NULL DEFAULT 'feature',
@@ -307,6 +310,9 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			spend_est       REAL NOT NULL DEFAULT 0,
 			spend_in        INTEGER NOT NULL DEFAULT 0,
 			spend_out       INTEGER NOT NULL DEFAULT 0,
+			spend_decompose_credits REAL NOT NULL DEFAULT 0,
+			spend_decompose_in      INTEGER NOT NULL DEFAULT 0,
+			spend_decompose_out     INTEGER NOT NULL DEFAULT 0,
 			created_at      TEXT NOT NULL,
 			updated_at      TEXT NOT NULL,
 			kind            TEXT NOT NULL DEFAULT 'feature',
@@ -325,12 +331,14 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			(id, num, title, one_liner, slug, stage,
 			 skip_brainstorm, skip_plan, profile,
 			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
+			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
 			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
 			 severity, fork_point, commit_draft_fail, repo)
 		 SELECT id, num, title, one_liner, slug, stage,
 			 skip_brainstorm, skip_plan, profile,
 			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
+			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
 			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
 			 severity, fork_point, commit_draft_fail, repo
@@ -439,6 +447,9 @@ var migrations = []string{
 	`ALTER TABLE sessions ADD COLUMN verdict TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN commit_draft_fail TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN spend_decompose_credits REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN spend_decompose_in INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN spend_decompose_out INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Close releases the database.
@@ -487,6 +498,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 const featureCols = `id, num, title, one_liner, slug, stage,
 	skip_brainstorm, skip_plan, profile,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
+	spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, commit_draft_fail, repo`
 
@@ -515,6 +527,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
 		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
+		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
 		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.CommitDraftFail, &f.Repo)
 	if err != nil {
@@ -561,6 +574,27 @@ func (s *Store) AddSpend(ctx context.Context, id domain.FeatureID, credits, esti
 		WHERE id = ?`, credits, estimated, in, out, string(id))
 	if err != nil {
 		return fmt.Errorf("metering %s: %w", id, err)
+	}
+	return nil
+}
+
+// AddDecomposeSpend accumulates a decompose-pass usage sample (FD-081)
+// onto both a feature's overall running total and its decompose-only
+// bucket, in one UPDATE — so DecomposeCreditEquivalentAt(rate) can never
+// exceed CreditEquivalentAt(rate) at any rate, hosted or BYOK, and spend
+// reporting can distinguish what decomposition cost from the rest.
+func (s *Store) AddDecomposeSpend(ctx context.Context, id domain.FeatureID, credits float64, in, out int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE features SET
+			spend_credits = spend_credits + ?,
+			spend_in = spend_in + ?,
+			spend_out = spend_out + ?,
+			spend_decompose_credits = spend_decompose_credits + ?,
+			spend_decompose_in = spend_decompose_in + ?,
+			spend_decompose_out = spend_decompose_out + ?
+		WHERE id = ?`, credits, in, out, credits, in, out, string(id))
+	if err != nil {
+		return fmt.Errorf("metering decompose spend for %s: %w", id, err)
 	}
 	return nil
 }

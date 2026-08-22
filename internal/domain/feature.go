@@ -118,6 +118,15 @@ type Spend struct {
 	EstimatedCredits float64 // token-derived subset of Credits
 	InputTokens      int64
 	OutputTokens     int64
+
+	// Decompose* mirror Credits/InputTokens/OutputTokens but count only
+	// the FD-081 decompose pass's own spend, so it stays distinguishable
+	// in reporting. Store.AddDecomposeSpend increments the pair (overall,
+	// decompose) together, so DecomposeCreditEquivalentAt(rate) can never
+	// exceed CreditEquivalentAt(rate) at any rate.
+	DecomposeCredits      float64
+	DecomposeInputTokens  int64
+	DecomposeOutputTokens int64
 }
 
 // Add accumulates another usage sample.

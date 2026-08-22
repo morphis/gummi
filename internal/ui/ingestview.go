@@ -26,6 +26,13 @@ type ingestView struct {
 	profile  string
 	envelope int
 	repo     string // managed repository the batch belongs to ("" = default)
+
+	// decomposeFor (FD-081) is the done RS card this review surface is a
+	// re-run of decompose for; zero means a standalone ingest. Non-zero
+	// routes approval to Engine.MintProposals (which re-derives its own
+	// target rows and repo/profile/envelope from the RS card) instead of
+	// Engine.Materialize.
+	decomposeFor domain.FeatureID
 }
 
 // ingestProposal is one proposed feature plus its review state.
@@ -43,6 +50,15 @@ func newIngestView(res domain.IngestResult, profile string, envelope int, repo s
 		source: res.SourcePath, coverage: res.Coverage, props: props,
 		profile: profile, envelope: envelope, repo: repo,
 	}
+}
+
+// newDecomposeReviewView builds the same review surface for a decompose
+// re-run (FD-081): decomposeFor marks it so approval mints through
+// Engine.MintProposals against that RS card instead of Engine.Materialize.
+func newDecomposeReviewView(res domain.IngestResult, cardID domain.FeatureID) *ingestView {
+	iv := newIngestView(res, "", 0, "")
+	iv.decomposeFor = cardID
+	return iv
 }
 
 // kept returns the proposals that survive review (not dropped) as an
@@ -223,8 +239,17 @@ func (m *Shell) materializeIngest() tea.Cmd {
 	}
 	eng := m.engine
 	res := iv.kept()
-	opts := engine.MaterializeOpts{Profile: iv.profile, Envelope: iv.envelope, Repo: iv.repo}
 	m.ingest = nil
+	if cardID := iv.decomposeFor; cardID != "" {
+		return func() tea.Msg {
+			created, err := eng.MintProposals(context.Background(), cardID, res)
+			if err != nil {
+				return noticeMsg{text: "decompose: " + sanitize(err.Error()), isErr: true}
+			}
+			return noticeMsg{text: fmt.Sprintf("minted %d feature(s) from %s's decomposition", len(created), cardID), reload: true}
+		}
+	}
+	opts := engine.MaterializeOpts{Profile: iv.profile, Envelope: iv.envelope, Repo: iv.repo}
 	return func() tea.Msg {
 		created, err := eng.Materialize(context.Background(), res, opts)
 		if err != nil {
@@ -268,6 +293,35 @@ func (m *Shell) startIngest(path, profile, repo string) tea.Cmd {
 	return tea.Batch(pass, listenIngestSteps(steps))
 }
 
+// startDecomposeReRun runs the FD-081 decompose pass for a done RS card
+// and opens the review surface on success — the board-key counterpart to
+// the headless `--request-changes` re-run (Chosen approach § Contract:
+// "Auto-trigger, headless verb, and board key all call the same two
+// ops"). Unlike startIngest it needs no source-file/profile/repo form:
+// DecomposeForCard resolves everything from the card itself, and the
+// plain re-run carries no operator note (the note field is TUI-only via
+// --request-changes headless, not exposed here).
+func (m *Shell) startDecomposeReRun(f domain.Feature) tea.Cmd {
+	if m.engine == nil {
+		m.notice = noticeMsg{text: "no agent configured — decompose needs one", isErr: true}
+		return nil
+	}
+	if m.ingestRun != nil {
+		m.notice = noticeMsg{text: "an ingest/decompose is already running — wait for it", isErr: true}
+		return nil
+	}
+	eng := m.engine
+	m.ingestRun = newIngestRunView(string(f.ID))
+	m.notice = noticeMsg{text: "re-running decompose for " + string(f.ID) + "…"}
+	return func() tea.Msg {
+		res, err := eng.DecomposeForCard(context.Background(), f.ID, "")
+		if err != nil {
+			return ingestLoadedMsg{err: err}
+		}
+		return ingestLoadedMsg{res: res, decomposeFor: f.ID}
+	}
+}
+
 // listenIngestSteps bridges the pass's progress channel into Bubble Tea:
 // it blocks for one step and returns it as a message, and is re-issued
 // after each one so the feed stays live until the channel closes.
@@ -298,6 +352,11 @@ type ingestLoadedMsg struct {
 	envelope int
 	repo     string
 	err      error
+
+	// decomposeFor (FD-081) is set by startDecomposeReRun so the shell
+	// opens the review surface tagged for MintProposals instead of a
+	// standalone ingest.
+	decomposeFor domain.FeatureID
 }
 
 // ingestViewRender paints the review surface into the main pane.

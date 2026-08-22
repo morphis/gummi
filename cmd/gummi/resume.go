@@ -17,7 +17,11 @@ import (
 // feature, applies the caller's decision, and drives on — streaming the
 // same NDJSON and exiting with a typed status. With no decision flag it
 // simply re-runs the parked stage (after a timeout, an escalation, or an
-// envelope top-up).
+// envelope top-up). The same two flags also resolve a done research
+// card's decompose checkpoint (FD-081): --approve mints its pending
+// proposals into FDs, --request-changes re-runs the decompose pass with
+// the note attached — no new plumbing, the driver dispatches on the
+// card's kind and stage.
 func runResume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	rv := registerResumeFlags(fs)
