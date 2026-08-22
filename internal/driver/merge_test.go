@@ -138,6 +138,58 @@ func TestMergeRefusesInvalidMessage(t *testing.T) {
 	}
 }
 
+// Merge refuses a verified card that is linked to an outbound PR — the
+// both-or-neither landing invariant — naming the linked repo#number, before
+// any git mutation.
+func TestMergeRefusesLinkedPR(t *testing.T) {
+	h, d, id := driveVerified(t)
+	before := gitHead(t, h.root)
+
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
+	if err := h.store.SetPullRequest(context.Background(), id, ref); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly")
+	if err == nil {
+		t.Fatal("Merge accepted a linked card")
+	}
+	if !strings.Contains(err.Error(), "o/r#42") {
+		t.Fatalf("error %q does not name the linked PR", err)
+	}
+	if out.Status != StatusError {
+		t.Fatalf("status = %q, want error", out.Status)
+	}
+	if got := gitHead(t, h.root); got != before {
+		t.Fatalf("main HEAD moved by refused merge: %s -> %s", before, got)
+	}
+	if lastEvent(h, "merged") != nil {
+		t.Fatal("refused merge still emitted a merged event")
+	}
+}
+
+// Merge succeeds once a linked PR is unlinked — the guard is keyed off the
+// live PullRequest field, not a one-time check.
+func TestMergeSucceedsAfterUnlink(t *testing.T) {
+	h, d, id := driveVerified(t)
+
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
+	if err := h.store.SetPullRequest(context.Background(), id, ref); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SetPullRequest(context.Background(), id, domain.PullRequestRef{}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly")
+	if err != nil {
+		t.Fatalf("Merge after unlink: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done", out.Status)
+	}
+}
+
 // Clean removes a landed card's worktree and branch, emits a cleaned event,
 // and keeps the card record.
 func TestCleanRemovesLandedBranch(t *testing.T) {

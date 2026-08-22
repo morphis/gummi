@@ -263,3 +263,62 @@ func TestFeatureRepoValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestPullRequestRefEmpty(t *testing.T) {
+	if !(PullRequestRef{}).Empty() {
+		t.Error("zero-value ref should read Empty()")
+	}
+	nonEmpty := []PullRequestRef{
+		{Repo: "o/r"},
+		{Number: 1},
+		{URL: "https://github.com/o/r/pull/1"},
+		{HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"},
+	}
+	for _, r := range nonEmpty {
+		if r.Empty() {
+			t.Errorf("ref %+v should read non-empty", r)
+		}
+	}
+}
+
+func TestPullRequestRefValidate(t *testing.T) {
+	good := PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
+	if err := good.Validate(); err != nil {
+		t.Errorf("well-formed ref rejected: %v", err)
+	}
+	// HeadSHA is optional (unset until resolved).
+	woSHA := good
+	woSHA.HeadSHA = ""
+	if err := woSHA.Validate(); err != nil {
+		t.Errorf("ref with no HeadSHA should be legal: %v", err)
+	}
+	mutations := map[string]func(*PullRequestRef){
+		"bare owner repo": func(r *PullRequestRef) { r.Repo = "o" },
+		"empty repo":      func(r *PullRequestRef) { r.Repo = "" },
+		"number zero":     func(r *PullRequestRef) { r.Number = 0 },
+		"negative number": func(r *PullRequestRef) { r.Number = -1 },
+		"non-github URL":  func(r *PullRequestRef) { r.URL = "https://example.com/o/r/pull/42" },
+		"empty URL":       func(r *PullRequestRef) { r.URL = "" },
+		"bad hex SHA":     func(r *PullRequestRef) { r.HeadSHA = "not-a-sha" },
+		"short SHA":       func(r *PullRequestRef) { r.HeadSHA = "9f86d08" },
+	}
+	for name, mut := range mutations {
+		r := good
+		mut(&r)
+		if err := r.Validate(); err == nil {
+			t.Errorf("%s: Validate() = nil, want error", name)
+		}
+	}
+}
+
+func TestFeatureValidatePullRequest(t *testing.T) {
+	f := testFeature()
+	f.PullRequest = PullRequestRef{Repo: "o", Number: 1, URL: "https://github.com/o/r/pull/1"}
+	if err := f.Validate(); err == nil {
+		t.Error("feature with malformed linked PR should be rejected")
+	}
+	f.PullRequest = PullRequestRef{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}
+	if err := f.Validate(); err != nil {
+		t.Errorf("feature with well-formed linked PR rejected: %v", err)
+	}
+}

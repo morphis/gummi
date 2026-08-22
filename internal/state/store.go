@@ -68,7 +68,11 @@ CREATE TABLE IF NOT EXISTS features (
 	severity        TEXT NOT NULL DEFAULT '',
 	fork_point      TEXT NOT NULL DEFAULT '',
 	commit_draft_fail TEXT NOT NULL DEFAULT '',
-	repo            TEXT NOT NULL DEFAULT ''
+	repo            TEXT NOT NULL DEFAULT '',
+	pr_repo         TEXT NOT NULL DEFAULT '',
+	pr_number       INTEGER NOT NULL DEFAULT 0,
+	pr_url          TEXT NOT NULL DEFAULT '',
+	pr_head_sha     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 
@@ -325,7 +329,11 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			severity        TEXT NOT NULL DEFAULT '',
 			fork_point      TEXT NOT NULL DEFAULT '',
 			commit_draft_fail TEXT NOT NULL DEFAULT '',
-			repo            TEXT NOT NULL DEFAULT ''
+			repo            TEXT NOT NULL DEFAULT '',
+			pr_repo         TEXT NOT NULL DEFAULT '',
+			pr_number       INTEGER NOT NULL DEFAULT 0,
+			pr_url          TEXT NOT NULL DEFAULT '',
+			pr_head_sha     TEXT NOT NULL DEFAULT ''
 		)`,
 		`INSERT INTO features_new
 			(id, num, title, one_liner, slug, stage,
@@ -334,14 +342,14 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
 			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
-			 severity, fork_point, commit_draft_fail, repo)
+			 severity, fork_point, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha)
 		 SELECT id, num, title, one_liner, slug, stage,
 			 skip_brainstorm, skip_plan, profile,
 			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
 			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
-			 severity, fork_point, commit_draft_fail, repo
+			 severity, fork_point, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha
 		 FROM features`,
 		`DROP TABLE features`,
 		`ALTER TABLE features_new RENAME TO features`,
@@ -450,6 +458,10 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN spend_decompose_credits REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN spend_decompose_in INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN spend_decompose_out INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN pr_repo TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -482,13 +494,15 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, commit_draft_fail, repo)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, commit_draft_fail, repo,
+			pr_repo, pr_number, pr_url, pr_head_sha)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.CommitDraftFail, f.Repo)
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.CommitDraftFail, f.Repo,
+		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -500,7 +514,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, commit_draft_fail, repo`
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, commit_draft_fail, repo,
+	pr_repo, pr_number, pr_url, pr_head_sha`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -529,7 +544,8 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.CommitDraftFail, &f.Repo)
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.CommitDraftFail, &f.Repo,
+		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA)
 	if err != nil {
 		return f, err
 	}
@@ -721,6 +737,26 @@ func (s *Store) ClearForkPoint(ctx context.Context, id domain.FeatureID) error {
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE features SET fork_point = '' WHERE id = ?`, string(id)); err != nil {
 		return fmt.Errorf("clearing fork-point for %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetPullRequest persists a feature's linked outbound PR (or clears it, when
+// ref is Empty()) — the side-channel `gummi pr link`/`unlink` write onto the
+// four pr_* columns. Like SetCommitDraftFail it neither touches updated_at
+// nor moves the stage: linking is metadata about how the card will land, not
+// a stage transition. ref must be Empty() or pass Validate().
+func (s *Store) SetPullRequest(ctx context.Context, id domain.FeatureID, ref domain.PullRequestRef) error {
+	if !ref.Empty() {
+		if err := ref.Validate(); err != nil {
+			return fmt.Errorf("setting pull request for %s: %w", id, err)
+		}
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET pr_repo = ?, pr_number = ?, pr_url = ?, pr_head_sha = ? WHERE id = ?`,
+		ref.Repo, ref.Number, ref.URL, ref.HeadSHA, string(id))
+	if err != nil {
+		return fmt.Errorf("setting pull request for %s: %w", id, err)
 	}
 	return nil
 }

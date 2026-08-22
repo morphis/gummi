@@ -373,6 +373,13 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 		return d.fail(ctx, string(id),
 			fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
 	}
+	// a card lands either via its linked PR or locally, never both: refuse
+	// before any git mutation, naming the PR and the unlink escape.
+	if !f.PullRequest.Empty() {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s is linked to %s#%d (%s); land it via the PR, or run `gummi pr unlink %s` to land it locally instead",
+				id, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, id))
+	}
 	// the same open-thread / open-diff floor Advance applies before the
 	// verify→done gate; unresolved ones hold the merge.
 	if specOpen, diffOpen, _, err := d.eng.GateBlockers(ctx, id); err != nil {

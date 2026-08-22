@@ -273,6 +273,25 @@ func TestSquashMergeRefusedWithoutWorktree(t *testing.T) {
 	}
 }
 
+// A card linked to an outbound PR refuses the local squash-merge dialog —
+// the both-or-neither landing invariant, enforced in shared landing code
+// even though the TUI has no surface for pr link/unlink itself.
+func TestSquashMergeRefusedWhenLinkedToPR(t *testing.T) {
+	m, _, _ := mergeFixture(t)
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
+	if err := m.store.SetPullRequest(context.Background(), "FD-001", ref); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	m = pressMerge(t, m)
+	if !m.notice.isErr || !strings.Contains(m.notice.text, "o/r#42") {
+		t.Fatalf("notice = %q (err=%v), want a refusal naming the linked PR", m.notice.text, m.notice.isErr)
+	}
+	if m.Overlay.Top() != nil {
+		t.Fatal("dialog opened for a card linked to a PR")
+	}
+}
+
 func TestSquashMergeRefusedWhenLanded(t *testing.T) {
 	m, root, wt := rebaseFeatureFixture(t)
 	landFeature(t, root, wt) // commits + merges --no-ff into main

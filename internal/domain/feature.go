@@ -199,6 +199,56 @@ type Feature struct {
 	// or a timeout), persisted so the failure survives the dialog and later
 	// inspection still sees it. Empty when the last pass drafted cleanly.
 	CommitDraftFail string
+	// PullRequest is the outbound PR this card is linked to — the mirror of
+	// ExternalRef (which ties a bug back to its inbound source). Set by
+	// `gummi pr link`, cleared by `gummi pr unlink`. A linked card refuses a
+	// local squash-merge (see the driver/UI landing guards): a card lands
+	// either via its PR or locally, never both. Empty() until linked.
+	PullRequest PullRequestRef
+}
+
+// PullRequestRef records an outbound pull request a card is linked to: a
+// point-in-time snapshot taken at link time, not a live view. Repo is the
+// PR's own repo ("owner/repo") — which, in a fork workflow, is the upstream
+// repo the PR was opened against, not necessarily the card's own configured
+// Repo. HeadSHA is the PR's head commit as of link time; nothing here is
+// refreshed automatically.
+type PullRequestRef struct {
+	Repo    string // "owner/repo"
+	Number  int
+	URL     string
+	HeadSHA string
+}
+
+// Empty reports whether the ref carries no linked PR (all four fields at
+// their zero value) — the "unlinked" state every pre-existing row reads as.
+func (r PullRequestRef) Empty() bool {
+	return r.Repo == "" && r.Number == 0 && r.URL == "" && r.HeadSHA == ""
+}
+
+var (
+	prRefRepoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	prRefSHARe  = regexp.MustCompile(`^[0-9a-f]{40}$`)
+)
+
+// Validate checks a non-empty ref's shape: Repo must be "owner/repo" (never
+// a bare name), Number must be a real PR number, URL must be a github.com
+// link, and HeadSHA, when set, must be a 40-hex-char SHA. An Empty ref is
+// always legal and is never passed here by callers that check first.
+func (r PullRequestRef) Validate() error {
+	if !prRefRepoRe.MatchString(r.Repo) {
+		return fmt.Errorf("pull request repo %q is not in owner/repo form", r.Repo)
+	}
+	if r.Number < 1 {
+		return fmt.Errorf("pull request number must be >= 1, got %d", r.Number)
+	}
+	if !strings.HasPrefix(r.URL, "https://github.com/") {
+		return fmt.Errorf("pull request URL %q does not start with https://github.com/", r.URL)
+	}
+	if r.HeadSHA != "" && !prRefSHARe.MatchString(r.HeadSHA) {
+		return fmt.Errorf("pull request head SHA %q is not a 40-hex-char SHA", r.HeadSHA)
+	}
+	return nil
 }
 
 // kind returns the feature's kind, treating the empty default as a
@@ -284,6 +334,11 @@ func (f *Feature) Validate() error {
 	// (it names the workspace default).
 	if strings.TrimSpace(f.Repo) != f.Repo || strings.Contains(f.Repo, "/") || strings.Contains(f.Repo, "\\") {
 		return fmt.Errorf("feature %s: repo name %q is not a plain configured name", f.ID, f.Repo)
+	}
+	if !f.PullRequest.Empty() {
+		if err := f.PullRequest.Validate(); err != nil {
+			return fmt.Errorf("feature %s: %w", f.ID, err)
+		}
 	}
 	return nil
 }

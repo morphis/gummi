@@ -163,6 +163,36 @@ var depsListCmd = &cobra.Command{
 	},
 }
 
+// prCmd groups the outbound-PR operations (link/unlink/status).
+var prCmd = &cobra.Command{
+	Use:   "pr",
+	Short: "Link, unlink, and check the outbound PR a card lands through",
+}
+
+var prLinkCmd = &cobra.Command{
+	Use:   "link <card> <url|number> [--auto]",
+	Short: "Link a card to an existing PR",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPRLink(buildFlagArgs(cmd, args))
+	},
+}
+
+var prUnlinkCmd = &cobra.Command{
+	Use:   "unlink <card>",
+	Short: "Clear a card's linked PR",
+	RunE: func(_ *cobra.Command, args []string) error {
+		return runPRUnlink(args)
+	},
+}
+
+var prStatusCmd = &cobra.Command{
+	Use:   "status <card> [--json]",
+	Short: "Show a card's linked PR state and comment count",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPRStatus(buildFlagArgs(cmd, args))
+	},
+}
+
 // skillCmd groups the skill file operations.
 var skillCmd = &cobra.Command{
 	Use:   "skill",
@@ -207,8 +237,12 @@ func init() {
 	bindBugsNewFlags(bugsNewCmd)
 	bindSkillInstallFlags(skillInstallCmd)
 
+	prLinkCmd.Flags().Bool("auto", false, "resolve the PR whose head branch matches the card's branch (via gh pr list --head)")
+	prStatusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
+
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
+	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 }
 

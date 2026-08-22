@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,6 +36,11 @@ type mergeReadyMsg struct {
 func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
+		// a card lands either via its linked PR or locally, never both.
+		if !f.PullRequest.Empty() {
+			return mergeReadyMsg{err: fmt.Errorf("%s is linked to %s#%d (%s); land it via the PR, or run `gummi pr unlink %s` to land it locally instead",
+				f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.ID)}
+		}
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
 			return mergeReadyMsg{err: err}
 		}
