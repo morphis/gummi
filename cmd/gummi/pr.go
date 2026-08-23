@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
@@ -244,5 +245,188 @@ func runPRStatus(args []string) error {
 	fmt.Printf("  URL:      %s\n", view.URL)
 	fmt.Printf("  State:    %s\n", strings.ToLower(view.State))
 	fmt.Printf("  Comments: %d\n", view.Comments)
+	return nil
+}
+
+// firstLine returns s's first line, trimmed, for one-line summaries.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// prThreadView and prTopLevelView are `gummi pr comments`'s --json payload
+// shapes for list mode.
+type prThreadView struct {
+	ID            string `json:"id"`
+	Path          string `json:"path"`
+	IsOutdated    bool   `json:"is_outdated"`
+	RootAuthor    string `json:"root_author"`
+	RootBodyFirst string `json:"root_body_first_line"`
+}
+
+type prTopLevelView struct {
+	Author    string `json:"author"`
+	BodyFirst string `json:"body_first_line"`
+}
+
+type prCommentsListView struct {
+	Threads  []prThreadView   `json:"threads"`
+	TopLevel []prTopLevelView `json:"top_level"`
+}
+
+// prIngestSummary is `pr comments --ingest`'s --json payload shape.
+type prIngestSummary struct {
+	Written         int `json:"written"`
+	Existing        int `json:"existing"`
+	TopLevelSkipped int `json:"top_level_skipped"`
+	Orphaned        int `json:"orphaned"`
+}
+
+// runPRComments implements `gummi pr comments <card> [--ingest] [--json]`:
+// fetches the linked PR's unresolved review threads and top-level comments.
+// Without --ingest, it lists them; with --ingest, it anchors each thread
+// onto the card's current worktree diff and writes one DiffAnnotation per
+// thread (top-level comments are never written — DiffAnnotation.File is
+// required and they have none). Idempotent re-ingest is guaranteed by
+// FD-094's (feature_id, source_ref) uniqueness in the store, not by this
+// verb; the pre-write ListDiffAnnotations snapshot below only classifies the
+// summary counts.
+func runPRComments(args []string) error {
+	fs := flag.NewFlagSet("pr comments", flag.ContinueOnError)
+	ingest := fs.Bool("ingest", false, "write an annotation per unresolved review thread onto the card's diff")
+	jsonOut := fs.Bool("json", false, "emit machine-readable JSON instead of the text summary")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: gummi pr comments <card> [--ingest] [--json]")
+		fs.PrintDefaults()
+	}
+	idArg, err := idFirstArg(fs, args)
+	if err != nil {
+		return err
+	}
+
+	ghBinary := pr.GHBinary()
+	if err := pr.Available(ghBinary); err != nil {
+		return err
+	}
+
+	pe, err := openPREnv()
+	if err != nil {
+		return err
+	}
+	defer pe.cleanup()
+
+	ctx := context.Background()
+	f, err := resolveFeatureID(ctx, pe.store, idArg)
+	if err != nil {
+		return err
+	}
+	if f.PullRequest.Empty() {
+		return fmt.Errorf("%s has no linked PR; run `gummi pr link` first", f.ID)
+	}
+
+	threads, topLevel, err := pr.FetchReviewThreads(ctx, ghBinary, f.PullRequest)
+	if err != nil {
+		return fmt.Errorf("fetching review threads for %s: %w", f.ID, err)
+	}
+
+	if !*ingest {
+		return renderPRCommentsList(threads, topLevel, *jsonOut)
+	}
+	return runPRCommentsIngest(ctx, pe, &f, threads, topLevel, *jsonOut)
+}
+
+func renderPRCommentsList(threads []pr.ReviewThread, topLevel []pr.TopLevelComment, jsonOut bool) error {
+	if jsonOut {
+		view := prCommentsListView{Threads: []prThreadView{}, TopLevel: []prTopLevelView{}}
+		for _, t := range threads {
+			root := ""
+			rootLogin := ""
+			if len(t.Comments) > 0 {
+				root = firstLine(t.Comments[0].Body)
+				rootLogin = t.Comments[0].AuthorLogin
+			}
+			view.Threads = append(view.Threads, prThreadView{
+				ID: t.Id, Path: t.Path, IsOutdated: t.IsOutdated,
+				RootAuthor: rootLogin, RootBodyFirst: root,
+			})
+		}
+		for _, c := range topLevel {
+			view.TopLevel = append(view.TopLevel, prTopLevelView{Author: c.AuthorLogin, BodyFirst: firstLine(c.Body)})
+		}
+		b, err := json.MarshalIndent(view, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+
+	for _, t := range threads {
+		root, login := "", ""
+		if len(t.Comments) > 0 {
+			root, login = firstLine(t.Comments[0].Body), t.Comments[0].AuthorLogin
+		}
+		line := fmt.Sprintf("%s — @%s: %s", t.Path, login, root)
+		if t.IsOutdated {
+			line += " [outdated]"
+		}
+		fmt.Println(line)
+	}
+	fmt.Println("Top-level comments:")
+	for _, c := range topLevel {
+		fmt.Printf("@%s: %s\n", c.AuthorLogin, firstLine(c.Body))
+	}
+	return nil
+}
+
+func runPRCommentsIngest(ctx context.Context, pe *prEnv, f *domain.Feature, threads []pr.ReviewThread, topLevel []pr.TopLevelComment, jsonOut bool) error {
+	diff, diffErr := pe.wt.Diff(ctx, f)
+	var worktreeLines []string
+	if diffErr == nil {
+		worktreeLines = strings.Split(strings.TrimRight(diff, "\n"), "\n")
+	}
+
+	existing, err := pe.store.ListDiffAnnotations(ctx, f.ID)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, a := range existing {
+		if a.SourceRef != "" {
+			seen[a.SourceRef] = true
+		}
+	}
+
+	var written, alreadyExisting, orphaned int
+	now := time.Now()
+	for _, t := range threads {
+		if seen[t.Id] {
+			alreadyExisting++
+		} else {
+			written++
+			seen[t.Id] = true
+		}
+		ann := pr.AnnotationFor(f.ID, t, worktreeLines)
+		if ann.Anchor == "" {
+			orphaned++
+		}
+		if _, err := pe.store.AddDiffAnnotation(ctx, ann, now); err != nil {
+			return err
+		}
+	}
+
+	if jsonOut {
+		b, err := json.MarshalIndent(prIngestSummary{
+			Written: written, Existing: alreadyExisting, TopLevelSkipped: len(topLevel), Orphaned: orphaned,
+		}, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	fmt.Printf("wrote %d (existing %d, top-level %d, orphaned %d)\n", written, alreadyExisting, len(topLevel), orphaned)
 	return nil
 }

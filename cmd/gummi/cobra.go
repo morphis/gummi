@@ -193,6 +193,14 @@ var prStatusCmd = &cobra.Command{
 	},
 }
 
+var prCommentsCmd = &cobra.Command{
+	Use:   "comments <card> [--ingest] [--json]",
+	Short: "List or ingest a linked PR's unresolved review threads as diff annotations",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPRComments(buildFlagArgs(cmd, args))
+	},
+}
+
 // skillCmd groups the skill file operations.
 var skillCmd = &cobra.Command{
 	Use:   "skill",
@@ -239,10 +247,12 @@ func init() {
 
 	prLinkCmd.Flags().Bool("auto", false, "resolve the PR whose head branch matches the card's branch (via gh pr list --head)")
 	prStatusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
+	prCommentsCmd.Flags().Bool("ingest", false, "write an annotation per unresolved review thread onto the card's diff")
+	prCommentsCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
 
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
-	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd)
+	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 }
 

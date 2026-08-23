@@ -160,6 +160,44 @@ func TestResolveRejectsGarbageSpec(t *testing.T) {
 	}
 }
 
+// TestFetchReviewThreadsSplitsOwnerRepo guards the owner/repo derivation:
+// domain.PullRequestRef.Repo is a single "owner/repo" string, but the
+// GraphQL query takes owner and repo as two separately-named -F variables,
+// so FetchReviewThreads must split it rather than passing it through
+// combined (the way gh pr view/list's --repo flag does elsewhere in this
+// package).
+func TestFetchReviewThreadsSplitsOwnerRepo(t *testing.T) {
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "out.json")
+	argvLog := filepath.Join(dir, "argv.log")
+	if err := os.WriteFile(outFile, []byte(`{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":""}},"comments":{"nodes":[]},"reviews":{"nodes":[]}}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\necho \"$@\" >> \"" + argvLog + "\"\ncat \"" + outFile + "\"\n"
+	bin := filepath.Join(dir, "gh")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
+	if _, _, err := FetchReviewThreads(context.Background(), bin, ref); err != nil {
+		t.Fatalf("FetchReviewThreads: %v", err)
+	}
+	argv := readLog(t, argvLog)
+	if !strings.Contains(argv, "owner=o") || !strings.Contains(argv, "repo=r") || strings.Contains(argv, "owner=o/r") {
+		t.Errorf("argv %q missing split -F owner=o -F repo=r", argv)
+	}
+}
+
+// TestFetchReviewThreadsRefusesMalformedRepo asserts a Repo not in
+// "owner/repo" form is rejected before gh is ever invoked, rather than
+// sending a half-empty GraphQL variable pair.
+func TestFetchReviewThreadsRefusesMalformedRepo(t *testing.T) {
+	ref := domain.PullRequestRef{Repo: "nosplit", Number: 1, URL: "https://github.com/nosplit/pull/1"}
+	if _, _, err := FetchReviewThreads(context.Background(), "/nonexistent/gh", ref); err == nil {
+		t.Fatal("malformed repo ref should be refused before gh is invoked")
+	}
+}
+
 func TestLiveStatus(t *testing.T) {
 	bin, log := fakeGH(t, `{"state":"OPEN","comments":[{},{},{}]}`, "[]")
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
