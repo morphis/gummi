@@ -374,6 +374,19 @@ copilot for implement, claude for review.
   own provider config from there. Set `GUMMI_HEADLESS_CREDITS_PER_1K`
   to price a local endpoint's token spend into credits so it meters
   against the same budget envelope.
+- **zz** — the zz CLI (`GUMMI_ZZ_BIN` overrides the binary), a small Rust
+  coding agent that fronts any OpenAI-compatible endpoint (local
+  llama.cpp, OpenRouter, a self-hosted gateway). zz's `-p ask` mode is
+  process-per-turn with no stdin form, so gummi resumes a session via a
+  `--session` transcript file rather than an in-process handle. zz owns
+  provider selection through its own `~/.config/zz/config.toml`. This
+  backend requires `permissions: allow-all` (zz has no approval
+  callback) and cannot run a read-only research session (zz has no flag
+  to disable its write/edit/bash tools) — point those roles at `claude`
+  or `opencode` instead. Its prompt travels as a positional argv string,
+  so a single turn is bounded well under Linux's 128 KiB argv limit. Set
+  `GUMMI_ZZ_CREDITS_PER_1K` to price its token spend into credits, the
+  same escape hatch headless uses.
 
 No usable agent just leaves the board static — creation, specs,
 worktrees, and gates all still work.
@@ -394,7 +407,7 @@ Two files in `.gummi/`, both scaffolded on first run:
   before running them.
 - **`profiles.yaml`** — role → `{backend, model}` maps per profile
   (`premium`, `thrifty`, …) with a declared default. `backend:` is
-  optional (`copilot` | `claude` | `codex` | `opencode` | `headless`); omitted, the
+  optional (`copilot` | `claude` | `codex` | `opencode` | `headless` | `zz`); omitted, the
   role uses whatever `GUMMI_AGENT` selects. This lets a single profile
   mix providers — e.g. `implementer: copilot`, `reviewer: claude` — and
   keeps all provider config (endpoints, keys, credit rates) out of the
@@ -404,12 +417,14 @@ Environment variables:
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default) · `claude` · `codex` · `opencode` · `headless` |
+| `GUMMI_AGENT` | default backend: `copilot` (default) · `claude` · `codex` · `opencode` · `headless` · `zz` |
 | `GUMMI_AGENT_CMD` | headless adapter's command line |
 | `GUMMI_CLAUDE_BIN` | claude backend's binary (default `claude` on PATH) |
 | `GUMMI_CODEX_BIN` | codex backend's binary (default `codex` on PATH) |
 | `GUMMI_OPENCODE_BIN` | opencode backend's binary (default `opencode` on PATH) |
+| `GUMMI_ZZ_BIN` | zz backend's binary (default `zz` on PATH) |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | headless adapter's token→credit rate for a local endpoint (llama.cpp, vLLM); 0 uses the engine default |
+| `GUMMI_ZZ_CREDITS_PER_1K` | zz adapter's token→credit rate; 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
 | `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |

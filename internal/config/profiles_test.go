@@ -83,6 +83,26 @@ func TestLoadProfilesAcceptsCodex(t *testing.T) {
 	}
 }
 
+func TestProfilesAcceptZZBackend(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: zz, model: qwen2.5-coder-32b }\n")
+	if got := p.Profiles["x"]["implementer"].Backend; got != "zz" {
+		t.Fatalf("backend = %q", got)
+	}
+}
+
+func TestProfilesRejectUnknownBackendMentionsZZ(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, `profiles:
+  x:
+    scribe: { backend: made-up, model: m }
+`))
+	if err == nil {
+		t.Fatal("unknown backend should be rejected")
+	}
+	if !strings.Contains(err.Error(), "zz") {
+		t.Errorf("error should name zz in the accepted list, got: %v", err)
+	}
+}
+
 func TestLoadProfilesRejectsLegacyByok(t *testing.T) {
 	// stale profiles from before the migration must fail with a pointer,
 	// not silently ignore the removed field.

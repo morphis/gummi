@@ -277,6 +277,7 @@ const (
 	agentCodex    skillAgent = "codex"
 	agentOpencode skillAgent = "opencode"
 	agentCopilot  skillAgent = "copilot"
+	agentZZ       skillAgent = "zz"
 )
 
 // installTarget is one SKILL.md destination and a human label for output.
@@ -287,7 +288,7 @@ type installTarget struct {
 
 func skillInstall(args []string) error {
 	fs := flag.NewFlagSet("skill install", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "", "target a specific agent: claude|codex|opencode|copilot (default: detect)")
+	agentFlag := fs.String("agent", "", "target a specific agent: claude|codex|opencode|copilot|zz (default: detect)")
 	scopeFlag := fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
 	force := fs.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
 	dryRun := fs.Bool("dry-run", false, "print what would be written, change nothing")
@@ -379,10 +380,11 @@ func skillList(args []string) error {
 	curHash := skillBodyHash()
 	rows := []installTarget{
 		{path: projectSkillPath(repoRoot), label: "project (claude/copilot/opencode)"},
-		{path: codexProjectSkillPath(repoRoot), label: "project (codex)"},
+		{path: codexProjectSkillPath(repoRoot), label: "project (codex/zz)"},
 		{path: userSkillPath(agentClaude), label: "user (claude/opencode)"},
 		{path: userSkillPath(agentCopilot), label: "user (copilot)"},
 		{path: userSkillPath(agentCodex), label: "user (codex)"},
+		{path: userSkillPath(agentZZ), label: "user (zz)"},
 	}
 	for _, r := range rows {
 		fmt.Printf("  %-32s %-12s %s\n", r.label, describeInstall(r.path, curHash), r.path)
@@ -429,6 +431,9 @@ func detectAgents() []skillAgent {
 	if onPath("copilot") || onPath("gh") {
 		out = append(out, agentCopilot)
 	}
+	if hasEnvPrefix("ZZ_") || onPath("zz") {
+		out = append(out, agentZZ)
+	}
 	return out
 }
 
@@ -448,10 +453,10 @@ func hasEnvPrefix(prefix string) bool {
 
 func parseAgent(s string) (skillAgent, error) {
 	switch skillAgent(s) {
-	case agentClaude, agentCodex, agentOpencode, agentCopilot:
+	case agentClaude, agentCodex, agentOpencode, agentCopilot, agentZZ:
 		return skillAgent(s), nil
 	default:
-		return "", fmt.Errorf("--agent must be claude, codex, opencode, or copilot, got %q", s)
+		return "", fmt.Errorf("--agent must be claude, codex, opencode, copilot, or zz, got %q", s)
 	}
 }
 
@@ -483,11 +488,11 @@ func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
 			path:  projectSkillPath(cwd),
 			label: "project (read by claude, copilot, opencode)",
 		}
-		codex := installTarget{path: codexProjectSkillPath(cwd), label: "project (read by codex)"}
+		codex := installTarget{path: codexProjectSkillPath(cwd), label: "project (read by codex/zz)"}
 		switch agentFlag {
 		case "":
 			return []installTarget{shared, codex}, nil
-		case string(agentCodex):
+		case string(agentCodex), string(agentZZ):
 			return []installTarget{codex}, nil
 		default:
 			if _, err := parseAgent(agentFlag); err != nil {
@@ -504,7 +509,7 @@ func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
 		}
 		agents = []skillAgent{a}
 	} else if agents = detectAgents(); len(agents) == 0 {
-		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|codex|opencode|copilot (or use --scope project)")
+		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|codex|opencode|copilot|zz (or use --scope project)")
 	}
 	seen := map[string]bool{}
 	var targets []installTarget
@@ -531,14 +536,17 @@ func codexProjectSkillPath(cwd string) string {
 }
 
 // userSkillPath is an agent's user-scope home. Claude and opencode share the
-// Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot and Codex each
-// have their own native homes.
+// Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot, Codex, and zz
+// each have their own native homes.
 func userSkillPath(a skillAgent) string {
 	if a == agentCopilot {
 		return filepath.Join(homeDir(), ".copilot", "skills", "gummi", "SKILL.md")
 	}
 	if a == agentCodex {
 		return filepath.Join(homeDir(), ".agents", "skills", "gummi", "SKILL.md")
+	}
+	if a == agentZZ {
+		return filepath.Join(homeDir(), ".config", "zz", "skills", "gummi", "SKILL.md")
 	}
 	base := os.Getenv("CLAUDE_CONFIG_DIR")
 	if base == "" {

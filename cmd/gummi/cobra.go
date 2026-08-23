@@ -365,7 +365,7 @@ func bindBugsNewFlags(cmd *cobra.Command) {
 // bindSkillInstallFlags mirrors skillInstall's flag set.
 func bindSkillInstallFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.String("agent", "", "target a specific agent: claude|codex|opencode|copilot (default: detect)")
+	f.String("agent", "", "target a specific agent: claude|codex|opencode|copilot|zz (default: detect)")
 	f.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
 	f.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
 	f.Bool("dry-run", false, "print what would be written, change nothing")

@@ -239,6 +239,14 @@ for when you want the native experience. Cheap to build, zero risk.
 headless adapter** (spawn `<cmd> -p "<prompt>"`, capture output) as the
 lowest common denominator for one-shot autonomous stages with any CLI agent.
 
+Shipped alongside the above: **claude** (Claude Code CLI, streaming
+stream-json), **codex** (Codex CLI, `codex exec --json`), and **zz** — a
+small Rust coding agent that fronts any OpenAI-compatible endpoint (local
+llama.cpp, OpenRouter, a self-hosted gateway). zz's CLI is one process per
+turn with no server mode and no stdin form, so its adapter follows codex's
+process-per-turn shape, resuming via a `--session` transcript file instead
+of an in-process thread id.
+
 ### 4.2 Orchestrator
 
 - **State machine** per feature — the workflow is compiled in, not

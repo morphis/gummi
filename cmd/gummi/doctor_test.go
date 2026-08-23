@@ -24,7 +24,7 @@ import (
 func clearDoctorEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"GUMMI_AGENT", "GUMMI_AGENT_CMD", "GUMMI_CLAUDE_BIN", "GUMMI_CODEX_BIN", "GUMMI_OPENCODE_BIN",
+		"GUMMI_AGENT", "GUMMI_AGENT_CMD", "GUMMI_CLAUDE_BIN", "GUMMI_CODEX_BIN", "GUMMI_OPENCODE_BIN", "GUMMI_ZZ_BIN",
 		"GUMMI_ENVELOPE",
 	} {
 		t.Setenv(k, "")
@@ -366,6 +366,31 @@ profiles:
 		if strings.HasPrefix(c.Name, "backend:copilot") || strings.HasPrefix(c.Name, "auth:copilot") {
 			t.Errorf("unexpected check for the unused default backend: %q", c.Name)
 		}
+	}
+}
+
+// A profile requiring zz renders both a backend:zz and auth:zz row, the
+// same shape every other backend gets, with no zz binary needed to see it.
+func TestDoctorRendersZZBackend(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: zz, model: qwen2.5-coder-32b }
+    implementer: { backend: zz, model: qwen2.5-coder-32b }
+    reviewer: { backend: zz, model: qwen2.5-coder-32b }
+    scribe: { backend: zz, model: qwen2.5-coder-32b }
+`)
+	fakeAgentOnPath(t, "zz")
+
+	r := buildDoctorReport(repo, doctorOpts{})
+	if c := checkByName(r, "backend:zz"); c.Status != statusOK {
+		t.Errorf("backend:zz = %+v, want ok", c)
+	}
+	if c := checkByName(r, "auth:zz"); c.Name != "auth:zz" {
+		t.Errorf("auth:zz row missing: %+v", r.Checks)
 	}
 }
 

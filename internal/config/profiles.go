@@ -18,6 +18,7 @@ var knownBackends = map[string]struct{}{
 	"opencode": {},
 	"codex":    {},
 	"headless": {},
+	"zz":       {},
 }
 
 // RoleConfig maps one role to a concrete backend+model. Backend is optional;
@@ -111,7 +112,7 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 				if _, has := rcm["byok"]; has {
 					return Profiles{}, fmt.Errorf("%s: profile %q role %q uses the removed `byok:` field; "+
 						"per-role BYOK is gone — configure the endpoint in the backend itself "+
-						"(claude/opencode/headless) and pick it with `backend:` instead", path, name, role)
+						"(claude/opencode/headless/zz) and pick it with `backend:` instead", path, name, role)
 				}
 			}
 		}
@@ -164,7 +165,7 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 			}
 			if rc.Backend != "" {
 				if _, ok := knownBackends[rc.Backend]; !ok {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless",
+					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless|zz",
 						path, name, role, rc.Backend)
 				}
 			}
@@ -182,7 +183,7 @@ const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. 
 # so the same process can run cheap or premium, or mix providers. See
 # docs/DESIGN.md §5.
 #
-# backend: (optional) copilot | claude | codex | opencode | headless. Omit to use
+# backend: (optional) copilot | claude | codex | opencode | headless | zz. Omit to use
 # the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
 # The backend owns provider config natively — Claude Code login, Codex login, opencode
 # auth, GUMMI_AGENT_CMD for headless — so no keys or endpoints live here.

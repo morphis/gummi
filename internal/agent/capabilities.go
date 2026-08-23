@@ -23,6 +23,7 @@ var capsBase = map[string]Capabilities{
 	"codex":    {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
 	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true},
 	"headless": {Interrupt: true, UsageEvents: true, ClientTools: true},
+	"zz":       {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
 }
 
 // CapabilitiesFor returns the capabilities a constructed adapter named

@@ -505,6 +505,8 @@ func backendInfoFor(name string) backendInfo {
 		return backendInfo{name: "codex", bin: cmp.Or(os.Getenv("GUMMI_CODEX_BIN"), "codex"), login: "codex login"}
 	case "headless":
 		return backendInfo{name: "headless", bin: firstField(os.Getenv("GUMMI_AGENT_CMD")), headless: true}
+	case "zz":
+		return backendInfo{name: "zz", bin: cmp.Or(os.Getenv("GUMMI_ZZ_BIN"), "zz"), login: "zz setup"}
 	case "copilot":
 		return backendInfo{name: "copilot", bin: "copilot", login: "gh auth login  (authenticate GitHub Copilot)"}
 	}

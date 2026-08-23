@@ -205,3 +205,44 @@ func TestDetectAgentsIncludesCodex(t *testing.T) {
 		t.Fatal("Codex was not detected from CODEX_HOME")
 	}
 }
+
+func TestParseAgentAcceptsZZ(t *testing.T) {
+	got, err := parseAgent("zz")
+	if err != nil || got != agentZZ {
+		t.Fatalf("parseAgent(\"zz\") = %q, %v, want agentZZ, nil", got, err)
+	}
+	_, err = parseAgent("bogus")
+	if err == nil {
+		t.Fatal("bogus agent accepted")
+	}
+	for _, name := range []string{"claude", "codex", "opencode", "copilot", "zz"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("unknown-agent error should mention %q, got: %v", name, err)
+		}
+	}
+}
+
+func TestUserSkillPathZZ(t *testing.T) {
+	got := userSkillPath(agentZZ)
+	want := filepath.Join(homeDir(), ".config", "zz", "skills", "gummi", "SKILL.md")
+	if got != want {
+		t.Errorf("userSkillPath(agentZZ) = %q, want %q", got, want)
+	}
+}
+
+func TestDetectAgentsIncludesZZOnPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "zz"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	found := false
+	for _, a := range detectAgents() {
+		if a == agentZZ {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("zz was not detected on PATH")
+	}
+}
