@@ -472,6 +472,89 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
+// Squash collapses a card's branch to a single commit carrying the
+// caller-supplied message, in place — the preflight that keeps checkpoint
+// commits off main regardless of how the card's linked PR is eventually
+// merged (merge commit, rebase-merge, or GitHub's squash button). It never
+// touches main and never contacts a remote: on success the caller still owns
+// the follow-up `git push --force-with-lease`. A `done` or already-landed
+// card is refused before any git mutation, matching Merge's shape.
+func (d *Driver) Squash(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
+	f, err := d.store.GetFeature(ctx, id)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	wt, err := d.eng.WorktreesFor(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+
+	if f.Stage == domain.StageDone {
+		return d.fail(ctx, string(id), fmt.Errorf("%s is done, nothing to collapse", id))
+	}
+	if landed, err := wt.Landed(ctx, &f); err != nil {
+		return d.fail(ctx, string(id), err)
+	} else if landed {
+		return d.fail(ctx, string(id), fmt.Errorf("%s is already landed on main", id))
+	}
+
+	if err := engine.ValidateCommitMessage(message); err != nil {
+		return d.fail(ctx, string(id), fmt.Errorf("invalid commit message: %w", err))
+	}
+
+	base, err := worktree.ResolveCollapseBase(ctx, d.store, wt, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+
+	// Captured before Collapse runs, so BeforeSHA is accurate even on the
+	// no-op path (Collapse returns "" without moving the branch).
+	beforeSHA, err := wt.Head(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+
+	sha, err := wt.Collapse(ctx, &f, message, base)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	if sha == "" {
+		return Outcome{Status: StatusDone, ID: string(id)}, nil
+	}
+	d.out.emit(squashedEvent{
+		Event: "squashed", ID: string(id), Branch: f.BranchName(),
+		BeforeSHA: beforeSHA, AfterSHA: sha, BaseSHA: base,
+		MessageSubject: commitSubject(message),
+	})
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
+}
+
+// commitSubject returns msg's first line — the subject a squashed/merged
+// event reports, without the body.
+func commitSubject(msg string) string {
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		return msg[:i]
+	}
+	return msg
+}
+
+// OpenReviewThreads reports the number of open review threads on id's
+// linked outbound PR (the diff-annotation half of GateBlockers) alongside
+// the PR's URL, for the CLI's `--force` gate on `gummi squash`: collapsing a
+// branch a reviewer is actively commenting on force-pushes their comments
+// out from under them unless the operator explicitly acknowledges it.
+func (d *Driver) OpenReviewThreads(ctx context.Context, id domain.FeatureID) (count int, prURL string, err error) {
+	f, err := d.store.GetFeature(ctx, id)
+	if err != nil {
+		return 0, "", err
+	}
+	_, diffOpen, _, err := d.eng.GateBlockers(ctx, id)
+	if err != nil {
+		return 0, "", err
+	}
+	return diffOpen, f.PullRequest.URL, nil
+}
+
 // drive is the checkpoint loop: it advances the feature stage by stage
 // until it reaches a terminal Outcome (a decision the caller must make,
 // or a verified branch). Autonomous stretches carry no caller decisions

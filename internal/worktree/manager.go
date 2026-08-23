@@ -404,6 +404,16 @@ func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) err
 	return err
 }
 
+// Head returns the feature branch's current tip commit sha, resolved inside
+// the feature's own worktree.
+func (m *Manager) Head(ctx context.Context, f *domain.Feature) (string, error) {
+	wtPath, err := m.requireWorktree(f)
+	if err != nil {
+		return "", err
+	}
+	return runGit(ctx, wtPath, "rev-parse", "HEAD")
+}
+
 // BranchAhead reports whether the feature branch carries commits of its
 // own beyond where it forked from the main checkout — i.e. the stage has
 // committed work on the branch. Used to tell a budget park that stopped

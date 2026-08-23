@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // mergeFlagValues holds the flag pointer `gummi merge` binds. registerMergeFlags
@@ -57,7 +58,7 @@ func runMerge(args []string) error {
 		}
 		message = string(b)
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
@@ -85,7 +86,7 @@ func runClean(args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return driver.Outcome{}, err
@@ -108,7 +109,7 @@ func runClean(args []string) error {
 // of a different card. The driver still needs an engine object for its
 // gate-floor checks, so one is built with no agents — the engine is only
 // ever read from here, never run.
-func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store, state.Workspace) (driver.Outcome, error)) error {
+func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store, state.Workspace, *worktree.Pool) (driver.Outcome, error)) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -135,7 +136,7 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 	defer func() { _ = eng.Close() }()
 
 	d := driver.New(eng, store, ws, os.Stdout, driver.Options{})
-	out, derr := fn(context.Background(), d, store, ws)
+	out, derr := fn(context.Background(), d, store, ws, pool)
 	if out.Status == "" && derr != nil {
 		// the closure failed before the driver produced an outcome (e.g. an
 		// unknown id/ref) — a plain setup/usage error to stderr, exit 1.

@@ -180,3 +180,36 @@ func TestPoolReposOnlyNoDefault(t *testing.T) {
 		t.Errorf("unexpected no-default error: %v", err)
 	}
 }
+
+// TestPoolCollapseDelegates proves Pool.Collapse is a thin delegator: it
+// resolves the same manager ManagerFor would, and its effect on the branch
+// (the returned sha, the collapsed commit count) is exactly what calling
+// Manager.Collapse on that manager directly would produce — the symmetry
+// Pool.SquashMerge already promises.
+func TestPoolCollapseDelegates(t *testing.T) {
+	root := newRepo(t)
+	m, f, _, base := checkpointedFeature(t, root)
+	pool := WrapSingle(m)
+
+	resolved, err := pool.ManagerFor(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != m {
+		t.Fatal("Pool.ManagerFor resolved a different manager than the one wrapped")
+	}
+
+	sha, err := pool.Collapse(ctx, f, "feat(x): collapsed", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shaRe.MatchString(sha) {
+		t.Fatalf("sha = %q, want a 40-hex sha", sha)
+	}
+	if head, err := m.Head(ctx, f); err != nil || head != sha {
+		t.Fatalf("Pool.Collapse sha %q != manager's own branch head %q (err=%v)", sha, head, err)
+	}
+	if n := mustGit(t, root, "rev-list", "--count", base+".."+f.BranchName()); n != "1" {
+		t.Errorf("commits beyond base = %s, want 1", n)
+	}
+}

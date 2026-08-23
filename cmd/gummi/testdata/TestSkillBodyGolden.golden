@@ -108,6 +108,11 @@ gummi merge <id|ref> -m <message|->
     --m string        landing commit message (required; - reads from stdin)
     --message string  long form of -m
 
+gummi squash <id|ref> -m <message|->
+    --force           proceed even if the linked PR has open review threads
+    --m string        collapsed commit message (required; - reads from stdin)
+    --message string  long form of -m
+
 gummi clean <id|ref>
 
 gummi status <id|ref>

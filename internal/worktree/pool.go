@@ -250,6 +250,14 @@ func (p *Pool) DeleteLandedBranch(ctx context.Context, f *domain.Feature) error 
 	return wt.DeleteLandedBranch(ctx, f)
 }
 
+func (p *Pool) Head(ctx context.Context, f *domain.Feature) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.Head(ctx, f)
+}
+
 func (p *Pool) BranchAhead(ctx context.Context, f *domain.Feature) (bool, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
@@ -296,6 +304,18 @@ func (p *Pool) SquashMerge(ctx context.Context, f *domain.Feature, message strin
 		return "", err
 	}
 	return wt.SquashMerge(ctx, f, message)
+}
+
+// Collapse mirrors Manager.Collapse, resolving f's repository manager first.
+// It exists for TUI-facing symmetry with SquashMerge (Shell.wt is a *Pool);
+// the CLI `gummi squash` path calls Manager.Collapse directly via the
+// per-card manager it already resolves through Driver.
+func (p *Pool) Collapse(ctx context.Context, f *domain.Feature, message, baseSHA string) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.Collapse(ctx, f, message, baseSHA)
 }
 
 func (p *Pool) RebaseOnMain(ctx context.Context, f *domain.Feature) error {

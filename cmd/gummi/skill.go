@@ -222,6 +222,8 @@ func commandGrammar() string {
 	b.WriteString("gummi verify <id|ref>\n\n")
 	writeCmd("gummi merge <id|ref> -m <message|->", flagLines(func(fs *flag.FlagSet) { registerMergeFlags(fs) }))
 	b.WriteString("\n")
+	writeCmd("gummi squash <id|ref> -m <message|->", flagLines(func(fs *flag.FlagSet) { registerSquashFlags(fs) }))
+	b.WriteString("\n")
 	b.WriteString("gummi clean <id|ref>\n\n")
 	writeCmd("gummi status <id|ref>", flagLines(func(fs *flag.FlagSet) { registerStatusFlags(fs) }))
 	b.WriteString("\n")

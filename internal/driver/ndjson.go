@@ -304,6 +304,21 @@ type cleanedEvent struct {
 	Branch string `json:"branch"`
 }
 
+// squashedEvent reports a successful `gummi squash`: the card's branch was
+// rewritten, in place, to one commit. BeforeSHA/AfterSHA/BaseSHA let a
+// driving script audit exactly what moved without re-reading git; on the
+// no-op path (branch already collapsed) Squash returns before emitting this
+// event at all.
+type squashedEvent struct {
+	Event          string `json:"event"`
+	ID             string `json:"id"`
+	Branch         string `json:"branch"`
+	BeforeSHA      string `json:"before_sha"`
+	AfterSHA       string `json:"after_sha"`
+	BaseSHA        string `json:"base_sha"`
+	MessageSubject string `json:"message_subject"`
+}
+
 type errorEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id,omitempty"`
