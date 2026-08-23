@@ -203,8 +203,10 @@ func TestPRStatusRendersTextAndJSON(t *testing.T) {
 }
 
 // Each verb fails deterministically, naming exactly what is absent, when gh
-// is missing or no token is set — never silently.
-func TestPRVerbsFailWithoutGHOrToken(t *testing.T) {
+// itself is missing — never silently. Authentication is gh's own concern
+// (GH_TOKEN, GITHUB_TOKEN, or a `gh auth login` config), so a verb run with
+// gh present but no token env vars set must not be gated here.
+func TestPRVerbsFailWithoutGH(t *testing.T) {
 	prFixture(t)
 	t.Setenv("GUMMI_GH_CMD", filepath.Join(t.TempDir(), "nonexistent-gh"))
 	t.Setenv("GH_TOKEN", "")
@@ -222,7 +224,7 @@ func TestPRVerbsFailWithoutGHOrToken(t *testing.T) {
 
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	t.Setenv("GUMMI_GH_CMD", bin)
-	if err := runPRLink([]string{"FD-001", "42"}); err == nil || !strings.Contains(err.Error(), "token") {
-		t.Errorf("pr link with no token = %v, want an error naming the token", err)
+	if err := runPRLink([]string{"FD-001", "42"}); err != nil {
+		t.Errorf("pr link with gh present but no token env vars = %v, want nil (auth is gh's concern)", err)
 	}
 }

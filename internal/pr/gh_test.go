@@ -73,26 +73,23 @@ func TestAvailableMissingGH(t *testing.T) {
 	}
 }
 
-func TestAvailableMissingToken(t *testing.T) {
-	bin, _ := fakeGH(t, "{}", "[]")
+// TestAvailableAcceptsGhAuthLoginUser stands in for the `gh auth login`
+// state: gh is on PATH and authenticated, but neither GH_TOKEN nor
+// GITHUB_TOKEN is set (gh keeps that credential in its own keyring/config,
+// not the environment). Available must not reject this — auth is gh's own
+// concern, surfaced via its own error on the first real call if it's
+// genuinely missing.
+func TestAvailableAcceptsGhAuthLoginUser(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "gh")
+	script := "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then exit 0; fi\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
-	if err := Available(bin); err == nil {
-		t.Fatal("Available with no token should error")
-	} else if !strings.Contains(err.Error(), "token") {
-		t.Errorf("error %q should name the token as the missing piece", err)
-	}
-}
-
-func TestAvailableTokenPrecedence(t *testing.T) {
-	bin, _ := fakeGH(t, "{}", "[]")
-	for _, env := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
-		t.Setenv("GH_TOKEN", "")
-		t.Setenv("GITHUB_TOKEN", "")
-		t.Setenv(env, "x")
-		if err := Available(bin); err != nil {
-			t.Errorf("Available with %s set = %v, want nil", env, err)
-		}
+	if err := Available(bin); err != nil {
+		t.Fatalf("Available with gh authed via `gh auth login` (no env token) = %v, want nil", err)
 	}
 }
 

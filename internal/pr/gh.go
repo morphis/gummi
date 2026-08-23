@@ -2,8 +2,8 @@
 // CLI. It runs gh deterministically off a working directory (mirroring
 // internal/engine/bugsource.go's execGH: gh auto-detects owner/repo from a
 // directory's git remote when --repo is omitted) and never guesses when gh
-// or a token is missing — Available fails loudly, naming exactly what is
-// absent.
+// itself is missing — Available fails loudly, naming exactly what is
+// absent. Authentication is left entirely to gh.
 package pr
 
 import (
@@ -34,16 +34,14 @@ func binOrDefault(ghBinary string) string {
 }
 
 // Available reports whether gh can be run at all: the binary is on PATH (or
-// at the configured ghBinary path) and a GitHub token is set (GH_TOKEN then
-// GITHUB_TOKEN, gh's own precedence). It never degrades silently — the
-// returned error names exactly what is missing.
+// at the configured ghBinary path). Authentication is gh's own concern — it
+// may come from GH_TOKEN, GITHUB_TOKEN, or a `gh auth login` keyring/config,
+// and an unauthenticated gh surfaces its own error on the first real call,
+// same as internal/engine/bugsource.go's execGH.
 func Available(ghBinary string) error {
 	bin := binOrDefault(ghBinary)
 	if _, err := exec.LookPath(bin); err != nil {
 		return fmt.Errorf("gh CLI not on PATH (looked for %q)", bin)
-	}
-	if os.Getenv("GH_TOKEN") == "" && os.Getenv("GITHUB_TOKEN") == "" {
-		return errors.New("no GitHub token; set GH_TOKEN or GITHUB_TOKEN")
 	}
 	return nil
 }
