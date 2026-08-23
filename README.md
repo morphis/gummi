@@ -215,6 +215,8 @@ auto-crosses design gates; `--full` adds brainstorm + plan, and
 | `gummi diff <id\|ref>` | read-only: the worktree diff |
 | `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit (message required) |
 | `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
+| `gummi pr link\|unlink\|status\|comments <id> [flags]` | link/unlink a card to a PR, or read its linked-PR status and review comments |
+| `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place (message required) |
 | `gummi deps add\|rm <dependent> <depends-on>` / `gummi deps list <id>` | manage a card's direct dependency edges |
 | `gummi doctor [--json] [--deep]` | readiness: repo, backend, auth, profile, envelope, lock, per-role reach (`--deep`) |
 | `gummi skill show\|install\|list` | generate and install the calling-agent skill |
@@ -279,6 +281,26 @@ Useful `run` flags: `--ref <id>` correlates a feature with your own tracker
 seeds the spec's verification plan, `--until spec` stops cleanly for a human
 design review before implementation burns tokens, and `--autonomous`
 auto-takes the recommended answer instead of checkpointing questions.
+
+### Landing through a PR
+
+Some repos land a card by opening a PR on GitHub instead of running `gummi
+merge`. On that route gummi still never writes to GitHub — it only names
+and reads the PR you already opened. The loop is four commands:
+
+```sh
+gummi pr link FD-042 --auto                        # or a URL/number instead of --auto
+gummi pr comments FD-042 --ingest                   # unresolved review threads land as diff annotations
+gummi resume FD-042 --bounce --note "address review" # rewinds to fix the annotated lines
+git push                                            # push the fix onto the open PR
+```
+
+What you do before that first push depends on the repo's merge setting:
+
+| merge method | before you push |
+|---|---|
+| squash merge | nothing — GitHub already collapses the branch to one commit |
+| merge commit / rebase merge | `gummi squash <id> -m <message\|->` first, so the branch lands as one commit either way; later fix rounds can keep their own commits or `squash` again, as long as no review thread is open |
 
 ### Dependencies between cards
 

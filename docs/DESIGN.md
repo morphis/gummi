@@ -122,7 +122,10 @@ Stage semantics:
   checkpoint-commits whatever a stage leaves uncommitted (turn end, budget
   exhaustion), so work on the branch is never stranded in the working tree.
   Checkpoint granularity never reaches main — the branch lands as one
-  squash commit.
+  squash commit. On the PR route the same one-commit shape is produced
+  by `gummi squash` on the branch, because the branch's own commits
+  interleaved with checkpoint commits are fit for squashing and nothing
+  else.
 - **Review** *(autonomous, role: reviewer)* — **fresh session, no shared
   context with the implementer**, ideally a *different model* (cross-model
   review catches more). Findings written into the spec's review section;
@@ -142,9 +145,15 @@ Stage semantics:
 - **Done** — you decide the feature is done: advancing out of Verify
   squash-merges the branch into main as a single commit whose message gummi
   drafts from the spec and the branch — you review, edit, and approve it
-  before anything lands. A branch that
-  already landed some other way (manual merge, PR) skips straight to
-  Done. gummi then offers worktree cleanup + spec archival.
+  before anything lands. A PR merge is a first-class landing route
+  alongside gummi's own squash merge, and works under any of GitHub's
+  three merge methods — squash merge, merge commit, or rebase merge. The
+  trigger is your `git pull` on main: no new verb, no `pr merge` shim —
+  the existing verify→done gate carries the flow, and the fork-point
+  invariant continues to hold because a fast-forward pull keeps the
+  recorded fork point an ancestor of main. A branch that lands this way
+  (or any other manual merge) skips straight to Done. gummi then offers
+  worktree cleanup + spec archival.
 
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.
@@ -612,7 +621,10 @@ several widths, so visual regressions fail CI, not eyes. Demo GIFs via
 - Not tmux — gummi owns its sessions; raw attach is the escape hatch.
 - Not a merge pipeline — the one integration gummi does is the squash
   merge onto local main when you accept a feature; PRs, pushing, and
-  releasing stay in your hands.
+  releasing stay in your hands. A card may name and read the PR it
+  lands through — linking it and pulling its review threads in as diff
+  annotations — but gummi still never writes to GitHub: no PR creation,
+  no push, no merge, no thread resolution, no CI gating.
 - Not a process editor — one workflow, compiled in. If the workflow needs
   changing, that's a gummi release, not a config file.
 
@@ -716,7 +728,11 @@ Decided in the design interview (2026-07-03):
     the main checkout — its workspace home for the rest of the feature's
     life. The artifact is gummi workspace content: it never enters the
     worktree and is never committed, so the feature branch (and the
-    squash commit that lands it) carries only product changes.
+    squash commit that lands it) carries only product changes. When the
+    card lands through a PR under a non-squash merge method instead,
+    `gummi squash` is the explicit escape hatch that collapses the
+    branch to one presentable commit before it is pushed, preserving
+    the same promise across whatever merge method the repo uses.
  12. **One process per card, not per workspace.** Headless
      run/resume/verify/merge/clean each hold an exclusive per-card lock
      (`.gummi/state/locks/<id>.lock`), so independent cards drive
@@ -1145,6 +1161,12 @@ caller must decide, then exits.
   landed card's worktree and branch. Both hold the same per-card lock as
   `run`/`resume` (Decision 12) and stream the same typed NDJSON/exit
   contract.
+- **PR landing** — a linked card refuses `gummi merge`; `gummi pr link/unlink/status/comments`
+  name and read the PR, `gummi squash <id> -m <message|->` collapses the
+  branch to one presentable commit before the user's `git push`, and
+  `pr comments --ingest` writes review threads as diff annotations so
+  `resume --bounce` rewinds review-round work exactly as it does for
+  gummi's own reviewer findings.
 - **Envelope required** — a run refuses to start without one (`--envelope N` or
   `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
 - **Design questions are delegated** — an interactive stage's `ask_user`
