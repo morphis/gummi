@@ -279,7 +279,7 @@ func TestPRStatusRendersTextAndJSON(t *testing.T) {
 	}
 
 	// re-point gh at a shim whose "pr view" returns live status fields.
-	bin2 := fakePRTestGH(t, `{"state":"OPEN","comments":[{},{}]}`, "[]")
+	bin2 := fakePRTestGH(t, `{"state":"OPEN","comments":[{},{}],"headRefOid":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}`, "[]")
 	t.Setenv("GUMMI_GH_CMD", bin2)
 
 	out := captureStdout(t, func() {
@@ -298,6 +298,41 @@ func TestPRStatusRendersTextAndJSON(t *testing.T) {
 	})
 	if !strings.Contains(jsonOut, `"state": "OPEN"`) || !strings.Contains(jsonOut, `"comments": 2`) {
 		t.Errorf("status --json output missing expected fields:\n%s", jsonOut)
+	}
+}
+
+// pr status refreshes the stored head SHA when gh reports a new one — the
+// only side effect a render-only verb performs, and only onto the pr_*
+// columns (never a stage transition, never gated on downstream).
+func TestPRStatusRefreshesHeadSHA(t *testing.T) {
+	store := prFixture(t)
+	bin := fakePRTestGH(t, testViewJSON, "[]") // links with HeadSHA A
+	setFakeGHEnv(t, bin)
+	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+		t.Fatalf("runPRLink: %v", err)
+	}
+	before, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.PullRequest.HeadSHA != "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b" {
+		t.Fatalf("setup: linked head_sha = %q, want the A sha", before.PullRequest.HeadSHA)
+	}
+
+	// re-point gh at a shim whose "pr view" reports a new head SHA (B).
+	const newSHA = "cafebabecafebabecafebabecafebabecafebabe"
+	bin2 := fakePRTestGH(t, `{"state":"OPEN","comments":[],"headRefOid":"`+newSHA+`"}`, "[]")
+	t.Setenv("GUMMI_GH_CMD", bin2)
+	if err := runPRStatus([]string{"FD-001"}); err != nil {
+		t.Fatalf("runPRStatus: %v", err)
+	}
+
+	after, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.PullRequest.HeadSHA != newSHA {
+		t.Errorf("head_sha after pr status = %q, want %q", after.PullRequest.HeadSHA, newSHA)
 	}
 }
 
@@ -417,6 +452,7 @@ func prCommentsFixture(t *testing.T) (*state.Store, domain.Feature) {
 // top-level PR-body comment. A resolved thread is included to prove it
 // never reaches list/ingest output.
 const reviewThreadsFixture = `{"data":{"repository":{"pullRequest":{
+ "headRefOid":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
  "reviewThreads":{"nodes":[
    {"id":"T1","path":"foo.go","isResolved":false,"isOutdated":false,"comments":{"nodes":[
      {"id":"C1","author":{"login":"alice"},"body":"please fix","diffHunk":"@@ -0,0 +1,7 @@\n+ctx2\n+ctx3\n+new"},
@@ -471,6 +507,36 @@ func TestPRCommentsListMode(t *testing.T) {
 	}
 	if len(anns) != 0 {
 		t.Fatalf("list mode wrote %d annotations, want 0", len(anns))
+	}
+}
+
+// pr comments refreshes the stored head SHA when the GraphQL response's
+// headRefOid differs from the stored one — the same side effect `pr status`
+// performs, applied once before either list or ingest render.
+func TestPRCommentsRefreshesHeadSHA(t *testing.T) {
+	store, _ := prCommentsFixture(t)
+	bin := fakePRTestGH(t, testViewJSON, "[]") // links with HeadSHA A
+	setFakeGHEnv(t, bin)
+	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+		t.Fatalf("runPRLink: %v", err)
+	}
+
+	const newSHA = "cafebabecafebabecafebabecafebabecafebabe"
+	freshFixture := strings.Replace(reviewThreadsFixture,
+		`"headRefOid":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"`, `"headRefOid":"`+newSHA+`"`, 1)
+	bin2 := fakePRCommentsGH(t, testViewJSON, freshFixture)
+	t.Setenv("GUMMI_GH_CMD", bin2)
+
+	if err := runPRComments([]string{"FD-001"}); err != nil {
+		t.Fatalf("runPRComments: %v", err)
+	}
+
+	got, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PullRequest.HeadSHA != newSHA {
+		t.Errorf("head_sha after pr comments = %q, want %q", got.PullRequest.HeadSHA, newSHA)
 	}
 }
 

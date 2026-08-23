@@ -48,6 +48,7 @@ type TopLevelComment struct {
 const reviewThreadsQuery = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
+      headRefOid
       reviewThreads(first:100,after:$endCursor){
         nodes{
           id
@@ -70,6 +71,7 @@ type ghReviewThreadsPage struct {
 	Data struct {
 		Repository struct {
 			PullRequest struct {
+				HeadRefOid    string `json:"headRefOid"`
 				ReviewThreads struct {
 					Nodes []struct {
 						ID         string `json:"id"`
@@ -110,16 +112,17 @@ type ghReviewThreadsPage struct {
 	} `json:"data"`
 }
 
-// FetchReviewThreads fetches ref's unresolved review threads and top-level
-// comments via `gh api graphql --paginate`. reviewThreads.nodes accumulate
-// across every page `--paginate` decodes; comments/reviews are non-paginated
-// siblings that `--paginate` repeats verbatim on every page, so
-// TopLevelComment folds from the first decoded page only. isResolved=true
-// threads are dropped here and never surface to a caller.
-func FetchReviewThreads(ctx context.Context, ghBinary string, ref domain.PullRequestRef) ([]ReviewThread, []TopLevelComment, error) {
+// FetchReviewThreads fetches ref's unresolved review threads, top-level
+// comments, and the PR's current head commit SHA via `gh api graphql
+// --paginate`. reviewThreads.nodes accumulate across every page `--paginate`
+// decodes; comments/reviews/headRefOid are non-paginated siblings that
+// `--paginate` repeats verbatim on every page, so TopLevelComment and
+// headSHA fold from the first decoded page only. isResolved=true threads are
+// dropped here and never surface to a caller.
+func FetchReviewThreads(ctx context.Context, ghBinary string, ref domain.PullRequestRef) (threads []ReviewThread, topLevel []TopLevelComment, headSHA string, err error) {
 	owner, repoName, ok := strings.Cut(ref.Repo, "/")
 	if !ok || owner == "" || repoName == "" {
-		return nil, nil, fmt.Errorf("pull request repo %q is not in owner/repo form", ref.Repo)
+		return nil, nil, "", fmt.Errorf("pull request repo %q is not in owner/repo form", ref.Repo)
 	}
 
 	out, err := run(ctx, ghBinary, "", "api", "graphql", "--paginate",
@@ -128,17 +131,15 @@ func FetchReviewThreads(ctx context.Context, ghBinary string, ref domain.PullReq
 		"-F", "repo="+repoName,
 		"-F", "number="+strconv.Itoa(ref.Number))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
-	var threads []ReviewThread
-	var topLevel []TopLevelComment
 	first := true
 	dec := json.NewDecoder(bytes.NewReader(out))
 	for dec.More() {
 		var page ghReviewThreadsPage
 		if err := dec.Decode(&page); err != nil {
-			return nil, nil, fmt.Errorf("parsing gh api graphql output: %w", err)
+			return nil, nil, "", fmt.Errorf("parsing gh api graphql output: %w", err)
 		}
 		p := page.Data.Repository.PullRequest
 		for _, n := range p.ReviewThreads.Nodes {
@@ -164,10 +165,11 @@ func FetchReviewThreads(ctx context.Context, ghBinary string, ref domain.PullReq
 				}
 				topLevel = append(topLevel, TopLevelComment{AuthorLogin: r.Author.Login, Body: r.Body})
 			}
+			headSHA = p.HeadRefOid
 			first = false
 		}
 	}
-	return threads, topLevel, nil
+	return threads, topLevel, headSHA, nil
 }
 
 // formatBody renders a thread's comments as per-comment `@login: body`

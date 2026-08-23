@@ -23,6 +23,7 @@ func keysOf(acts []nextAction) string {
 func TestNextActionsByState(t *testing.T) {
 	feat := domain.KindFeature
 	bug := domain.KindBug
+	linkedRef := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
 	cases := []struct {
 		name string
 		in   nextInput
@@ -54,6 +55,7 @@ func TestNextActionsByState(t *testing.T) {
 		{"verify gate with open comments resolves", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, openDiffComments: 1}, "d b"},
 		{"cleared inbox still reads as finished", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StateDone}, "g d b"},
 		{"bug verify bounces to fix", nextInput{stage: domain.StageVerify, kind: bug, attn: attnGate}, "g d b"},
+		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g d b"},
 	}
 	for _, c := range cases {
 		if got := keysOf(nextActions(c.in)); got != c.want {
@@ -100,6 +102,17 @@ func TestNextActionsProseDetails(t *testing.T) {
 	acts = nextActions(nextInput{stage: domain.StageSpec, kind: domain.KindFeature, openSpecQs: 2})
 	if !strings.Contains(acts[0].why, "2 open") {
 		t.Errorf("blocked-gate why = %q, want the count", acts[0].why)
+	}
+	// a verified linked card's top action points at the PR
+	linkedRef := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
+	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, pullRequest: linkedRef})
+	if want := "PR #42 — merge on GitHub, then pull main"; !strings.Contains(acts[0].why, want) {
+		t.Errorf("linked verify-clean why = %q, want it to contain %q", acts[0].why, want)
+	}
+	// an unlinked verify-clean card keeps its pre-existing prose unchanged
+	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate})
+	if want := "squash-merge the branch and mark the feature done"; !strings.Contains(acts[0].why, want) {
+		t.Errorf("unlinked verify-clean why = %q, want it to contain %q", acts[0].why, want)
 	}
 }
 

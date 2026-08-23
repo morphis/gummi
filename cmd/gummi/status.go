@@ -81,6 +81,13 @@ type statusView struct {
 	// (or attach to the events.jsonl mirror) instead of retrying, which would
 	// hit ErrLocked and look like a fresh failure.
 	Running bool `json:"running"`
+	// PullRequest mirrors the linked PullRequestRef verbatim (repo, number,
+	// url, head_sha) when the card is linked; absent otherwise. Never a live
+	// gh call — the stored ref only.
+	PullRequest any `json:"pull_request,omitempty"`
+	// PullRequestLine is the plain-text `pr: owner/repo#N` render, never
+	// marshaled into the JSON view.
+	PullRequestLine string `json:"-"`
 }
 
 type statusBlockers struct {
@@ -112,19 +119,21 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 	}
 	sq, dq := gateBlockers(ctx, store, wt, ws, f)
 	return statusView{
-		ID:          string(f.ID),
-		Ref:         f.ExternalRef,
-		Kind:        string(kind),
-		Title:       f.Title,
-		Stage:       string(f.Stage),
-		Route:       route,
-		Blockers:    statusBlockers{OpenQuestions: sq, OpenDiff: dq},
-		Spend:       statusSpend{Credits: f.Spend.Credits, Envelope: f.Budget.Envelope},
-		Branch:      f.BranchName(),
-		BranchState: branchState(ctx, wt, f),
-		Verified:    !f.VerifiedAt.IsZero(),
-		Done:        f.Stage == domain.StageDone,
-		Running:     state.ProcessAlive(state.ReadPIDFile(ws.PIDFile())),
+		ID:              string(f.ID),
+		Ref:             f.ExternalRef,
+		Kind:            string(kind),
+		Title:           f.Title,
+		Stage:           string(f.Stage),
+		Route:           route,
+		Blockers:        statusBlockers{OpenQuestions: sq, OpenDiff: dq},
+		Spend:           statusSpend{Credits: f.Spend.Credits, Envelope: f.Budget.Envelope},
+		Branch:          f.BranchName(),
+		BranchState:     branchState(ctx, wt, f),
+		Verified:        !f.VerifiedAt.IsZero(),
+		Done:            f.Stage == domain.StageDone,
+		Running:         state.ProcessAlive(state.ReadPIDFile(ws.PIDFile())),
+		PullRequest:     f.PullRequest.StatusPayload(),
+		PullRequestLine: f.PullRequest.PlainLine(),
 	}
 }
 
@@ -161,6 +170,9 @@ func renderStatus(w io.Writer, v statusView) {
 	fmt.Fprintf(w, "  Blockers: %d open question(s) · %d open diff comment(s)\n", v.Blockers.OpenQuestions, v.Blockers.OpenDiff)
 	if v.Ref != "" {
 		fmt.Fprintf(w, "  Ref:      %s\n", v.Ref)
+	}
+	if v.PullRequestLine != "" {
+		fmt.Fprintf(w, "  pr: %s\n", v.PullRequestLine)
 	}
 }
 

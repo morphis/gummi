@@ -193,6 +193,77 @@ func TestReviewChangesThenPass(t *testing.T) {
 	}
 }
 
+// A linked card's `done` event reiterates the PR: a `pull_request` object
+// mirroring the stored ref and a `message` naming it. StatusNeedsMerge
+// (verify→done) still exits 0 / event done per DESIGN §14.2 — this only adds
+// fields.
+func TestDoneEventCarriesLinkedPR(t *testing.T) {
+	h := newHarness(t, true, happyResumeScript())
+	f := feature(1, domain.StageSpec)
+	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.PullRequestRef{
+		Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42",
+		HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
+	}
+	if err := h.store.SetPullRequest(context.Background(), f.ID, ref); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
+	}
+	d := lastEvent(h, "done")
+	if d == nil {
+		t.Fatalf("no done event; stream=%v", h.eventKinds())
+	}
+	pr, ok := d["pull_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("done event carries no pull_request object: %v", d)
+	}
+	if pr["number"] != float64(42) {
+		t.Errorf("pull_request.number = %v, want 42", pr["number"])
+	}
+	if msg, _ := d["message"].(string); !strings.Contains(msg, "PR #42") {
+		t.Errorf("done message = %q, want it to contain PR #42", msg)
+	}
+}
+
+// An unlinked card's `done` event carries neither field — omitempty keeps
+// the wire shape identical to before this feature.
+func TestDoneEventOmitsPRWhenUnlinked(t *testing.T) {
+	h := newHarness(t, true, happyResumeScript())
+	f := feature(1, domain.StageSpec)
+	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
+	}
+	d := lastEvent(h, "done")
+	if d == nil {
+		t.Fatalf("no done event; stream=%v", h.eventKinds())
+	}
+	if _, ok := d["pull_request"]; ok {
+		t.Errorf("unlinked done event carries a pull_request key: %v", d)
+	}
+	if _, ok := d["message"]; ok {
+		t.Errorf("unlinked done event carries a message key: %v", d)
+	}
+}
+
 // Review still requesting changes past the cap escalates (non-zero exit).
 func TestReviewCapEscalates(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{

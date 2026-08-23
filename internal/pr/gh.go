@@ -189,18 +189,21 @@ func RepoAllowsSquashMerge(ctx context.Context, ghBinary, repo string) (bool, er
 }
 
 // LiveStatus queries ref's PR right now for its state (e.g. "OPEN",
-// "CLOSED", "MERGED") and its comment count.
-func LiveStatus(ctx context.Context, ghBinary string, ref domain.PullRequestRef) (state string, comments int, err error) {
-	out, err := run(ctx, ghBinary, "", "pr", "view", strconv.Itoa(ref.Number), "--repo", ref.Repo, "--json", "state,comments")
+// "CLOSED", "MERGED"), its comment count, and its current head commit SHA
+// (headSHA) — the value `pr status` refreshes back into the store as a side
+// effect when it differs from the stored one.
+func LiveStatus(ctx context.Context, ghBinary string, ref domain.PullRequestRef) (state string, comments int, headSHA string, err error) {
+	out, err := run(ctx, ghBinary, "", "pr", "view", strconv.Itoa(ref.Number), "--repo", ref.Repo, "--json", "state,comments,headRefOid")
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	var data struct {
-		State    string            `json:"state"`
-		Comments []json.RawMessage `json:"comments"`
+		State      string            `json:"state"`
+		Comments   []json.RawMessage `json:"comments"`
+		HeadRefOid string            `json:"headRefOid"`
 	}
 	if err := json.Unmarshal(out, &data); err != nil {
-		return "", 0, fmt.Errorf("parsing gh pr view output: %w", err)
+		return "", 0, "", fmt.Errorf("parsing gh pr view output: %w", err)
 	}
-	return data.State, len(data.Comments), nil
+	return data.State, len(data.Comments), data.HeadRefOid, nil
 }

@@ -45,6 +45,8 @@ type nextInput struct {
 	failedCheck      string // first failing manual `v` check, "" if none
 	openSpecQs       int    // open user %% threads in the artifact (block gates)
 	openDiffComments int    // unresolved diff annotations (block gates)
+
+	pullRequest domain.PullRequestRef // the card's linked outbound PR, empty when unlinked
 }
 
 // verifyBounces counts verify→work bounce edges in a feature's history:
@@ -75,6 +77,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		verifyBounces:    verifyBounces(r.History, r.F.Kind),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
+		pullRequest:      r.F.PullRequest,
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
@@ -309,8 +312,12 @@ func nextActions(in nextInput) []nextAction {
 		if in.verdict == verdictPass {
 			why = "verify passed — " + why
 		}
+		gate := nextAction{"g", "land on main", why}
+		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
+			gate = nextAction{"g", "merge the PR", hint}
+		}
 		return []nextAction{
-			{"g", "land on main", why},
+			gate,
 			{"d", "final read of the diff", "one last look before it lands"},
 			{"b", "bounce to " + string(work), "not convinced — send it back with comments"},
 		}

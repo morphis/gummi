@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,5 +274,67 @@ func TestBuildStatusRunning(t *testing.T) {
 	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
 	if !v.Running {
 		t.Fatal("running=false with the pid file pointing at this test process")
+	}
+}
+
+// buildStatus surfaces a top-level pull_request object mirroring the stored
+// ref, present only on a linked card, and reflects the stored ref only (no
+// live gh call).
+func TestBuildStatusPullRequest(t *testing.T) {
+	f := newReadFixture(t)
+	linked := f.mkFeature(t, "")
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
+	if err := f.store.SetPullRequest(f.ctx, linked.ID, ref); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.GetFeature(f.ctx, linked.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &got)
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"pull_request":{"repo":"o/r","number":42,"url":"https://github.com/o/r/pull/42","head_sha":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}`; !strings.Contains(string(b), want) {
+		t.Errorf("marshaled status = %s, want substring %s", b, want)
+	}
+
+	sibling := newReadFixture(t)
+	unlinked := sibling.mkFeature(t, "")
+	v2 := buildStatus(sibling.ctx, sibling.store, sibling.wt, sibling.ws, &unlinked)
+	b2, err := json.Marshal(v2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b2), `"pull_request"`) {
+		t.Errorf("marshaled status for unlinked card carries a pull_request key: %s", b2)
+	}
+}
+
+// renderStatus prints the `pr: owner/repo#N` line only for a linked card.
+func TestRenderStatusPRLine(t *testing.T) {
+	f := newReadFixture(t)
+	linked := f.mkFeature(t, "")
+	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
+	if err := f.store.SetPullRequest(f.ctx, linked.ID, ref); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.GetFeature(f.ctx, linked.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	renderStatus(&buf, buildStatus(f.ctx, f.store, f.wt, f.ws, &got))
+	if !strings.Contains(buf.String(), "pr: o/r#42") {
+		t.Errorf("rendered status = %q, want a line containing %q", buf.String(), "pr: o/r#42")
+	}
+
+	sibling := newReadFixture(t)
+	unlinked := sibling.mkFeature(t, "")
+	buf.Reset()
+	renderStatus(&buf, buildStatus(sibling.ctx, sibling.store, sibling.wt, sibling.ws, &unlinked))
+	if strings.Contains(buf.String(), "pr:") {
+		t.Errorf("rendered status for unlinked card carries a pr: line: %q", buf.String())
 	}
 }

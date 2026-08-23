@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -320,5 +321,42 @@ func TestFeatureValidatePullRequest(t *testing.T) {
 	f.PullRequest = PullRequestRef{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}
 	if err := f.Validate(); err != nil {
 		t.Errorf("feature with well-formed linked PR rejected: %v", err)
+	}
+}
+
+func TestPullRequestRefPresenters(t *testing.T) {
+	var empty PullRequestRef
+	if got := empty.Badge(); got != "" {
+		t.Errorf("empty.Badge() = %q, want \"\"", got)
+	}
+	if got := empty.PlainLine(); got != "" {
+		t.Errorf("empty.PlainLine() = %q, want \"\"", got)
+	}
+	if got := empty.NextStepsHint(true); got != "" {
+		t.Errorf("empty.NextStepsHint(true) = %q, want \"\"", got)
+	}
+	if got := empty.StatusPayload(); got != nil {
+		t.Errorf("empty.StatusPayload() = %#v, want nil", got)
+	}
+
+	ref := PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "abc123"}
+	if got, want := ref.Badge(), "PR#42"; got != want {
+		t.Errorf("Badge() = %q, want %q", got, want)
+	}
+	if got, want := ref.PlainLine(), "o/r#42"; got != want {
+		t.Errorf("PlainLine() = %q, want %q", got, want)
+	}
+	if got, want := ref.NextStepsHint(true), "PR #42 — merge on GitHub, then pull main"; got != want {
+		t.Errorf("NextStepsHint(true) = %q, want %q", got, want)
+	}
+	if got := ref.NextStepsHint(false); got != "" {
+		t.Errorf("NextStepsHint(false) = %q, want \"\"", got)
+	}
+	b, err := json.Marshal(ref.StatusPayload())
+	if err != nil {
+		t.Fatalf("json.Marshal(StatusPayload()): %v", err)
+	}
+	if got, want := string(b), `{"repo":"o/r","number":42,"url":"https://github.com/o/r/pull/42","head_sha":"abc123"}`; got != want {
+		t.Errorf("json.Marshal(StatusPayload()) = %s, want %s", got, want)
 	}
 }

@@ -44,6 +44,7 @@ func populatedShell(w, h int) *Shell {
 		{FeatureID: "FD-042", From: domain.StageSpec, To: domain.StagePlan, Actor: "user", At: fixedTime},
 		{FeatureID: "FD-042", From: domain.StagePlan, To: domain.StageImplement, Actor: "user", At: fixedTime},
 	}
+	m.rows[1].F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
 	m.sel = 1
 	model, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return model.(*Shell)
@@ -137,6 +138,24 @@ func TestBoardRepoBadge(t *testing.T) {
 	}
 	if strings.Contains(content, "[default]") {
 		t.Error("a default-repo card should not render an explicit repo badge")
+	}
+}
+
+// cardLine renders a linked card's PR badge off the already-in-memory row —
+// never a live gh call. Pointing GUMMI_GH_CMD at a binary that always fails
+// proves the render path never shells out.
+func TestCardLineNeverShellsGH(t *testing.T) {
+	t.Setenv("GUMMI_GH_CMD", "/bin/false")
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(42, "dark mode", domain.StageImplement, "thrifty", true)
+	r.F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
+	r.Landed = true
+	line := m.cardLine(r, 1, false, 100)
+	if !strings.Contains(line, "PR#42") {
+		t.Errorf("card line = %q, want it to contain PR#42", line)
+	}
+	if !strings.Contains(line, "landed") {
+		t.Errorf("card line = %q, want the landed marker still present alongside the PR badge", line)
 	}
 }
 

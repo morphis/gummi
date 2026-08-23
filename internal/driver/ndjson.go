@@ -283,6 +283,12 @@ type doneEvent struct {
 	Spec         string  `json:"spec,omitempty"`
 	Spent        float64 `json:"spent_credits"`
 	ReviewRounds int     `json:"review_rounds"`
+	// Message reiterates the linked PR (e.g. "PR #42 — merge on GitHub, then
+	// pull main") when the card is linked; absent otherwise.
+	Message string `json:"message,omitempty"`
+	// PullRequest mirrors the linked PullRequestRef verbatim, same shape as
+	// `status --json`'s pull_request object; absent when unlinked.
+	PullRequest any `json:"pull_request,omitempty"`
 }
 
 // mergedEvent reports a successful headless landing: the feature branch was

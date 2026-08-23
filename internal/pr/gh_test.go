@@ -203,7 +203,7 @@ func TestFetchReviewThreadsSplitsOwnerRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
-	if _, _, err := FetchReviewThreads(context.Background(), bin, ref); err != nil {
+	if _, _, _, err := FetchReviewThreads(context.Background(), bin, ref); err != nil {
 		t.Fatalf("FetchReviewThreads: %v", err)
 	}
 	argv := readLog(t, argvLog)
@@ -217,7 +217,7 @@ func TestFetchReviewThreadsSplitsOwnerRepo(t *testing.T) {
 // sending a half-empty GraphQL variable pair.
 func TestFetchReviewThreadsRefusesMalformedRepo(t *testing.T) {
 	ref := domain.PullRequestRef{Repo: "nosplit", Number: 1, URL: "https://github.com/nosplit/pull/1"}
-	if _, _, err := FetchReviewThreads(context.Background(), "/nonexistent/gh", ref); err == nil {
+	if _, _, _, err := FetchReviewThreads(context.Background(), "/nonexistent/gh", ref); err == nil {
 		t.Fatal("malformed repo ref should be refused before gh is invoked")
 	}
 }
@@ -256,14 +256,14 @@ func TestRepoAllowsSquashMergeErrorPropagates(t *testing.T) {
 }
 
 func TestLiveStatus(t *testing.T) {
-	bin, log := fakeGH(t, `{"state":"OPEN","comments":[{},{},{}]}`, "[]")
+	bin, log := fakeGH(t, `{"state":"OPEN","comments":[{},{},{}],"headRefOid":"cafebabecafebabecafebabecafebabecafebabe"}`, "[]")
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42", HeadSHA: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"}
-	state, comments, err := LiveStatus(context.Background(), bin, ref)
+	state, comments, headSHA, err := LiveStatus(context.Background(), bin, ref)
 	if err != nil {
 		t.Fatalf("LiveStatus: %v", err)
 	}
-	if state != "OPEN" || comments != 3 {
-		t.Errorf("LiveStatus = (%q, %d), want (\"OPEN\", 3)", state, comments)
+	if state != "OPEN" || comments != 3 || headSHA != "cafebabecafebabecafebabecafebabecafebabe" {
+		t.Errorf("LiveStatus = (%q, %d, %q), want (\"OPEN\", 3, \"cafebabecafebabecafebabecafebabecafebabe\")", state, comments, headSHA)
 	}
 	argv := readLog(t, log)
 	if !strings.Contains(argv, "pr view 42") || !strings.Contains(argv, "--repo o/r") {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -249,6 +250,58 @@ func (r PullRequestRef) Validate() error {
 		return fmt.Errorf("pull request head SHA %q is not a 40-hex-char SHA", r.HeadSHA)
 	}
 	return nil
+}
+
+// Badge is the compact board marker for a linked PR: "PR#42". Empty for an
+// unlinked ref, so callers can append it unconditionally.
+func (r PullRequestRef) Badge() string {
+	if r.Empty() {
+		return ""
+	}
+	return "PR#" + strconv.Itoa(r.Number)
+}
+
+// PlainLine is the "owner/repo#N" rendering used by the plain-text `gummi
+// status` line and any other owner/repo#N render — the single source for
+// that shape, so it never drifts between call sites. Empty for an unlinked
+// ref.
+func (r PullRequestRef) PlainLine() string {
+	if r.Empty() {
+		return ""
+	}
+	return r.Repo + "#" + strconv.Itoa(r.Number)
+}
+
+// NextStepsHint is the nextsteps line for a verified, linked card: "PR #42 —
+// merge on GitHub, then pull main". Empty when the ref is unlinked or the
+// card hasn't verified yet, so the caller falls back to its existing
+// wording.
+func (r PullRequestRef) NextStepsHint(verified bool) string {
+	if r.Empty() || !verified {
+		return ""
+	}
+	return "PR #" + strconv.Itoa(r.Number) + " — merge on GitHub, then pull main"
+}
+
+// pullRequestPayload mirrors PullRequestRef for the status --json and driver
+// done-event wire shapes. Field order is declaration order (encoding/json
+// serializes in that order), pinned here to repo, number, url, head_sha.
+type pullRequestPayload struct {
+	Repo    string `json:"repo"`
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+	HeadSHA string `json:"head_sha"`
+}
+
+// StatusPayload is the wire shape for a linked ref — used verbatim by both
+// `status --json`'s `pull_request` object and the driver's `done` event, so
+// the two surfaces stay identical by construction. nil for an unlinked ref,
+// so an `any`-typed `omitempty` field drops it off the wire.
+func (r PullRequestRef) StatusPayload() any {
+	if r.Empty() {
+		return nil
+	}
+	return &pullRequestPayload{Repo: r.Repo, Number: r.Number, URL: r.URL, HeadSHA: r.HeadSHA}
 }
 
 // kind returns the feature's kind, treating the empty default as a

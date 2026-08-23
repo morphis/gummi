@@ -122,11 +122,18 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	if r.Landed {
 		landed = " " + s.Success.Render("landed")
 	}
+	// a card linked to an outbound PR gets a compact badge, kept visually
+	// separate from (and never replacing) the landed marker — the read is
+	// off the already-in-memory row, never a gh call.
+	pr := ""
+	if b := r.F.PullRequest.Badge(); b != "" {
+		pr = " " + s.Info.Render(b)
+	}
 	cost := ""
 	if !r.F.Spend.Zero() {
 		cost = " " + s.Faint.Render(spendTick(r.F.Spend))
 	}
-	line := cursor + num + " " + glyph + " " + id + badge + " " + title + loop + tag + wtMark + landed + cost
+	line := cursor + num + " " + glyph + " " + id + badge + " " + title + loop + tag + wtMark + landed + pr + cost
 	return ansi.Truncate(line, w, "…")
 }
 

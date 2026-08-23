@@ -35,6 +35,7 @@ func fakeGraphQL(t *testing.T, out string) string {
 }
 
 const singlePageFixture = `{"data":{"repository":{"pullRequest":{
+ "headRefOid":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
  "reviewThreads":{"nodes":[
    {"id":"T1","path":"foo.go","isResolved":false,"isOutdated":false,"comments":{"nodes":[
      {"id":"C1","author":{"login":"alice"},"body":"please fix","diffHunk":"@@ -1,3 +1,3 @@\n ctx\n-old\n+new"},
@@ -62,9 +63,12 @@ const singlePageFixture = `{"data":{"repository":{"pullRequest":{
 func TestFetchReviewThreadsSinglePage(t *testing.T) {
 	bin := fakeGraphQL(t, singlePageFixture)
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}
-	threads, topLevel, err := FetchReviewThreads(context.Background(), bin, ref)
+	threads, topLevel, headSHA, err := FetchReviewThreads(context.Background(), bin, ref)
 	if err != nil {
 		t.Fatalf("FetchReviewThreads: %v", err)
+	}
+	if headSHA != "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b" {
+		t.Errorf("headSHA = %q, want the PR's head commit from the same page", headSHA)
 	}
 	if len(threads) != 2 {
 		t.Fatalf("threads = %d, want 2 (resolved T2 dropped)", len(threads))
@@ -81,6 +85,7 @@ func TestFetchReviewThreadsSinglePage(t *testing.T) {
 }
 
 const twoPageFixtureA = `{"data":{"repository":{"pullRequest":{
+ "headRefOid":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
  "reviewThreads":{"nodes":[{"id":"TA","path":"a.go","isResolved":false,"isOutdated":false,"comments":{"nodes":[
    {"id":"CA","author":{"login":"a"},"body":"a","diffHunk":"@@ -1,1 +1,1 @@\n+a"}
  ]}}],"pageInfo":{"hasNextPage":true,"endCursor":"CUR1"}},
@@ -89,6 +94,7 @@ const twoPageFixtureA = `{"data":{"repository":{"pullRequest":{
 }}}}`
 
 const twoPageFixtureB = `{"data":{"repository":{"pullRequest":{
+ "headRefOid":"should-not-fold-from-here",
  "reviewThreads":{"nodes":[{"id":"TB","path":"b.go","isResolved":false,"isOutdated":false,"comments":{"nodes":[
    {"id":"CB","author":{"login":"b"},"body":"b","diffHunk":"@@ -1,1 +1,1 @@\n+b"}
  ]}}],"pageInfo":{"hasNextPage":false,"endCursor":""}},
@@ -104,7 +110,7 @@ const twoPageFixtureB = `{"data":{"repository":{"pullRequest":{
 func TestFetchReviewThreadsFoldsAcrossPages(t *testing.T) {
 	bin := fakeGraphQL(t, twoPageFixtureA+"\n"+twoPageFixtureB)
 	ref := domain.PullRequestRef{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}
-	threads, topLevel, err := FetchReviewThreads(context.Background(), bin, ref)
+	threads, topLevel, headSHA, err := FetchReviewThreads(context.Background(), bin, ref)
 	if err != nil {
 		t.Fatalf("FetchReviewThreads: %v", err)
 	}
@@ -113,6 +119,9 @@ func TestFetchReviewThreadsFoldsAcrossPages(t *testing.T) {
 	}
 	if len(topLevel) != 1 {
 		t.Fatalf("topLevel = %+v, want exactly 1 (first-page-only fold, not doubled)", topLevel)
+	}
+	if headSHA != "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b" {
+		t.Errorf("headSHA = %q, want the first page's value (first-page-only fold)", headSHA)
 	}
 }
 

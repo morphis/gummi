@@ -227,13 +227,18 @@ func runPRStatus(args []string) error {
 	if f.PullRequest.Empty() {
 		return fmt.Errorf("%s has no linked PR", f.ID)
 	}
-	state, comments, err := pr.LiveStatus(ctx, ghBinary, f.PullRequest)
+	state, comments, headSHA, err := pr.LiveStatus(ctx, ghBinary, f.PullRequest)
 	if err != nil {
 		return fmt.Errorf("querying PR status for %s: %w", f.ID, err)
 	}
+	if headSHA != "" && headSHA != f.PullRequest.HeadSHA {
+		refreshed := f.PullRequest
+		refreshed.HeadSHA = headSHA
+		_ = pe.store.SetPullRequest(ctx, f.ID, refreshed) // side effect only; the live render above is authoritative
+	}
 	view := prStatusView{
 		ID: string(f.ID), Repo: f.PullRequest.Repo, Number: f.PullRequest.Number,
-		URL: f.PullRequest.URL, HeadSHA: f.PullRequest.HeadSHA,
+		URL: f.PullRequest.URL, HeadSHA: headSHA,
 		State: state, Comments: comments,
 	}
 	if *jsonOut {
@@ -329,9 +334,14 @@ func runPRComments(args []string) error {
 		return fmt.Errorf("%s has no linked PR; run `gummi pr link` first", f.ID)
 	}
 
-	threads, topLevel, err := pr.FetchReviewThreads(ctx, ghBinary, f.PullRequest)
+	threads, topLevel, headSHA, err := pr.FetchReviewThreads(ctx, ghBinary, f.PullRequest)
 	if err != nil {
 		return fmt.Errorf("fetching review threads for %s: %w", f.ID, err)
+	}
+	if headSHA != "" && headSHA != f.PullRequest.HeadSHA {
+		refreshed := f.PullRequest
+		refreshed.HeadSHA = headSHA
+		_ = pe.store.SetPullRequest(ctx, f.ID, refreshed) // side effect only; list/ingest render off the fetched threads, not this
 	}
 
 	if !*ingest {

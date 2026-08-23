@@ -1134,6 +1134,8 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 	d.out.emit(doneEvent{
 		Event: "done", ID: string(f.ID), Branch: f.BranchName(),
 		Spec: f.ArtifactPath(), Spent: f.Spend.Credits, ReviewRounds: d.reviewsRun,
+		Message:     f.PullRequest.NextStepsHint(true),
+		PullRequest: f.PullRequest.StatusPayload(),
 	})
 	return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
 }
