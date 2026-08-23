@@ -16,4 +16,9 @@ type DiffAnnotation struct {
 	Comment   string
 	Resolved  bool
 	CreatedAt time.Time
+	// SourceRef identifies the row's external origin (e.g. a GitHub
+	// review-thread id) for idempotent re-ingest. "" is the sentinel for
+	// a locally-authored annotation (reviewer agent, TUI) and carries no
+	// uniqueness constraint.
+	SourceRef string
 }

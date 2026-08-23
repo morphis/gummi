@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS diff_annotations (
 	excerpt    TEXT NOT NULL DEFAULT '',
 	comment    TEXT NOT NULL,
 	resolved   INTEGER NOT NULL DEFAULT 0,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	source_ref TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS diff_annotations_feature ON diff_annotations(feature_id);
 
@@ -462,6 +463,8 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN pr_url TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE diff_annotations ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS diff_annotations_source_ref ON diff_annotations(feature_id, source_ref) WHERE source_ref != ''`,
 }
 
 // Close releases the database.
