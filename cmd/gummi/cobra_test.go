@@ -35,6 +35,29 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(b)
 }
 
+// captureStderr mirrors captureStdout for os.Stderr — used to assert on
+// warnings that deliberately print outside a command's normal stdout
+// output.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 // The `version` subcommand prints the same stamp as the old dispatch.
 func TestCobraVersion(t *testing.T) {
 	out := captureStdout(t, func() {

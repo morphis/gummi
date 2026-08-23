@@ -10,25 +10,49 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
+// defaultReposJSON is what `gh api repos/<repo>` answers by default in the
+// fake shim: every merge method allowed, so tests that don't care about
+// RepoAllowsSquashMerge (Resolve/LiveStatus) are unaffected by its addition.
+const defaultReposJSON = `{"allow_squash_merge":true,"allow_merge_commit":true,"allow_rebase_merge":true}`
+
+// apiReposErrorSentinel, when written as reposOut, makes the shim's "api
+// repos" case exit non-zero instead of printing a body — standing in for a
+// failed or unauthorized settings read.
+const apiReposErrorSentinel = "__api_repos_error__"
+
 // fakeGH writes an executable shell shim to a temp dir that logs its argv
 // (one space-joined line per invocation) to argvLog and prints viewOut for
-// any "pr view" call or listOut for any "pr list" call. No network, no real
-// gh CLI — the deterministic offline seam the plan calls for.
+// any "pr view" call or listOut for any "pr list" call, answering "api
+// repos" calls with defaultReposJSON. No network, no real gh CLI — the
+// deterministic offline seam the plan calls for.
 func fakeGH(t *testing.T, viewOut, listOut string) (binPath, argvLog string) {
+	t.Helper()
+	return fakeGHWithRepoJSON(t, viewOut, listOut, defaultReposJSON)
+}
+
+// fakeGHWithRepoJSON is fakeGH plus a caller-chosen reposOut for "api repos"
+// calls, letting a test force allow_squash_merge:false or (via
+// apiReposErrorSentinel) a non-zero exit on that path.
+func fakeGHWithRepoJSON(t *testing.T, viewOut, listOut, reposOut string) (binPath, argvLog string) {
 	t.Helper()
 	dir := t.TempDir()
 	argvLog = filepath.Join(dir, "argv.log")
 	viewFile := filepath.Join(dir, "view.json")
 	listFile := filepath.Join(dir, "list.json")
+	reposFile := filepath.Join(dir, "repos.json")
 	if err := os.WriteFile(viewFile, []byte(viewOut), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(listFile, []byte(listOut), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(reposFile, []byte(reposOut), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	script := "#!/bin/sh\n" +
 		"echo \"$@\" >> \"" + argvLog + "\"\n" +
 		"case \"$*\" in\n" +
+		"  *\"api repos\"*) if [ \"$(cat \"" + reposFile + "\")\" = \"" + apiReposErrorSentinel + "\" ]; then echo \"repos settings unavailable\" >&2; exit 1; fi; cat \"" + reposFile + "\" ;;\n" +
 		"  *\"pr view\"*) cat \"" + viewFile + "\" ;;\n" +
 		"  *\"pr list\"*) cat \"" + listFile + "\" ;;\n" +
 		"  *) echo \"unrecognized invocation: $@\" >&2; exit 1 ;;\n" +
@@ -195,6 +219,39 @@ func TestFetchReviewThreadsRefusesMalformedRepo(t *testing.T) {
 	ref := domain.PullRequestRef{Repo: "nosplit", Number: 1, URL: "https://github.com/nosplit/pull/1"}
 	if _, _, err := FetchReviewThreads(context.Background(), "/nonexistent/gh", ref); err == nil {
 		t.Fatal("malformed repo ref should be refused before gh is invoked")
+	}
+}
+
+func TestRepoAllowsSquashMergeTrue(t *testing.T) {
+	bin, log := fakeGH(t, "{}", "[]")
+	ok, err := RepoAllowsSquashMerge(context.Background(), bin, "o/r")
+	if err != nil {
+		t.Fatalf("RepoAllowsSquashMerge: %v", err)
+	}
+	if !ok {
+		t.Errorf("RepoAllowsSquashMerge = false, want true under default repo settings")
+	}
+	argv := readLog(t, log)
+	if !strings.Contains(argv, "api repos/o/r") {
+		t.Errorf("argv %q missing expected api repos/o/r", argv)
+	}
+}
+
+func TestRepoAllowsSquashMergeFalse(t *testing.T) {
+	bin, _ := fakeGHWithRepoJSON(t, "{}", "[]", `{"allow_squash_merge":false,"allow_merge_commit":true,"allow_rebase_merge":true}`)
+	ok, err := RepoAllowsSquashMerge(context.Background(), bin, "o/r")
+	if err != nil {
+		t.Fatalf("RepoAllowsSquashMerge: %v", err)
+	}
+	if ok {
+		t.Errorf("RepoAllowsSquashMerge = true, want false when the repo disallows squash merging")
+	}
+}
+
+func TestRepoAllowsSquashMergeErrorPropagates(t *testing.T) {
+	bin, _ := fakeGHWithRepoJSON(t, "{}", "[]", apiReposErrorSentinel)
+	if _, err := RepoAllowsSquashMerge(context.Background(), bin, "o/r"); err == nil {
+		t.Fatal("RepoAllowsSquashMerge with a failing api call should error")
 	}
 }
 

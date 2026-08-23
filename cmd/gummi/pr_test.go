@@ -59,23 +59,46 @@ func prFixture(t *testing.T) *state.Store {
 	return store
 }
 
+// defaultReposJSON is what `gh api repos/<repo>` answers by default in the
+// fake shims below: every merge method allowed, so tests that predate the
+// squash-merge warning aren't affected by its addition.
+const defaultReposJSON = `{"allow_squash_merge":true,"allow_merge_commit":true,"allow_rebase_merge":true}`
+
+// apiReposErrorSentinel, when written as reposOut, makes a shim's "api
+// repos" case exit non-zero instead of printing a body.
+const apiReposErrorSentinel = "__api_repos_error__"
+
 // fakePRTestGH writes an executable shell shim that returns viewOut for any
-// "pr view" invocation and listOut for any "pr list" invocation — the same
-// no-network, no-real-gh seam internal/pr's own tests use, wired here via
-// GUMMI_GH_CMD so the CLI layer is exercised end to end.
+// "pr view" invocation, listOut for any "pr list" invocation, and
+// defaultReposJSON for any "api repos" invocation — the same no-network,
+// no-real-gh seam internal/pr's own tests use, wired here via GUMMI_GH_CMD
+// so the CLI layer is exercised end to end.
 func fakePRTestGH(t *testing.T, viewOut, listOut string) string {
+	t.Helper()
+	return fakePRTestGHWithSettings(t, viewOut, listOut, defaultReposJSON)
+}
+
+// fakePRTestGHWithSettings is fakePRTestGH plus a caller-chosen reposOut for
+// "api repos" calls, letting a test force allow_squash_merge:false or (via
+// apiReposErrorSentinel) a non-zero exit on that path.
+func fakePRTestGHWithSettings(t *testing.T, viewOut, listOut, reposOut string) string {
 	t.Helper()
 	dir := t.TempDir()
 	viewFile := filepath.Join(dir, "view.json")
 	listFile := filepath.Join(dir, "list.json")
+	reposFile := filepath.Join(dir, "repos.json")
 	if err := os.WriteFile(viewFile, []byte(viewOut), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(listFile, []byte(listOut), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(reposFile, []byte(reposOut), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
+		"  *\"api repos\"*) if [ \"$(cat \"" + reposFile + "\")\" = \"" + apiReposErrorSentinel + "\" ]; then echo \"repos settings unavailable\" >&2; exit 1; fi; cat \"" + reposFile + "\" ;;\n" +
 		"  *\"pr view\"*) cat \"" + viewFile + "\" ;;\n" +
 		"  *\"pr list\"*) cat \"" + listFile + "\" ;;\n" +
 		"  *) echo \"unrecognized invocation: $@\" >&2; exit 1 ;;\n" +
@@ -125,6 +148,81 @@ func TestPRLinkPersistsAndRefusesDoubleLink(t *testing.T) {
 		t.Fatal("double-link should be refused")
 	} else if !strings.Contains(err.Error(), "already linked") {
 		t.Errorf("error = %q, want it to name the existing link", err)
+	}
+}
+
+// pr link warns on stderr when the repo disallows squash-merging, naming
+// `gummi squash` and the card so the operator has a next step, while still
+// persisting the link.
+func TestPRLinkWarnsWhenSquashDisallowed(t *testing.T) {
+	store := prFixture(t)
+	bin := fakePRTestGHWithSettings(t, testViewJSON, "[]", `{"allow_squash_merge":false,"allow_merge_commit":true,"allow_rebase_merge":true}`)
+	setFakeGHEnv(t, bin)
+
+	errOut := captureStderr(t, func() {
+		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+			t.Fatalf("runPRLink: %v", err)
+		}
+	})
+	if !strings.Contains(errOut, "gummi squash FD-001") || !strings.Contains(errOut, "o/r") {
+		t.Errorf("stderr = %q, want it to name `gummi squash FD-001` and o/r", errOut)
+	}
+
+	got, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PullRequest.Empty() {
+		t.Fatal("link should persist even when the squash-merge warning fires")
+	}
+}
+
+// pr link stays quiet when the repo allows squash-merging.
+func TestPRLinkQuietWhenSquashAllowed(t *testing.T) {
+	store := prFixture(t)
+	bin := fakePRTestGH(t, testViewJSON, "[]")
+	setFakeGHEnv(t, bin)
+
+	errOut := captureStderr(t, func() {
+		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+			t.Fatalf("runPRLink: %v", err)
+		}
+	})
+	if strings.Contains(errOut, "squash") {
+		t.Errorf("stderr = %q, want no squash warning when the repo allows squash-merge", errOut)
+	}
+
+	got, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PullRequest.Empty() {
+		t.Fatal("link should persist")
+	}
+}
+
+// pr link stays quiet, and still links, when the repo-settings read itself
+// fails (network, 401, 404) — the read must never block or fail the link.
+func TestPRLinkQuietWhenSettingsFetchFails(t *testing.T) {
+	store := prFixture(t)
+	bin := fakePRTestGHWithSettings(t, testViewJSON, "[]", apiReposErrorSentinel)
+	setFakeGHEnv(t, bin)
+
+	errOut := captureStderr(t, func() {
+		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+			t.Fatalf("runPRLink: %v", err)
+		}
+	})
+	if strings.Contains(errOut, "squash") {
+		t.Errorf("stderr = %q, want no squash warning when the settings read fails", errOut)
+	}
+
+	got, err := store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PullRequest.Empty() {
+		t.Fatal("link should persist even when the settings read fails")
 	}
 }
 
@@ -247,23 +345,28 @@ func TestPRCommentsRefusesUnlinkedCard(t *testing.T) {
 	}
 }
 
-// fakePRCommentsGH extends fakePRTestGH's "pr view"/"pr list" shim with an
-// "api graphql" case returning graphqlOut verbatim — standing in for what a
-// real `gh api graphql --paginate` call streams back.
+// fakePRCommentsGH extends fakePRTestGH's "pr view"/"pr list"/"api repos"
+// shim with an "api graphql" case returning graphqlOut verbatim — standing
+// in for what a real `gh api graphql --paginate` call streams back.
 func fakePRCommentsGH(t *testing.T, viewOut, graphqlOut string) string {
 	t.Helper()
 	dir := t.TempDir()
 	viewFile := filepath.Join(dir, "view.json")
 	graphqlFile := filepath.Join(dir, "graphql.json")
+	reposFile := filepath.Join(dir, "repos.json")
 	if err := os.WriteFile(viewFile, []byte(viewOut), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(graphqlFile, []byte(graphqlOut), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(reposFile, []byte(defaultReposJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
 		"  *\"api graphql\"*) cat \"" + graphqlFile + "\" ;;\n" +
+		"  *\"api repos\"*) cat \"" + reposFile + "\" ;;\n" +
 		"  *\"pr view\"*) cat \"" + viewFile + "\" ;;\n" +
 		"  *) echo \"unrecognized invocation: $@\" >&2; exit 1 ;;\n" +
 		"esac\n"

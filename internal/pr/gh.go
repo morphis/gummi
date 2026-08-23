@@ -164,6 +164,30 @@ func resolveAuto(ctx context.Context, ghBinary, dir, branch string) (domain.Pull
 	return refFromGHPR(prs[0])
 }
 
+// repoSettings is the subset of `gh api repos/<owner>/<repo>`'s response
+// RepoAllowsSquashMerge cares about.
+type repoSettings struct {
+	AllowSquashMerge bool `json:"allow_squash_merge"`
+}
+
+// RepoAllowsSquashMerge reports whether repo (an "owner/repo" string) allows
+// squash-merging its PRs on GitHub, per the repo's own merge-method
+// settings. It shells out to `gh api repos/<repo>` (the api verb takes the
+// path directly, so no --repo flag or owner/repo split is needed). Any gh
+// exit failure or JSON parse failure is returned as the error; callers
+// decide whether to surface it or degrade silently.
+func RepoAllowsSquashMerge(ctx context.Context, ghBinary, repo string) (bool, error) {
+	out, err := run(ctx, ghBinary, "", "api", "repos/"+repo)
+	if err != nil {
+		return false, err
+	}
+	var s repoSettings
+	if err := json.Unmarshal(out, &s); err != nil {
+		return false, fmt.Errorf("parsing gh api repos response: %w", err)
+	}
+	return s.AllowSquashMerge, nil
+}
+
 // LiveStatus queries ref's PR right now for its state (e.g. "OPEN",
 // "CLOSED", "MERGED") and its comment count.
 func LiveStatus(ctx context.Context, ghBinary string, ref domain.PullRequestRef) (state string, comments int, err error) {

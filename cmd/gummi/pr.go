@@ -139,6 +139,9 @@ func runPRLink(args []string) error {
 	if err := pe.store.SetPullRequest(ctx, f.ID, ref); err != nil {
 		return err
 	}
+	if allowed, err := pr.RepoAllowsSquashMerge(ctx, ghBinary, ref.Repo); err == nil && !allowed {
+		fmt.Fprintf(os.Stderr, "warning: %s does not allow squash-merge on GitHub; run `gummi squash %s` to collapse the branch to one commit before merging so main stays clean\n", ref.Repo, f.ID)
+	}
 	fmt.Printf("%s linked to %s#%d\n  %s\n  head %s\n", f.ID, ref.Repo, ref.Number, ref.URL, ref.HeadSHA)
 	return nil
 }
