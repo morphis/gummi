@@ -227,6 +227,38 @@ func TestCleanRemovesLandedBranch(t *testing.T) {
 	}
 }
 
+// Clean removes the cleaned card's durable zz session transcripts (FD-104)
+// but leaves a co-resident card's transcripts alone.
+func TestCleanRemovesTranscripts(t *testing.T) {
+	h, d, id := driveVerified(t)
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	sessDir := filepath.Join(h.ws.StateDir(), "sessions")
+	if err := os.MkdirAll(sessDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mine := filepath.Join(sessDir, string(id)+"-implementer.jsonl")
+	other := filepath.Join(sessDir, "FD-999-implementer.jsonl")
+	for _, p := range []string{mine, other} {
+		if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := d.Clean(context.Background(), id); err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Fatalf("cleaned card's transcript still present: stat err = %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("co-resident card's transcript removed: %v", err)
+	}
+}
+
 // Clean refuses a card that has not actually landed — nothing is removed.
 func TestCleanRefusesUnlanded(t *testing.T) {
 	h := newHarness(t, true, nil)

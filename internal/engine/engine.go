@@ -395,19 +395,12 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		return prior, nil
 	}
 
-	// interactive chat is human-paced: no budget cap.
-	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
-	if err != nil {
-		return nil, err
-	}
 	// The session's lifecycle context is bound to nothing: it is canceled by
 	// Session.stop, not by the caller's ctx going away. Keep it distinct from
 	// the caller's ctx so the initial kickoff Send stays on the caller's
 	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
 	sctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, specPath: specPath}
-	s.setMCPTeardown(mcpTeardown)
-	e.stampSpawnInfo(s)
+	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel}
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
 		s.transcript = append(s.transcript, ps.Transcript...)
@@ -415,9 +408,26 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		s.spend = ps.Spend
 	}
 	// A fresh conversation opens with a stage kickoff so the agent leads;
-	// a carried-over transcript means the interview is already underway,
-	// so reattaching stays silent.
+	// a carried-over transcript means the interview is already underway
+	// (this is a restart-reattach), so reattaching stays silent. The same
+	// distinction decides the durable transcript's fate: a fresh attach
+	// must not inherit an unrelated earlier attempt's file, while a
+	// restart-reattach's carried transcript is exactly what that file
+	// preserves — it must be left alone.
 	fresh := len(s.transcript) == 0
+	if fresh {
+		e.clearResumeTranscript(s, flavorStage)
+	}
+
+	// interactive chat is human-paced: no budget cap.
+	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	s.setSpecPath(specPath)
+	s.setMCPTeardown(mcpTeardown)
+	e.stampSpawnInfo(s)
 	// s is not yet reachable by Pause/Drop/Close (not in e.live), so
 	// attachAgent can't be racing a finalize here; the bool is checked for
 	// symmetry with the autonomous path.
@@ -617,6 +627,12 @@ func (e *Engine) startAutonomous(s *Session) {
 			return
 		}
 	}
+	// run() always builds a brand-new in-process Session with no carried
+	// transcript (kickoff, bounce, and restart-then-resume all dispatch
+	// through the same path), so every startAutonomous spawn is fresh: any
+	// transcript left at the derived path belongs to an unrelated earlier
+	// attempt and must not leak into this one.
+	e.clearResumeTranscript(s, s.flavor())
 	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor())
 	if err != nil {
 		s.setError(err)
@@ -981,6 +997,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(f.ID),
 		ReadOnly:       readOnly,
+		ResumePath:     resumeSessionPath(e.cfg.Workspace, f.ID, role, flavor),
 	})
 	if specErr != nil {
 		mcpTeardown()

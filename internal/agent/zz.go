@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -156,17 +157,28 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		// label to drift from the one buildArgs actually launched.
 		mcpLabel = filepath.Base(exe)
 	}
-	// The transcript path is allocated once, under an agent-owned temp
-	// root Close removes; without a stable session path turn 2 would
-	// forget turn 1 entirely.
-	dir, err := os.MkdirTemp("", "gummi-zz-session-*")
-	if err != nil {
-		return nil, fmt.Errorf("zz adapter: allocating session dir: %w", err)
+	// The transcript path is allocated once and stays stable for the
+	// session's lifetime; without it turn 2 would forget turn 1 entirely.
+	// A caller-supplied ResumePath is a durable path the engine derived
+	// (survives a gummi restart); otherwise fall back to an agent-owned
+	// temp root that Close removes.
+	var sessionPath, tempRoot string
+	if opts.ResumePath != "" {
+		sessionPath = opts.ResumePath
+		if err := os.MkdirAll(filepath.Dir(sessionPath), 0o700); err != nil {
+			return nil, fmt.Errorf("zz session at %s: %w", sessionPath, err)
+		}
+	} else {
+		dir, err := os.MkdirTemp("", "gummi-zz-session-*")
+		if err != nil {
+			return nil, fmt.Errorf("zz adapter: allocating session dir: %w", err)
+		}
+		sessionPath, tempRoot = filepath.Join(dir, "session.json"), dir
 	}
 	s := &zzSession{
 		z: z, workdir: opts.WorkDir, model: opts.Model, provider: opts.Provider, think: opts.Think, hints: opts.SystemHints,
 		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, mcpLabel: mcpLabel,
-		sessionPath: filepath.Join(dir, "session.json"), tempRoot: dir, maxTurns: zzMaxTurns(),
+		sessionPath: sessionPath, tempRoot: tempRoot, maxTurns: zzMaxTurns(),
 		// zz's cage is a single --cwd root with no per-file allowlist; a
 		// transient session with ExtraReadAllows must read outside
 		// WorkDir, so it runs without --cwd rather than being denied.
@@ -325,7 +337,7 @@ func (s *zzSession) buildArgs() ([]string, error) {
 		args = append(args, "--think", s.think)
 	}
 	args = append(args, "--session", s.sessionPath)
-	if s.primed {
+	if s.primed || fileExists(s.sessionPath) {
 		args = append(args, "--continue")
 	}
 	if s.featureID != "" && s.mcpSock != "" {
@@ -341,6 +353,17 @@ func (s *zzSession) buildArgs() ([]string, error) {
 	args = append(args, "--max-turns", strconv.Itoa(s.maxTurns))
 	args = append(args, "ask")
 	return args, nil
+}
+
+// fileExists reports whether path names an existing file. A stat error
+// other than "not found" (e.g. permission denied) is treated as existing
+// so it cannot silently drop --continue.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 func (s *zzSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringer, cancel context.CancelFunc) {

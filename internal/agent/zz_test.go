@@ -765,3 +765,168 @@ func TestZZIdentityAndCapabilities(t *testing.T) {
 		t.Fatal("missing binary accepted")
 	}
 }
+
+func TestZZUsesResumePathWhenSet(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "zz")
+	writeZZEchoBin(t, bin, log)
+	z, err := NewZZ(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+	resumePath := filepath.Join(dir, "resume.jsonl")
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m", ResumePath: resumePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zs := sess.(*zzSession)
+	if zs.sessionPath != resumePath {
+		t.Fatalf("sessionPath = %q, want %q", zs.sessionPath, resumePath)
+	}
+	if zs.tempRoot != "" {
+		t.Fatalf("tempRoot = %q, want empty (no temp dir allocated)", zs.tempRoot)
+	}
+	if err := sess.Send(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitZZIdle(t, sess)
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "--session "+resumePath) {
+		t.Fatalf("argv missing --session %s:\n%s", resumePath, raw)
+	}
+}
+
+func TestZZDoesNotDeleteResumePathOnClose(t *testing.T) {
+	z := &ZZ{bin: "zz"}
+	dir := t.TempDir()
+	resumePath := filepath.Join(dir, "resume.jsonl")
+	if err := os.WriteFile(resumePath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m", ResumePath: resumePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(resumePath); err != nil {
+		t.Fatalf("resume transcript removed on Close: %v", err)
+	}
+}
+
+func TestZZCreatesParentDirsForResumePath(t *testing.T) {
+	z := &ZZ{bin: "zz"}
+	dir := t.TempDir()
+	resumePath := filepath.Join(dir, "nested", "sub", "resume.jsonl")
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m", ResumePath: resumePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := os.Stat(filepath.Dir(resumePath)); err != nil {
+		t.Fatalf("parent dir not created: %v", err)
+	}
+}
+
+func TestZZFallsBackToTempDirWhenResumePathEmpty(t *testing.T) {
+	z := &ZZ{bin: "zz"}
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zs := sess.(*zzSession)
+	if zs.tempRoot == "" {
+		t.Fatal("tempRoot empty, want an allocated temp dir")
+	}
+	root := zs.tempRoot
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("temp dir %s still present after Close: %v", root, err)
+	}
+}
+
+func TestZZContinueOnTurn1WhenResumeFileExists(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "zz")
+	writeZZEchoBin(t, bin, log)
+	z, err := NewZZ(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+	resumePath := filepath.Join(dir, "resume.jsonl")
+	if err := os.WriteFile(resumePath, []byte(`{"type":"session","id":"prior"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m", ResumePath: resumePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitZZIdle(t, sess)
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "--continue") {
+		t.Fatalf("turn 1 against an existing transcript should pass --continue:\n%s", raw)
+	}
+}
+
+func TestZZNoContinueOnTurn1WhenResumeFileAbsent(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "zz")
+	writeZZEchoBin(t, bin, log)
+	z, err := NewZZ(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+	resumePath := filepath.Join(dir, "resume.jsonl") // never written
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m", ResumePath: resumePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitZZIdle(t, sess)
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "--continue") {
+		t.Fatalf("turn 1 against a missing transcript must not pass --continue:\n%s", raw)
+	}
+}
+
+// TestZZResumeFailureNamesTranscriptPath proves a session-start failure
+// against an unusable ResumePath surfaces the transcript path in the
+// error, so an operator knows exactly which file to delete and retry.
+func TestZZResumeFailureNamesTranscriptPath(t *testing.T) {
+	z := &ZZ{bin: "zz"}
+	dir := t.TempDir()
+	// A regular file where a directory component is expected makes
+	// MkdirAll fail deterministically.
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resumePath := filepath.Join(blocker, "resume.jsonl")
+	_, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m", ResumePath: resumePath})
+	if err == nil || !strings.Contains(err.Error(), resumePath) {
+		t.Fatalf("error = %v, want it to name %s", err, resumePath)
+	}
+}

@@ -271,3 +271,24 @@ func TestHeadlessRejectsReadOnly(t *testing.T) {
 		t.Errorf("ReadOnly session error = %v, want a clear read-only rejection", err)
 	}
 }
+
+// TestHeadlessIgnoresResumePath proves ResumePath — engine-stamped on
+// every stage session regardless of backend (FD-104) — is a no-op for a
+// backend that never reads it: session start succeeds exactly as without
+// it, and nothing is written at the given path.
+func TestHeadlessIgnoresResumePath(t *testing.T) {
+	ag, err := NewHeadless([]string{"sh", "-c", "cat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	resumePath := filepath.Join(t.TempDir(), "would-be-resume.jsonl")
+	sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "m", ResumePath: resumePath})
+	if err != nil {
+		t.Fatalf("NewSession with ResumePath set: %v", err)
+	}
+	defer sess.Close()
+	if _, err := os.Stat(resumePath); !os.IsNotExist(err) {
+		t.Fatalf("headless adapter touched ResumePath %s: stat err = %v", resumePath, err)
+	}
+}

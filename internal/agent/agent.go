@@ -134,6 +134,12 @@ type SessionOpts struct {
 	// it read-write; the engine also gates on the capability before
 	// constructing one.
 	ReadOnly bool
+	// ResumePath, when non-empty, is the absolute filesystem path an adapter
+	// uses for its DURABLE conversation transcript — stamped by the engine,
+	// meaningful only to adapters that know what to do with it, ignored by
+	// every other adapter. When empty, an adapter that supports resume falls
+	// back to its previous in-process-only behavior.
+	ResumePath string
 }
 
 // Agent creates sessions and reports what its backend can do.

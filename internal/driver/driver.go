@@ -470,6 +470,18 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
+	// Durable zz session transcripts (FD-104) live outside the worktree,
+	// under the workspace state dir; a cleaned card must leave no
+	// conversation state behind. Scoped to this card's featureID prefix so
+	// a co-resident card's transcripts are untouched. A refused clean above
+	// never reaches here, so nothing partial is left by an early return.
+	if matches, err := filepath.Glob(filepath.Join(d.ws.StateDir(), "sessions", string(id)+"-*.jsonl")); err == nil {
+		for _, p := range matches {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return d.fail(ctx, string(id), fmt.Errorf("removing session transcript %s: %w", p, err))
+			}
+		}
+	}
 	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName()})
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
