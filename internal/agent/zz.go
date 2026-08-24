@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -111,6 +112,7 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	}
 	// zz splits --mcp on whitespace with no quoting, so a gummi executable
 	// path containing whitespace cannot be represented on that flag.
+	var mcpLabel string
 	if opts.FeatureID != "" && opts.MCPSockPath != "" {
 		exe, err := zzExecPath()
 		if err != nil {
@@ -121,6 +123,10 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 				"zz splits --mcp on whitespace with no quoting, so this session cannot register MCP tools; "+
 				"move the gummi binary to a path without spaces, or accept this role runs without MCP", exe)
 		}
+		// Stashed now (rather than recomputed from zzExecPath in mapLine) so
+		// a mid-session rebind of zzExecPath cannot cause the expected MCP
+		// label to drift from the one buildArgs actually launched.
+		mcpLabel = filepath.Base(exe)
 	}
 	// The transcript path is allocated once, under an agent-owned temp
 	// root Close removes; without a stable session path turn 2 would
@@ -131,7 +137,7 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	}
 	s := &zzSession{
 		z: z, workdir: opts.WorkDir, model: opts.Model, provider: opts.Provider, hints: opts.SystemHints,
-		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath,
+		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, mcpLabel: mcpLabel,
 		sessionPath: filepath.Join(dir, "session.json"), tempRoot: dir,
 		// zz's cage is a single --cwd root with no per-file allowlist; a
 		// transient session with ExtraReadAllows must read outside
@@ -159,6 +165,7 @@ type zzSession struct {
 	workdir, model     string
 	provider           string
 	featureID, mcpSock string
+	mcpLabel           string // filepath.Base of the resolved gummi exe; "" when the session was not started with --mcp
 	hints              []string
 	sessionPath        string // --session value; stable for the session's lifetime
 	tempRoot           string // agent-owned os.MkdirTemp root holding sessionPath; removed on Close
@@ -170,9 +177,15 @@ type zzSession struct {
 
 	mu                          sync.Mutex
 	sessionID                   string
+	lastContextBudget           int64 // most recent context_warning.budget seen; 0 when none seen
 	cancel                      context.CancelFunc
 	primed, interrupted, closed bool
 	closeOnce                   sync.Once
+
+	// syntheticCallSeq is a monotonic per-session counter for CallIDs the
+	// adapter itself generates (waiting/compaction), which zz's stream
+	// never assigns an id of its own. Touched only via atomic.AddUint64.
+	syntheticCallSeq uint64
 
 	// accum buffers text deltas for the turn in flight, flushed as one
 	// EventMessage at turn_end. Touched only by readTurn: Send resets it
@@ -355,6 +368,28 @@ func (s *zzSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringe
 	s.emit(Event{Kind: EventIdle})
 }
 
+// nextSyntheticCall allocates a CallID for an adapter-synthesized call+result
+// pair (waiting, compaction) that zz's own stream carries no id for. The
+// "zz-<kind>-" prefix marks these as adapter-synthesized to a future
+// transcript reader; zz's own tool_call ids are opaque strings, so there is
+// no collision risk.
+func (s *zzSession) nextSyntheticCall(kind string) string {
+	n := atomic.AddUint64(&s.syntheticCallSeq, 1)
+	return fmt.Sprintf("zz-%s-%d", kind, n)
+}
+
+// zzToolName composes the ticker-facing tool name from zz's tool_call /
+// tool_result source field, mirroring codex.go's mcp_tool_call convention:
+// "builtin" (or an absent/empty source) is the bare name; "mcp:<label>" is
+// dotted with the label.
+func zzToolName(source, name string) string {
+	label, ok := strings.CutPrefix(source, "mcp:")
+	if !ok {
+		return name
+	}
+	return strings.Trim(strings.Join([]string{label, name}, "."), ".")
+}
+
 func (s *zzSession) finishTurn(cancel context.CancelFunc) {
 	cancel()
 	s.mu.Lock()
@@ -404,6 +439,29 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 			s.sessionID = id
 			s.mu.Unlock()
 		}
+		// MCP registration is asserted only for a session configured with
+		// --mcp (the same condition buildArgs uses to emit the flag); a
+		// builtin-only roster on a non-MCP session is expected and silent.
+		if s.mcpSock != "" && s.featureID != "" {
+			var tools []struct {
+				Name   string `json:"name"`
+				Source string `json:"source"`
+			}
+			_ = json.Unmarshal(raw["tools"], &tools)
+			want := "mcp:" + s.mcpLabel
+			registered := false
+			for _, t := range tools {
+				if t.Source == want {
+					registered = true
+					break
+				}
+			}
+			if !registered {
+				return nil, false, fmt.Errorf("gummi's MCP server did not register with zz (no tool advertised source %q); "+
+					"ask_user and gummi's other tools are unavailable this session; "+
+					"the __mcp child may have failed to start, or the socket path was unreachable", want)
+			}
+		}
 		return nil, false, nil
 	case "text":
 		var delta string
@@ -422,9 +480,10 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 		return []Event{{Kind: EventReasoningDelta, Text: delta}}, false, nil
 	case "tool_call":
 		var c struct {
-			ID   string          `json:"id"`
-			Name string          `json:"name"`
-			Args json.RawMessage `json:"args"`
+			ID     string          `json:"id"`
+			Name   string          `json:"name"`
+			Source string          `json:"source"`
+			Args   json.RawMessage `json:"args"`
 		}
 		if err := json.Unmarshal(line, &c); err != nil {
 			return nil, false, fmt.Errorf("malformed zz tool_call: %w", err)
@@ -437,18 +496,19 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 		} else if err := json.Unmarshal(c.Args, &argsStr); err == nil {
 			detail = collapseDetail(s.workdir, argsStr)
 		}
-		return []Event{{Kind: EventToolCall, Tool: c.Name, CallID: c.ID, Detail: detail}}, false, nil
+		return []Event{{Kind: EventToolCall, Tool: zzToolName(c.Source, c.Name), CallID: c.ID, Detail: detail}}, false, nil
 	case "tool_result":
 		var r struct {
 			ID      string `json:"id"`
 			Name    string `json:"name"`
+			Source  string `json:"source"`
 			OK      bool   `json:"ok"`
 			Content string `json:"content"`
 		}
 		if err := json.Unmarshal(line, &r); err != nil {
 			return nil, false, fmt.Errorf("malformed zz tool_result: %w", err)
 		}
-		return []Event{{Kind: EventToolResult, Tool: r.Name, CallID: r.ID, Result: &ToolResult{OK: r.OK, Output: boundTail(r.Content, r.OK)}}}, false, nil
+		return []Event{{Kind: EventToolResult, Tool: zzToolName(r.Source, r.Name), CallID: r.ID, Result: &ToolResult{OK: r.OK, Output: boundTail(r.Content, r.OK)}}}, false, nil
 	case "turn_end":
 		return s.mapTurnEnd(raw), false, nil
 	case "context_warning":
@@ -459,7 +519,44 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 		if err := json.Unmarshal(line, &c); err != nil {
 			return nil, false, fmt.Errorf("malformed zz context_warning: %w", err)
 		}
+		s.mu.Lock()
+		s.lastContextBudget = c.Budget
+		s.mu.Unlock()
 		return []Event{{Kind: EventContext, Context: Context{Tokens: c.EstTokens, Limit: c.Budget}}}, false, nil
+	case "waiting":
+		var w struct {
+			Status  int   `json:"status"`
+			Attempt int   `json:"attempt"`
+			DelayMS int64 `json:"delay_ms"`
+		}
+		if err := json.Unmarshal(line, &w); err != nil {
+			return nil, false, fmt.Errorf("malformed zz waiting: %w", err)
+		}
+		id := s.nextSyntheticCall("waiting")
+		detail := fmt.Sprintf("http %d · attempt %d · retry in %.1fs", w.Status, w.Attempt, float64(w.DelayMS)/1000)
+		return []Event{
+			{Kind: EventToolCall, Tool: "waiting", CallID: id, Detail: detail},
+			{Kind: EventToolResult, Tool: "waiting", CallID: id, Result: &ToolResult{OK: true}},
+		}, false, nil
+	case "compaction":
+		var c struct {
+			MessagesFolded  int64 `json:"messages_folded"`
+			EstTokensBefore int64 `json:"est_tokens_before"`
+			EstTokensAfter  int64 `json:"est_tokens_after"`
+		}
+		if err := json.Unmarshal(line, &c); err != nil {
+			return nil, false, fmt.Errorf("malformed zz compaction: %w", err)
+		}
+		id := s.nextSyntheticCall("compaction")
+		detail := collapseDetail(s.workdir, fmt.Sprintf("folded %d messages · ~%d -> ~%d tokens", c.MessagesFolded, c.EstTokensBefore, c.EstTokensAfter))
+		s.mu.Lock()
+		limit := s.lastContextBudget
+		s.mu.Unlock()
+		return []Event{
+			{Kind: EventToolCall, Tool: "compaction", CallID: id, Detail: detail},
+			{Kind: EventToolResult, Tool: "compaction", CallID: id, Result: &ToolResult{OK: true}},
+			{Kind: EventContext, Context: Context{Tokens: c.EstTokensAfter, Limit: limit}},
+		}, false, nil
 	case "error":
 		var e struct {
 			Message string `json:"message"`
@@ -479,7 +576,7 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 			return []Event{{Kind: EventIdle}}, true, nil
 		}
 		return nil, true, fmt.Errorf("zz turn ended: %s", d.StopReason)
-	case "waiting", "compaction", "thinking", "turn_start", "user":
+	case "thinking", "turn_start", "user":
 		return nil, false, nil
 	}
 	return nil, false, nil

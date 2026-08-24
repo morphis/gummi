@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -78,4 +80,46 @@ func probeModel(bi backendInfo, model string, timeout time.Duration) probeResult
 			return reachUnknown
 		}
 	}
+}
+
+// zzAuthProbeTimeout bounds the offline zz auth probe's `zz status` call.
+const zzAuthProbeTimeout = 5 * time.Second
+
+// zzAuthResult is the outcome of the offline `auth:zz` doctor probe. Summary
+// is always one of a small fixed set of strings — never the subcommand's raw
+// stdout/stderr, which can name provider tokens.
+type zzAuthResult struct {
+	Status  string
+	Summary string
+}
+
+// zzAuthProbeFn runs zz's offline status probe, bounded by timeout, and
+// classifies the outcome. It is the seam doctorOpts.ZZAuthProbe injects a
+// stub into so the default test suite never spawns a real zz process.
+type zzAuthProbeFn func(bin string, timeout time.Duration) zzAuthResult
+
+// probeZZAuth is the default zzAuthProbeFn: it runs `<bin> status`, zz's
+// offline-status subcommand (named in FD-100's problem statement), which
+// reports the configured provider set without needing a live one. It never
+// surfaces the subcommand's stdout/stderr — only a classified status word
+// and a short fixed Summary reach the doctor report.
+func probeZZAuth(bin string, timeout time.Duration) zzAuthResult {
+	if _, err := exec.LookPath(bin); err != nil {
+		return zzAuthResult{Status: statusUnknown, Summary: "zz not on PATH"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "status")
+	err := cmd.Run()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return zzAuthResult{Status: statusUnknown, Summary: "probe timed out"}
+	}
+	if err == nil {
+		return zzAuthResult{Status: statusOK, Summary: "configured"}
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return zzAuthResult{Status: statusFail, Summary: "not configured"}
+	}
+	return zzAuthResult{Status: statusUnknown, Summary: "unexpected exit"}
 }

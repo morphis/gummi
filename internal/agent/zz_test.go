@@ -61,12 +61,153 @@ func TestZZEventMappingTable(t *testing.T) {
 	if err != nil || len(evs) != 1 || evs[0].Kind != EventError || !strings.Contains(evs[0].Err.Error(), "boom") {
 		t.Fatalf("error = %#v, %v", evs, err)
 	}
-	for _, typ := range []string{"waiting", "compaction", "thinking", "turn_start", "user"} {
+	for _, typ := range []string{"thinking", "turn_start", "user"} {
 		evs, terminal, err := s.mapLine([]byte(fmt.Sprintf(`{"type":%q}`, typ)))
 		if err != nil || terminal || len(evs) != 0 {
 			t.Fatalf("dropped type %q = %#v, %v, %v", typ, evs, terminal, err)
 		}
 	}
+}
+
+// TestZZToolSourceNamespacing proves tool_call/tool_result apply the same
+// source-prefix rule (mirroring codex's mcp_tool_call convention) and that
+// call/result correlation by CallID survives it.
+func TestZZToolSourceNamespacing(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"builtin", "builtin", "bash"},
+		{"mcp-labeled", "mcp:gummi", "gummi.ask_user"},
+		{"absent", "", "bash"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &zzSession{model: "m"}
+			toolName := "bash"
+			if tc.source == "mcp:gummi" {
+				toolName = "ask_user"
+			}
+			call := fmt.Sprintf(`{"type":"tool_call","id":"c1","name":%q,"source":%q,"args":{}}`, toolName, tc.source)
+			evs, _, err := s.mapLine([]byte(call))
+			if err != nil || len(evs) != 1 || evs[0].Tool != tc.want {
+				t.Fatalf("tool_call = %#v, %v, want Tool %q", evs, err, tc.want)
+			}
+			result := fmt.Sprintf(`{"type":"tool_result","id":"c1","name":%q,"source":%q,"ok":true,"content":""}`, toolName, tc.source)
+			evs, _, err = s.mapLine([]byte(result))
+			if err != nil || len(evs) != 1 || evs[0].Tool != tc.want || evs[0].CallID != "c1" {
+				t.Fatalf("tool_result = %#v, %v, want Tool %q CallID c1", evs, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestZZSessionRequiresMCPRegistration covers the MCP-registration assertion
+// added to the session arm of mapLine.
+func TestZZSessionRequiresMCPRegistration(t *testing.T) {
+	t.Run("builtin+mcp-labeled passes", func(t *testing.T) {
+		s := &zzSession{model: "m", featureID: "F", mcpSock: "/tmp/s", mcpLabel: "gummi"}
+		_, _, err := s.mapLine([]byte(`{"type":"session","id":"s1","tools":[{"name":"bash","source":"builtin"},{"name":"ask_user","source":"mcp:gummi"}]}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("builtin-only under MCP-configured session errors", func(t *testing.T) {
+		s := &zzSession{model: "m", featureID: "F", mcpSock: "/tmp/s", mcpLabel: "gummi"}
+		_, _, err := s.mapLine([]byte(`{"type":"session","id":"s1","tools":[{"name":"bash","source":"builtin"}]}`))
+		if err == nil || !strings.Contains(err.Error(), "MCP") || !strings.Contains(err.Error(), "gummi") {
+			t.Fatalf("err = %v, want a message naming MCP and the label", err)
+		}
+	})
+	t.Run("builtin-only under non-MCP session is fine", func(t *testing.T) {
+		s := &zzSession{model: "m"}
+		_, _, err := s.mapLine([]byte(`{"type":"session","id":"s1","tools":[{"name":"bash","source":"builtin"}]}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("label follows the resolved executable basename", func(t *testing.T) {
+		renamed := &zzSession{model: "m", featureID: "F", mcpSock: "/tmp/s", mcpLabel: "renamed"}
+		if _, _, err := renamed.mapLine([]byte(`{"type":"session","id":"s1","tools":[{"name":"ask_user","source":"mcp:renamed"}]}`)); err != nil {
+			t.Fatalf("mcp:renamed should be accepted for a renamed executable: %v", err)
+		}
+		if _, _, err := renamed.mapLine([]byte(`{"type":"session","id":"s1","tools":[{"name":"ask_user","source":"mcp:gummi"}]}`)); err == nil {
+			t.Fatal("mcp:gummi should be rejected when the resolved label is \"renamed\"")
+		}
+	})
+}
+
+// TestZZWaitingSurfacesAsPair proves a waiting frame lifts to one bounded
+// call+result pair rather than being silently dropped.
+func TestZZWaitingSurfacesAsPair(t *testing.T) {
+	s := &zzSession{model: "m"}
+	evs, terminal, err := s.mapLine([]byte(`{"type":"waiting","turn":1,"status":429,"attempt":2,"delay_ms":4000}`))
+	if err != nil || terminal {
+		t.Fatalf("waiting = %#v, %v, %v", evs, terminal, err)
+	}
+	if len(evs) != 2 || evs[0].Kind != EventToolCall || evs[1].Kind != EventToolResult {
+		t.Fatalf("waiting events = %#v", evs)
+	}
+	if evs[0].CallID == "" || evs[0].CallID != evs[1].CallID {
+		t.Fatalf("waiting CallID pairing = %#v", evs)
+	}
+	if evs[1].Result == nil || !evs[1].Result.OK {
+		t.Fatalf("waiting result = %#v", evs[1])
+	}
+	if evs[0].Detail != "http 429 · attempt 2 · retry in 4.0s" {
+		t.Fatalf("waiting detail = %q", evs[0].Detail)
+	}
+}
+
+// TestZZCompactionSurfacesAndUpdatesContext proves a compaction frame lifts
+// to a bounded call+result pair plus a context-meter update, and that the
+// meter's Limit tracks the most recent context_warning budget.
+func TestZZCompactionSurfacesAndUpdatesContext(t *testing.T) {
+	t.Run("no prior context_warning uses Limit 0", func(t *testing.T) {
+		s := &zzSession{model: "m"}
+		evs, _, err := s.mapLine([]byte(`{"type":"compaction","turn":2,"trigger":"auto","messages_folded":12,"bytes_before":1,"bytes_after":1,"est_tokens_before":48000,"est_tokens_after":12000,"content":"…"}`))
+		if err != nil || len(evs) != 3 {
+			t.Fatalf("compaction = %#v, %v", evs, err)
+		}
+		if evs[0].Kind != EventToolCall || evs[0].Tool != "compaction" || evs[0].Detail != "folded 12 messages · ~48000 -> ~12000 tokens" {
+			t.Fatalf("compaction call = %#v", evs[0])
+		}
+		if evs[1].Kind != EventToolResult || evs[1].CallID != evs[0].CallID || evs[1].Result == nil || !evs[1].Result.OK {
+			t.Fatalf("compaction result = %#v", evs[1])
+		}
+		if evs[2].Kind != EventContext || evs[2].Context.Tokens != 12000 || evs[2].Context.Limit != 0 {
+			t.Fatalf("compaction context = %#v", evs[2])
+		}
+	})
+	t.Run("prior context_warning seeds Limit", func(t *testing.T) {
+		s := &zzSession{model: "m"}
+		if _, _, err := s.mapLine([]byte(`{"type":"context_warning","est_tokens":1000,"budget":8000}`)); err != nil {
+			t.Fatal(err)
+		}
+		evs, _, err := s.mapLine([]byte(`{"type":"compaction","turn":2,"trigger":"auto","messages_folded":12,"bytes_before":1,"bytes_after":1,"est_tokens_before":48000,"est_tokens_after":12000,"content":"…"}`))
+		if err != nil || len(evs) != 3 {
+			t.Fatalf("compaction = %#v, %v", evs, err)
+		}
+		if evs[2].Kind != EventContext || evs[2].Context.Tokens != 12000 || evs[2].Context.Limit != 8000 {
+			t.Fatalf("compaction context = %#v", evs[2])
+		}
+	})
+	t.Run("long content does not unbound the detail", func(t *testing.T) {
+		s := &zzSession{model: "m"}
+		big := strings.Repeat("x", 10*1024)
+		line := fmt.Sprintf(`{"type":"compaction","turn":2,"trigger":"auto","messages_folded":12,"bytes_before":1,"bytes_after":1,"est_tokens_before":48000,"est_tokens_after":12000,"content":%q}`, big)
+		evs, _, err := s.mapLine([]byte(line))
+		if err != nil || len(evs) != 3 {
+			t.Fatalf("compaction = %#v, %v", evs, err)
+		}
+		if r := []rune(evs[0].Detail); len(r) > detailCap+len("…") {
+			t.Fatalf("detail length = %d, want <= %d", len(r), detailCap+len("…"))
+		}
+		if strings.Contains(evs[0].Detail, "xxxx") {
+			t.Fatalf("detail leaked compaction content: %q", evs[0].Detail)
+		}
+	})
 }
 
 func TestZZToolCallDetail(t *testing.T) {
@@ -217,13 +358,22 @@ func TestZZRefusesWhitespaceExecPath(t *testing.T) {
 // writeZZEchoBin writes a fake `zz` shell script that appends its argv,
 // followed by a line recording $GUMMI_MCP_SOCK, to the file named by
 // $ZZ_LOG, then emits a session + empty turn_end + end_turn done triple,
-// letting tests observe the exact argv and env zz receives.
+// letting tests observe the exact argv and env zz receives. The session
+// line advertises an mcp-labeled tool matching the real (unstubbed)
+// zzExecPath basename, so a caller that sets FeatureID+MCPSockPath (like
+// TestZZSendSetsMCPSockEnv) does not trip the MCP-registration assertion.
 func writeZZEchoBin(t *testing.T, bin, log string) {
 	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	label := filepath.Base(exe)
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> \"$ZZ_LOG\"\n" +
 		"printf 'MCP_SOCK=%s\\n' \"$GUMMI_MCP_SOCK\" >> \"$ZZ_LOG\"\n" +
-		"printf '%s\\n' '{\"type\":\"session\",\"id\":\"zz_test\"}' '{\"type\":\"turn_end\",\"usage\":{}}' '{\"type\":\"done\",\"stop_reason\":\"end_turn\"}'\n"
+		"printf '%s\\n' '{\"type\":\"session\",\"id\":\"zz_test\",\"tools\":[{\"name\":\"ask_user\",\"source\":\"mcp:" + label + "\"}]}' " +
+		"'{\"type\":\"turn_end\",\"usage\":{}}' '{\"type\":\"done\",\"stop_reason\":\"end_turn\"}'\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

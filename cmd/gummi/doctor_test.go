@@ -449,6 +449,8 @@ profiles:
 
 // A profile requiring zz renders both a backend:zz and auth:zz row, the
 // same shape every other backend gets, with no zz binary needed to see it.
+// The default doctor suite never spawns a real zz process, so a stub
+// ZZAuthProbe is injected here too.
 func TestDoctorRendersZZBackend(t *testing.T) {
 	clearDoctorEnv(t)
 	repo := gitRepo(t)
@@ -463,12 +465,144 @@ profiles:
 `)
 	fakeAgentOnPath(t, "zz")
 
-	r := buildDoctorReport(repo, doctorOpts{})
+	stub := func(bin string, timeout time.Duration) zzAuthResult {
+		return zzAuthResult{Status: statusOK, Summary: "configured"}
+	}
+	r := buildDoctorReport(repo, doctorOpts{ZZAuthProbe: stub})
 	if c := checkByName(r, "backend:zz"); c.Status != statusOK {
 		t.Errorf("backend:zz = %+v, want ok", c)
 	}
-	if c := checkByName(r, "auth:zz"); c.Name != "auth:zz" {
-		t.Errorf("auth:zz row missing: %+v", r.Checks)
+	if c := checkByName(r, "auth:zz"); c.Status != statusOK {
+		t.Errorf("auth:zz = %+v, want ok", c)
+	}
+}
+
+// TestDoctorAuthZZOK proves an injected probe reporting a configured zz
+// renders auth:zz as ok with no remediation.
+func TestDoctorAuthZZOK(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: zz, model: m }
+    implementer: { backend: zz, model: m }
+    reviewer: { backend: zz, model: m }
+    scribe: { backend: zz, model: m }
+`)
+	fakeAgentOnPath(t, "zz")
+	stub := func(bin string, timeout time.Duration) zzAuthResult {
+		return zzAuthResult{Status: statusOK, Summary: "configured"}
+	}
+	r := buildDoctorReport(repo, doctorOpts{ZZAuthProbe: stub})
+	c := checkByName(r, "auth:zz")
+	if c.Status != statusOK || c.Remediation != "" {
+		t.Errorf("auth:zz = %+v, want ok with no remediation", c)
+	}
+}
+
+// TestDoctorAuthZZFail proves an injected probe reporting an unconfigured zz
+// renders auth:zz as not ok, remediation still naming "zz setup".
+func TestDoctorAuthZZFail(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: zz, model: m }
+    implementer: { backend: zz, model: m }
+    reviewer: { backend: zz, model: m }
+    scribe: { backend: zz, model: m }
+`)
+	fakeAgentOnPath(t, "zz")
+	stub := func(bin string, timeout time.Duration) zzAuthResult {
+		return zzAuthResult{Status: statusFail, Summary: "not configured"}
+	}
+	r := buildDoctorReport(repo, doctorOpts{ZZAuthProbe: stub})
+	c := checkByName(r, "auth:zz")
+	if c.Status != statusFail || !strings.Contains(c.Remediation, "zz setup") {
+		t.Errorf("auth:zz = %+v, want fail with \"zz setup\" remediation", c)
+	}
+}
+
+// TestDoctorAuthZZUnknown proves a missing binary and a timeout both
+// classify as unknown — never fail — with remediation still naming "zz
+// setup".
+func TestDoctorAuthZZUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		summary string
+	}{
+		{"missing binary", "zz not on PATH"},
+		{"timeout", "probe timed out"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearDoctorEnv(t)
+			repo := gitRepo(t)
+			writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: zz, model: m }
+    implementer: { backend: zz, model: m }
+    reviewer: { backend: zz, model: m }
+    scribe: { backend: zz, model: m }
+`)
+			fakeAgentOnPath(t, "zz")
+			stub := func(bin string, timeout time.Duration) zzAuthResult {
+				return zzAuthResult{Status: statusUnknown, Summary: tc.summary}
+			}
+			r := buildDoctorReport(repo, doctorOpts{ZZAuthProbe: stub})
+			c := checkByName(r, "auth:zz")
+			if c.Status != statusUnknown {
+				t.Errorf("auth:zz = %+v, want unknown", c)
+			}
+			if c.Status == statusFail {
+				t.Errorf("auth:zz must never be fail on an inconclusive probe: %+v", c)
+			}
+			if !strings.Contains(c.Remediation, "zz setup") {
+				t.Errorf("auth:zz remediation = %q, want it to name \"zz setup\"", c.Remediation)
+			}
+		})
+	}
+}
+
+// TestDoctorAuthZZDoesNotLeakOutput proves a token-shaped Summary from the
+// probe never reaches the report's Detail or its --json payload, even when
+// the injected probe itself misbehaves and stuffs something secret-shaped
+// into Summary: authCheck classifies off Status alone and never echoes the
+// probe's free text.
+func TestDoctorAuthZZDoesNotLeakOutput(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { backend: zz, model: m }
+    implementer: { backend: zz, model: m }
+    reviewer: { backend: zz, model: m }
+    scribe: { backend: zz, model: m }
+`)
+	fakeAgentOnPath(t, "zz")
+	const secret = "sk-abc123xyz"
+	stub := func(bin string, timeout time.Duration) zzAuthResult {
+		return zzAuthResult{Status: statusFail, Summary: secret}
+	}
+	r := buildDoctorReport(repo, doctorOpts{ZZAuthProbe: stub})
+	for _, c := range r.Checks {
+		if strings.Contains(c.Detail, secret) {
+			t.Errorf("check %q leaked probe output into Detail: %q", c.Name, c.Detail)
+		}
+	}
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), secret) {
+		t.Errorf("JSON payload leaked probe output: %s", b)
 	}
 }
 

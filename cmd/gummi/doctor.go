@@ -46,7 +46,7 @@ func runDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildDoctorReport(cwd, doctorOpts{Deep: *flags.deep, Probe: probeModel})
+	report := buildDoctorReport(cwd, doctorOpts{Deep: *flags.deep, Probe: probeModel, ZZAuthProbe: probeZZAuth})
 	if *flags.json {
 		b, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -102,10 +102,13 @@ type doctorFlags struct {
 
 // doctorOpts configures buildDoctorReport's reachability probe. Deep turns
 // on the live per-role probe; Probe is the injectable seam that runs it
-// (tests substitute a stub), defaulting to the real probeModel.
+// (tests substitute a stub), defaulting to the real probeModel. ZZAuthProbe
+// is the analogous seam for the offline `auth:zz` check, defaulting to
+// probeZZAuth.
 type doctorOpts struct {
-	Deep  bool
-	Probe ProbeFn
+	Deep        bool
+	Probe       ProbeFn
+	ZZAuthProbe zzAuthProbeFn
 }
 
 // ProbeFn runs one per-role reachability probe against a backend and model,
@@ -230,7 +233,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// 5. auth (offline) — one line per required backend, pairing with the
 	// backend:* checks above.
 	for _, name := range ordered {
-		checks = append(checks, authCheck(backendInfoFor(name)))
+		checks = append(checks, authCheck(backendInfoFor(name), opts))
 	}
 
 	// 5b. reach — one line per declared profile/role, probing the model the
@@ -313,18 +316,50 @@ func backendModelConflicts(bi backendInfo, p config.Profiles) string {
 
 const nestingGuidance = "steer to a cost-tiered profile: frontier models for architect/reviewer, a cheaper model for implementer/scribe; avoid pointing gummi's roles at the same frontier model your own session runs on (you'd pay for it twice)"
 
-// authCheck reports auth readiness without spawning anything (confirmed
-// offline). Provider config lives in each backend's native store now
-// (Claude Code login, `opencode auth`, headless child's env), so an
-// interactive-login backend degrades to "unknown" with the exact command
-// a human runs (G2); a headless backend delegates to its own child.
-func authCheck(bi backendInfo) doctorCheck {
+// authCheck reports auth readiness without spawning anything for most
+// backends (confirmed offline). Provider config lives in each backend's
+// native store now (Claude Code login, `opencode auth`, headless child's
+// env), so an interactive-login backend degrades to "unknown" with the exact
+// command a human runs (G2); a headless backend delegates to its own child.
+// zz is the exception: it can answer its own config offline via `zz status`,
+// so opts.ZZAuthProbe (defaulting to probeZZAuth) supplies a real check.
+func authCheck(bi backendInfo, opts doctorOpts) doctorCheck {
 	if bi.headless {
 		return doctorCheck{Name: "auth:" + bi.name, Status: statusOK, Detail: "handled by the headless command (" + bi.bin + ")"}
+	}
+	if bi.name == "zz" {
+		probe := opts.ZZAuthProbe
+		if probe == nil {
+			probe = probeZZAuth
+		}
+		res := probe(bi.bin, zzAuthProbeTimeout)
+		// Detail is derived from Status alone, never from the probe's
+		// free-text Summary: probeZZAuth's own Summary values are drawn from
+		// a small safe set, but authCheck must not blindly trust an
+		// injected probe (production or test) to uphold that contract.
+		check := doctorCheck{Name: "auth:zz", Status: res.Status, Detail: zzAuthDetail(res.Status)}
+		if res.Status != statusOK {
+			check.Remediation = "zz setup"
+		}
+		return check
 	}
 	return doctorCheck{
 		Name: "auth:" + bi.name, Status: statusUnknown, Detail: bi.name + " auth state is not checked offline",
 		Remediation: "if runs fail on auth, have the human run: " + bi.login,
+	}
+}
+
+// zzAuthDetail renders auth:zz's Detail from the probe's classified Status
+// only — a fixed, enumerable string per status, so no probe implementation
+// (including a misbehaving one) can smuggle probe output into the report.
+func zzAuthDetail(status string) string {
+	switch status {
+	case statusOK:
+		return "zz reports a configured provider"
+	case statusFail:
+		return "zz reports no provider configured"
+	default:
+		return "zz auth state could not be determined offline"
 	}
 }
 
