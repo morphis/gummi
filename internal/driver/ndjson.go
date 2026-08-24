@@ -120,7 +120,11 @@ type blockedEvent struct {
 	// Document summarizes a research card's failing citation/coverage
 	// floor when a StatusBlockedDocument gate holds the card at verify.
 	Document *documentSummary `json:"document,omitempty"`
-	Resume   string           `json:"resume"`
+	// Reason carries a free-form gate message for statuses that don't fit
+	// the numeric blockers (e.g. the omission gate). Existing emits leave
+	// it zero and omitempty keeps it off the wire.
+	Reason string `json:"reason,omitempty"`
+	Resume string `json:"resume"`
 }
 
 // documentSummary is the NDJSON-facing shape of a verifydoc.Report: counts

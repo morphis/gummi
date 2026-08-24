@@ -447,6 +447,8 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 				text:  fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, res.Blockers),
 				isErr: true,
 			}
+		case engine.StatusBlockedOmission:
+			return noticeMsg{text: res.Reason, isErr: true}
 		case engine.StatusBlockedDependency:
 			names := make([]string, 0, len(res.BlockingDeps))
 			for _, d := range res.BlockingDeps {

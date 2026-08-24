@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -242,6 +243,73 @@ func TestVerifyKickoffRunsEnvProbes(t *testing.T) {
 	names := []string{snap.EnvProbes[0].Name, snap.EnvProbes[1].Name}
 	if names[0] != "absent-thing" || names[1] != "present-thing" {
 		t.Errorf("probe order = %v, want [absent-thing present-thing]", names)
+	}
+}
+
+// reverifyOmissionBug sets up a bug parked at verify with a clean-present
+// env prerequisite, zero [env:] tags, no waiver, and a passing gummi-check.
+// It returns the engine, store, and feature for Reverify assertions.
+func reverifyOmissionBug(t *testing.T, checkCmd string) (*Engine, *state.Store, domain.Feature) {
+	t.Helper()
+	ws, store, wt := newRepo(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New(Config{Store: store, Worktrees: wt, Workspace: ws})
+	t.Cleanup(func() { e.Close() })
+
+	f := bugFeature("reverify omission gate")
+	f.Stage = domain.StageVerify
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+
+	checks := "```gummi-checks\n- name: verify-check\n  cmd: " + strconv.Quote(checkCmd) + "\n```\n"
+	writeBugSpec(t, wt, f, "Run local unit tests only.\n\n"+checks)
+
+	return e, store, f
+}
+
+func TestReverify_OmissionGate_Blocked(t *testing.T) {
+	ctx := context.Background()
+	e, store, f := reverifyOmissionBug(t, "true")
+
+	res, err := e.Reverify(ctx, f.ID, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != ReverifyBlocked {
+		t.Fatalf("status=%d, want ReverifyBlocked", res.Status)
+	}
+	if res.Advance.Status != StatusBlockedOmission {
+		t.Fatalf("advance status=%d, want StatusBlockedOmission", res.Advance.Status)
+	}
+	if res.Advance.Reason == "" {
+		t.Fatal("advance reason empty")
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); !got.VerifiedAt.IsZero() {
+		t.Fatalf("verified_at stamped on reverify omission block: %v", got.VerifiedAt)
+	}
+}
+
+func TestReverify_RegressionStillFails(t *testing.T) {
+	ctx := context.Background()
+	e, store, f := reverifyOmissionBug(t, "echo boom; exit 3")
+
+	res, err := e.Reverify(ctx, f.ID, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != ReverifyFailed {
+		t.Fatalf("status=%d, want ReverifyFailed", res.Status)
+	}
+	if len(res.Failed) == 0 {
+		t.Fatal("expected failing check names, got none")
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); !got.VerifiedAt.IsZero() {
+		t.Fatalf("verified_at stamped on reverify failure: %v", got.VerifiedAt)
 	}
 }
 

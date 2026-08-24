@@ -702,6 +702,34 @@ func (e *Engine) failRun(s *Session, err error) {
 // (mirrors the manual verify dialog's cap).
 const verifyStageTimeout = 10 * time.Minute
 
+// probeCleanPresent is a session-free counterpart of hasCleanPresentProbe:
+// it loads the layered env config and runs envprobe.Run fresh against the
+// feature's worktree, reporting whether any probe came back clean-present
+// (Err nil and Present true). It does not mutate or persist session state.
+func (e *Engine) probeCleanPresent(ctx context.Context, f *domain.Feature) bool {
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		if e.envWarn != nil {
+			e.envWarn(fmt.Sprintf("user config path could not be resolved: %v", err))
+		}
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, e.cfg.Workspace.ConfigFile())
+	if err != nil {
+		return false
+	}
+	if len(cfg.Env) == 0 {
+		return false
+	}
+	workDir := filepath.Join(e.pool.Root(), f.WorktreePath())
+	for _, r := range envprobe.Run(ctx, workDir, cfg.Env) {
+		if r.Err == nil && r.Present {
+			return true
+		}
+	}
+	return false
+}
+
 // runEnvProbes loads the layered user+workspace config, probes every
 // declared environment prerequisite in the card's worktree, records each
 // result in the activity feed, persists the snapshot, and returns a compact

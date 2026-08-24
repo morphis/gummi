@@ -45,6 +45,10 @@ const (
 	// caller lands the branch (the TUI collects a commit message; the
 	// headless driver stops at the verified branch, DESIGN §10.6/§12).
 	StatusNeedsMerge
+	// StatusBlockedOmission: bug-only omission gate fired at the
+	// verify→done edge — a bug with a clean-present env prerequisite, zero
+	// [env:] live checks, and no human waiver cannot finalize.
+	StatusBlockedOmission
 )
 
 // BlockingDep names a single outstanding dependency blocking a card's
@@ -78,6 +82,9 @@ type AdvanceResult struct {
 	// DocumentReport carries the broken citations and unmapped coverage
 	// items when Status is StatusBlockedDocument.
 	DocumentReport verifydoc.Report
+	// Reason is populated only for StatusBlockedOmission; it mirrors the
+	// human-facing reason produced by the shared omission-gate predicate.
+	Reason string
 	// EnteredWorktree reports that this call created the item's worktree
 	// (the design→work approval gate), so the caller can kick off the
 	// one-shot check-discovery + baseline passes over the fresh branch.
@@ -168,6 +175,16 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// of its own (nothing to land — the artifact lives in the workspace,
 	// not on the branch) skips straight to the transition.
 	if next == domain.StageDone {
+		// Bug-only omission gate: a bug with a clean-present env
+		// prerequisite, zero [env:] live checks, and no human waiver cannot
+		// finalize. This runs before any worktree/git calls in this branch,
+		// and mirrors gateVerifyVerdict's skip-on-error behavior.
+		if reason, blocked := e.omissionGateBlocksAdvance(ctx, f); blocked {
+			res.Status = StatusBlockedOmission
+			res.Reason = reason
+			return res, nil
+		}
+
 		wt, err := e.mgr(ctx, &f)
 		if err != nil {
 			return res, err
@@ -474,6 +491,34 @@ func (e *Engine) openQuestionsBlockingGate(f domain.Feature) int {
 		return 0
 	}
 	return len(spec.Parse(string(raw)).UserOpenThreads())
+}
+
+// omissionGateBlocksAdvance is the Advance-side counterpart of
+// gateVerifyVerdict. It re-runs env probes fresh against the feature's
+// worktree and, if the artifact can be read, asks omissionGateReason whether
+// the verify→done edge should be held open. A missing or unreadable artifact
+// falls through (returns blocked=false), mirroring openQuestionsBlockingGate's
+// zero-on-error pattern and gateVerifyVerdict's skip-on-error behavior.
+func (e *Engine) omissionGateBlocksAdvance(ctx context.Context, f domain.Feature) (reason string, blocked bool) {
+	if f.Kind != domain.KindBug {
+		return "", false
+	}
+	if !e.probeCleanPresent(ctx, &f) {
+		return "", false
+	}
+	path := e.artifactFile(&f)
+	if path == "" {
+		return "", false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	reason = omissionGateReason(f.Kind, true, string(raw))
+	if reason == "" {
+		return "", false
+	}
+	return reason, true
 }
 
 // openDiffCommentsBlockingGate returns the number of unresolved diff

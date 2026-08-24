@@ -329,6 +329,67 @@ func TestVerifyKickoffAnnouncesArmedOmissionGate(t *testing.T) {
 	}
 }
 
+func TestOmissionGateReason(t *testing.T) {
+	cases := []struct {
+		name              string
+		kind              domain.Kind
+		cleanPresentProbe bool
+		content           string
+		blocked           bool
+	}{
+		{
+			name:              "bug clean present no tags no waiver",
+			kind:              domain.KindBug,
+			cleanPresentProbe: true,
+			content:           "# BG-002\n\n## Verification\n\nRun local unit tests only.\n",
+			blocked:           true,
+		},
+		{
+			name:              "bug clean present with env tag",
+			kind:              domain.KindBug,
+			cleanPresentProbe: true,
+			content:           "# BG-002\n\n## Verification\n\nRun the docker check [env: docker].\n",
+			blocked:           false,
+		},
+		{
+			name:              "bug clean present with waiver",
+			kind:              domain.KindBug,
+			cleanPresentProbe: true,
+			content:           "# BG-002\n\n## Verification\n\n%% @user: no-live-check docker unavailable in this sandbox\n\nRun local unit tests only.\n",
+			blocked:           false,
+		},
+		{
+			name:              "feature clean present no tags no waiver",
+			kind:              domain.KindFeature,
+			cleanPresentProbe: true,
+			content:           "# FD-001\n\n## Verification plan\n\nRun local unit tests only.\n",
+			blocked:           false,
+		},
+		{
+			name:              "bug no clean present probe",
+			kind:              domain.KindBug,
+			cleanPresentProbe: false,
+			content:           "# BG-002\n\n## Verification\n\nRun local unit tests only.\n",
+			blocked:           false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := omissionGateReason(tc.kind, tc.cleanPresentProbe, tc.content)
+			if tc.blocked {
+				if reason == "" {
+					t.Fatal("expected blocked reason, got empty")
+				}
+			} else {
+				if reason != "" {
+					t.Fatalf("expected not blocked, got reason: %s", reason)
+				}
+			}
+		})
+	}
+}
+
 func TestGateVerifyVerdictDirectArming(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {

@@ -44,6 +44,27 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// gatedVerifyBug returns a bug parked at the verify stage with a worktree,
+// a bug report containing verificationBody, and a branch that is ahead of
+// main by one commit. The caller must have configured env probes so that at
+// least one probes clean-present for the omission gate to arm.
+func gatedVerifyBug(t *testing.T, store *state.Store, wt *worktree.Manager, verificationBody string) domain.Feature {
+	t.Helper()
+	f := bugFeature("gated verify bug")
+	f.Stage = domain.StageVerify
+	putFeature(t, store, f)
+	withWorktree(t, wt, f)
+	writeBugSpec(t, wt, f, verificationBody)
+
+	wtDir := filepath.Join(wt.Root(), f.WorktreePath())
+	if err := os.WriteFile(filepath.Join(wtDir, "fix.txt"), []byte("fix\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wtDir, "add", "fix.txt")
+	gitIn(t, wtDir, "commit", "-q", "-m", "fix")
+	return f
+}
+
 func mustAdvance(t *testing.T, e *Engine, id domain.FeatureID) AdvanceResult {
 	t.Helper()
 	res, err := e.Advance(context.Background(), id, "user")
@@ -246,6 +267,117 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 			t.Fatalf("empty branch: status=%d to=%s, want advanced/done", res.Status, res.To)
 		}
 	})
+}
+
+func TestAdvance_OmissionGate_Blocks(t *testing.T) {
+	ctx := context.Background()
+	e, ws, store, wt := advanceEngine(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := gatedVerifyBug(t, store, wt, "Run local unit tests only.")
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusBlockedOmission {
+		t.Fatalf("status=%d, want blocked-omission", res.Status)
+	}
+	if res.Reason == "" {
+		t.Fatal("blocked-omission result has no reason")
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); got.Stage != domain.StageVerify {
+		t.Fatalf("blocked gate transitioned to %s", got.Stage)
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); !got.VerifiedAt.IsZero() {
+		t.Fatalf("verified_at stamped on blocked omission gate: %v", got.VerifiedAt)
+	}
+}
+
+func TestAdvance_OmissionGate_WaiverPasses(t *testing.T) {
+	ctx := context.Background()
+	e, ws, store, wt := advanceEngine(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The waiver line disarms the omission gate; a resolution marker below
+	// it closes the open thread so Advance's open-question gate does not
+	// also fire.
+	body := "%% @user: no-live-check docker unavailable in this sandbox\n%% @user(2026-08-21): resolved\n\nRun local unit tests only."
+	f := gatedVerifyBug(t, store, wt, body)
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusNeedsMerge {
+		t.Fatalf("status=%d, want needs-merge", res.Status)
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); got.VerifiedAt.IsZero() {
+		t.Fatal("needs-merge gate did not persist verified_at with waiver")
+	}
+}
+
+func TestAdvance_OmissionGate_EnvTagPasses(t *testing.T) {
+	ctx := context.Background()
+	e, ws, store, wt := advanceEngine(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := gatedVerifyBug(t, store, wt, "Run the docker check [env: docker].")
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusNeedsMerge {
+		t.Fatalf("status=%d, want needs-merge", res.Status)
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); got.VerifiedAt.IsZero() {
+		t.Fatal("needs-merge gate did not persist verified_at with env tag")
+	}
+}
+
+func TestAdvance_OmissionGate_FeatureKindPasses(t *testing.T) {
+	ctx := context.Background()
+	e, ws, store, wt := advanceEngine(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := feature(1, "gated feature", domain.StageVerify)
+	putFeature(t, store, f)
+	withWorktree(t, wt, f)
+	writeSpecChecks(t, wt, f, "- name: x\n  cmd: echo ok\n")
+
+	wtDir := filepath.Join(wt.Root(), f.WorktreePath())
+	if err := os.WriteFile(filepath.Join(wtDir, "work.txt"), []byte("w\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wtDir, "add", "work.txt")
+	gitIn(t, wtDir, "commit", "-q", "-m", "work")
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusNeedsMerge {
+		t.Fatalf("status=%d, want needs-merge", res.Status)
+	}
+	if got, _ := store.GetFeature(ctx, f.ID); got.VerifiedAt.IsZero() {
+		t.Fatal("needs-merge gate did not persist verified_at for feature")
+	}
+}
+
+func TestAdvance_OmissionGate_FallsThroughOnUnreadableArtifact(t *testing.T) {
+	e, ws, store, wt := advanceEngine(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("env:\n  docker:\n    probe: \"true\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := gatedVerifyBug(t, store, wt, "Run local unit tests only.")
+	// Replace the artifact file with a directory so os.ReadFile fails.
+	p := filepath.Join(wt.Root(), f.ArtifactPath())
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(p, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusNeedsMerge {
+		t.Fatalf("status=%d, want needs-merge (unreadable artifact falls through)", res.Status)
+	}
 }
 
 // A terminal item has no forward edge.
