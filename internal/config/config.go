@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // Config is the parsed .gummi/config.yaml.
@@ -43,6 +46,16 @@ type Config struct {
 	// order. Every entry must be an absolute path; Load rejects relative or
 	// empty entries so a path cannot silently walk out of the workspace.
 	Instructions []string `yaml:"instructions"`
+	// Checks supplies workspace-wide default verification checks. When
+	// Checks.Default is non-empty, check discovery bypasses the scribe and
+	// writes the configured list straight into the artifact.
+	Checks ChecksConfig `yaml:"checks"`
+}
+
+// ChecksConfig holds workspace-wide check settings.
+type ChecksConfig struct {
+	// Default is a list of checks used in place of scribe discovery.
+	Default []domain.Check `yaml:"default"`
 }
 
 // EnvPrereq is one operator-configured environment prerequisite.
@@ -100,7 +113,32 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: instructions: entry %q is not an absolute path", path, inst)
 		}
 	}
+	for i, ch := range c.Checks.Default {
+		if strings.TrimSpace(ch.Cmd) == "" {
+			return Config{}, fmt.Errorf("%s: checks.default: entry %d has an empty cmd", path, i)
+		}
+		if err := validateCheckTimeout(ch); err != nil {
+			return Config{}, fmt.Errorf("%s: checks.default: entry %d: %w", path, i, err)
+		}
+	}
 	return c, nil
+}
+
+// validateCheckTimeout mirrors the same validation in internal/spec so the
+// config loader rejects per-check timeouts that would fail later parsing.
+func validateCheckTimeout(c domain.Check) error {
+	if c.Timeout == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return fmt.Errorf("check %q: invalid timeout %q: %w", c.Name, c.Timeout, err)
+	}
+	const maxCheckTimeout = 30 * time.Minute
+	if d > maxCheckTimeout {
+		return fmt.Errorf("check %q: timeout %s exceeds maximum %s", c.Name, d, maxCheckTimeout)
+	}
+	return nil
 }
 
 // Guarded reports whether the config selects guarded permission mode
@@ -216,6 +254,18 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["instructions"] = workspacePath
 	default:
 		sources["instructions"] = "default"
+	}
+
+	// checks.default is layered like permissions/sandbox: a workspace list
+	// takes precedence, and a user-level list is the fallback.
+	if len(ws.Checks.Default) > 0 {
+		merged.Checks.Default = ws.Checks.Default
+		sources["checks.default"] = workspacePath
+	} else if len(user.Checks.Default) > 0 {
+		merged.Checks.Default = user.Checks.Default
+		sources["checks.default"] = userPath
+	} else {
+		sources["checks.default"] = "default"
 	}
 
 	return merged, sources, nil

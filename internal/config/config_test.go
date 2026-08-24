@@ -399,6 +399,69 @@ func TestLoadLayeredEnvUserOnly(t *testing.T) {
 	}
 }
 
+func TestLoadChecksDefault(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	content := `checks:
+  default:
+    - name: build
+      cmd: go build ./...
+    - name: test
+      cmd: go test ./...
+`
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Checks.Default) != 2 {
+		t.Fatalf("got %d default checks, want 2", len(c.Checks.Default))
+	}
+	if c.Checks.Default[0].Name != "build" || c.Checks.Default[1].Name != "test" {
+		t.Errorf("checks = %+v", c.Checks.Default)
+	}
+}
+
+func TestLoadChecksDefaultRejectsEmptyCmd(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("checks:\n  default:\n    - name: bad\n      cmd: \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "entry 0 has an empty cmd") {
+		t.Fatalf("expected empty-cmd error naming file, got: %v", err)
+	}
+}
+
+func TestLoadChecksDefaultRejectsBadTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		timeout string
+	}{
+		{name: "malformed", timeout: "soon"},
+		{name: "over-ceiling", timeout: "31m"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "config.yaml")
+			content := fmt.Sprintf("checks:\n  default:\n    - name: bad\n      cmd: \"true\"\n      timeout: %s\n", tc.timeout)
+			if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), `"bad"`) {
+				t.Errorf("expected error naming file and check, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadLayeredInstructionsConcat(t *testing.T) {
 	dir := t.TempDir()
 	userPath := filepath.Join(dir, "user.yaml")

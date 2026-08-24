@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"syscall"
 	"time"
@@ -55,6 +56,14 @@ type Result struct {
 // to RunBounded.
 const CheckTimeout = 2 * time.Minute
 
+// MaxCheckTimeout is the ceiling for any per-check Timeout configured in
+// the artifact. It is intentionally not configurable.
+const MaxCheckTimeout = 30 * time.Minute
+
+// budgetSlack pads the sum of per-check timeouts so a run's overall
+// deadline is not tight to the millisecond.
+const budgetSlack = 30 * time.Second
+
 // maxOutput bounds captured output so a chatty check can't blow up the
 // transcript/UI.
 const maxOutput = 8 << 10
@@ -82,12 +91,67 @@ func RunBounded(ctx context.Context, workDir string, checks []domain.Check, perC
 			out = append(out, Result{Name: ch.Name, Cmd: ch.Cmd, Status: StatusNotRun})
 			continue
 		}
-		out = append(out, runOne(ctx, workDir, ch, perCheck))
+		out = append(out, runOneWithBound(ctx, workDir, ch, perCheck))
 	}
 	return out
 }
 
-func runOne(ctx context.Context, workDir string, ch domain.Check, perCheck time.Duration) Result {
+// RunWithBudget runs checks with an overall deadline derived from the
+// checks' own per-check timeouts. The deadline is max(floor, sum of each
+// check's effective timeout + budgetSlack). Checks without a configured
+// Timeout use the package default (CheckTimeout). The per-check bound is
+// applied individually so one slow check cannot exhaust the whole run.
+func RunWithBudget(ctx context.Context, workDir string, checks []domain.Check, floor time.Duration) ([]Result, error) {
+	type boundedCheck struct {
+		check domain.Check
+		bound time.Duration
+	}
+	bounded := make([]boundedCheck, len(checks))
+	var sum time.Duration
+	for i, ch := range checks {
+		d, err := effectiveTimeout(ch)
+		if err != nil {
+			return nil, err
+		}
+		bounded[i] = boundedCheck{check: ch, bound: d}
+		sum += d
+	}
+	deadline := floor
+	if sum+budgetSlack > deadline {
+		deadline = sum + budgetSlack
+	}
+	runCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+
+	out := make([]Result, 0, len(checks))
+	for _, cb := range bounded {
+		if runCtx.Err() != nil {
+			out = append(out, Result{Name: cb.check.Name, Cmd: cb.check.Cmd, Status: StatusNotRun})
+			continue
+		}
+		out = append(out, runOneWithBound(runCtx, workDir, cb.check, cb.bound))
+	}
+	return out, nil
+}
+
+// effectiveTimeout resolves a check's configured Timeout, falling back to
+// the package default. An empty Timeout is not an error; a malformed value
+// or one above MaxCheckTimeout is.
+func effectiveTimeout(ch domain.Check) (time.Duration, error) {
+	if ch.Timeout == "" {
+		return CheckTimeout, nil
+	}
+	d, err := time.ParseDuration(ch.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("check %q: invalid timeout %q: %w", ch.Name, ch.Timeout, err)
+	}
+	if d > MaxCheckTimeout {
+		return 0, fmt.Errorf("check %q: timeout %s exceeds maximum %s", ch.Name, d, MaxCheckTimeout)
+	}
+	return d, nil
+}
+
+func runOneWithBound(ctx context.Context, workDir string, ch domain.Check, perCheck time.Duration) Result {
 	start := time.Now()
 	runCtx := ctx
 	if perCheck > 0 {

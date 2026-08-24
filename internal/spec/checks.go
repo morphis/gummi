@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/morphis/gummi/internal/domain"
 )
+
+// maxCheckTimeout mirrors verify.MaxCheckTimeout so spec parsing can
+// reject per-check timeouts without importing the verify package.
+const maxCheckTimeout = 30 * time.Minute
 
 // The artifact's Verification section carries the repo's check commands
 // as a fenced block gummi can execute deterministically:
@@ -49,9 +54,28 @@ func ParseChecks(content string) (checks []domain.Check, found bool, err error) 
 		if strings.TrimSpace(c.Name) == "" {
 			c.Name = c.Cmd
 		}
+		if err := validateCheckTimeout(c); err != nil {
+			return nil, true, fmt.Errorf("gummi-checks block does not parse: %w", err)
+		}
 		checks = append(checks, c)
 	}
 	return checks, true, nil
+}
+
+// validateCheckTimeout rejects malformed or over-ceiling per-check timeout
+// values, naming the offending check for the caller's error message.
+func validateCheckTimeout(c domain.Check) error {
+	if c.Timeout == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return fmt.Errorf("check %q: invalid timeout %q: %w", c.Name, c.Timeout, err)
+	}
+	if d > maxCheckTimeout {
+		return fmt.Errorf("check %q: timeout %s exceeds maximum %s", c.Name, d, maxCheckTimeout)
+	}
+	return nil
 }
 
 // RenderChecks renders the canonical fenced block for a check list.

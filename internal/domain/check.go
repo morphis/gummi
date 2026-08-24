@@ -6,6 +6,8 @@ package domain
 // at approval, editable like any other spec content, and executed by
 // the Verify stage (DESIGN §3, decision 7).
 type Check struct {
-	Name string `yaml:"name"`
-	Cmd  string `yaml:"cmd"`
+	Name     string `yaml:"name"`
+	Cmd      string `yaml:"cmd"`
+	Timeout  string `yaml:"timeout,omitempty"`
+	Baseline *bool  `yaml:"baseline,omitempty"`
 }

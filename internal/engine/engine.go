@@ -781,11 +781,14 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		return ""
 	}
 	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
-	ctx, cancel := context.WithTimeout(context.Background(), verifyStageTimeout)
-	defer cancel()
-	// The shared context bounds the whole set; a per-check bound stops one
-	// hung command from consuming it and starving the rest (verify.CheckTimeout).
-	results := verify.RunBounded(ctx, workDir, checks, verify.CheckTimeout)
+	// The budgeted runner derives an overall deadline from the sum of the
+	// checks' own timeouts (or the package default) plus a small slack,
+	// bounded below by verifyStageTimeout. Each check also gets its own
+	// per-check bound so one hung command cannot starve the rest.
+	results, err := verify.RunWithBudget(context.Background(), workDir, checks, verifyStageTimeout)
+	if err != nil {
+		return ""
+	}
 
 	// The approval-time baseline separates failures the feature caused
 	// from ones the branch was born with. A baseline entry speaks for a
@@ -793,7 +796,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// invalidates what the old run proved. No baseline (older features,
 	// guarded mode) degrades to today's unlabeled FAIL.
 	baseline := map[string]state.CheckResult{}
-	if rows, err := e.cfg.Store.CheckBaseline(ctx, s.Feature.ID); err == nil {
+	if rows, err := e.cfg.Store.CheckBaseline(context.Background(), s.Feature.ID); err == nil {
 		for _, r := range rows {
 			baseline[r.Name] = r
 		}

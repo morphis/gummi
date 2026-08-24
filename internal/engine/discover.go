@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
+	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 )
@@ -71,6 +73,22 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 			return nil, nil
 		}
 	}
+
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		if e.envWarn != nil {
+			e.envWarn(fmt.Sprintf("user config path could not be resolved: %v", err))
+		}
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, e.cfg.Workspace.ConfigFile())
+	if err != nil {
+		return nil, err
+	}
+	if len(cfg.Checks.Default) > 0 {
+		return e.recordChecks(specPath, spec.RenderChecks(cfg.Checks.Default))
+	}
+
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:         workDir,
 		ArtifactPath:    specPath,

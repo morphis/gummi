@@ -110,9 +110,10 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	// run the checks in the worktree, bounded like the Verify stage's own
 	// gummi-side run.
 	workDir := filepath.Join(e.pool.Root(), f.WorktreePath())
-	rctx, cancel := context.WithTimeout(ctx, verifyStageTimeout)
-	defer cancel()
-	results := verify.RunBounded(rctx, workDir, checks, verify.CheckTimeout)
+	results, err := verify.RunWithBudget(ctx, workDir, checks, verifyStageTimeout)
+	if err != nil {
+		return res, err
+	}
 	// classify against the approval-time baseline: a failure the branch was
 	// born with (same command, already failing) is pre-existing and does not
 	// count against this feature — only regressions do. No baseline degrades

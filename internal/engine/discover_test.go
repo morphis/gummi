@@ -96,6 +96,89 @@ func TestDiscoverChecksSkipsWhenBlockExists(t *testing.T) {
 	}
 }
 
+func TestDiscoverChecksUsesConfiguredDefault(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("checks:\n  default:\n    - name: build\n      cmd: go build ./...\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sessions int32
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, _ string) []agent.Event {
+		atomic.AddInt32(&sessions, 1)
+		return []agent.Event{{Kind: agent.EventMessage, Text: "should not run"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "default checks", domain.StagePlan)
+	withWorktree(t, wt, f)
+	p := filepath.Join(wt.Root(), f.ArtifactPath())
+	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(spec.Template(&f)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	checks, err := e.DiscoverChecks(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checks) != 1 || checks[0].Name != "build" {
+		t.Fatalf("checks = %+v", checks)
+	}
+	if n := atomic.LoadInt32(&sessions); n != 0 {
+		t.Errorf("scribe session spawned %d time(s) despite configured default", n)
+	}
+	got, found, _ := spec.ParseChecks(readFile(t, p))
+	if !found || len(got) != 1 || got[0].Name != "build" {
+		t.Fatalf("spec block = %+v (found=%v)", got, found)
+	}
+}
+
+func TestDiscoverChecksConfiguredDefaultNoOpsWhenBlockExists(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	if err := os.WriteFile(ws.ConfigFile(), []byte("checks:\n  default:\n    - name: build\n      cmd: go build ./...\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sessions int32
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, _ string) []agent.Event {
+		atomic.AddInt32(&sessions, 1)
+		return []agent.Event{{Kind: agent.EventMessage, Text: "should not run"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "existing block", domain.StagePlan)
+	withWorktree(t, wt, f)
+	p := filepath.Join(wt.Root(), f.ArtifactPath())
+	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := spec.Template(&f)
+	out, err := spec.UpsertChecks(tmpl, []domain.Check{{Name: "mine", Cmd: "make check"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	checks, err := e.DiscoverChecks(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checks != nil {
+		t.Errorf("discovery on existing block returned %+v", checks)
+	}
+	if n := atomic.LoadInt32(&sessions); n != 0 {
+		t.Errorf("scribe session spawned %d time(s) despite existing block", n)
+	}
+	got, _, _ := spec.ParseChecks(readFile(t, p))
+	if len(got) != 1 || got[0].Name != "mine" {
+		t.Errorf("existing block clobbered: %+v", got)
+	}
+}
+
 func TestDiscoverChecksUnusableReplyIsSoft(t *testing.T) {
 	e, f, p, _ := discoverFixture(t, "I could not find anything conclusive.")
 	checks, err := e.DiscoverChecks(context.Background(), f)

@@ -91,6 +91,67 @@ func TestRunEmitsNotRunWhenBudgetExhausted(t *testing.T) {
 // A check killed by the deadline must be distinguishable from one that
 // failed to start (both surface as ExitCode -1): only the former is a
 // timeout.
+// A check with its own Timeout should not be killed by the package's
+// default per-check bound or the overall floor.
+func TestRunWithBudgetHonorsPerCheckTimeout(t *testing.T) {
+	dir := t.TempDir()
+	checks := []domain.Check{
+		{Name: "long", Cmd: "sleep 3", Timeout: "5m"},
+	}
+	res, err := RunWithBudget(context.Background(), dir, checks, 2*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Status != StatusPass {
+		t.Errorf("expected pass, got %+v", res[0])
+	}
+}
+
+// RunWithBudget's overall deadline is the sum of per-check timeouts when
+// that exceeds the floor, not the floor alone.
+func TestRunWithBudgetOverallDeadlineIsSum(t *testing.T) {
+	dir := t.TempDir()
+	checks := []domain.Check{
+		{Name: "a", Cmd: "sleep 12", Timeout: "3m"},
+		{Name: "b", Cmd: "sleep 12", Timeout: "3m"},
+	}
+	res, err := RunWithBudget(context.Background(), dir, checks, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("got %d results", len(res))
+	}
+	for _, r := range res {
+		if r.Status == StatusTimeout || r.Status == StatusNotRun {
+			t.Errorf("check %q was %v; deadline should cover both serial checks", r.Name, r.Status)
+		}
+		if r.Status != StatusPass {
+			t.Errorf("check %q: expected pass, got %+v", r.Name, r)
+		}
+	}
+}
+
+// effectiveTimeout rejects malformed or over-ceiling timeout strings and
+// names the offending check.
+func TestEffectiveTimeoutValidates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ch   domain.Check
+	}{
+		{name: "malformed", ch: domain.Check{Name: "x", Timeout: "soon"}},
+		{name: "over-ceiling", ch: domain.Check{Name: "x", Timeout: "31m"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := effectiveTimeout(tc.ch); err == nil {
+				t.Fatal("expected error")
+			} else if !strings.Contains(err.Error(), `"x"`) {
+				t.Errorf("error should name check x: %v", err)
+			}
+		})
+	}
+}
+
 func TestRunDistinguishesTimeoutFromSpawnFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()

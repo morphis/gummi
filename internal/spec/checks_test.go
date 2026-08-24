@@ -67,6 +67,58 @@ func TestRenderParseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRenderParseRoundTripOptionalFields(t *testing.T) {
+	// unset Timeout/Baseline must not emit keys (omitempty)
+	in := []domain.Check{{Name: "plain", Cmd: "true"}}
+	rendered := RenderChecks(in)
+	if strings.Contains(rendered, "timeout:") || strings.Contains(rendered, "baseline:") {
+		t.Fatalf("omitempty fields emitted: %s", rendered)
+	}
+	out, found, err := ParseChecks(rendered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || len(out) != 1 || out[0].Timeout != "" || out[0].Baseline != nil {
+		t.Errorf("round trip mismatch: %+v", out)
+	}
+
+	// set values round-trip byte-stable
+	f := false
+	in2 := []domain.Check{{Name: "configured", Cmd: "true", Timeout: "90s", Baseline: &f}}
+	rendered2 := RenderChecks(in2)
+	out2, found2, err2 := ParseChecks(rendered2)
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if !found2 || len(out2) != 1 {
+		t.Fatalf("round trip lost checks: %+v", out2)
+	}
+	if out2[0].Timeout != "90s" || out2[0].Baseline == nil || *out2[0].Baseline != false {
+		t.Errorf("round trip mismatch: %+v", out2[0])
+	}
+}
+
+func TestParseChecksRejectsBadTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		timeout string
+	}{
+		{name: "malformed", timeout: "soon"},
+		{name: "over-ceiling", timeout: "31m"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := "```gummi-checks\n- name: bad\n  cmd: \"true\"\n  timeout: " + tc.timeout + "\n```\n"
+			_, _, err := ParseChecks(doc)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), `"bad"`) {
+				t.Errorf("error should name check: %v", err)
+			}
+		})
+	}
+}
+
 func TestUpsertChecksInsertsUnderVerification(t *testing.T) {
 	f := &domain.Feature{ID: "FD-001", Num: 1, Title: "t", Slug: "t", Kind: domain.KindFeature}
 	doc := Template(f)

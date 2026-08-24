@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/verify"
 )
 
 // BaselineChecks runs the artifact's checks on the fresh worktree and
@@ -76,6 +78,50 @@ func TestBaselineChecksGuardedNoop(t *testing.T) {
 	}
 	if rows, _ := store.CheckBaseline(ctx, f.ID); len(rows) != 0 {
 		t.Errorf("guarded mode persisted a baseline: %+v", rows)
+	}
+}
+
+// Baseline:false checks are excluded from the approval-time baseline but
+// still run at Verify.
+func TestBaselineChecksSkipsBaselineFalse(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{
+		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+	})
+	t.Cleanup(func() { e.Close() })
+
+	ctx := context.Background()
+	f := feature(1, "baseline filter", domain.StagePlan)
+	if err := store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	writeSpecChecks(t, wt, f, "- name: plain\n  cmd: \"true\"\n- name: nonbaseline\n  cmd: \"true\"\n  baseline: false\n")
+
+	results, err := e.BaselineChecks(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Name != "plain" {
+		t.Fatalf("baseline results = %+v, want only plain", results)
+	}
+
+	rows, err := store.CheckBaseline(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "plain" {
+		t.Fatalf("persisted baseline = %+v, want only plain", rows)
+	}
+
+	// verify still runs both
+	all := verify.Run(context.Background(), filepath.Join(wt.Root(), f.WorktreePath()), []domain.Check{
+		{Name: "plain", Cmd: "true"},
+		{Name: "nonbaseline", Cmd: "true"},
+	})
+	if len(all) != 2 || !all[0].OK || !all[1].OK {
+		t.Errorf("verify run = %+v, want both passing", all)
 	}
 }
 

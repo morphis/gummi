@@ -44,9 +44,17 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 	if len(checks) == 0 {
 		return nil, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, verifyStageTimeout)
-	defer cancel()
-	results := verify.RunBounded(runCtx, workDir, checks, verify.CheckTimeout)
+	baselineChecks := checks[:0]
+	for _, ch := range checks {
+		if ch.Baseline != nil && !*ch.Baseline {
+			continue
+		}
+		baselineChecks = append(baselineChecks, ch)
+	}
+	results, err := verify.RunWithBudget(ctx, workDir, baselineChecks, verifyStageTimeout)
+	if err != nil {
+		return nil, err
+	}
 
 	baseline := make([]state.CheckResult, 0, len(results))
 	now := time.Now().UTC()
