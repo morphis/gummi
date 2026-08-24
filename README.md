@@ -160,6 +160,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `P` | restore the plan stage on a quick / skip-plan feature (design phase only) |
 | `v` | run the verify checks |
 | `u` | set the budget envelope (credits; 0 = uncapped) |
+| `o` | change the card's managed repository (before worktree) |
 | `S` | toggle severity sort (todo only) |
 | `tab` / `i` | cycle / open the needs-attention inbox |
 | `n` / `B` / `R` | new feature / new bug / new research card |

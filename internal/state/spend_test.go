@@ -60,6 +60,24 @@ func TestAddSpendTracksEstimatedPortion(t *testing.T) {
 	}
 }
 
+func TestUpdateFeaturePersistsRepo(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "x")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetFeature(ctx, f.ID)
+	got.Repo = "b"
+	if err := s.UpdateFeature(ctx, &got); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.GetFeature(ctx, f.ID)
+	if after.Repo != "b" {
+		t.Errorf("repo after update = %q, want %q", after.Repo, "b")
+	}
+}
+
 func TestUpdateFeaturePreservesSpend(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()

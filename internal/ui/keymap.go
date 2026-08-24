@@ -116,6 +116,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "P", label: "add plan", help: "restore the plan stage on a quick/skip-plan feature (design phase only)"},
 		{key: "v", label: "verify", help: "run verify checks"},
 		{key: "u", label: "envelope", help: "set the budget envelope (credits; 0 = uncapped)"},
+		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
 		{key: "tab", label: "attention", help: "cycle needs-attention queue"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},

@@ -175,11 +175,11 @@ type Feature struct {
 	// can badge and sort by it without a join.
 	Severity Severity
 	// Repo is the configured name of the git repository this card belongs
-	// to, chosen at creation and immutable thereafter. Empty names the
-	// workspace's default repo (the `repo:` key when set, else the
-	// workspace root), so every pre-existing row needs no migration value.
-	// It is metadata for routing git operations; it never feeds a branch,
-	// worktree, or spec path.
+	// to, chosen at creation and changeable until the card cuts a worktree.
+	// Empty names the workspace's default repo (the `repo:` key when set,
+	// else the workspace root), so every pre-existing row needs no migration
+	// value. It is metadata for routing git operations; it never feeds a
+	// branch, worktree, or spec path.
 	Repo      string
 	CreatedAt time.Time
 	UpdatedAt time.Time

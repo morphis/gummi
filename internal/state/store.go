@@ -1059,11 +1059,11 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE features SET title=?, one_liner=?, slug=?,
 			skip_brainstorm=?, skip_plan=?, skip_triage=?, skip_diagnose=?, quick=?, profile=?,
-			budget_envelope=?, updated_at=?
+			budget_envelope=?, repo=?, updated_at=?
 		WHERE id=?`,
 		f.Title, f.OneLiner, f.Slug,
 		f.Skip.Brainstorm, f.Skip.Plan, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.Profile,
-		f.Budget.Envelope,
+		f.Budget.Envelope, f.Repo,
 		now.Format(timeFmt), string(f.ID))
 	if err != nil {
 		return fmt.Errorf("updating %s: %w", f.ID, err)

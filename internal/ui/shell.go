@@ -908,6 +908,20 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				return m.setEnvelope(r.F.ID, to)
 			}))
 		}
+	case "o":
+		if r, ok := m.selected(); ok {
+			if workflow.NeedsWorktree(r.F.Kind, r.F.Stage) || r.HasWorktree {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": repo is fixed once a worktree exists", isErr: true}
+				return nil
+			}
+			if len(m.repoNames) == 0 {
+				m.notice = noticeMsg{text: "no other repositories configured"}
+				return nil
+			}
+			m.Overlay.Push(newRepoPickerDialog(r.F, m.repoNames, func(repo string) tea.Cmd {
+				return m.setRepo(r.F.ID, repo)
+			}))
+		}
 	case "P":
 		if r, ok := m.selected(); ok {
 			return m.routeViaPlan(r.F.ID)
@@ -1420,6 +1434,23 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 		}
 		return noticeMsg{text: fmt.Sprintf("%s topped up — envelope raised to %d credits, resuming",
 			id, f.Budget.Envelope), reload: true}
+	}
+}
+
+// setRepo durably changes a feature's managed repository. It is the
+// command backing the o repo picker; the board reloads on success so the
+// repo badge re-renders immediately.
+func (m *Shell) setRepo(id domain.FeatureID, repo string) tea.Cmd {
+	return func() tea.Msg {
+		updated, err := m.engine.SetRepo(context.Background(), id, repo)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		label := updated.Repo
+		if label == "" {
+			label = "default"
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: repo set to %s", id, label), reload: true}
 	}
 }
 
