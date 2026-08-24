@@ -41,7 +41,7 @@ on failure, and stay offline — no dependency installs, no watch modes.`
 // edits. Best-effort like Estimate: an unusable reply returns (nil, nil)
 // and the Verify agent falls back to discovering the commands itself.
 func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain.Check, error) {
-	model, backend, _ := e.resolveRole(f.Profile, agent.RoleScribe)
+	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return nil, nil
@@ -59,7 +59,8 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		WorkDir:         workDir,
 		ArtifactPath:    specPath,
 		Role:            agent.RoleScribe,
-		Model:           model,
+		Model:           rc.Model,
+		Provider:        rc.Provider,
 		Permission:      e.cfg.Permission,
 		SystemHints:     []string{"You are surveying the repository read-only; do not modify any files."},
 		ExtraReadAllows: []string{specPath},

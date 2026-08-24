@@ -379,7 +379,10 @@ copilot for implement, claude for review.
   llama.cpp, OpenRouter, a self-hosted gateway). zz's `-p ask` mode is
   process-per-turn with no stdin form, so gummi resumes a session via a
   `--session` transcript file rather than an in-process handle. zz owns
-  provider selection through its own `~/.config/zz/config.toml`. This
+  provider selection through its own `~/.config/zz/config.toml`; a
+  role's `provider:` field in `profiles.yaml` names one of that file's
+  `[providers.<name>]` stanzas and gummi forwards it as `--provider`, so
+  different roles under one zz binary can hit different endpoints. This
   backend requires `permissions: allow-all` (zz has no approval
   callback) and cannot run a read-only research session (zz has no flag
   to disable its write/edit/bash tools) — point those roles at `claude`
@@ -411,7 +414,13 @@ Two files in `.gummi/`, both scaffolded on first run:
   role uses whatever `GUMMI_AGENT` selects. This lets a single profile
   mix providers — e.g. `implementer: copilot`, `reviewer: claude` — and
   keeps all provider config (endpoints, keys, credit rates) out of the
-  repo-committed file.
+  repo-committed file. A role also takes an optional `provider:` field,
+  honored only by the zz backend: it names a `[providers.<name>]` stanza
+  in the operator's own `~/.config/zz/config.toml`, so one zz binary can
+  serve different endpoints per role —
+  `architect: { backend: zz, model: gpt-5, provider: hosted-gateway }`
+  alongside `implementer: { backend: zz, model: qwen2.5-coder-32b,
+  provider: local-llama-cpp }`.
 
 Environment variables:
 

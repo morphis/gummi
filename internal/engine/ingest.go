@@ -87,7 +87,7 @@ type IngestStep struct {
 // commentary) as the pass runs. It is called from the pass's goroutine;
 // callers wanting UI updates must hand off to their own loop.
 func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progress func(IngestStep)) (domain.IngestResult, error) {
-	model, backend, _ := e.resolveRole(profile, agent.RoleArchitect)
+	rc, backend := e.resolveRole(profile, agent.RoleArchitect)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return domain.IngestResult{}, fmt.Errorf("no agent configured; cannot ingest")
@@ -123,7 +123,8 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:         wt.RepoRoot(),
 		Role:            agent.RoleArchitect,
-		Model:           model,
+		Model:           rc.Model,
+		Provider:        rc.Provider,
 		Permission:      e.cfg.Permission,
 		SystemHints:     hints,
 		Tools:           tools,
@@ -140,8 +141,8 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 		}
 	}
 	started := "architect reading " + filepath.Base(relPath)
-	if model != "" {
-		started += " (" + model + ")"
+	if rc.Model != "" {
+		started += " (" + rc.Model + ")"
 	}
 	emit(IngestStepNote, started)
 

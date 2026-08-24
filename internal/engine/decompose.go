@@ -84,7 +84,7 @@ func (e *Engine) DecomposeForCard(ctx context.Context, cardID domain.FeatureID, 
 		return domain.IngestResult{}, nil
 	}
 
-	model, backend, _ := e.resolveRole(rsCard.Profile, agent.RoleArchitect)
+	rc, backend := e.resolveRole(rsCard.Profile, agent.RoleArchitect)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return domain.IngestResult{}, fmt.Errorf("no agent configured; cannot decompose")
@@ -98,7 +98,7 @@ func (e *Engine) DecomposeForCard(ctx context.Context, cardID domain.FeatureID, 
 	// re-runs admit a smaller cap each time and eventually admit none.
 	var maxCredits float64
 	if rsCard.Budget.Envelope > 0 {
-		rate := ag.CreditRate(model)
+		rate := ag.CreditRate(rc.Model)
 		remaining := float64(rsCard.Budget.Envelope) - rsCard.Spend.CreditEquivalentAt(rate)
 		if remaining <= 0 {
 			return domain.IngestResult{}, ErrDecomposeExhausted
@@ -131,7 +131,8 @@ func (e *Engine) DecomposeForCard(ctx context.Context, cardID domain.FeatureID, 
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:         wt.RepoRoot(),
 		Role:            agent.RoleArchitect,
-		Model:           model,
+		Model:           rc.Model,
+		Provider:        rc.Provider,
 		Permission:      e.cfg.Permission,
 		SystemHints:     hints,
 		Tools:           tools,

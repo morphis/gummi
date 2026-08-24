@@ -277,7 +277,7 @@ func NewCommitDraftGuardError(reason string) *CommitDraftGuardError {
 // rejection instead of seeing a blank box forever. Deliberate rejections
 // (diff dump / attribution) are returned as a *CommitDraftGuardError.
 func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (string, error) {
-	model, backend, _ := e.resolveRole(f.Profile, agent.RoleScribe)
+	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return "", errors.New("no scribe agent is configured for the scribe backend")
@@ -300,7 +300,8 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		WorkDir:      workDir,
 		ArtifactPath: specPath,
 		Role:         agent.RoleScribe,
-		Model:        model,
+		Model:        rc.Model,
+		Provider:     rc.Provider,
 		Permission:   e.cfg.Permission,
 		SystemHints: []string{
 			fmt.Sprintf("The feature's spec is at %s; read it first.", specPath),

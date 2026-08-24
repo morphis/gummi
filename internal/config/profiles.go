@@ -32,6 +32,12 @@ type RoleConfig struct {
 	// its hardcoded 32000 default; opencode.jsonc's limit.output can only
 	// lower the cap, never raise it). Other backends ignore it.
 	OutputTokenMax int `yaml:"output_token_max"`
+	// Provider, when set, names a `[providers.<name>]` stanza in the
+	// operator's own ~/.config/zz/config.toml. Only the zz backend honors
+	// it (forwarded as `--provider <name>`); every other adapter ignores
+	// it. No credentials, URLs or keys live here — the value is a NAME,
+	// nothing more.
+	Provider string `yaml:"provider"`
 }
 
 // Profile maps role names (architect/implementer/reviewer/scribe) to
@@ -172,6 +178,10 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 			if rc.OutputTokenMax < 0 {
 				return Profiles{}, fmt.Errorf("%s: profile %q role %q output_token_max %d is negative", path, name, role, rc.OutputTokenMax)
 			}
+			if rc.Provider != "" && rc.Backend != "" && rc.Backend != "zz" {
+				return Profiles{}, fmt.Errorf("%s: profile %q role %q sets provider %q but backend %q is not zz; "+
+					"provider: is only honored by the zz backend", path, name, role, rc.Provider, rc.Backend)
+			}
 		}
 	}
 	return p, nil
@@ -215,4 +225,12 @@ profiles:
   #   implementer: { backend: headless, model: qwen2.5-coder-32b }
   #   reviewer: { backend: headless, model: qwen2.5-coder-32b }
   #   scribe: { backend: copilot, model: gpt-5-mini }
+
+  # zz-mixed: zz drives any OpenAI-compatible endpoint; provider: names a
+  # [providers.<name>] stanza in your own ~/.config/zz/config.toml, so
+  # different roles can hit different endpoints under one zz binary.
+  #
+  # zz-mixed:
+  #   architect: { backend: zz, model: gpt-5, provider: hosted-gateway }
+  #   implementer: { backend: zz, model: qwen2.5-coder-32b, provider: local-llama-cpp }
 `

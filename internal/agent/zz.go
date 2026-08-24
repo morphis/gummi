@@ -130,7 +130,7 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		return nil, fmt.Errorf("zz adapter: allocating session dir: %w", err)
 	}
 	s := &zzSession{
-		z: z, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
+		z: z, workdir: opts.WorkDir, model: opts.Model, provider: opts.Provider, hints: opts.SystemHints,
 		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath,
 		sessionPath: filepath.Join(dir, "session.json"), tempRoot: dir,
 		// zz's cage is a single --cwd root with no per-file allowlist; a
@@ -157,6 +157,7 @@ func (z *ZZ) Close() error {
 type zzSession struct {
 	z                  *ZZ
 	workdir, model     string
+	provider           string
 	featureID, mcpSock string
 	hints              []string
 	sessionPath        string // --session value; stable for the session's lifetime
@@ -273,7 +274,11 @@ func (s *zzSession) Send(_ context.Context, msg string) error {
 // buildArgs assembles the argv for one `zz ask` invocation, everything up
 // to (but not including) the trailing prompt argument Send appends.
 func (s *zzSession) buildArgs() ([]string, error) {
-	args := []string{"-p", "--model", s.model, "--session", s.sessionPath}
+	args := []string{"-p", "--model", s.model}
+	if s.provider != "" {
+		args = append(args, "--provider", s.provider)
+	}
+	args = append(args, "--session", s.sessionPath)
 	if s.primed {
 		args = append(args, "--continue")
 	}

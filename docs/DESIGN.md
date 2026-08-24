@@ -245,7 +245,10 @@ small Rust coding agent that fronts any OpenAI-compatible endpoint (local
 llama.cpp, OpenRouter, a self-hosted gateway). zz's CLI is one process per
 turn with no server mode and no stdin form, so its adapter follows codex's
 process-per-turn shape, resuming via a `--session` transcript file instead
-of an in-process thread id.
+of an in-process thread id. A role's `provider:` field in `profiles.yaml`
+selects which `[providers.<name>]` stanza of the operator's own zz config
+that role's session hits, forwarded as `--provider`; omitted, the session
+falls back to zz's own default.
 
 ### 4.2 Orchestrator
 

@@ -162,11 +162,45 @@ func TestResolveRoleUnknownProfileUsesDefault(t *testing.T) {
 	}
 }
 
+// TestResolveRolePropagatesProvider proves a zz-backed role's provider:
+// field reaches the adapter's SessionOpts — guarding the plumbing from
+// silently regressing to always-empty.
+func TestResolveRolePropagatesProvider(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	rec.name = "zz"
+	agents := map[string]agent.Agent{"": rec, "zz": rec}
+	e := New(Config{
+		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "fallback", MaxActive: 1,
+		Profiles: config.Profiles{
+			Default: "mixed",
+			Profiles: map[string]config.Profile{
+				"mixed": {
+					"implementer": {Backend: "zz", Model: "m", Provider: "mab"},
+				},
+			},
+		},
+	})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(6, "impl", domain.StageImplement)
+	f.Profile = "mixed"
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-006", StateDone)
+	if got := rec.opts().Provider; got != "mab" {
+		t.Errorf("SessionOpts.Provider = %q, want mab", got)
+	}
+}
+
 // resolveRole is also exercised directly for the no-profiles case.
 func TestResolveRoleNoProfiles(t *testing.T) {
 	e := &Engine{cfg: Config{Model: "only-model"}}
-	m, backend, otm := e.resolveRole("anything", agent.RoleArchitect)
-	if m != "only-model" || backend != "" || otm != 0 {
-		t.Errorf("no-profiles resolve = (%q, %q, %d), want (only-model, \"\", 0)", m, backend, otm)
+	rc, backend := e.resolveRole("anything", agent.RoleArchitect)
+	if rc.Model != "only-model" || backend != "" || rc.Provider != "" {
+		t.Errorf("no-profiles resolve = (%+v, %q), want (RoleConfig{Model: only-model}, \"\")", rc, backend)
 	}
 }

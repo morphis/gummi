@@ -58,7 +58,7 @@ func parseScribeEstimate(text string) (float64, bool) {
 // the board. Returns (0,nil) when the scribe declines or its reply can't
 // be parsed — estimation is advisory and never fatal.
 func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error) {
-	model, backend, _ := e.resolveRole(f.Profile, agent.RoleScribe)
+	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return 0, nil
@@ -71,7 +71,8 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 		WorkDir:         workDir,
 		ArtifactPath:    specPath,
 		Role:            agent.RoleScribe,
-		Model:           model,
+		Model:           rc.Model,
+		Provider:        rc.Provider,
 		Permission:      e.cfg.Permission,
 		SystemHints:     []string{fmt.Sprintf("The feature's spec is at %s; read it first.", specPath)},
 		ExtraReadAllows: []string{specPath},

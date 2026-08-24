@@ -115,6 +115,9 @@ func TestZZBuildArgs(t *testing.T) {
 	if strings.Contains(got, "--mcp") {
 		t.Errorf("argv has unexpected --mcp: %s", got)
 	}
+	if strings.Contains(got, "--provider") {
+		t.Errorf("argv has unexpected --provider (Provider unset): %s", got)
+	}
 	if args[len(args)-1] != "ask" {
 		t.Errorf("ask must be the last token (prompt appended by Send): %v", args)
 	}
@@ -153,6 +156,21 @@ func TestZZBuildArgs(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(args, " "), "--cwd") {
 		t.Errorf("cwd should be suppressed: %v", args)
+	}
+}
+
+// TestZZBuildArgsProvider proves --provider is emitted immediately after
+// --model when SessionOpts.Provider is set (and NewSession copies it onto
+// the session), so a role can pick its zz endpoint per-profile.
+func TestZZBuildArgsProvider(t *testing.T) {
+	s := &zzSession{model: "m", provider: "mab", sessionPath: "/tmp/sess.json", workdir: "/work"}
+	args, err := s.buildArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "--model", "m", "--provider", "mab", "--session", "/tmp/sess.json", "--cwd", "/work", "ask"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Errorf("argv = %v, want %v", args, want)
 	}
 }
 

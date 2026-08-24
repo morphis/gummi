@@ -156,6 +156,38 @@ func TestProfilesTemplateParses(t *testing.T) {
 // TestParseProfilesRejectsMalformedYAML: a document with a YAML syntax
 // error must fail loudly rather than silently loading zero profiles (the
 // probe round-trip must not swallow the parse error).
+func TestParseProfilesProviderRoundTrip(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: zz, model: m, provider: mab }\n")
+	if got := p.Profiles["x"]["implementer"].Provider; got != "mab" {
+		t.Errorf("provider = %q, want mab", got)
+	}
+}
+
+func TestParseProfilesProviderAcceptedWithoutBackend(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { model: m, provider: mab }\n")
+	if got := p.Profiles["x"]["implementer"].Provider; got != "mab" {
+		t.Errorf("provider = %q, want mab", got)
+	}
+	if got := p.Profiles["x"]["implementer"].Backend; got != "" {
+		t.Errorf("backend = %q, want empty", got)
+	}
+}
+
+func TestParseProfilesProviderRejectedForNonZZ(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, `profiles:
+  x:
+    implementer: { backend: claude, model: m, provider: mab }
+`))
+	if err == nil {
+		t.Fatal("provider: on a non-zz backend should be rejected")
+	}
+	for _, want := range []string{"provider", "claude", "x", "implementer"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
 func TestParseProfilesRejectsMalformedYAML(t *testing.T) {
 	_, err := LoadProfiles(profilesPath(t, "profiles:\n  x:\n    architect: { model: m\n"))
 	if err == nil {

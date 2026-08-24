@@ -564,10 +564,10 @@ func (e *Engine) startAutonomous(s *Session) {
 	// price this session's token spend at the resolved adapter's rate
 	// (0 = default), and use the same rate for the remaining-envelope
 	// baseline so the budget math is self-consistent.
-	model, backend, _ := e.resolveRole(s.Feature.Profile, s.Role)
+	rc, backend := e.resolveRole(s.Feature.Profile, s.Role)
 	rate := 0.0
 	if a := e.agentFor(backend); a != nil {
-		rate = a.CreditRate(model)
+		rate = a.CreditRate(rc.Model)
 	}
 	s.setByokRate(rate)
 	// compute the stage budget once so the enforced cap, the budget-aware
@@ -761,16 +761,16 @@ func indentLines(s string) string {
 // status displays (and interactive budget math) have them from the
 // moment the session exists, not after the first usage event.
 func (e *Engine) stampSpawnInfo(s *Session) {
-	model, backend, _ := e.resolveRole(s.Feature.Profile, s.Role)
+	rc, backend := e.resolveRole(s.Feature.Profile, s.Role)
 	name := ""
 	rate := 0.0
 	clientTools := false
 	if a := e.agentFor(backend); a != nil {
 		name = a.Name()
-		rate = a.CreditRate(model)
+		rate = a.CreditRate(rc.Model)
 		clientTools = a.Capabilities().ClientTools
 	}
-	s.setSpawnInfo(name, model, clientTools)
+	s.setSpawnInfo(name, rc.Model, clientTools)
 	s.setByokRate(rate)
 	s.setSandboxMode(e.resolveSandbox(s.Feature).Mode)
 }
@@ -787,7 +787,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	if err != nil {
 		return nil, "", nil, err
 	}
-	model, backend, outputTokenMax := e.resolveRole(f.Profile, role)
+	rc, backend := e.resolveRole(f.Profile, role)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		if backend == "" {
@@ -866,12 +866,13 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		WorkDir:        workDir,
 		ArtifactPath:   specPath,
 		Role:           role,
-		Model:          model,
+		Model:          rc.Model,
 		SystemHints:    hints,
 		Permission:     e.cfg.Permission,
 		MaxCredits:     maxCredits,
 		Tools:          tools,
-		OutputTokenMax: outputTokenMax,
+		OutputTokenMax: rc.OutputTokenMax,
+		Provider:       rc.Provider,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(f.ID),
 		ReadOnly:       readOnly,
