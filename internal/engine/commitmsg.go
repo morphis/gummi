@@ -302,6 +302,7 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		Role:         agent.RoleScribe,
 		Model:        rc.Model,
 		Provider:     rc.Provider,
+		Think:        rc.Think,
 		Permission:   e.cfg.Permission,
 		SystemHints: []string{
 			fmt.Sprintf("The feature's spec is at %s; read it first.", specPath),

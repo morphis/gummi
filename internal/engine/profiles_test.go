@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -193,6 +194,74 @@ func TestResolveRolePropagatesProvider(t *testing.T) {
 	waitState(t, e, "FD-006", StateDone)
 	if got := rec.opts().Provider; got != "mab" {
 		t.Errorf("SessionOpts.Provider = %q, want mab", got)
+	}
+}
+
+// TestResolveRolePropagatesThink proves a zz-backed role's think: field
+// reaches the adapter's SessionOpts — guarding the plumbing from silently
+// regressing to always-empty, the same way TestResolveRolePropagatesProvider
+// guards Provider.
+func TestResolveRolePropagatesThink(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	rec.name = "zz"
+	agents := map[string]agent.Agent{"": rec, "zz": rec}
+	e := New(Config{
+		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "fallback", MaxActive: 1,
+		Profiles: config.Profiles{
+			Default: "mixed",
+			Profiles: map[string]config.Profile{
+				"mixed": {
+					"implementer": {Backend: "zz", Model: "m", Think: "high"},
+				},
+			},
+		},
+	})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(7, "impl", domain.StageImplement)
+	f.Profile = "mixed"
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-007", StateDone)
+	if got := rec.opts().Think; got != "high" {
+		t.Errorf("SessionOpts.Think = %q, want high", got)
+	}
+}
+
+// TestScribeSessionCarriesThink guards the transient-session sites (this
+// one via DraftCommitMessage's scribe role): every callsite that copies
+// rc.Provider onto SessionOpts must also copy rc.Think, not just the
+// stage seam TestResolveRolePropagatesThink covers.
+func TestScribeSessionCarriesThink(t *testing.T) {
+	rec := &recorder{Fake: agent.NewFake("```gummi-commit\nfeat(ui): prefill the merge dialog\n\n- drafts from the spec\n```")}
+	rec.name = "zz"
+	ws, store, wt := newRepo(t)
+	agents := map[string]agent.Agent{"": rec, "zz": rec}
+	e := New(Config{
+		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
+		Model: "fallback", MaxActive: 1,
+		Profiles: config.Profiles{
+			Default: "mixed",
+			Profiles: map[string]config.Profile{
+				"mixed": {
+					"scribe": {Backend: "zz", Model: "m", Think: "low"},
+				},
+			},
+		},
+	})
+	t.Cleanup(func() { e.Close() })
+	f := feature(8, "impl", domain.StageImplement)
+	f.Profile = "mixed"
+	withWorktree(t, wt, f)
+	if _, err := e.DraftCommitMessage(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.opts().Think; got != "low" {
+		t.Errorf("SessionOpts.Think = %q, want low", got)
 	}
 }
 

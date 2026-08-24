@@ -382,14 +382,31 @@ copilot for implement, claude for review.
   provider selection through its own `~/.config/zz/config.toml`; a
   role's `provider:` field in `profiles.yaml` names one of that file's
   `[providers.<name>]` stanzas and gummi forwards it as `--provider`, so
-  different roles under one zz binary can hit different endpoints. This
-  backend requires `permissions: allow-all` (zz has no approval
-  callback) and cannot run a read-only research session (zz has no flag
-  to disable its write/edit/bash tools) — point those roles at `claude`
-  or `opencode` instead. Its prompt travels as a positional argv string,
-  so a single turn is bounded well under Linux's 128 KiB argv limit. Set
-  `GUMMI_ZZ_CREDITS_PER_1K` to price its token spend into credits, the
-  same escape hatch headless uses.
+  different roles under one zz binary can hit different endpoints. A
+  role's `think:` field is forwarded as `--think <level>`, an opaque
+  value declared by the provider stanza (an architect wants a high
+  level, a scribe wants none). This backend requires `permissions:
+  allow-all` (zz has no approval callback) and cannot run a read-only
+  research session (zz has no flag to disable its write/edit/bash
+  tools) — point those roles at `claude` or `opencode` instead. Its
+  prompt travels as a positional argv string, so a single turn is
+  bounded well under Linux's 128 KiB argv limit. Every invocation also
+  carries `--max-turns` (default 200, override with
+  `GUMMI_ZZ_MAX_TURNS`) as a runaway-loop backstop — gummi's real spend
+  limiter is the credit envelope, not a turn count, so this only exists
+  to catch a session that never converges; hitting it ends the turn
+  with an actionable error naming the cap and the env knob that raises
+  it. Set `GUMMI_ZZ_CREDITS_PER_1K` to price its token spend into
+  credits, the same escape hatch headless uses.
+
+  zz also offers `--no-skills` and `--no-agents-md`; gummi passes
+  neither. gummi suppresses OPERATOR-level config that could hijack a
+  stage (codex gets `--ignore-user-config`, claude gets
+  `--strict-mcp-config` and a scrubbed session env), but it does not
+  suppress REPO-level agent instructions — no adapter disables
+  AGENTS.md, CLAUDE.md, or project skills, because those are the
+  repository's own guidance for agents working in it. zz follows the
+  same rule and sees the same repo context every other backend sees.
 
 No usable agent just leaves the board static — creation, specs,
 worktrees, and gates all still work.
@@ -414,13 +431,14 @@ Two files in `.gummi/`, both scaffolded on first run:
   role uses whatever `GUMMI_AGENT` selects. This lets a single profile
   mix providers — e.g. `implementer: copilot`, `reviewer: claude` — and
   keeps all provider config (endpoints, keys, credit rates) out of the
-  repo-committed file. A role also takes an optional `provider:` field,
-  honored only by the zz backend: it names a `[providers.<name>]` stanza
-  in the operator's own `~/.config/zz/config.toml`, so one zz binary can
-  serve different endpoints per role —
-  `architect: { backend: zz, model: gpt-5, provider: hosted-gateway }`
-  alongside `implementer: { backend: zz, model: qwen2.5-coder-32b,
-  provider: local-llama-cpp }`.
+  repo-committed file. A role also takes two optional zz-only fields:
+  `provider:` names a `[providers.<name>]` stanza in the operator's own
+  `~/.config/zz/config.toml`, so one zz binary can serve different
+  endpoints per role, and `think:` forwards a thinking level (opaque to
+  gummi — whatever the provider stanza declares) —
+  `architect: { backend: zz, model: gpt-5, provider: hosted-gateway,
+  think: high }` alongside `implementer: { backend: zz, model:
+  qwen2.5-coder-32b, provider: local-llama-cpp }`.
 
 Environment variables:
 
@@ -434,6 +452,7 @@ Environment variables:
 | `GUMMI_ZZ_BIN` | zz backend's binary (default `zz` on PATH) |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | headless adapter's token→credit rate for a local endpoint (llama.cpp, vLLM); 0 uses the engine default |
 | `GUMMI_ZZ_CREDITS_PER_1K` | zz adapter's token→credit rate; 0 uses the engine default |
+| `GUMMI_ZZ_MAX_TURNS` | zz adapter's runaway-turn backstop (default 200); a session that hits the cap ends with an actionable error |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
 | `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |

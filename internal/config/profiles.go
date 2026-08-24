@@ -38,6 +38,12 @@ type RoleConfig struct {
 	// it. No credentials, URLs or keys live here — the value is a NAME,
 	// nothing more.
 	Provider string `yaml:"provider"`
+	// Think, when set, is forwarded verbatim as `--think <level>`. Only
+	// the zz backend honors it; every other adapter ignores it. The
+	// valid levels are declared by the operator's own provider stanza,
+	// not a fixed enum gummi can validate, so the value is opaque —
+	// treated exactly like Model.
+	Think string `yaml:"think"`
 }
 
 // Profile maps role names (architect/implementer/reviewer/scribe) to
@@ -182,6 +188,10 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 				return Profiles{}, fmt.Errorf("%s: profile %q role %q sets provider %q but backend %q is not zz; "+
 					"provider: is only honored by the zz backend", path, name, role, rc.Provider, rc.Backend)
 			}
+			if rc.Think != "" && rc.Backend != "" && rc.Backend != "zz" {
+				return Profiles{}, fmt.Errorf("%s: profile %q role %q sets think %q but backend %q is not zz; "+
+					"think: is only honored by the zz backend", path, name, role, rc.Think, rc.Backend)
+			}
 		}
 	}
 	return p, nil
@@ -229,8 +239,10 @@ profiles:
   # zz-mixed: zz drives any OpenAI-compatible endpoint; provider: names a
   # [providers.<name>] stanza in your own ~/.config/zz/config.toml, so
   # different roles can hit different endpoints under one zz binary.
+  # think: forwards a thinking level to the provider stanza (opaque to
+  # gummi, so any value the provider declares is accepted).
   #
   # zz-mixed:
-  #   architect: { backend: zz, model: gpt-5, provider: hosted-gateway }
+  #   architect: { backend: zz, model: gpt-5, provider: hosted-gateway, think: high }
   #   implementer: { backend: zz, model: qwen2.5-coder-32b, provider: local-llama-cpp }
 `

@@ -36,6 +36,34 @@ const zzArgvPromptMaxBytes = 96 * 1024
 // engine's token-priced fallback applies.
 const zzCreditRateEnv = "GUMMI_ZZ_CREDITS_PER_1K" //nolint:gosec // an env var name, not a credential
 
+// zzMaxTurnsEnv overrides zz's per-session turn cap. gummi's real spend
+// limiter is the credit envelope, not a turn count; this cap only exists
+// as a runaway-loop backstop, so the override is lenient by design (see
+// zzMaxTurns).
+const zzMaxTurnsEnv = "GUMMI_ZZ_MAX_TURNS"
+
+// zzMaxTurnsDefault is passed on every zz invocation unless overridden.
+// zz's own default is 50, which a long implement stage can exceed; 200
+// is well above a normal stage's turn count while still catching a
+// genuine runaway loop.
+const zzMaxTurnsDefault = 200
+
+// zzMaxTurns reads the operator's turn-cap override. Absent, unparseable,
+// zero or negative all fall back to zzMaxTurnsDefault rather than
+// erroring — an operator typo must not wedge every zz session, the same
+// lenient shape as CreditRate's GUMMI_ZZ_CREDITS_PER_1K parse.
+func zzMaxTurns() int {
+	v := strings.TrimSpace(os.Getenv(zzMaxTurnsEnv))
+	if v == "" {
+		return zzMaxTurnsDefault
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return zzMaxTurnsDefault
+	}
+	return n
+}
+
 // ZZ drives the zz CLI, a small Rust coding agent that fronts any
 // OpenAI-compatible endpoint. `zz -p ask "<prompt>"` is strictly one
 // process per turn — there is no stdin form and no long-lived
@@ -136,9 +164,9 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		return nil, fmt.Errorf("zz adapter: allocating session dir: %w", err)
 	}
 	s := &zzSession{
-		z: z, workdir: opts.WorkDir, model: opts.Model, provider: opts.Provider, hints: opts.SystemHints,
+		z: z, workdir: opts.WorkDir, model: opts.Model, provider: opts.Provider, think: opts.Think, hints: opts.SystemHints,
 		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, mcpLabel: mcpLabel,
-		sessionPath: filepath.Join(dir, "session.json"), tempRoot: dir,
+		sessionPath: filepath.Join(dir, "session.json"), tempRoot: dir, maxTurns: zzMaxTurns(),
 		// zz's cage is a single --cwd root with no per-file allowlist; a
 		// transient session with ExtraReadAllows must read outside
 		// WorkDir, so it runs without --cwd rather than being denied.
@@ -164,6 +192,8 @@ type zzSession struct {
 	z                  *ZZ
 	workdir, model     string
 	provider           string
+	think              string
+	maxTurns           int // frozen at NewSession from zzMaxTurns(); argv and the max_turns error both read this, never the env directly
 	featureID, mcpSock string
 	mcpLabel           string // filepath.Base of the resolved gummi exe; "" when the session was not started with --mcp
 	hints              []string
@@ -291,6 +321,9 @@ func (s *zzSession) buildArgs() ([]string, error) {
 	if s.provider != "" {
 		args = append(args, "--provider", s.provider)
 	}
+	if s.think != "" {
+		args = append(args, "--think", s.think)
+	}
 	args = append(args, "--session", s.sessionPath)
 	if s.primed {
 		args = append(args, "--continue")
@@ -305,6 +338,7 @@ func (s *zzSession) buildArgs() ([]string, error) {
 	if !s.cwdSuppressed {
 		args = append(args, "--cwd", s.workdir)
 	}
+	args = append(args, "--max-turns", strconv.Itoa(s.maxTurns))
 	args = append(args, "ask")
 	return args, nil
 }
@@ -574,6 +608,9 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 		_ = json.Unmarshal(line, &d)
 		if d.StopReason == "end_turn" {
 			return []Event{{Kind: EventIdle}}, true, nil
+		}
+		if d.StopReason == "max_turns" {
+			return nil, true, fmt.Errorf("zz turn ended: hit the %d-turn cap (raise it with %s)", s.maxTurns, zzMaxTurnsEnv)
 		}
 		return nil, true, fmt.Errorf("zz turn ended: %s", d.StopReason)
 	case "thinking", "turn_start", "user":

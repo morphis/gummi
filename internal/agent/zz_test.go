@@ -239,13 +239,13 @@ func TestZZBuildArgs(t *testing.T) {
 	zzExecPath = func() (string, error) { return "/opt/gummi-stub", nil }
 	t.Cleanup(func() { zzExecPath = prev })
 
-	s := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work"}
+	s := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", maxTurns: zzMaxTurnsDefault}
 	args, err := s.buildArgs()
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := strings.Join(args, " ")
-	for _, tok := range []string{"-p", "--model m", "--session /tmp/sess.json", "--cwd /work", "ask"} {
+	for _, tok := range []string{"-p", "--model m", "--session /tmp/sess.json", "--cwd /work", "--max-turns 200", "ask"} {
 		if !strings.Contains(got, tok) {
 			t.Errorf("argv missing %q: %s", tok, got)
 		}
@@ -258,6 +258,9 @@ func TestZZBuildArgs(t *testing.T) {
 	}
 	if strings.Contains(got, "--provider") {
 		t.Errorf("argv has unexpected --provider (Provider unset): %s", got)
+	}
+	if strings.Contains(got, "--think") {
+		t.Errorf("argv has unexpected --think (Think unset): %s", got)
 	}
 	if args[len(args)-1] != "ask" {
 		t.Errorf("ask must be the last token (prompt appended by Send): %v", args)
@@ -272,7 +275,7 @@ func TestZZBuildArgs(t *testing.T) {
 		t.Errorf("turn 2 missing --continue: %v", args)
 	}
 
-	mcp := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", featureID: "FD-100", mcpSock: "/tmp/mcp.sock"}
+	mcp := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", featureID: "FD-100", mcpSock: "/tmp/mcp.sock", maxTurns: zzMaxTurnsDefault}
 	args, err = mcp.buildArgs()
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +284,7 @@ func TestZZBuildArgs(t *testing.T) {
 		t.Errorf("mcp argv wrong: %v", args)
 	}
 
-	noFeature := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", mcpSock: "/tmp/mcp.sock"}
+	noFeature := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", mcpSock: "/tmp/mcp.sock", maxTurns: zzMaxTurnsDefault}
 	args, err = noFeature.buildArgs()
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +293,7 @@ func TestZZBuildArgs(t *testing.T) {
 		t.Errorf("mcp emitted without a feature id: %v", args)
 	}
 
-	suppressed := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", cwdSuppressed: true}
+	suppressed := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", cwdSuppressed: true, maxTurns: zzMaxTurnsDefault}
 	args, err = suppressed.buildArgs()
 	if err != nil {
 		t.Fatal(err)
@@ -304,12 +307,50 @@ func TestZZBuildArgs(t *testing.T) {
 // --model when SessionOpts.Provider is set (and NewSession copies it onto
 // the session), so a role can pick its zz endpoint per-profile.
 func TestZZBuildArgsProvider(t *testing.T) {
-	s := &zzSession{model: "m", provider: "mab", sessionPath: "/tmp/sess.json", workdir: "/work"}
+	s := &zzSession{model: "m", provider: "mab", sessionPath: "/tmp/sess.json", workdir: "/work", maxTurns: zzMaxTurnsDefault}
 	args, err := s.buildArgs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-p", "--model", "m", "--provider", "mab", "--session", "/tmp/sess.json", "--cwd", "/work", "ask"}
+	want := []string{"-p", "--model", "m", "--provider", "mab", "--session", "/tmp/sess.json", "--cwd", "/work", "--max-turns", "200", "ask"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Errorf("argv = %v, want %v", args, want)
+	}
+}
+
+// TestZZBuildArgsThink proves --think is emitted (and omitted) the same
+// way --provider is, mirroring TestZZBuildArgsProvider.
+func TestZZBuildArgsThink(t *testing.T) {
+	withThink := &zzSession{model: "m", think: "high", sessionPath: "/tmp/sess.json", workdir: "/work", maxTurns: zzMaxTurnsDefault}
+	args, err := withThink.buildArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--think high") {
+		t.Errorf("argv missing --think high: %v", args)
+	}
+
+	noThink := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", maxTurns: zzMaxTurnsDefault}
+	args, err = noThink.buildArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(args, " "), "--think") {
+		t.Errorf("argv has unexpected --think (Think unset): %v", args)
+	}
+}
+
+// TestZZBuildArgsProviderAndThink pins the exact argv ordering when both
+// Provider and Think are set alongside the default turn cap: --provider
+// immediately after --model, --think immediately after --provider, and
+// --max-turns as the unconditional tail before "ask".
+func TestZZBuildArgsProviderAndThink(t *testing.T) {
+	s := &zzSession{model: "m", provider: "mab", think: "high", sessionPath: "/tmp/sess.json", workdir: "/work", maxTurns: zzMaxTurnsDefault}
+	args, err := s.buildArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "--model", "m", "--provider", "mab", "--think", "high", "--session", "/tmp/sess.json", "--cwd", "/work", "--max-turns", "200", "ask"}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Errorf("argv = %v, want %v", args, want)
 	}
@@ -585,8 +626,10 @@ func TestZZDoneNonEndTurn(t *testing.T) {
 		case ev := <-sess.Events():
 			switch ev.Kind {
 			case EventError:
-				if !strings.Contains(ev.Err.Error(), "max_turns") {
-					t.Fatalf("error = %v, want mention of max_turns", ev.Err)
+				for _, want := range []string{"200", zzMaxTurnsEnv} {
+					if !strings.Contains(ev.Err.Error(), want) {
+						t.Fatalf("error = %v, want it to mention %q", ev.Err, want)
+					}
 				}
 				return
 			case EventIdle:
@@ -595,6 +638,64 @@ func TestZZDoneNonEndTurn(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timeout")
 		}
+	}
+}
+
+// TestZZMaxTurnsErrorMessage proves the max_turns branch names both the
+// cap in force and the env knob that raises it, at the mapLine level
+// (rather than through a full subprocess round trip).
+func TestZZMaxTurnsErrorMessage(t *testing.T) {
+	s := &zzSession{model: "m", maxTurns: 200}
+	_, _, err := s.mapLine([]byte(`{"type":"done","stop_reason":"max_turns"}`))
+	if err == nil {
+		t.Fatal("want an error for stop_reason max_turns")
+	}
+	for _, want := range []string{"200", "GUMMI_ZZ_MAX_TURNS"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to contain %q", err, want)
+		}
+	}
+}
+
+// TestZZDoneOtherStopReasonUnchanged proves stop reasons other than
+// max_turns keep their existing generic message untouched.
+func TestZZDoneOtherStopReasonUnchanged(t *testing.T) {
+	s := &zzSession{model: "m", maxTurns: 200}
+	_, _, err := s.mapLine([]byte(`{"type":"done","stop_reason":"length"}`))
+	if err == nil || err.Error() != "zz turn ended: length" {
+		t.Errorf("error = %v, want \"zz turn ended: length\"", err)
+	}
+}
+
+// TestZZMaxTurns proves the GUMMI_ZZ_MAX_TURNS parse is as lenient as
+// CreditRate's GUMMI_ZZ_CREDITS_PER_1K: absent, unparseable, zero, or
+// negative all fall back to the default rather than erroring.
+func TestZZMaxTurns(t *testing.T) {
+	if got := zzMaxTurns(); got != zzMaxTurnsDefault {
+		t.Errorf("unset = %d, want default %d", got, zzMaxTurnsDefault)
+	}
+	t.Setenv(zzMaxTurnsEnv, "42")
+	if got := zzMaxTurns(); got != 42 {
+		t.Errorf("valid = %d, want 42", got)
+	}
+	for _, bad := range []string{"garbage", "0", "-3"} {
+		t.Setenv(zzMaxTurnsEnv, bad)
+		if got := zzMaxTurns(); got != zzMaxTurnsDefault {
+			t.Errorf("%q = %d, want default %d", bad, got, zzMaxTurnsDefault)
+		}
+	}
+}
+
+// TestZZBuildArgsMaxTurnsOverride proves a NewSession-frozen maxTurns
+// (as GUMMI_ZZ_MAX_TURNS would set it) reaches the argv tail.
+func TestZZBuildArgsMaxTurnsOverride(t *testing.T) {
+	s := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", maxTurns: 42}
+	args, err := s.buildArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--max-turns 42") {
+		t.Errorf("argv missing --max-turns 42: %v", args)
 	}
 }
 

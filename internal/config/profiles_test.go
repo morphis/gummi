@@ -188,6 +188,52 @@ func TestParseProfilesProviderRejectedForNonZZ(t *testing.T) {
 	}
 }
 
+func TestParseProfilesThinkRoundTrip(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: zz, model: m, think: high }\n")
+	if got := p.Profiles["x"]["implementer"].Think; got != "high" {
+		t.Errorf("think = %q, want high", got)
+	}
+}
+
+func TestParseProfilesThinkAcceptedWithoutBackend(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { model: m, think: high }\n")
+	if got := p.Profiles["x"]["implementer"].Think; got != "high" {
+		t.Errorf("think = %q, want high", got)
+	}
+	if got := p.Profiles["x"]["implementer"].Backend; got != "" {
+		t.Errorf("backend = %q, want empty", got)
+	}
+}
+
+func TestParseProfilesThinkRejectedForNonZZ(t *testing.T) {
+	_, err := LoadProfiles(profilesPath(t, `profiles:
+  x:
+    implementer: { backend: claude, model: m, think: high }
+`))
+	if err == nil {
+		t.Fatal("think: on a non-zz backend should be rejected")
+	}
+	for _, want := range []string{"think", "claude", "x", "implementer"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestParseProfilesThinkAbsentIsEmpty(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { model: m }\n")
+	if got := p.Profiles["x"]["implementer"].Think; got != "" {
+		t.Errorf("think = %q, want empty", got)
+	}
+}
+
+func TestParseProfilesThinkAcceptsArbitraryValue(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: zz, model: m, think: ludicrous }\n")
+	if got := p.Profiles["x"]["implementer"].Think; got != "ludicrous" {
+		t.Errorf("think = %q, want ludicrous (values are opaque, not validated)", got)
+	}
+}
+
 func TestParseProfilesRejectsMalformedYAML(t *testing.T) {
 	_, err := LoadProfiles(profilesPath(t, "profiles:\n  x:\n    architect: { model: m\n"))
 	if err == nil {

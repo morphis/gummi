@@ -248,7 +248,12 @@ process-per-turn shape, resuming via a `--session` transcript file instead
 of an in-process thread id. A role's `provider:` field in `profiles.yaml`
 selects which `[providers.<name>]` stanza of the operator's own zz config
 that role's session hits, forwarded as `--provider`; omitted, the session
-falls back to zz's own default.
+falls back to zz's own default. A sibling `think:` field forwards an
+opaque thinking level as `--think`, letting an architect role reason at a
+high level while a scribe role runs at none. Every zz session also
+carries an unconditional `--max-turns` (default 200, overridable via
+`GUMMI_ZZ_MAX_TURNS`) as a runaway-loop backstop distinct from the credit
+envelope that is gummi's real spend limiter.
 
 ### 4.2 Orchestrator
 

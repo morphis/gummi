@@ -95,6 +95,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		Role:            agent.RoleScribe,
 		Model:           rc.Model,
 		Provider:        rc.Provider,
+		Think:           rc.Think,
 		Permission:      e.cfg.Permission,
 		SystemHints:     []string{"You are surveying the repository read-only; do not modify any files."},
 		ExtraReadAllows: []string{specPath},

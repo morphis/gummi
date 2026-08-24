@@ -105,6 +105,11 @@ type SessionOpts struct {
 	// adapter consumes it (forwarded as `--provider <name>`); other
 	// adapters ignore it.
 	Provider string
+	// Think names a thinking level. Only the zz adapter consumes it
+	// (forwarded as `--think <level>`); other adapters ignore it. The
+	// value is opaque — valid levels are declared by the operator's own
+	// provider stanza, not a set gummi validates.
+	Think string
 	// MCPSockPath is the absolute unix socket path of the session's
 	// inbound MCP endpoint, stamped by the engine when the backend's
 	// Capabilities().ClientTools is false so the child can serve gummi's
