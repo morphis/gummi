@@ -360,11 +360,40 @@ func (m *Manager) BranchExists(ctx context.Context, f *domain.Feature) (bool, er
 	return gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 }
 
+// unregisterStaleWorktree clears git's worktree registration for f when
+// the worktree directory is already gone (e.g. after a crash or manual
+// removal). Without this, later branch deletion fails with "used by
+// worktree" even though the directory no longer exists. An active
+// worktree — one whose directory still exists — is left alone so callers
+// don't silently destroy work-in-progress; Remove handles those.
+func (m *Manager) unregisterStaleWorktree(ctx context.Context, f *domain.Feature) error {
+	p, _, err := m.featurePaths(f)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(p); err == nil {
+		// Directory still exists: worktree is active, leave it to Remove.
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	_, err = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+	if err != nil && !strings.Contains(err.Error(), "is not a working tree") {
+		return err
+	}
+	return nil
+}
+
 // DeleteBranch removes the feature's branch. Without force it refuses
 // branches that are not fully merged into HEAD (git -d semantics).
 func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force bool) error {
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
+		return err
+	}
+	// A stale worktree registration (directory gone, metadata left) pins
+	// the branch and makes even -D fail. Clean it up first.
+	if err := m.unregisterStaleWorktree(ctx, f); err != nil {
 		return err
 	}
 	flag := "-d"
@@ -390,6 +419,11 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) error {
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
+		return err
+	}
+	// Clear any stale worktree registration so git's branch checks can
+	// operate on the branch alone.
+	if err := m.unregisterStaleWorktree(ctx, f); err != nil {
 		return err
 	}
 	_, derr := runGit(ctx, m.repo, "branch", "-d", "--", branch)

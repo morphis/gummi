@@ -196,6 +196,44 @@ func TestCreateAndRemove(t *testing.T) {
 	}
 }
 
+// TestDeleteBranchWithStaleWorktreeMetadata covers the case where the
+// worktree directory was removed outside git (crash, manual rm), leaving
+// git's worktree registration behind. Exists reports false, but branch
+// deletion used to fail with "used by worktree". DeleteBranch must
+// unregister the stale metadata first.
+func TestDeleteBranchWithStaleWorktreeMetadata(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(42, "Crash recovery")
+
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Give the branch a commit so -d would refuse it; we will use -D.
+	writeFile(t, p, "work.txt", "wip\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "wip")
+
+	// Simulate a crash: delete the directory without telling git.
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := m.Exists(ctx, f); ok {
+		t.Fatal("Exists reports true after directory removed")
+	}
+
+	if err := m.DeleteBranch(ctx, f, true); err != nil {
+		t.Fatalf("DeleteBranch force with stale metadata: %v", err)
+	}
+	if ok, _ := m.BranchExists(ctx, f); ok {
+		t.Fatal("branch survived DeleteBranch")
+	}
+	if paths, err := m.List(ctx); err != nil || len(paths) != 0 {
+		t.Fatalf("stale worktree listed after delete: %v, %v", paths, err)
+	}
+}
+
 func TestCreateInEmptyRepoFails(t *testing.T) {
 	root := t.TempDir()
 	mustGit(t, root, "init", "-q", "-b", "main")
