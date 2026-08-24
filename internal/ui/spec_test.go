@@ -31,6 +31,7 @@ func specWorkspace(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := newWorkspace(t)
 	m.now = func() time.Time { return fixedTime }
+	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Dark mode")
