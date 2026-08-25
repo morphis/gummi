@@ -35,3 +35,14 @@ e2e: build
 
 clean:
 	rm -rf bin
+	rm -f results/*.snap;
+
+.PHONY: build-snap try-snap
+build-snap: clean
+	set -e; ./scripts/build-snap.sh
+
+try-snap: build-snap
+	set -e; \
+	snapfile=$$(ls results/gummi-agent_*.snap | head -n1); \
+	sudo snap install --dangerous --classic "$$snapfile"; \
+	snap run gummi version

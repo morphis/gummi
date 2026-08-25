@@ -21,3 +21,6 @@
 
 # stray root binary from `go build .`
 /gummi
+
+# snapcraft results
+/results/
