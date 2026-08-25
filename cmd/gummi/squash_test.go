@@ -18,9 +18,9 @@ import (
 // squashCLIRepo builds a temp repo with a feature worktree holding three
 // checkpoint commits, the card parked at StageImplement (not done, not
 // verified — squash needs neither), and refs/remotes/origin/main faked to
-// the repo's initial commit so the zero-dependency collapse-base arm
-// resolves without a real remote. It chdirs the test process into the repo
-// root, matching every other headless-command test in this package.
+// the repo's initial commit so the zero-dependency collapse-base arm has a
+// remote to model. It chdirs the test process into the repo root, matching
+// every other headless-command test in this package.
 func squashCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 	t.Helper()
 	root := t.TempDir()
@@ -78,8 +78,8 @@ func squashCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 	return store, f
 }
 
-// A card with checkpoint commits collapses to one commit off origin/main and
-// exits 0, printing the follow-up force-with-lease push hint.
+// A card with checkpoint commits collapses to one commit off its fork point
+// with main and exits 0, printing the follow-up force-with-lease push hint.
 func TestSquashCommand_Happy(t *testing.T) {
 	_, f := squashCLIRepo(t)
 	base := cliGit(t, ".", "rev-parse", "origin/main")

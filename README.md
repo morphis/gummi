@@ -166,7 +166,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
 | `a` | raw-attach the agent CLI in the worktree (escape hatch) |
-| `r` / `m` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) |
+| `r` / `m` / `z` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) / squash in place (collapse the branch to one commit on its fork point) |
 | `y` | duplicate — a fresh copy starts over in todo, the original stays |
 | `c` / `x` | clean up a landed branch / delete |
 

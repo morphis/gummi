@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -70,7 +71,8 @@ type Shell struct {
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
 
-	mergePrep bool // a squash merge's preconditions are being checked (one at a time)
+	mergePrep  bool // a squash merge's preconditions are being checked (one at a time)
+	squashPrep bool // a squash-in-place's preconditions are being checked (one at a time)
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -90,6 +92,10 @@ type Shell struct {
 	copilot       copilotQuota
 	copilotHint   bool
 	ghCopilotUser func(context.Context) ([]byte, error)
+
+	// openReviewThreads probes a linked PR for open review threads.
+	// Tests stub it; nil uses the engine path.
+	openReviewThreads func(context.Context, domain.Feature) (int, string, error)
 
 	// shared activity spinner (spinner.go): frame is the current cycle
 	// position; spinning guards the single live tick loop.
@@ -164,6 +170,41 @@ func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
 // SetCopilotHint toggles the status-bar Copilot quota pill (on by
 // default; it hides itself anyway when gh or a quota is absent).
 func (m *Shell) SetCopilotHint(on bool) { m.copilotHint = on }
+
+// probeOpenReviewThreads returns the count of open review threads and the
+// PR URL for a linked PR, or (0, "", nil) when there is no linked PR. A
+// nil seam falls back to the engine path so tests can stub failures.
+func (m *Shell) probeOpenReviewThreads(ctx context.Context, f domain.Feature) (int, string, error) {
+	if m.openReviewThreads != nil {
+		return m.openReviewThreads(ctx, f)
+	}
+	if f.PullRequest.Empty() {
+		return 0, "", nil
+	}
+	if m.engine == nil {
+		return 0, f.PullRequest.URL, nil
+	}
+	_, diffOpen, _, err := m.engine.GateBlockers(ctx, f.ID)
+	if err != nil {
+		return 0, "", err
+	}
+	return diffOpen, f.PullRequest.URL, nil
+}
+
+// openSquashDialog opens the reused commit-message dialog for a squash
+// in place, pre-filled with the same best-effort draft the merge path uses.
+func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
+	d := newCommitMsgDialog(f, func(message string) tea.Cmd {
+		return m.collapseFeature(f, message)
+	}, func(dctx context.Context, feature domain.Feature) (string, error) {
+		if m.engine == nil {
+			return "", nil
+		}
+		return m.engine.DraftCommitMessage(dctx, feature)
+	})
+	m.Overlay.Push(d)
+	return d.startDraft()
+}
 
 // reconstructInbox rebuilds the needs-attention queue from the engine's
 // restored sessions at startup — the queue is otherwise in-memory and a
@@ -460,6 +501,41 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// start the draft pass off the render loop; the dialog is already
 		// open and editable, and the draft fills only while unmodified.
 		return m, d.startDraft()
+
+	case squashReadyMsg:
+		m.squashPrep = false
+		if msg.err != nil {
+			text := string(msg.f.ID) + " squash failed: " + msg.err.Error()
+			var ne squashNoticeErr
+			if errors.As(msg.err, &ne) {
+				// landed guard carries its own ID-prefixed notice; emit it
+				// verbatim without the generic "squash failed:" wrapper.
+				text = ne.text
+			}
+			m.notice = noticeMsg{text: text, isErr: true}
+			return m, nil
+		}
+		m.notice = noticeMsg{}
+		f := msg.f
+		if msg.openThreads > 0 {
+			detail := strconv.Itoa(msg.openThreads) + " open review thread(s) will be detached from their lines"
+			if msg.prURL != "" {
+				detail = detail + " — " + msg.prURL
+			}
+			m.Overlay.Push(&confirmDialog{
+				id:       "confirm-squash",
+				question: "squash " + string(f.ID) + "?",
+				detail:   detail,
+				onConfirm: func() tea.Cmd {
+					return func() tea.Msg { return squashOpenDialogMsg{f: f} }
+				},
+			})
+			return m, nil
+		}
+		return m, m.openSquashDialog(f)
+
+	case squashOpenDialogMsg:
+		return m, m.openSquashDialog(msg.f)
 
 	case commitDraftMsg:
 		// a late reply from a closed dialog (esc) or a stale pass (ctrl+r
@@ -955,6 +1031,28 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.mergePrep = true
 			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing merge…"}
 			return m.prepareMerge(r.F, false)
+		}
+	case "z":
+		if r, ok := m.selected(); ok {
+			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": no squash — research cards carry no branch"}
+				return nil
+			}
+			if !r.HasWorktree {
+				m.notice = noticeMsg{text: string(r.F.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+				return nil
+			}
+			if r.Landed {
+				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — press c to clean up", isErr: true}
+				return nil
+			}
+			if m.squashPrep {
+				m.notice = noticeMsg{text: string(r.F.ID) + " already preparing a squash — wait for it", isErr: true}
+				return nil
+			}
+			m.squashPrep = true
+			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing squash…"}
+			return m.prepareSquash(r.F)
 		}
 	case "c":
 		if r, ok := m.selected(); ok {
@@ -1586,6 +1684,9 @@ func (m *Shell) statusView(w int) string {
 	}
 	if m.mergePrep {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " merging", Kind: statusbar.KindNeutral})
+	}
+	if m.squashPrep {
+		pills = append(pills, statusbar.Pill{Text: m.spinner() + " squashing", Kind: statusbar.KindNeutral})
 	}
 	if n := m.inbox.len(); n > 0 {
 		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})

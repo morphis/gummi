@@ -12,8 +12,8 @@ import (
 
 // fakeOriginMain points refs/remotes/origin/main at sha in root, so a
 // harness repo with no real remote can still exercise Squash's
-// no-dependency collapse-base arm (ResolveCollapseBase resolves to
-// origin/main when a card has no parent).
+// no-dependency collapse-base arm (ResolveCollapseBase resolves to the
+// branch's fork point with main).
 func fakeOriginMain(t *testing.T, root, sha string) {
 	t.Helper()
 	if out, err := exec.CommandContext(context.Background(), "git", "-C", root, "update-ref", "refs/remotes/origin/main", sha).CombinedOutput(); err != nil {
@@ -22,9 +22,9 @@ func fakeOriginMain(t *testing.T, root, sha string) {
 }
 
 // TestDriverSquashCollapsesVerifiedBranch proves the happy path: a verified
-// card's checkpoint-laden branch collapses to one commit off origin/main,
-// main is untouched, and a `squashed` event carries the before/after/base
-// shas and the message subject.
+// card's checkpoint-laden branch collapses to one commit off its fork point
+// with main, main is untouched, and a `squashed` event carries the
+// before/after/base shas and the message subject.
 func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	fakeOriginMain(t, h.root, gitHead(t, h.root))
@@ -50,7 +50,7 @@ func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
 		t.Fatalf("squashed.branch = %v, want %s", sq["branch"], f.BranchName())
 	}
 	if sq["base_sha"] != before {
-		t.Fatalf("squashed.base_sha = %v, want origin/main %s", sq["base_sha"], before)
+		t.Fatalf("squashed.base_sha = %v, want fork point %s", sq["base_sha"], before)
 	}
 	after, _ := sq["after_sha"].(string)
 	if after == "" || after == before {

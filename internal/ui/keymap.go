@@ -122,6 +122,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},
 		{key: "m", label: "merge", help: "squash-merge branch into main (review & approve the drafted message)"},
+		{key: "z", label: "squash", help: "collapse the branch to one commit in place (review & approve the drafted message)"},
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
 		{key: "n", label: "new", help: "new feature", bar: true},
 		{key: "B", label: "bug", help: "new bug"},
@@ -142,7 +143,7 @@ func (m *Shell) boardBindings() []binding {
 		filtered := bs[:0:0]
 		for _, b := range bs {
 			switch b.key {
-			case "d", "r", "m", "c":
+			case "d", "r", "m", "c", "z":
 				continue
 			}
 			filtered = append(filtered, b)

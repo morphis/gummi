@@ -683,7 +683,7 @@ func TestRS_BoardBindings_OmitsWorktreeKeys(t *testing.T) {
 	m.sel = 0
 	for _, b := range m.boardBindings() {
 		switch b.key {
-		case "d", "r", "m", "c":
+		case "d", "r", "m", "c", "z":
 			t.Errorf("RS-selected board bindings still include %q", b.key)
 		}
 	}
@@ -693,7 +693,7 @@ func TestRS_BoardBindings_OmitsWorktreeKeys(t *testing.T) {
 	for _, b := range m.boardBindings() {
 		found[b.key] = true
 	}
-	for _, k := range []string{"d", "r", "m", "c"} {
+	for _, k := range []string{"d", "r", "m", "c", "z"} {
 		if !found[k] {
 			t.Errorf("FD-selected board bindings missing %q", k)
 		}
