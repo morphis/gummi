@@ -661,12 +661,18 @@ func TestCallerGateApproveResume(t *testing.T) {
 	if g := lastEvent(h, "gate"); g == nil || g["to"] != string(domain.StageImplement) {
 		t.Fatalf("gate event = %v, want to=implement", g)
 	}
+	h.buf.Reset()
 	out2, err := h.driver(Options{}).Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{Approve: true})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
 	if out2.Status != StatusDone {
 		t.Fatalf("resume status = %q, want done; stream=%v", out2.Status, h.eventKinds())
+	}
+	// BG-005: an explicit caller approval must not be indistinguishable
+	// from an unattended auto-crossing in the emitted gate event.
+	if g := lastEvent(h, "gate"); g == nil || g["decision"] != "caller-approved" {
+		t.Fatalf("gate event decision = %v, want caller-approved; stream=%v", g, h.eventKinds())
 	}
 }
 

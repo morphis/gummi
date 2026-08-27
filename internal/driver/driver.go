@@ -1137,7 +1137,11 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		// the todo→first-stage kickoff is "start", not an approval, so it
 		// emits no gate milestone; every real gate does.
 		if res.From != domain.StageTodo {
-			d.out.emit(gateEvent{Event: "gate", ID: string(f.ID), From: string(res.From), To: string(res.To), Decision: "auto-approved"})
+			decision := "auto-approved"
+			if d.actor == "caller" {
+				decision = "caller-approved"
+			}
+			d.out.emit(gateEvent{Event: "gate", ID: string(f.ID), From: string(res.From), To: string(res.To), Decision: decision})
 		}
 		return Outcome{}, nil // non-terminal: drive loops into res.To
 	default:
