@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/morphis/gummi/internal/driver"
 )
 
 // captureStdout runs fn with the process-wide stdout redirected to a pipe and
@@ -119,6 +121,41 @@ func TestCobraUnknownCommand(t *testing.T) {
 	rootCmd.SetArgs([]string{"frobnicate"})
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("Execute(frobnicate): want error, got nil")
+	}
+}
+
+// BG-003: `resume --gate-approval auto` re-affirms the run's default gate
+// mode explicitly, overriding a persisted "caller" mode. buildFlagArgs drops
+// any flag whose explicit value equals its cobra default (it can't tell
+// "never passed" from "passed the default" apart), which silently dropped
+// this exact flag from the argv handed to the legacy flag.FlagSet — so the
+// override never took effect. resumeArgv is the seam that re-adds it; this
+// exercises the real call path (cobra flag parse -> resumeArgv -> the
+// legacy flag.FlagSet's isSet) rather than asserting on buildFlagArgs alone.
+func TestResumeArgvKeepsExplicitDefaultGateApproval(t *testing.T) {
+	resumeCmd.ResetFlags()
+	bindResumeFlags(resumeCmd)
+	t.Cleanup(func() {
+		resumeCmd.ResetFlags()
+		bindResumeFlags(resumeCmd)
+	})
+
+	if err := resumeCmd.Flags().Set("gate-approval", driver.GateAuto); err != nil {
+		t.Fatalf("Set(gate-approval, %q): %v", driver.GateAuto, err)
+	}
+
+	argv := resumeArgv(resumeCmd, []string{"FD-000"})
+
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	rv := registerResumeFlags(fs)
+	if err := fs.Parse(argv); err != nil {
+		t.Fatalf("fs.Parse(%v): %v", argv, err)
+	}
+	if !isSet(fs, "gate-approval") {
+		t.Fatalf("isSet(gate-approval) = false after explicit --gate-approval auto; argv was %v", argv)
+	}
+	if *rv.gate != driver.GateAuto {
+		t.Fatalf("gate = %q, want %q", *rv.gate, driver.GateAuto)
 	}
 }
 

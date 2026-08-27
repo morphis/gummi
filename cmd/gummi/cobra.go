@@ -35,8 +35,24 @@ var resumeCmd = &cobra.Command{
 	Use:   "resume <id|ref> [decision]",
 	Short: "Rehydrate a parked feature and drive it on",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runResume(buildFlagArgs(cmd, args))
+		return runResume(resumeArgv(cmd, args))
 	},
+}
+
+// resumeArgv is buildFlagArgs plus one exception for `resume`:
+// buildFlagArgs drops a flag whose explicit value equals its cobra default,
+// since it can't tell "never passed" from "passed the default value" apart.
+// --gate-approval auto is a legitimate no-op re-affirmation (it overrides a
+// persisted "caller" mode), so re-add it here when that's exactly what
+// buildFlagArgs dropped. The exception lives at this one call site rather
+// than in buildFlagArgs itself, which stays generic for the ~20 other
+// commands routed through it.
+func resumeArgv(cmd *cobra.Command, args []string) []string {
+	argv := buildFlagArgs(cmd, args)
+	if f := cmd.Flags().Lookup("gate-approval"); f != nil && f.Changed && f.Value.String() == f.DefValue {
+		argv = append([]string{"--gate-approval", f.Value.String()}, argv...)
+	}
+	return argv
 }
 
 // verifyCmd implements `gummi verify <id|ref>`.
