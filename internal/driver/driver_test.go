@@ -337,11 +337,16 @@ func TestVerifyFailEscalates(t *testing.T) {
 // surface's request-changes takes via Engine.RunWith.
 func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 	var implementCalls []string
+	var implementRuns int
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "```gummi-checks\n- name: smoke\n  cmd: \"true\"\n```")
+			}
+			implementRuns++
 			implementCalls = append(implementCalls, msg)
 			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
 			return msgIdle(o.Model, "Implemented.")
@@ -379,9 +384,11 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 			out2.Status, h.eventKinds())
 	}
 	// two implement runs total: the original one before the failed verify, and
-	// the reborn one after --bounce.
-	if h.calls[domain.StageImplement] != 2 {
-		t.Fatalf("implement entered %d times, want 2 (bounce should re-run it)", h.calls[domain.StageImplement])
+	// the reborn one after --bounce. The worktree-entry discovery pass also
+	// fires a scribe session under the implement stage, so this counts real
+	// implement kickoffs rather than using h.calls[domain.StageImplement].
+	if implementRuns != 2 {
+		t.Fatalf("implement entered %d times, want 2 (bounce should re-run it)", implementRuns)
 	}
 	if len(implementCalls) != 2 {
 		t.Fatalf("captured %d implement kickoff messages, want 2", len(implementCalls))
@@ -950,6 +957,9 @@ func TestTripwireNotTimeout(t *testing.T) {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Implemented.")
+			}
 			// the agent dirties the MAIN checkout (h.root), not the worktree —
 			// a clean->dirty transition that trips the engine's tripwire.
 			if err := os.WriteFile(filepath.Join(h.root, "tripwire.txt"), []byte("dirty\n"), 0o600); err != nil {

@@ -123,6 +123,12 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 				return e.recordChecks(specPath, text.String())
 			case agent.EventError:
 				return nil, ev.Err
+			case agent.EventBudgetExhausted:
+				// soft stop, same as the main engine loop's handling: the
+				// in-flight response is done and no more turns will run, so
+				// stop waiting rather than block forever for an idle that
+				// isn't coming.
+				return e.recordChecks(specPath, text.String())
 			}
 		case <-ctx.Done():
 			return nil, ctx.Err()

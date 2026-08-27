@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -84,6 +85,166 @@ func TestResumeOverridesPersistedGate(t *testing.T) {
 	}
 	if got.GateApproval != domain.GateAuto {
 		t.Fatalf("persisted gate-approval = %q, want %q (override re-persisted)", got.GateApproval, domain.GateAuto)
+	}
+}
+
+// Crossing into a feature's first worktree stage must baseline its
+// gummi-checks the same way the TUI does off EnteredWorktree (msgs.go
+// discoverChecks/baselineChecks): a headless drive with no shell loop to
+// chain those passes onto still needs the artifact to gain the block, or
+// a later crash mid-verify has nothing to cheaply re-attach to.
+func TestHeadlessAdvanceBaselinesChecksAtWorktreeEntry(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "```gummi-checks\n- name: smoke\n  cmd: \"true\"\n```")
+			}
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+	if _, err := h.driver(Options{}).Run(context.Background(), "add a json export"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	f := h.storeFeature(t)
+	raw, err := os.ReadFile(filepath.Join(h.root, f.ArtifactPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "```gummi-checks") {
+		t.Fatalf("expected a gummi-checks block baselined at worktree entry, found none; spec:\n%s", raw)
+	}
+
+	// A crash mid-verify must find the baselined block on reattach and
+	// finalize with no fresh agent pass.
+	h.buf.Reset()
+	out, err := h.driver(Options{}).Verify(context.Background(), f.ID)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done (verify reattach on the baselined block); stream=%v", out.Status, h.eventKinds())
+	}
+}
+
+// The worktree-entry discovery pass is best-effort: a scribe session that
+// hits its budget cap (a soft stop, no trailing idle) must not wedge the
+// drive forever waiting for an event that will never arrive — it should
+// leave the gummi-checks block absent and let the drive continue.
+func TestHeadlessAdvanceSurvivesDiscoveryBudgetExhaustion(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return []agent.Event{{Kind: agent.EventBudgetExhausted}}
+			}
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+
+	done := make(chan struct{})
+	var out Outcome
+	var runErr error
+	go func() {
+		out, runErr = h.driver(Options{}).Run(context.Background(), "add a json export")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run hung — discovery's budget-exhausted event never let the drive continue")
+	}
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done (quick route stops at verified); stream=%v", out.Status, h.eventKinds())
+	}
+
+	f := h.storeFeature(t)
+	raw, err := os.ReadFile(filepath.Join(h.root, f.ArtifactPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "```gummi-checks") {
+		t.Fatalf("expected no gummi-checks block (discovery's scribe session hit budget exhaustion, not a usable reply); spec:\n%s", raw)
+	}
+}
+
+// The worktree-entry discovery pass must not hang the drive forever when its
+// scribe session stalls — streams a message but never reaches idle, error,
+// or budget exhaustion. discoverAndBaselineChecks bounds the call with a
+// deadline (the driver's --stage-timeout, or a small fixed default when
+// unset) so a non-terminating session returns promptly, leaves the
+// gummi-checks block absent, and lets the drive continue.
+func TestHeadlessAdvanceSurvivesDiscoveryStall(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				// stall: a message with no trailing idle/error/exhausted, so
+				// DiscoverChecks's event loop would wait forever without a
+				// deadline on the context.
+				return []agent.Event{{Kind: agent.EventMessage, Text: "still surveying"}}
+			}
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+
+	done := make(chan struct{})
+	var out Outcome
+	var runErr error
+	go func() {
+		out, runErr = h.driver(Options{StageTimeout: 200 * time.Millisecond}).Run(context.Background(), "add a json export")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run hung — a stalling discovery scribe session was never bounded by a deadline")
+	}
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done (quick route stops at verified); stream=%v", out.Status, h.eventKinds())
+	}
+
+	f := h.storeFeature(t)
+	raw, err := os.ReadFile(filepath.Join(h.root, f.ArtifactPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "```gummi-checks") {
+		t.Fatalf("expected no gummi-checks block (discovery's scribe session stalled, not a usable reply); spec:\n%s", raw)
 	}
 }
 
@@ -230,6 +391,9 @@ func driveToVerified(t *testing.T) *harness {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "```gummi-checks\n- name: smoke\n  cmd: \"true\"\n```")
+			}
 			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
 			return msgIdle(o.Model, "Implemented.")
 		},

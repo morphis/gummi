@@ -1124,6 +1124,9 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 	case engine.StatusNoop:
 		return d.done(ctx, res.Feature)
 	case engine.StatusAdvanced:
+		if res.EnteredWorktree {
+			d.discoverAndBaselineChecks(ctx, res.Feature)
+		}
 		if res.To == domain.StageDone {
 			if res.Feature.Kind == domain.KindResearch {
 				return d.decomposeGate(ctx, res.Feature, "")
@@ -1139,6 +1142,34 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 	default:
 		return d.escalation(f, "unexpected gate status"), nil
 	}
+}
+
+// discoverStageTimeout bounds discoverAndBaselineChecks when the driver
+// has no --stage-timeout of its own, so a scribe session that never
+// reaches one of DiscoverChecks's terminal events (idle, error, budget
+// exhaustion) can't hang the drive forever.
+const discoverStageTimeout = 2 * time.Minute
+
+// discoverAndBaselineChecks mirrors the TUI's discover→baseline chain
+// (msgs.go discoverChecks/baselineChecks) for the headless path: it
+// surveys the fresh worktree for the repo's build/test/lint commands and,
+// once they're recorded as a gummi-checks block, runs them once to record
+// a baseline. Best-effort like the TUI's version — a discovery or baseline
+// failure leaves the block absent/unbaselined and the drive continues;
+// Verify's own fallback still applies. Bounded by the driver's
+// --stage-timeout (or discoverStageTimeout when unset) so a stalling
+// scribe session returns promptly instead of hanging the gate crossing.
+func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature) {
+	timeout := d.opts.StageTimeout
+	if timeout <= 0 {
+		timeout = discoverStageTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if _, err := d.eng.DiscoverChecks(ctx, f); err != nil {
+		return
+	}
+	_, _ = d.eng.BaselineChecks(ctx, f)
 }
 
 // --- terminal outcomes -------------------------------------------------

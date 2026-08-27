@@ -59,6 +59,9 @@ func TestPlanRoundsResumeSurvivesFreshDriver(t *testing.T) {
 		domain.StageBrainstorm: idleTurn,
 		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Plan written.")
+			}
 			if o.Role == agent.RoleReviewer {
 				st.mu.Lock()
 				resumed := st.resumed
@@ -243,6 +246,9 @@ func TestPlanRoundsResumeReCritiquesRevisedPlan(t *testing.T) {
 		domain.StageBrainstorm: idleTurn,
 		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Plan written.")
+			}
 			if o.Role == agent.RoleReviewer {
 				st.mu.Lock()
 				resumed := st.resumed
@@ -325,6 +331,9 @@ func TestPlanRoundsResumeCritiquesFreshPlan(t *testing.T) {
 		domain.StageBrainstorm: idleTurn,
 		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Plan written.")
+			}
 			if o.Role == agent.RoleReviewer {
 				st.mu.Lock()
 				st.critiques++
@@ -387,6 +396,9 @@ func TestPlanRoundsResumeFinishedCritiqueReplans(t *testing.T) {
 		domain.StageBrainstorm: idleTurn,
 		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Plan written.")
+			}
 			if o.Role == agent.RoleReviewer {
 				st.mu.Lock()
 				st.reviewers++

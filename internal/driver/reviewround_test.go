@@ -17,9 +17,17 @@ import (
 func reviewLoopScript(verdicts ...string) map[domain.Stage]stageFn {
 	var mu sync.Mutex
 	var reviews int
+	var implements int
 	return map[domain.Stage]stageFn{
 		domain.StageSpec: idleTurn,
-		domain.StageImplement: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Implemented.")
+			}
+			mu.Lock()
+			n := implements
+			implements++
+			mu.Unlock()
 			if n == 0 {
 				return msgIdle(o.Model, "Implemented.")
 			}

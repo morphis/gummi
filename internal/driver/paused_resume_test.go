@@ -27,6 +27,9 @@ func TestPausedPlanWriterResumeReDispatches(t *testing.T) {
 		domain.StageBrainstorm: idleTurn,
 		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "Plan written.")
+			}
 			if o.Role == agent.RoleReviewer {
 				return msgIdle(o.Model, "Looks good.\nVERDICT: pass")
 			}
