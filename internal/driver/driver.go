@@ -1279,7 +1279,7 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),
 		Next:          resumeCmd(string(f.ID), "--envelope", fmt.Sprintf("%d", suggested)),
-		Preconditions: d.resumePreconditions(),
+		Preconditions: d.resumePreconditions(f.ID),
 	})
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
 }
@@ -1320,20 +1320,21 @@ func (d *Driver) timeout(f domain.Feature) Outcome {
 		StageTimeoutUsed: used,
 		Resume:           string(f.ID),
 		Next:             resumeCmd(string(f.ID)),
-		Preconditions:    d.resumePreconditions(),
+		Preconditions:    d.resumePreconditions(f.ID),
 	})
 	return Outcome{Status: StatusTimeout, ID: string(f.ID)}
 }
 
 // resumePreconditions builds the pid-probe caller-side check attached to
 // terminal events whose `next` command starts a new gummi run: exhaustion,
-// timeout. The probe warns when the workspace's recorded pid is still alive
-// — an orphan gummi from a killed wrapper — so an orchestrating agent knows
+// timeout. The probe warns when this card's recorded pid is still alive —
+// an orphan gummi from a killed wrapper — so an orchestrating agent knows
 // to wait instead of hitting ErrLocked on immediate retry. The path is
+// scoped to id (BG-006), so it never reads a different card's pid, and is
 // derived from the live workspace, so relocating the state dir keeps the
 // probe correct.
-func (d *Driver) resumePreconditions() *resumePreconditions {
-	pid := d.ws.PIDFile()
+func (d *Driver) resumePreconditions(id domain.FeatureID) *resumePreconditions {
+	pid := d.ws.PIDFile(id)
 	if pid == "" {
 		return nil
 	}

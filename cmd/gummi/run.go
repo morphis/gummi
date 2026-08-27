@@ -82,6 +82,11 @@ func runRun(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
+		clearPID, err := trackPID(ws, f.ID)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer clearPID()
 		return d.Drive(ctx, f)
 	}, opts)
 }
@@ -165,6 +170,28 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 	}, nil
 }
 
+// trackPID records this process's pid at ws.PIDFile(id) and returns a
+// cleanup that clears it on clean exit. Call it once a card's per-card lock
+// is held, right where the id first comes into scope — for `run`/`research`
+// that's after Create mints the card, for `resume`/`verify` it's after the
+// existing card resolves. A caller whose bash wrapper is killed by the
+// harness (SIGHUP-ignored gummi keeps running) has no way to tell whether
+// gummi died with the wrapper or is still churning: recording our pid lets
+// an external check use `kill -0` on that specific card to answer the
+// question without touching the flock (which would fight the live run).
+// Scoping the file per card (BG-006) means concurrent drives of independent
+// cards never clobber or clear each other's entry. Clear on clean exit so
+// the absence is authoritative; a crash leaves the file behind but the pid
+// it names no longer signals, so the same check still reads dead.
+func trackPID(ws state.Workspace, id domain.FeatureID) (func(), error) {
+	path := ws.PIDFile(id)
+	pid := os.Getpid()
+	if err := state.WritePIDFile(path, pid); err != nil {
+		return nil, fmt.Errorf("recording pid: %w", err)
+	}
+	return func() { _ = state.ClearPIDFile(path, pid) }, nil
+}
+
 // withRunEngine wires the workspace, store, worktree manager, and agent
 // engine (mirroring cmd/gummi/ingest.go), builds a driver over os.Stdout,
 // hands it to fn, and maps the terminal Outcome to a process exit. It takes
@@ -194,18 +221,6 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store, state.
 	if err != nil {
 		return err
 	}
-	// A caller whose bash wrapper is killed by the harness (SIGHUP-ignored
-	// gummi keeps running) has no way to tell whether gummi died with the
-	// wrapper or is still churning: recording our pid lets an external check
-	// use `kill -0` to answer the question without touching the flock (which
-	// would fight the live run). With per-card concurrency the file names the
-	// most recent drive, a best-effort liveness hint. Clear on clean exit so
-	// the absence is authoritative; a crash leaves the file behind but the
-	// pid it names no longer signals, so the same check still reads dead.
-	if err := state.WritePIDFile(ws.PIDFile(), os.Getpid()); err != nil {
-		return fmt.Errorf("recording pid: %w", err)
-	}
-	defer func() { _ = state.ClearPIDFile(ws.PIDFile()) }()
 
 	// Mirror the NDJSON stream to .gummi/state/events.jsonl in addition to
 	// stdout so a wrapper-death survivor can tail progress off disk. Append

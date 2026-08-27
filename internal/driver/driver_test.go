@@ -455,8 +455,8 @@ func TestBudgetExhausted(t *testing.T) {
 		t.Fatalf("exhausted event missing preconditions; ev=%v", ev)
 	}
 	cr, _ := pre["check_running"].(string)
-	if !strings.Contains(cr, "gummi.pid") || !strings.Contains(cr, "kill -0") {
-		t.Fatalf("exhausted.preconditions.check_running = %q, want a kill -0 probe over gummi.pid", cr)
+	if !strings.Contains(cr, ".pid") || !strings.Contains(cr, "kill -0") {
+		t.Fatalf("exhausted.preconditions.check_running = %q, want a kill -0 probe over a .pid file", cr)
 	}
 }
 
@@ -793,8 +793,8 @@ func TestTimeoutCarriesStageTimeoutUsedAndCheckRunning(t *testing.T) {
 		t.Fatalf("preconditions missing/wrong type; ev=%v", ev)
 	}
 	cr, _ := pre["check_running"].(string)
-	if !strings.Contains(cr, "gummi.pid") || !strings.Contains(cr, "kill -0") {
-		t.Fatalf("check_running = %q, want a kill -0 probe over gummi.pid", cr)
+	if !strings.Contains(cr, ".pid") || !strings.Contains(cr, "kill -0") {
+		t.Fatalf("check_running = %q, want a kill -0 probe over a .pid file", cr)
 	}
 }
 

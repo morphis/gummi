@@ -13,10 +13,11 @@ import (
 	"github.com/morphis/gummi/internal/atomicfile"
 )
 
-// WritePIDFile records pid at path atomically. The state dir must already
-// exist. With per-card locks, several drives can run at once, so the pid
-// file is a best-effort hint for an external orphan check, not a unique
-// governor of the workspace.
+// WritePIDFile records pid at path atomically, creating the parent dir if
+// needed. Each card's drive writes its own path (Workspace.PIDFile(id)), so
+// concurrent per-card drives never share a write target; the file is a
+// best-effort hint for an external orphan check, not a unique governor of
+// the workspace.
 func WritePIDFile(path string, pid int) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("preparing pid dir: %w", err)
@@ -25,9 +26,16 @@ func WritePIDFile(path string, pid int) error {
 	return atomicfile.Write(path, data, 0o600)
 }
 
-// ClearPIDFile removes path if present. A missing file is not an error —
-// clean exit and crash both leave a caller free to notice the run is gone.
-func ClearPIDFile(path string) error {
+// ClearPIDFile removes path, but only if the pid currently recorded there
+// still matches pid. This compare-and-clear guards against a same-card race
+// (e.g. a crash-and-restart under the same id) where a late clear from the
+// older run would otherwise delete the newer run's entry. A missing file, or
+// one that no longer names pid, is not an error — either way there is
+// nothing left for this caller to clear.
+func ClearPIDFile(path string, pid int) error {
+	if ReadPIDFile(path) != pid {
+		return nil
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}

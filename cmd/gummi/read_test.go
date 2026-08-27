@@ -259,7 +259,7 @@ func TestBuildStatusRunning(t *testing.T) {
 	}
 
 	// a pid pointing at nobody → not running.
-	if err := state.WritePIDFile(f.ws.PIDFile(), 1<<30); err != nil {
+	if err := state.WritePIDFile(f.ws.PIDFile(feat.ID), 1<<30); err != nil {
 		t.Fatal(err)
 	}
 	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
@@ -268,7 +268,7 @@ func TestBuildStatusRunning(t *testing.T) {
 	}
 
 	// the current process is always alive → true.
-	if err := state.WritePIDFile(f.ws.PIDFile(), os.Getpid()); err != nil {
+	if err := state.WritePIDFile(f.ws.PIDFile(feat.ID), os.Getpid()); err != nil {
 		t.Fatal(err)
 	}
 	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)

@@ -73,9 +73,10 @@ type statusView struct {
 	// run reached its verified branch, since the headless driver never merges.
 	Verified bool `json:"verified"`
 	Done     bool `json:"done"`
-	// Running reports whether the pid recorded at .gummi/state/gummi.pid is
-	// still alive — a live run or resume governing this workspace. Meant for
-	// an orchestrating agent whose bash wrapper was killed by the harness:
+	// Running reports whether the pid recorded at this card's pid file
+	// (.gummi/state/locks/<id>.pid) is still alive — a live run or resume
+	// driving this specific card. Meant for an orchestrating agent whose
+	// bash wrapper was killed by the harness:
 	// gummi's SIGHUP-ignore makes it survive the hangup, so the wrapper's
 	// death is not gummi's death. A caller that sees running=true should wait
 	// (or attach to the events.jsonl mirror) instead of retrying, which would
@@ -131,7 +132,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		BranchState:     branchState(ctx, wt, f),
 		Verified:        !f.VerifiedAt.IsZero(),
 		Done:            f.Stage == domain.StageDone,
-		Running:         state.ProcessAlive(state.ReadPIDFile(ws.PIDFile())),
+		Running:         state.ProcessAlive(state.ReadPIDFile(ws.PIDFile(f.ID))),
 		PullRequest:     f.PullRequest.StatusPayload(),
 		PullRequestLine: f.PullRequest.PlainLine(),
 	}

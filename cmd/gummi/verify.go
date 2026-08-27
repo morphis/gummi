@@ -39,6 +39,11 @@ func runVerify(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
+		clearPID, err := trackPID(ws, f.ID)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer clearPID()
 		return d.Verify(ctx, f.ID)
 	}, driver.Options{})
 }

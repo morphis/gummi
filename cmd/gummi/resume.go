@@ -73,6 +73,11 @@ func runResume(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
+		clearPID, err := trackPID(ws, f.ID)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer clearPID()
 		return d.Resume(ctx, f.ID, in)
 	}, opts)
 }

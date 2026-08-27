@@ -220,8 +220,8 @@ one-liner — run it before following `next`. gummi ignores SIGHUP so that a
 detached wrapper's death doesn't kill the model turn; the flipside is that
 your wrapper dying (e.g. the harness killed it) can leave gummi still
 churning as an orphan. A bare retry there fights the exclusive lock and
-looks like a fresh failure. `check_running` reads `.gummi/state/gummi.pid`
-and probes it with `kill -0`: if it prints "gummi still running as pid …",
+looks like a fresh failure. `check_running` reads that card's own pid file
+under `.gummi/state/locks/` and probes it with `kill -0`: if it prints "gummi still running as pid …",
 wait (or `tail -f .gummi/state/events.jsonl` to watch progress) until the
 pid is gone, then follow `next`. `gummi status --json` also exposes this
 under `"running"` when you'd rather branch on JSON than a shell probe.

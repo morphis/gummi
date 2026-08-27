@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // Workspace locates gummi's on-disk layout inside one repository.
@@ -58,12 +60,16 @@ func (w Workspace) ProfilesFile() string { return filepath.Join(w.GummiDir(), "p
 // DBFile is the SQLite state store.
 func (w Workspace) DBFile() string { return filepath.Join(w.StateDir(), "gummi.db") }
 
-// PIDFile records the PID of the run/resume process governing this
-// workspace. It is written after the exclusive lock is taken and cleared
-// on clean exit, so an external caller — an orchestrating agent that
-// spawned gummi and lost its wrapper — can probe liveness (kill -0) even
-// though it can't take the lock (which would fight the live run).
-func (w Workspace) PIDFile() string { return filepath.Join(w.StateDir(), "gummi.pid") }
+// PIDFile records the PID of the run/resume process driving card id. It is
+// written after the card's lock is taken and cleared on clean exit, so an
+// external caller — an orchestrating agent that spawned gummi and lost its
+// wrapper — can probe that specific card's liveness (kill -0) even though it
+// can't take the lock (which would fight the live run). Scoped per card,
+// mirroring CardLockFile, so concurrent drives of independent cards never
+// share a write/clear target.
+func (w Workspace) PIDFile(id domain.FeatureID) string {
+	return filepath.Join(w.StateDir(), "locks", fmt.Sprintf("%s.pid", id))
+}
 
 // EventsFile mirrors the driver's NDJSON stream, one JSON object per line,
 // append-only. It lives beside the pid file so a caller whose wrapper died
