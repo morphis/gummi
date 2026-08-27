@@ -861,7 +861,7 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 		}
 	})
 
-	t.Run("exhausted names --envelope doubled", func(t *testing.T) {
+	t.Run("exhausted names --envelope doubled when spend is low", func(t *testing.T) {
 		h := newHarness(t, true, map[domain.Stage]stageFn{
 			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 				return msgIdle(o.Model, "Spec.")
@@ -877,6 +877,41 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 		e := lastEvent(h, "exhausted")
 		if want := "gummi resume " + out.ID + " --envelope 1000"; e == nil || e["next"] != want {
 			t.Fatalf("exhausted next = %v, want %q (double the dry envelope)", e["next"], want)
+		}
+	})
+
+	// BG-004: when recorded spend already overshoots the envelope (metered
+	// spend can land ahead of the next usage report), doubling the envelope
+	// alone can still propose a resume envelope below spend, guaranteeing a
+	// second exhaustion with zero agent work in between. The hint must clear
+	// recorded spend plus headroom, not just double the old envelope.
+	t.Run("exhausted names an envelope above spend when spend exceeds double the envelope", func(t *testing.T) {
+		h := newHarness(t, true, map[domain.Stage]stageFn{
+			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return msgIdle(o.Model, "Spec.")
+			},
+			domain.StageImplement: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
+				return []agent.Event{
+					{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 34.3}},
+					{Kind: agent.EventBudgetExhausted, Usage: agent.Usage{Credits: 34.3}},
+				}
+			},
+		})
+		out, err := h.driver(Options{Envelope: 15}).Run(context.Background(), "feature")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		e := lastEvent(h, "exhausted")
+		if e == nil {
+			t.Fatal("no exhausted event")
+		}
+		spent, _ := e["spent_credits"].(float64)
+		if spent != 35.3 {
+			t.Fatalf("spent_credits = %v, want 35.3", spent)
+		}
+		want := "gummi resume " + out.ID + " --envelope 43" // ceil(35.3 * 1.2) = 43, above the 30 that doubling would give
+		if e["next"] != want {
+			t.Fatalf("exhausted next = %v, want %q (doubling alone would give --envelope 30, below spend 35.3)", e["next"], want)
 		}
 	})
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1260,9 +1261,16 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
 		f = got
 	}
-	// suggest a concrete raise (double the dry envelope) so `next` is runnable
-	// as-is; it is a floor the driver never lowers, and the caller can edit it.
+	// suggest a concrete raise so `next` is runnable as-is; it is a floor the
+	// driver never lowers, and the caller can edit it. Doubling the envelope
+	// alone can land below already-recorded spend when spend overshoots the
+	// envelope before an agent's next usage report lands, guaranteeing a
+	// second exhaustion with zero work done — so the suggestion also has to
+	// clear recorded spend plus headroom.
 	suggested := f.Budget.Envelope * 2
+	if bySpend := int(math.Ceil(f.Spend.Credits * 1.2)); bySpend > suggested {
+		suggested = bySpend
+	}
 	d.out.emit(exhaustedEvent{
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),
