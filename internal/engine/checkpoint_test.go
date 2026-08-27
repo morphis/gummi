@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // TestAutonomousTurnCheckpointsWorktree: an implement run that leaves
@@ -138,6 +141,8 @@ waitLoop:
 			case EventError:
 				gotErr = ev.Err
 				break waitLoop
+			case EventCheckpointFailed:
+				t.Fatal("ErrNoWorktree must not emit EventCheckpointFailed")
 			}
 		case <-deadline:
 			t.Fatal("timed out waiting for EventError")
@@ -166,6 +171,57 @@ waitLoop:
 	if stored.Stage != domain.StageImplement {
 		t.Errorf("stored stage = %s, want StageImplement (must not advance with the worktree gone)", stored.Stage)
 	}
+}
+
+// TestCheckpointDriftEmitsWarning: a checkpoint commit that fails for a
+// reason other than a missing worktree — here, main having drifted past
+// the feature's recorded fork point — must surface as a non-terminal
+// EventCheckpointFailed, naming the feature, stage, and underlying
+// ForkDriftError, while the turn still finishes cleanly (EventIdle).
+func TestCheckpointDriftEmitsWarning(t *testing.T) {
+	var ws state.Workspace
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if err := os.WriteFile(filepath.Join(opts.WorkDir, "feat.go"), []byte("package x\n"), 0o600); err != nil {
+			t.Error(err)
+		}
+		// drift main after the stage has already located its worktree
+		// (locate's own AssertNoForkDrift precheck already passed) so the
+		// failure surfaces at checkpoint's end-of-turn CommitAll instead.
+		rewindMain(t, ws.Root)
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Implemented."},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	var store *state.Store
+	var wt *worktree.Manager
+	ws, store, wt = newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := waitFor(t, e, EventCheckpointFailed)
+	var fe *worktree.ForkDriftError
+	if !errors.As(ev.Err, &fe) {
+		t.Fatalf("EventCheckpointFailed.Err = %v, want *worktree.ForkDriftError", ev.Err)
+	}
+	if ev.Feature != f.ID {
+		t.Errorf("EventCheckpointFailed.Feature = %s, want %s", ev.Feature, f.ID)
+	}
+	if ev.Stage != f.Stage {
+		t.Errorf("EventCheckpointFailed.Stage = %s, want %s", ev.Stage, f.Stage)
+	}
+
+	waitFor(t, e, EventIdle) // non-fatal: the turn still finishes cleanly
 }
 
 func containsSubstring(lines []string, want string) bool {

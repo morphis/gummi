@@ -1696,6 +1696,9 @@ func (e *Engine) checkpoint(s *Session) error {
 	committed, err := wt.CommitAll(ctx, &s.Feature, msg)
 	if err != nil {
 		s.appendActivity("checkpoint commit failed: " + err.Error())
+		if !errors.Is(err, worktree.ErrNoWorktree) {
+			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventCheckpointFailed, Err: err})
+		}
 		if needsWT && errors.Is(err, worktree.ErrNoWorktree) {
 			return err
 		}

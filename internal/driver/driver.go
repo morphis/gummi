@@ -1711,6 +1711,12 @@ func (d *Driver) awaitStage(ctx context.Context, id domain.FeatureID) (stageEnd,
 				return stageEnd{kind: endTripwire, dirtyPaths: ev.DirtyPaths}, nil
 			case engine.EventUpdated, engine.EventMessage, engine.EventAnnotations:
 				d.emitActivity(id)
+			case engine.EventCheckpointFailed:
+				// non-terminal: the stage keeps running, so this is never a
+				// decision boundary — unlike emitActivity, unconditional
+				// (not gated by verbose): it belongs in the default
+				// milestone stream, not the verbose-only activity feed.
+				d.out.emit(checkpointFailedEvent{Event: "checkpoint_failed", ID: string(id), Stage: string(ev.Stage), Error: ev.Err.Error()})
 			default:
 				// Started, Budget, Stopped: not a decision boundary. Stopped is
 				// emitted on benign session teardowns too (a gate-advance drops

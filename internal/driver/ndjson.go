@@ -355,6 +355,16 @@ type activityEvent struct {
 	Line  string `json:"line"`
 }
 
+// checkpointFailedEvent reports a checkpoint commit failure that did not
+// stop the stage — the failure carries no resume/next: the stage isn't
+// stopped, so there is nothing to resume.
+type checkpointFailedEvent struct {
+	Event string `json:"event"`
+	ID    string `json:"id"`
+	Stage string `json:"stage"`
+	Error string `json:"error"`
+}
+
 // activity emits a per-tool-call line, only under verbose.
 func (e *emitter) activity(id, stage, line string) {
 	if !e.verbose {

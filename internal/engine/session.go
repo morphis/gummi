@@ -43,6 +43,10 @@ const (
 	// the main checkout — new paths appear that weren't dirty before the
 	// turn. The run aborts (DirtyPaths names the new paths).
 	EventTripwire EventKind = "tripwire"
+	// EventCheckpointFailed fires when checkpoint's CommitAll fails for any
+	// reason other than ErrNoWorktree (Err populated). It is non-terminal:
+	// the session and stage keep running.
+	EventCheckpointFailed EventKind = "checkpoint_failed"
 )
 
 // Event is one item in the engine's UI-facing stream.
