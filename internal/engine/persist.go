@@ -149,7 +149,24 @@ func (e *Engine) Restore(ctx context.Context) error {
 		// or its pump would outlive Restore and, unjoined by Close, leak.
 		// Mirrors the old.stop() both replace and RunWith do on overwrite.
 		if old := e.live[snap.Feature]; old != nil {
+			// ...unless it is still in flight in THIS process, where the
+			// live session is by definition newer than the row it was
+			// persisted into. Rehydrating over it would stop a working
+			// agent mid-turn and hand the driver a paused snapshot, which
+			// reads as "died mid-turn, re-dispatch" — the double-spawn a
+			// resume onto an in-flight stage must not do (DESIGN §4.2).
+			// Nothing enforced this but the attention-slot cap, which is
+			// off by default now.
+			if st := old.State(); st == StateRunning || st == StateQueued {
+				continue
+			}
 			old.stop()
+			// a paused/done session freed its slot on the way out; release
+			// defensively so a replaced holder can never leak the count
+			// (Restore runs under e.mu, so freeSlot's own lock is out).
+			if old.releaseSlot() && e.running > 0 {
+				e.running--
+			}
 		}
 		e.live[snap.Feature] = s
 	}

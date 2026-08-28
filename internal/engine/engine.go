@@ -1,13 +1,15 @@
 // Package engine is gummi's orchestrator: it binds features' stages to
-// agent sessions, schedules autonomous runs across a bounded number of
-// attention slots (DESIGN §4.2), routes turns, and streams typed
-// activity to the UI.
+// agent sessions, schedules autonomous runs (DESIGN §4.2), routes turns,
+// and streams typed activity to the UI.
 //
 // Interactive sessions (brainstorm/spec chat) run whenever you attach
 // and hold no slot — you are the scarce resource. Autonomous sessions
-// (plan/implement/review/verify) consume one of max_active slots;
-// excess runs queue and start automatically as slots free (a session
-// freeing its slot on pause, or on going idle when its turn completes).
+// (plan/implement/review/verify) start as soon as they are run: how many
+// cards to drive at once is the operator's call, not the engine's, so
+// max_active is unlimited by default. Setting it to a positive number
+// re-imposes a cap for anyone who wants one — excess runs then queue and
+// start automatically as slots free (a session freeing its slot on
+// pause, or on going idle when its turn completes).
 package engine
 
 import (
@@ -154,7 +156,10 @@ type Config struct {
 	// taken from .gummi/config.yaml. Empty means a profile that also omits
 	// a value falls back to the built-in default (warn).
 	Sandbox string
-	// MaxActive is the number of concurrent autonomous slots (default 1).
+	// MaxActive caps concurrent autonomous slots. Zero or negative — the
+	// default — means no cap: every run started begins immediately, and
+	// parallel token burn is the operator's choice. A positive value
+	// queues runs beyond it.
 	MaxActive int
 	// Persist writes session transcripts to Store so they survive a
 	// restart (Restore reloads them).
@@ -244,9 +249,11 @@ func New(cfg Config) *Engine {
 	if cfg.Permission == "" {
 		cfg.Permission = agent.PermissionAllowAll
 	}
+	// 0 = uncapped; a negative value is normalized to it so every
+	// "no cap configured" spelling behaves the same.
 	max := cfg.MaxActive
-	if max < 1 {
-		max = 1
+	if max < 0 {
+		max = 0
 	}
 	pool := cfg.Pool
 	if pool == nil && cfg.Worktrees != nil {
@@ -570,11 +577,13 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	return nil
 }
 
-// schedule fills free slots from the queue.
+// schedule fills free slots from the queue. With maxActive 0 (the
+// default) there is no cap, so it drains the queue on every pass and a
+// run never sits in StateQueued waiting on another card.
 func (e *Engine) schedule() {
 	for {
 		e.mu.Lock()
-		if e.running >= e.maxActive || len(e.queue) == 0 {
+		if (e.maxActive > 0 && e.running >= e.maxActive) || len(e.queue) == 0 {
 			e.mu.Unlock()
 			return
 		}

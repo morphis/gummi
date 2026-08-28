@@ -242,6 +242,46 @@ func TestRestoreInterruptedAutonomousComesBackPaused(t *testing.T) {
 	}
 }
 
+// Restore in the SAME process must not rehydrate over a session that is
+// still in flight: the live one is newer than its persisted row, and
+// handing the driver a paused snapshot reads as "died mid-turn" and
+// re-dispatches the stage. Without a slot cap nothing else stops that
+// double-spawn.
+func TestRestoreKeepsLiveInFlightSession(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	e := persistEngine(t, ag, ws, store, wt)
+	t.Cleanup(func() { close(release) })
+
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, f.ID, StateRunning)
+	live := e.Get(f.ID)
+
+	if err := e.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Get(f.ID); got != live {
+		t.Error("Restore replaced a session still running in this process")
+	}
+	// a re-dispatch would swap in a fresh Session; the identity check
+	// above is the double-spawn assertion, this is its state.
+	if st := e.Get(f.ID).State(); st != StateRunning {
+		t.Errorf("live session came back %s, want running", st)
+	}
+}
+
 func TestRestoreSkipsStaleStage(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()

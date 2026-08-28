@@ -245,7 +245,9 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		return nil, nil, nil, nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
-	maxActive := 1
+	// No cap by default: driving five cards at once is the operator's
+	// call. GUMMI_MAX_ACTIVE re-imposes one (a value < 1 means uncapped).
+	maxActive := 0
 	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxActive = n

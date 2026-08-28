@@ -417,6 +417,33 @@ func TestMaxActiveTwo(t *testing.T) {
 	waitState(t, e, "FD-003", StateQueued) // third waits behind two slots
 }
 
+// An unset MaxActive means no cap: however many cards the operator
+// starts, all of them drive — nothing sits in StateQueued behind a slot.
+func TestUncappedByDefault(t *testing.T) {
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() {
+		close(release)
+		e.Close()
+	})
+
+	for i := 1; i <= 5; i++ {
+		f := feature(i, "f", domain.StageImplement)
+		withWorktree(t, wt, f)
+		if err := e.Run(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []domain.FeatureID{"FD-001", "FD-002", "FD-003", "FD-004", "FD-005"} {
+		waitState(t, e, id, StateRunning)
+	}
+}
+
 func TestRunRequiresWorktree(t *testing.T) {
 	e := newEngine(t, agent.NewFake("ok"))
 	f := feature(1, "no wt", domain.StageImplement)

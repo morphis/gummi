@@ -261,10 +261,14 @@ envelope that is gummi's real spend limiter.
   configured; the engine only honors skip flags and rerun transitions.
   Transitions fire actions (start session, run checks, request human gate)
   and emit events.
-- **Scheduler with attention slots**: `max_active` (default `1`) autonomous
-  session; excess sessions queue; interactive stages only run when you
-  attach. A paused/blocked session frees its slot. This matches "one active,
-  one paused" reality and caps parallel token burn.
+- **Scheduler with attention slots**: `max_active` is uncapped by default —
+  every autonomous run you start begins immediately, however many cards
+  that is. Set it to a positive number and excess sessions queue behind
+  the cap; a paused/blocked session frees its slot. Parallel token burn is
+  the operator's call: cards drive in disjoint worktrees under per-card
+  locks (§8.2 Decision 12), so nothing in the engine needs the
+  serialization.
+  Interactive stages only run when you attach.
 - **Needs-attention queue**: gates, agent questions, budget exhaustion, and
   failures — plus permission requests when running in `guarded` mode — land
   in one inbox, newest-first, with desktop-bell/notification hooks.
@@ -791,8 +795,9 @@ Decided in the design interview (2026-07-03):
 8. **First-class providers**: GitHub Copilot Pro/Pro+ (premium-request
    pool) and OpenAI-compatible BYOK endpoints (llama.cpp, vLLM, hosted).
    Profiles are designed around exactly these two paths.
-9. **Attention slots default to 1** active autonomous session
-   (configurable).
+9. **Attention slots are uncapped by default** — as many concurrent
+   autonomous sessions as you start. A cap is configurable for anyone who
+   wants one.
 10. **One repo per gummi instance, permanently** — multi-repo is out of
     scope by design, not deferred.
 11. **Spec drafts** live in `.gummi/state/drafts/` during Brainstorm/Spec

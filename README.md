@@ -481,7 +481,7 @@ Environment variables:
 | `GUMMI_ZZ_CREDITS_PER_1K` | zz adapter's token→credit rate; 0 uses the engine default |
 | `GUMMI_ZZ_MAX_TURNS` | zz adapter's runaway-turn backstop (default 200); a session that hits the cap ends with an actionable error |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
-| `GUMMI_MAX_ACTIVE` | concurrent autonomous sessions (default 1) |
+| `GUMMI_MAX_ACTIVE` | cap on concurrent autonomous sessions (default: no cap — every run you start begins immediately) |
 | `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_TURN_RESERVE` | one turn's credits — the floor under envelope-derived stage budgets (default `domain.TurnReserveCredits`; override for unusual models) |
