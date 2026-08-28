@@ -68,6 +68,17 @@ type Identified interface {
 	SessionID() string
 }
 
+// OSProcess is implemented by sessions backed by a real, independently
+// supervisable OS process. Pid returns that process's pid — which, because
+// every such adapter spawns with Setpgid: true and no explicit Pgid, is also
+// that process's own process-group id, so a caller holding it can send the
+// whole group a kill (catching any same-group child the process spawned,
+// e.g. claude's own `gummi __mcp` tool child). A 0 result means no process is
+// currently backing the session (not yet started, or already reaped).
+type OSProcess interface {
+	Pid() int
+}
+
 // SessionOpts configures one agent session.
 type SessionOpts struct {
 	// WorkDir is the feature's worktree; the agent's cwd.

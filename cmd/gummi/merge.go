@@ -96,6 +96,7 @@ func runClean(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
+		state.ReapOrphanAgent(ws, f.ID)
 		return d.Clean(ctx, f.ID)
 	})
 }

@@ -1,10 +1,15 @@
 package state
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -118,6 +123,93 @@ func TestPIDAndEventsFilePaths(t *testing.T) {
 	}
 	if got, want := w.EventsFile(), "/repo/.gummi/state/events.jsonl"; got != want {
 		t.Fatalf("EventsFile = %q, want %q", got, want)
+	}
+}
+
+// BG-002: a `kill -9` of the driver runs no Go code, so nothing ever signals
+// the group an agent session was spawned into — it (and any same-group
+// child it spawned, e.g. claude's own `gummi __mcp` tool child) is simply
+// reparented and keeps running. This reproduces that exact shape without
+// gummi or claude: a stub process group standing in for the agent, recorded
+// at AgentPGIDFile exactly as Engine.trackAgentPID would, and asserts
+// ReapOrphanAgent — the check a subsequent run/resume/clean runs once it has
+// (re-)acquired the card's lock — kills the whole group and clears the
+// record.
+func TestReapOrphanAgentKillsOrphanedGroup(t *testing.T) {
+	ws := Workspace{Root: t.TempDir()}
+	id, err := domain.NewFeatureID(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pidDir := t.TempDir()
+	// Mirrors internal/agent/claudecode.go's NewSession spawn exactly:
+	// Setpgid true, and the child spawns its own same-group grandchild.
+	script := fmt.Sprintf(`
+		echo $$ > %[1]s/child.pid
+		sh -c 'echo $$ > %[1]s/grandchild.pid; sleep 30' &
+		sleep 30
+	`, pidDir)
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting stub process group: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_, _ = cmd.Process.Wait()
+	})
+
+	childPath := filepath.Join(pidDir, "child.pid")
+	grandchildPath := filepath.Join(pidDir, "grandchild.pid")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, errChild := os.Stat(childPath)
+		_, errGrandchild := os.Stat(grandchildPath)
+		if errChild == nil && errGrandchild == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stub process group never wrote its pid files")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	grandchildPID := ReadPIDFile(grandchildPath)
+	if grandchildPID == 0 {
+		t.Fatalf("grandchild pid file did not contain a valid pid")
+	}
+
+	// This is what Engine.trackAgentPID records at session start: the
+	// spawned agent's own pid, which — because it was started with
+	// Setpgid: true and no explicit Pgid — is also its whole process
+	// group's pgid (agent.OSProcess's contract).
+	if err := WritePIDFile(ws.AgentPGIDFile(id), cmd.Process.Pid); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+
+	ReapOrphanAgent(ws, id)
+	// The test is cmd's real parent, so a killed leader sits as a zombie —
+	// still "alive" to a bare kill(pid, 0) probe — until reaped; production
+	// callers are never the agent's parent (they're a later, unrelated
+	// gummi invocation), so this Wait is purely to make the probe below
+	// meaningful here.
+	_, _ = cmd.Process.Wait()
+
+	if ProcessAlive(cmd.Process.Pid) {
+		t.Fatalf("BUG: agent %d survived ReapOrphanAgent", cmd.Process.Pid)
+	}
+	// SIGKILL delivery and teardown of an orphaned grandchild (reparented to
+	// init/subreaper once the leader dies) isn't synchronous with the
+	// signal call, so give it a moment before failing.
+	deadline = time.Now().Add(2 * time.Second)
+	for ProcessAlive(grandchildPID) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ProcessAlive(grandchildPID) {
+		t.Fatalf("BUG: agent's own child %d survived ReapOrphanAgent", grandchildPID)
+	}
+	if got := ReadPIDFile(ws.AgentPGIDFile(id)); got != 0 {
+		t.Fatalf("AgentPGIDFile after reap = %d, want cleared", got)
 	}
 }
 

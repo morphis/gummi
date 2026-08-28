@@ -316,6 +316,16 @@ type claudeSession struct {
 	ctxTokens   int64              // main model's last request: input+cache tokens
 }
 
+// Pid implements agent.OSProcess: cmd is set once at construction and never
+// reassigned, so this needs no lock, same as the other post-Start-only
+// fields callers already read without one.
+func (s *claudeSession) Pid() int {
+	if s.cmd == nil || s.cmd.Process == nil {
+		return 0
+	}
+	return s.cmd.Process.Pid
+}
+
 // reap waits for the child exactly once (read() reaps a self-exited child;
 // Close reaps a killed one) and caches the exit status. Wait is safe here
 // because the only stdout reader — read() — is done before either caller

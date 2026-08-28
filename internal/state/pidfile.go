@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/morphis/gummi/internal/atomicfile"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // WritePIDFile records pid at path atomically, creating the parent dir if
@@ -79,4 +80,26 @@ func ProcessAlive(pid int) bool {
 	}
 	// EPERM means the process exists but we can't signal it — still alive.
 	return errors.Is(err, syscall.EPERM)
+}
+
+// ReapOrphanAgent kills any agent process group left running behind card
+// id's last driver (BG-002) and clears the record. Call it once the card's
+// lock has been (re-)acquired, before any new work on the card begins:
+// AcquireLock only succeeds once the previous holder's process has fully
+// exited — by clean exit, crash, or SIGKILL — so a pgid still recorded at
+// ws.AgentPGIDFile(id) at that point is provably an orphan, never a live
+// drive's own agent racing this check. A negative pid signals the whole
+// process group (the group leader itself, plus any child it spawned
+// in-group, e.g. claude's own `gummi __mcp` tool child) — see
+// agent.OSProcess. Best-effort like the rest of this package: an already-
+// dead group's kill is a silent no-op (ESRCH), and the record is cleared
+// either way so a stale entry never accumulates.
+func ReapOrphanAgent(ws Workspace, id domain.FeatureID) {
+	path := ws.AgentPGIDFile(id)
+	pgid := ReadPIDFile(path)
+	if pgid == 0 {
+		return
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	_ = ClearPIDFile(path, pgid)
 }

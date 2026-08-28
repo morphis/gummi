@@ -71,6 +71,20 @@ func (w Workspace) PIDFile(id domain.FeatureID) string {
 	return filepath.Join(w.StateDir(), "locks", fmt.Sprintf("%s.pid", id))
 }
 
+// AgentPGIDFile records the process-group id of the agent backend process
+// currently spawned for card id (BG-002), written when its session starts
+// (Engine.trackAgentPID) and left in place once the session ends — a live
+// group re-signals as dead the moment anyone actually checks it, so leaving
+// a stale entry costs nothing (mirrors PIDFile's own "crash leaves the file
+// behind, the next read reads it as dead" reasoning). ReapOrphanAgent reads
+// it once a subsequent run/resume/clean (re-)acquires the card's lock: that
+// only succeeds once the driver that owned this entry has fully exited (by
+// any means), so any process group still recorded here is provably
+// orphaned, never a live drive's own agent.
+func (w Workspace) AgentPGIDFile(id domain.FeatureID) string {
+	return filepath.Join(w.StateDir(), "locks", fmt.Sprintf("%s.agent.pid", id))
+}
+
 // EventsFile mirrors the driver's NDJSON stream, one JSON object per line,
 // append-only. It lives beside the pid file so a caller whose wrapper died
 // mid-run can tail progress off disk instead of a lost stdout pipe.

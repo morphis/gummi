@@ -82,6 +82,7 @@ func runRun(args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
+		state.ReapOrphanAgent(ws, f.ID)
 		clearPID, err := trackPID(ws, f.ID)
 		if err != nil {
 			return driver.Outcome{}, err

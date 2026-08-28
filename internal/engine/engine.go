@@ -435,6 +435,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		_ = sess.Close()
 		return nil, errors.New("engine is closed")
 	}
+	e.trackAgentPID(f.ID, sess)
 	s.setState(StateInteractive)
 
 	if !e.replace(f.ID, s) {
@@ -652,6 +653,7 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.freeSlot(s)
 		return
 	}
+	e.trackAgentPID(s.Feature.ID, sess)
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.pump(s) }()
 	e.flushEnvNotices(s)
@@ -890,6 +892,23 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 	s.setSpawnInfo(name, rc.Model, clientTools)
 	s.setByokRate(rate)
 	s.setSandboxMode(e.resolveSandbox(s.Feature).Mode)
+}
+
+// trackAgentPID records sess's backing OS process at
+// ws.AgentPGIDFile(id) (BG-002), so a driver that dies without running its
+// own in-process cleanup (SIGKILL, crash, OOM-kill) still leaves behind a
+// durable pointer a later run/resume/clean can use to kill the orphan
+// before touching the card again (state.ReapOrphanAgent). sess implementing
+// agent.OSProcess is optional — an adapter with no real OS process backing
+// its session (or a test fake) simply isn't one, and nothing is recorded.
+func (e *Engine) trackAgentPID(id domain.FeatureID, sess agent.Session) {
+	p, ok := sess.(agent.OSProcess)
+	if !ok {
+		return
+	}
+	if pid := p.Pid(); pid > 0 {
+		_ = state.WritePIDFile(e.cfg.Workspace.AgentPGIDFile(id), pid)
+	}
 }
 
 // newAgentSession builds an agent session for a feature's stage, with
