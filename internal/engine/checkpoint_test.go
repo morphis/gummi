@@ -130,7 +130,7 @@ func TestCheckpointWorktreeGoneFailsRunWithoutIdle(t *testing.T) {
 
 	var sawIdle bool
 	var gotErr error
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 waitLoop:
 	for {
 		select {

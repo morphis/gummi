@@ -60,9 +60,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The project root is the repo root: snapcraft reads snap/snapcraft.yaml
+      # from here, and the parts' `source: .` stays inside the directory the
+      # LXD build environment mounts.
       - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
         with:
-          path: snap
+          path: .
 
   race-coverage:
     runs-on: ubuntu-latest

@@ -17,9 +17,10 @@ import (
 // putResearchCard persists an RS card in the store and writes body at its
 // promoted artifact path, so DecomposeForCard/MintProposals (which load
 // the card via the store, unlike IngestResearch) find both.
-func putResearchCard(t *testing.T, e *Engine, store interface {
+func putResearchCard(t *testing.T, store interface {
 	CreateFeature(context.Context, *domain.Feature) error
-}, root string, f domain.Feature, body string) {
+}, root string, f domain.Feature, body string,
+) {
 	t.Helper()
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -62,7 +63,7 @@ func TestMintProposalsBackAnnotatesPositionallyAndWiresBothDirections(t *testing
 	e, root := ingestResearchEngine(t)
 	rsCard := researchCard(1, "research topic")
 	rsCard.Stage = domain.StageDone
-	putResearchCard(t, e, e.cfg.Store, root, rsCard, decomposeThreeRows)
+	putResearchCard(t, e.cfg.Store, root, rsCard, decomposeThreeRows)
 
 	rows, err := unsettledSliceRows(decomposeThreeRows)
 	if err != nil || len(rows) != 3 {
@@ -114,7 +115,7 @@ func TestMintProposalsCountMismatchMintsNothing(t *testing.T) {
 	e, root := ingestResearchEngine(t)
 	rsCard := researchCard(1, "research topic")
 	rsCard.Stage = domain.StageDone
-	putResearchCard(t, e, e.cfg.Store, root, rsCard, decomposeThreeRows)
+	putResearchCard(t, e.cfg.Store, root, rsCard, decomposeThreeRows)
 
 	res := domain.IngestResult{Proposals: []domain.FeatureProposal{{Title: "only one"}}}
 	created, err := e.MintProposals(context.Background(), rsCard.ID, res)
@@ -136,7 +137,7 @@ func TestMintProposalsPropagatesBackAnnotationFailure(t *testing.T) {
 	e, root := ingestResearchEngine(t)
 	rsCard := researchCard(1, "research topic")
 	rsCard.Stage = domain.StageDone
-	putResearchCard(t, e, e.cfg.Store, root, rsCard, decomposeThreeRows)
+	putResearchCard(t, e.cfg.Store, root, rsCard, decomposeThreeRows)
 
 	rows, err := unsettledSliceRows(decomposeThreeRows)
 	if err != nil || len(rows) != 3 {
@@ -166,7 +167,7 @@ func TestDecomposeForCardZeroSliceNoOp(t *testing.T) {
 	body := "# RS-001: research topic\n\n## Slices\n\n```yaml\n" +
 		"- title: example slice\n  one-liner: what it mints\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
 		"```\n"
-	putResearchCard(t, e, e.cfg.Store, root, rsCard, body)
+	putResearchCard(t, e.cfg.Store, root, rsCard, body)
 
 	res, err := e.DecomposeForCard(context.Background(), rsCard.ID, "")
 	if err != nil {
@@ -185,7 +186,7 @@ func TestBackAnnotationIdempotentOnSettledDoc(t *testing.T) {
 		"```yaml\n" +
 		"- title: Row one\n  one-liner: first\n  depends-on: []\n  requirements: []\n  id: \"FD-001\"\n" +
 		"```\n"
-	putResearchCard(t, e, e.cfg.Store, root, rsCard, settled)
+	putResearchCard(t, e.cfg.Store, root, rsCard, settled)
 
 	path := filepath.Join(root, rsCard.ArtifactPath())
 	before, err := os.ReadFile(path)

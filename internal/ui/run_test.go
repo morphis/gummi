@@ -194,7 +194,7 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 // waitForActivity polls until FD-001's session has a tool-call line.
 func waitForActivity(t *testing.T, eng *engine.Engine) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		if s := eng.Get("FD-001"); s != nil && len(s.Snapshot().Activity) > 0 {
 			return

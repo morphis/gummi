@@ -15,7 +15,7 @@ apps:
 parts:
   metadata:
     plugin: nil
-    source: ..
+    source: .
     override-build: |
       : "${RELEASE_VERSION:=0.0.0}"
       if [ "$RELEASE_VERSION" = "0.0.0" ]; then
@@ -25,7 +25,7 @@ parts:
 
   gummi:
     plugin: dump
-    source: ..
+    source: .
     build-snaps:
       - go/1.26/stable
     override-build: |

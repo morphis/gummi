@@ -83,7 +83,7 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 // turn — every chat/run test creates FD-001 as its subject.
 func settleChat(t *testing.T, eng *engine.Engine) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		if a := eng.Get("FD-001"); a != nil {
 			snap := a.Snapshot()
@@ -204,7 +204,7 @@ func askingFake() *agent.Fake {
 // waitAsk blocks until FD-001 has an open ask (the picker is showing).
 func waitAsk(t *testing.T, eng *engine.Engine) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		if s := eng.Get("FD-001"); s != nil && s.Snapshot().PendingAsk != nil {
 			return
@@ -232,7 +232,7 @@ func TestChatPickerAnswers(t *testing.T) {
 
 	// selecting option 1 (per-device) answers the question
 	press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
 		select {
 		case <-deadline:

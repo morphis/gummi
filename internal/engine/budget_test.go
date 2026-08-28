@@ -120,7 +120,7 @@ func TestBudgetThresholdNudges(t *testing.T) {
 
 	// collect the budget threshold events
 	var thresholds []int
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		select {
 		case ev := <-e.Events():
@@ -762,7 +762,7 @@ func TestStageReceiptCountsDistinctModels(t *testing.T) {
 	waitState(t, e, "FD-001", StateDone)
 	// the spend receipt is appended just after the done transition; poll
 	// for it so the assertion below reads it once it has landed.
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		if joined := strings.Join(e.Get("FD-001").Snapshot().Activity, "\n"); strings.Contains(joined, "implement ·") {
 			break

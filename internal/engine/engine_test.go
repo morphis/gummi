@@ -17,6 +17,14 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
+// testWaitTimeout bounds the poll loops that wait for an engine event or
+// state change. It only ever runs out on a broken test, so it is sized for
+// the slowest CI shape (race detector plus coverage on a loaded shared
+// runner), not for the happy path — those loops return as soon as the
+// condition holds. Negative assertions ("nothing more arrives") keep their
+// own short windows.
+const testWaitTimeout = 30 * time.Second
+
 func newRepo(t *testing.T) (state.Workspace, *state.Store, *worktree.Manager) {
 	t.Helper()
 	root := t.TempDir()
@@ -70,7 +78,7 @@ func feature(num int, title string, stage domain.Stage) domain.Feature {
 // way feature does, so tests can cover the artifact-path naming across
 // kinds.
 func bugFeature(title string) domain.Feature {
-const num = 2
+	const num = 2
 	id, _ := domain.NewID(domain.KindBug, num)
 	slug, _ := domain.Slugify(title)
 	now := time.Now()
@@ -82,7 +90,7 @@ const num = 2
 
 func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		select {
 		case ev := <-e.Events():
@@ -98,7 +106,7 @@ func waitFor(t *testing.T, e *Engine, kind EventKind) Event {
 // waitState polls a feature's session until it reaches want.
 func waitState(t *testing.T, e *Engine, id domain.FeatureID, want SessionState) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		if s := e.Get(id); s != nil && s.State() == want {
 			return
@@ -121,7 +129,7 @@ func waitState(t *testing.T, e *Engine, id domain.FeatureID, want SessionState) 
 // its repo down right at Done races the commit.
 func waitActivity(t *testing.T, e *Engine, id domain.FeatureID, wants ...string) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		acts := strings.Join(e.Get(id).Snapshot().Activity, "\n")
 		for _, w := range wants {

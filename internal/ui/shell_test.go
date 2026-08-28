@@ -14,6 +14,13 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
+// testWaitTimeout bounds the poll loops that wait for engine state to
+// reach a condition. It only ever runs out on a broken test, so it is
+// sized for the slowest CI shape (race detector plus coverage on a loaded
+// shared runner), not for the happy path — those loops return as soon as
+// the condition holds.
+const testWaitTimeout = 30 * time.Second
+
 func shellAt(w, h int) *Shell {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
 	model, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -154,7 +161,7 @@ func TestQuitLiveDialogCancelStays(t *testing.T) {
 // (holding or waiting for a slot) — i.e. live autonomous work.
 func waitLive(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		if s := eng.Get(id); s != nil {
 			switch s.State() {

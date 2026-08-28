@@ -283,7 +283,7 @@ func TestMCPSockCallToolInterleave(t *testing.T) {
 	// only now resolve the ask; its response is the chosen answer. Wait
 	// for the ask_user dispatch to have registered the pending question
 	// (it runs in its own socket goroutine) before answering.
-	askDeadline := time.After(3 * time.Second)
+	askDeadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-askDeadline:

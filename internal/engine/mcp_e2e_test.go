@@ -111,7 +111,7 @@ func (c *mcpChild) nextID() string {
 // receive scans the child's stdout for the MCP response with the given id.
 func (c *mcpChild) receive(id string) map[string]any {
 	c.t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for {
 		select {
 		case <-deadline:
@@ -221,7 +221,7 @@ func TestMCPEndToEndAskUserRoundTrip(t *testing.T) {
 		text, _ = child.call("ask_user", `{"question":"theme?","options":[{"label":"dark"},{"label":"light"}]}`)
 	}()
 
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-deadline:
@@ -254,7 +254,7 @@ func TestMCPEndToEndConcurrency(t *testing.T) {
 	child.send(`{"jsonrpc":"2.0","id":` + fast + `,"method":"tools/call","params":{"name":"spec_view","arguments":{"section":"Problem"}}}`)
 
 	// the fast response must arrive first, before the ask is answered.
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	first := make(chan string, 1)
 	go func() {
 		for child.sc.Scan() {
@@ -274,7 +274,7 @@ func TestMCPEndToEndConcurrency(t *testing.T) {
 		t.Fatal("no response before ask resolved")
 	}
 
-	ddl := time.After(3 * time.Second)
+	ddl := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-ddl:
@@ -300,7 +300,7 @@ func TestMCPEndToEndLifecycle(t *testing.T) {
 	// put an ask_user in flight so teardown must release it.
 	sendID := child.nextID()
 	child.send(`{"jsonrpc":"2.0","id":` + sendID + `,"method":"tools/call","params":{"name":"ask_user","arguments":{"question":"q","options":[{"label":"a"}]}}}`)
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-deadline:

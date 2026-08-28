@@ -294,41 +294,50 @@ func TestDiffAnnotationSourceRefSchema(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
 
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT name FROM pragma_table_info('diff_annotations') WHERE name = 'source_ref'`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !rows.Next() {
-		t.Fatal("diff_annotations missing source_ref column")
-	}
-	rows.Close()
-
-	idxRows, err := s.db.QueryContext(ctx, `PRAGMA index_list('diff_annotations')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found bool
-	for idxRows.Next() {
-		var seq int
-		var name string
-		var unique, partial int
-		var origin string
-		if err := idxRows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
-			idxRows.Close()
+	func() {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT name FROM pragma_table_info('diff_annotations') WHERE name = 'source_ref'`)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if name == "diff_annotations_source_ref" {
-			found = true
-			if unique != 1 {
-				t.Errorf("index %s: unique = %d, want 1", name, unique)
+		defer rows.Close()
+		if !rows.Next() {
+			t.Fatal("diff_annotations missing source_ref column")
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	var found bool
+	func() {
+		idxRows, err := s.db.QueryContext(ctx, `PRAGMA index_list('diff_annotations')`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer idxRows.Close()
+		for idxRows.Next() {
+			var seq int
+			var name string
+			var unique, partial int
+			var origin string
+			if err := idxRows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+				t.Fatal(err)
 			}
-			if partial != 1 {
-				t.Errorf("index %s: partial = %d, want 1", name, partial)
+			if name == "diff_annotations_source_ref" {
+				found = true
+				if unique != 1 {
+					t.Errorf("index %s: unique = %d, want 1", name, unique)
+				}
+				if partial != 1 {
+					t.Errorf("index %s: partial = %d, want 1", name, partial)
+				}
 			}
 		}
-	}
-	idxRows.Close()
+		if err := idxRows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}()
 	if !found {
 		t.Fatal("diff_annotations_source_ref index not found")
 	}
@@ -346,6 +355,9 @@ func TestDiffAnnotationSourceRefSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		cols = append(cols, name)
+	}
+	if err := colRows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if len(cols) != 2 || cols[0] != "feature_id" || cols[1] != "source_ref" {
 		t.Fatalf("diff_annotations_source_ref covers %v, want [feature_id source_ref]", cols)

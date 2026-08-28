@@ -1129,7 +1129,7 @@ func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 			json.RawMessage(`{"question":"theme?","options":[{"label":"dark"}]}`))
 		done <- dcall{out, derr}
 	}()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-deadline:
@@ -1167,7 +1167,7 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 			json.RawMessage(`{"question":"q","options":[{"label":"a"}]}`))
 		done <- derr
 	}()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-deadline:
@@ -1218,7 +1218,7 @@ func TestDeathMidAskClearsLiveness(t *testing.T) {
 			json.RawMessage(`{"question":"theme?","options":[{"label":"dark"}]}`))
 		done <- derr
 	}()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
 		case <-deadline:

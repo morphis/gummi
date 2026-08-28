@@ -13,17 +13,18 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// researchCardAt builds an RS-kind card at the given stage, ready for the
+// researchCardInVerify builds RS-001 at the verify stage, ready for the
 // decompose gate: verify's blocker checks (open threads, open diff
 // comments, verifydoc citations) all pass trivially against a doc with no
 // %% markers and no Findings citations.
-func researchCardAt(num int, stage domain.Stage) domain.Feature {
+func researchCardInVerify() domain.Feature {
+	const num = 1
 	id, _ := domain.NewID(domain.KindResearch, num)
 	slug, _ := domain.Slugify("research card")
 	now := time.Now()
 	return domain.Feature{
 		ID: id, Num: num, Kind: domain.KindResearch, Title: "research card", Slug: slug,
-		Stage: stage, Budget: domain.Budget{Envelope: 500}, CreatedAt: now, UpdatedAt: now,
+		Stage: domain.StageVerify, Budget: domain.Budget{Envelope: 500}, CreatedAt: now, UpdatedAt: now,
 	}
 }
 
@@ -92,7 +93,7 @@ func TestVerifyToDoneEmitsQuestion(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageDone: decomposeArchitectFn([]json.RawMessage{decomposeProposalsWire("Row one", "Row two")}, &prompts),
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestDecomposeErrorLeavesRSDone(t *testing.T) {
 			return []agent.Event{{Kind: agent.EventError, Err: context.DeadlineExceeded}}
 		},
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestResumeApproveMintsPendingDecompose(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageDone: decomposeArchitectFn([]json.RawMessage{decomposeProposalsWire("Row one", "Row two")}, &prompts),
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestResumeApprovePartialMintClearsPendingKeepsRSDone(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageDone: decomposeArchitectFn([]json.RawMessage{decomposeProposalsWire("Row one", "Row two")}, &prompts),
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +314,7 @@ func TestResumeRequestChangesRerunsDecompose(t *testing.T) {
 			decomposeProposalsWire("Row one v2", "Row two v2"),
 		}, &prompts),
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +352,7 @@ func TestZeroSliceRSExitsDoneCleanly(t *testing.T) {
 			return nil
 		},
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +380,7 @@ func TestAutoTriggerFiresExactlyOncePerCrossing(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageDone: decomposeArchitectFn([]json.RawMessage{decomposeProposalsWire("Row one", "Row two")}, &prompts),
 	})
-	f := researchCardAt(1, domain.StageVerify)
+	f := researchCardInVerify()
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}

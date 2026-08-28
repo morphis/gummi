@@ -19,12 +19,14 @@ trap cleanup EXIT
 # copy tracked source into tempdir
 ( cd "$orig_pwd" && git archive --format=tar --prefix=src/ HEAD ) | ( cd "$workdir" && tar -xf - )
 
-if [ ! -d "$workdir/src/snap" ]; then
-  echo "expected $workdir/src/snap to exist" >&2
+if [ ! -f "$workdir/src/snap/snapcraft.yaml" ]; then
+  echo "expected $workdir/src/snap/snapcraft.yaml to exist" >&2
   exit 1
 fi
 
-cd "$workdir/src/snap"
+# Build from the repo root, not from snap/: the parts' `source: .` has to
+# resolve inside the project directory snapcraft mounts.
+cd "$workdir/src"
 
 if systemd-detect-virt --container --quiet; then
   used_destructive=1
