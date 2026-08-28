@@ -52,7 +52,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	// so they don't need a coding agent — construct a bare engine when none
 	// is configured. Running the bugs later needs an agent; creating them
 	// does not.
-	eng, agents, names := newEngineFromEnv(store, pool, ws)
+	eng, agents, names, _ := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
 		eng = engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	}

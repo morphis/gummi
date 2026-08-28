@@ -433,6 +433,9 @@ func TestClaudeCodeRejectsGuarded(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "guarded") {
 		t.Errorf("guarded session error = %v, want a clear guarded rejection", err)
 	}
+	if support, known := GuardedSupport("claude"); !known || support {
+		t.Errorf(`GuardedSupport("claude") = (%v, %v), want (false, true) to match this rejection`, support, known)
+	}
 }
 
 // A foreign (non-Anthropic) model id is rejected at session start with a

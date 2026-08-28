@@ -1,14 +1,72 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/morphis/gummi/internal/driver"
+	"github.com/morphis/gummi/internal/state"
 )
+
+// TestWithRunEngineSurfacesGuardedMismatch pins the call site the review
+// flagged: a guarded config with a role on claude must reach the caller as
+// the specific guarded-mismatch diagnosis, not the generic "no coding agent
+// is configured" text that would misdiagnose an agent that's actually on
+// PATH. GUMMI_CLAUDE_BIN points at this test binary so claude is
+// independently startable, proving the block comes from the gate.
+func TestWithRunEngineSurfacesGuardedMismatch(t *testing.T) {
+	clearDoctorEnv(t)
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_CLAUDE_BIN", bin)
+
+	root := t.TempDir()
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	cliGit(t, root, "init", "-q", "-b", "main")
+	cliGit(t, root, "config", "user.name", "t")
+	cliGit(t, root, "config", "user.email", "t@e.invalid")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-q", "-m", "init")
+
+	writeConfig(t, root, "permissions: guarded\n")
+	writeProfiles(t, root, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: claude, model: m }
+`)
+
+	runErr := withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
+		t.Fatal("fn should not run when the guarded/backend gate blocks the engine")
+		return driver.Outcome{}, nil
+	}, driver.Options{})
+	if runErr == nil {
+		t.Fatal("err = nil, want a guarded-mismatch error")
+	}
+	if strings.Contains(runErr.Error(), "no coding agent is configured") {
+		t.Fatalf("err = %v, want the guarded-mismatch diagnosis, not the generic no-agent message", runErr)
+	}
+	for _, want := range []string{"premium", "architect", "claude"} {
+		if !strings.Contains(runErr.Error(), want) {
+			t.Errorf("error %q should name %q", runErr.Error(), want)
+		}
+	}
+}
 
 // An envelope is required (D6): missing --envelope with no GUMMI_ENVELOPE
 // fails loud before any workspace is touched.

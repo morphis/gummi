@@ -403,6 +403,141 @@ func TestDoctorSandboxUsesWorkspaceDefault(t *testing.T) {
 	}
 }
 
+// TestGuardedIncompatibilitiesMultiProfile: a non-default profile's role
+// paired with claude is reported, while a clean opencode profile is not —
+// confirming every profile is checked, not just the default one.
+func TestGuardedIncompatibilitiesMultiProfile(t *testing.T) {
+	profiles := config.Profiles{
+		Default: "default",
+		Profiles: map[string]config.Profile{
+			"default": {"implementer": {Backend: "opencode", Model: "m"}},
+			"premium": {"architect": {Backend: "claude", Model: "m"}},
+		},
+	}
+	issues := guardedIncompatibilities("opencode", profiles)
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly one", issues)
+	}
+	got := issues[0]
+	want := guardedIncompatibility{Profile: "premium", Role: "architect", Backend: "claude"}
+	if got != want {
+		t.Errorf("issue = %+v, want %+v", got, want)
+	}
+}
+
+// TestGuardedIncompatibilitiesCleanCompatible: profiles routed entirely at
+// guarded-capable backends report no issues.
+func TestGuardedIncompatibilitiesCleanCompatible(t *testing.T) {
+	profiles := config.Profiles{Profiles: map[string]config.Profile{
+		"safe": {
+			"architect":   {Backend: "copilot", Model: "m"},
+			"implementer": {Backend: "opencode", Model: "m"},
+			"reviewer":    {Backend: "codex", Model: "m"},
+		},
+	}}
+	if issues := guardedIncompatibilities("copilot", profiles); len(issues) != 0 {
+		t.Errorf("issues = %+v, want none", issues)
+	}
+}
+
+// TestGuardedIncompatibilitiesHeadlessSkipped: a headless role is never
+// reported, since gummi cannot tell whether the wrapped tool honors guarded.
+func TestGuardedIncompatibilitiesHeadlessSkipped(t *testing.T) {
+	profiles := config.Profiles{Profiles: map[string]config.Profile{
+		"wrapped": {"implementer": {Backend: "headless", Model: "m"}},
+	}}
+	if issues := guardedIncompatibilities("headless", profiles); len(issues) != 0 {
+		t.Errorf("issues = %+v, want headless silently skipped", issues)
+	}
+}
+
+// TestDoctorGuardedFail: a guarded config with a claude role fails the
+// guarded:<profile> check, naming the profile/role/backend, wired through
+// the full buildDoctorReport path.
+func TestDoctorGuardedFail(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: guarded\n")
+	writeProfiles(t, repo, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: claude, model: m }
+`)
+	r := buildDoctorReport(repo, doctorOpts{})
+	c := checkByName(r, "guarded:premium")
+	if c.Status != statusFail {
+		t.Fatalf("guarded:premium = %+v, want fail", c)
+	}
+	for _, want := range []string{`profile "premium"`, `role "architect"`, `backend "claude"`} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("detail %q should contain %q", c.Detail, want)
+		}
+	}
+}
+
+// TestDoctorGuardedOkOnCompatibleBackend: a guarded config routed at a
+// guarded-capable backend reports the profile clean.
+func TestDoctorGuardedOkOnCompatibleBackend(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: guarded\n")
+	writeProfiles(t, repo, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: copilot, model: m }
+`)
+	r := buildDoctorReport(repo, doctorOpts{})
+	c := checkByName(r, "guarded:premium")
+	if c.Status != statusOK {
+		t.Fatalf("guarded:premium = %+v, want ok", c)
+	}
+}
+
+// TestDoctorGuardedSilentOnAllowAll: with permissions: allow-all, no
+// guarded:* check is emitted at all, even with a claude role present.
+func TestDoctorGuardedSilentOnAllowAll(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: allow-all\n")
+	writeProfiles(t, repo, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: claude, model: m }
+`)
+	r := buildDoctorReport(repo, doctorOpts{})
+	for _, c := range r.Checks {
+		if strings.HasPrefix(c.Name, "guarded:") {
+			t.Errorf("unexpected guarded check emitted under allow-all: %+v", c)
+		}
+	}
+}
+
+// TestDoctorGuardedFailNoProfiles: with a present-but-empty profiles.yaml
+// (so effectiveProfiles doesn't seed the starter template), a guarded
+// config backed by an incompatible default backend must still surface a
+// guarded:* check — mirroring the "no profiles configured; gummi falls back
+// to the single GUMMI_MODEL" state doctor's own profile check already
+// treats as legitimate, rather than silently dropping the mismatch because
+// there's no profile name in profiles.Profiles to attach it to.
+func TestDoctorGuardedFailNoProfiles(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_AGENT", "claude")
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: guarded\n")
+	writeProfiles(t, repo, "profiles: {}\n")
+	r := buildDoctorReport(repo, doctorOpts{})
+	c := checkByName(r, "guarded:(default)")
+	if c.Status != statusFail {
+		t.Fatalf("guarded:(default) = %+v, want fail", c)
+	}
+	if !strings.Contains(c.Detail, `backend "claude"`) {
+		t.Errorf("detail %q should name backend \"claude\"", c.Detail)
+	}
+}
+
 // writeProfiles writes a profiles.yaml under the repo's .gummi dir so the
 // report's profile and backend checks parse a real loaded profile set.
 func writeProfiles(t *testing.T, repo, body string) {

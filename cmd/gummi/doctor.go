@@ -230,6 +230,10 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// and flagging any enforce profile whose tool coverage is incomplete.
 	checks = append(checks, sandboxChecks(wsCfg, profiles)...)
 
+	// guarded — one check per defined profile when permissions: guarded is
+	// set, flagging any role whose resolved backend can't honor it.
+	checks = append(checks, guardedChecks(wsCfg, profiles)...)
+
 	// 5. auth (offline) — one line per required backend, pairing with the
 	// backend:* checks above.
 	for _, name := range ordered {
@@ -611,6 +615,75 @@ func requiredBackendRoles(def string, profiles config.Profiles) map[string][]str
 	return roles
 }
 
+// guardedIncompatibility names one profile/role pairing whose resolved
+// backend cannot honor permissions: guarded.
+type guardedIncompatibility struct {
+	Profile, Role, Backend string
+}
+
+// guardedIncompatibilities walks every profile's resolved roles — applying
+// the same default-backend substitution and no-profiles fallback as
+// requiredBackendRoles — and reports each role whose backend is known to
+// reject guarded (agent.GuardedSupport reports known && !support). A
+// backend absent from the matrix (headless, or unrecognized) is silently
+// skipped rather than flagged: gummi cannot tell whether it honors guarded,
+// so it is never reported either way. With no profiles configured, a
+// mismatch on the default backend is reported under the synthetic profile
+// name "(default)" with no role, mirroring the "no profiles configured;
+// gummi falls back to the single GUMMI_MODEL" state doctor's own profile
+// check already treats as legitimate. The result is sorted by profile then
+// role for a deterministic report.
+func guardedIncompatibilities(def string, profiles config.Profiles) []guardedIncompatibility {
+	var issues []guardedIncompatibility
+	if len(profiles.Profiles) == 0 {
+		if support, known := agent.GuardedSupport(def); known && !support {
+			issues = append(issues, guardedIncompatibility{Profile: "(default)", Backend: def})
+		}
+		return issues
+	}
+	pnames := make([]string, 0, len(profiles.Profiles))
+	for pname := range profiles.Profiles {
+		pnames = append(pnames, pname)
+	}
+	sort.Strings(pnames)
+	for _, pname := range pnames {
+		p := profiles.Profiles[pname]
+		roles := make([]string, 0, len(p))
+		for role := range p {
+			roles = append(roles, role)
+		}
+		sort.Strings(roles)
+		for _, role := range roles {
+			name := p[role].Backend
+			if name == "" {
+				name = def
+			}
+			if support, known := agent.GuardedSupport(name); known && !support {
+				issues = append(issues, guardedIncompatibility{Profile: pname, Role: role, Backend: name})
+			}
+		}
+	}
+	return issues
+}
+
+// formatGuardedIncompatibilities renders each offending pairing as
+// `profile %q role %q -> backend %q`, joined by "; ". An issue with no role
+// (the no-profiles-configured fallback, keyed under "(default)") renders as
+// `profile %q -> backend %q` instead, omitting the empty role clause. Doctor's
+// guarded:* check detail and the startup config-validation error share this
+// verbatim so the two surfaces can't drift in wording.
+func formatGuardedIncompatibilities(issues []guardedIncompatibility) string {
+	parts := make([]string, 0, len(issues))
+	for _, i := range issues {
+		if i.Role == "" {
+			parts = append(parts, fmt.Sprintf("profile %q -> backend %q", i.Profile, i.Backend))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("profile %q role %q -> backend %q", i.Profile, i.Role, i.Backend))
+	}
+	return strings.Join(parts, "; ")
+}
+
 // roleAttribution renders the referencing-profile hint appended to a failing
 // backend check's detail — e.g. " (required by premium/architect, ...)".
 // It is empty when there is no profile provenance to name (unprofiled
@@ -705,6 +778,54 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 			})
 		} else {
 			checks = append(checks, doctorCheck{Name: "sandbox:" + name, Status: statusOK, Detail: detail})
+		}
+	}
+	return checks
+}
+
+// guardedChecks emits one guarded:<profile> check per defined profile, but
+// only when permissions: guarded is set — with allow-all there is nothing
+// to check and this returns nil. Each profile fails when
+// guardedIncompatibilities reports a mismatch scoped to it, naming the
+// offending profile/role/backend triples; a profile with no mismatches
+// reports ok. With no profiles configured at all, guardedIncompatibilities'
+// fallback issue is keyed under the synthetic profile "(default)" rather
+// than any name in profiles.Profiles, so the check set is built from the
+// union of both — otherwise that fallback issue would have no profile to
+// attach a check to and silently vanish from the report.
+func guardedChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
+	if !cfg.Guarded() {
+		return nil
+	}
+	issues := guardedIncompatibilities(defaultBackendName(), profiles)
+	byProfile := map[string][]guardedIncompatibility{}
+	for _, i := range issues {
+		byProfile[i.Profile] = append(byProfile[i.Profile], i)
+	}
+	seen := map[string]bool{}
+	names := make([]string, 0, len(profiles.Profiles))
+	for name := range profiles.Profiles {
+		names = append(names, name)
+		seen[name] = true
+	}
+	for name := range byProfile {
+		if !seen[name] {
+			names = append(names, name)
+			seen[name] = true
+		}
+	}
+	sort.Strings(names)
+	var checks []doctorCheck
+	for _, name := range names {
+		if is := byProfile[name]; len(is) > 0 {
+			checks = append(checks, doctorCheck{
+				Name:        "guarded:" + name,
+				Status:      statusFail,
+				Detail:      formatGuardedIncompatibilities(is),
+				Remediation: "route the flagged roles at a guarded-capable backend (copilot), or set permissions: allow-all",
+			})
+		} else {
+			checks = append(checks, doctorCheck{Name: "guarded:" + name, Status: statusOK, Detail: "guarded permissions honored by every resolved backend"})
 		}
 	}
 	return checks

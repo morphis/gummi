@@ -163,7 +163,10 @@ func runBoard() error {
 //	                        local endpoint (llama.cpp) that the engine
 //	                        still needs to meter against a credit budget
 func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, []string, func()) {
-	eng, agents, names := newEngineFromEnv(store, pool, ws)
+	eng, agents, names, err := newEngineFromEnv(store, pool, ws)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+	}
 	if eng == nil {
 		return nil, nil, nil
 	}
@@ -192,12 +195,42 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*
 // the board (adding Restore + a combined cleanup); one-shot commands like
 // `gummi ingest` use it directly and own the agents' lifetimes. Returns
 // (nil, nil, nil) when no agent can be started.
-func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string) {
+// The returned error is non-nil only when permissions: guarded is paired
+// with a backend that can't honor it (agent.GuardedSupport) — every other
+// nil-eng path (buildAgents failure, zero agents configured) keeps
+// returning a nil error, so callers that already have their own generic
+// "no coding agent is configured" message for those cases are unaffected.
+func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string, error) {
 	// per-role model routing from .gummi/profiles.yaml (falls back to
 	// the single env model when absent or a role isn't covered)
 	profiles, err := config.LoadProfiles(ws.ProfilesFile())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
+	}
+	// Honor the repo's permission mode from config.yaml. Without this the
+	// parsed value was inert and "permissions: guarded" silently ran allow-all.
+	// Loaded before buildAgents so a guarded/backend mismatch is caught
+	// before any backend process starts.
+	perm := agent.PermissionAllowAll
+	var sandboxMode string
+	var instructions []string
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		userPath = ""
+	}
+	if cfg, _, err := config.LoadLayered(userPath, ws.ConfigFile()); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+	} else {
+		if cfg.Guarded() {
+			perm = agent.PermissionGuarded
+			if issues := guardedIncompatibilities(defaultBackendName(), profiles); len(issues) > 0 {
+				return nil, nil, nil, fmt.Errorf("permissions: guarded is incompatible with the resolved backend for %s",
+					formatGuardedIncompatibilities(issues))
+			}
+		}
+		sandboxMode = cfg.Sandbox
+		instructions = cfg.Instructions
 	}
 	// Adapter selection: GUMMI_AGENT picks the default backend, and any
 	// distinct `backend:` referenced across the loaded profiles is
@@ -206,10 +239,10 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	agents, err := buildAgents(profiles)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if len(agents) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
 	maxActive := 1
@@ -232,25 +265,6 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 			turnReserve = b
 		}
 	}
-	// Honor the repo's permission mode from config.yaml. Without this the
-	// parsed value was inert and "permissions: guarded" silently ran allow-all.
-	perm := agent.PermissionAllowAll
-	var sandboxMode string
-	var instructions []string
-	userPath, err := config.UserConfigPath()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "gummi:", err)
-		userPath = ""
-	}
-	if cfg, _, err := config.LoadLayered(userPath, ws.ConfigFile()); err != nil {
-		fmt.Fprintln(os.Stderr, "gummi:", err)
-	} else {
-		if cfg.Guarded() {
-			perm = agent.PermissionGuarded
-		}
-		sandboxMode = cfg.Sandbox
-		instructions = cfg.Instructions
-	}
 	eng := engine.New(engine.Config{
 		Agents: agents, Store: store, Pool: pool, Workspace: ws,
 		Model: model, MaxActive: maxActive, Persist: true,
@@ -262,7 +276,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	// fallback. Re-sorting alphabetically here would silently pick the wrong
 	// default (e.g. "premium" ahead of the configured "thrifty").
 	names := profiles.Names()
-	return eng, agents, names
+	return eng, agents, names, nil
 }
 
 // profileNames returns the profile names declared in .gummi/profiles.yaml

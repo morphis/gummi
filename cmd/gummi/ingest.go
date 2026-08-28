@@ -77,8 +77,11 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
-	eng, agents, names := newEngineFromEnv(store, pool, ws)
+	eng, agents, names, err := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
+		if err != nil {
+			return err
+		}
 		return fmt.Errorf("no coding agent is configured; ingestion needs one (GitHub Copilot, or set GUMMI_AGENT_CMD)")
 	}
 	defer func() { _ = eng.Close(); closeAgents(agents) }()

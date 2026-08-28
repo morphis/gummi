@@ -372,6 +372,9 @@ func TestZZRefusesGuarded(t *testing.T) {
 		!strings.Contains(err.Error(), "guarded") {
 		t.Errorf("Guarded session error = %v, want a clear guarded rejection", err)
 	}
+	if support, known := GuardedSupport("zz"); !known || support {
+		t.Errorf(`GuardedSupport("zz") = (%v, %v), want (false, true) to match this rejection`, support, known)
+	}
 }
 
 func TestZZRefusesEmptyModel(t *testing.T) {

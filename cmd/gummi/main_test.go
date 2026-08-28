@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/config"
@@ -209,6 +210,111 @@ func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
 	}
 	if _, ok := agents["copilot"]; ok {
 		t.Errorf("buildAgents started the copilot default even though no role references it")
+	}
+}
+
+// TestNewEngineFromEnvBlocksGuardedMismatch locks in the guarded/backend
+// gate at its call site: a guarded config with a role on claude must fail
+// before buildAgents ever runs, not mid-session. GUMMI_CLAUDE_BIN points at
+// this test binary (the TestBuildAgentsSkipsUnstartableDefault trick) so
+// claude is independently startable — proving the nil engine and error come
+// from the gate itself, not a build failure.
+func TestNewEngineFromEnvBlocksGuardedMismatch(t *testing.T) {
+	clearDoctorEnv(t)
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_CLAUDE_BIN", bin)
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: guarded\n")
+	writeProfiles(t, repo, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: claude, model: m }
+`)
+	ws, err := state.Open(repo, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	if eng != nil {
+		t.Fatalf("eng = %v, want nil on a guarded/claude mismatch", eng)
+	}
+	if err == nil {
+		t.Fatal("err = nil, want a guarded-mismatch error")
+	}
+	for _, want := range []string{"premium", "architect", "claude"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should name %q", err.Error(), want)
+		}
+	}
+}
+
+// TestNewEngineFromEnvBlocksGuardedMismatchNoProfiles pins the startup
+// error's wording when profiles.yaml is absent: the message must name the
+// synthetic "(default)" profile and the offending backend, not render blank
+// quoted profile/role clauses (`profile "" role "" -> backend "claude"`).
+func TestNewEngineFromEnvBlocksGuardedMismatchNoProfiles(t *testing.T) {
+	clearDoctorEnv(t)
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_CLAUDE_BIN", bin)
+	t.Setenv("GUMMI_AGENT", "claude")
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: guarded\n")
+	ws, err := state.Open(repo, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	if eng != nil {
+		t.Fatalf("eng = %v, want nil on a guarded/claude mismatch", eng)
+	}
+	if err == nil {
+		t.Fatal("err = nil, want a guarded-mismatch error")
+	}
+	if strings.Contains(err.Error(), `role ""`) || strings.Contains(err.Error(), `profile ""`) {
+		t.Errorf("error %q should not render blank profile/role clauses", err.Error())
+	}
+	for _, want := range []string{`profile "(default)"`, `backend "claude"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should contain %q", err.Error(), want)
+		}
+	}
+}
+
+// TestNewEngineFromEnvAllowsGuardedCompatibleBackend confirms the gate
+// doesn't false-positive: guarded paired with a guarded-capable backend
+// (opencode) starts normally with no error.
+func TestNewEngineFromEnvAllowsGuardedCompatibleBackend(t *testing.T) {
+	clearDoctorEnv(t)
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_OPENCODE_BIN", bin)
+	repo := gitRepo(t)
+	writeConfig(t, repo, "permissions: guarded\n")
+	writeProfiles(t, repo, `
+default: premium
+profiles:
+  premium:
+    architect: { backend: opencode, model: m }
+`)
+	ws, err := state.Open(repo, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	if err != nil {
+		t.Fatalf("err = %v, want nil for a guarded+opencode pairing", err)
+	}
+	if eng == nil {
+		t.Fatal("eng = nil, want a started engine for a compatible pairing")
 	}
 }
 
