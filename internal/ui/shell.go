@@ -925,7 +925,7 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 				// straight to the verb, never back through this layer: the
 				// run action's own accelerator IS enter, so re-entering here
 				// would pick the same row and recurse until the stack blew.
-				return m.boardVerb(a.key)
+				return m.runCardAction(a)
 			}
 			return nil
 		}
@@ -1162,18 +1162,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				question:     "clean up " + string(f.ID) + "?",
 				detail:       "removes the worktree (incl. untracked files) and merged branch — keeps the record",
 				onConfirm:    func() tea.Cmd { return m.cleanupLanded(f) },
-			})
-		}
-	case "y":
-		if r, ok := m.selected(); ok {
-			f := r.F
-			m.Overlay.Push(&confirmDialog{
-				id:           "confirm-duplicate",
-				cancelLabel:  "Cancel",
-				confirmLabel: "Duplicate",
-				question:     "duplicate " + string(f.ID) + "?",
-				detail:       f.Title + " — fresh copy in todo (same skips, profile, envelope); this card stays",
-				onConfirm:    func() tea.Cmd { return m.duplicateFeature(f.ID) },
 			})
 		}
 	case "x":

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -147,7 +148,10 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			needsWT && r.HasWorktree && !r.Landed},
 		{"clean", "c", "clean up", "branch landed on main — remove the worktree and branch", true,
 			needsWT && r.Landed},
-		{"duplicate", "y", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
+		// no accelerator: y is "yes" in the confirm this very action raises,
+		// so binding it here made one letter mean two things one keystroke
+		// apart. The list and the command menu are how you reach it now.
+		{"duplicate", "", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
 			true},
 		{"delete", "x", "delete", "remove the worktree, branch, and record — irrecoverable", true,
 			true},
@@ -231,14 +235,20 @@ func runLabelWhy(in nextInput) (label, why string) {
 // right-aligned within w, danger rows tinted and set off by a separator,
 // and a trailing explainer for whatever row the cursor sits on (shown
 // whether or not the list itself has focus — the same continuity the old
-// read-only "next" block gave the top suggestion). The marker itself only
-// appears when focused is true; an unfocused list still shows where the
-// cursor would land so → has something concrete to land on.
-func (l *cardActionList) View(s *theme.Styles, w int, focused bool) string {
+// read-only "next" block gave the top suggestion).
+//
+// maxRows caps the rendered rows: the dashboard also carries stage,
+// branch, budget, spend, the live activity feed and the history, and a
+// card mid-implement offers a dozen actions — unbounded, the list pushed
+// all of that off a short terminal. The window follows the cursor so the
+// row you are on is always visible, and the count of what is hidden is
+// stated rather than silently dropped. maxRows <= 0 means no cap.
+func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) string {
 	if len(l.actions) == 0 {
 		return ""
 	}
 	var lines []string
+	cursorLine := 0
 	sepDrawn := false
 	for i, a := range l.actions {
 		if a.danger && !sepDrawn {
@@ -251,6 +261,7 @@ func (l *cardActionList) View(s *theme.Styles, w int, focused bool) string {
 		// keeps the distinction visible without claiming input focus.
 		marker := "  "
 		if i == l.cursor {
+			cursorLine = len(lines) // the separator shifts rows, so track it here
 			if focused {
 				marker = s.Cursor.Render("▸ ")
 			} else {
@@ -273,8 +284,21 @@ func (l *cardActionList) View(s *theme.Styles, w int, focused bool) string {
 		}
 		lines = append(lines, marker+labelStyle.Render(label)+strings.Repeat(" ", pad)+" "+keyStr)
 	}
-	if a, ok := l.Selected(); ok {
-		lines = append(lines, s.Faint.Render(ansi.Truncate("  ↳ "+a.why, w, "…")))
+	shown := lines
+	hidden := 0
+	if maxRows > 0 && len(lines) > maxRows {
+		shown = windowLines(lines, cursorLine, maxRows)
+		hidden = len(lines) - len(shown)
 	}
-	return strings.Join(lines, "\n")
+	// copy before appending: windowLines returns a slice of lines, so
+	// appending in place would scribble over the row after the window.
+	out := make([]string, 0, len(shown)+2)
+	out = append(out, shown...)
+	if hidden > 0 {
+		out = append(out, s.Faint.Render(fmt.Sprintf("  …%d more — ↑↓ to reach them", hidden)))
+	}
+	if a, ok := l.Selected(); ok {
+		out = append(out, s.Faint.Render(ansi.Truncate("  ↳ "+a.why, w, "…")))
+	}
+	return strings.Join(out, "\n")
 }

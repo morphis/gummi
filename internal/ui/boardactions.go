@@ -80,3 +80,40 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	}
 	return m.boardVerb(id)
 }
+
+// confirmDuplicate raises the duplicate confirm. Duplicating used to sit
+// on the board's `y`, which is also "yes" in the confirm dialog `y`
+// itself raises — one letter, two meanings, one keystroke apart. It has
+// no accelerator now: it is a rare action, the action list and the
+// command menu both reach it, and `y` gets to mean exactly one thing.
+func (m *Shell) confirmDuplicate() tea.Cmd {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	f := r.F
+	m.Overlay.Push(&confirmDialog{
+		id:           "confirm-duplicate",
+		cancelLabel:  "Cancel",
+		confirmLabel: "Duplicate",
+		question:     "duplicate " + string(f.ID) + "?",
+		detail:       f.Title + " — fresh copy in todo (same skips, profile, envelope); this card stays",
+		onConfirm:    func() tea.Cmd { return m.duplicateFeature(f.ID) },
+	})
+	return nil
+}
+
+// runCardAction performs one entry from the card's action list. A keyed
+// action goes through boardVerb so it hits the same guarded case body as
+// its accelerator; a keyless one (duplicate) is handled here, since there
+// is no key to route it by.
+func (m *Shell) runCardAction(a cardAction) tea.Cmd {
+	if a.key != "" {
+		return m.boardVerb(a.key)
+	}
+	switch a.id {
+	case "duplicate":
+		return m.confirmDuplicate()
+	}
+	return nil
+}

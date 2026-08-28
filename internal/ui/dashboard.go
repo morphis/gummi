@@ -93,7 +93,10 @@ func (m *Shell) dashboardView(w, h int) string {
 	// key beside it is a demoted accelerator the row teaches in passing.
 	if l := m.cardActions(); l.Len() > 0 {
 		line(s.Subtitle.Render("actions"))
-		for _, row := range strings.Split(l.View(s, w, m.actionFocused), "\n") {
+		// the same h-14 reserve the activity feed below uses, floored so a
+		// very short terminal still shows the recommendation and a way to
+		// reach the rest.
+		for _, row := range strings.Split(l.View(s, w, max(h-14, 4), m.actionFocused), "\n") {
 			line(row)
 		}
 		line("")

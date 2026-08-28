@@ -82,15 +82,30 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	}
 }
 
-// TestDuplicateKeyOpensConfirm: y on a selected card asks before minting
-// the copy, like every other card-level action with side effects.
-func TestDuplicateKeyOpensConfirm(t *testing.T) {
+// TestDuplicateFromActionListOpensConfirm: duplicating asks before
+// minting the copy, like every other card-level action with side
+// effects. It has no accelerator any more — y is "yes" in the very
+// confirm this action raises — so the action list is the way in.
+func TestDuplicateFromActionListOpensConfirm(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m := populatedShell(80, 24)
 	m.Attach(store, wt, ws) // board keys are gated on an attached store
-	m.handleKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m.runCardAction(cardAction{id: "duplicate"})
 	if !m.Overlay.Contains("confirm-duplicate") {
-		t.Fatal("y did not open the duplicate confirm dialog")
+		t.Fatal("the duplicate action did not open its confirm dialog")
+	}
+}
+
+// TestDuplicateNoLongerOnY guards the collision that motivated moving
+// it: y raised the duplicate confirm and was also "yes" inside it, so
+// one letter meant two things a single keystroke apart.
+func TestDuplicateNoLongerOnY(t *testing.T) {
+	ws, store, wt := uiRepo(t)
+	m := populatedShell(80, 24)
+	m.Attach(store, wt, ws)
+	m.handleKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("y still opens a dialog on the board")
 	}
 }
 

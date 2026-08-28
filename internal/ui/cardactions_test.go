@@ -168,7 +168,7 @@ func TestCardActionsForEmpty(t *testing.T) {
 	}
 	l.Move(1) // must not panic
 	l.Move(-1)
-	if got := l.View(theme.New(theme.GummiDark()), 40, true); got != "" {
+	if got := l.View(theme.New(theme.GummiDark()), 40, 0, true); got != "" {
 		t.Errorf("View() on an empty list = %q, want \"\"", got)
 	}
 }
@@ -216,7 +216,7 @@ func TestCardActionListViewContainsKeyAndLabel(t *testing.T) {
 		{id: "attach", key: "a", label: "attach", why: "raw-attach the agent CLI"},
 	})
 	l.Move(1) // cursor -> attach
-	out := ansi.Strip(l.View(s, 40, true))
+	out := ansi.Strip(l.View(s, 40, 0, true))
 	lines := strings.Split(out, "\n")
 	if len(lines) < 3 {
 		t.Fatalf("expected at least 3 lines (2 rows + explainer), got %d: %q", len(lines), out)
@@ -250,7 +250,7 @@ func TestCardActionListViewUnfocusedKeepsMarker(t *testing.T) {
 		{id: "run", key: "enter", label: "run", why: "start the stage"},
 		{id: "attach", key: "a", label: "attach", why: "raw-attach the agent CLI"},
 	})
-	out := ansi.Strip(l.View(s, 40, false))
+	out := ansi.Strip(l.View(s, 40, 0, false))
 	lines := strings.Split(out, "\n")
 	if !strings.HasPrefix(lines[0], "\u25b8 ") {
 		t.Errorf("cursor row = %q, want it to keep the marker while unfocused", lines[0])
