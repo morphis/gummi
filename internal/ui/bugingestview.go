@@ -155,41 +155,39 @@ func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
 }
 
 // bugIngestView is the bug-import review surface (DESIGN §11.4 phase B,
-// bug variant): the GitHub issues fetched as proposals, reviewed and
-// approved before any are minted. Unlike feature ingest there is no
-// coverage map and no merge — issues are discrete — so the gate only
-// coarsens (drop) and edits (rename/one-liner).
+// bug variant): the GitHub issues fetched as proposals, single-picked
+// before any is minted. Unlike feature ingest there is no coverage map and
+// no merge — issues are discrete — and unlike a batch gate there is no
+// "kept set" either: only a cursor position, and enter imports exactly the
+// row under it.
 type bugIngestView struct {
 	source   string
-	props    []bugIngestProposal
+	props    []domain.BugProposal
 	skipped  []domain.FeatureID
 	cursor   int // index into the filtered (visible) list
 	profile  string
 	envelope int
 
 	filter    textinput.Model // live substring filter over the fetched issues
-	filtering bool            // the filter input is focused (typing)
+	filtering bool            // the filter input has focus (typing into it)
 }
 
-type bugIngestProposal struct {
-	p       domain.BugProposal
-	dropped bool
-}
-
+// newBugIngestView opens with the filter input focused: typing narrows the
+// list live, and Tab moves focus to the list without discarding the query.
 func newBugIngestView(res engine.BugIngestResult, profile string, envelope int) *bugIngestView {
-	props := make([]bugIngestProposal, len(res.Proposals))
-	for i, p := range res.Proposals {
-		props[i] = bugIngestProposal{p: p}
-	}
 	filter := textinput.New()
 	filter.Placeholder = "filter by title / label / text…"
 	filter.CharLimit = 80
 	filter.SetWidth(40)
+	filter.Focus()
 	skipped := make([]domain.FeatureID, len(res.Skipped))
 	for i, s := range res.Skipped {
 		skipped[i] = s.LocalID
 	}
-	return &bugIngestView{source: res.Source, props: props, skipped: skipped, profile: profile, envelope: envelope, filter: filter}
+	return &bugIngestView{
+		source: res.Source, props: res.Proposals, skipped: skipped,
+		profile: profile, envelope: envelope, filter: filter, filtering: true,
+	}
 }
 
 // bugMatches reports whether a proposal matches the (already lowercased)
@@ -212,8 +210,8 @@ func bugMatches(p domain.BugProposal, q string) bool {
 func (bv *bugIngestView) visible() []int {
 	q := strings.ToLower(strings.TrimSpace(bv.filter.Value()))
 	var out []int
-	for i, ip := range bv.props {
-		if bugMatches(ip.p, q) {
+	for i, p := range bv.props {
+		if bugMatches(p, q) {
 			out = append(out, i)
 		}
 	}
@@ -235,29 +233,6 @@ func (bv *bugIngestView) selected() int {
 // currently editing it).
 func (bv *bugIngestView) active() bool { return strings.TrimSpace(bv.filter.Value()) != "" }
 
-// keptCount / kept count only proposals that are visible under the
-// current filter AND not dropped: what you see (and haven't dropped) is
-// what materializes, so the filter drives the import set.
-func (bv *bugIngestView) keptCount() int {
-	n := 0
-	for _, i := range bv.visible() {
-		if !bv.props[i].dropped {
-			n++
-		}
-	}
-	return n
-}
-
-func (bv *bugIngestView) kept() []domain.BugProposal {
-	var out []domain.BugProposal
-	for _, i := range bv.visible() {
-		if !bv.props[i].dropped {
-			out = append(out, bv.props[i].p)
-		}
-	}
-	return out
-}
-
 func (bv *bugIngestView) setCursor(n int) {
 	if vis := len(bv.visible()); vis > 0 {
 		bv.cursor = min(max(n, 0), vis-1)
@@ -266,24 +241,26 @@ func (bv *bugIngestView) setCursor(n int) {
 	}
 }
 
-// bindings is the bug-import surface's key table (see keymap.go),
-// split by filter focus like handleBugIngestKey routes.
+// bindings is the bug-import surface's key table (see keymap.go), split by
+// filter focus like handleBugIngestKey routes. up/down/pgup/pgdn always
+// move the cursor regardless of focus, so they aren't re-listed per state.
 func (bv *bugIngestView) bindings() []binding {
 	if bv.filtering {
 		return []binding{
 			{key: "type", label: "filter", help: "type to filter the list", bar: true},
-			{key: "enter", label: "apply", help: "lock the filter in and return to the list", bar: true},
-			{key: "esc", label: "clear", help: "clear the filter and return to the full list", bar: true},
+			{key: "up/down/pgup/pgdn", label: "move", help: "move the highlighted row without leaving the filter"},
+			{key: "tab", label: "list", help: "move focus to the list (rename/one-liner)", bar: true},
+			{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
+			{key: "esc", label: "discard", help: "discard the import — nothing created", bar: true},
 		}
 	}
 	return []binding{
 		{key: "j/k", label: "select", help: "move over the bugs"},
 		{key: "pgup/pgdn", label: "page", help: "move by a page over the bugs"},
-		{key: "/", label: "filter", bar: true},
+		{key: "tab", label: "filter", help: "move focus back to the filter", bar: true},
 		{key: "r", label: "rename", help: "rename the bug (also c)", bar: true},
 		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
-		{key: "x", label: "drop", help: "drop/undrop the bug", bar: true},
-		{key: "A", label: "approve", help: "materialize the kept bugs into todo", bar: true},
+		{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
 		{key: "esc", label: "discard", help: "discard the import — nothing created (also q)", bar: true},
 		{key: "?", label: "help", bar: true},
 	}
@@ -295,18 +272,35 @@ func (bv *bugIngestView) bindings() []binding {
 func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 	bv := m.bugIngest
 	key := msg.String()
+
+	// up/down/pgup/pgdn move the cursor regardless of which side has focus,
+	// so a few filter characters and a move need no extra step in between.
+	switch key {
+	case "up":
+		bv.setCursor(bv.cursor - 1)
+		return nil
+	case "down":
+		bv.setCursor(bv.cursor + 1)
+		return nil
+	case "pgup":
+		bv.setCursor(bv.cursor - m.mainPage())
+		return nil
+	case "pgdown":
+		bv.setCursor(bv.cursor + m.mainPage())
+		return nil
+	}
+
 	if bv.filtering {
 		switch key {
+		case "tab":
+			// move focus to the list, keeping the query and the pass intact
+			bv.filtering = false
+			bv.filter.Blur()
 		case "enter":
-			// lock the filter in and return to navigation, keeping the query
-			bv.filtering = false
-			bv.filter.Blur()
+			return m.importHighlighted()
 		case "esc":
-			// clear the filter and return to the full list
-			bv.filter.SetValue("")
-			bv.filtering = false
-			bv.filter.Blur()
-			bv.cursor = 0
+			m.bugIngest = nil
+			m.notice = noticeMsg{text: "import discarded — nothing created"}
 		default:
 			bv.filter, _ = bv.filter.Update(msg)
 			bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
@@ -321,27 +315,19 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
 		return nil
-	case "/":
+	case "tab":
 		bv.filtering = true
 		bv.filter.Focus()
-	case "j", "down":
+	case "j":
 		bv.setCursor(bv.cursor + 1)
-	case "k", "up":
+	case "k":
 		bv.setCursor(bv.cursor - 1)
-	case "pgdown":
-		bv.setCursor(bv.cursor + m.mainPage())
-	case "pgup":
-		bv.setCursor(bv.cursor - m.mainPage())
-	case "x":
-		if i := bv.selected(); i >= 0 {
-			bv.props[i].dropped = !bv.props[i].dropped
-		}
 	case "r", "c":
 		bv.promptTitle(m)
 	case "o":
 		bv.promptOneLiner(m)
-	case "A":
-		return m.approveBugIngest()
+	case "enter":
+		return m.importHighlighted()
 	}
 	return nil
 }
@@ -351,9 +337,9 @@ func (bv *bugIngestView) promptTitle(m *Shell) {
 	if i < 0 {
 		return
 	}
-	m.Overlay.Push(newTextPrompt("rename bug", bv.props[i].p.Title, "bug title",
+	m.Overlay.Push(newTextPrompt("rename bug", bv.props[i].Title, "bug title",
 		func(s string) error { _, err := domain.Slugify(s); return err },
-		func(s string) tea.Cmd { bv.props[i].p.Title = s; return nil }))
+		func(s string) tea.Cmd { bv.props[i].Title = s; return nil }))
 }
 
 func (bv *bugIngestView) promptOneLiner(m *Shell) {
@@ -361,25 +347,27 @@ func (bv *bugIngestView) promptOneLiner(m *Shell) {
 	if i < 0 {
 		return
 	}
-	m.Overlay.Push(newTextPrompt("edit one-liner", bv.props[i].p.OneLiner, "one-line summary", nil,
-		func(s string) tea.Cmd { bv.props[i].p.OneLiner = s; return nil }))
+	m.Overlay.Push(newTextPrompt("edit one-liner", bv.props[i].OneLiner, "one-line summary", nil,
+		func(s string) tea.Cmd { bv.props[i].OneLiner = s; return nil }))
 }
 
-// approveBugIngest confirms, then materializes the kept proposals.
-func (m *Shell) approveBugIngest() tea.Cmd {
+// importHighlighted confirms, then imports exactly the row under the
+// cursor — the only materialize path this surface has left.
+func (m *Shell) importHighlighted() tea.Cmd {
 	bv := m.bugIngest
 	if bv == nil {
 		return nil
 	}
-	n := bv.keptCount()
-	if n == 0 {
-		m.notice = noticeMsg{text: "every bug is dropped — nothing to create", isErr: true}
+	i := bv.selected()
+	if i < 0 {
+		m.notice = noticeMsg{text: "no bug matches the filter", isErr: true}
 		return nil
 	}
+	p := bv.props[i]
 	m.Overlay.Push(&confirmDialog{
 		id:        "confirm-bug-ingest",
-		question:  fmt.Sprintf("materialize %d bug(s) into todo?", n),
-		detail:    "from " + bv.source,
+		question:  "import " + p.Title + "?",
+		detail:    p.ExternalRef,
 		onConfirm: m.materializeBugIngest,
 	})
 	return nil
@@ -390,8 +378,12 @@ func (m *Shell) materializeBugIngest() tea.Cmd {
 	if bv == nil || m.engine == nil {
 		return nil
 	}
+	i := bv.selected()
+	if i < 0 {
+		return nil
+	}
 	eng := m.engine
-	props := bv.kept()
+	props := []domain.BugProposal{bv.props[i]}
 	opts := engine.MaterializeOpts{Profile: bv.profile, Envelope: bv.envelope}
 	m.bugIngest = nil
 	return func() tea.Msg {
@@ -444,9 +436,9 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	}
 	var b strings.Builder
 	vis := bv.visible()
-	countPill := fmt.Sprintf("%d keep", bv.keptCount())
+	countPill := fmt.Sprintf("%d issue(s)", len(bv.props))
 	if bv.active() {
-		countPill = fmt.Sprintf("%d/%d keep", bv.keptCount(), len(bv.props))
+		countPill = fmt.Sprintf("%d/%d match", len(vis), len(bv.props))
 	}
 	head := s.Title.Render("import bugs") + " " + s.Base.Render("· "+bv.source) +
 		"  " + s.Pill.Render(countPill)
@@ -472,23 +464,16 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	numW := len(fmt.Sprintf("%d", len(bv.props)))
 	rows := make([]string, len(vis))
 	for pos, i := range vis {
-		ip := bv.props[i]
+		p := bv.props[i]
 		marker := "  "
-		title := ip.p.Title
 		style := s.Base
-		if ip.dropped {
-			style = s.Faint
-			title = "✗ " + title
-		}
 		if pos == bv.cursor {
 			marker = s.Cursor.Render("▸ ")
-			if !ip.dropped {
-				style = s.Subtitle
-			}
+			style = s.Subtitle
 		}
 		num := s.Faint.Render(fmt.Sprintf("%*d.", numW, i+1))
-		line := marker + num + " " + style.Render(ansi.Truncate(title, max(w-numW-6, 8), "…"))
-		if tag := bugProposalTags(ip.p); tag != "" {
+		line := marker + num + " " + style.Render(ansi.Truncate(p.Title, max(w-numW-6, 8), "…"))
+		if tag := bugProposalTags(p); tag != "" {
 			line += "  " + s.Faint.Render(tag)
 		}
 		rows[pos] = line
@@ -526,16 +511,16 @@ func (bv *bugIngestView) renderDetail(s *theme.Styles, w int) string {
 	if i < 0 {
 		return ""
 	}
-	ip := bv.props[i]
+	p := bv.props[i]
 	var b strings.Builder
-	if ip.p.OneLiner != "" {
-		b.WriteString(s.Subtle.Render(ansi.Truncate(ip.p.OneLiner, max(w-2, 8), "…")) + "\n")
+	if p.OneLiner != "" {
+		b.WriteString(s.Subtle.Render(ansi.Truncate(p.OneLiner, max(w-2, 8), "…")) + "\n")
 	}
-	if ip.p.ExternalRef != "" {
-		b.WriteString(s.Faint.Render("ref: "+ansi.Truncate(ip.p.ExternalRef, max(w-6, 8), "…")) + "\n")
+	if p.ExternalRef != "" {
+		b.WriteString(s.Faint.Render("ref: "+ansi.Truncate(p.ExternalRef, max(w-6, 8), "…")) + "\n")
 	}
-	if ip.p.Report.Description != "" {
-		b.WriteString(s.Base.Render(ansi.Truncate(oneLineText(ip.p.Report.Description), max(w-2, 8), "…")) + "\n")
+	if p.Report.Description != "" {
+		b.WriteString(s.Base.Render(ansi.Truncate(oneLineText(p.Report.Description), max(w-2, 8), "…")) + "\n")
 	}
 	return b.String()
 }

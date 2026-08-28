@@ -102,6 +102,7 @@ func closeAgents(agents map[string]agent.Agent) {
 type bugIngestFlagValues struct {
 	repo, targetRepo, label, stateFilter, profile *string
 	envelope                                      *int
+	issue                                         *int
 	yes, comments                                 *bool
 }
 
@@ -118,6 +119,7 @@ func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
 		stateFilter: fs.String("state", "open", "issue state: open|closed|all"),
 		profile:     fs.String("profile", "", "profile the new bugs adopt (default: first configured)"),
 		envelope:    fs.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)"),
+		issue:       fs.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)"),
 		yes:         fs.Bool("yes", false, "materialize without the confirmation prompt"),
 		comments:    fs.Bool("comments", false, "fetch issue comments into the report's Discussion section"),
 	}
@@ -126,11 +128,15 @@ func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
 // runBugIngest implements `gummi bugs ingest`: pull open issues from a
 // GitHub repo (default: this repo's origin remote), print them, and —
 // after confirmation — materialize the fresh ones into the todo backlog.
+// --issue N switches to single-issue mode: the same fetch is resolved
+// against N (via selectIssue) and only that one bug is materialized; every
+// other flag keeps its current meaning. Without --issue this is the batch
+// path, unchanged.
 func runBugIngest(args []string) error {
 	fs := flag.NewFlagSet("bugs ingest", flag.ContinueOnError)
 	f := registerBugIngestFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--target-repo r] [--label bug] [--state open] [--profile p] [--envelope n] [--comments] [--yes]")
+		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--target-repo r] [--label bug] [--state open] [--profile p] [--envelope n] [--comments] [--issue N] [--yes]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -155,6 +161,25 @@ func runBugIngest(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	if *f.issue != 0 {
+		prop, err := selectIssue(res, *f.issue, target, *f.label, *f.stateFilter)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("\nSelected issue #%d: %s\n", prop.Number, clean(prop.Title))
+		if prop.ExternalRef != "" {
+			fmt.Printf("      %s\n", clean(prop.ExternalRef))
+		}
+		if !*f.yes {
+			if !confirm(os.Stdin, os.Stdout, "Materialize this bug into todo?") {
+				fmt.Println("Aborted — nothing created.")
+				return nil
+			}
+		}
+		return materializeBugs(ctx, be, []domain.BugProposal{prop}, *f.targetRepo)
+	}
+
 	renderBugProposals(os.Stdout, res)
 	if len(res.Proposals) == 0 {
 		fmt.Println("Nothing new to import.")
@@ -168,6 +193,26 @@ func runBugIngest(args []string) error {
 		}
 	}
 	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo)
+}
+
+// selectIssue resolves a GitHub issue number against a single
+// already-fetched IngestBugs result — it never triggers a second, narrower
+// fetch. A match in Proposals is the selection. A match in Skipped means the
+// issue is already on the board, reported by local ID so a dedup exclusion
+// is never mistaken for a missing issue. No match names the active filters
+// so a filter exclusion isn't mistaken for a genuinely missing issue.
+func selectIssue(res engine.BugIngestResult, issue int, repo, label, state string) (domain.BugProposal, error) {
+	for _, p := range res.Proposals {
+		if p.Number == issue {
+			return p, nil
+		}
+	}
+	for _, s := range res.Skipped {
+		if s.Proposal.Number == issue {
+			return domain.BugProposal{}, fmt.Errorf("issue %d already on the board as %s", issue, s.LocalID)
+		}
+	}
+	return domain.BugProposal{}, fmt.Errorf("issue %d not in the fetched set: repo=%s label=%s state=%s", issue, repo, label, state)
 }
 
 // ingestGitHubSource builds the GitHub source from parsed ingest flags.

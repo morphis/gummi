@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -24,10 +25,22 @@ func sampleBugImport() engine.BugIngestResult {
 	}
 }
 
-func TestBugImportFilterNarrowsVisibleAndKept(t *testing.T) {
+// TestBugImportOpensFilterFocused proves the picker opens ready to type:
+// the filter has focus and the surface starts in the filtering state.
+func TestBugImportOpensFilterFocused(t *testing.T) {
 	bv := newBugIngestView(sampleBugImport(), "thrifty", 0)
-	if bv.keptCount() != 3 || len(bv.visible()) != 3 {
-		t.Fatalf("unfiltered: keep=%d visible=%d, want 3/3", bv.keptCount(), len(bv.visible()))
+	if !bv.filtering {
+		t.Fatal("bug import should open with the filter focused")
+	}
+	if !bv.filter.Focused() {
+		t.Error("filter input should be focused on open")
+	}
+}
+
+func TestBugImportFilterNarrowsVisible(t *testing.T) {
+	bv := newBugIngestView(sampleBugImport(), "thrifty", 0)
+	if len(bv.visible()) != 3 {
+		t.Fatalf("unfiltered visible = %d, want 3", len(bv.visible()))
 	}
 	if len(bv.skipped) != 1 || bv.skipped[0] != "BG-041" {
 		t.Errorf("skipped IDs = %v, want [BG-041]", bv.skipped)
@@ -38,78 +51,148 @@ func TestBugImportFilterNarrowsVisibleAndKept(t *testing.T) {
 	if len(vis) != 2 {
 		t.Fatalf("filter 'log' visible = %d, want 2", len(vis))
 	}
-	kept := bv.kept()
-	if len(kept) != 2 || kept[0].Title != "Login loops" || kept[1].Title != "Logout crash" {
-		t.Errorf("filtered kept = %+v", kept)
+	if bv.props[vis[0]].Title != "Login loops" || bv.props[vis[1]].Title != "Logout crash" {
+		t.Errorf("filtered visible = %+v", vis)
 	}
 
-	// a filter matching nothing hides everything and keeps nothing.
+	// a filter matching nothing hides everything.
 	bv.filter.SetValue("zzz")
-	if len(bv.visible()) != 0 || bv.keptCount() != 0 {
-		t.Errorf("non-matching filter: visible=%d keep=%d, want 0/0", len(bv.visible()), bv.keptCount())
+	if len(bv.visible()) != 0 {
+		t.Errorf("non-matching filter: visible=%d, want 0", len(bv.visible()))
 	}
 }
 
-func TestBugImportDropRespectsFilter(t *testing.T) {
+// TestBugImportEnterImportsExactlyHighlighted proves enter materializes the
+// one row under the cursor regardless of how many issues were fetched, and
+// that no other proposal is created alongside it.
+func TestBugImportEnterImportsExactlyHighlighted(t *testing.T) {
+	m, _ := chatWorkspace(t, agent.NewFake("hi"))
+	m = pump(t, m, m.Init())
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	// move focus off the filter and select the second row ("Logout crash").
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.Overlay.Contains("confirm-bug-ingest") {
+		t.Fatal("enter did not raise the import confirmation dialog")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.bugIngest != nil {
+		t.Error("review surface should close after materialization")
+	}
+
+	all, err := m.store.ListFeatures(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bugs []domain.Feature
+	for _, f := range all {
+		if f.Kind == domain.KindBug {
+			bugs = append(bugs, f)
+		}
+	}
+	if len(bugs) != 1 {
+		t.Fatalf("bugs created = %d, want exactly 1: %+v", len(bugs), bugs)
+	}
+	if bugs[0].Title != "Logout crash" {
+		t.Errorf("materialized bug = %q, want %q (the highlighted row)", bugs[0].Title, "Logout crash")
+	}
+}
+
+// TestBugImportNoBulkMaterializePath proves the surface has no reachable
+// key path — filtering or not — that materializes more than the single
+// highlighted proposal: there is no bulk approve binding left at all.
+func TestBugImportNoBulkMaterializePath(t *testing.T) {
 	bv := newBugIngestView(sampleBugImport(), "thrifty", 0)
-	bv.filter.SetValue("log")
-	// cursor 0 within the filtered view is "Login loops"; dropping it must
-	// hit that proposal, not props[0] of the full list (same here, but the
-	// index mapping is what we're checking).
-	bv.cursor = 1 // "Logout crash"
-	if i := bv.selected(); i != 1 {
-		t.Fatalf("selected props index = %d, want 1", i)
+	for _, b := range bv.bindings() {
+		if b.key == "A" {
+			t.Errorf("bulk-approve binding %q should not exist on the single-select picker", b.key)
+		}
 	}
-	bv.props[bv.selected()].dropped = true
-	if bv.keptCount() != 1 {
-		t.Errorf("keep after drop = %d, want 1", bv.keptCount())
+	m := &Shell{}
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	if m.Overlay.Contains("confirm-bug-ingest") {
+		t.Error("'A' should not raise the materialize confirmation on the single-select picker")
 	}
-	// clearing the filter reveals all three; the drop persists.
-	bv.filter.SetValue("")
-	if len(bv.visible()) != 3 || bv.keptCount() != 2 {
-		t.Errorf("after clear: visible=%d keep=%d, want 3/2", len(bv.visible()), bv.keptCount())
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.Overlay.Contains("confirm-bug-ingest") {
+		t.Error("'x' should not raise the materialize confirmation on the single-select picker")
 	}
 }
 
-func TestBugImportFilterKeyFlow(t *testing.T) {
+// TestBugImportEscDiscardsFromEitherFocusStateQOnlyWhenListFocused proves
+// esc discards the whole pass and creates nothing regardless of which
+// element has focus, while q only discards once the list has focus — while
+// the filter is focused, q is an ordinary character that types into the
+// query (a query containing "q", e.g. "query" or "quota", is unremarkable).
+func TestBugImportEscDiscardsFromEitherFocusStateQOnlyWhenListFocused(t *testing.T) {
+	m := &Shell{}
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	if !m.bugIngest.filtering {
+		t.Fatal("expected the picker to open filtering")
+	}
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.bugIngest != nil {
+		t.Error("esc while filtering should discard the pass immediately")
+	}
+
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab}) // move focus off the filter
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.bugIngest != nil {
+		t.Error("esc with list focus should discard the pass")
+	}
+
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab}) // move focus off the filter
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if m.bugIngest != nil {
+		t.Error("q with list focus should discard the pass")
+	}
+
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	if !m.bugIngest.filtering {
+		t.Fatal("expected the picker to open filtering")
+	}
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if m.bugIngest == nil {
+		t.Fatal("q while filtering should not discard the pass")
+	}
+	if !m.bugIngest.filtering {
+		t.Error("q while filtering should leave the filter focused")
+	}
+	if got := m.bugIngest.filter.Value(); got != "q" {
+		t.Errorf("q while filtering should type into the query, got %q", got)
+	}
+}
+
+// TestBugImportRenameAndOneLinerAfterTab proves r/c and o still edit the
+// highlighted proposal once Tab has moved focus off the filter.
+func TestBugImportRenameAndOneLinerAfterTab(t *testing.T) {
 	m := &Shell{}
 	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
 	bv := m.bugIngest
-
-	// '/' enters filter mode; typing narrows live.
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: '/', Text: "/"})
-	if !bv.filtering {
-		t.Fatal("'/' did not enter filter mode")
-	}
-	for _, r := range "foot" {
-		m.handleBugIngestKey(tea.KeyPressMsg{Code: r, Text: string(r)})
-	}
-	if len(bv.visible()) != 1 {
-		t.Fatalf("after typing 'foot' visible = %d, want 1 (Footer typo)", len(bv.visible()))
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if bv.filtering {
+		t.Fatal("tab should move focus off the filter")
 	}
 
-	// enter locks the filter in (query kept, editing off).
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if bv.filtering || !bv.active() {
-		t.Errorf("after enter: filtering=%v active=%v, want false/true", bv.filtering, bv.active())
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if !m.Overlay.Contains("text-prompt") {
+		t.Fatal("'r' after tab should open the rename prompt")
 	}
+	m.Overlay.Pop()
 
-	// re-enter and esc clears the filter back to the full list.
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if bv.filtering || bv.active() || len(bv.visible()) != 3 {
-		t.Errorf("after esc-clear: filtering=%v active=%v visible=%d, want false/false/3", bv.filtering, bv.active(), len(bv.visible()))
-	}
-
-	// esc when not filtering discards the whole import.
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.bugIngest != nil {
-		t.Error("esc (not filtering) should discard the import")
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	if !m.Overlay.Contains("text-prompt") {
+		t.Fatal("'o' after tab should open the one-liner prompt")
 	}
 }
 
 // TestBugImportMaterializeUpdatesBoard proves the import's materialize
-// notice carries reload, so the freshly minted bug rows appear on the
+// notice carries reload, so the freshly minted bug row appears on the
 // board without a second, unrelated notice (regression: import used to go
 // stale on screen until some other reload happened to fire).
 func TestBugImportMaterializeUpdatesBoard(t *testing.T) {
@@ -126,8 +209,8 @@ func TestBugImportMaterializeUpdatesBoard(t *testing.T) {
 			seen++
 		}
 	}
-	if seen != 3 {
-		t.Errorf("board shows %d imported bugs, want 3 (rows %d)", seen, len(m.rows))
+	if seen != 1 {
+		t.Errorf("board shows %d imported bugs, want 1 (rows %d)", seen, len(m.rows))
 	}
 }
 

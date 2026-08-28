@@ -1025,13 +1025,16 @@ Each bug persists its **external ref** (e.g. the issue URL), so re-ingesting a
 repo skips bugs already on the board rather than minting duplicates — the one
 piece of machinery doc-ingest didn't need, and what makes GitHub polling safe.
 
-The gate lives on two surfaces, mirroring §11.4: the TUI import-review pane
-(reusing the annotate-style list — drop/rename/edit/approve; no merge, since
-issues are discrete) and the CLI (`gummi bugs ingest`, gated y/N or `--yes`).
-The review pane adds an interactive `/` filter — a live substring match over
-the fetched issues' title/label/body — so a repo with dozens of issues can be
-narrowed to the ones worth importing before approving; what is visible under
-the filter and not dropped is exactly what materializes.
+The gate lives on two surfaces, mirroring §11.4, and both pick a **single**
+issue out of one fetch rather than gating a batch — an entire repo's issues
+should never land in todo from one keystroke. The TUI import-review pane is a
+searchable picker: it opens with a live substring filter over the fetched
+issues' title/label/body already focused, `Tab` swaps focus between typing
+and commanding the list (rename/edit), and `enter` imports exactly the
+highlighted issue — the filter narrows what you see, never what gets
+created. The CLI (`gummi bugs ingest`, gated y/N or `--yes`) keeps its batch
+import for scripted use, plus an additive `--issue N` that resolves N against
+the same fetched batch and materializes just that one bug.
 
 ### 12.5 Deferred
 

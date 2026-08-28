@@ -85,9 +85,12 @@ func TestNormalizeSeverity(t *testing.T) {
 }
 
 func TestBugProposalSlugAndProvenance(t *testing.T) {
-	p := BugProposal{Title: "Crash on Empty Input!", Source: "github", ExternalRef: "https://x/issues/9"}
+	p := BugProposal{Title: "Crash on Empty Input!", Source: "github", ExternalRef: "https://x/issues/9", Number: 9}
 	if s, err := p.Slug(); err != nil || s != "crash-on-empty-input" {
 		t.Errorf("Slug() = %q, %v", s, err)
+	}
+	if p.Number != 9 {
+		t.Errorf("Number = %d, want 9", p.Number)
 	}
 	if prov := p.Provenance(); prov.Source != "github" || prov.ExternalRef != "https://x/issues/9" {
 		t.Errorf("Provenance() = %+v", prov)

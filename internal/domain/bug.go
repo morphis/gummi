@@ -74,6 +74,7 @@ type BugProposal struct {
 	OneLiner    string    // → Feature.OneLiner
 	Source      string    // source name, e.g. "github" / "manual"
 	ExternalRef string    // → Feature.ExternalRef; dedup key + provenance
+	Number      int       // GitHub issue number; 0 when not applicable (e.g. ManualSource)
 	Severity    Severity  // impact, seeded into the report header
 	Skip        SkipFlags // suggested skip flags (Triage/Diagnose)
 	Report      BugReport

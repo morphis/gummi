@@ -149,6 +149,7 @@ func (g GitHubSource) Fetch(ctx context.Context) ([]domain.BugProposal, error) {
 			Title:       title,
 			Source:      "github",
 			ExternalRef: is.URL,
+			Number:      is.Number,
 			Severity:    severityFromLabels(is.Labels),
 			Report:      report,
 		})

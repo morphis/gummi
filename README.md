@@ -180,10 +180,14 @@ board, both gated on your review before anything is created:
   went. You rename, edit, merge, or drop proposals, then approve;
   each one materializes as a pre-seeded draft in todo.
 - **Bug import** (`G`, or `gummi bugs ingest`) — deterministic,
-  agent-free import of GitHub issues via `gh`: one issue → one proposed
-  bug, with a live `/` filter to narrow a big backlog before approving.
-  External refs are remembered, so re-importing skips bugs already on
-  the board. `gummi bugs new` adds a single bug by hand.
+  agent-free import of GitHub issues via `gh`: a searchable picker opens
+  with the filter focused, typing narrows the list live, and `enter`
+  imports exactly the highlighted issue — one issue per pass, never a
+  whole repo at once. External refs are remembered, so re-importing
+  skips bugs already on the board. `gummi bugs ingest --issue N` gives
+  the same single-issue import headlessly (the CLI's batch flags still
+  work unchanged for scripted imports). `gummi bugs new` adds a single
+  bug by hand.
 
 ## Running headlessly (driving gummi from an agent)
 

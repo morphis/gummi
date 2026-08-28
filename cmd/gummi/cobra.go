@@ -376,6 +376,7 @@ func bindBugsIngestFlags(cmd *cobra.Command) {
 	f.String("state", "open", "issue state: open|closed|all")
 	f.String("profile", "", "profile the new bugs adopt (default: first configured)")
 	f.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)")
+	f.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)")
 	f.Bool("yes", false, "materialize without the confirmation prompt")
 	f.Bool("comments", false, "fetch issue comments into the report's Discussion section")
 }

@@ -88,19 +88,21 @@ func TestPasteIntoBugIngestFilter(t *testing.T) {
 	m := &Shell{}
 	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
 
-	// paste while not filtering is dropped
-	m.Update(tea.PasteMsg{Content: "stray"})
-	if got := m.bugIngest.filter.Value(); got != "" {
-		t.Fatalf("paste landed in an unfocused filter: %q", got)
-	}
-
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: '/', Text: "/"})
+	// the picker opens with the filter already focused, so a paste lands
+	// directly in it.
 	m.Update(tea.PasteMsg{Content: "crash"})
 	if got := m.bugIngest.filter.Value(); got != "crash" {
 		t.Fatalf("filter value = %q", got)
 	}
 	if len(m.bugIngest.visible()) != 1 {
 		t.Fatalf("visible after pasted filter = %d, want 1", len(m.bugIngest.visible()))
+	}
+
+	// tab moves focus to the list; a paste there is dropped.
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	m.Update(tea.PasteMsg{Content: "stray"})
+	if got := m.bugIngest.filter.Value(); got != "crash" {
+		t.Fatalf("paste landed in the filter while list-focused: %q", got)
 	}
 }
 

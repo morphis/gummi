@@ -46,6 +46,12 @@ func TestGitHubSourceFetchMapsIssues(t *testing.T) {
 	if p.Title != "Login loops" || p.Source != "github" || p.ExternalRef != "https://github.com/o/r/issues/42" {
 		t.Errorf("proposal[0] fields wrong: %+v", p)
 	}
+	if p.Number != 42 {
+		t.Errorf("proposal[0].Number = %d, want 42", p.Number)
+	}
+	if props[1].Number != 7 {
+		t.Errorf("proposal[1].Number = %d, want 7", props[1].Number)
+	}
 	if p.Severity != domain.SeverityHigh { // P1 → high
 		t.Errorf("severity = %q, want high (from P1 label)", p.Severity)
 	}
@@ -85,6 +91,9 @@ func TestIngestBugsDedupesAgainstBoard(t *testing.T) {
 	}
 	if len(first.Proposals) != 2 || len(first.Skipped) != 0 {
 		t.Fatalf("first ingest: %d fresh / %d skipped, want 2/0", len(first.Proposals), len(first.Skipped))
+	}
+	if first.Proposals[0].Number != 42 || first.Proposals[1].Number != 7 {
+		t.Errorf("IngestBugs should pass Number through untouched: %+v", first.Proposals)
 	}
 	if _, err := e.MaterializeBugs(ctx, first.Proposals, MaterializeOpts{Profile: "thrifty"}); err != nil {
 		t.Fatal(err)
