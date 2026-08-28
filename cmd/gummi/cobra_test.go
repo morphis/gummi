@@ -185,3 +185,15 @@ func TestCobraFlagsMirrorCanonical(t *testing.T) {
 		})
 	}
 }
+
+// TestInitCmdRegistered catches a forgotten rootCmd.AddCommand(initCmd) the
+// way a missed registration would silently drop the verb.
+func TestInitCmdRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"init"})
+	if err != nil {
+		t.Fatalf("rootCmd.Find([\"init\"]): %v", err)
+	}
+	if cmd != initCmd {
+		t.Errorf("rootCmd.Find([\"init\"]) resolved to %v, want initCmd", cmd)
+	}
+}

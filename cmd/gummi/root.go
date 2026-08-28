@@ -53,6 +53,7 @@ func init() {
 	rootCmd.AddCommand(specCmd)
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(mcpCmd)

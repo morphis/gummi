@@ -136,6 +136,15 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
+// initCmd implements `gummi init`.
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Create and seed the .gummi workspace in the current directory",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runInit(buildFlagArgs(cmd, args))
+	},
+}
+
 // ingestCmd implements `gummi ingest [flags] <spec-file>`.
 var ingestCmd = &cobra.Command{
 	Use:   "ingest [flags] <spec-file>",
