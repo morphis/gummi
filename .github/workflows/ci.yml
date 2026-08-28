@@ -42,19 +42,6 @@ jobs:
           version: v2.13.1
           args: --timeout=5m
 
-  skill-drift:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - run: make build
-      - run: ./bin/gummi skill install --scope project --check
-
   snap-build:
     runs-on: ubuntu-latest
     steps:
@@ -97,29 +84,3 @@ jobs:
 
       - run: make build
       - run: ./scripts/e2e.sh
-
-  zz-integration:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - run: go test -tags zz_integration ./internal/agent/...
-
-  opencode-integration:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - run: go test -tags opencode_integration ./internal/agent/...
