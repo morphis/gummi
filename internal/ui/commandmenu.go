@@ -204,16 +204,30 @@ func (m *commandMenu) renderRow(s *theme.Styles, i int, sel bool, width int) str
 		label = s.Faint
 	}
 	if sel {
-		marker = s.Cursor.Render("▸ ")
+		marker = s.BandMarker(true)
 		if c.available {
-			label = s.Subtle
+			label = s.BandText
+		} else {
+			// the band swallows s.Faint; an unavailable row still has to
+			// read as unavailable, one tier down from an available one.
+			label = s.Muted
 		}
 	}
 	labelText := label.Render(c.label)
 	keyText := ""
 	if c.key != "" {
-		keyText = s.Faint.Render(c.key)
+		key := s.Faint
+		if sel {
+			key = s.BandTextDim
+		}
+		keyText = key.Render(c.key)
 	}
 	pad := width - ansi.StringWidth(marker) - ansi.StringWidth(labelText) - ansi.StringWidth(keyText)
-	return marker + labelText + strings.Repeat(" ", max(pad, 1)) + keyText
+	row := marker + labelText + strings.Repeat(" ", max(pad, 1)) + keyText
+	if sel {
+		// a dialog has one focus region, so its selection is always the
+		// bright band.
+		return s.Band(row, width, true)
+	}
+	return row
 }

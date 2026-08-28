@@ -1326,6 +1326,19 @@ func (m *Shell) clampSel() {
 	}
 }
 
+// boardPaneFocused reports whether the kanban column owns the arrow keys
+// — nothing has taken over the main pane, and focus has not moved right
+// into the selected card's action list. It mirrors activeSurface's
+// precedence (keymap.go): whatever surface answers the keys is the one
+// that gets to look focused.
+func (m *Shell) boardPaneFocused() bool {
+	if m.actionFocused {
+		return false
+	}
+	return m.chat == nil && m.spec == nil && m.diff == nil && m.ingest == nil &&
+		m.bugIngest == nil && m.deps == nil && (m.ingestRun == nil || m.ingestRun.hidden)
+}
+
 // View implements tea.Model: compute the buffer, paint the panes, the
 // status bar, then the dialog stack.
 func (m *Shell) View() tea.View {
@@ -1354,7 +1367,7 @@ func (m *Shell) draw(scr uv.Screen) {
 	l := m.layout
 
 	if l.KanbanVisible {
-		uv.NewStyledString(m.boardView(l.Kanban.Dx())).Draw(scr, l.Kanban)
+		uv.NewStyledString(m.boardView(l.Kanban.Dx(), m.boardPaneFocused())).Draw(scr, l.Kanban)
 		sep := strings.TrimSuffix(strings.Repeat(s.Separator.Render("│")+"\n", l.Main.Dy()), "\n")
 		uv.NewStyledString(sep).Draw(scr, uv.Rect(l.Main.Min.X, 0, 1, l.Main.Dy()))
 	}

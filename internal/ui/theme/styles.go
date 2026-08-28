@@ -1,6 +1,8 @@
 package theme
 
 import (
+	"image/color"
+
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 
@@ -24,12 +26,45 @@ type Styles struct {
 	Subtitle lipgloss.Style
 
 	// Chrome.
-	Separator      lipgloss.Style
-	PaneTitle      lipgloss.Style // section headers in panes (TODO, IN PROGRESS…)
-	KeyHint        lipgloss.Style // "enter" in key hints
-	KeyLabel       lipgloss.Style // "attach" in key hints
-	Cursor         lipgloss.Style // the ▸ selection/focus marker
-	Selection      lipgloss.Style // selected row highlight
+	Separator       lipgloss.Style
+	PaneTitle       lipgloss.Style // section headers in panes (TODO, IN PROGRESS…)
+	PaneTitleActive lipgloss.Style // the same header in the pane that holds focus
+	KeyHint         lipgloss.Style // "enter" in key hints
+	KeyLabel        lipgloss.Style // "attach" in key hints
+	Cursor          lipgloss.Style // the ▸ selection/focus marker
+
+	// Selection bands. A selected row wears a full-width background band
+	// (Band, band.go) so the eye finds it without hunting for a one-glyph
+	// marker; the accent-tinted band marks the pane that owns the arrow
+	// keys, the quiet grey one a pane whose selection is only remembered.
+	Selection    lipgloss.Style // selected row, focused pane
+	SelectionDim lipgloss.Style // selected row, unfocused pane
+	SelMarker    lipgloss.Style // the ▸ on a focused band
+	SelMarkerDim lipgloss.Style // the ▸ on an unfocused band
+
+	// A band costs contrast: against it FgMuted lands near 2:1 and
+	// FgFaint near 1.2:1, so the four-tier text ramp collapses to two on
+	// a highlighted row. Rows swap their Base/Faint pair for these, which
+	// is why a selected card's cost tick and profile tag don't disappear
+	// on exactly the row the eye was sent to.
+	BandText    lipgloss.Style // primary text on a band
+	BandTextDim lipgloss.Style // secondary text on a band
+
+	// band/bandDim are the two band backgrounds Band paints with; they
+	// are the backgrounds inside Selection/SelectionDim, kept as raw
+	// slots because Band assembles its own SGR (a nested lipgloss
+	// background cannot survive the row's own resets).
+	band    color.Color
+	bandDim color.Color
+
+	// Buttons (a dialog's focusable row, buttons.go). Focus reads as a
+	// fill, not a hue: two reds cannot say "selected" to each other, and
+	// on the light theme Error and Destructive are the same color.
+	Button            lipgloss.Style
+	ButtonFocus       lipgloss.Style
+	ButtonDanger      lipgloss.Style
+	ButtonDangerFocus lipgloss.Style
+
 	CardID         lipgloss.Style // FD-042
 	CardIDResearch lipgloss.Style // RS-### cool/info tint, distinct from CardID and Warning
 	CardTitle      lipgloss.Style
@@ -67,6 +102,11 @@ type Styles struct {
 // New derives all component styles from the theme's semantic slots.
 func New(t Theme) *Styles {
 	base := lipgloss.NewStyle().Foreground(t.FgBase)
+	// the focused band is the raised surface pulled a quarter of the way
+	// toward the accent: it separates from the unfocused band by hue as
+	// well as by lightness, which is what makes "which pane am I in?"
+	// answerable at a glance rather than by comparing two greys.
+	band := lipgloss.Blend1D(5, t.BgRaised, t.Accent)[1]
 	s := &Styles{
 		Theme: t,
 
@@ -78,14 +118,31 @@ func New(t Theme) *Styles {
 		Title:    base.Foreground(t.Primary).Bold(true),
 		Subtitle: base.Foreground(t.FgSubtle).Bold(true),
 
-		Separator: base.Foreground(t.Separator),
-		PaneTitle: base.Foreground(t.FgFaint).Bold(true),
+		Separator:       base.Foreground(t.Separator),
+		PaneTitle:       base.Foreground(t.FgFaint).Bold(true),
+		PaneTitleActive: base.Foreground(t.Accent).Bold(true),
 		// key hints stay quiet greys (the crush help pattern); the
 		// accent is reserved for the cursor and interactive pills.
-		KeyHint:   base.Foreground(t.FgSubtle),
-		KeyLabel:  base.Foreground(t.FgMuted),
-		Cursor:    base.Foreground(t.Accent),
-		Selection: base.Foreground(t.FgBase).Background(t.BgRaised),
+		KeyHint:  base.Foreground(t.FgSubtle),
+		KeyLabel: base.Foreground(t.FgMuted),
+		Cursor:   base.Foreground(t.Accent),
+
+		Selection:    base.Foreground(t.FgBase).Background(band),
+		SelectionDim: base.Foreground(t.FgSubtle).Background(t.BgSurface),
+		// on a band the accent cursor loses most of its contrast, and the
+		// band already carries the accent — so the marker goes bright and
+		// bold instead, and dim-but-legible on the quiet band.
+		SelMarker:    base.Foreground(t.FgBase).Bold(true),
+		SelMarkerDim: base.Foreground(t.FgMuted),
+		BandText:     base.Foreground(t.FgBase),
+		BandTextDim:  base.Foreground(t.FgSubtle),
+		band:         band,
+		bandDim:      t.BgSurface,
+
+		Button:            base.Foreground(t.FgFaint),
+		ButtonFocus:       lipgloss.NewStyle().Foreground(t.OnAccent).Background(t.Accent).Bold(true),
+		ButtonDanger:      base.Foreground(t.Destructive),
+		ButtonDangerFocus: lipgloss.NewStyle().Foreground(t.OnFill(t.Destructive)).Background(t.Destructive).Bold(true),
 
 		CardID:         base.Foreground(t.FgSubtle).Bold(true),
 		CardIDResearch: base.Foreground(t.Info).Bold(true),

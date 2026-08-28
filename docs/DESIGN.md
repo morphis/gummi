@@ -655,6 +655,32 @@ everything gracefully on non-truecolor terminals.
   one accent per surface, spinners only where something is actually
   happening.
 
+**Selection and focus.** Two questions have to be answerable without
+moving: *what is selected* and *which region do the arrow keys drive*.
+
+- *Selection is a band, not a marker.* A selected row wears a full-width
+  background bar (`theme.Band`) with the `▸` on it. A one-glyph marker is
+  too small to track while paging a list, and it leaves the row's text
+  looking exactly like every other row's. A band costs contrast, so a
+  banded row collapses the four-tier text ramp to two (`BandText`,
+  `BandTextDim`): against the band `FgMuted` lands near 2:1 and `FgFaint`
+  near 1.2:1, which would erase the metadata on precisely the row the eye
+  was sent to.
+- *Focus is the band's strength.* Surfaces keep their selection when
+  focus leaves them — moving from the kanban into a card's action list
+  leaves the card selected — so presence of a band can't mean focus. The
+  accent-tinted band marks the region that owns the arrow keys; the quiet
+  grey one a region that is only remembering where its cursor was. The
+  focused region's section headers take the accent too
+  (`PaneTitleActive`), and the status bar names what the arrows and enter
+  do there, so the answer is available by color and in words.
+- *Focus on a control is a fill, not a hue.* A focused button is filled —
+  the accent for an ordinary one, the destructive color for a danger one.
+  Hue alone cannot carry focus on a control that is already colored:
+  swapping `Destructive` for `Error` says nothing on a dark palette and
+  literally nothing on the light one, where the two slots are the same
+  color.
+
 **Quality enforcement.** Crush golden-tests its UI (`x/exp/golden`); gummi
 does the same from M0 — every component gets golden-file snapshot tests at
 several widths, so visual regressions fail CI, not eyes. Demo GIFs via

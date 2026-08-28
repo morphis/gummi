@@ -92,7 +92,14 @@ func (m *Shell) dashboardView(w, h int) string {
 	// into it, ↑↓ move, enter runs — so the label is the interface and the
 	// key beside it is a demoted accelerator the row teaches in passing.
 	if l := m.cardActions(); l.Len() > 0 {
-		line(s.Subtitle.Render("actions"))
+		// the header takes the accent while the list owns the arrow keys —
+		// the same tell the kanban's group headers give the other pane, so
+		// the two regions never both look live.
+		head := s.Subtitle
+		if m.actionFocused {
+			head = s.PaneTitleActive
+		}
+		line(head.Render("actions"))
 		// the same h-14 reserve the activity feed below uses, floored so a
 		// very short terminal still shows the recommendation and a way to
 		// reach the rest.

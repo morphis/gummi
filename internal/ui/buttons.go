@@ -66,13 +66,22 @@ func (r *buttonRow) Selected() button {
 	return r.buttons[r.cursor]
 }
 
-// View renders "[ Label ]  [ Label ]": the focused button highlighted
-// (bracket in s.Cursor, label in s.Subtle — the same marker/text split
-// form.go's options row uses), the rest s.Faint. A danger button inverts
-// that: s.Destructive while unfocused, s.Error once it takes focus, so
-// the destructive choice reads as alarmed only when it's actually about
-// to fire. focused reports whether the row itself holds input focus
-// (false dims every button, e.g. while a sibling text input has it).
+// View renders "[ Label ]  [ Label ]". The focused button is *filled* —
+// accent ink for an ordinary one, the destructive color for a danger one
+// — while every other button stays an unfilled legend: faint for plain,
+// destructive-tinted for danger.
+//
+// The fill is the point. Focus used to be a hue swap (s.Destructive →
+// s.Error on the danger button), which said nothing: the two reds read
+// as the same red on the dark theme, and on the light theme they are
+// literally the same color, so the most consequential button in the app
+// — merge, delete — looked identical whether or not enter would fire it.
+// A fill is a shape change, so it survives both a red-on-red palette and
+// a colorblind reader.
+//
+// focused reports whether the row itself holds input focus; false leaves
+// every button unfilled (e.g. while a sibling text input has it), so a
+// filled button always means "enter presses this".
 func (r *buttonRow) View(s *theme.Styles, focused bool) string {
 	width := 0
 	for _, b := range r.buttons {
@@ -84,17 +93,16 @@ func (r *buttonRow) View(s *theme.Styles, focused bool) string {
 		if pad := width - ansi.StringWidth(label); pad > 0 {
 			label += strings.Repeat(" ", pad)
 		}
-		on := focused && i == r.cursor
-		switch {
+		style := s.Button
+		switch on := focused && i == r.cursor; {
 		case on && b.danger:
-			parts[i] = s.Error.Render("[ " + label + " ]")
+			style = s.ButtonDangerFocus
 		case on:
-			parts[i] = s.Cursor.Render("[ ") + s.Subtle.Render(label) + s.Cursor.Render(" ]")
+			style = s.ButtonFocus
 		case b.danger:
-			parts[i] = s.Destructive.Render("[ " + label + " ]")
-		default:
-			parts[i] = s.Faint.Render("[ " + label + " ]")
+			style = s.ButtonDanger
 		}
+		parts[i] = style.Render("[ " + label + " ]")
 	}
 	return strings.Join(parts, "  ")
 }

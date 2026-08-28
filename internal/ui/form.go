@@ -79,9 +79,14 @@ func selectCycleDelta(key string) (delta int, ok bool) {
 // fieldRow renders one stacked field line: a cursor marker and the label,
 // styled by focus — the shared look for every tab-stop field (repo,
 // profile, severity, route) across the creation dialogs.
+//
+// The focused field wears the same band a selected list row does, so
+// "where am I" answers the same way on every surface. It bands the label
+// only (w=0), not a full column: these rows sit inside a dialog frame
+// whose width they don't own.
 func fieldRow(s *theme.Styles, focused bool, label string) string {
 	if focused {
-		return s.Cursor.Render("▸ ") + s.Subtle.Render(label)
+		return s.Band(s.BandMarker(true)+s.Base.Render(label), 0, true)
 	}
 	return "  " + s.Faint.Render(label)
 }

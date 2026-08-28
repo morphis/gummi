@@ -324,16 +324,15 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 		}
 		// the marker shows on the cursor row either way — the explainer
 		// below describes that row, so hiding the marker while unfocused
-		// left the explanation pointing at nothing. Faint while unfocused
-		// keeps the distinction visible without claiming input focus.
+		// left the explanation pointing at nothing. The band behind it is
+		// what says whether this list holds focus or is only remembering
+		// where the cursor was.
 		marker := "  "
+		banded := false
 		if i == l.cursor {
 			cursorLine = len(lines) // the separator shifts rows, so track it here
-			if focused {
-				marker = s.Cursor.Render("▸ ")
-			} else {
-				marker = s.Faint.Render("▸ ")
-			}
+			marker = s.BandMarker(focused)
+			banded = true
 		}
 		keyStr := s.KeyHint.Render(a.key)
 		avail := width - ansi.StringWidth(marker) - ansi.StringWidth(keyStr) - 1
@@ -349,7 +348,11 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 		if a.danger {
 			labelStyle = s.Destructive
 		}
-		lines = append(lines, marker+labelStyle.Render(label)+strings.Repeat(" ", pad)+" "+keyStr)
+		row := marker + labelStyle.Render(label) + strings.Repeat(" ", pad) + " " + keyStr
+		if banded {
+			row = s.Band(row, width, focused)
+		}
+		lines = append(lines, row)
 	}
 	// the "…N more" and "↳ why" lines are part of the block, so they come
 	// out of the same budget the caller granted — otherwise the block

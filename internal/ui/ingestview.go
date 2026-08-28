@@ -398,15 +398,26 @@ func (m *Shell) ingestViewRender(w, h int) string {
 			style = s.Faint
 			title = "✗ " + title
 		}
-		if i == iv.cursor {
-			marker = s.Cursor.Render("▸ ")
+		sel := i == iv.cursor
+		tag := s.Faint
+		num := s.Faint
+		if sel {
+			marker = s.BandMarker(true)
 			if !ip.dropped {
-				style = s.Subtitle
+				style = s.BandText.Bold(true)
+			} else {
+				// dropped stays a tier below kept, but s.Faint vanishes on
+				// the band — both lift.
+				style = s.BandTextDim
 			}
+			tag, num = s.BandTextDim, s.BandTextDim
 		}
-		num := s.Faint.Render(fmt.Sprintf("%*d.", numW, i+1))
-		line := marker + num + " " + style.Render(ansi.Truncate(title, max(w-numW-6, 8), "…"))
-		line += "  " + s.Faint.Render(proposalTags(ip.p))
+		line := marker + num.Render(fmt.Sprintf("%*d.", numW, i+1)) + " " +
+			style.Render(ansi.Truncate(title, max(w-numW-6, 8), "…"))
+		line += "  " + tag.Render(proposalTags(ip.p))
+		if sel {
+			line = s.Band(line, w, true)
+		}
 		rows[i] = line
 	}
 

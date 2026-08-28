@@ -2,7 +2,7 @@ base: [38;2;247;246;251mThe quick brown fox[m
 muted: [38;2;133;131;146mThe quick brown fox[m
 faint: [38;2;96;95;107mThe quick brown fox[m
 title: [1;38;2;0;164;255mFeature detail[m
-selection: [38;2;247;246;251;48;2;77;76;87m FD-042 dark mode [m
+selection: [38;2;247;246;251;48;2;90;85;126m FD-042 dark mode [m
 pill-alert: [48;2;245;239;52m [m[1;38;2;32;31;38;48;2;245;239;52m✉ 2 need you[m[48;2;245;239;52m [m
 error: [38;2;255;56;139m✗ build failed[m
 warning: [38;2;245;239;52m⚠ budget 80%[m

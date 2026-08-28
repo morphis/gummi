@@ -28,11 +28,22 @@ func stageGlyph(s domain.Stage) string {
 
 // boardView renders the kanban column: features grouped by super-state
 // with stage-colored glyphs, IDs, titles, and profile tags.
-func (m *Shell) boardView(w int) string {
+//
+// focused says whether the column owns the arrow keys right now. The
+// board never loses its selection — moving into the card's action list
+// or opening the spec leaves the card selected — so without this the
+// column looked exactly as live as it does when j/k actually move it.
+// Focused, the selected card wears the bright band and the group headers
+// take the accent; unfocused, both go quiet.
+func (m *Shell) boardView(w int, focused bool) string {
 	s := m.styles
+	paneTitle := s.PaneTitle
+	if focused {
+		paneTitle = s.PaneTitleActive
+	}
 	if len(m.rows) == 0 {
 		var b strings.Builder
-		b.WriteString("\n " + s.PaneTitle.Render("BOARD") + "\n\n")
+		b.WriteString("\n " + paneTitle.Render("BOARD") + "\n\n")
 		b.WriteString(" " + s.Faint.Render("nothing on the board yet") + "\n")
 		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" new feature · ") + s.KeyHint.Render("B") + s.Muted.Render(" new bug · ") + s.KeyHint.Render("R") + s.Muted.Render(" new research") + "\n")
 		return b.String()
@@ -49,17 +60,28 @@ func (m *Shell) boardView(w int) string {
 			if shortcut > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(" " + s.PaneTitle.Render(strings.ToUpper(string(super))) + "\n")
+			b.WriteString(" " + paneTitle.Render(strings.ToUpper(string(super))) + "\n")
 			lastSuper = super
 		}
-		b.WriteString(m.cardLine(r, shortcut+1, i == m.sel, w) + "\n")
+		b.WriteString(m.cardLine(r, shortcut+1, i == m.sel, focused, w) + "\n")
 	}
 	return b.String()
 }
 
-// cardLine renders one feature card row, truncated to w.
-func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) string {
+// cardLine renders one feature card row, truncated to w. A selected row
+// is painted as a full-width band (theme.Band) rather than marked by the
+// ▸ alone: paneFocused picks the bright band or the quiet one.
+//
+// The band swallows the faintest text tiers (theme.BandTextDim), so a
+// selected row lifts its own metadata — the shortcut number, the profile
+// tag, the worktree mark and the cost tick would otherwise be invisible
+// on exactly the row the eye was sent to.
+func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool, w int) string {
 	s := m.styles
+	faint := s.Faint
+	if selected {
+		faint = s.BandTextDim
+	}
 	glyph := s.Stage(r.F.Stage).Render(stageGlyph(r.F.Stage))
 	// a live agent session marks the card by scheduling state; a plan-loop
 	// session also names its leg (the stage alone can't distinguish them)
@@ -71,17 +93,22 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 				glyph = s.Info.Render(m.spinner())
 			}
 			if word := m.planLoopWord(sess); word != "" {
-				loop = " " + s.Faint.Render(word)
+				loop = " " + faint.Render(word)
 			}
 		case engine.StateQueued:
 			glyph = s.Warning.Render("◔")
 		}
 	}
+	// the marker sits flush against the shortcut number, so it can't use
+	// BandMarker's padded form — same two styles, one column.
 	cursor := " "
-	if selected {
-		cursor = s.Cursor.Render("▸")
+	switch {
+	case selected && paneFocused:
+		cursor = s.SelMarker.Render("▸")
+	case selected:
+		cursor = s.SelMarkerDim.Render("▸")
 	}
-	num := s.Faint.Render(shortcutLabel(shortcut))
+	num := faint.Render(shortcutLabel(shortcut))
 	// a bug's ID reads in a warm tint so bugs stand out among features in
 	// the shared board (the BG- prefix already distinguishes them).
 	id := s.CardID.Render(string(r.F.ID))
@@ -111,11 +138,15 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	title := s.CardTitle.Render(r.F.Title)
 	tag := ""
 	if r.F.Profile != "" {
-		tag = " " + s.ProfileTag.Render("["+r.F.Profile+"]")
+		profile := s.ProfileTag
+		if selected {
+			profile = faint
+		}
+		tag = " " + profile.Render("["+r.F.Profile+"]")
 	}
 	wtMark := ""
 	if r.HasWorktree {
-		wtMark = " " + s.Faint.Render("⎇")
+		wtMark = " " + faint.Render("⎇")
 	}
 	// a landed branch is cleanup-ready (press c) — flag it so it stands out
 	landed := ""
@@ -131,10 +162,13 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected bool, w int) strin
 	}
 	cost := ""
 	if !r.F.Spend.Zero() {
-		cost = " " + s.Faint.Render(spendTick(r.F.Spend))
+		cost = " " + faint.Render(spendTick(r.F.Spend))
 	}
-	line := cursor + num + " " + glyph + " " + id + badge + " " + title + loop + tag + wtMark + landed + pr + cost
-	return ansi.Truncate(line, w, "…")
+	line := ansi.Truncate(cursor+num+" "+glyph+" "+id+badge+" "+title+loop+tag+wtMark+landed+pr+cost, w, "…")
+	if selected {
+		return s.Band(line, w, paneFocused)
+	}
+	return line
 }
 
 // severityAbbrev is the compact badge text for a bug's severity level;

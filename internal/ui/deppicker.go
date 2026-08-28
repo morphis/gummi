@@ -335,24 +335,39 @@ func (dp *depPicker) depRow(s *theme.Styles, numW, i int, c depCandidate, w int)
 	case candCycle:
 		style = s.Warning
 	}
-	if i == dp.cursor {
-		marker = s.Cursor.Render("▸ ")
-		style = s.Subtitle
-	}
+	sel := i == dp.cursor
 	num := s.Faint.Render(fmt.Sprintf("%*d.", numW, i+1))
+	if sel {
+		marker = s.BandMarker(true)
+		style = s.BandText.Bold(true)
+		// the band swallows the faintest tiers, so the row number lifts
+		num = s.BandTextDim.Render(fmt.Sprintf("%*d.", numW, i+1))
+	}
 	mark := "  "
+	selfMark := s.Faint
+	if sel {
+		selfMark = s.BandTextDim
+	}
 	switch c.state {
 	case candAttached, candRemove:
 		mark = s.Success.Render("✓ ")
 	case candSelf:
-		mark = s.Faint.Render("· ")
+		mark = selfMark.Render("· ")
 	}
 	id := style.Render(string(c.f.ID))
 	line := marker + num + " " + mark + id
 	if t := c.f.Title; t != "" {
-		line += " " + s.Faint.Render(ansi.Truncate(t, max(w-numW-8, 4), "…"))
+		title := s.Faint
+		if sel {
+			title = s.BandTextDim
+		}
+		line += " " + title.Render(ansi.Truncate(t, max(w-numW-8, 4), "…"))
 	}
-	return ansi.Truncate(line, w, "…")
+	line = ansi.Truncate(line, w, "…")
+	if sel {
+		return s.Band(line, w, true)
+	}
+	return line
 }
 
 // renderDepDetail shows the selected target's one-liner and the outcome of

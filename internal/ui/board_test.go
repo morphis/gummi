@@ -150,7 +150,7 @@ func TestCardLineNeverShellsGH(t *testing.T) {
 	r := row(42, "dark mode", domain.StageImplement, "thrifty", true)
 	r.F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
 	r.Landed = true
-	line := m.cardLine(r, 1, false, 100)
+	line := m.cardLine(r, 1, false, true, 100)
 	if !strings.Contains(line, "PR#42") {
 		t.Errorf("card line = %q, want it to contain PR#42", line)
 	}
@@ -261,11 +261,11 @@ func TestBoardBlockedBadgeGolden(t *testing.T) {
 	m.rows = []featureRow{blocked, met, design}
 	var b strings.Builder
 	b.WriteString("blocked@plan\n")
-	b.WriteString(m.cardLine(blocked, 1, false, 80) + "\n\n")
+	b.WriteString(m.cardLine(blocked, 1, false, true, 80) + "\n\n")
 	b.WriteString("met@plan\n")
-	b.WriteString(m.cardLine(met, 2, false, 80) + "\n\n")
+	b.WriteString(m.cardLine(met, 2, false, true, 80) + "\n\n")
 	b.WriteString("design@brainstorm\n")
-	b.WriteString(m.cardLine(design, 3, false, 80) + "\n")
+	b.WriteString(m.cardLine(design, 3, false, true, 80) + "\n")
 	golden.RequireEqual(t, []byte(b.String()))
 }
 
@@ -287,7 +287,7 @@ func TestBoardCardLineSeverity(t *testing.T) {
 	for _, c := range cases {
 		b.WriteString(c.name + "\n")
 		r := bugRow(1, c.name, c.sev)
-		b.WriteString(m.cardLine(r, 1, false, 80) + "\n\n")
+		b.WriteString(m.cardLine(r, 1, false, true, 80) + "\n\n")
 	}
 	golden.RequireEqual(t, []byte(b.String()))
 }

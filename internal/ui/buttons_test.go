@@ -81,24 +81,52 @@ func TestButtonRowViewDangerRendersDistinctly(t *testing.T) {
 		t.Fatalf("view %q missing a button label", view)
 	}
 
-	// "Cancel" and "Delete" are equal width, so no padding is in play here:
-	// the unfocused plain button is s.Faint, the focused danger button is
-	// s.Error — visibly alarmed only now that it's about to fire.
-	plain := s.Faint.Render("[ Cancel ]")
-	dangerFocused := s.Error.Render("[ Delete ]")
+	// "Cancel" and "Delete" are equal width, so no padding is in play
+	// here: the unfocused plain button is an unfilled faint legend, the
+	// focused danger button is filled with the destructive color.
+	plain := s.Button.Render("[ Cancel ]")
+	dangerFocused := s.ButtonDangerFocus.Render("[ Delete ]")
 	if !strings.Contains(view, plain) {
-		t.Fatalf("unfocused Cancel not rendered s.Faint: %q", view)
+		t.Fatalf("unfocused Cancel not rendered s.Button: %q", view)
 	}
 	if !strings.Contains(view, dangerFocused) {
-		t.Fatalf("focused danger button not rendered s.Error: %q", view)
+		t.Fatalf("focused danger button not filled (s.ButtonDangerFocus): %q", view)
 	}
 
 	// unfocused, the same danger button stays visibly destructive rather
 	// than blending into the row.
 	unfocusedDanger := newButtonRow(button{label: "Cancel"}, button{label: "Delete", danger: true})
-	dangerUnfocused := s.Destructive.Render("[ Delete ]")
+	dangerUnfocused := s.ButtonDanger.Render("[ Delete ]")
 	if !strings.Contains(unfocusedDanger.View(s, true), dangerUnfocused) {
-		t.Fatalf("unfocused danger button not rendered s.Destructive: %q", unfocusedDanger.View(s, true))
+		t.Fatalf("unfocused danger button not rendered s.ButtonDanger: %q", unfocusedDanger.View(s, true))
+	}
+}
+
+// TestButtonRowDangerFocusVisibleOnEveryTheme is the regression this
+// whole treatment exists for: focus used to be a hue swap from
+// Destructive to Error, and on the light theme those two slots are the
+// same color — so the focused Merge/Delete button rendered byte for byte
+// like the unfocused one, on the single most consequential control in
+// the app. Focus is now a fill, which no palette can collapse.
+func TestButtonRowDangerFocusVisibleOnEveryTheme(t *testing.T) {
+	for _, name := range theme.Names() {
+		th, ok := theme.ByName(name)
+		if !ok {
+			t.Fatalf("theme %q not in the registry", name)
+		}
+		t.Run(name, func(t *testing.T) {
+			s := theme.New(th)
+			focused := s.ButtonDangerFocus.Render("[ Delete ]")
+			unfocused := s.ButtonDanger.Render("[ Delete ]")
+			if focused == unfocused {
+				t.Errorf("focused and unfocused danger buttons render identically: %q", focused)
+			}
+			// and the fill must not be the same as an ordinary button's
+			// fill, or "about to delete" reads as "about to confirm".
+			if focused == s.ButtonFocus.Render("[ Delete ]") {
+				t.Errorf("focused danger button renders like an ordinary focused button: %q", focused)
+			}
+		})
 	}
 }
 
@@ -113,17 +141,16 @@ func TestButtonRowViewFocusedVsUnfocused(t *testing.T) {
 		t.Fatal("focused and unfocused row rendered identically")
 	}
 
-	// with focused=false, no button should be highlighted — every label
-	// renders the same (faint) way regardless of cursor position.
-	allFaint := s.Faint.Render("[ Cancel ]") + "  " + s.Faint.Render("[ Delete ]")
-	if unfocusedRow != allFaint {
-		t.Fatalf("unfocused row = %q, want every button faint: %q", unfocusedRow, allFaint)
+	// with focused=false, no button is filled — every label renders the
+	// same unfilled way regardless of cursor position.
+	allPlain := s.Button.Render("[ Cancel ]") + "  " + s.Button.Render("[ Delete ]")
+	if unfocusedRow != allPlain {
+		t.Fatalf("unfocused row = %q, want every button unfilled: %q", unfocusedRow, allPlain)
 	}
 
-	// with focused=true, the cursor button is highlighted, the other stays
-	// faint.
-	wantFocused := s.Cursor.Render("[ ") + s.Subtle.Render("Cancel") + s.Cursor.Render(" ]") +
-		"  " + s.Faint.Render("[ Delete ]")
+	// with focused=true, the cursor button is filled, the other stays a
+	// plain legend.
+	wantFocused := s.ButtonFocus.Render("[ Cancel ]") + "  " + s.Button.Render("[ Delete ]")
 	if focusedRow != wantFocused {
 		t.Fatalf("focused row = %q, want %q", focusedRow, wantFocused)
 	}

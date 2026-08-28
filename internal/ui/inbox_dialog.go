@@ -83,13 +83,17 @@ func (d *inboxDialog) View(s *theme.Styles, w, h int) string {
 	for i, it := range d.items {
 		cursor := "  "
 		row := s.Base
-		if i == d.sel {
-			cursor = s.Cursor.Render("▸ ")
+		sel := i == d.sel
+		if sel {
+			cursor = s.BandMarker(true)
 			row = s.Subtle
 		}
 		icon := attnIcon(s, it.Kind)
 		line := cursor + icon + " " + s.CardID.Render(string(it.Feature)) + " " +
 			row.Render(ansi.Truncate(sanitize(it.Text), max(width-14, 6), "…"))
+		if sel {
+			line = s.Band(line, width, true)
+		}
 		b.WriteString(line + "\n")
 	}
 	// the selected item's recommended action: what to press once there

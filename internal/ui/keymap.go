@@ -102,9 +102,22 @@ func (m *Shell) boardBindings() []binding {
 			pause.bar = true
 		}
 	}
+	// which region owns the arrow keys is a fact the bar states, not one
+	// the user has to infer from a cursor: with the action list focused,
+	// enter runs the highlighted action and ← is the way back to the
+	// cards, and the bar says exactly that.
+	move := binding{key: "j/k ↓↑", label: "select", help: "select feature"}
+	into := binding{key: "→", label: "actions", help: "focus the card's action list (↑↓ move, enter runs, ← back)", bar: true}
+	if m.actionFocused {
+		move.label, move.help = "move", "move the action cursor"
+		move.bar = true
+		into.key, into.label = "←", "cards"
+		into.help = "leave the action list, back to the cards"
+		enter.label, enter.help = "run action", "run the highlighted action"
+	}
 	bs := []binding{
-		{key: "j/k ↓↑", label: "select", help: "select feature"},
-		{key: "→", label: "actions", help: "focus the card's action list (↑↓ move, enter runs, ← back)", bar: true},
+		move,
+		into,
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
 		{key: "pgup/pgdn", label: "ends", help: "jump to the first/last card"},
 		{key: "1..9", label: "jump", help: "jump to feature"},

@@ -483,7 +483,7 @@ func TestRS_R_CreatesResearchCard(t *testing.T) {
 
 func TestRS_EmptyBoard_HintR(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
-	out := m.boardView(80)
+	out := m.boardView(80, true)
 	if !strings.Contains(out, "new research") {
 		t.Errorf("empty-board hint does not mention research: %s", out)
 	}
@@ -504,9 +504,9 @@ func TestRS_CardLine_BadgeTint(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = model.(*Shell)
 
-	featureLine := m.cardLine(m.rows[0], 1, false, 100)
-	bugLine := m.cardLine(m.rows[1], 2, false, 100)
-	rsLine := m.cardLine(m.rows[2], 3, false, 100)
+	featureLine := m.cardLine(m.rows[0], 1, false, true, 100)
+	bugLine := m.cardLine(m.rows[1], 2, false, true, 100)
+	rsLine := m.cardLine(m.rows[2], 3, false, true, 100)
 
 	wantID := m.styles.CardIDResearch.Render(string(rid))
 	if !strings.Contains(rsLine, wantID) {

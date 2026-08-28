@@ -123,25 +123,15 @@ func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(d.repo.View() + "\n")
 	b.WriteString(d.label.View() + "\n\n")
 
-	marker := "  "
-	profile := s.Faint.Render(d.profiles[d.profile])
-	if d.focus == bugIngestFieldProfile {
-		marker = s.Cursor.Render("▸ ")
-		profile = s.Subtle.Render(d.profiles[d.profile])
-	}
-	b.WriteString(marker + profile + "\n")
+	// both option rows use the shared field-row look (form.go): the
+	// focused one wears the selection band, the rest stay faint.
+	b.WriteString(fieldRow(s, d.focus == bugIngestFieldProfile, d.profiles[d.profile]) + "\n")
 
 	box := "[ ]"
 	if d.comments {
 		box = "[x]"
 	}
-	cmMarker := "  "
-	comments := s.Faint.Render(box + " Fetch comments")
-	if d.focus == bugIngestFieldComments {
-		cmMarker = s.Cursor.Render("▸ ")
-		comments = s.Subtle.Render(box + " Fetch comments")
-	}
-	b.WriteString(cmMarker + comments + "\n")
+	b.WriteString(fieldRow(s, d.focus == bugIngestFieldComments, box+" Fetch comments") + "\n")
 
 	hint := "enter import · tab next · esc cancel"
 	switch d.focus {
@@ -499,14 +489,20 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 		p := bv.props[i]
 		marker := "  "
 		style := s.Base
-		if pos == bv.cursor {
-			marker = s.Cursor.Render("▸ ")
-			style = s.Subtitle
+		meta := s.Faint
+		sel := pos == bv.cursor
+		if sel {
+			marker = s.BandMarker(true)
+			style = s.BandText.Bold(true)
+			meta = s.BandTextDim // s.Faint vanishes on the band
 		}
-		num := s.Faint.Render(fmt.Sprintf("%*d.", numW, i+1))
+		num := meta.Render(fmt.Sprintf("%*d.", numW, i+1))
 		line := marker + num + " " + style.Render(ansi.Truncate(p.Title, max(w-numW-6, 8), "…"))
 		if tag := bugProposalTags(p); tag != "" {
-			line += "  " + s.Faint.Render(tag)
+			line += "  " + meta.Render(tag)
+		}
+		if sel {
+			line = s.Band(line, w, true)
 		}
 		rows[pos] = line
 	}
