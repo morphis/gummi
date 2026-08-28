@@ -154,6 +154,48 @@ func TestInstallOneLifecycle(t *testing.T) {
 	}
 }
 
+// checkTargets: all up-to-date targets → nil; a missing target, and
+// separately a hand-edited one, each yield a non-nil error naming that
+// target's path.
+func TestSkillInstallCheck(t *testing.T) {
+	dir := t.TempDir()
+	curHash := skillBodyHash()
+	content := renderSkill("vtest")
+
+	upToDate := installTarget{path: filepath.Join(dir, "up-to-date", "SKILL.md"), label: "up-to-date"}
+	if err := installOne(upToDate, content, curHash, false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkTargets([]installTarget{upToDate}, curHash); err != nil {
+		t.Errorf("all targets up to date: checkTargets = %v, want nil", err)
+	}
+
+	absent := installTarget{path: filepath.Join(dir, "absent", "SKILL.md"), label: "absent"}
+	if err := checkTargets([]installTarget{upToDate, absent}, curHash); err == nil {
+		t.Error("missing target: checkTargets = nil, want an error naming it")
+	} else if !strings.Contains(err.Error(), absent.path) {
+		t.Errorf("checkTargets error %q does not name absent target %q", err, absent.path)
+	}
+
+	drifted := installTarget{path: filepath.Join(dir, "drifted", "SKILL.md"), label: "drifted"}
+	if err := installOne(drifted, content, curHash, false, false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(drifted.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(drifted.path, append(raw, []byte("\nHAND EDIT\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkTargets([]installTarget{upToDate, drifted}, curHash); err == nil {
+		t.Error("drifted target: checkTargets = nil, want an error naming it")
+	} else if !strings.Contains(err.Error(), drifted.path) {
+		t.Errorf("checkTargets error %q does not name drifted target %q", err, drifted.path)
+	}
+}
+
 // resolveTargets: project scope is one file; user scope resolves per agent
 // and rejects an unknown --agent.
 func TestResolveTargets(t *testing.T) {

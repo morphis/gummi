@@ -94,7 +94,7 @@ go test -tags pin ./...                # match the build tag when compiling ever
 ## Testing conventions
 
 - **86+ tests, no network, no real agents.** Tests use the in-process
-  `internal/agent/fake.go` (and `fakeopenai/`) — never spawn `copilot`
+  `internal/agent/fake.go` — never spawn `copilot`
   or hit an API in a test. Follow that pattern for new engine/UI tests.
 - **UI golden files.** Several `internal/ui/...` packages snapshot
   rendered output into `testdata/` via `x/exp/golden`. After an

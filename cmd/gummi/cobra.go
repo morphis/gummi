@@ -404,4 +404,5 @@ func bindSkillInstallFlags(cmd *cobra.Command) {
 	f.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
 	f.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
 	f.Bool("dry-run", false, "print what would be written, change nothing")
+	f.Bool("check", false, "verify every target is up to date; write nothing, fail if any is absent/foreign/drifted")
 }

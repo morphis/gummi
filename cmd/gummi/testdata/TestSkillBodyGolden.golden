@@ -126,7 +126,7 @@ gummi doctor
     --deep  probe per-role model reachability with a live backend turn (TTL-cached)
     --json  emit the readiness checklist as JSON (the skill's setup path)
 
-gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]
+gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run] [--check]
 ```
 
 A run drives one feature via the **quick route** by default (spec → implement →
@@ -268,6 +268,12 @@ tokens, add `--until spec` (or `--until plan` on `--full`). The run stops cleanl
 at that stage — event `stopped`, exit 0 — with the feature parked and resumable.
 Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
 --approve` continues to the verified branch.
+
+`--until` is per-invocation only — it is never persisted on the card, so if you
+want the run to stop again at a *later* boundary (e.g. `--until plan` after
+already stopping at `--until spec`), re-pass `--until <stage>` on that `resume`
+too. A bare `resume --approve` with no `--until` runs straight through to the
+end.
 
 ## Research cards: `gummi research`
 

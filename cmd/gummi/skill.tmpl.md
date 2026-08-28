@@ -198,6 +198,12 @@ at that stage — event `stopped`, exit 0 — with the feature parked and resuma
 Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
 --approve` continues to the verified branch.
 
+`--until` is per-invocation only — it is never persisted on the card, so if you
+want the run to stop again at a *later* boundary (e.g. `--until plan` after
+already stopping at `--until spec`), re-pass `--until <stage>` on that `resume`
+too. A bare `resume --approve` with no `--until` runs straight through to the
+end.
+
 ## Research cards: `gummi research`
 
 `gummi research "<brief>"` mints one RS card from a free-form brief and drives

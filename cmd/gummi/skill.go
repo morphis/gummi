@@ -231,7 +231,7 @@ func commandGrammar() string {
 	b.WriteString("gummi diff <id|ref>\n\n")
 	writeCmd("gummi doctor", flagLines(func(fs *flag.FlagSet) { registerDoctorFlags(fs) }))
 	b.WriteString("\n")
-	b.WriteString("gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run]")
+	b.WriteString("gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run] [--check]")
 	return b.String()
 }
 
@@ -292,8 +292,9 @@ func skillInstall(args []string) error {
 	scopeFlag := fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
 	force := fs.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
 	dryRun := fs.Bool("dry-run", false, "print what would be written, change nothing")
+	check := fs.Bool("check", false, "verify every target is up to date; write nothing, fail if any is absent/foreign/drifted")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi skill install [--agent a] [--scope s] [--force] [--dry-run]")
+		fmt.Fprintln(os.Stderr, "usage: gummi skill install [--agent a] [--scope s] [--force] [--dry-run] [--check]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -315,12 +316,37 @@ func skillInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	content := renderSkill(version())
 	curHash := skillBodyHash()
+	if *check {
+		return checkTargets(targets, curHash)
+	}
+	content := renderSkill(version())
 	for _, t := range targets {
 		if err := installOne(t, content, curHash, *force, *dryRun); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkTargets is the --check drift guard: it writes nothing and reports
+// every target whose install state isn't "up-to-date" (absent/foreign/
+// drifted), printing an OK line for each target that is. Used by CI to fail
+// when a committed SKILL.md has drifted from what the current binary would
+// generate.
+func checkTargets(targets []installTarget, curHash string) error {
+	var stale []string
+	for _, t := range targets {
+		status := describeInstall(t.path, curHash)
+		if status == "up-to-date" {
+			fmt.Printf("  ✓ %s — up to date: %s\n", t.label, t.path)
+			continue
+		}
+		fmt.Printf("  ✗ %s — %s: %s\n", t.label, status, t.path)
+		stale = append(stale, t.path)
+	}
+	if len(stale) > 0 {
+		return fmt.Errorf("skill install --check: out of date: %s", strings.Join(stale, ", "))
 	}
 	return nil
 }

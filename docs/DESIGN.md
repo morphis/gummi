@@ -1228,7 +1228,8 @@ caller must decide, then exits.
   plan; `--ref <id>` persists an external correlation id (`status`/`resume`
   resolve it); `--until <stage>` stops cleanly at a design boundary
   (event `stopped`, exit 0) for a human review before implementation spends
-  tokens.
+  tokens. `--until` is per-invocation only — it is never persisted, so it
+  must be re-passed on every `resume` to keep stopping at later boundaries.
 - **Read commands** — `status`/`spec`/`diff` are agent-free and take **no
   lock** (SQLite WAL + read-only git), so they observe a live run safely.
   `status --json` distinguishes two terminal signals a poller must not
