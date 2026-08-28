@@ -380,7 +380,7 @@ func TestRS_Form_EscCancels(t *testing.T) {
 
 func TestRS_Form_TabsFocusRing(t *testing.T) {
 	form := newRSForm(nil, nil, false, 0, func(rsFormResult) tea.Cmd { return nil })
-	for _, want := range []int{rsFieldBrief, rsFieldEnvelope, rsFieldProfile, rsFieldBrief} {
+	for _, want := range []int{rsFieldBrief, rsFieldEnvelope, rsFieldProfile, rsFieldButtons, rsFieldBrief} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}

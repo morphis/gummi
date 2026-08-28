@@ -305,9 +305,10 @@ func TestIngestFormRepo(t *testing.T) {
 			return nil
 		})
 		f.path.SetValue(prd)
-		// tab order is repo -> path -> profile; from the initial path focus,
-		// two forward tabs (path -> profile -> repo) reach it, then ←/→
-		// cycles: default -> a -> b
+		// tab order is repo -> path -> profile -> buttons; from the initial
+		// path focus, three forward tabs (profile -> buttons -> repo) reach
+		// it, then ←/→ cycles: default -> a -> b
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})

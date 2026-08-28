@@ -17,7 +17,7 @@ func TestBugFormSizing(t *testing.T) {
 	for _, area := range []struct{ w, h int }{{60, 20}, {200, 60}} {
 		form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 		form.View(styles, area.w, area.h)
-		wantW, wantH := dialogDescSize(area.w, area.h, 10) // no repo field: base static rows only
+		wantW, wantH := dialogDescSize(area.w, area.h, 12) // no repo field: base static rows only
 		assertDescRendersAt(t, form.desc.View(), area.w, area.h, wantW, wantH)
 	}
 }
@@ -207,7 +207,7 @@ func TestBugFormEnvelopeEmpty(t *testing.T) {
 // description, skipping the repo stop since no repos are configured.
 func TestBugFormEnvelopeTabOrder(t *testing.T) {
 	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
-	for _, want := range []int{bugFieldDesc, bugFieldEnvelope, bugFieldProfile, bugFieldSeverity, bugFieldRoute, bugFieldDesc} {
+	for _, want := range []int{bugFieldDesc, bugFieldEnvelope, bugFieldProfile, bugFieldSeverity, bugFieldRoute, bugFieldButtons, bugFieldDesc} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}

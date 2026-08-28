@@ -167,13 +167,15 @@ var featureRoutes = []featureRoute{
 }
 
 // feature form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus).
+// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// last stop, so tab from it wraps back to the first field.
 const (
 	featureFieldRepo = iota
 	featureFieldDesc
 	featureFieldEnvelope
 	featureFieldProfile
 	featureFieldRoute
+	featureFieldButtons
 	featureFieldCount
 )
 
@@ -191,6 +193,7 @@ type featureForm struct {
 	route    int
 	focus    int
 	errText  string
+	buttons  *buttonRow
 
 	onSubmit func(formResult) tea.Cmd
 }
@@ -221,6 +224,7 @@ func newFeatureForm(profiles []string, repos []string, hasDefault bool, defaultE
 	return &featureForm{
 		desc: desc, env: env, profiles: profiles,
 		repo: newRepoPicker(repos, hasDefault), focus: featureFieldDesc,
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
 }
@@ -228,43 +232,48 @@ func newFeatureForm(profiles []string, repos []string, hasDefault bool, defaultE
 // ID implements overlay.Dialog.
 func (d *featureForm) ID() string { return "new-feature" }
 
+// submit validates and fires onSubmit, matching enter's own handling from
+// any other field exactly — the button row's Create button is just another
+// way to reach the same action.
+func (d *featureForm) submit() (bool, tea.Cmd) {
+	desc := strings.TrimSpace(d.desc.Value())
+	if desc == "" {
+		d.errText = "description must not be empty"
+		return false, nil
+	}
+	// validate the slug of the derived title (what creation will use),
+	// not the whole description
+	title, _, _ := domain.SplitFreeform(desc)
+	if _, err := domain.Slugify(title); err != nil {
+		d.errText = err.Error()
+		return false, nil
+	}
+	// an empty envelope is the "use default" signal; a non-negative
+	// integer becomes an explicit envelope (0 = uncapped)
+	var env *int
+	if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
+		n, err := strconv.Atoi(trimmed)
+		if err != nil || n < 0 {
+			d.errText = "envelope must be a non-negative number of credits"
+			return false, nil
+		}
+		env = &n
+	}
+	res := formResult{
+		Desc:     desc,
+		Profile:  d.profiles[d.profile],
+		Skip:     featureRoutes[d.route].skip,
+		Envelope: env,
+		Repo:     d.repo.name(),
+	}
+	return true, d.onSubmit(res)
+}
+
 // HandleKey implements overlay.Dialog.
 func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "enter":
-		desc := strings.TrimSpace(d.desc.Value())
-		if desc == "" {
-			d.errText = "description must not be empty"
-			return false, nil
-		}
-		// validate the slug of the derived title (what creation will use),
-		// not the whole description
-		title, _, _ := domain.SplitFreeform(desc)
-		if _, err := domain.Slugify(title); err != nil {
-			d.errText = err.Error()
-			return false, nil
-		}
-		// an empty envelope is the "use default" signal; a non-negative
-		// integer becomes an explicit envelope (0 = uncapped)
-		var env *int
-		if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
-			n, err := strconv.Atoi(trimmed)
-			if err != nil || n < 0 {
-				d.errText = "envelope must be a non-negative number of credits"
-				return false, nil
-			}
-			env = &n
-		}
-		res := formResult{
-			Desc:     desc,
-			Profile:  d.profiles[d.profile],
-			Skip:     featureRoutes[d.route].skip,
-			Envelope: env,
-			Repo:     d.repo.name(),
-		}
-		return true, d.onSubmit(res)
 	case "alt+enter", "ctrl+j":
 		if d.focus == featureFieldDesc {
 			d.desc.InsertString("\n")
@@ -277,6 +286,24 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "shift+tab":
 		d.advanceFocus(-1)
 		return false, nil
+	}
+
+	if d.focus == featureFieldButtons {
+		switch key.String() {
+		case "left", "h":
+			d.buttons.Move(-1)
+		case "right", "l":
+			d.buttons.Move(1)
+		case "enter":
+			if d.buttons.Cursor() == 0 {
+				return true, nil
+			}
+			return d.submit()
+		}
+		return false, nil
+	}
+	if key.String() == "enter" {
+		return d.submit()
 	}
 
 	switch d.focus {
@@ -342,9 +369,9 @@ func (d *featureForm) setFocus(f int) {
 // View implements overlay.Dialog.
 func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-desc(1),
-	// envelope+blank(2), profile+route(2), blank+hint(2); +2 more when the
-	// repo field renders (repo+blank).
-	staticRows := 9
+	// envelope+blank(2), profile+route(2), blank+buttons(2), blank+hint(2);
+	// +2 more when the repo field renders (repo+blank).
+	staticRows := 11
 	if d.repo.multi() {
 		staticRows += 2
 	}
@@ -361,13 +388,17 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == featureFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 	b.WriteString(fieldRow(s, d.focus == featureFieldRoute, "route: "+featureRoutes[d.route].label) + "\n")
+	b.WriteString("\n" + d.buttons.View(s, d.focus == featureFieldButtons) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
 	hint := "tab next · ←/→ change · enter create · esc cancel"
-	if d.focus == featureFieldDesc {
+	switch d.focus {
+	case featureFieldDesc:
 		hint = "alt+enter newline · " + hint
+	case featureFieldButtons:
+		hint = "←/→ buttons · enter activate · tab next · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

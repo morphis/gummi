@@ -32,7 +32,8 @@ var bugRoutes = []bugRoute{
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
 // bug form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus).
+// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// last stop, so tab from it wraps back to the first field.
 const (
 	bugFieldRepo = iota
 	bugFieldDesc
@@ -40,6 +41,7 @@ const (
 	bugFieldProfile
 	bugFieldSeverity
 	bugFieldRoute
+	bugFieldButtons
 	bugFieldCount
 )
 
@@ -58,6 +60,7 @@ type bugForm struct {
 	route    int
 	focus    int
 	errText  string
+	buttons  *buttonRow
 
 	onSubmit func(bugFormResult) tea.Cmd
 }
@@ -81,6 +84,7 @@ func newBugForm(profiles []string, repos []string, hasDefault bool, defaultEnvel
 	return &bugForm{
 		desc: desc, env: env, profiles: profiles,
 		repo: newRepoPicker(repos, hasDefault), focus: bugFieldDesc,
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
 }
@@ -88,43 +92,48 @@ func newBugForm(profiles []string, repos []string, hasDefault bool, defaultEnvel
 // ID implements overlay.Dialog.
 func (d *bugForm) ID() string { return "new-bug" }
 
+// submit validates and fires onSubmit, matching enter's own handling from
+// any other field exactly — the button row's Create button is just another
+// way to reach the same action.
+func (d *bugForm) submit() (bool, tea.Cmd) {
+	desc := strings.TrimSpace(d.desc.Value())
+	if desc == "" {
+		d.errText = "description must not be empty"
+		return false, nil
+	}
+	// validate the slug of the derived title (what creation will use),
+	// not the whole description
+	title, oneLiner, seed := domain.SplitFreeform(desc)
+	if _, err := domain.Slugify(title); err != nil {
+		d.errText = err.Error()
+		return false, nil
+	}
+	var env *int
+	if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
+		n, err := strconv.Atoi(trimmed)
+		if err != nil || n < 0 {
+			d.errText = "envelope must be a non-negative number of credits"
+			return false, nil
+		}
+		env = &n
+	}
+	return true, d.onSubmit(bugFormResult{
+		Title:    title,
+		OneLiner: oneLiner,
+		Seed:     seed,
+		Severity: bugSeverityChoices[d.sev],
+		Profile:  d.profiles[d.profile],
+		Skip:     bugRoutes[d.route].skip,
+		Envelope: env,
+		Repo:     d.repo.name(),
+	})
+}
+
 // HandleKey implements overlay.Dialog.
 func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "enter":
-		desc := strings.TrimSpace(d.desc.Value())
-		if desc == "" {
-			d.errText = "description must not be empty"
-			return false, nil
-		}
-		// validate the slug of the derived title (what creation will use),
-		// not the whole description
-		title, oneLiner, seed := domain.SplitFreeform(desc)
-		if _, err := domain.Slugify(title); err != nil {
-			d.errText = err.Error()
-			return false, nil
-		}
-		var env *int
-		if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
-			n, err := strconv.Atoi(trimmed)
-			if err != nil || n < 0 {
-				d.errText = "envelope must be a non-negative number of credits"
-				return false, nil
-			}
-			env = &n
-		}
-		return true, d.onSubmit(bugFormResult{
-			Title:    title,
-			OneLiner: oneLiner,
-			Seed:     seed,
-			Severity: bugSeverityChoices[d.sev],
-			Profile:  d.profiles[d.profile],
-			Skip:     bugRoutes[d.route].skip,
-			Envelope: env,
-			Repo:     d.repo.name(),
-		})
 	case "alt+enter", "ctrl+j":
 		if d.focus == bugFieldDesc {
 			d.desc.InsertString("\n")
@@ -137,6 +146,24 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "shift+tab":
 		d.advanceFocus(-1)
 		return false, nil
+	}
+
+	if d.focus == bugFieldButtons {
+		switch key.String() {
+		case "left", "h":
+			d.buttons.Move(-1)
+		case "right", "l":
+			d.buttons.Move(1)
+		case "enter":
+			if d.buttons.Cursor() == 0 {
+				return true, nil
+			}
+			return d.submit()
+		}
+		return false, nil
+	}
+	if key.String() == "enter" {
+		return d.submit()
 	}
 
 	switch d.focus {
@@ -214,9 +241,9 @@ func (d *bugForm) sevLabel() string {
 // View implements overlay.Dialog.
 func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-desc(1),
-	// envelope+blank(2), profile+severity+route(3), blank+hint(2); +2 more
-	// when the repo field renders (repo+blank).
-	staticRows := 10
+	// envelope+blank(2), profile+severity+route(3), blank+buttons(2),
+	// blank+hint(2); +2 more when the repo field renders (repo+blank).
+	staticRows := 12
 	if d.repo.multi() {
 		staticRows += 2
 	}
@@ -234,13 +261,17 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(fieldRow(s, d.focus == bugFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 	b.WriteString(fieldRow(s, d.focus == bugFieldSeverity, d.sevLabel()) + "\n")
 	b.WriteString(fieldRow(s, d.focus == bugFieldRoute, "route: "+bugRoutes[d.route].label) + "\n")
+	b.WriteString("\n" + d.buttons.View(s, d.focus == bugFieldButtons) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
 	hint := "tab next · ←/→ change · enter create · esc cancel"
-	if d.focus == bugFieldDesc {
+	switch d.focus {
+	case bugFieldDesc:
 		hint = "alt+enter newline · " + hint
+	case bugFieldButtons:
+		hint = "←/→ buttons · enter activate · tab next · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

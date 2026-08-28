@@ -77,11 +77,13 @@ func (d *textPromptDialog) View(s *theme.Styles, w, h int) string {
 }
 
 // ingest form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus).
+// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// last stop, so tab from it wraps back to the first field.
 const (
 	ingestFieldRepo = iota
 	ingestFieldPath
 	ingestFieldProfile
+	ingestFieldButtons
 	ingestFieldCount
 )
 
@@ -96,6 +98,7 @@ type ingestForm struct {
 	repo     repoPicker
 	focus    int
 	errText  string
+	buttons  *buttonRow
 
 	onSubmit func(path, profile, repo string) tea.Cmd
 }
@@ -112,6 +115,7 @@ func newIngestForm(profiles, repos []string, hasDefault bool, onSubmit func(path
 	return &ingestForm{
 		path: path, profiles: profiles,
 		repo: newRepoPicker(repos, hasDefault), focus: ingestFieldPath,
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Decompose"}),
 		onSubmit: onSubmit,
 	}
 }
@@ -119,22 +123,27 @@ func newIngestForm(profiles, repos []string, hasDefault bool, onSubmit func(path
 // ID implements overlay.Dialog.
 func (d *ingestForm) ID() string { return "ingest-spec" }
 
+// submit validates and fires onSubmit, matching enter's own handling from
+// any other field exactly — the button row's Decompose button is just
+// another way to reach the same action.
+func (d *ingestForm) submit() (bool, tea.Cmd) {
+	path := strings.TrimSpace(d.path.Value())
+	if path == "" {
+		d.errText = "give a path to a spec file"
+		return false, nil
+	}
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		d.errText = "no such file: " + path
+		return false, nil
+	}
+	return true, d.onSubmit(path, d.profiles[d.profile], d.repo.name())
+}
+
 // HandleKey implements overlay.Dialog.
 func (d *ingestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "enter":
-		path := strings.TrimSpace(d.path.Value())
-		if path == "" {
-			d.errText = "give a path to a spec file"
-			return false, nil
-		}
-		if fi, err := os.Stat(path); err != nil || fi.IsDir() {
-			d.errText = "no such file: " + path
-			return false, nil
-		}
-		return true, d.onSubmit(path, d.profiles[d.profile], d.repo.name())
 	case "tab":
 		d.advanceFocus(1)
 		return false, nil
@@ -142,6 +151,25 @@ func (d *ingestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.advanceFocus(-1)
 		return false, nil
 	}
+
+	if d.focus == ingestFieldButtons {
+		switch key.String() {
+		case "left", "h":
+			d.buttons.Move(-1)
+		case "right", "l":
+			d.buttons.Move(1)
+		case "enter":
+			if d.buttons.Cursor() == 0 {
+				return true, nil
+			}
+			return d.submit()
+		}
+		return false, nil
+	}
+	if key.String() == "enter" {
+		return d.submit()
+	}
+
 	switch d.focus {
 	case ingestFieldRepo:
 		if delta, ok := selectCycleDelta(key.String()); ok {
@@ -200,11 +228,15 @@ func (d *ingestForm) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString(d.path.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == ingestFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
+	b.WriteString("\n" + d.buttons.View(s, d.focus == ingestFieldButtons) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
 	hint := "tab next · ←/→ change · enter decompose · esc cancel"
+	if d.focus == ingestFieldButtons {
+		hint = "←/→ buttons · enter activate · tab next · esc cancel"
+	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
 }

@@ -13,12 +13,14 @@ import (
 )
 
 // research form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus).
+// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// last stop, so tab from it wraps back to the first field.
 const (
 	rsFieldRepo = iota
 	rsFieldBrief
 	rsFieldEnvelope
 	rsFieldProfile
+	rsFieldButtons
 	rsFieldCount
 )
 
@@ -36,6 +38,7 @@ type rsForm struct {
 	repo     repoPicker
 	focus    int
 	errText  string
+	buttons  *buttonRow
 
 	onSubmit func(rsFormResult) tea.Cmd
 }
@@ -59,6 +62,7 @@ func newRSForm(profiles []string, repos []string, hasDefault bool, defaultEnvelo
 	return &rsForm{
 		brief: brief, env: env, profiles: profiles,
 		repo: newRepoPicker(repos, hasDefault), focus: rsFieldBrief,
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
 		onSubmit: onSubmit,
 	}
 }
@@ -66,38 +70,43 @@ func newRSForm(profiles []string, repos []string, hasDefault bool, defaultEnvelo
 // ID implements overlay.Dialog.
 func (d *rsForm) ID() string { return "new-research" }
 
+// submit validates and fires onSubmit, matching enter's own handling from
+// any other field exactly — the button row's Create button is just another
+// way to reach the same action.
+func (d *rsForm) submit() (bool, tea.Cmd) {
+	brief := strings.TrimSpace(d.brief.Value())
+	if brief == "" {
+		d.errText = "brief required"
+		return false, nil
+	}
+	trimmedEnv := strings.TrimSpace(d.env.Value())
+	if trimmedEnv == "" {
+		d.errText = "envelope required"
+		return false, nil
+	}
+	n, err := strconv.Atoi(trimmedEnv)
+	if err != nil || n < 0 {
+		d.errText = "envelope must be a non-negative number of credits"
+		return false, nil
+	}
+	title, _, _ := domain.SplitFreeform(brief)
+	if _, err := domain.Slugify(title); err != nil {
+		d.errText = "brief must include a letter or digit"
+		return false, nil
+	}
+	return true, d.onSubmit(rsFormResult{
+		Brief:    brief,
+		Profile:  d.profiles[d.profile],
+		Repo:     d.repo.name(),
+		Envelope: &n,
+	})
+}
+
 // HandleKey implements overlay.Dialog.
 func (d *rsForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "enter":
-		brief := strings.TrimSpace(d.brief.Value())
-		if brief == "" {
-			d.errText = "brief required"
-			return false, nil
-		}
-		trimmedEnv := strings.TrimSpace(d.env.Value())
-		if trimmedEnv == "" {
-			d.errText = "envelope required"
-			return false, nil
-		}
-		n, err := strconv.Atoi(trimmedEnv)
-		if err != nil || n < 0 {
-			d.errText = "envelope must be a non-negative number of credits"
-			return false, nil
-		}
-		title, _, _ := domain.SplitFreeform(brief)
-		if _, err := domain.Slugify(title); err != nil {
-			d.errText = "brief must include a letter or digit"
-			return false, nil
-		}
-		return true, d.onSubmit(rsFormResult{
-			Brief:    brief,
-			Profile:  d.profiles[d.profile],
-			Repo:     d.repo.name(),
-			Envelope: &n,
-		})
 	case "alt+enter", "ctrl+j":
 		if d.focus == rsFieldBrief {
 			d.brief.InsertString("\n")
@@ -110,6 +119,24 @@ func (d *rsForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "shift+tab":
 		d.advanceFocus(-1)
 		return false, nil
+	}
+
+	if d.focus == rsFieldButtons {
+		switch key.String() {
+		case "left", "h":
+			d.buttons.Move(-1)
+		case "right", "l":
+			d.buttons.Move(1)
+		case "enter":
+			if d.buttons.Cursor() == 0 {
+				return true, nil
+			}
+			return d.submit()
+		}
+		return false, nil
+	}
+	if key.String() == "enter" {
+		return d.submit()
 	}
 
 	switch d.focus {
@@ -170,9 +197,9 @@ func (d *rsForm) setFocus(f int) {
 // View implements overlay.Dialog.
 func (d *rsForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-brief(1),
-	// envelope+blank(2), profile(1), blank+hint(2); +2 more when the repo
-	// field renders (repo+blank).
-	staticRows := 8
+	// envelope+blank(2), profile(1), blank+buttons(2), blank+hint(2); +2
+	// more when the repo field renders (repo+blank).
+	staticRows := 10
 	if d.repo.multi() {
 		staticRows += 2
 	}
@@ -188,13 +215,17 @@ func (d *rsForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(d.brief.View() + "\n\n")
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == rsFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
+	b.WriteString("\n" + d.buttons.View(s, d.focus == rsFieldButtons) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
 	hint := "tab next · ←/→ change · enter create · esc cancel"
-	if d.focus == rsFieldBrief {
+	switch d.focus {
+	case rsFieldBrief:
 		hint = "alt+enter newline · " + hint
+	case rsFieldButtons:
+		hint = "←/→ buttons · enter activate · tab next · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
