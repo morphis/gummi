@@ -291,7 +291,7 @@ func rsCardShell(t *testing.T, repo string) (*Shell, domain.Feature) {
 
 func TestRS_Form_SubmitCarriesBrief(t *testing.T) {
 	var got rsFormResult
-	form := newRSForm([]string{"thrifty"}, []string{"lxd"}, 1000, func(res rsFormResult) tea.Cmd {
+	form := newRSForm([]string{"thrifty"}, []string{"lxd"}, true, 1000, func(res rsFormResult) tea.Cmd {
 		got = res
 		return nil
 	})
@@ -312,7 +312,7 @@ func TestRS_Form_SubmitCarriesBrief(t *testing.T) {
 
 func TestRS_Form_EnterEmptyBriefErrors(t *testing.T) {
 	submitted := false
-	form := newRSForm(nil, nil, 1000, func(rsFormResult) tea.Cmd {
+	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -329,7 +329,7 @@ func TestRS_Form_EnterEmptyBriefErrors(t *testing.T) {
 
 func TestRS_Form_EnterEmptyEnvelopeErrors(t *testing.T) {
 	submitted := false
-	form := newRSForm(nil, nil, 1000, func(rsFormResult) tea.Cmd {
+	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -348,7 +348,7 @@ func TestRS_Form_EnterEmptyEnvelopeErrors(t *testing.T) {
 
 func TestRS_Form_EnterPunctuationOnlyBriefErrors(t *testing.T) {
 	submitted := false
-	form := newRSForm(nil, nil, 1000, func(rsFormResult) tea.Cmd {
+	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -365,7 +365,7 @@ func TestRS_Form_EnterPunctuationOnlyBriefErrors(t *testing.T) {
 }
 
 func TestRS_Form_EscCancels(t *testing.T) {
-	form := newRSForm(nil, nil, 1000, func(rsFormResult) tea.Cmd {
+	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
 		t.Fatal("onSubmit ran on esc")
 		return nil
 	})
@@ -379,8 +379,8 @@ func TestRS_Form_EscCancels(t *testing.T) {
 }
 
 func TestRS_Form_TabsFocusRing(t *testing.T) {
-	form := newRSForm(nil, nil, 0, func(rsFormResult) tea.Cmd { return nil })
-	for _, want := range []int{fieldDesc, fieldEnvelope, fieldOpts} {
+	form := newRSForm(nil, nil, false, 0, func(rsFormResult) tea.Cmd { return nil })
+	for _, want := range []int{rsFieldBrief, rsFieldEnvelope, rsFieldProfile, rsFieldBrief} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}

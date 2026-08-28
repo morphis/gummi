@@ -230,13 +230,13 @@ func TestBugImportFormCommentsCheckbox(t *testing.T) {
 		t.Error("view should render the unchecked comments box")
 	}
 
-	// tab to the comments field and press 'c' to check it.
+	// tab to the comments field and press space to check it.
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	form.HandleKey(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	if !form.comments {
-		t.Fatal("'c' on the comments field should check it")
+		t.Fatal("space on the comments field should check it")
 	}
 
 	// submitting passes the checked flag through.

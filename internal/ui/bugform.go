@@ -12,35 +12,57 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// bugForm is the new-bug dialog: a title line, an envelope line, plus a
-// demoted options row (profile · severity · triage/diagnose skips). It
-// mirrors the feature form — the triage stage develops reproduction and
-// root cause, just as brainstorm develops a feature — but carries
-// bug-shaped options.
-type bugForm struct {
-	desc     textarea.Model
-	env      textinput.Model
-	profiles []string
-	profile  int
-	sevs     []domain.Severity
-	sev      int
-	// repos are the configured selectable managed repositories; repoIdx
-	// indexes a list whose first (0) entry is the workspace default (empty
-	// name) and whose rest are the configured names.
-	repos   []string
-	repoIdx int
-	skip    domain.SkipFlags
-	focus   int
-	errText string
+// bugRoute is one state of the bug workflow-route field, mirroring
+// featureRoute: a display label paired with the domain.SkipFlags it
+// selects.
+type bugRoute struct {
+	label string
+	skip  domain.SkipFlags
+}
 
-	onSubmit func(bugFormResult) tea.Cmd
+var bugRoutes = []bugRoute{
+	{"full workflow", domain.SkipFlags{}},
+	{"skip triage", domain.SkipFlags{Triage: true}},
+	{"skip diagnose", domain.SkipFlags{Diagnose: true}},
+	{"skip triage+diagnose", domain.SkipFlags{Triage: true, Diagnose: true}},
 }
 
 // bugSeverityChoices are the severities the form cycles through; the
 // first ("") means unset — triage classifies it later.
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
-func newBugForm(profiles []string, repos []string, defaultEnvelope int, onSubmit func(bugFormResult) tea.Cmd) *bugForm {
+// bug form fields, in tab order. fieldRepo is skipped when the repo
+// picker has nothing to choose (see advanceFocus).
+const (
+	bugFieldRepo = iota
+	bugFieldDesc
+	bugFieldEnvelope
+	bugFieldProfile
+	bugFieldSeverity
+	bugFieldRoute
+	bugFieldCount
+)
+
+// bugForm is the new-bug dialog: a title line, an envelope line, plus
+// repo/profile/severity/route each its own tab stop, cycled with ←/→ —
+// no mnemonic keys. It mirrors featureForm — the triage stage develops
+// reproduction and root cause, just as brainstorm develops a feature —
+// but carries bug-shaped options.
+type bugForm struct {
+	desc     textarea.Model
+	env      textinput.Model
+	profiles []string
+	profile  int
+	sev      int
+	repo     repoPicker
+	route    int
+	focus    int
+	errText  string
+
+	onSubmit func(bugFormResult) tea.Cmd
+}
+
+func newBugForm(profiles []string, repos []string, hasDefault bool, defaultEnvelope int, onSubmit func(bugFormResult) tea.Cmd) *bugForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -56,24 +78,11 @@ func newBugForm(profiles []string, repos []string, defaultEnvelope int, onSubmit
 	env.SetWidth(46)
 	env.CharLimit = 12
 	env.SetValue(strconv.Itoa(defaultEnvelope))
-	return &bugForm{desc: desc, env: env, profiles: profiles, sevs: bugSeverityChoices, repos: repos, onSubmit: onSubmit}
-}
-
-// repoName returns the currently selected repository name: "" for the
-// workspace default, else the configured name.
-func (d *bugForm) repoName() string {
-	if d.repoIdx == 0 || len(d.repos) == 0 {
-		return ""
+	return &bugForm{
+		desc: desc, env: env, profiles: profiles,
+		repo: newRepoPicker(repos, hasDefault), focus: bugFieldDesc,
+		onSubmit: onSubmit,
 	}
-	return d.repos[d.repoIdx-1]
-}
-
-// repoLabel is the display label for the selected repository.
-func (d *bugForm) repoLabel() string {
-	if name := d.repoName(); name != "" {
-		return name
-	}
-	return "default"
 }
 
 // ID implements overlay.Dialog.
@@ -110,51 +119,50 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			Title:    title,
 			OneLiner: oneLiner,
 			Seed:     seed,
-			Severity: d.sevs[d.sev],
+			Severity: bugSeverityChoices[d.sev],
 			Profile:  d.profiles[d.profile],
-			Skip:     d.skip,
+			Skip:     bugRoutes[d.route].skip,
 			Envelope: env,
-			Repo:     d.repoName(),
+			Repo:     d.repo.name(),
 		})
 	case "alt+enter", "ctrl+j":
-		if d.focus == fieldDesc {
+		if d.focus == bugFieldDesc {
 			d.desc.InsertString("\n")
 			d.errText = ""
 		}
 		return false, nil
 	case "tab":
-		d.setFocus((d.focus + 1) % fieldCount)
+		d.advanceFocus(1)
 		return false, nil
 	case "shift+tab":
-		d.setFocus((d.focus + fieldCount - 1) % fieldCount)
+		d.advanceFocus(-1)
 		return false, nil
 	}
 
 	switch d.focus {
-	case fieldOpts:
-		switch key.String() {
-		case "left", "h":
-			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
-		case "right", "l", "space":
-			d.profile = (d.profile + 1) % len(d.profiles)
-		case "s":
-			d.sev = (d.sev + 1) % len(d.sevs)
-		case "t":
-			d.skip.Triage = !d.skip.Triage
-		case "d":
-			d.skip.Diagnose = !d.skip.Diagnose
-		case "r":
-			// cycle the managed repository (default + configured names); no
-			// repos configured means a no-op on a single-entry list.
-			total := len(d.repos) + 1
-			if total > 1 {
-				d.repoIdx = (d.repoIdx + 1) % total
-			}
+	case bugFieldRepo:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			d.repo.cycle(delta)
 		}
-	case fieldDesc:
+	case bugFieldProfile:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			n := len(d.profiles)
+			d.profile = ((d.profile+delta)%n + n) % n
+		}
+	case bugFieldSeverity:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			n := len(bugSeverityChoices)
+			d.sev = ((d.sev+delta)%n + n) % n
+		}
+	case bugFieldRoute:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			n := len(bugRoutes)
+			d.route = ((d.route+delta)%n + n) % n
+		}
+	case bugFieldDesc:
 		d.desc, _ = d.desc.Update(key)
 		d.errText = ""
-	case fieldEnvelope:
+	case bugFieldEnvelope:
 		d.env, _ = d.env.Update(key)
 		d.errText = ""
 	}
@@ -164,11 +172,24 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // HandlePaste implements overlay.Paster: pasted text goes into the
 // description while it's focused.
 func (d *bugForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	if d.focus == fieldDesc {
+	if d.focus == bugFieldDesc {
 		d.desc, _ = d.desc.Update(msg)
 		d.errText = ""
 	}
 	return nil
+}
+
+// advanceFocus moves focus by dir (±1), wrapping, and skips the repo stop
+// when there's nothing to choose there.
+func (d *bugForm) advanceFocus(dir int) {
+	f := d.focus
+	for {
+		f = (f + dir + bugFieldCount) % bugFieldCount
+		if f != bugFieldRepo || d.repo.multi() {
+			break
+		}
+	}
+	d.setFocus(f)
 }
 
 func (d *bugForm) setFocus(f int) {
@@ -176,83 +197,50 @@ func (d *bugForm) setFocus(f int) {
 	d.desc.Blur()
 	d.env.Blur()
 	switch f {
-	case fieldDesc:
+	case bugFieldDesc:
 		d.desc.Focus()
-	case fieldEnvelope:
+	case bugFieldEnvelope:
 		d.env.Focus()
 	}
 }
 
-// skipLabel names the workflow route the bug's skip flags select.
-func (d *bugForm) skipLabel() string {
-	switch {
-	case d.skip.Triage && d.skip.Diagnose:
-		return "skip triage+diagnose"
-	case d.skip.Triage:
-		return "skip triage"
-	case d.skip.Diagnose:
-		return "skip diagnose"
-	}
-	return "full workflow"
-}
-
 func (d *bugForm) sevLabel() string {
-	if d.sevs[d.sev] == "" {
+	if bugSeverityChoices[d.sev] == "" {
 		return "severity: unset"
 	}
-	return "severity: " + string(d.sevs[d.sev])
+	return "severity: " + string(bugSeverityChoices[d.sev])
 }
 
 // View implements overlay.Dialog.
 func (d *bugForm) View(s *theme.Styles, w, h int) string {
-	descW, descH := dialogDescSize(w, h)
+	// base static rows: title+blank(2), blank-after-desc(1),
+	// envelope+blank(2), profile+severity+route(3), blank+hint(2); +2 more
+	// when the repo field renders (repo+blank).
+	staticRows := 10
+	if d.repo.multi() {
+		staticRows += 2
+	}
+	descW, descH := dialogDescSize(w, h, staticRows)
 	d.desc.SetWidth(descW)
 	d.desc.SetHeight(descH)
 
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new bug") + "\n\n")
+	if d.repo.multi() {
+		b.WriteString(fieldRow(s, d.focus == bugFieldRepo, "repo: "+d.repo.label()) + "\n\n")
+	}
 	b.WriteString(d.desc.View() + "\n\n")
 	b.WriteString(d.env.View() + "\n\n")
-
-	marker := "  "
-	profile := s.Faint.Render(d.profiles[d.profile])
-	sev := s.Faint.Render(d.sevLabel())
-	skips := s.Faint.Render(d.skipLabel())
-	repo := s.Faint.Render("[" + d.repoLabel() + "]")
-	if d.focus == fieldOpts {
-		marker = s.Cursor.Render("▸ ")
-		profile = s.Subtle.Render(d.profiles[d.profile])
-		repo = s.Subtle.Render("[" + d.repoLabel() + "]")
-	}
-	if d.sevs[d.sev] != "" {
-		sev = s.Warning.Render(d.sevLabel())
-	}
-	if d.skip.Triage || d.skip.Diagnose {
-		skips = s.Warning.Render(d.skipLabel())
-	}
-	row := marker + profile + s.Faint.Render(" · ") + sev + s.Faint.Render(" · ") + skips
-	if len(d.repos) > 0 {
-		// only when there is more than the default to choose among
-		row += s.Faint.Render(" · ") + repo
-	}
-	b.WriteString(row + "\n")
+	b.WriteString(fieldRow(s, d.focus == bugFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
+	b.WriteString(fieldRow(s, d.focus == bugFieldSeverity, d.sevLabel()) + "\n")
+	b.WriteString(fieldRow(s, d.focus == bugFieldRoute, "route: "+bugRoutes[d.route].label) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter create · alt+enter newline · tab envelope · esc cancel"
-	if len(d.repos) > 0 {
-		hint += " · r repo"
-	}
-	switch d.focus {
-	case fieldEnvelope:
-		hint = "numeric credits (0 = uncapped) · enter create · esc cancel"
-	case fieldOpts:
-		hint = "←/→ profile · s severity · t/d toggle skips"
-		if len(d.repos) > 0 {
-			hint = "←/→ profile · s severity · t/d skips · r repo"
-		}
-		hint += " · enter create · esc cancel"
+	hint := "tab next · ←/→ change · enter create · esc cancel"
+	if d.focus == bugFieldDesc {
+		hint = "alt+enter newline · " + hint
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

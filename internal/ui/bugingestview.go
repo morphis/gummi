@@ -81,7 +81,7 @@ func (d *bugIngestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.profile = (d.profile + 1) % len(d.profiles)
 		}
 	case bugIngestFieldComments:
-		if key.String() == "c" || key.String() == "space" {
+		if key.String() == "space" {
 			d.comments = !d.comments
 		}
 	case bugIngestFieldRepo:
@@ -148,7 +148,7 @@ func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
 	case bugIngestFieldProfile:
 		hint = "←/→ profile · enter import · esc cancel"
 	case bugIngestFieldComments:
-		hint = "c toggle comments · enter import · esc cancel"
+		hint = "space toggle comments · enter import · esc cancel"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

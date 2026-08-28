@@ -12,29 +12,35 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
+// research form fields, in tab order. fieldRepo is skipped when the repo
+// picker has nothing to choose (see advanceFocus).
+const (
+	rsFieldRepo = iota
+	rsFieldBrief
+	rsFieldEnvelope
+	rsFieldProfile
+	rsFieldCount
+)
+
 // rsForm is the new-research dialog: a free-form brief textarea (first
 // line becomes the card title, the rest seeds the doc's Brief section
-// verbatim), an envelope input, and a demoted options row (profile ·
-// repo). Unlike featureForm/bugForm there are no brainstorm/plan skip
-// toggles — research has no such stages — and the envelope is required:
-// RS carries no default budget of its own (SCOPE §Budget).
+// verbatim), an envelope input, and repo/profile each their own tab stop.
+// Unlike featureForm/bugForm there are no brainstorm/plan skip toggles —
+// research has no such stages — and the envelope is required: RS carries
+// no default budget of its own (SCOPE §Budget).
 type rsForm struct {
 	brief    textarea.Model
 	env      textinput.Model
 	profiles []string
 	profile  int
-	// repos are the configured selectable managed repositories; repoIdx
-	// indexes a list whose first (0) entry is the workspace default (empty
-	// name) and whose rest are the configured names.
-	repos   []string
-	repoIdx int
-	focus   int
-	errText string
+	repo     repoPicker
+	focus    int
+	errText  string
 
 	onSubmit func(rsFormResult) tea.Cmd
 }
 
-func newRSForm(profiles []string, repos []string, defaultEnvelope int, onSubmit func(rsFormResult) tea.Cmd) *rsForm {
+func newRSForm(profiles []string, repos []string, hasDefault bool, defaultEnvelope int, onSubmit func(rsFormResult) tea.Cmd) *rsForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -50,24 +56,11 @@ func newRSForm(profiles []string, repos []string, defaultEnvelope int, onSubmit 
 	env.SetWidth(46)
 	env.CharLimit = 12
 	env.SetValue(strconv.Itoa(defaultEnvelope))
-	return &rsForm{brief: brief, env: env, profiles: profiles, repos: repos, onSubmit: onSubmit}
-}
-
-// repoName returns the currently selected repository name: "" for the
-// workspace default, else the configured name.
-func (d *rsForm) repoName() string {
-	if d.repoIdx == 0 || len(d.repos) == 0 {
-		return ""
+	return &rsForm{
+		brief: brief, env: env, profiles: profiles,
+		repo: newRepoPicker(repos, hasDefault), focus: rsFieldBrief,
+		onSubmit: onSubmit,
 	}
-	return d.repos[d.repoIdx-1]
-}
-
-// repoLabel is the display label for the selected repository.
-func (d *rsForm) repoLabel() string {
-	if name := d.repoName(); name != "" {
-		return name
-	}
-	return "default"
 }
 
 // ID implements overlay.Dialog.
@@ -102,42 +95,37 @@ func (d *rsForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, d.onSubmit(rsFormResult{
 			Brief:    brief,
 			Profile:  d.profiles[d.profile],
-			Repo:     d.repoName(),
+			Repo:     d.repo.name(),
 			Envelope: &n,
 		})
 	case "alt+enter", "ctrl+j":
-		if d.focus == fieldDesc {
+		if d.focus == rsFieldBrief {
 			d.brief.InsertString("\n")
 			d.errText = ""
 		}
 		return false, nil
 	case "tab":
-		d.setFocus((d.focus + 1) % fieldCount)
+		d.advanceFocus(1)
 		return false, nil
 	case "shift+tab":
-		d.setFocus((d.focus + fieldCount - 1) % fieldCount)
+		d.advanceFocus(-1)
 		return false, nil
 	}
 
 	switch d.focus {
-	case fieldOpts:
-		switch key.String() {
-		case "left", "h":
-			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
-		case "right", "l", "space":
-			d.profile = (d.profile + 1) % len(d.profiles)
-		case "r":
-			// cycle the managed repository (default + configured names); no
-			// repos configured means a no-op on a single-entry list.
-			total := len(d.repos) + 1
-			if total > 1 {
-				d.repoIdx = (d.repoIdx + 1) % total
-			}
+	case rsFieldRepo:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			d.repo.cycle(delta)
 		}
-	case fieldDesc:
+	case rsFieldProfile:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			n := len(d.profiles)
+			d.profile = ((d.profile+delta)%n + n) % n
+		}
+	case rsFieldBrief:
 		d.brief, _ = d.brief.Update(key)
 		d.errText = ""
-	case fieldEnvelope:
+	case rsFieldEnvelope:
 		d.env, _ = d.env.Update(key)
 		d.errText = ""
 	}
@@ -147,11 +135,24 @@ func (d *rsForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // HandlePaste implements overlay.Paster: pasted text goes into the brief
 // while it's focused, newlines intact.
 func (d *rsForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	if d.focus == fieldDesc {
+	if d.focus == rsFieldBrief {
 		d.brief, _ = d.brief.Update(msg)
 		d.errText = ""
 	}
 	return nil
+}
+
+// advanceFocus moves focus by dir (±1), wrapping, and skips the repo stop
+// when there's nothing to choose there.
+func (d *rsForm) advanceFocus(dir int) {
+	f := d.focus
+	for {
+		f = (f + dir + rsFieldCount) % rsFieldCount
+		if f != rsFieldRepo || d.repo.multi() {
+			break
+		}
+	}
+	d.setFocus(f)
 }
 
 func (d *rsForm) setFocus(f int) {
@@ -159,51 +160,41 @@ func (d *rsForm) setFocus(f int) {
 	d.brief.Blur()
 	d.env.Blur()
 	switch f {
-	case fieldDesc:
+	case rsFieldBrief:
 		d.brief.Focus()
-	case fieldEnvelope:
+	case rsFieldEnvelope:
 		d.env.Focus()
 	}
 }
 
 // View implements overlay.Dialog.
 func (d *rsForm) View(s *theme.Styles, w, h int) string {
+	// base static rows: title+blank(2), blank-after-brief(1),
+	// envelope+blank(2), profile(1), blank+hint(2); +2 more when the repo
+	// field renders (repo+blank).
+	staticRows := 8
+	if d.repo.multi() {
+		staticRows += 2
+	}
+	briefW, briefH := dialogDescSize(w, h, staticRows)
+	d.brief.SetWidth(briefW)
+	d.brief.SetHeight(briefH)
+
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new research") + "\n\n")
+	if d.repo.multi() {
+		b.WriteString(fieldRow(s, d.focus == rsFieldRepo, "repo: "+d.repo.label()) + "\n\n")
+	}
 	b.WriteString(d.brief.View() + "\n\n")
 	b.WriteString(d.env.View() + "\n\n")
-
-	marker := "  "
-	profile := s.Faint.Render(d.profiles[d.profile])
-	repo := s.Faint.Render("[" + d.repoLabel() + "]")
-	if d.focus == fieldOpts {
-		marker = s.Cursor.Render("▸ ")
-		profile = s.Subtle.Render(d.profiles[d.profile])
-		repo = s.Subtle.Render("[" + d.repoLabel() + "]")
-	}
-	row := marker + profile
-	if len(d.repos) > 0 {
-		// only when there is more than the default to choose among
-		row += s.Faint.Render(" · ") + repo
-	}
-	b.WriteString(row + "\n")
+	b.WriteString(fieldRow(s, d.focus == rsFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter create · alt+enter newline · tab envelope · esc cancel"
-	if len(d.repos) > 0 {
-		hint += " · r repo"
-	}
-	switch d.focus {
-	case fieldEnvelope:
-		hint = "numeric credits (required) · enter create · esc cancel"
-	case fieldOpts:
-		hint = "←/→ profile"
-		if len(d.repos) > 0 {
-			hint = "←/→ profile · r repo"
-		}
-		hint += " · enter create · esc cancel"
+	hint := "tab next · ←/→ change · enter create · esc cancel"
+	if d.focus == rsFieldBrief {
+		hint = "alt+enter newline · " + hint
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())

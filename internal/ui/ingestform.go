@@ -76,33 +76,31 @@ func (d *textPromptDialog) View(s *theme.Styles, w, h int) string {
 	return s.DialogFrame.Render(b.String())
 }
 
-// ingest form fields, in tab order.
+// ingest form fields, in tab order. fieldRepo is skipped when the repo
+// picker has nothing to choose (see advanceFocus).
 const (
-	ingestFieldPath = iota
+	ingestFieldRepo = iota
+	ingestFieldPath
 	ingestFieldProfile
 	ingestFieldCount
 )
 
-// ingestForm collects the source document, the profile, and the managed
-// repository for an ingest pass (DESIGN §11.4): the architect decomposes
+// ingestForm collects the managed repository, the source document, and
+// the profile for an ingest pass (DESIGN §11.4): the architect decomposes
 // the file, then the review surface opens on the result. The repository
 // is a batch-level choice for the whole pass, like the profile.
 type ingestForm struct {
 	path     textinput.Model
 	profiles []string
 	profile  int
-	// repos are the configured selectable managed repositories; repoIdx
-	// indexes a list whose first (0) entry is the workspace default (empty
-	// name) and whose rest are the configured names.
-	repos   []string
-	repoIdx int
-	focus   int
-	errText string
+	repo     repoPicker
+	focus    int
+	errText  string
 
 	onSubmit func(path, profile, repo string) tea.Cmd
 }
 
-func newIngestForm(profiles, repos []string, onSubmit func(path, profile, repo string) tea.Cmd) *ingestForm {
+func newIngestForm(profiles, repos []string, hasDefault bool, onSubmit func(path, profile, repo string) tea.Cmd) *ingestForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
@@ -111,24 +109,11 @@ func newIngestForm(profiles, repos []string, onSubmit func(path, profile, repo s
 	path.CharLimit = 300
 	path.SetWidth(46)
 	path.Focus()
-	return &ingestForm{path: path, profiles: profiles, repos: repos, onSubmit: onSubmit}
-}
-
-// repoName returns the currently selected repository name: "" for the
-// workspace default, else the configured name.
-func (d *ingestForm) repoName() string {
-	if d.repoIdx == 0 || len(d.repos) == 0 {
-		return ""
+	return &ingestForm{
+		path: path, profiles: profiles,
+		repo: newRepoPicker(repos, hasDefault), focus: ingestFieldPath,
+		onSubmit: onSubmit,
 	}
-	return d.repos[d.repoIdx-1]
-}
-
-// repoLabel is the display label for the selected repository.
-func (d *ingestForm) repoLabel() string {
-	if name := d.repoName(); name != "" {
-		return name
-	}
-	return "default"
 }
 
 // ID implements overlay.Dialog.
@@ -149,28 +134,23 @@ func (d *ingestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.errText = "no such file: " + path
 			return false, nil
 		}
-		return true, d.onSubmit(path, d.profiles[d.profile], d.repoName())
-	case "tab", "down":
-		d.setFocus((d.focus + 1) % ingestFieldCount)
+		return true, d.onSubmit(path, d.profiles[d.profile], d.repo.name())
+	case "tab":
+		d.advanceFocus(1)
 		return false, nil
-	case "shift+tab", "up":
-		d.setFocus((d.focus + ingestFieldCount - 1) % ingestFieldCount)
+	case "shift+tab":
+		d.advanceFocus(-1)
 		return false, nil
 	}
 	switch d.focus {
+	case ingestFieldRepo:
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			d.repo.cycle(delta)
+		}
 	case ingestFieldProfile:
-		switch key.String() {
-		case "left", "h":
-			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
-		case "right", "l", "space":
-			d.profile = (d.profile + 1) % len(d.profiles)
-		case "r":
-			// cycle the managed repository (default + configured names); no
-			// repos configured means a no-op on a single-entry list.
-			total := len(d.repos) + 1
-			if total > 1 {
-				d.repoIdx = (d.repoIdx + 1) % total
-			}
+		if delta, ok := selectCycleDelta(key.String()); ok {
+			n := len(d.profiles)
+			d.profile = ((d.profile+delta)%n + n) % n
 		}
 	case ingestFieldPath:
 		d.path, _ = d.path.Update(key)
@@ -189,6 +169,19 @@ func (d *ingestForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	return nil
 }
 
+// advanceFocus moves focus by dir (±1), wrapping, and skips the repo stop
+// when there's nothing to choose there.
+func (d *ingestForm) advanceFocus(dir int) {
+	f := d.focus
+	for {
+		f = (f + dir + ingestFieldCount) % ingestFieldCount
+		if f != ingestFieldRepo || d.repo.multi() {
+			break
+		}
+	}
+	d.setFocus(f)
+}
+
 func (d *ingestForm) setFocus(f int) {
 	d.focus = f
 	if f == ingestFieldPath {
@@ -202,36 +195,16 @@ func (d *ingestForm) setFocus(f int) {
 func (d *ingestForm) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("ingest spec") + "\n\n")
+	if d.repo.multi() {
+		b.WriteString(fieldRow(s, d.focus == ingestFieldRepo, "repo: "+d.repo.label()) + "\n\n")
+	}
 	b.WriteString(d.path.View() + "\n\n")
-
-	marker := "  "
-	profile := s.Faint.Render(d.profiles[d.profile])
-	repo := s.Faint.Render("[" + d.repoLabel() + "]")
-	if d.focus == ingestFieldProfile {
-		marker = s.Cursor.Render("▸ ")
-		profile = s.Subtle.Render(d.profiles[d.profile])
-		repo = s.Subtle.Render("[" + d.repoLabel() + "]")
-	}
-	row := marker + profile
-	if len(d.repos) > 0 {
-		// only when there is more than the default to choose among
-		row += s.Faint.Render(" · ") + repo
-	}
-	b.WriteString(row + "\n")
+	b.WriteString(fieldRow(s, d.focus == ingestFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter decompose · tab profile · esc cancel"
-	if len(d.repos) > 0 {
-		hint += " · r repo"
-	}
-	if d.focus == ingestFieldProfile {
-		hint = "←/→ profile · enter decompose · esc cancel"
-		if len(d.repos) > 0 {
-			hint = "←/→ profile · r repo · enter decompose · esc cancel"
-		}
-	}
+	hint := "tab next · ←/→ change · enter decompose · esc cancel"
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
 }

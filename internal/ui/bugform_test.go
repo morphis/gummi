@@ -15,9 +15,9 @@ import (
 func TestBugFormSizing(t *testing.T) {
 	styles := theme.New(theme.GummiDark())
 	for _, area := range []struct{ w, h int }{{60, 20}, {200, 60}} {
-		form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
+		form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 		form.View(styles, area.w, area.h)
-		wantW, wantH := dialogDescSize(area.w, area.h)
+		wantW, wantH := dialogDescSize(area.w, area.h, 10) // no repo field: base static rows only
 		assertDescRendersAt(t, form.desc.View(), area.w, area.h, wantW, wantH)
 	}
 }
@@ -25,7 +25,7 @@ func TestBugFormSizing(t *testing.T) {
 // TestBugFormCharLimit: the description accepts up to 4096 characters
 // without truncation.
 func TestBugFormCharLimit(t *testing.T) {
-	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 	long := strings.Repeat("a", 4096)
 	form.desc.SetValue(long)
 	if got := len(form.desc.Value()); got != 4096 {
@@ -37,7 +37,7 @@ func TestBugFormCharLimit(t *testing.T) {
 // newline into the description while it's focused, matching the feature
 // form.
 func TestBugFormAltEnterInsertsNewline(t *testing.T) {
-	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 	form.desc.SetValue("Crash on empty diff")
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if got := form.desc.Value(); got != "Crash on empty diff\n" {
@@ -52,7 +52,7 @@ func TestBugFormAltEnterInsertsNewline(t *testing.T) {
 // TestBugFormMultilinePasteKeepsNewlines: a multiline paste routes to the
 // description and its newlines survive.
 func TestBugFormMultilinePasteKeepsNewlines(t *testing.T) {
-	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 	form.HandlePaste(tea.PasteMsg{Content: "Crash on empty diff\n\nRepro: stage nothing, hit c."})
 	if got := form.desc.Value(); got != "Crash on empty diff\n\nRepro: stage nothing, hit c." {
 		t.Fatalf("desc after paste = %q, want newlines preserved", got)
@@ -63,19 +63,19 @@ func TestBugFormMultilinePasteKeepsNewlines(t *testing.T) {
 // "down" is no longer a tab-cycle alias — it moves the in-editor cursor,
 // same as the feature form. Only tab/shift+tab cycle focus.
 func TestBugFormDownMovesCursorNotFocus(t *testing.T) {
-	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 	form.desc.SetValue("line one\nline two")
 	if done, _ := form.HandleKey(tea.KeyPressMsg{Code: tea.KeyDown}); done {
 		t.Fatal("down should not submit or close the form")
 	}
-	if form.focus != fieldDesc {
-		t.Fatalf("focus = %d after down, want it to stay on fieldDesc", form.focus)
+	if form.focus != bugFieldDesc {
+		t.Fatalf("focus = %d after down, want it to stay on bugFieldDesc", form.focus)
 	}
 	if done, _ := form.HandleKey(tea.KeyPressMsg{Code: tea.KeyUp}); done {
 		t.Fatal("up should not submit or close the form")
 	}
-	if form.focus != fieldDesc {
-		t.Fatalf("focus = %d after up, want it to stay on fieldDesc", form.focus)
+	if form.focus != bugFieldDesc {
+		t.Fatalf("focus = %d after up, want it to stay on bugFieldDesc", form.focus)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestBugFormDownMovesCursorNotFocus(t *testing.T) {
 // matching the feature form's phrasing.
 func TestBugFormHintShowsNewlineKey(t *testing.T) {
 	styles := theme.New(theme.GummiDark())
-	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
 	out := form.View(styles, 80, 24)
 	if !strings.Contains(out, "alt+enter newline") {
 		t.Fatalf("bug form hint missing %q:\n%s", "alt+enter newline", out)
@@ -95,7 +95,7 @@ func TestBugFormHintShowsNewlineKey(t *testing.T) {
 // first line and carrying the rest verbatim as Seed.
 func TestBugFormSubmitSplitsTitleOneLinerSeed(t *testing.T) {
 	var got bugFormResult
-	form := newBugForm(nil, nil, 0, func(res bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, false, 0, func(res bugFormResult) tea.Cmd {
 		got = res
 		return nil
 	})
@@ -118,7 +118,7 @@ func TestBugFormSubmitSplitsTitleOneLinerSeed(t *testing.T) {
 // TestBugFormEnvelopeDefault: the bug form pre-fills its envelope from
 // the global default, mirroring the feature form.
 func TestBugFormEnvelopeDefault(t *testing.T) {
-	form := newBugForm(nil, nil, 3000, func(bugFormResult) tea.Cmd { return nil })
+	form := newBugForm(nil, nil, false, 3000, func(bugFormResult) tea.Cmd { return nil })
 	if got := form.env.Value(); got != "3000" {
 		t.Fatalf("envelope pre-fill = %q, want \"3000\"", got)
 	}
@@ -128,7 +128,7 @@ func TestBugFormEnvelopeDefault(t *testing.T) {
 // explicit Envelope on submit.
 func TestBugFormEnvelopeCustom(t *testing.T) {
 	var got *int
-	form := newBugForm(nil, nil, 1000, func(res bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, false, 1000, func(res bugFormResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -146,7 +146,7 @@ func TestBugFormEnvelopeCustom(t *testing.T) {
 // and blocks submission.
 func TestBugFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newBugForm(nil, nil, 1000, func(bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, false, 1000, func(bugFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -167,7 +167,7 @@ func TestBugFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 // rejected the same way.
 func TestBugFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newBugForm(nil, nil, 1000, func(bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, false, 1000, func(bugFormResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -188,7 +188,7 @@ func TestBugFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 // use-default signal.
 func TestBugFormEnvelopeEmpty(t *testing.T) {
 	var got *int
-	form := newBugForm(nil, nil, 1000, func(res bugFormResult) tea.Cmd {
+	form := newBugForm(nil, nil, false, 1000, func(res bugFormResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -202,11 +202,12 @@ func TestBugFormEnvelopeEmpty(t *testing.T) {
 	}
 }
 
-// TestBugFormEnvelopeTabOrder: tab cycles description → envelope →
-// options in the bug form too.
+// TestBugFormEnvelopeTabOrder: tab walks every field in order —
+// description, envelope, profile, severity, route — and wraps back to
+// description, skipping the repo stop since no repos are configured.
 func TestBugFormEnvelopeTabOrder(t *testing.T) {
-	form := newBugForm(nil, nil, 0, func(bugFormResult) tea.Cmd { return nil })
-	for _, want := range []int{fieldDesc, fieldEnvelope, fieldOpts} {
+	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
+	for _, want := range []int{bugFieldDesc, bugFieldEnvelope, bugFieldProfile, bugFieldSeverity, bugFieldRoute, bugFieldDesc} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}

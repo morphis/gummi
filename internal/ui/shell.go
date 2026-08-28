@@ -159,6 +159,18 @@ func (m *Shell) SetProfileNames(names []string) { m.profileNames = names }
 // new-feature and new-bug forms. Empty leaves only the workspace default.
 func (m *Shell) SetRepoNames(names []string) { m.repoNames = names }
 
+// repoHasDefault reports whether the workspace default repository
+// actually resolves (worktree.Pool.Known(""))  — false in a repos:-only
+// workspace with no `repo:` root. The creation dialogs' repo field uses
+// this so it never offers a "default" choice that would only fail later
+// at worktree creation (worktree/pool.go ManagerForName).
+func (m *Shell) repoHasDefault() bool {
+	if m.wt == nil {
+		return false
+	}
+	return m.wt.Known(m.wt.DefaultName())
+}
+
 // SetEnvelope sets the default spend-plan envelope (credits) stamped on
 // new features, enabling layer-3 per-stage budgets. 0 leaves features
 // unbudgeted (or governed by a flat per-stage budget).
@@ -923,11 +935,11 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.sel = order[len(order)-1]
 		}
 	case "n":
-		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.envelope, m.createFeature))
+		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createFeature))
 	case "B":
-		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.envelope, m.createBug))
+		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createBug))
 	case "R":
-		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.envelope, m.createResearch))
+		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createResearch))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
@@ -947,7 +959,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.notice = noticeMsg{text: "an ingest is already decomposing — showing its progress"}
 			return nil
 		}
-		m.Overlay.Push(newIngestForm(m.profileNames, m.repoNames, m.startIngest))
+		m.Overlay.Push(newIngestForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.startIngest))
 	case "esc":
 		if m.ingestRun != nil && !m.ingestRun.hidden {
 			// background the feed; the pass keeps running and the review

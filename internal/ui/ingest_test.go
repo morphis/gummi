@@ -273,7 +273,7 @@ func TestIngestViewMerge(t *testing.T) {
 
 func TestIngestFormRejectsMissingFile(t *testing.T) {
 	var called bool
-	f := newIngestForm([]string{"premium"}, nil, func(string, string, string) tea.Cmd { called = true; return nil })
+	f := newIngestForm([]string{"premium"}, nil, false, func(string, string, string) tea.Cmd { called = true; return nil })
 	// type a path that doesn't exist, then submit
 	for _, r := range "/no/such/spec.md" {
 		f.HandleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
@@ -290,10 +290,9 @@ func TestIngestFormRejectsMissingFile(t *testing.T) {
 	}
 }
 
-// TestIngestFormRepoCyclesAndForwards: the ingest form cycles the managed
-// repository (default + configured names) on 'r' and forwards the selection
-// through onSubmit; the repo chip is hidden entirely when none are
-// configured.
+// TestIngestFormRepo: the ingest form's repo field is its own tab stop,
+// cycled with ←/→, and forwards the selection through onSubmit; it's
+// hidden entirely when there's nothing to choose.
 func TestIngestFormRepo(t *testing.T) {
 	t.Run("cycles and forwards", func(t *testing.T) {
 		prd := filepath.Join(t.TempDir(), "prd.md")
@@ -301,17 +300,20 @@ func TestIngestFormRepo(t *testing.T) {
 			t.Fatal(err)
 		}
 		var gotPath, gotProfile, gotRepo string
-		f := newIngestForm([]string{"premium"}, []string{"a", "b"}, func(path, profile, repo string) tea.Cmd {
+		f := newIngestForm([]string{"premium"}, []string{"a", "b"}, true, func(path, profile, repo string) tea.Cmd {
 			gotPath, gotProfile, gotRepo = path, profile, repo
 			return nil
 		})
 		f.path.SetValue(prd)
-		// focus the profile field, then cycle the repo twice: default -> a -> b
+		// tab order is repo -> path -> profile; from the initial path focus,
+		// two forward tabs (path -> profile -> repo) reach it, then ←/→
+		// cycles: default -> a -> b
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-		f.HandleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
-		f.HandleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
-		if got := f.repoName(); got != "b" {
-			t.Fatalf("repoName after two cycles = %q, want b", got)
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+		if got := f.repo.name(); got != "b" {
+			t.Fatalf("repo name after two cycles = %q, want b", got)
 		}
 		if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done {
 			t.Fatal("form did not submit")
@@ -321,30 +323,32 @@ func TestIngestFormRepo(t *testing.T) {
 		}
 	})
 
-	t.Run("chip shown when repos configured", func(t *testing.T) {
-		f := newIngestForm(nil, []string{"b"}, func(string, string, string) tea.Cmd { return nil })
+	t.Run("field shown when repos configured", func(t *testing.T) {
+		f := newIngestForm(nil, []string{"b"}, true, func(string, string, string) tea.Cmd { return nil })
 		s := theme.New(theme.GummiDark())
 		view := f.View(s, 60, 12)
-		if !strings.Contains(view, "[default]") || !strings.Contains(view, "r repo") {
-			t.Errorf("repo chip/hint missing when repos configured:\n%s", view)
+		if !strings.Contains(view, "repo: default") {
+			t.Errorf("repo field missing when repos configured:\n%s", view)
 		}
 	})
 
 	t.Run("hidden when none configured", func(t *testing.T) {
-		f := newIngestForm(nil, nil, func(string, string, string) tea.Cmd { return nil })
+		f := newIngestForm(nil, nil, false, func(string, string, string) tea.Cmd { return nil })
 		s := theme.New(theme.GummiDark())
 		view := f.View(s, 60, 12)
-		if strings.Contains(view, "[default]") || strings.Contains(view, "r repo") {
-			t.Errorf("repo chip/hint should be hidden when no repos configured:\n%s", view)
+		if strings.Contains(view, "repo:") {
+			t.Errorf("repo field should be hidden when no repos configured:\n%s", view)
 		}
 	})
 
-	t.Run("r is a no-op with none configured", func(t *testing.T) {
-		f := newIngestForm(nil, nil, func(string, string, string) tea.Cmd { return nil })
+	t.Run("tab skips the repo stop with none configured", func(t *testing.T) {
+		f := newIngestForm(nil, nil, false, func(string, string, string) tea.Cmd { return nil })
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-		f.HandleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
-		if got := f.repoName(); got != "" {
-			t.Fatalf("repoName = %q, want empty default", got)
+		if f.focus == ingestFieldRepo {
+			t.Fatal("focus should skip the repo field when nothing is configured")
+		}
+		if got := f.repo.name(); got != "" {
+			t.Fatalf("repo name = %q, want empty default", got)
 		}
 	})
 }

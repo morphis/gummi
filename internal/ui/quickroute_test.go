@@ -12,33 +12,42 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// TestFeatureFormQuickToggle: q on the options row is a route preset —
-// one keystroke in (both skips + the marker), one keystroke back out,
-// and an individual b/p toggle demotes the route to plain skips.
-func TestFeatureFormQuickToggle(t *testing.T) {
-	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
-	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // focus the envelope field
-	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // focus the options row
+// TestFeatureFormRouteCycle: the route field is a single ←/→-cycled tab
+// stop over every workflow-route state (full, skip brainstorm, skip
+// plan, skip both, quick) — no q/b/p mnemonic keys — and the selected
+// state's flags flow through to the submitted result.
+func TestFeatureFormRouteCycle(t *testing.T) {
+	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
+	form.focus = featureFieldRoute
 
-	form.HandleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	if form.skip != domain.QuickRoute() {
-		t.Fatalf("q set %+v, want the quick route", form.skip)
+	for i := range featureRoutes {
+		if form.route != i {
+			t.Fatalf("route index = %d, want %d", form.route, i)
+		}
+		form.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	}
-	if !strings.Contains(form.skipLabel(), "quick") {
-		t.Errorf("label = %q, want it to name the quick route", form.skipLabel())
-	}
-
-	// p while quick: back to an explicit route, no orphaned marker
-	form.HandleKey(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if form.skip.Quick || form.skip.Plan || !form.skip.Brainstorm {
-		t.Fatalf("p under quick = %+v, want plan+quick dropped, brainstorm kept", form.skip)
+	if form.route != 0 {
+		t.Fatalf("route after a full cycle = %d, want wrap to 0 (full workflow)", form.route)
 	}
 
-	// q toggles the whole preset back off
-	form.HandleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	form.HandleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	if form.skip != (domain.SkipFlags{}) {
-		t.Fatalf("double q = %+v, want the full workflow", form.skip)
+	// left wraps backward directly to the last state (quick)
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if want := len(featureRoutes) - 1; form.route != want {
+		t.Fatalf("route after left from 0 = %d, want %d (the last state)", form.route, want)
+	}
+	if got := featureRoutes[form.route].skip; got != domain.QuickRoute() {
+		t.Fatalf("last route state = %+v, want QuickRoute()", got)
+	}
+	if !strings.Contains(featureRoutes[form.route].label, "quick") {
+		t.Errorf("label = %q, want it to name the quick route", featureRoutes[form.route].label)
+	}
+
+	var got formResult
+	form.onSubmit = func(res formResult) tea.Cmd { got = res; return nil }
+	form.desc.SetValue("dark mode")
+	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.Skip != domain.QuickRoute() {
+		t.Fatalf("submitted Skip = %+v, want QuickRoute()", got.Skip)
 	}
 }
 

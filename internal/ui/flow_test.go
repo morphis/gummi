@@ -377,12 +377,14 @@ func TestSkipFlagsChangeRoute(t *testing.T) {
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Tiny fix")
-	// toggle both skip flags on the options row: tab past the new
-	// envelope field, then tab to options, then b and p
+	// dial the route field to "skip brainstorm+plan": tab past envelope
+	// and profile to reach it, then step ←/→ to the third state
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // envelope field
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // options row
-	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // profile field
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // route field
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.rows[0].F.Skip.Brainstorm || !m.rows[0].F.Skip.Plan {
 		t.Fatalf("skip flags not set: %+v", m.rows[0].F.Skip)

@@ -161,9 +161,9 @@ func TestCardLineNeverShellsGH(t *testing.T) {
 
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
-	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
-	form.skip.Brainstorm = true
-	form.focus = fieldOpts
+	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
+	form.route = 1 // "skip brainstorm"
+	form.focus = featureFieldRoute
 	form.desc.SetValue("dark mode toggle")
 	form.desc.Blur()
 	m.Overlay.Push(form)

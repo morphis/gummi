@@ -17,6 +17,7 @@ import (
 // TestDialogDescSize covers the sizing contract's two goldens plus a
 // boundary case at each clamp edge.
 func TestDialogDescSize(t *testing.T) {
+	const staticRows = 8 // matches the old shared dialogStaticRows constant this test was written against
 	cases := []struct {
 		name  string
 		w, h  int
@@ -32,9 +33,9 @@ func TestDialogDescSize(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			gotW, gotH := dialogDescSize(c.w, c.h)
+			gotW, gotH := dialogDescSize(c.w, c.h, staticRows)
 			if gotW != c.wantW || gotH != c.wantH {
-				t.Errorf("dialogDescSize(%d, %d) = (%d, %d), want (%d, %d)", c.w, c.h, gotW, gotH, c.wantW, c.wantH)
+				t.Errorf("dialogDescSize(%d, %d, %d) = (%d, %d), want (%d, %d)", c.w, c.h, staticRows, gotW, gotH, c.wantW, c.wantH)
 			}
 		})
 	}
@@ -46,9 +47,9 @@ func TestDialogDescSize(t *testing.T) {
 func TestFeatureFormSizing(t *testing.T) {
 	styles := theme.New(theme.GummiDark())
 	for _, area := range []struct{ w, h int }{{60, 20}, {200, 60}} {
-		form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
+		form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
 		form.View(styles, area.w, area.h)
-		wantW, wantH := dialogDescSize(area.w, area.h)
+		wantW, wantH := dialogDescSize(area.w, area.h, 9) // no repo field: base static rows only
 		assertDescRendersAt(t, form.desc.View(), area.w, area.h, wantW, wantH)
 	}
 }
@@ -72,7 +73,7 @@ func assertDescRendersAt(t *testing.T, rendered string, areaW, areaH, wantW, wan
 // TestFeatureFormCharLimit: the description accepts up to 4096
 // characters without truncation.
 func TestFeatureFormCharLimit(t *testing.T) {
-	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
 	long := strings.Repeat("a", 4096)
 	form.desc.SetValue(long)
 	if got := len(form.desc.Value()); got != 4096 {
@@ -83,7 +84,7 @@ func TestFeatureFormCharLimit(t *testing.T) {
 // TestFormEnvelopeDefault: the envelope input pre-fills from the global
 // default, so the intended budget is visible before the user edits it.
 func TestFormEnvelopeDefault(t *testing.T) {
-	form := newFeatureForm(nil, nil, 5000, func(formResult) tea.Cmd { return nil })
+	form := newFeatureForm(nil, nil, false, 5000, func(formResult) tea.Cmd { return nil })
 	if got := form.env.Value(); got != "5000" {
 		t.Fatalf("envelope pre-fill = %q, want \"5000\"", got)
 	}
@@ -93,7 +94,7 @@ func TestFormEnvelopeDefault(t *testing.T) {
 // Envelope pointer on submit.
 func TestFormEnvelopeCustom(t *testing.T) {
 	var got *int
-	form := newFeatureForm(nil, nil, 5000, func(res formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, false, 5000, func(res formResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -111,7 +112,7 @@ func TestFormEnvelopeCustom(t *testing.T) {
 // the enter branch, showing an error and never reaching onSubmit.
 func TestFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newFeatureForm(nil, nil, 5000, func(formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, false, 5000, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -132,7 +133,7 @@ func TestFormEnvelopeNegativeBlocksSubmit(t *testing.T) {
 // the same way, so a typo can't silently clear the envelope.
 func TestFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 	submitted := false
-	form := newFeatureForm(nil, nil, 5000, func(formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, false, 5000, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -153,7 +154,7 @@ func TestFormEnvelopeNonNumericBlocksSubmit(t *testing.T) {
 // "use the global default" signal distinct from an explicit 0.
 func TestFormEnvelopeEmpty(t *testing.T) {
 	var got *int
-	form := newFeatureForm(nil, nil, 5000, func(res formResult) tea.Cmd {
+	form := newFeatureForm(nil, nil, false, 5000, func(res formResult) tea.Cmd {
 		got = res.Envelope
 		return nil
 	})
@@ -167,11 +168,12 @@ func TestFormEnvelopeEmpty(t *testing.T) {
 	}
 }
 
-// TestFormEnvelopeTabOrder: tab cycles description → envelope → options,
-// so the new field is reachable without breaking the options row.
+// TestFormEnvelopeTabOrder: tab walks every field in order — description,
+// envelope, profile, route — and wraps back to description, skipping the
+// repo stop since no repos are configured (nothing to choose there).
 func TestFormEnvelopeTabOrder(t *testing.T) {
-	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
-	for _, want := range []int{fieldDesc, fieldEnvelope, fieldOpts} {
+	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
+	for _, want := range []int{featureFieldDesc, featureFieldEnvelope, featureFieldProfile, featureFieldRoute, featureFieldDesc} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}
