@@ -142,10 +142,21 @@ func (m *commandMenu) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 
 // View implements overlay.Dialog.
 func (m *commandMenu) View(s *theme.Styles, w, h int) string {
+	// the rows, the rule and the filter share one width, and it comes from
+	// the widest command rather than from the dialog's outer bound: at the
+	// old fixed 60 the accelerator for "New bug" sat 50 columns from its
+	// label, and the rule ran 20 columns past the last one.
+	labels := make([]string, len(m.cmds))
+	keys := make([]string, len(m.cmds))
+	for i, c := range m.cmds {
+		labels[i], keys[i] = c.label, c.key
+	}
+	width := max(min(keyColumn(w-8, labels, keys), 60), 24)
+
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("commands") + "\n\n")
+	m.filter.SetWidth(width)
 	b.WriteString(m.filter.View() + "\n")
-	width := max(min(w-8, 60), 24)
 	b.WriteString(s.Separator.Render(strings.Repeat("─", width)) + "\n")
 
 	vis := m.visible()

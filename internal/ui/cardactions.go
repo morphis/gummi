@@ -258,8 +258,39 @@ func pauseLabelWhy(in nextInput) (label, why string) {
 	}
 }
 
+// markerWidth is the width of the per-row cursor marker ("▸ " / "  ");
+// keyGap is the minimum space between the widest label and the key
+// column. Together with the widest label and key they give the list its
+// own width, independent of the pane it is drawn into.
+const (
+	markerWidth = 2
+	keyGap      = 2
+)
+
+// keyColumn is the width a label/accelerator list needs to align its keys
+// against its own content: marker + widest label + gap + widest key,
+// never wider than the available width w.
+//
+// Aligning to w instead — the pane the list happens to sit in — is what
+// this replaces. The dashboard's main pane is 60+ columns, so "spec" sat
+// at column 2 and its "s" at column 68, with nothing in between for the
+// eye to follow. The column is worth keeping (it is what lets you scan
+// the accelerators vertically and graduate from reading labels to typing
+// letters); it just has to be a column of the list, not of the terminal.
+func keyColumn(w int, labels, keys []string) int {
+	labelW, keyW := 0, 0
+	for _, l := range labels {
+		labelW = max(labelW, ansi.StringWidth(l))
+	}
+	for _, k := range keys {
+		keyW = max(keyW, ansi.StringWidth(k))
+	}
+	return min(markerWidth+labelW+keyGap+keyW, w)
+}
+
 // View renders the action list: cursor marker left, label left, key
-// right-aligned within w, danger rows tinted and set off by a separator,
+// right-aligned in a column sized to the list's own content (keyColumn,
+// capped at w), danger rows tinted and set off by a separator,
 // and a trailing explainer for whatever row the cursor sits on (shown
 // whether or not the list itself has focus — the same continuity the old
 // read-only "next" block gave the top suggestion).
@@ -274,12 +305,21 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 	if len(l.actions) == 0 {
 		return ""
 	}
+	labels := make([]string, len(l.actions))
+	keys := make([]string, len(l.actions))
+	for i, a := range l.actions {
+		labels[i], keys[i] = a.label, a.key
+	}
+	width := keyColumn(w, labels, keys)
+
 	var lines []string
 	cursorLine := 0
 	sepDrawn := false
 	for i, a := range l.actions {
 		if a.danger && !sepDrawn {
-			lines = append(lines, sepPrefix+s.Separator.Render(strings.Repeat("─", max(min(w, 40), 0))))
+			// the rule marks the danger boundary within the list, so it spans
+			// the list's width rather than the pane's.
+			lines = append(lines, sepPrefix+s.Separator.Render(strings.Repeat("─", max(min(width, 40), 0))))
 			sepDrawn = true
 		}
 		// the marker shows on the cursor row either way — the explainer
@@ -296,7 +336,7 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 			}
 		}
 		keyStr := s.KeyHint.Render(a.key)
-		avail := w - ansi.StringWidth(marker) - ansi.StringWidth(keyStr) - 1
+		avail := width - ansi.StringWidth(marker) - ansi.StringWidth(keyStr) - 1
 		label := a.label
 		if ansi.StringWidth(label) > avail {
 			label = ansi.Truncate(label, max(avail, 0), "…")
