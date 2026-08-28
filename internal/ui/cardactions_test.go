@@ -45,7 +45,9 @@ func TestCardActionsForOrdering(t *testing.T) {
 	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
 
 	got := idsOf(cardActionsFor(in, r))
-	want := "verify run bounce deps spec diff advance envelope attach rebase merge duplicate delete"
+	// inbox is present because attn is set: it is the spec the budget/gate
+	// recommendation (keyed i) lands on.
+	want := "verify run bounce deps spec diff advance envelope inbox attach rebase merge duplicate delete"
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
 	}
@@ -238,15 +240,26 @@ func TestCardActionListViewContainsKeyAndLabel(t *testing.T) {
 	}
 }
 
-func TestCardActionListViewUnfocusedHidesMarker(t *testing.T) {
+// TestCardActionListViewUnfocusedKeepsMarker: the trailing explainer
+// describes the cursor row whether or not the list holds focus, so
+// hiding the marker while unfocused left that explanation pointing at
+// nothing. The marker stays and goes faint instead.
+func TestCardActionListViewUnfocusedKeepsMarker(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	l := newCardActionList([]cardAction{
 		{id: "run", key: "enter", label: "run", why: "start the stage"},
 		{id: "attach", key: "a", label: "attach", why: "raw-attach the agent CLI"},
 	})
 	out := ansi.Strip(l.View(s, 40, false))
-	if strings.Contains(out, "▸") {
-		t.Errorf("unfocused View() should carry no cursor marker, got %q", out)
+	lines := strings.Split(out, "\n")
+	if !strings.HasPrefix(lines[0], "\u25b8 ") {
+		t.Errorf("cursor row = %q, want it to keep the marker while unfocused", lines[0])
+	}
+	if strings.HasPrefix(lines[1], "\u25b8 ") {
+		t.Errorf("non-cursor row = %q, want no marker", lines[1])
+	}
+	if !strings.Contains(lines[2], "start the stage") {
+		t.Errorf("explainer = %q, want it to describe the marked row", lines[2])
 	}
 }
 

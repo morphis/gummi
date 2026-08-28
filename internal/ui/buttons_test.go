@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -142,5 +144,43 @@ func TestButtonRowViewPadsLabelsEvenly(t *testing.T) {
 		" ]  [ Delete forever ]"
 	if view != want {
 		t.Fatalf("view = %q, want %q (short label padded to the long one's width)", view, want)
+	}
+}
+
+// TestCommitMsgMergeReachableWithoutCtrl: zellij binds ctrl+s to search
+// mode, so the merge must be reachable by tabbing to the button row —
+// otherwise the most consequential action in gummi is unreachable inside
+// a multiplexer.
+func TestCommitMsgMergeReachableWithoutCtrl(t *testing.T) {
+	var got string
+	d := newCommitMsgDialog(
+		domain.Feature{ID: "FD-001", Slug: "x"},
+		func(msg string) tea.Cmd { got = msg; return nil },
+		nil,
+	)
+	d.input.SetValue("land the thing")
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // → buttons
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight}) // Cancel → Redraft → Merge
+	done, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !done {
+		t.Fatal("enter on Merge did not close the dialog")
+	}
+	if got != "land the thing" {
+		t.Fatalf("onSubmit got %q, want the message", got)
+	}
+}
+
+// TestCommitMsgEnterStillTypesNewline: the textarea owns enter, which is
+// why the merge needed a button in the first place.
+func TestCommitMsgEnterStillTypesNewline(t *testing.T) {
+	d := newCommitMsgDialog(
+		domain.Feature{ID: "FD-001", Slug: "x"},
+		func(string) tea.Cmd { t.Fatal("enter in the textarea must not submit"); return nil },
+		nil,
+	)
+	d.input.SetValue("line one")
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done {
+		t.Fatal("enter in the textarea closed the dialog")
 	}
 }

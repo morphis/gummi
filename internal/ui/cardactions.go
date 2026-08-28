@@ -132,6 +132,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			research || needsWT},
 		{"envelope", "u", "envelope", "set the budget envelope (credits; 0 = uncapped)", false,
 			true},
+		// the inbox is global, but it is also the recommended action for a
+		// card that stopped on budget — nextActions returns exactly one
+		// entry there, keyed `i`. Without a spec to land on, that
+		// recommendation (and its "top up or park from there" why) was
+		// dropped and the card said nothing about why it had stalled.
+		{"inbox", "i", "inbox", "open the needs-you inbox", false,
+			in.attn != ""},
 		{"attach", "a", "attach", "raw-attach the agent CLI in the worktree", false,
 			r.HasWorktree},
 		{"rebase", "r", "rebase", "rebase branch onto main (conflicts hand off to an agent)", false,
@@ -238,9 +245,17 @@ func (l *cardActionList) View(s *theme.Styles, w int, focused bool) string {
 			lines = append(lines, s.Separator.Render(strings.Repeat("─", max(min(w, 40), 0))))
 			sepDrawn = true
 		}
+		// the marker shows on the cursor row either way — the explainer
+		// below describes that row, so hiding the marker while unfocused
+		// left the explanation pointing at nothing. Faint while unfocused
+		// keeps the distinction visible without claiming input focus.
 		marker := "  "
-		if focused && i == l.cursor {
-			marker = s.Cursor.Render("▸ ")
+		if i == l.cursor {
+			if focused {
+				marker = s.Cursor.Render("▸ ")
+			} else {
+				marker = s.Faint.Render("▸ ")
+			}
 		}
 		keyStr := s.KeyHint.Render(a.key)
 		avail := w - ansi.StringWidth(marker) - ansi.StringWidth(keyStr) - 1

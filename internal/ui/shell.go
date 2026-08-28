@@ -922,7 +922,10 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 		case "enter":
 			if a, ok := m.cardActions().Selected(); ok {
 				m.clearTransientNotice()
-				return m.boardKey(a.key)
+				// straight to the verb, never back through this layer: the
+				// run action's own accelerator IS enter, so re-entering here
+				// would pick the same row and recurse until the stack blew.
+				return m.boardVerb(a.key)
 			}
 			return nil
 		}
@@ -939,6 +942,14 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 		m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
 		return nil
 	}
+	return m.boardVerb(key)
+}
+
+// boardVerb performs a board action. It is the layer below boardKey's
+// focus handling, so an action invoked by name (from the card list or the
+// command menu) reaches the same guarded case body as its key without
+// passing back through the focus interception.
+func (m *Shell) boardVerb(key string) tea.Cmd {
 	switch key {
 	case "tab":
 		m.cycleAttention()

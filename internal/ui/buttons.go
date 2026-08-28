@@ -56,8 +56,15 @@ func (r *buttonRow) SetCursor(i int) {
 	r.cursor = i
 }
 
-// Selected returns the focused button.
-func (r *buttonRow) Selected() button { return r.buttons[r.cursor] }
+// Selected returns the focused button, or the zero button when the row is
+// empty — a dialog built with no buttons should render nothing, not panic
+// on the first keypress.
+func (r *buttonRow) Selected() button {
+	if r.cursor < 0 || r.cursor >= len(r.buttons) {
+		return button{}
+	}
+	return r.buttons[r.cursor]
+}
 
 // View renders "[ Label ]  [ Label ]": the focused button highlighted
 // (bracket in s.Cursor, label in s.Subtle — the same marker/text split

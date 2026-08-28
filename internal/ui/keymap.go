@@ -165,6 +165,7 @@ func (m *Shell) splashBindings() []binding {
 		}
 	}
 	return []binding{
+		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
 		{key: "n", label: "new", help: "new feature", bar: true},
 		{key: "B", label: "bug", help: "new bug", bar: true},
 		{key: "I", label: "ingest", help: "ingest a spec into features", bar: true},

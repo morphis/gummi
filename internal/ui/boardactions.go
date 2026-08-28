@@ -78,5 +78,5 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		m.Overlay.Push(m.helpOverlay())
 		return nil
 	}
-	return m.boardKey(id)
+	return m.boardVerb(id)
 }

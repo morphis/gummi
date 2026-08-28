@@ -42,6 +42,12 @@ type commitMsgDialog struct {
 	// dump / attribution) so it reads differently from a config fault.
 	reason string
 	guard  bool
+
+	// focus is the tab position (text ⇄ buttons); buttons carries the
+	// Cancel/Redraft/Merge row that makes the merge reachable without a
+	// Ctrl key a multiplexer might claim.
+	focus   int
+	buttons *buttonRow
 }
 
 func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft func(ctx context.Context, f domain.Feature) (string, error)) *commitMsgDialog {
@@ -52,7 +58,14 @@ func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft f
 	in.SetWidth(64)
 	in.SetHeight(8)
 	in.Focus()
-	return &commitMsgDialog{feature: f.ID, f: f, branch: f.BranchName(), input: in, onSubmit: onSubmit, draft: draft}
+	return &commitMsgDialog{
+		feature: f.ID, f: f, branch: f.BranchName(), input: in, onSubmit: onSubmit, draft: draft,
+		buttons: newButtonRow(
+			button{label: "Cancel"},
+			button{label: "Redraft"},
+			button{label: "Merge", danger: true},
+		),
+	}
 }
 
 // startDraft launches a fresh best-effort draft pass for this dialog and
@@ -107,7 +120,30 @@ func (d *commitMsgDialog) apply(msg commitDraftMsg) {
 // ID implements overlay.Dialog.
 func (d *commitMsgDialog) ID() string { return "commit-message" }
 
-// HandleKey implements overlay.Dialog.
+// commit message fields, in tab order.
+const (
+	commitFieldText = iota
+	commitFieldButtons
+)
+
+// merge validates and fires onSubmit — the same path ctrl+s and the
+// Merge button both reach.
+func (d *commitMsgDialog) merge() (bool, tea.Cmd) {
+	text := strings.TrimSpace(d.input.Value())
+	if text == "" {
+		return false, nil // nothing to commit with — keep editing
+	}
+	if d.cancel != nil {
+		d.cancel()
+	}
+	return true, d.onSubmit(text)
+}
+
+// HandleKey implements overlay.Dialog. The textarea owns enter (a commit
+// message is multi-line), so the merge lives on a button row one tab
+// away. ctrl+s stays as an accelerator, but it can no longer be the only
+// way through: zellij binds ctrl+s to search mode, which made the most
+// consequential action in gummi unreachable inside a multiplexer.
 func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
@@ -118,17 +154,39 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case "ctrl+s":
-		text := strings.TrimSpace(d.input.Value())
-		if text == "" {
-			return false, nil // nothing to commit with — keep editing
-		}
-		if d.cancel != nil {
-			d.cancel()
-		}
-		return true, d.onSubmit(text)
+		return d.merge()
 	case "ctrl+r":
 		// regenerate the draft; applies only while the user hasn't typed.
 		return false, d.startDraft()
+	case "tab", "shift+tab":
+		d.focus = (d.focus + 1) % 2
+		if d.focus == commitFieldText {
+			d.input.Focus()
+		} else {
+			d.input.Blur()
+		}
+		return false, nil
+	}
+	if d.focus == commitFieldButtons {
+		switch key.String() {
+		case "left", "h":
+			d.buttons.Move(-1)
+		case "right", "l":
+			d.buttons.Move(1)
+		case "enter":
+			switch d.buttons.Cursor() {
+			case 0: // Cancel
+				if d.cancel != nil {
+					d.cancel()
+				}
+				return true, nil
+			case 1: // Redraft
+				return false, d.startDraft()
+			default: // Merge
+				return d.merge()
+			}
+		}
+		return false, nil
 	}
 	before := d.input.Value()
 	d.input, _ = d.input.Update(key)
@@ -140,6 +198,9 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 
 // HandlePaste implements overlay.Paster.
 func (d *commitMsgDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	if d.focus != commitFieldText {
+		return nil
+	}
 	d.modified = true
 	d.input, _ = d.input.Update(msg)
 	return nil
@@ -163,6 +224,7 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 			b.WriteString("\n" + s.Error.Render(d.reason))
 		}
 	}
-	b.WriteString("\n" + s.Faint.Render("ctrl+s merge · ctrl+r regenerate · esc cancel"))
+	b.WriteString("\n\n" + d.buttons.View(s, d.focus == commitFieldButtons) + "\n")
+	b.WriteString("\n" + s.Faint.Render("tab buttons · enter activates · ctrl+s merge · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }
