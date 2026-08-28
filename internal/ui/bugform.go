@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
@@ -17,7 +18,7 @@ import (
 // root cause, just as brainstorm develops a feature — but carries
 // bug-shaped options.
 type bugForm struct {
-	desc     textinput.Model
+	desc     textarea.Model
 	env      textinput.Model
 	profiles []string
 	profile  int
@@ -43,10 +44,12 @@ func newBugForm(profiles []string, repos []string, defaultEnvelope int, onSubmit
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
-	desc := textinput.New()
+	desc := textarea.New()
 	desc.Placeholder = "describe the bug…"
-	desc.CharLimit = 120
-	desc.SetWidth(46)
+	desc.CharLimit = 4096
+	desc.ShowLineNumbers = false
+	desc.SetWidth(descWidthMin)
+	desc.SetHeight(descHeightMin)
 	desc.Focus()
 	env := textinput.New()
 	env.Placeholder = "credits (0 = uncapped)"
@@ -87,7 +90,10 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.errText = "description must not be empty"
 			return false, nil
 		}
-		if _, err := domain.Slugify(desc); err != nil {
+		// validate the slug of the derived title (what creation will use),
+		// not the whole description
+		title, oneLiner, seed := domain.SplitFreeform(desc)
+		if _, err := domain.Slugify(title); err != nil {
 			d.errText = err.Error()
 			return false, nil
 		}
@@ -101,17 +107,25 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			env = &n
 		}
 		return true, d.onSubmit(bugFormResult{
-			Title:    desc,
+			Title:    title,
+			OneLiner: oneLiner,
+			Seed:     seed,
 			Severity: d.sevs[d.sev],
 			Profile:  d.profiles[d.profile],
 			Skip:     d.skip,
 			Envelope: env,
 			Repo:     d.repoName(),
 		})
-	case "tab", "down":
+	case "alt+enter", "ctrl+j":
+		if d.focus == fieldDesc {
+			d.desc.InsertString("\n")
+			d.errText = ""
+		}
+		return false, nil
+	case "tab":
 		d.setFocus((d.focus + 1) % fieldCount)
 		return false, nil
-	case "shift+tab", "up":
+	case "shift+tab":
 		d.setFocus((d.focus + fieldCount - 1) % fieldCount)
 		return false, nil
 	}
@@ -191,6 +205,10 @@ func (d *bugForm) sevLabel() string {
 
 // View implements overlay.Dialog.
 func (d *bugForm) View(s *theme.Styles, w, h int) string {
+	descW, descH := dialogDescSize(w, h)
+	d.desc.SetWidth(descW)
+	d.desc.SetHeight(descH)
+
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new bug") + "\n\n")
 	b.WriteString(d.desc.View() + "\n\n")
@@ -222,7 +240,7 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	if d.errText != "" {
 		b.WriteString("\n" + s.Error.Render(d.errText))
 	}
-	hint := "enter create · tab envelope · esc cancel"
+	hint := "enter create · alt+enter newline · tab envelope · esc cancel"
 	if len(d.repos) > 0 {
 		hint += " · r repo"
 	}

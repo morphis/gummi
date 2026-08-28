@@ -220,6 +220,7 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 type bugFormResult struct {
 	Title    string
 	OneLiner string
+	Seed     string
 	Severity domain.Severity
 	Profile  string
 	Skip     domain.SkipFlags
@@ -259,7 +260,7 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 		// Seed the report draft first (so severity/one-liner survive), then
 		// persist — a persisted bug with no draft would be reseeded blank.
 		draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
-		content := spec.SeededBugTemplate(&f, domain.BugReport{}, domain.BugProvenance{Source: "manual"}, res.Severity)
+		content := spec.SeededBugTemplate(&f, domain.BugReport{Description: res.Seed}, domain.BugProvenance{Source: "manual"}, res.Severity)
 		if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}

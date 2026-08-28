@@ -24,6 +24,53 @@ const (
 	fieldCount
 )
 
+// dialogDescSize sizes have their own clamps: a small terminal keeps
+// today's fixed 46×4 box (the floor), a large one stops well short of
+// spanning edge to edge (the ceiling).
+const (
+	descWidthMin  = 46
+	descWidthMax  = 104
+	descHeightMin = 4
+	descHeightMax = 20
+)
+
+// dialogFrameChrome is DialogFrame's own border+padding, and
+// dialogStaticRows is the fixed non-description row count shared by the
+// feature and bug forms (title+blank, blank-after-desc, envelope+blank,
+// options row, blank+hint) — both forms' View is line-for-line parallel,
+// so one shared helper sizes both.
+const (
+	dialogFrameChromeW = 6
+	dialogFrameChromeH = 4
+	dialogStaticRows   = 8
+)
+
+// dialogStatusBarMargin reserves the persistent status bar's row: the
+// overlay draws dialogs into the full terminal area, status bar included
+// (layout.Compute carves the status row out of that same height rather
+// than excluding it), so without this the dialog frame can grow to
+// exactly fill the draw area and paint over the status bar.
+const dialogStatusBarMargin = 1
+
+// dialogDescSize returns the description editor's width and height for a
+// dialog drawn in a w×h area, clamped so it stays usable on a small
+// terminal and doesn't span an ultra-wide/ultra-tall one edge to edge.
+func dialogDescSize(w, h int) (width, height int) {
+	width = clamp(w-dialogFrameChromeW, descWidthMin, descWidthMax)
+	height = clamp(h-dialogFrameChromeH-dialogStaticRows-dialogStatusBarMargin, descHeightMin, descHeightMax)
+	return width, height
+}
+
+func clamp(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // featureForm is the new-feature dialog: a free-form description — the
 // first line becomes the card title, anything beyond it seeds the
 // draft's Problem section for the brainstorm stage to develop. Profile
@@ -60,10 +107,10 @@ func newFeatureForm(profiles []string, repos []string, defaultEnvelope int, onSu
 	}
 	desc := textarea.New()
 	desc.Placeholder = "describe the feature…"
-	desc.CharLimit = 4000
+	desc.CharLimit = 4096
 	desc.ShowLineNumbers = false
-	desc.SetWidth(46)
-	desc.SetHeight(4)
+	desc.SetWidth(descWidthMin)
+	desc.SetHeight(descHeightMin)
 	desc.Focus()
 	env := textinput.New()
 	env.Placeholder = "credits (0 = uncapped)"
@@ -222,6 +269,10 @@ func (d *featureForm) skipLabel() string {
 
 // View implements overlay.Dialog.
 func (d *featureForm) View(s *theme.Styles, w, h int) string {
+	descW, descH := dialogDescSize(w, h)
+	d.desc.SetWidth(descW)
+	d.desc.SetHeight(descH)
+
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new feature") + "\n\n")
 	b.WriteString(d.desc.View() + "\n\n")

@@ -56,3 +56,32 @@ func TestCreateFeatureSeedsDraft(t *testing.T) {
 		t.Errorf("single-line description seeded a draft (stat err = %v)", err)
 	}
 }
+
+// TestCreateBugSeedsReport: a multiline bug description seeds the
+// report's Summary section with what the user typed beyond the title
+// line, mirroring the feature-side seeding above.
+func TestCreateBugSeedsReport(t *testing.T) {
+	ws, store, wt := uiRepo(t)
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.now = func() time.Time { return time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC) }
+	m.Attach(store, wt, ws)
+
+	seed := "Crash on empty diff\n\nRepro: stage nothing, hit c."
+	res := bugFormResult{Title: "Crash on empty diff", Seed: seed, Severity: domain.SeverityHigh}
+	if msg := m.createBug(res)(); msg != nil {
+		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
+			t.Fatalf("create bug failed: %s", nm.text)
+		}
+	}
+	f, err := store.GetFeature(context.Background(), "BG-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
+	if err != nil {
+		t.Fatalf("seeded report missing: %v", err)
+	}
+	if !strings.Contains(string(raw), "## Summary\n\n"+seed) {
+		t.Errorf("report Summary section lost the seeded text:\n%s", raw)
+	}
+}

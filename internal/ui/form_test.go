@@ -2,14 +2,83 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+
+	"charm.land/lipgloss/v2"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
+
+// TestDialogDescSize covers the sizing contract's two goldens plus a
+// boundary case at each clamp edge.
+func TestDialogDescSize(t *testing.T) {
+	cases := []struct {
+		name  string
+		w, h  int
+		wantW int
+		wantH int
+	}{
+		{"golden small area", 60, 20, 54, 7},
+		{"golden large area", 200, 60, 104, 20},
+		{"width just under the floor's trigger point stays at the floor", 51, 20, descWidthMin, 7},
+		{"width past the ceiling's trigger point clamps to the ceiling", 111, 20, descWidthMax, 7},
+		{"height just under the floor's trigger point stays at the floor", 60, 16, 54, descHeightMin},
+		{"height past the ceiling's trigger point clamps to the ceiling", 60, 100, 54, descHeightMax},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotW, gotH := dialogDescSize(c.w, c.h)
+			if gotW != c.wantW || gotH != c.wantH {
+				t.Errorf("dialogDescSize(%d, %d) = (%d, %d), want (%d, %d)", c.w, c.h, gotW, gotH, c.wantW, c.wantH)
+			}
+		})
+	}
+}
+
+// TestFeatureFormSizing renders the feature dialog at a small and a large
+// draw area and asserts the description editor's own rendered size
+// matches the sizing helper's output exactly for that area.
+func TestFeatureFormSizing(t *testing.T) {
+	styles := theme.New(theme.GummiDark())
+	for _, area := range []struct{ w, h int }{{60, 20}, {200, 60}} {
+		form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
+		form.View(styles, area.w, area.h)
+		wantW, wantH := dialogDescSize(area.w, area.h)
+		assertDescRendersAt(t, form.desc.View(), area.w, area.h, wantW, wantH)
+	}
+}
+
+// assertDescRendersAt checks a description textarea's rendered View()
+// output — every line the given rendered width, and the given number of
+// lines — matching dialogDescSize's output for the area it was sized at.
+func assertDescRendersAt(t *testing.T, rendered string, areaW, areaH, wantW, wantH int) {
+	t.Helper()
+	lines := strings.Split(rendered, "\n")
+	if len(lines) != wantH {
+		t.Errorf("at %dx%d: desc rendered %d lines, want %d", areaW, areaH, len(lines), wantH)
+	}
+	for i, l := range lines {
+		if gotW := lipgloss.Width(l); gotW != wantW {
+			t.Errorf("at %dx%d: desc line %d width = %d, want %d", areaW, areaH, i, gotW, wantW)
+		}
+	}
+}
+
+// TestFeatureFormCharLimit: the description accepts up to 4096
+// characters without truncation.
+func TestFeatureFormCharLimit(t *testing.T) {
+	form := newFeatureForm(nil, nil, 0, func(formResult) tea.Cmd { return nil })
+	long := strings.Repeat("a", 4096)
+	form.desc.SetValue(long)
+	if got := len(form.desc.Value()); got != 4096 {
+		t.Fatalf("description length = %d, want 4096 (not truncated)", got)
+	}
+}
 
 // TestFormEnvelopeDefault: the envelope input pre-fills from the global
 // default, so the intended budget is visible before the user edits it.
