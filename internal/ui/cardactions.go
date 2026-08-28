@@ -33,13 +33,25 @@ type cardAction struct {
 	label  string // imperative, user-facing; the interface
 	why    string // one-line explainer shown under the list for the focused row
 	danger bool   // destroys work / spends irrecoverably: tinted, sorted last, label gets "…"
+	folded bool   // legal here but not advice: hidden behind the fold row
 }
+
+// expandID is the synthetic row that opens and closes the folded tail.
+// It is not a card verb, so runCardAction answers it directly rather
+// than routing it through boardVerb.
+const expandID = "expand"
+
+// foldMin is the shortest tail worth folding. Below it the fold row
+// would cost as many lines as it saves, and "2 more actions" is a worse
+// row than the two actions themselves.
+const foldMin = 3
 
 // cardActionList is the focusable list rendered under the selected card
 // (→ to focus, ↑/↓ to move, enter to run, ←/esc back to the card list).
 type cardActionList struct {
-	actions []cardAction
-	cursor  int
+	actions  []cardAction
+	cursor   int
+	expanded bool // the folded tail is showing
 }
 
 // newCardActionList wraps a pre-built action set for focus/cursor
@@ -48,30 +60,81 @@ func newCardActionList(actions []cardAction) *cardActionList {
 	return &cardActionList{actions: actions}
 }
 
+// foldRow builds the row that stands in for the folded tail. Its why
+// carries the fact that makes folding safe: nothing was taken away, and
+// every hidden action still answers its accelerator from the board.
+func foldRow(n int, expanded bool) cardAction {
+	if expanded {
+		return cardAction{
+			id:    expandID,
+			label: "fewer actions",
+			why:   "fold the rarely-used actions away again",
+		}
+	}
+	return cardAction{
+		id:    expandID,
+		label: itoa(n) + " more actions",
+		why:   "legal here but rarely the move — each still runs from its key without expanding",
+	}
+}
+
+// rows is what the list navigates and draws: the promoted actions, then
+// the fold row whenever there is a tail, then the tail itself once
+// expanded. Every cursor operation goes through it, so the fold row is a
+// row you land on and press enter — not a caption the cursor skips.
+func (l *cardActionList) rows() []cardAction {
+	tail := 0
+	for _, a := range l.actions {
+		if a.folded {
+			tail++
+		}
+	}
+	if tail == 0 {
+		return l.actions
+	}
+	out := make([]cardAction, 0, len(l.actions)+1)
+	for _, a := range l.actions {
+		if !a.folded {
+			out = append(out, a)
+		}
+	}
+	out = append(out, foldRow(tail, l.expanded))
+	if l.expanded {
+		for _, a := range l.actions {
+			if a.folded {
+				out = append(out, a)
+			}
+		}
+	}
+	return out
+}
+
 // Move shifts the cursor by delta, clamped to the list's bounds — a list
 // you can overshoot into is worse than one that just stops.
 func (l *cardActionList) Move(delta int) {
-	if len(l.actions) == 0 {
+	n := len(l.rows())
+	if n == 0 {
 		return
 	}
 	l.cursor += delta
 	if l.cursor < 0 {
 		l.cursor = 0
 	}
-	if l.cursor > len(l.actions)-1 {
-		l.cursor = len(l.actions) - 1
+	if l.cursor > n-1 {
+		l.cursor = n - 1
 	}
 }
 
 // Selected returns the cursor's action, or false when the list is empty.
 func (l *cardActionList) Selected() (cardAction, bool) {
-	if l.cursor < 0 || l.cursor >= len(l.actions) {
+	rows := l.rows()
+	if l.cursor < 0 || l.cursor >= len(rows) {
 		return cardAction{}, false
 	}
-	return l.actions[l.cursor], true
+	return rows[l.cursor], true
 }
 
-func (l *cardActionList) Len() int { return len(l.actions) }
+func (l *cardActionList) Len() int { return len(l.rows()) }
 
 // actionSpec is one candidate action before validity/ordering are
 // resolved — the fixed half of a cardAction plus the gate that decides
@@ -85,12 +148,29 @@ type actionSpec struct {
 	valid  bool
 }
 
+// promotedActions are the ids that stay above the fold whatever the
+// stage: the marquee run/pause pair and the two artifact readers.
+// cardActionsFor promotes the rest of the visible tier from its rank map
+// — whatever nextActions recommends for this exact state — so the tier
+// reads as "what to do now" and the fold holds what is merely legal.
+//
+// This is also how an action that is valid but never the advice stays
+// out of the way without being gated out: merge and rebase on a
+// mid-implement card, the envelope, attach, duplicate. Gating them out
+// would put the table back at odds with the key handler (see below);
+// folding leaves them in the list, on their key, one row away.
+var promotedActions = map[string]bool{
+	"run": true, "pause": true, "spec": true, "diff": true,
+}
+
 // cardActionsFor is the full set of actions valid for this card right
 // now — the focusable list's contents. Ordering: recommended first (the
 // same entries nextActions surfaces in the read-only block, in its
 // order, with its why text), then the remaining valid actions in board
 // order, then danger actions last regardless of recommendation — a
 // destructive action never gets to be the thing enter runs by default.
+// Promoted actions come before folded ones, each half keeping that
+// normal-then-danger shape.
 //
 // Validity mirrors boardBindings() and the board's key handler exactly
 // (shell.go's handleKey): a research card carries no branch, so
@@ -192,15 +272,17 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		}
 		w := sp.why
 		order := len(steps) + i // canonical fallback order, after every recommendation
+		folded := !promotedActions[sp.id]
 		if r, ok := rank[sp.key]; ok {
 			w = why[sp.key]
 			order = r
+			folded = false // recommended for this state: it belongs on screen
 		}
 		label := sp.label
 		if sp.danger {
 			label += "…"
 		}
-		o := ordered{cardAction{id: sp.id, key: sp.key, label: label, why: w, danger: sp.danger}, order}
+		o := ordered{cardAction{id: sp.id, key: sp.key, label: label, why: w, danger: sp.danger, folded: folded}, order}
 		if sp.danger {
 			danger = append(danger, o)
 		} else {
@@ -217,7 +299,27 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	for _, o := range danger {
 		out = append(out, o.action)
 	}
-	return out
+
+	// hoist the promoted half in front, each half keeping the ordering
+	// settled above. A tail too short to be worth a fold row is simply
+	// unfolded — a card in todo offers little enough that hiding any of
+	// it buys nothing.
+	head := make([]cardAction, 0, len(out))
+	tail := make([]cardAction, 0, len(out))
+	for _, a := range out {
+		if a.folded {
+			tail = append(tail, a)
+		} else {
+			head = append(head, a)
+		}
+	}
+	if len(tail) < foldMin {
+		for i := range out {
+			out[i].folded = false
+		}
+		return out
+	}
+	return append(head, tail...)
 }
 
 // runLabelWhy derives the enter action's label and fallback why — the
@@ -302,25 +404,28 @@ func keyColumn(w int, labels, keys []string) int {
 // row you are on is always visible, and the count of what is hidden is
 // stated rather than silently dropped. maxRows <= 0 means no cap.
 func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) string {
-	if len(l.actions) == 0 {
+	rows := l.rows()
+	if len(rows) == 0 {
 		return ""
 	}
-	labels := make([]string, len(l.actions))
-	keys := make([]string, len(l.actions))
-	for i, a := range l.actions {
+	labels := make([]string, len(rows))
+	keys := make([]string, len(rows))
+	for i, a := range rows {
 		labels[i], keys[i] = a.label, a.key
 	}
 	width := keyColumn(w, labels, keys)
 
 	var lines []string
 	cursorLine := 0
-	sepDrawn := false
-	for i, a := range l.actions {
-		if a.danger && !sepDrawn {
+	for i, a := range rows {
+		// a rule opens each contiguous danger run rather than only the
+		// first: the fold can put a recommended danger (clean up, on a
+		// landed card) above the fold row and delete below it, and the
+		// second run needs the boundary just as much as the first.
+		if a.danger && (i == 0 || !rows[i-1].danger) {
 			// the rule marks the danger boundary within the list, so it spans
 			// the list's width rather than the pane's.
 			lines = append(lines, sepPrefix+s.Separator.Render(strings.Repeat("─", max(min(width, 40), 0))))
-			sepDrawn = true
 		}
 		// the marker shows on the cursor row either way — the explainer
 		// below describes that row, so hiding the marker while unfocused
@@ -345,8 +450,17 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 			pad = 0
 		}
 		labelStyle := s.Base
-		if a.danger {
+		switch {
+		case a.danger:
 			labelStyle = s.Destructive
+		case a.id == expandID:
+			// structural, not an action: it reads one tier down from the
+			// rows it stands for. On the band s.Faint lands near 1.2:1, so
+			// the banded row steps up to Muted rather than vanishing.
+			labelStyle = s.Faint
+			if banded {
+				labelStyle = s.Muted
+			}
 		}
 		row := marker + labelStyle.Render(label) + strings.Repeat(" ", pad) + " " + keyStr
 		if banded {
@@ -374,7 +488,7 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 				shownActions++
 			}
 		}
-		hidden = len(l.actions) - shownActions
+		hidden = len(rows) - shownActions
 	}
 	// copy before appending: windowLines returns a slice of lines, so
 	// appending in place would scribble over the row after the window.

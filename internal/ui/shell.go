@@ -81,6 +81,10 @@ type Shell struct {
 	actionFocused bool
 	actionCursor  int
 	actionCard    domain.FeatureID // whose list actionCursor belongs to
+	// the list folds everything that is legal here but not the advice
+	// (cardactions.go); this is whether the fold is currently open. It
+	// lives here, not on the list, because the list is rebuilt per frame.
+	actionsExpanded bool
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -948,7 +952,7 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 			m.moveAction(-1)
 			return nil
 		case "left", "esc":
-			m.actionFocused = false
+			m.blurActions()
 			return nil
 		case "enter":
 			if a, ok := m.cardActions().Selected(); ok {

@@ -44,12 +44,75 @@ func TestCardActionsForOrdering(t *testing.T) {
 	}
 	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
 
-	got := idsOf(cardActionsFor(in, r))
-	// inbox is present because attn is set: it is the spec the budget/gate
-	// recommendation (keyed i) lands on.
-	want := "verify run bounce deps spec diff advance envelope inbox attach rebase merge duplicate delete"
+	acts := cardActionsFor(in, r)
+	got := idsOf(acts)
+	// the promoted tier comes first — the three ranked entries in
+	// nextActions' order, then the two readers — and the fold holds the
+	// rest in board order. inbox is in there because attn is set: it is
+	// the spec the budget/gate recommendation (keyed i) lands on.
+	want := "verify run bounce spec diff " +
+		"deps advance envelope inbox attach rebase merge duplicate delete"
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
+	}
+	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps advance envelope inbox attach rebase merge duplicate delete" {
+		t.Fatalf("unexpected folded tail: %q", gotFolded)
+	}
+}
+
+// foldedOnly filters an action list to one tier, so a test can assert
+// what the card shows without expanding separately from what it holds.
+func foldedOnly(acts []cardAction, folded bool) []cardAction {
+	var out []cardAction
+	for _, a := range acts {
+		if a.folded == folded {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestCardActionsForFoldsTheTail(t *testing.T) {
+	// The whole point of the fold: a mid-flow card offers a dozen-odd
+	// actions, and only the handful nextActions ranks (plus run/pause and
+	// the two readers) earn a row before you ask for the rest.
+	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictPass}
+	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
+
+	acts := cardActionsFor(in, r)
+	promoted := foldedOnly(acts, false)
+	if got, want := idsOf(promoted), "advance diff bounce run spec"; got != want {
+		t.Fatalf("promoted tier:\n got  %q\n want %q", got, want)
+	}
+	if n := len(foldedOnly(acts, true)); n < foldMin {
+		t.Fatalf("expected a folded tail worth folding, got %d", n)
+	}
+
+	// and it is a fold, not a filter: every action is still in the list,
+	// still carrying its accelerator, one enter away.
+	l := newCardActionList(acts)
+	if got, want := l.Len(), len(promoted)+1; got != want {
+		t.Fatalf("collapsed list = %d rows, want %d (the promoted tier plus the fold row)", got, want)
+	}
+	l.expanded = true
+	if got, want := l.Len(), len(acts)+1; got != want {
+		t.Fatalf("expanded list = %d rows, want %d (every action plus the fold row)", got, want)
+	}
+}
+
+func TestCardActionsForShortTailStaysUnfolded(t *testing.T) {
+	// A todo card offers little enough that a fold row would cost a line
+	// to save two: below foldMin the tail is shown inline instead.
+	in := nextInput{stage: domain.StageTodo, kind: domain.KindFeature}
+	r := cardRow(domain.KindFeature, domain.StageTodo, false, false)
+
+	acts := cardActionsFor(in, r)
+	if n := len(foldedOnly(acts, true)); n != 0 && n < foldMin {
+		t.Fatalf("tail of %d folded, but foldMin is %d", n, foldMin)
+	}
+	l := newCardActionList(acts)
+	if len(foldedOnly(acts, true)) == 0 && l.Len() != len(acts) {
+		t.Fatalf("unfolded list grew a fold row: %d rows for %d actions", l.Len(), len(acts))
 	}
 }
 
@@ -68,18 +131,27 @@ func TestCardActionsForDangerLast(t *testing.T) {
 	if last.id != "delete" && last.id != "clean" {
 		t.Fatalf("expected a danger action last, got %q", last.id)
 	}
+	// danger-last is an invariant of each tier, not of the concatenation:
+	// "clean up" is the recommendation here, so it is promoted and sorts
+	// after the promoted non-danger rows but before the whole folded tail.
 	dangerSeen := false
-	for _, a := range acts {
-		if a.danger {
-			dangerSeen = true
-			continue
-		}
-		if dangerSeen {
-			t.Fatalf("non-danger action %q sorted after a danger action", a.id)
+	for _, tier := range [][]cardAction{foldedOnly(acts, false), foldedOnly(acts, true)} {
+		tierDanger := false
+		for _, a := range tier {
+			if a.danger {
+				dangerSeen, tierDanger = true, true
+				continue
+			}
+			if tierDanger {
+				t.Fatalf("non-danger action %q sorted after a danger action in its tier", a.id)
+			}
 		}
 	}
 	if !dangerSeen {
 		t.Fatal("expected at least one danger action on a landed card (clean, delete)")
+	}
+	if a := foldedOnly(acts, false)[len(foldedOnly(acts, false))-1]; a.id != "clean" {
+		t.Fatalf("expected the recommended clean-up promoted and last in its tier, got %q", a.id)
 	}
 }
 

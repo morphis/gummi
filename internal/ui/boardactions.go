@@ -23,10 +23,19 @@ func (m *Shell) cardActions() *cardActionList {
 		return newCardActionList(nil)
 	}
 	l := newCardActionList(cardActionsFor(m.nextInputFor(r), r))
+	l.expanded = m.actionsExpanded
 	if n := l.Len(); n > 0 {
 		l.cursor = clamp(m.actionCursor, 0, n-1)
 	}
 	return l
+}
+
+// blurActions hands the arrow keys back to the cards and refolds the
+// list. The fold exists so the pane stays short while you are reading
+// it, so an expansion is scoped to the visit that asked for it.
+func (m *Shell) blurActions() {
+	m.actionFocused = false
+	m.actionsExpanded = false
 }
 
 // moveAction steps the action cursor, clamping through the live list so
@@ -52,8 +61,8 @@ func (m *Shell) syncActionFocus() {
 		return
 	}
 	m.actionCard = id
-	m.actionFocused = false
 	m.actionCursor = 0
+	m.blurActions()
 }
 
 // globalCommands is the space menu's contents on the board: the actions
@@ -116,13 +125,18 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 
 // runCardAction performs one entry from the card's action list. A keyed
 // action goes through boardVerb so it hits the same guarded case body as
-// its accelerator; a keyless one (duplicate) is handled here, since there
-// is no key to route it by.
+// its accelerator; a keyless one (duplicate, and the fold row) is handled
+// here, since there is no key to route it by.
 func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	if a.key != "" {
 		return m.boardVerb(a.key)
 	}
 	switch a.id {
+	case expandID:
+		// the cursor stays on the fold row, so enter toggles in place and
+		// the newly revealed actions start one ↓ away.
+		m.actionsExpanded = !m.actionsExpanded
+		return nil
 	case "duplicate":
 		return m.confirmDuplicate()
 	}
