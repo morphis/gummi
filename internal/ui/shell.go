@@ -80,6 +80,7 @@ type Shell struct {
 	// each use, so it can never go stale against the selected card.
 	actionFocused bool
 	actionCursor  int
+	actionCard    domain.FeatureID // whose list actionCursor belongs to
 
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
@@ -462,6 +463,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rows = msg.rows
 		m.clampSel()
+		// a reload can move the selection onto a different card with no
+		// keypress (a card was deleted, or the sort reordered), which would
+		// leave the action cursor pointing into another card's list.
+		m.syncActionFocus()
 		return m, nil
 
 	case noticeMsg:
@@ -1221,9 +1226,9 @@ func (m *Shell) moveSel(delta int) {
 			break
 		}
 	}
-	m.resetActionFocus() // the action list belongs to the card being left
 	pos = (pos + delta + len(order)) % len(order)
 	m.sel = order[pos]
+	m.syncActionFocus()
 }
 
 // jumpSel selects the nth visible card (1-based), matching the numbers
@@ -1231,8 +1236,8 @@ func (m *Shell) moveSel(delta int) {
 func (m *Shell) jumpSel(n int) {
 	order := m.displayOrder(m.sortMode)
 	if n >= 1 && n <= len(order) {
-		m.resetActionFocus() // the action list belongs to the card being left
 		m.sel = order[n-1]
+		m.syncActionFocus()
 	}
 }
 

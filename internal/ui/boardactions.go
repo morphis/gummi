@@ -2,6 +2,8 @@ package ui
 
 import (
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // This file joins the two action surfaces to the board's key handler.
@@ -36,11 +38,20 @@ func (m *Shell) moveAction(delta int) {
 	m.actionCursor = l.cursor
 }
 
-// resetActionFocus returns focus to the cards and rewinds the action
-// cursor. Called whenever the selected card changes: the list is a
-// property of the card, so carrying a cursor across cards would land the
-// user on an unrelated action.
-func (m *Shell) resetActionFocus() {
+// syncActionFocus returns focus to the cards and rewinds the action
+// cursor whenever the selected card changed. It keys off the card's
+// identity rather than the selection index, because a board reload can
+// move the selection onto a different card with no keypress at all —
+// and a cursor left on "delete" then belongs to the wrong card.
+func (m *Shell) syncActionFocus() {
+	var id domain.FeatureID
+	if r, ok := m.selected(); ok {
+		id = r.F.ID
+	}
+	if id == m.actionCard {
+		return
+	}
+	m.actionCard = id
 	m.actionFocused = false
 	m.actionCursor = 0
 }

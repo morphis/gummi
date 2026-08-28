@@ -33,6 +33,27 @@ func TestActionFocusResetsOnCardChange(t *testing.T) {
 	}
 }
 
+// TestActionFocusResetsOnSilentSelectionChange: a board reload can land
+// the selection on a different card with no keypress (a card deleted, or
+// the sort reordered). The cursor must not survive that — it could be
+// sitting on "delete" and would then belong to the wrong card.
+func TestActionFocusResetsOnSilentSelectionChange(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.syncActionFocus() // adopt the current card
+	m.actionFocused = true
+	m.actionCursor = 3
+
+	// drop the selected row without touching m.sel, the way a reload can
+	m.rows = append(m.rows[:m.sel], m.rows[m.sel+1:]...)
+	m.clampSel()
+	m.syncActionFocus()
+
+	if m.actionFocused || m.actionCursor != 0 {
+		t.Fatalf("focus=%v cursor=%d after the selection silently moved, want false/0",
+			m.actionFocused, m.actionCursor)
+	}
+}
+
 // TestRightFocusesActionsAndLeftReturns covers the board's two new focus
 // keys end to end.
 func TestRightFocusesActionsAndLeftReturns(t *testing.T) {
