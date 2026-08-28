@@ -86,21 +86,15 @@ func (m *Shell) dashboardView(w, h int) string {
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
 
-	// next: ranked concrete actions for the feature's current state
-	// (nextsteps.go). The first entry is the recommendation.
-	if steps := nextActions(m.nextInputFor(r)); len(steps) > 0 {
-		line(s.Subtitle.Render("next"))
-		keyW, labelW := 0, 0
-		for _, a := range steps {
-			keyW, labelW = max(keyW, len(a.key)), max(labelW, len(a.label))
-		}
-		for i, a := range steps {
-			label := s.Subtle
-			if i == 0 {
-				label = s.Base
-			}
-			line("  " + s.KeyHint.Render(padRight(a.key, keyW)) + "  " +
-				label.Render(padRight(a.label, labelW)) + "  " + s.Faint.Render(a.why))
+	// actions: everything valid for this card right now, recommendation
+	// first (cardactions.go). This used to be a read-only "next" block of
+	// ranked hints; it is now the board's second focus region — → moves
+	// into it, ↑↓ move, enter runs — so the label is the interface and the
+	// key beside it is a demoted accelerator the row teaches in passing.
+	if l := m.cardActions(); l.Len() > 0 {
+		line(s.Subtitle.Render("actions"))
+		for _, row := range strings.Split(l.View(s, w, m.actionFocused), "\n") {
+			line(row)
 		}
 		line("")
 	}

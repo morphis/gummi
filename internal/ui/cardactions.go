@@ -1,0 +1,265 @@
+package ui
+
+import (
+	"sort"
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/workflow"
+)
+
+// The dashboard's "next" block (nextsteps.go) is read-only guidance; this
+// file turns it into the thing you actually operate — the full menu of
+// what → can do to the selected card, focusable and runnable. cardAction
+// is deliberately label-first (the interface) with the key demoted to a
+// right-aligned accelerator, so the list teaches the shortcut instead of
+// requiring it memorized up front.
+
+// cardAction is one invokable action on the selected card.
+type cardAction struct {
+	id     string // stable identifier the Shell switches on to run it
+	key    string // accelerator shown right-aligned; "" when there is none
+	label  string // imperative, user-facing; the interface
+	why    string // one-line explainer shown under the list for the focused row
+	danger bool   // destroys work / spends irrecoverably: tinted, sorted last, label gets "…"
+}
+
+// cardActionList is the focusable list rendered under the selected card
+// (→ to focus, ↑/↓ to move, enter to run, ←/esc back to the card list).
+type cardActionList struct {
+	actions []cardAction
+	cursor  int
+}
+
+// newCardActionList wraps a pre-built action set for focus/cursor
+// tracking.
+func newCardActionList(actions []cardAction) *cardActionList {
+	return &cardActionList{actions: actions}
+}
+
+// Move shifts the cursor by delta, clamped to the list's bounds — a list
+// you can overshoot into is worse than one that just stops.
+func (l *cardActionList) Move(delta int) {
+	if len(l.actions) == 0 {
+		return
+	}
+	l.cursor += delta
+	if l.cursor < 0 {
+		l.cursor = 0
+	}
+	if l.cursor > len(l.actions)-1 {
+		l.cursor = len(l.actions) - 1
+	}
+}
+
+// Selected returns the cursor's action, or false when the list is empty.
+func (l *cardActionList) Selected() (cardAction, bool) {
+	if l.cursor < 0 || l.cursor >= len(l.actions) {
+		return cardAction{}, false
+	}
+	return l.actions[l.cursor], true
+}
+
+func (l *cardActionList) Len() int { return len(l.actions) }
+
+// actionSpec is one candidate action before validity/ordering are
+// resolved — the fixed half of a cardAction plus the gate that decides
+// whether this card, right now, actually offers it.
+type actionSpec struct {
+	id     string
+	key    string
+	label  string
+	why    string // fallback why, used when nextActions(in) has nothing better
+	danger bool
+	valid  bool
+}
+
+// cardActionsFor is the full set of actions valid for this card right
+// now — the focusable list's contents. Ordering: recommended first (the
+// same entries nextActions surfaces in the read-only block, in its
+// order, with its why text), then the remaining valid actions in board
+// order, then danger actions last regardless of recommendation — a
+// destructive action never gets to be the thing enter runs by default.
+//
+// Validity mirrors boardBindings() and the board's key handler exactly
+// (shell.go's handleKey): a research card carries no branch, so
+// diff/rebase/merge/clean — worktree-gated via workflow.NeedsWorktree —
+// never appear for one, the same way keymap.go filters them from the
+// status bar and help overlay. Here that filtering doubles as the
+// availability check itself, so "not shown" and "not available" can't
+// diverge the way they used to when the handler answered a key the
+// table didn't advertise.
+func cardActionsFor(in nextInput, r featureRow) []cardAction {
+	work := workflow.WorkStage(in.kind)
+	research := in.kind == domain.KindResearch
+	doneStage := in.stage == domain.StageDone
+	needsWT := workflow.NeedsWorktree(in.kind, in.stage)
+
+	runLabel, runWhy := runLabelWhy(in)
+
+	advanceLabel, advanceWhy := "advance", "advance stage (gate; from verify it lands the branch on main)"
+	if research && doneStage {
+		// FD-081: a done RS card has nothing left to advance — g re-runs
+		// decompose instead (keymap.go).
+		advanceLabel, advanceWhy = "decompose", "on a done RS: re-run decompose"
+	}
+
+	specs := []actionSpec{
+		{"run", "enter", runLabel, runWhy, false,
+			workflow.Interactive(in.stage) || autonomousStage(in.stage)},
+		{"pause", "p", "pause", "pause the running agent, freeing its slot", false,
+			in.sess != ""},
+		{"deps", "p", "dependencies", "open the dependency picker for this card", false,
+			in.sess == ""},
+		{"transcript", "t", "transcript", "read the session transcript (tool calls and their outputs)", false,
+			in.sess != ""},
+		{"spec", "s", "spec", "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,
+			true},
+		{"diff", "d", "diff", "read or annotate the diff (tab toggles annotate)", false,
+			needsWT},
+		{"advance", "g", advanceLabel, advanceWhy, false,
+			!doneStage || research},
+		{"bounce", "b", "bounce", "send it back to " + string(work) + " for rework", false,
+			in.stage == domain.StageReview || in.stage == domain.StageVerify},
+		{"addplan", "P", "add plan", "restore the plan stage on a quick/skip-plan feature (design phase only)", false,
+			in.kind != domain.KindBug && r.F.Skip.Plan &&
+				(in.stage == domain.StageTodo || in.stage == domain.StageBrainstorm || in.stage == domain.StageSpec)},
+		{"verify", "v", "verify", "run verify checks", false,
+			research || needsWT},
+		{"envelope", "u", "envelope", "set the budget envelope (credits; 0 = uncapped)", false,
+			true},
+		{"attach", "a", "attach", "raw-attach the agent CLI in the worktree", false,
+			r.HasWorktree},
+		{"rebase", "r", "rebase", "rebase branch onto main (conflicts hand off to an agent)", false,
+			needsWT},
+		{"merge", "m", "merge", "squash-merge branch into main (review & approve the drafted message)", false,
+			needsWT && r.HasWorktree && !r.Landed},
+		{"clean", "c", "clean up", "branch landed on main — remove the worktree and branch", true,
+			needsWT && r.Landed},
+		{"duplicate", "y", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
+			true},
+		{"delete", "x", "delete", "remove the worktree, branch, and record — irrecoverable", true,
+			true},
+	}
+
+	// seed ordering and why text from the ranked suggestions: first
+	// occurrence of a key wins, so the recommendation (steps[0]) always
+	// out-ranks a same-keyed entry appended later in the same call.
+	steps := nextActions(in)
+	rank := make(map[string]int, len(steps))
+	why := make(map[string]string, len(steps))
+	for i, st := range steps {
+		if _, ok := rank[st.key]; !ok {
+			rank[st.key] = i
+			why[st.key] = st.why
+		}
+	}
+
+	type ordered struct {
+		action cardAction
+		order  int
+	}
+	var normal, danger []ordered
+	for i, sp := range specs {
+		if !sp.valid {
+			continue
+		}
+		w := sp.why
+		order := len(steps) + i // canonical fallback order, after every recommendation
+		if r, ok := rank[sp.key]; ok {
+			w = why[sp.key]
+			order = r
+		}
+		label := sp.label
+		if sp.danger {
+			label += "…"
+		}
+		o := ordered{cardAction{id: sp.id, key: sp.key, label: label, why: w, danger: sp.danger}, order}
+		if sp.danger {
+			danger = append(danger, o)
+		} else {
+			normal = append(normal, o)
+		}
+	}
+	sort.SliceStable(normal, func(a, b int) bool { return normal[a].order < normal[b].order })
+	sort.SliceStable(danger, func(a, b int) bool { return danger[a].order < danger[b].order })
+
+	out := make([]cardAction, 0, len(normal)+len(danger))
+	for _, o := range normal {
+		out = append(out, o.action)
+	}
+	for _, o := range danger {
+		out = append(out, o.action)
+	}
+	return out
+}
+
+// runLabelWhy derives the enter action's label and fallback why — the
+// same chat/run/watch adaptation boardBindings() makes for the status bar
+// (shell.go), plus the hasAsk nuance nextsteps.go's StateRunning branch
+// carries. The fallback is only seen when nextActions(in) has nothing for
+// this state (a queued or busy-without-ask run, or a finished autonomous
+// stage with no live session) — everywhere else cardActionsFor's why
+// override wins.
+func runLabelWhy(in nextInput) (label, why string) {
+	switch {
+	case workflow.Interactive(in.stage):
+		return "chat", "talk through the draft with the agent"
+	case in.hasAsk:
+		return "answer the agent", "it asked a question and is blocked on your reply"
+	case in.sess == engine.StateRunning:
+		return "watch", "watch the running agent (scrollable transcript)"
+	case in.sess == engine.StateQueued:
+		return "run", "queued — waiting for a free slot"
+	default:
+		return "run", "re-run " + string(in.stage) + " (starts a fresh session)"
+	}
+}
+
+// View renders the action list: cursor marker left, label left, key
+// right-aligned within w, danger rows tinted and set off by a separator,
+// and a trailing explainer for whatever row the cursor sits on (shown
+// whether or not the list itself has focus — the same continuity the old
+// read-only "next" block gave the top suggestion). The marker itself only
+// appears when focused is true; an unfocused list still shows where the
+// cursor would land so → has something concrete to land on.
+func (l *cardActionList) View(s *theme.Styles, w int, focused bool) string {
+	if len(l.actions) == 0 {
+		return ""
+	}
+	var lines []string
+	sepDrawn := false
+	for i, a := range l.actions {
+		if a.danger && !sepDrawn {
+			lines = append(lines, s.Separator.Render(strings.Repeat("─", max(min(w, 40), 0))))
+			sepDrawn = true
+		}
+		marker := "  "
+		if focused && i == l.cursor {
+			marker = s.Cursor.Render("▸ ")
+		}
+		keyStr := s.KeyHint.Render(a.key)
+		avail := w - ansi.StringWidth(marker) - ansi.StringWidth(keyStr) - 1
+		label := a.label
+		if ansi.StringWidth(label) > avail {
+			label = ansi.Truncate(label, max(avail, 0), "…")
+		}
+		pad := avail - ansi.StringWidth(label)
+		if pad < 0 {
+			pad = 0
+		}
+		labelStyle := s.Base
+		if a.danger {
+			labelStyle = s.Destructive
+		}
+		lines = append(lines, marker+labelStyle.Render(label)+strings.Repeat(" ", pad)+" "+keyStr)
+	}
+	if a, ok := l.Selected(); ok {
+		lines = append(lines, s.Faint.Render(ansi.Truncate("  ↳ "+a.why, w, "…")))
+	}
+	return strings.Join(lines, "\n")
+}

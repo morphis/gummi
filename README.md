@@ -153,6 +153,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | key | action |
 |---|---|
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
+| `→` / `←` | focus the selected card's action list / go back to the cards — `↑↓` move, `enter` runs |
+| `space` | open the command menu (everything that belongs to no card); type to filter |
 | `enter` | chat (interactive stages) · run / watch (autonomous stages) |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |
 | `s` / `d` | spec / diff view — `tab` switches read ⇄ annotate |

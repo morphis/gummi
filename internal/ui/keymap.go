@@ -104,6 +104,8 @@ func (m *Shell) boardBindings() []binding {
 	}
 	bs := []binding{
 		{key: "j/k ↓↑", label: "select", help: "select feature"},
+		{key: "→", label: "actions", help: "focus the card's action list (↑↓ move, enter runs, ← back)", bar: true},
+		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
 		{key: "pgup/pgdn", label: "ends", help: "jump to the first/last card"},
 		{key: "1..9", label: "jump", help: "jump to feature"},
 		enter,

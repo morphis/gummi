@@ -371,10 +371,12 @@ func (m *Shell) discardBugIngest() tea.Cmd {
 		return drop()
 	}
 	m.Overlay.Push(&confirmDialog{
-		id:        "confirm-bug-ingest-discard",
-		question:  "discard the import?",
-		detail:    "your renamed titles and one-liners are not kept — re-importing fetches the issues again as they are on GitHub",
-		onConfirm: drop,
+		id:           "confirm-bug-ingest-discard",
+		cancelLabel:  "Keep",
+		confirmLabel: "Discard",
+		question:     "discard the import?",
+		detail:       "your renamed titles and one-liners are not kept — re-importing fetches the issues again as they are on GitHub",
+		onConfirm:    drop,
 	})
 	return nil
 }
@@ -393,10 +395,12 @@ func (m *Shell) importHighlighted() tea.Cmd {
 	}
 	p := bv.props[i]
 	m.Overlay.Push(&confirmDialog{
-		id:        "confirm-bug-ingest",
-		question:  "import " + p.Title + "?",
-		detail:    p.ExternalRef,
-		onConfirm: m.materializeBugIngest,
+		id:           "confirm-bug-ingest",
+		cancelLabel:  "Cancel",
+		confirmLabel: "Import",
+		question:     "import " + p.Title + "?",
+		detail:       p.ExternalRef,
+		onConfirm:    m.materializeBugIngest,
 	})
 	return nil
 }

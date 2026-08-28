@@ -74,6 +74,13 @@ type Shell struct {
 	mergePrep  bool // a squash merge's preconditions are being checked (one at a time)
 	squashPrep bool // a squash-in-place's preconditions are being checked (one at a time)
 
+	// The dashboard's action list is the second focus region on the board:
+	// → moves into it, ← back to the cards. Only the cursor and the focus
+	// flag live here — the list itself is rebuilt from cardActionsFor on
+	// each use, so it can never go stale against the selected card.
+	actionFocused bool
+	actionCursor  int
+
 	// agent orchestration (nil engine means no agent wired)
 	engine       *engine.Engine
 	chat         *chatPane // non-nil while attached to an interactive session
@@ -845,9 +852,11 @@ func (m *Shell) quitCmd() tea.Cmd {
 		return tea.Quit
 	}
 	m.Overlay.Push(&confirmDialog{
-		id:       "confirm-quit",
-		question: "quit with live sessions " + strings.Join(live, ", ") + "?",
-		detail:   "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)",
+		id:           "confirm-quit",
+		cancelLabel:  "Stay",
+		confirmLabel: "Quit",
+		question:     "quit with live sessions " + strings.Join(live, ", ") + "?",
+		detail:       "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)",
 		onConfirm: func() tea.Cmd {
 			return tea.Quit
 		},
@@ -896,6 +905,40 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
+	// the action list, when focused, owns movement and enter; everything
+	// else still falls through to the board so the accelerators keep
+	// working from either side.
+	if m.actionFocused {
+		switch key {
+		case "j", "down":
+			m.moveAction(1)
+			return nil
+		case "k", "up":
+			m.moveAction(-1)
+			return nil
+		case "left", "esc":
+			m.actionFocused = false
+			return nil
+		case "enter":
+			if a, ok := m.cardActions().Selected(); ok {
+				m.clearTransientNotice()
+				return m.boardKey(a.key)
+			}
+			return nil
+		}
+	}
+	switch key {
+	case "right":
+		// → drills from the cards into their actions; the two panes sit
+		// side by side, so the arrow means what it looks like.
+		if m.cardActions().Len() > 0 {
+			m.actionFocused = true
+		}
+		return nil
+	case " ", "space":
+		m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
+		return nil
+	}
 	switch key {
 	case "tab":
 		m.cycleAttention()
@@ -1102,30 +1145,36 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 			}
 			f := r.F
 			m.Overlay.Push(&confirmDialog{
-				id:        "confirm-cleanup",
-				question:  "clean up " + string(f.ID) + "?",
-				detail:    "removes the worktree (incl. untracked files) and merged branch — keeps the record",
-				onConfirm: func() tea.Cmd { return m.cleanupLanded(f) },
+				id:           "confirm-cleanup",
+				cancelLabel:  "Keep",
+				confirmLabel: "Clean up",
+				question:     "clean up " + string(f.ID) + "?",
+				detail:       "removes the worktree (incl. untracked files) and merged branch — keeps the record",
+				onConfirm:    func() tea.Cmd { return m.cleanupLanded(f) },
 			})
 		}
 	case "y":
 		if r, ok := m.selected(); ok {
 			f := r.F
 			m.Overlay.Push(&confirmDialog{
-				id:        "confirm-duplicate",
-				question:  "duplicate " + string(f.ID) + "?",
-				detail:    f.Title + " — fresh copy in todo (same skips, profile, envelope); this card stays",
-				onConfirm: func() tea.Cmd { return m.duplicateFeature(f.ID) },
+				id:           "confirm-duplicate",
+				cancelLabel:  "Cancel",
+				confirmLabel: "Duplicate",
+				question:     "duplicate " + string(f.ID) + "?",
+				detail:       f.Title + " — fresh copy in todo (same skips, profile, envelope); this card stays",
+				onConfirm:    func() tea.Cmd { return m.duplicateFeature(f.ID) },
 			})
 		}
 	case "x":
 		if r, ok := m.selected(); ok {
 			f := r.F
 			m.Overlay.Push(&confirmDialog{
-				id:        "confirm-delete",
-				question:  "delete " + string(f.ID) + "?",
-				detail:    f.Title + " — removes worktree, branch, and record",
-				onConfirm: func() tea.Cmd { return m.deleteFeature(f.ID) },
+				id:           "confirm-delete",
+				cancelLabel:  "Keep",
+				confirmLabel: "Delete",
+				question:     "delete " + string(f.ID) + "?",
+				detail:       f.Title + " — removes worktree, branch, and record",
+				onConfirm:    func() tea.Cmd { return m.deleteFeature(f.ID) },
 			})
 		}
 	default:
@@ -1173,6 +1222,7 @@ func (m *Shell) moveSel(delta int) {
 			break
 		}
 	}
+	m.resetActionFocus() // the action list belongs to the card being left
 	pos = (pos + delta + len(order)) % len(order)
 	m.sel = order[pos]
 }
@@ -1182,6 +1232,7 @@ func (m *Shell) moveSel(delta int) {
 func (m *Shell) jumpSel(n int) {
 	order := m.displayOrder(m.sortMode)
 	if n >= 1 && n <= len(order) {
+		m.resetActionFocus() // the action list belongs to the card being left
 		m.sel = order[n-1]
 	}
 }

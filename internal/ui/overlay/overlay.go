@@ -75,9 +75,24 @@ func (st *Stack) HandleKey(key tea.KeyPressMsg) (consumed bool, cmd tea.Cmd) {
 	}
 	done, cmd := top.HandleKey(key)
 	if done {
-		st.Pop()
+		// remove the dialog that reported done, not whatever is on top
+		// now: a handler is allowed to open another dialog (the command
+		// menu running "new feature" is exactly that), and a positional
+		// pop would close the one it just opened instead.
+		st.remove(top)
 	}
 	return true, cmd
+}
+
+// remove splices out a specific dialog by identity, leaving anything
+// pushed above it in place.
+func (st *Stack) remove(d Dialog) {
+	for i, x := range st.dialogs {
+		if x == d {
+			st.dialogs = append(st.dialogs[:i], st.dialogs[i+1:]...)
+			return
+		}
+	}
 }
 
 // Paster is an optional Dialog extension: dialogs hosting a text input

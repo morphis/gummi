@@ -143,9 +143,11 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 		// with no way back. Ask, and name what is being lost.
 		n := len(iv.props)
 		m.Overlay.Push(&confirmDialog{
-			id:       "confirm-ingest-discard",
-			question: fmt.Sprintf("discard %d proposal(s)?", n),
-			detail:   "they came from a paid architect pass over " + iv.source + " and are not recoverable — nothing has been created yet",
+			id:           "confirm-ingest-discard",
+			cancelLabel:  "Keep",
+			confirmLabel: "Discard",
+			question:     fmt.Sprintf("discard %d proposal(s)?", n),
+			detail:       "they came from a paid architect pass over " + iv.source + " and are not recoverable — nothing has been created yet",
 			onConfirm: func() tea.Cmd {
 				m.ingest = nil
 				m.notice = noticeMsg{text: "ingest discarded — nothing created"}
@@ -233,10 +235,12 @@ func (m *Shell) approveIngest() tea.Cmd {
 		detail = fmt.Sprintf("%d source requirement(s) UNMAPPED · %s", u, iv.source)
 	}
 	m.Overlay.Push(&confirmDialog{
-		id:        "confirm-ingest",
-		question:  fmt.Sprintf("materialize %d feature(s) into todo?", n),
-		detail:    detail,
-		onConfirm: m.materializeIngest,
+		id:           "confirm-ingest",
+		cancelLabel:  "Cancel",
+		confirmLabel: "Materialize",
+		question:     fmt.Sprintf("materialize %d feature(s) into todo?", n),
+		detail:       detail,
+		onConfirm:    m.materializeIngest,
 	})
 	return nil
 }
