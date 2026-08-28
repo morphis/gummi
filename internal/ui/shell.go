@@ -886,6 +886,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if !m.attached() {
 		return nil
 	}
+	return m.boardKey(key)
+}
+
+// boardKey answers the board's keys. It is split out from handleKey so
+// the card action list and the command menu can invoke an action by name
+// without a second copy of the guards each case carries (a research card
+// refusing a merge, a card with no worktree refusing a diff). Both paths
+// funnel through here, so what a surface offers and what the handler
+// does cannot drift apart.
+func (m *Shell) boardKey(key string) tea.Cmd {
 	switch key {
 	case "tab":
 		m.cycleAttention()

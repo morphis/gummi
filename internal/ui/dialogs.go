@@ -48,33 +48,80 @@ func padRight(str string, n int) string {
 	return str
 }
 
-// confirmDialog asks a yes/no question before a destructive action.
+// confirmDialog asks a yes/no question before a destructive action. Its
+// last (only) tab stop is a buttonRow — Cancel focused by default so a
+// stray enter never fires the destructive side — named by the verb it
+// performs rather than a bare "yes", per DESIGN.md's confirm convention.
+// callers construct it as a struct literal (no constructor exists, so
+// existing Push sites across the package don't need to change); buttons
+// is built lazily on first use from confirmLabel/cancelLabel, which
+// default to "Confirm"/"Cancel" when left unset.
 type confirmDialog struct {
 	id        string
 	question  string
 	detail    string
 	onConfirm func() tea.Cmd
+
+	// confirmLabel/cancelLabel override the button row's legends; a caller
+	// naming the verb ("Delete", "Quit") gets that instead of a bare
+	// "Confirm".
+	confirmLabel string
+	cancelLabel  string
+
+	buttons *buttonRow
 }
 
 func (d *confirmDialog) ID() string { return d.id }
 
+// ensureButtons lazily builds the row on first use, since confirmDialog
+// has no constructor callers go through.
+func (d *confirmDialog) ensureButtons() *buttonRow {
+	if d.buttons == nil {
+		confirm := d.confirmLabel
+		if confirm == "" {
+			confirm = "Confirm"
+		}
+		cancel := d.cancelLabel
+		if cancel == "" {
+			cancel = "Cancel"
+		}
+		d.buttons = newButtonRow(button{label: cancel}, button{label: confirm, danger: true})
+	}
+	return d.buttons
+}
+
 func (d *confirmDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
+	row := d.ensureButtons()
 	switch key.String() {
+	// y/n stay as accelerators: existing callers and tests rely on them,
+	// and the muscle memory is exactly what an accelerator is for.
 	case "y", "Y":
 		return true, d.onConfirm()
 	case "n", "N", "esc":
+		return true, nil
+	case "left", "h", "shift+tab":
+		row.Move(-1)
+		return false, nil
+	case "right", "l", "tab":
+		row.Move(1)
+		return false, nil
+	case "enter":
+		if row.Selected().danger {
+			return true, d.onConfirm()
+		}
 		return true, nil
 	}
 	return false, nil
 }
 
 func (d *confirmDialog) View(s *theme.Styles, w, h int) string {
+	row := d.ensureButtons()
 	var b strings.Builder
 	b.WriteString(s.Destructive.Bold(true).Render(d.question) + "\n")
 	if d.detail != "" {
 		b.WriteString(s.Subtle.Render(d.detail) + "\n")
 	}
-	b.WriteString("\n" + s.KeyHint.Render("y") + s.KeyLabel.Render(" yes") +
-		s.Faint.Render(" · ") + s.KeyHint.Render("n") + s.KeyLabel.Render(" no"))
+	b.WriteString("\n" + row.View(s, true) + "\n")
+	b.WriteString("\n" + s.Faint.Render("enter select · ←/→ move · y/n accelerators · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }
