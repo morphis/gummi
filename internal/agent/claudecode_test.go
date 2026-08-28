@@ -19,7 +19,7 @@ import (
 func writeFakeClaude(t *testing.T, body string) string {
 	t.Helper()
 	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("python3 not available")
+		t.Fatalf("python3 not available: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(path, []byte("#!/usr/bin/env python3\n"+body), 0o700); err != nil {

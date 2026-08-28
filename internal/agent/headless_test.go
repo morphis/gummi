@@ -35,7 +35,7 @@ func writeFakeAgent(t *testing.T, body string) []string {
 	t.Helper()
 	py, err := exec.LookPath("python3")
 	if err != nil {
-		t.Skip("python3 not available")
+		t.Fatalf("python3 not available: %v", err)
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.py")
