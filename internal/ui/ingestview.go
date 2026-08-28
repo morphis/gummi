@@ -138,8 +138,20 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 	iv := m.ingest
 	switch key {
 	case "esc", "q":
-		m.ingest = nil
-		m.notice = noticeMsg{text: "ingest discarded — nothing created"}
+		// the proposals cost an architect pass to produce and nothing has
+		// been written yet, so a reflex esc used to throw away paid work
+		// with no way back. Ask, and name what is being lost.
+		n := len(iv.props)
+		m.Overlay.Push(&confirmDialog{
+			id:       "confirm-ingest-discard",
+			question: fmt.Sprintf("discard %d proposal(s)?", n),
+			detail:   "they came from a paid architect pass over " + iv.source + " and are not recoverable — nothing has been created yet",
+			onConfirm: func() tea.Cmd {
+				m.ingest = nil
+				m.notice = noticeMsg{text: "ingest discarded — nothing created"}
+				return nil
+			},
+		})
 		return nil
 	case "?":
 		m.Overlay.Push(m.helpOverlay())

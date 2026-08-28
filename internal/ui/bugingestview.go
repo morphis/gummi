@@ -170,6 +170,11 @@ type bugIngestView struct {
 
 	filter    textinput.Model // live substring filter over the fetched issues
 	filtering bool            // the filter input has focus (typing into it)
+	// edited marks a title or one-liner the user changed by hand. The
+	// fetched batch itself is one `G` away from being re-fetched, so a
+	// bare esc discarding it costs nothing — the hand edits are the only
+	// unrecoverable part, and the only thing worth a confirm.
+	edited bool
 }
 
 // newBugIngestView opens with the filter input focused: typing narrows the
@@ -299,8 +304,7 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "enter":
 			return m.importHighlighted()
 		case "esc":
-			m.bugIngest = nil
-			m.notice = noticeMsg{text: "import discarded — nothing created"}
+			return m.discardBugIngest()
 		default:
 			bv.filter, _ = bv.filter.Update(msg)
 			bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
@@ -309,9 +313,7 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch key {
 	case "esc", "q":
-		m.bugIngest = nil
-		m.notice = noticeMsg{text: "import discarded — nothing created"}
-		return nil
+		return m.discardBugIngest()
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
 		return nil
@@ -339,7 +341,7 @@ func (bv *bugIngestView) promptTitle(m *Shell) {
 	}
 	m.Overlay.Push(newTextPrompt("rename bug", bv.props[i].Title, "bug title",
 		func(s string) error { _, err := domain.Slugify(s); return err },
-		func(s string) tea.Cmd { bv.props[i].Title = s; return nil }))
+		func(s string) tea.Cmd { bv.props[i].Title = s; bv.edited = true; return nil }))
 }
 
 func (bv *bugIngestView) promptOneLiner(m *Shell) {
@@ -348,7 +350,33 @@ func (bv *bugIngestView) promptOneLiner(m *Shell) {
 		return
 	}
 	m.Overlay.Push(newTextPrompt("edit one-liner", bv.props[i].OneLiner, "one-line summary", nil,
-		func(s string) tea.Cmd { bv.props[i].OneLiner = s; return nil }))
+		func(s string) tea.Cmd { bv.props[i].OneLiner = s; bv.edited = true; return nil }))
+}
+
+// discardBugIngest drops the whole fetched batch. The fetch itself is
+// one `G` away from being redone, so an untouched batch goes without
+// ceremony; hand-edited titles and one-liners are the part no re-fetch
+// brings back, so those get asked about first.
+func (m *Shell) discardBugIngest() tea.Cmd {
+	bv := m.bugIngest
+	if bv == nil {
+		return nil
+	}
+	drop := func() tea.Cmd {
+		m.bugIngest = nil
+		m.notice = noticeMsg{text: "import discarded — nothing created"}
+		return nil
+	}
+	if !bv.edited {
+		return drop()
+	}
+	m.Overlay.Push(&confirmDialog{
+		id:        "confirm-bug-ingest-discard",
+		question:  "discard the import?",
+		detail:    "your renamed titles and one-liners are not kept — re-importing fetches the issues again as they are on GitHub",
+		onConfirm: drop,
+	})
+	return nil
 }
 
 // importHighlighted confirms, then imports exactly the row under the

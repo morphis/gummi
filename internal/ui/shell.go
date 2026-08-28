@@ -795,6 +795,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		// ctrl+c is hoisted above the overlay: it is the one key every
+		// terminal program is expected to answer, and routing it into an
+		// open dialog's text input (which is what happened) left no way
+		// out of a modal but esc.
+		if msg.String() == "ctrl+c" {
+			return m, m.quitCmd()
+		}
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
 			return m, cmd
 		}
@@ -822,11 +829,34 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
-	key := msg.String()
-	if key == "ctrl+c" {
+// quitCmd is the shared exit path for q and ctrl+c. Quitting with
+// autonomous work live stops sessions mid-turn, discarding the in-flight
+// turn and its spend and leaving the stage uncommitted on disk; ask
+// first so the user who means it can still get out. Idle quit stays a
+// single keypress, and a second press while the confirm is already up
+// means it — otherwise ctrl+c, hoisted above the overlay, could only
+// ever re-raise the dialog it just opened.
+func (m *Shell) quitCmd() tea.Cmd {
+	if m.Overlay.Contains("confirm-quit") {
 		return tea.Quit
 	}
+	live := m.liveSessions()
+	if len(live) == 0 {
+		return tea.Quit
+	}
+	m.Overlay.Push(&confirmDialog{
+		id:       "confirm-quit",
+		question: "quit with live sessions " + strings.Join(live, ", ") + "?",
+		detail:   "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)",
+		onConfirm: func() tea.Cmd {
+			return tea.Quit
+		},
+	})
+	return nil
+}
+
+func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	key := msg.String()
 	// The chat pane captures all keys except the global quit.
 	if m.chat != nil {
 		return m.handleChatKey(msg)
@@ -848,23 +878,7 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch key {
 	case "q":
-		// quitting with autonomous work live stops sessions mid-turn,
-		// discarding the in-flight turn and its spend and leaving the
-		// stage uncommitted on disk; ask first so the user who means it
-		// can still get out (the confirm dialog's way-through). Idle quit
-		// stays a single keypress.
-		if live := m.liveSessions(); len(live) > 0 {
-			m.Overlay.Push(&confirmDialog{
-				id:       "confirm-quit",
-				question: "quit with live sessions " + strings.Join(live, ", ") + "?",
-				detail:   "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)",
-				onConfirm: func() tea.Cmd {
-					return tea.Quit
-				},
-			})
-			return nil
-		}
-		return tea.Quit
+		return m.quitCmd()
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
 		return nil

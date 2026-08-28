@@ -173,7 +173,7 @@ func (c *chatPane) bindings() []binding {
 		return []binding{
 			{key: "enter", label: "send", bar: true},
 			{key: "pgup/pgdn", label: "scroll", bar: true},
-			{key: "ctrl+o", label: "outputs", help: "expand/collapse captured tool outputs", bar: true},
+			{key: "alt+o", label: "outputs", help: "expand/collapse captured tool outputs", bar: true},
 			{key: "esc", label: "detach", help: "detach — the session keeps running", bar: true},
 		}
 	}
@@ -358,7 +358,11 @@ func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send, answer str
 	case "pgdown", "ctrl+d":
 		c.scrollBy(-c.page())
 		return false, "", "", nil
-	case "ctrl+o":
+	// alt+o, not ctrl+o: zellij binds ctrl+o to session mode, so the
+	// toggle never arrived there. The message input owns every printable
+	// key, so this needs a modifier — alt is the one no multiplexer
+	// claims, and alt+enter already sets that precedent in the forms.
+	case "alt+o":
 		c.showOutput = !c.showOutput
 		return false, "", "", nil
 	}
@@ -388,9 +392,12 @@ func (c *chatPane) handlePickerKey(msg tea.KeyPressMsg, ask *engine.Ask) (detach
 	switch msg.String() {
 	case "esc":
 		return true, "", "", nil // detach; the question stays pending
-	case "up", "k", "ctrl+p":
+	// ctrl+p/ctrl+n used to alias these. They were undeclared, redundant
+	// with the arrows, and both are zellij's defaults (pane and resize
+	// mode), so in a multiplexer they never reached us anyway.
+	case "up", "k":
 		c.cursor = (c.cursor - 1 + len(ask.Options)) % len(ask.Options)
-	case "down", "j", "ctrl+n":
+	case "down", "j":
 		c.cursor = (c.cursor + 1) % len(ask.Options)
 	case "o":
 		if ask.FreeForm {
