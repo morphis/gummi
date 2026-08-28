@@ -217,14 +217,16 @@ auto-crosses design gates; `--full` adds brainstorm + plan, and
 | `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link/unlink a card to a PR, or read its linked-PR status and review comments |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place (message required) |
+| `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch (message required) |
 | `gummi deps add\|rm <dependent> <depends-on>` / `gummi deps list <id>` | manage a card's direct dependency edges |
 | `gummi doctor [--json] [--deep]` | readiness: repo, backend, auth, profile, envelope, lock, per-role reach (`--deep`) |
 | `gummi skill show\|install\|list` | generate and install the calling-agent skill |
 
 `status`/`spec`/`diff` take no lock, so you can inspect a feature while a run
 is live. A run holds an exclusive `.gummi` lock, so a headless run and the TUI
-never touch the same workspace at once. So do `gummi merge` and `gummi clean`,
-which mutate the workspace and main.
+never touch the same workspace at once. So do `gummi merge`, `gummi squash`,
+`gummi commit`, and `gummi clean`, which mutate the workspace (and, for
+`merge`, main).
 
 ### Landing and cleanup without the TUI
 
@@ -301,6 +303,24 @@ What you do before that first push depends on the repo's merge setting:
 |---|---|
 | squash merge | nothing — GitHub already collapses the branch to one commit |
 | merge commit / rebase merge | `gummi squash <id> -m <message\|->` first, so the branch lands as one commit either way; later fix rounds can keep their own commits or `squash` again, as long as no review thread is open |
+
+`squash` refuses outright while the worktree carries uncommitted changes,
+by design — folding them silently into the collapsed commit would hide what
+changed. If a PR-linked card has stray worktree changes (say, a fix made by
+hand rather than through `resume`), commit them first with `gummi commit`,
+then squash:
+
+```sh
+gummi commit FD-042 -m "fix(export): tighten the empty-array case"
+gummi squash FD-042 -m "feat(export): add a --format=json flag"
+```
+
+`gummi commit <id\|ref> -m <message\|->` commits exactly the target card's own
+uncommitted worktree changes onto its own branch, using the caller-supplied
+message — no PR, remote, or main-checkout interaction, and no stage
+transition. It has no PR-linked or stage precondition, so it works
+regardless of what `merge`/`squash` would otherwise require; a clean
+worktree is a no-op, reported as such, not an error.
 
 ### Dependencies between cards
 

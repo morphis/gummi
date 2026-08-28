@@ -306,6 +306,18 @@ type mergedEvent struct {
 	Commit string `json:"commit"`
 }
 
+// committedEvent reports a successful `gummi commit`: the card's own
+// uncommitted worktree changes were committed onto its own branch. Commit is
+// the new commit's sha — exactly what CommitAll created — so a driving
+// script can record it without re-reading git. On the no-op path (worktree
+// already clean) Commit returns before emitting this event at all.
+type committedEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
+}
+
 // cleanedEvent reports a successful headless cleanup: a landed card's
 // worktree and branch were removed (the card record stays as a done entry).
 type cleanedEvent struct {

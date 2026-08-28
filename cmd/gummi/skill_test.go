@@ -22,6 +22,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 		"research": func(fs *flag.FlagSet) { registerResearchFlags(fs) },
 		"resume":   func(fs *flag.FlagSet) { registerResumeFlags(fs) },
 		"merge":    func(fs *flag.FlagSet) { registerMergeFlags(fs) },
+		"commit":   func(fs *flag.FlagSet) { registerCommitFlags(fs) },
 		"status":   func(fs *flag.FlagSet) { registerStatusFlags(fs) },
 		"doctor":   func(fs *flag.FlagSet) { registerDoctorFlags(fs) },
 	}
@@ -36,7 +37,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 	}
 
 	for _, cmd := range []string{
-		"gummi run", "gummi research", "gummi resume", "gummi verify", "gummi merge", "gummi clean",
+		"gummi run", "gummi research", "gummi resume", "gummi verify", "gummi merge", "gummi commit", "gummi clean",
 		"gummi status", "gummi spec", "gummi diff", "gummi doctor", "gummi skill",
 	} {
 		if !strings.Contains(doc, cmd) {

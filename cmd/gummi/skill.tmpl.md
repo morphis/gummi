@@ -242,6 +242,15 @@ before you run `gummi merge` — don't invent a message and merge
 unattended. `gummi clean <id>` removes a landed card's worktree and branch
 afterward. Both hold the same per-card lock as `run`/`resume`.
 
+`gummi commit <id> -m "<message>"` commits exactly a card's own uncommitted
+worktree changes onto its own branch, with the same message rules as
+`merge`/`squash` — no auto-generated fallback, and refused before touching
+git if invalid. It has no PR-linked or stage precondition, unlike `merge`
+(which refuses a PR-linked card outright) and `squash` (which refuses a
+dirty worktree outright): use `commit` first to turn stray worktree changes
+into a commit, then run `squash` on a PR-linked card that has them, in place
+of raw `git commit`. A clean worktree is a no-op, not an error.
+
 If a card depends on another (`gummi deps add <dependent> <depends-on>`,
 `rm`/`list` to remove or read them back), an unmet dependency blocks it
 from entering its coding stage — see the `blocked (3)` case above.

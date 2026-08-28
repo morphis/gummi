@@ -1205,9 +1205,12 @@ caller must decide, then exits.
   counterpart of the TUI's `m`, requiring the card at a verified branch and a
   Conventional Commits message with no diff dump or agent attribution before
   it will touch git. `gummi clean <id>` is the counterpart of `c`, removing a
-  landed card's worktree and branch. Both hold the same per-card lock as
-  `run`/`resume` (Decision 12) and stream the same typed NDJSON/exit
-  contract.
+  landed card's worktree and branch. `gummi commit <id> -m <message>` commits
+  a card's own uncommitted worktree changes onto its own branch, with no
+  PR-linked or stage precondition, so a dirty card can be readied for
+  `squash` (or, unlinked, `merge`) without raw git. All three hold the same
+  per-card lock as `run`/`resume` (Decision 12) and stream the same typed
+  NDJSON/exit contract.
 - **PR landing** — a linked card refuses `gummi merge`; `gummi pr link/unlink/status/comments`
   name and read the PR, `gummi squash <id> -m <message|->` collapses the
   branch to one presentable commit before the user's `git push`, and

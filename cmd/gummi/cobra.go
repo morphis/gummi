@@ -91,6 +91,15 @@ var cleanCmd = &cobra.Command{
 	},
 }
 
+// commitCmd implements `gummi commit <id|ref> -m <message|->`.
+var commitCmd = &cobra.Command{
+	Use:   "commit <id|ref> -m <message|->",
+	Short: "Commit a card's own uncommitted worktree changes onto its branch",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runCommit(buildFlagArgs(cmd, args))
+	},
+}
+
 // statusCmd implements `gummi status <id|ref> [--json]`.
 var statusCmd = &cobra.Command{
 	Use:   "status <id|ref> [--json]",
@@ -263,6 +272,7 @@ func init() {
 	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")
 	squashCmd.Flags().StringP("message", "m", "", "collapsed commit message (required; - reads from stdin)")
 	squashCmd.Flags().Bool("force", false, "proceed even if the linked PR has open review threads")
+	commitCmd.Flags().StringP("message", "m", "", "commit message for the card's uncommitted worktree changes (required; - reads from stdin)")
 	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
 	doctorCmd.Flags().Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
 	doctorCmd.Flags().Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")

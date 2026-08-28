@@ -544,6 +544,46 @@ func (d *Driver) Squash(ctx context.Context, id domain.FeatureID, message string
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
 }
 
+// Commit commits exactly the target card's own uncommitted worktree changes
+// onto the card's own branch, using the caller-supplied message — the
+// headless counterpart of the "final checkpoint" commit Merge and the TUI's
+// m key already make internally, now addressable on its own with a
+// caller-chosen message instead of an auto-generated one. It has no PR or
+// stage precondition of its own: any card in any stage can commit its own
+// stray changes. It composes with Squash to replace the raw-git "commit the
+// stray changes, then collapse" workaround a PR-linked card with a dirty
+// worktree otherwise needs. A clean worktree is a no-op, reported as
+// StatusDone with no `committed` event, not an error.
+func (d *Driver) Commit(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
+	f, err := d.store.GetFeature(ctx, id)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	wt, err := d.eng.WorktreesFor(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+
+	if err := engine.ValidateCommitMessage(message); err != nil {
+		return d.fail(ctx, string(id), fmt.Errorf("invalid commit message: %w", err))
+	}
+
+	committed, err := wt.CommitAll(ctx, &f, message)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	if !committed {
+		return Outcome{Status: StatusDone, ID: string(id)}, nil
+	}
+
+	sha, err := wt.Head(ctx, &f)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	d.out.emit(committedEvent{Event: "committed", ID: string(id), Branch: f.BranchName(), Commit: sha})
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
+}
+
 // commitSubject returns msg's first line — the subject a squashed/merged
 // event reports, without the body.
 func commitSubject(msg string) string {
