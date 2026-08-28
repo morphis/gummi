@@ -107,3 +107,52 @@ func TestDrawEmptyStackLeavesContent(t *testing.T) {
 		t.Error("content vanished with no dialogs open")
 	}
 }
+
+// valueDialog is a value-type Dialog holding an uncomparable field, the
+// shape helpDialog has. Removing it from the stack must not compare
+// interfaces: == on two such values panics with "comparing uncomparable
+// type", which crashed gummi on every esc out of the help overlay.
+type valueDialog struct {
+	rows [][2]string
+}
+
+func (valueDialog) ID() string { return "value" }
+func (valueDialog) HandleKey(tea.KeyPressMsg) (bool, tea.Cmd) {
+	return true, nil
+}
+func (valueDialog) View(*theme.Styles, int, int) string { return "" }
+
+func TestHandleKeyRemovesValueTypeDialog(t *testing.T) {
+	var st Stack
+	st.Push(valueDialog{rows: [][2]string{{"?", "help"}}})
+	if consumed, _ := st.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape}); !consumed {
+		t.Fatal("key was not consumed")
+	}
+	if st.Len() != 0 {
+		t.Fatalf("stack len = %d, want 0", st.Len())
+	}
+}
+
+// pushingDialog opens another dialog from its own handler, then reports
+// done — the command menu running "New feature". The stack must close
+// the pusher, not the pushed.
+type pushingDialog struct{ st *Stack }
+
+func (pushingDialog) ID() string { return "pusher" }
+func (d pushingDialog) HandleKey(tea.KeyPressMsg) (bool, tea.Cmd) {
+	d.st.Push(valueDialog{})
+	return true, nil
+}
+func (pushingDialog) View(*theme.Styles, int, int) string { return "" }
+
+func TestHandleKeyClosesThePusherNotThePushed(t *testing.T) {
+	var st Stack
+	st.Push(pushingDialog{st: &st})
+	st.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if st.Len() != 1 {
+		t.Fatalf("stack len = %d, want 1 (the pushed dialog)", st.Len())
+	}
+	if got := st.Top().ID(); got != "value" {
+		t.Fatalf("top = %q, want the pushed dialog", got)
+	}
+}

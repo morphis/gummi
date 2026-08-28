@@ -852,16 +852,36 @@ func (m *Shell) quitCmd() tea.Cmd {
 	if m.Overlay.Contains("confirm-quit") {
 		return tea.Quit
 	}
-	live := m.liveSessions()
-	if len(live) == 0 {
+	question, detail := "", ""
+	switch live := m.liveSessions(); {
+	case len(live) > 0:
+		question = "quit with live sessions " + strings.Join(live, ", ") + "?"
+		detail = "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)"
+	// an ingest or bug-import pass is not an engine session, so
+	// liveSessions never saw it. Both cost a paid architect pass, and
+	// esc already confirms before discarding one — quitting past that
+	// silently would make the confirm theatre.
+	case m.ingestRun != nil:
+		question = "quit while a decompose is running?"
+		detail = "the architect pass is paid for and its proposals are not written anywhere yet — quitting loses them"
+	case m.ingest != nil:
+		question = fmt.Sprintf("quit with %d unsaved proposal(s)?", len(m.ingest.props))
+		detail = "they came from a paid architect pass over " + m.ingest.source + " and nothing has been created yet"
+	case m.bugIngesting:
+		question = "quit while a bug import is fetching?"
+		detail = "the fetch is in flight — quitting drops it"
+	case m.bugIngest != nil && m.bugIngest.edited:
+		question = "quit with unsaved import edits?"
+		detail = "your renamed titles and one-liners are not kept — re-importing fetches the issues as they are on GitHub"
+	default:
 		return tea.Quit
 	}
 	m.Overlay.Push(&confirmDialog{
 		id:           "confirm-quit",
 		cancelLabel:  "Stay",
 		confirmLabel: "Quit",
-		question:     "quit with live sessions " + strings.Join(live, ", ") + "?",
-		detail:       "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)",
+		question:     question,
+		detail:       detail,
 		onConfirm: func() tea.Cmd {
 			return tea.Quit
 		},
@@ -910,6 +930,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
+	// reconcile before anything can act: m.sel is written from half a
+	// dozen places (the attention cycle, the inbox jump, pgup/pgdn, a
+	// reload) and a cursor left over from another card would otherwise
+	// run its action against this one. Idempotent, so the per-site calls
+	// stay for rendering and this is the backstop for correctness.
+	m.syncActionFocus()
 	// the action list, when focused, owns movement and enter; everything
 	// else still falls through to the board so the accelerators keep
 	// working from either side.
@@ -1012,10 +1038,12 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "pgup":
 		if order := m.displayOrder(m.sortMode); len(order) > 0 {
 			m.sel = order[0]
+			m.syncActionFocus()
 		}
 	case "pgdown":
 		if order := m.displayOrder(m.sortMode); len(order) > 0 {
 			m.sel = order[len(order)-1]
+			m.syncActionFocus()
 		}
 	case "n":
 		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createFeature))
@@ -1570,6 +1598,7 @@ func (m *Shell) cycleAttention() {
 	for i, r := range m.rows {
 		if r.F.ID == next {
 			m.sel = i
+			m.syncActionFocus()
 			return
 		}
 	}
@@ -1583,6 +1612,7 @@ func (m *Shell) openInbox() {
 			for i, r := range m.rows {
 				if r.F.ID == id {
 					m.sel = i
+					m.syncActionFocus()
 					break
 				}
 			}

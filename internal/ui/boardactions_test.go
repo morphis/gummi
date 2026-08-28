@@ -88,3 +88,58 @@ func TestRunCommandRoutesGlobalKeys(t *testing.T) {
 		t.Fatal("the menu's help entry did not open the help overlay")
 	}
 }
+
+// TestQuitConfirmsWithUnsavedProposals: an ingest pass is not an engine
+// session, so liveSessions never saw it — and ctrl+c, hoisted above the
+// overlay, was one keystroke from discarding a paid architect pass that
+// esc already confirms before discarding.
+func TestQuitConfirmsWithUnsavedProposals(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.ingest = &ingestView{source: "prd.md", props: []ingestProposal{{}, {}}}
+	if cmd := m.quitCmd(); cmd != nil {
+		t.Fatal("quit returned a command instead of asking first")
+	}
+	if !m.Overlay.Contains("confirm-quit") {
+		t.Fatal("quit did not confirm with unsaved proposals on screen")
+	}
+}
+
+// TestQuitConfirmsDuringDecompose: same for a pass still running.
+func TestQuitConfirmsDuringDecompose(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.ingestRun = newIngestRunView("prd.md")
+	if cmd := m.quitCmd(); cmd != nil {
+		t.Fatal("quit returned a command instead of asking first")
+	}
+	if !m.Overlay.Contains("confirm-quit") {
+		t.Fatal("quit did not confirm while a decompose was running")
+	}
+}
+
+// TestQuitIdleStillOneKeypress: the confirm must not become the default.
+func TestQuitIdleStillOneKeypress(t *testing.T) {
+	m := populatedShell(100, 30)
+	if cmd := m.quitCmd(); cmd == nil {
+		t.Fatal("idle quit asked for confirmation")
+	}
+	if m.Overlay.HasDialogs() {
+		t.Fatal("idle quit opened a dialog")
+	}
+}
+
+// TestActionFocusResetsOnAttentionCycle: tab jumps the selection to
+// another card; a cursor left on merge would otherwise merge that one.
+func TestActionFocusResetsOnAttentionCycle(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.syncActionFocus()
+	m.actionFocused = true
+	m.actionCursor = 3
+	for _, r := range m.rows {
+		m.inbox.add(r.F.ID, attnGate, "gate")
+	}
+	m.cycleAttention()
+	if m.actionFocused || m.actionCursor != 0 {
+		t.Fatalf("focus=%v cursor=%d after the attention cycle, want false/0",
+			m.actionFocused, m.actionCursor)
+	}
+}

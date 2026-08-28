@@ -20,6 +20,12 @@ import (
 // right-aligned accelerator, so the list teaches the shortcut instead of
 // requiring it memorized up front.
 
+// sepPrefix marks the danger separator row so the windowing can tell a
+// structural line from an action when counting what is hidden. It is a
+// zero-width joiner: invisible in the rendered pane, and no action label
+// starts with one.
+const sepPrefix = "\u200d"
+
 // cardAction is one invokable action on the selected card.
 type cardAction struct {
 	id     string // stable identifier the Shell switches on to run it
@@ -101,6 +107,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	needsWT := workflow.NeedsWorktree(in.kind, in.stage)
 
 	runLabel, runWhy := runLabelWhy(in)
+	pauseLabel, pauseWhy := pauseLabelWhy(in)
 
 	advanceLabel, advanceWhy := "advance", "advance stage (gate; from verify it lands the branch on main)"
 	if research && doneStage {
@@ -112,7 +119,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	specs := []actionSpec{
 		{"run", "enter", runLabel, runWhy, false,
 			workflow.Interactive(in.stage) || autonomousStage(in.stage)},
-		{"pause", "p", "pause", "pause the running agent, freeing its slot", false,
+		// the gate must stay in lockstep with boardVerb's `p`, which pauses
+		// whenever a non-interactive session exists — including a finished
+		// one, which p parks. Only the wording varies: "pause the running
+		// agent" was a lie on a session that had already stopped.
+		{"pause", "p", pauseLabel, pauseWhy, false,
 			in.sess != ""},
 		{"deps", "p", "dependencies", "open the dependency picker for this card", false,
 			in.sess == ""},
@@ -231,6 +242,22 @@ func runLabelWhy(in nextInput) (label, why string) {
 	}
 }
 
+// pauseLabelWhy words the p action for the session state it will act on.
+// boardVerb pauses any non-interactive session, so this row appears for
+// queued, running, paused and finished sessions alike — and describing
+// all four as "pause the running agent" was wrong for three of them.
+func pauseLabelWhy(in nextInput) (label, why string) {
+	switch in.sess {
+	case engine.StateQueued:
+		return "pause", "drop it out of the queue before it starts"
+	case engine.StateRunning:
+		return "pause", "stop the running agent mid-turn, freeing its slot"
+	default:
+		// paused or finished: p parks it so the loop stops offering it
+		return "park", "park the settled session so it stops asking"
+	}
+}
+
 // View renders the action list: cursor marker left, label left, key
 // right-aligned within w, danger rows tinted and set off by a separator,
 // and a trailing explainer for whatever row the cursor sits on (shown
@@ -252,7 +279,7 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 	sepDrawn := false
 	for i, a := range l.actions {
 		if a.danger && !sepDrawn {
-			lines = append(lines, s.Separator.Render(strings.Repeat("─", max(min(w, 40), 0))))
+			lines = append(lines, sepPrefix+s.Separator.Render(strings.Repeat("─", max(min(w, 40), 0))))
 			sepDrawn = true
 		}
 		// the marker shows on the cursor row either way — the explainer
@@ -284,11 +311,27 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 		}
 		lines = append(lines, marker+labelStyle.Render(label)+strings.Repeat(" ", pad)+" "+keyStr)
 	}
+	// the "…N more" and "↳ why" lines are part of the block, so they come
+	// out of the same budget the caller granted — otherwise the block
+	// renders maxRows+2 and overruns the reserve the dashboard computed.
+	rowBudget := maxRows
+	if rowBudget > 0 {
+		rowBudget = max(rowBudget-2, 1)
+	}
 	shown := lines
 	hidden := 0
-	if maxRows > 0 && len(lines) > maxRows {
-		shown = windowLines(lines, cursorLine, maxRows)
-		hidden = len(lines) - len(shown)
+	if rowBudget > 0 && len(lines) > rowBudget {
+		shown = windowLines(lines, cursorLine, rowBudget)
+		// count hidden *actions*, not hidden lines: the danger separator
+		// is a line but not something ↑↓ can reach, so counting it made
+		// the tally one too many whenever it fell outside the window.
+		shownActions := 0
+		for _, l := range shown {
+			if !strings.HasPrefix(l, sepPrefix) {
+				shownActions++
+			}
+		}
+		hidden = len(l.actions) - shownActions
 	}
 	// copy before appending: windowLines returns a slice of lines, so
 	// appending in place would scribble over the row after the window.

@@ -20,5 +20,5 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mo        [m  [38;2;191;188;200mchange the card's managed repository (before worktree)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200ma        [m  [38;2;191;188;200mraw-attach the agent CLI in the worktree[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle needs-attention queue[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mi        [m  [38;2;191;188;200mopen needs-attention inbox[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mr        [m  [38;2;191;188;200mrebase branch onto main (conflicts hand off to an agent)[m
+[38;2;107;80;255m│[m
+[38;2;107;80;255m│[m  [38;2;96;95;107m↑↓ scroll · 1–18 of 32 · esc close[m

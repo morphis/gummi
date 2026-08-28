@@ -69,30 +69,32 @@ func (st *Stack) Contains(id string) bool {
 // HandleKey routes a key press to the top dialog. It returns true when
 // the key was consumed (a dialog was open).
 func (st *Stack) HandleKey(key tea.KeyPressMsg) (consumed bool, cmd tea.Cmd) {
-	top := st.Top()
-	if top == nil {
+	if len(st.dialogs) == 0 {
 		return false, nil
 	}
-	done, cmd := top.HandleKey(key)
+	// remember where the handling dialog sits. A handler is allowed to
+	// open another dialog (the command menu running "new feature" is
+	// exactly that), and anything it pushes lands above this index — so
+	// removing by index closes the dialog that finished rather than the
+	// one it just opened. Identity comparison is not an option: Dialog is
+	// an interface and some implementations are value types holding
+	// slices, where == panics at runtime with "comparing uncomparable
+	// type" (helpDialog did, on every esc).
+	idx := len(st.dialogs) - 1
+	done, cmd := st.dialogs[idx].HandleKey(key)
 	if done {
-		// remove the dialog that reported done, not whatever is on top
-		// now: a handler is allowed to open another dialog (the command
-		// menu running "new feature" is exactly that), and a positional
-		// pop would close the one it just opened instead.
-		st.remove(top)
+		st.removeAt(idx)
 	}
 	return true, cmd
 }
 
-// remove splices out a specific dialog by identity, leaving anything
-// pushed above it in place.
-func (st *Stack) remove(d Dialog) {
-	for i, x := range st.dialogs {
-		if x == d {
-			st.dialogs = append(st.dialogs[:i], st.dialogs[i+1:]...)
-			return
-		}
+// removeAt splices out the dialog at i, leaving anything pushed above it
+// in place.
+func (st *Stack) removeAt(i int) {
+	if i < 0 || i >= len(st.dialogs) {
+		return
 	}
+	st.dialogs = append(st.dialogs[:i], st.dialogs[i+1:]...)
 }
 
 // Paster is an optional Dialog extension: dialogs hosting a text input

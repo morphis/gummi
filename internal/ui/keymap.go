@@ -67,9 +67,9 @@ func (m *Shell) activeSurface() (string, []binding) {
 }
 
 // helpOverlay builds the ? dialog for whichever surface is active.
-func (m *Shell) helpOverlay() helpDialog {
+func (m *Shell) helpOverlay() *helpDialog {
 	name, bs := m.activeSurface()
-	return helpDialog{title: "keys · " + name, rows: helpRows(bs)}
+	return &helpDialog{title: "keys · " + name, rows: helpRows(bs)}
 }
 
 // boardBindings is the board's key table. The bar subset adapts to the
@@ -111,8 +111,10 @@ func (m *Shell) boardBindings() []binding {
 		enter,
 		pause,
 		transcript,
-		{key: "s", label: "spec", help: "spec (tab: read ⇄ annotate)", bar: true},
-		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)", bar: true},
+		// s and d are off the bar: the action list reaches both without a
+		// key, so the bar can spend its width on the two ways in instead.
+		{key: "s", label: "spec", help: "spec (tab: read ⇄ annotate)"},
+		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)"},
 		advance,
 		{key: "b", label: "bounce", help: "bounce back to implement/fix"},
 		{key: "P", label: "add plan", help: "restore the plan stage on a quick/skip-plan feature (design phase only)"},
