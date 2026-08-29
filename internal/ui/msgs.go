@@ -45,6 +45,13 @@ type featureRow struct {
 	// that would fight the other process — it can still be watched.
 	Foreign      state.ForeignDrive
 	DrivenAbroad bool
+	// Events is the card's event log (state.CardEvent, card_events table),
+	// populated for the SELECTED card only, lazily, once the card page
+	// opens or the selection changes on it (Shell.loadCardEvents). Every
+	// other row's Events is nil — loading every card's log on each board
+	// refresh would be unbounded IO, which is exactly what the row
+	// snapshot above exists to avoid.
+	Events []state.CardEvent
 }
 
 // rowsMsg delivers a fresh load of the board content.

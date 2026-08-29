@@ -12,14 +12,19 @@ import (
 
 // openCard opens the selected card's page. The action list is the only
 // list on that page, so it takes the arrow keys on arrival — there is no
-// second region to hand them to.
-func (m *Shell) openCard() {
-	if _, ok := m.selected(); !ok {
-		return
+// second region to hand them to. It also kicks off the selected card's
+// event-log load (shell.go's loadCardEvents): the thread's folded stage
+// receipts need it, and the card page is the one place that reads it, so
+// it is fetched on arrival rather than on every board refresh.
+func (m *Shell) openCard() tea.Cmd {
+	r, ok := m.selected()
+	if !ok {
+		return nil
 	}
 	m.cardOpen = true
 	m.actionCursor = 0
 	m.actionsExpanded = false
+	return m.loadCardEvents(r.F.ID)
 }
 
 // closeCard returns to the backlog list.
@@ -29,11 +34,19 @@ func (m *Shell) closeCard() {
 }
 
 // stepCard moves to the previous/next card without leaving the page —
-// J/K, so j/k stay on the action list where the eye already is.
-func (m *Shell) stepCard(delta int) {
+// J/K, so j/k stay on the action list where the eye already is. It
+// re-fires the event-log load for the newly selected card, same as
+// openCard: the thread's folded receipts belong to whichever card is on
+// screen now.
+func (m *Shell) stepCard(delta int) tea.Cmd {
 	m.moveSel(delta)
 	m.actionCursor = 0
 	m.actionsExpanded = false
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	return m.loadCardEvents(r.F.ID)
 }
 
 // actionsOwnArrows reports whether the card's action list owns ↑↓ and
@@ -57,8 +70,7 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	if !m.cardOpen {
 		switch key {
 		case "enter", "right", "l":
-			m.openCard()
-			return nil, true
+			return m.openCard(), true
 		}
 		return nil, false
 	}
@@ -73,11 +85,9 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		m.moveAction(-1)
 		return nil, true
 	case "J":
-		m.stepCard(1)
-		return nil, true
+		return m.stepCard(1), true
 	case "K":
-		m.stepCard(-1)
-		return nil, true
+		return m.stepCard(-1), true
 	case "right":
 		return nil, true
 	case "enter":
@@ -231,7 +241,11 @@ func scrollNote(render func(...string) string, arrow string, n int) string {
 
 // cardPageView renders one card on the full width: a breadcrumb naming
 // the way back and the card's position in the backlog, then the card's
-// detail (dashboardView) — with the whole terminal to spend on it.
+// thread (thread.go) — with the whole terminal to spend on it.
+//
+// This delegates to threadView rather than the older dashboardView, which
+// stays in the package untouched (board_test.go still goldens it
+// directly).
 func (m *Shell) cardPageView(w, h int) string {
 	s := m.styles
 	if _, ok := m.selected(); !ok {
@@ -248,7 +262,7 @@ func (m *Shell) cardPageView(w, h int) string {
 	crumb := " " + s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
 		"  " + s.KeyHint.Render("J/K") + s.Faint.Render(" prev/next card")
-	return ansi.Truncate(crumb, w, "…") + "\n" + m.dashboardView(w, max(h-1, 1))
+	return ansi.Truncate(crumb, w, "…") + "\n" + m.threadView(w, max(h-1, 1))
 }
 
 // backlogBindings is the list level's key table: the board's own table

@@ -143,16 +143,29 @@ type Shell struct {
 	foreignTicks int
 	// locks is the board's per-card lock registry, shared with the engine
 	// (AttachCardLocks). Nil leaves the board's git verbs unlocked.
-	locks        *state.CardLocks
-	inbox        *inbox // needs-attention queue
-	checks       map[domain.FeatureID][]verify.Result
-	baselining   map[domain.FeatureID]bool // a baseline check run is in flight
-	rounds       map[roundKey]int          // automatic loop round counters, keyed by (id, round_kind)
-	roundStore   rounds.Store              // persistence seam for rounds (defaults to store)
-	profileNames []string                  // profile names for the new-feature form
-	repoNames    []string                  // configured managed-repo names for the new-card forms
-	envelope     int                       // default spend-plan envelope for new features (0 = none)
-	notifier     *notify.Notifier          // bell/desktop hook for needs-attention events
+	locks      *state.CardLocks
+	inbox      *inbox // needs-attention queue
+	checks     map[domain.FeatureID][]verify.Result
+	baselining map[domain.FeatureID]bool // a baseline check run is in flight
+	rounds     map[roundKey]int          // automatic loop round counters, keyed by (id, round_kind)
+	// cardEvents caches the card-event log (state.CardEvent, card_events
+	// table) per feature, loaded lazily by loadCardEvents and applied to
+	// the selected row's featureRow.Events at render time (msgs.go). It is
+	// never populated for a row that has not been the selected card on an
+	// open card page — loading every card's log on each board refresh
+	// would be unbounded IO.
+	cardEvents map[domain.FeatureID][]state.CardEvent
+	// expandedStages is the thread's fold state: which stage segments (see
+	// thread.go's stageSegments) render their events instead of one
+	// collapsed line. Keyed by a per-card, per-segment string so two
+	// cards' fold state never collides. Nothing sets a key yet — this is
+	// the seam a key binds to, not a live toggle yet.
+	expandedStages map[string]bool
+	roundStore     rounds.Store     // persistence seam for rounds (defaults to store)
+	profileNames   []string         // profile names for the new-feature form
+	repoNames      []string         // configured managed-repo names for the new-card forms
+	envelope       int              // default spend-plan envelope for new features (0 = none)
+	notifier       *notify.Notifier // bell/desktop hook for needs-attention events
 
 	// Copilot quota hint (copilotquota.go): the latest reading shown as
 	// a status-bar pill, its enable flag, and the gh seam for tests.
@@ -193,14 +206,16 @@ func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
 	return &Shell{
-		styles:      theme.New(t),
-		version:     version,
-		now:         time.Now,
-		inbox:       newInbox(),
-		checks:      map[domain.FeatureID][]verify.Result{},
-		baselining:  map[domain.FeatureID]bool{},
-		rounds:      map[roundKey]int{},
-		copilotHint: true,
+		styles:         theme.New(t),
+		version:        version,
+		now:            time.Now,
+		inbox:          newInbox(),
+		checks:         map[domain.FeatureID][]verify.Result{},
+		baselining:     map[domain.FeatureID]bool{},
+		rounds:         map[roundKey]int{},
+		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
+		expandedStages: map[string]bool{},
+		copilotHint:    true,
 	}
 }
 
@@ -1002,6 +1017,17 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setChat(newChatPane(msg.feature.ID, msg.session))
 		m.inbox.remove(msg.feature.ID)
+		return m, nil
+
+	case cardEventsMsg:
+		// a late reply for a card the page has since moved off (esc, or a
+		// second J/K before the first load landed) is dropped: the cache
+		// keys on the feature it belongs to and nothing renders a stale
+		// key by mistake, but there's nothing to gain by keeping a fetch
+		// racing behind the current selection.
+		if msg.err == nil {
+			m.cardEvents[msg.id] = msg.events
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -2020,6 +2046,32 @@ func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
 		return nil
 	}
 	return m.engine.Get(id)
+}
+
+// cardEventsMsg delivers one card's event log (state.CardEvent), loaded
+// by loadCardEvents.
+type cardEventsMsg struct {
+	id     domain.FeatureID
+	events []state.CardEvent
+	err    error
+}
+
+// loadCardEvents reads one card's event log from the store — the
+// thread's folded stage receipts and live-stage fallback (thread.go).
+// Fired only for the selected card, when the card page opens and when
+// J/K moves the selection on it, never for the whole board: an unbounded
+// per-card read on every row would be exactly the IO-per-frame the row
+// snapshot in msgs.go exists to avoid. A detached shell (no store, as in
+// several UI tests) has nothing to read, so it returns nil rather than a
+// command that would panic on m.store.
+func (m *Shell) loadCardEvents(id domain.FeatureID) tea.Cmd {
+	if m.store == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		evs, err := m.store.Events(context.Background(), id)
+		return cardEventsMsg{id: id, events: evs, err: err}
+	}
 }
 
 // liveSessions names every autonomous session that holds or is waiting

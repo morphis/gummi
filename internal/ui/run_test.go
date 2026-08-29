@@ -50,10 +50,11 @@ func TestRunAutonomousStage(t *testing.T) {
 		t.Errorf("spend not metered: %+v", snap.Spend)
 	}
 
-	// the dashboard shows the activity feed
+	// the thread's live stage shows the activity feed, under a session
+	// boundary naming the fresh context it started (thread.go)
 	view := m.View().Content
-	if !strings.Contains(view, "activity") || !strings.Contains(view, "run go test") {
-		t.Error("dashboard missing live activity feed")
+	if !strings.Contains(view, "fresh context") || !strings.Contains(view, "run go test") {
+		t.Error("thread missing live activity feed")
 	}
 }
 
@@ -228,5 +229,14 @@ func TestDashboardActivityGolden(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
+	// settleChat only waits on Busy/Transcript, not the session's own
+	// State — the engine clears Busy on EventIdle well before
+	// finishRunning() marks the session StateDone (engine.go's idle
+	// handler), so without this the thread's "next" card (verbatim
+	// nextActions, which reads StateRunning as "still going — say
+	// nothing") could race and render as if the run hadn't finished yet.
+	// drainEngineLoop (reviewloop_test.go) processes the engine's own
+	// idle event, which is sent only after that transition.
+	m = drainEngineLoop(t, m)
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
