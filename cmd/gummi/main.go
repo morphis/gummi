@@ -122,6 +122,11 @@ func runBoard() error {
 	// The configured managed repositories feed the new-card forms' repo
 	// selector; the default is always implicit, so only named repos here.
 	shell.SetRepoNames(pool.Names())
+	// The agent tab's hosted-CLI choice: a prior picker answer persisted
+	// to config.yaml's `agent:` key, or empty when nothing has been
+	// chosen yet (in which case MaybeShowAgentPicker below shows the
+	// picker).
+	shell.SetAgentConfig(configuredAgentCLI(ws), ws.ConfigFile())
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
 	if eng, _, cleanup := buildEngine(store, pool, ws, locks); eng != nil {
@@ -165,6 +170,11 @@ func runBoard() error {
 	if strings.EqualFold(os.Getenv("GUMMI_COPILOT_HINT"), "off") {
 		shell.SetCopilotHint(false)
 	}
+	// First-run ask for the agent tab's hosted CLI: a no-op once
+	// GUMMI_ATTACH_CMD/GUMMI_AGENT is set or a prior choice is recorded in
+	// config.yaml's `agent:` key. Must run before Run() starts (see
+	// MaybeShowAgentPicker's own comment for why that ordering matters).
+	shell.MaybeShowAgentPicker()
 
 	_, err = tea.NewProgram(shell).Run()
 	return err
@@ -319,6 +329,28 @@ func profileNames(ws state.Workspace) []string {
 		return nil
 	}
 	return profiles.Names()
+}
+
+// configuredAgentCLI returns the layered `agent:` value (config.Config.Agent)
+// for the agent tab's picker precedence — the third rung, below
+// GUMMI_ATTACH_CMD/GUMMI_AGENT and above the picker itself (see
+// ui.Shell.resolveAgentAttach). It is deliberately independent of
+// newEngineFromEnv's own config load: that one governs the engine's
+// permissions/sandbox/instructions, an entirely separate concern from
+// which CLI a human hosts in their own tab, and the two must never be
+// merged into one load just because they happen to read the same file.
+func configuredAgentCLI(ws state.Workspace) string {
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, ws.ConfigFile())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		return ""
+	}
+	return cfg.Agent
 }
 
 // defaultBackendName returns the backend name selected by GUMMI_AGENT

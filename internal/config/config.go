@@ -50,6 +50,28 @@ type Config struct {
 	// Checks.Default is non-empty, check discovery bypasses the scribe and
 	// writes the configured list straight into the artifact.
 	Checks ChecksConfig `yaml:"checks"`
+	// Agent selects which installed coding-agent CLI hosts the **agent
+	// tab** — the pty the TUI composites into its own screen
+	// (internal/ui/agenttab.go). It does NOT select any of the engine's
+	// per-role backends: those are routed entirely by profiles.yaml's
+	// `backend:` field (falling back to GUMMI_AGENT / defaultBackendName
+	// when a role omits one). The two are different programs doing
+	// different jobs — one drives autonomous stages headlessly, the other
+	// is the interactive CLI a human drives by hand — so conflating them
+	// would mean a person who wants `claude` for their own agent tab but
+	// routes autonomous work through `copilot` (or vice versa) couldn't
+	// express that with one key.
+	//
+	// Empty means unset: nothing has been picked yet, and the agent tab's
+	// resolveAgentAttach falls through GUMMI_ATTACH_CMD, then GUMMI_AGENT,
+	// then a first-run picker rather than guessing (the bug this field
+	// exists to fix — a hardcoded "copilot" default the user might not
+	// even have installed). The picker persists its choice here via
+	// internal/config.SetAgent, which rewrites only this one key and
+	// leaves the rest of config.yaml — comments included — untouched;
+	// hand-editing the key to one of internal/ui's known CLI names
+	// (copilot, claude, codex, opencode, zz) works exactly the same way.
+	Agent string `yaml:"agent"`
 }
 
 // ChecksConfig holds workspace-wide check settings.
@@ -164,8 +186,8 @@ func UserConfigPath() (string, error) {
 // LoadLayered loads the user-level and workspace config files and returns a
 // merged Config plus a source map describing which file supplied each value.
 // A missing user config is treated as an empty Config. The returned map has
-// one entry per top-level field: "permissions", "sandbox", "repo", "repos",
-// "instructions", and "env.<name>" for each distinct env key. Scalar fields
+// one entry per top-level field: "permissions", "sandbox", "agent", "repo",
+// "repos", "instructions", and "env.<name>" for each distinct env key. Scalar fields
 // that are unset in both files use the literal "default". Instructions list
 // both contributing paths when both files supply entries.
 func LoadLayered(userPath, workspacePath string) (Config, map[string]string, error) {
@@ -216,6 +238,16 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["sandbox"] = userPath
 	} else {
 		sources["sandbox"] = "default"
+	}
+
+	if ws.Agent != "" {
+		merged.Agent = ws.Agent
+		sources["agent"] = workspacePath
+	} else if user.Agent != "" {
+		merged.Agent = user.Agent
+		sources["agent"] = userPath
+	} else {
+		sources["agent"] = "default"
 	}
 
 	if ws.Repo != "" {
@@ -405,6 +437,14 @@ permissions: allow-all
 # here. Every path must be absolute.
 # instructions:
 #   - /home/you/.config/gummi/instructions.md
+
+# agent: claude|codex|opencode|zz|copilot — which installed CLI hosts the
+# TUI's agent tab (a pty running your own coding assistant). This is NOT
+# the engine's backend routing — that's profiles.yaml's backend: field.
+# Left unset, the TUI's first-run picker asks once and writes the answer
+# back here; GUMMI_ATTACH_CMD and GUMMI_AGENT both take priority over it
+# when set.
+# agent: claude
 
 # repo: <path> — the git repository root gummi manages. Omit when .gummi
 # and .git share the same directory (the default); name a nested repo

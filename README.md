@@ -465,7 +465,13 @@ Two files in `.gummi/`, both scaffolded on first run:
   auto-discovers the repo's build/test/lint commands at approval into
   each spec's Verification plan (a `gummi-checks` block), where you
   review and edit them — and the TUI still surfaces the exact commands
-  before running them.
+  before running them. `agent:` (`copilot` | `claude` | `codex` |
+  `opencode` | `zz`) picks which installed CLI hosts the TUI's **agent
+  tab** — a pty running your own coding assistant. It has nothing to do
+  with the engine's own per-role backend routing below; the TUI's
+  first-run picker (`A` on the board, or shown once automatically when
+  nothing is configured) writes this key back without disturbing
+  anything else in the file.
 - **`profiles.yaml`** — role → `{backend, model}` maps per profile
   (`premium`, `thrifty`, …) with a declared default. `backend:` is
   optional (`copilot` | `claude` | `codex` | `opencode` | `headless` | `zz`); omitted, the
@@ -502,7 +508,7 @@ Environment variables:
 | `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (on by default; needs an authenticated `gh` CLI to show anything) |
 | `GUMMI_THEME` | `dark` (default) · `light` · `neon` |
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default) · `desktop` · `off` |
-| `GUMMI_ATTACH_CMD` | command for raw-attach (default: selected backend's CLI) |
+| `GUMMI_ATTACH_CMD` | command for raw-attach (default: selected backend's CLI); also the agent tab's top-priority override, ahead of `GUMMI_AGENT` and the picker's `agent:` choice |
 
 ## Try it without your repo
 

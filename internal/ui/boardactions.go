@@ -82,6 +82,7 @@ func (m *Shell) globalCommands() []command {
 		{id: "G", label: "Import bugs from GitHub", key: "G", available: attached && m.engine != nil},
 		{id: "i", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "S", label: "Sort todo by severity", key: "S", available: attached},
+		{id: "agent-cli", label: agentChooseCommandLabel, key: "", available: attached},
 		{id: "?", label: "Show the keys for this surface", key: "?", available: true},
 		{id: "q", label: "Quit gummi", key: "q", available: true},
 	}

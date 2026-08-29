@@ -71,15 +71,24 @@ type Shell struct {
 	agent     *agentView
 	agentErr  agentSpawnErr
 	agentSock string // workspace MCP socket handed to the hosted CLI
-	cardOpen  bool
-	inboxSel  int      // cursor into m.inbox.list(), the inbox tab's own selection
-	sortMode  SortMode // todo-column ordering toggle (ephemeral, not persisted)
-	notice    noticeMsg
-	spec      *specView      // non-nil while the spec surface is open
-	diff      *diffView      // non-nil while the diff surface is open
-	ingest    *ingestView    // non-nil while the ingest review surface is open
-	ingestRun *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
-	deps      *depPicker     // non-nil while the dependency picker is open
+	// agentConfigName is the workspace's persisted `agent:` choice
+	// (config.Config.Agent, loaded once at startup via SetAgentConfig) —
+	// the third rung of resolveAgentAttach's precedence, below
+	// GUMMI_ATTACH_CMD/GUMMI_AGENT and above the picker. agentConfigPath
+	// is where a picker choice gets written back (config.SetAgent);
+	// empty disables persistence (a detached shell in tests has nowhere
+	// to write), and the choice still applies for the rest of this run.
+	agentConfigName string
+	agentConfigPath string
+	cardOpen        bool
+	inboxSel        int      // cursor into m.inbox.list(), the inbox tab's own selection
+	sortMode        SortMode // todo-column ordering toggle (ephemeral, not persisted)
+	notice          noticeMsg
+	spec            *specView      // non-nil while the spec surface is open
+	diff            *diffView      // non-nil while the diff surface is open
+	ingest          *ingestView    // non-nil while the ingest review surface is open
+	ingestRun       *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
+	deps            *depPicker     // non-nil while the dependency picker is open
 
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
@@ -551,6 +560,26 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text += ": " + sanitize(msg.err.Error())
 		}
 		m.notice = noticeMsg{text: text, isErr: msg.err != nil}
+		return m, nil
+
+	case agentPickerLoadedMsg:
+		m.Overlay.Push(newAgentPickerDialog(msg.agents, m.agentConfigName, m.chooseAgentCLI))
+		return m, nil
+
+	case agentChosenMsg:
+		if msg.err != nil {
+			m.notice = noticeMsg{text: "saving agent choice: " + sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		m.agentConfigName = msg.name
+		// The hosted CLI may already be running under the old choice (or
+		// sitting on a spawn error from having none) — close it so the
+		// next visit to the agent tab respawns under the new selection
+		// instead of keeping a stale process or a stale error message on
+		// screen forever.
+		m.closeAgent()
+		m.agentErr = ""
+		m.notice = noticeMsg{text: "agent tab: " + msg.name + " chosen"}
 		return m, nil
 
 	case rowsMsg:
@@ -1194,6 +1223,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.attachRaw(r.F)
 		}
+	case "agent-cli":
+		// Menu-only, and dispatched on an id rather than a letter on
+		// purpose: A already means "approve the gate" in the spec, diff
+		// and ingest views, and choosing a CLI is a rare action that does
+		// not deserve a board key which reads as approve everywhere else.
+		// Unlike every other case here it also belongs to no card, so it
+		// works with nothing selected (an empty board's splash answers
+		// space too).
+		return m.openAgentPickerCmd()
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":

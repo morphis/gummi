@@ -35,6 +35,30 @@ type agentSpawnErr string
 // the agent still runs — it just has gummi's CLI and no gummi tools.
 func (m *Shell) SetAgentMCPSock(path string) { m.agentSock = path }
 
+// SetAgentConfig wires the workspace's persisted agent-tab CLI choice
+// (config.Config.Agent, already loaded by the caller — cmd/gummi's
+// runBoard) and the path a later picker choice should be written back to
+// (config.SetAgent). name may be empty (nothing picked yet, or a
+// detached shell in tests); configPath may also be empty, which disables
+// persistence but not the choice itself for the rest of this run.
+func (m *Shell) SetAgentConfig(name, configPath string) {
+	m.agentConfigName, m.agentConfigPath = name, configPath
+}
+
+// agentConfigured reports whether the agent tab already knows which CLI
+// to host, by resolveAgentAttach's own precedence minus its last rung
+// (the picker): an explicit GUMMI_ATTACH_CMD or GUMMI_AGENT env var, or a
+// persisted config `agent:` value. MaybeShowAgentPicker (agentpicker.go)
+// uses this to decide whether the picker needs to show unasked on first
+// start; the space menu's agent-cli entry (boardactions.go) ignores it and
+// opens the picker unconditionally, since re-asking on demand is exactly
+// what that entry is for.
+func (m *Shell) agentConfigured() bool {
+	return strings.TrimSpace(os.Getenv("GUMMI_ATTACH_CMD")) != "" ||
+		strings.TrimSpace(os.Getenv("GUMMI_AGENT")) != "" ||
+		m.agentConfigName != ""
+}
+
 // ensureAgent starts the hosted CLI the first time the agent tab is
 // shown, and is a no-op on every later visit — the session, its
 // scrollback and its context outlive tab switches, which is the whole
@@ -67,28 +91,57 @@ func (m *Shell) ensureAgent() tea.Cmd {
 }
 
 // resolveAgentAttach picks the CLI to host and the directory to host it
-// in. It deliberately reuses rawattach.go's backend resolution
-// (GUMMI_ATTACH_CMD, else the GUMMI_AGENT backend's own binary) so the
-// tab and the `a` escape hatch can never disagree about what "your
-// agent" means. The directory is the workspace root, not a card's
-// worktree: this agent manages the board rather than living inside one
-// card, and pointing it at a worktree would silently scope it to
-// whichever card happened to be selected when the tab was first opened.
+// in.
+//
+// Precedence, checked in this order (this is the only place it is
+// applied — rawattach.go's `a` raw-attach hatch and the engine's own
+// per-role backend selection in cmd/gummi are separate features with
+// their own precedence, deliberately untouched by this one):
+//
+//  1. GUMMI_ATTACH_CMD — an explicit full command line, the operator
+//     escape hatch that always wins, exactly as it does for `a`.
+//  2. GUMMI_AGENT — an explicit backend name, resolved through
+//     defaultAttachCommand's own name→binary mapping (rawattach.go) so
+//     an operator using this one env var for both the engine and the
+//     agent tab gets one consistent answer instead of two that could
+//     drift apart.
+//  3. config `agent:` — the workspace config.yaml selection
+//     agentpicker.go's picker persists via config.SetAgent
+//     (m.agentConfigName, loaded once at startup by SetAgentConfig).
+//     Chosen once, it survives restarts with no env var and no re-ask.
+//  4. nothing configured — reported as a problem rather than guessed at.
+//     This is the fix for the bug this feature exists to close: the old
+//     code fell through to a hardcoded "copilot" here, so a user without
+//     copilot installed got a silent missing-binary error instead of a
+//     choice. Init's first-run trigger (agentConfigured) is what keeps
+//     step 4 from actually being reached on a normal first start — this
+//     problem string is what a user sees only if they dismiss the
+//     picker with esc and then visit the tab anyway.
+//
+// The directory is the workspace root, not a card's worktree: this agent
+// manages the board rather than living inside one card, and pointing it
+// at a worktree would silently scope it to whichever card happened to be
+// selected when the tab was first opened.
 func (m *Shell) resolveAgentAttach() (argv []string, dir string, problem string) {
-	// same precedence as resolveAttach (rawattach.go): an explicit
-	// GUMMI_ATTACH_CMD wins, else the selected backend's own binary.
-	// Reading only defaultAttachCommand here would silently ignore the
-	// override and make the tab disagree with the `a` escape hatch.
 	cmdline := strings.TrimSpace(os.Getenv("GUMMI_ATTACH_CMD"))
-	if cmdline == "" {
+	switch {
+	case cmdline != "":
+		// level 1, already resolved above.
+	case strings.TrimSpace(os.Getenv("GUMMI_AGENT")) != "":
 		cmdline = strings.TrimSpace(defaultAttachCommand())
+	case m.agentConfigName != "":
+		if bin, ok := agentCLIBinary(m.agentConfigName); ok {
+			cmdline = bin
+		}
 	}
+	notConfigured := "no agent chosen for the agent tab yet — press space then \"" +
+		agentChooseCommandLabel + "\" (or set GUMMI_AGENT / GUMMI_ATTACH_CMD)"
 	if cmdline == "" {
-		return nil, "", "no agent configured — set GUMMI_AGENT or GUMMI_ATTACH_CMD"
+		return nil, "", notConfigured
 	}
 	argv = strings.Fields(cmdline)
 	if len(argv) == 0 {
-		return nil, "", "no agent configured — set GUMMI_AGENT or GUMMI_ATTACH_CMD"
+		return nil, "", notConfigured
 	}
 	if _, err := exec.LookPath(argv[0]); err != nil {
 		return nil, "", argv[0] + " not found — set GUMMI_ATTACH_CMD to your agent's command"
