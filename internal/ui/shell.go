@@ -1048,7 +1048,7 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	// the hosted CLI brackets pastes itself (x/vt honours the child's own
 	// bracketed-paste mode), so hand it the text rather than any of
 	// gummi's inputs while its tab is up.
-	if m.tab == TabAgent && m.agent != nil {
+	if m.hostedKeyboard() {
 		m.agent.Paste(msg.Content)
 		return nil
 	}
@@ -1310,11 +1310,19 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 	// tab, alt+1/2/3 and ? never arrive here: handleKey answers them above
 	// every surface, which is what makes them global rather than "global
 	// as long as nothing is open".
-	if m.tab != TabBoard {
-		// the agent tab is routed in handleKey, which still has the real
-		// KeyPressMsg to forward; by here a key is only a string and the
-		// hosted CLI needs the event.
+	if m.tab == TabInbox {
 		return m.inboxKey(key)
+	}
+	if m.tab != TabBoard {
+		// A foreign tab that reaches this far has no live child — the CLI
+		// failed to start, or none is chosen yet (a live one is answered
+		// in handleKey, which still has the real KeyPressMsg it needs).
+		// gummi holds the keyboard here but has nothing to spend it on,
+		// and "nothing" is the answer: this used to fall through to the
+		// inbox's keymap, so on the agent tab x silently dismissed an
+		// inbox item, enter jumped to a card and switched tabs, and u
+		// topped up a budget — all from a tab showing none of it.
+		return nil
 	}
 	// reconcile before anything can act: m.sel is written from half a
 	// dozen places (the attention cycle, the inbox jump, pgup/pgdn, a
@@ -1763,7 +1771,7 @@ func (m *Shell) draw(scr uv.Screen) {
 	// the agent tab paints cells, not a string: its emulator composites
 	// straight into scr so the hosted CLI's own truecolor survives. Every
 	// other surface goes through mainView below.
-	if m.tab == TabAgent && m.agent != nil {
+	if m.hostedKeyboard() {
 		m.drawAgentTab(scr)
 		uv.NewStyledString(m.statusView(l.Status.Dx())).Draw(scr, l.Status)
 		uv.NewStyledString(m.tabBarView(l.Tabs.Dx())).Draw(scr, l.Tabs)

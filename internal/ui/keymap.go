@@ -69,7 +69,7 @@ func (m *Shell) activeSurface() (string, []binding) {
 	// to get back to the board.
 	case m.tab == TabInbox:
 		return "inbox", m.inboxBindings()
-	case m.tab == TabAgent:
+	case m.foreignTab(m.tab):
 		return "agent", m.agentBindings()
 	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen:
 		return "card", m.cardPageBindings()

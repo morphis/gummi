@@ -330,6 +330,36 @@ func TestLockIsInertWithoutAHostedChild(t *testing.T) {
 	}
 }
 
+// TestADeadAgentTabAnswersNothing: a foreign tab whose child never
+// started still has gummi holding the keyboard, and the answer has to be
+// "nothing". It used to fall through to the inbox's keymap, so from a
+// tab showing "starting your agent…" an x silently dismissed an inbox
+// item, enter jumped to a card and switched tabs, and u spent budget.
+func TestADeadAgentTabAnswersNothing(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m.setTab(TabAgent)
+	if m.agent != nil {
+		t.Fatal("precondition: expected no hosted child")
+	}
+	for _, k := range []tea.KeyPressMsg{
+		{Code: 'x', Text: "x"},
+		{Code: 'u', Text: "u"},
+		{Code: 'i', Text: "i"},
+		{Code: tea.KeyEnter},
+	} {
+		m.setTab(TabAgent)
+		m.inbox.add("FD-001", attnGate, "spec approval pending")
+		m.handleKey(k)
+		if m.tab != TabAgent {
+			t.Errorf("%v moved off the agent tab", k)
+		}
+		if m.inbox.len() != 1 {
+			t.Errorf("%v reached the inbox from the agent tab", k)
+		}
+		m.inbox.remove("FD-001")
+	}
+}
+
 // TestTheLockIsOfferedOnArrival: a lock nobody knows about is the same
 // as no lock. The moment worth naming it is just before the user reaches
 // for a key gummi is holding — which is when they land on the tab.
