@@ -126,8 +126,8 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 
 // runCardAction performs one entry from the card's action list. A keyed
 // action goes through boardVerb so it hits the same guarded case body as
-// its accelerator; a keyless one (duplicate, and the fold row) is handled
-// here, since there is no key to route it by.
+// its accelerator; a keyless one (duplicate, gate, and the fold row) is
+// handled here, since there is no key to route it by.
 func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	if a.key != "" {
 		return m.boardVerb(a.key)
@@ -140,6 +140,43 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		return nil
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "gate":
+		return m.toggleGateApproval()
 	}
+	return nil
+}
+
+// toggleGateApproval flips the selected card's gate-approval mode.
+// Tightening (auto → caller) applies immediately: caller is the more
+// conservative mode, so there is nothing here worth protecting the user
+// from. Loosening (caller, or empty which already reads as auto today —
+// but this toggle is what makes that explicit and permanent) goes through
+// confirmGateAuto first, because it is the one direction that removes a
+// human checkpoint the card would otherwise keep crossing unattended.
+func (m *Shell) toggleGateApproval() tea.Cmd {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	if r.F.GateApproval == domain.GateAuto {
+		return m.setGateApproval(r.F.ID, domain.GateCaller)
+	}
+	return m.confirmGateAuto(r.F)
+}
+
+// confirmGateAuto raises the confirm before setting a card's gate mode to
+// auto. Phrased like confirmDuplicate/the board's cleanup and delete
+// confirms: the question names the card, the detail spells out the
+// concrete consequence (design gates crossed without the user) rather
+// than restating the mode name.
+func (m *Shell) confirmGateAuto(f domain.Feature) tea.Cmd {
+	m.Overlay.Push(&confirmDialog{
+		id:           "confirm-gate-auto",
+		cancelLabel:  "Keep",
+		confirmLabel: "Auto-approve",
+		question:     "auto-approve " + string(f.ID) + "'s design gates?",
+		detail:       f.Title + " — its design gates will be crossed without you from here on, until this is switched back",
+		onConfirm:    func() tea.Cmd { return m.setGateApproval(f.ID, domain.GateAuto) },
+	})
 	return nil
 }

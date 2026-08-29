@@ -51,11 +51,11 @@ func TestCardActionsForOrdering(t *testing.T) {
 	// rest in board order. inbox is in there because attn is set: it is
 	// the spec the budget/gate recommendation (keyed i) lands on.
 	want := "verify run bounce spec diff " +
-		"deps advance envelope inbox attach rebase merge duplicate delete"
+		"deps advance envelope gate inbox attach rebase merge duplicate delete"
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
 	}
-	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps advance envelope inbox attach rebase merge duplicate delete" {
+	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps advance envelope gate inbox attach rebase merge duplicate delete" {
 		t.Fatalf("unexpected folded tail: %q", gotFolded)
 	}
 }

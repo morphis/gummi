@@ -159,6 +159,30 @@ func TestCardLineNeverShellsGH(t *testing.T) {
 	}
 }
 
+// TestCardLineGateMarker: the ⚡ badge marks only an explicit "auto"
+// gate-approval mode. Empty reads as auto everywhere else in the code
+// (domain.ValidGateApproval), but every TUI-created card stores empty —
+// badging it too would light up the whole board as if each card had
+// opted in to something nobody chose.
+func TestCardLineGateMarker(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	auto := row(1, "auto card", domain.StageTodo, "", false)
+	auto.F.GateApproval = domain.GateAuto
+	empty := row(2, "empty card", domain.StageTodo, "", false)
+	caller := row(3, "caller card", domain.StageTodo, "", false)
+	caller.F.GateApproval = domain.GateCaller
+
+	if !strings.Contains(m.cardLine(auto, 1, false, true, 80), "⚡") {
+		t.Error("explicit auto gate mode should show the ⚡ marker")
+	}
+	if strings.Contains(m.cardLine(empty, 2, false, true, 80), "⚡") {
+		t.Error("empty gate mode reads as auto but must not show the marker")
+	}
+	if strings.Contains(m.cardLine(caller, 3, false, true, 80), "⚡") {
+		t.Error("caller gate mode should not show the marker")
+	}
+}
+
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
 	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })

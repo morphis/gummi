@@ -71,6 +71,11 @@ type Shell struct {
 	agent     *agentView
 	agentErr  agentSpawnErr
 	agentSock string // workspace MCP socket handed to the hosted CLI
+	// agentSpawnedAt is when the current m.agent was started (ensureAgent,
+	// agenttab.go). The agentExitedMsg handler compares it against m.now()
+	// to tell a real, useful session from a CLI that fails at startup and
+	// would otherwise spin (see agentCrashLoopWindow).
+	agentSpawnedAt time.Time
 	// agentConfigName is the workspace's persisted `agent:` choice
 	// (config.Config.Agent, loaded once at startup via SetAgentConfig) —
 	// the third rung of resolveAgentAttach's precedence, below
@@ -553,14 +558,35 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.agent == nil || msg.view != m.agent {
 			return m, nil
 		}
-		// the last frame stays on screen (agentView.Draw still renders it);
-		// only stop re-arming, and say why the prompt went dead.
+		// A hosted CLI ending its own session (the user typed /exit, or an
+		// autonomous run finished) shouldn't leave a dead pane sitting on
+		// the tab — respawn it right away, same as the first visit.
+		//
+		// Guard against a crash loop first, though: a CLI that fails at
+		// startup (bad auth, a missing config file, an incompatible flag)
+		// exits almost immediately, and respawning that unconditionally
+		// would spin forever, each attempt burning a process start and
+		// scrolling the same failure past the user with no chance to read
+		// it. agentCrashLoopWindow draws the line — an exit within it reads
+		// as "never really started"; past it, as a session that ran and
+		// ended, worth restarting.
+		if elapsed := m.now().Sub(m.agentSpawnedAt); elapsed < agentCrashLoopWindow {
+			text := fmt.Sprintf("agent exited %s after starting — not restarting (looks like a crash loop)",
+				elapsed.Round(time.Millisecond))
+			if msg.err != nil {
+				text += ": " + sanitize(msg.err.Error())
+			}
+			m.agent = nil
+			m.agentErr = agentSpawnErr(text)
+			return m, nil
+		}
 		text := "agent exited"
 		if msg.err != nil {
 			text += ": " + sanitize(msg.err.Error())
 		}
 		m.notice = noticeMsg{text: text, isErr: msg.err != nil}
-		return m, nil
+		m.agent = nil
+		return m, m.ensureAgent()
 
 	case agentPickerLoadedMsg:
 		m.Overlay.Push(newAgentPickerDialog(msg.agents, m.agentConfigName, m.chooseAgentCLI))
@@ -1899,6 +1925,25 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 			return noticeMsg{text: string(id) + ": envelope removed — spend is uncapped", reload: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: envelope set to %d credits (applies from the next agent session)", id, to), reload: true}
+	}
+}
+
+// setGateApproval persists a card's gate-approval mode — the write half
+// of the gate-toggle card action (boardactions.go's toggleGateApproval/
+// confirmGateAuto). Like SetVerifiedAt/SetGateApproval on the store side
+// this is a side-channel write: it touches neither a session nor the
+// stage, so — unlike deleteFeature/cleanupLanded — it carries no card
+// lock, the same call shape as setRepo and setEnvelope above.
+func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		label := "attended — caller approves each design gate"
+		if mode == domain.GateAuto {
+			label = "unattended — design gates auto-approve"
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: gate approval now %s", id, label), reload: true}
 	}
 }
 

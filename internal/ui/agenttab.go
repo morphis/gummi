@@ -4,12 +4,28 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/morphis/gummi/internal/agentcli"
 )
+
+// agentCrashLoopWindow is how soon after starting a child has to exit to
+// read as "never really started" rather than "ran, then ended" — the
+// line shell.go's agentExitedMsg handler draws before deciding whether to
+// respawn it.
+//
+// Three seconds is comfortably longer than a CLI takes to fail on a bad
+// flag, missing auth, or an absent config file — those exits are
+// essentially instant — and comfortably shorter than any interactive
+// session a person would call "it ran". There's no back-off or attempt
+// counter behind it: one fast exit is enough to stop, on the theory that
+// whatever made it fail (a missing API key, an unwritable state dir)
+// isn't going to fix itself between one attempt and the next, and a
+// silent retry loop is a worse failure than a CLI that stops and says why.
+const agentCrashLoopWindow = 3 * time.Second
 
 // agenttab.go is the Shell's half of the agent tab: it decides when to
 // spawn the hosted CLI, routes keys to it, and tears it down. agentview.go
@@ -64,7 +80,10 @@ func (m *Shell) agentConfigured() bool {
 // ensureAgent starts the hosted CLI the first time the agent tab is
 // shown, and is a no-op on every later visit — the session, its
 // scrollback and its context outlive tab switches, which is the whole
-// point of hosting it rather than shelling out per visit.
+// point of hosting it rather than shelling out per visit. It is also
+// what shell.go's agentExitedMsg case calls to respawn a child that ended
+// on its own: m.agent is nil'd first there, so this is exactly the same
+// "cold start" path either way.
 //
 // It returns the command that begins pumping the child's output; the
 // caller must return it to bubbletea or the tab renders one frame and
@@ -73,10 +92,19 @@ func (m *Shell) ensureAgent() tea.Cmd {
 	if m.agent != nil || m.agentErr != "" {
 		return nil
 	}
-	argv, dir, problem := m.resolveAgentAttach()
+	argv, dir, backend, problem := m.resolveAgentAttach()
 	if problem != "" {
 		m.agentErr = agentSpawnErr(problem)
 		return nil
+	}
+	// resume only when the backend about to run is the one that last ran
+	// in this workspace: switching agents in the picker (or moving to a
+	// different GUMMI_ATTACH_CMD) must start clean rather than resume a
+	// different vendor's conversation, and a workspace with no recorded
+	// session yet (loadAgentSession's ok=false) is a genuine first run,
+	// which never gets a resume flag either.
+	if prev, ok := loadAgentSession(m.ws); ok && prev.Backend == backend {
+		argv = agentResumeArgs(argv, backend)
 	}
 	w, h := m.agentPaneSize()
 	var env []string
@@ -89,11 +117,46 @@ func (m *Shell) ensureAgent() tea.Cmd {
 		return nil
 	}
 	m.agent = av
+	m.agentSpawnedAt = m.now()
+	// best-effort: a workspace that can't be written to (a read-only
+	// .gummi) shouldn't stop the agent tab from hosting — it only means
+	// the *next* spawn won't know to resume this one.
+	_ = saveAgentSession(m.ws, backend, m.agentSpawnedAt)
 	return av.Wait()
 }
 
-// resolveAgentAttach picks the CLI to host and the directory to host it
-// in.
+// agentResumeArgs appends backend's resume form onto argv, using only
+// the forms this repo has actually verified against the real CLI:
+//
+//   - claude, copilot: a trailing --continue flag.
+//   - codex: `resume --last` as a SUBCOMMAND inserted right after the
+//     binary (argv[0]), never appended at the end. GUMMI_ATTACH_CMD (and
+//     this argv) is built for strings.Fields, which has no concept of
+//     subcommand position — appending would read back as
+//     "codex --continue" on a later raw invocation, and codex's own CLI
+//     parses that as an unrecognized top-level flag, not a resume.
+//
+// opencode, zz, and anything else (a raw GUMMI_ATTACH_CMD, or an
+// unrecognized GUMMI_AGENT value) get no resume form back: there is no
+// verified flag or subcommand to guess at, so they always start fresh.
+func agentResumeArgs(argv []string, backend string) []string {
+	switch backend {
+	case "claude", "copilot":
+		out := make([]string, len(argv), len(argv)+1)
+		copy(out, argv)
+		return append(out, "--continue")
+	case "codex":
+		out := make([]string, 0, len(argv)+2)
+		out = append(out, argv[0], "resume", "--last")
+		return append(out, argv[1:]...)
+	default:
+		return argv
+	}
+}
+
+// resolveAgentAttach picks the CLI to host, the directory to host it in,
+// and the backend identity agent-session.json tracks for resume
+// (agentResumeArgs, ensureAgent).
 //
 // Precedence, checked in this order (this is the only place it is
 // applied — rawattach.go's `a` raw-attach hatch and the engine's own
@@ -101,16 +164,25 @@ func (m *Shell) ensureAgent() tea.Cmd {
 // their own precedence, deliberately untouched by this one):
 //
 //  1. GUMMI_ATTACH_CMD — an explicit full command line, the operator
-//     escape hatch that always wins, exactly as it does for `a`.
+//     escape hatch that always wins, exactly as it does for `a`. There is
+//     no vendor name to recognize here, so backend falls back to the
+//     resolved binary itself below — enough identity to detect "the same
+//     raw command ran last time", never enough to guess a resume flag
+//     from (agentResumeArgs treats every unrecognized backend the same).
 //  2. GUMMI_AGENT — an explicit backend name, resolved through
 //     defaultAttachCommand's own name→binary mapping (rawattach.go) so
 //     an operator using this one env var for both the engine and the
 //     agent tab gets one consistent answer instead of two that could
-//     drift apart.
+//     drift apart. The env value itself (lowercased) is the backend
+//     identity — including values with no resume form (opencode, zz,
+//     headless), which is fine: they simply never match a case in
+//     agentResumeArgs.
 //  3. config `agent:` — the workspace config.yaml selection
 //     agentpicker.go's picker persists via config.SetAgent
 //     (m.agentConfigName, loaded once at startup by SetAgentConfig).
 //     Chosen once, it survives restarts with no env var and no re-ask.
+//     agentConfigName is already one of agentcli.Known()'s stable names,
+//     so it doubles as the backend identity directly.
 //  4. nothing configured — reported as a problem rather than guessed at.
 //     This is the fix for the bug this feature exists to close: the old
 //     code fell through to a hardcoded "copilot" here, so a user without
@@ -124,14 +196,17 @@ func (m *Shell) ensureAgent() tea.Cmd {
 // manages the board rather than living inside one card, and pointing it
 // at a worktree would silently scope it to whichever card happened to be
 // selected when the tab was first opened.
-func (m *Shell) resolveAgentAttach() (argv []string, dir string, problem string) {
+func (m *Shell) resolveAgentAttach() (argv []string, dir string, backend string, problem string) {
 	cmdline := strings.TrimSpace(os.Getenv("GUMMI_ATTACH_CMD"))
 	switch {
 	case cmdline != "":
-		// level 1, already resolved above.
+		// level 1, already resolved above; backend is filled in below,
+		// once argv[0] is known, from the resolved binary itself.
 	case strings.TrimSpace(os.Getenv("GUMMI_AGENT")) != "":
+		backend = strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT")))
 		cmdline = strings.TrimSpace(defaultAttachCommand())
 	case m.agentConfigName != "":
+		backend = m.agentConfigName
 		if bin, ok := agentcli.Binary(m.agentConfigName); ok {
 			cmdline = bin
 		}
@@ -139,19 +214,22 @@ func (m *Shell) resolveAgentAttach() (argv []string, dir string, problem string)
 	notConfigured := "no agent chosen for the agent tab yet — press space then \"" +
 		agentChooseCommandLabel + "\" (or set GUMMI_AGENT / GUMMI_ATTACH_CMD)"
 	if cmdline == "" {
-		return nil, "", notConfigured
+		return nil, "", "", notConfigured
 	}
 	argv = strings.Fields(cmdline)
 	if len(argv) == 0 {
-		return nil, "", notConfigured
+		return nil, "", "", notConfigured
 	}
 	if _, err := exec.LookPath(argv[0]); err != nil {
-		return nil, "", argv[0] + " not found — set GUMMI_ATTACH_CMD to your agent's command"
+		return nil, "", "", argv[0] + " not found — set GUMMI_ATTACH_CMD to your agent's command"
+	}
+	if backend == "" {
+		backend = argv[0]
 	}
 	if m.wt != nil {
 		dir = m.wt.Root()
 	}
-	return argv, dir, ""
+	return argv, dir, backend, ""
 }
 
 // agentPaneSize is the cell size available to the hosted CLI: the main

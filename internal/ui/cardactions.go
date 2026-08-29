@@ -235,6 +235,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// decompose instead (keymap.go).
 		advanceLabel, advanceWhy = "decompose", "on a done RS: re-run decompose"
 	}
+	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval)
 
 	specs := []actionSpec{
 		{"run", "enter", runLabel, runWhy, false,
@@ -263,6 +264,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		{"verify", "v", "verify", "run verify checks", false,
 			research || needsWT},
 		{"envelope", "u", "envelope", "set the budget envelope (credits; 0 = uncapped)", false,
+			true},
+		// no accelerator, for the same reason duplicate has none: this is a
+		// rare, deliberate setting change, not something to fat-finger from
+		// the board. Always valid — the mode is a property of the card, not
+		// of its stage or kind.
+		{"gate", "", gateLabel, gateWhy, false,
 			true},
 		// the inbox is global, but it is also the recommended action for a
 		// card that stopped on budget — nextActions returns exactly one
@@ -407,6 +414,21 @@ func pauseLabelWhy(in nextInput) (label, why string) {
 		// paused or finished: p parks it so the loop stops offering it
 		return "park", "park the settled session so it stops asking"
 	}
+}
+
+// gateLabelWhy words the gate-approval toggle for the card's current
+// mode, the same "name what pressing it does" adaptation runLabelWhy and
+// pauseLabelWhy already give run/pause. mode is r.F.GateApproval as
+// stored — empty and "caller" both word the same way here (the toggle's
+// only two destinations are auto and caller; landing on caller from
+// empty is exactly what tightening already meant), and only an explicit
+// domain.GateAuto reads as the unattended side, matching the badge's own
+// explicit-only rule (board.go's cardLine).
+func gateLabelWhy(mode string) (label, why string) {
+	if mode == domain.GateAuto {
+		return "require approval", "switch back to caller-approved design gates (attended)"
+	}
+	return "auto-approve gates", "let this card cross its design gates unattended (asks first — loosens control)"
 }
 
 // markerWidth is the width of the per-row cursor marker ("▸ " / "  ");
