@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
@@ -268,41 +266,14 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 			return res, err
 		}
 	}
-	tf, err := e.cfg.Store.Transition(ctx, id, next, actor)
-	if err != nil {
+	if _, err := e.cfg.Store.Transition(ctx, id, next, actor); err != nil {
 		return res, err
 	}
-	e.appendGateEvent(ctx, id, f.Stage, next, actor, tf.UpdatedAt)
 	e.Drop(id) // the old stage's session is stale now
 	res.Feature = f
 	res.Feature.Stage = next
 	res.Status = StatusAdvanced
 	return res, nil
-}
-
-// appendGateEvent records a design-gate crossing in the card's own
-// event log — the raw material the decision receipt (internal/ui's
-// receipt.go) counts to report "crossed N gates" for a card that ran
-// itself. Best-effort: a log failure must never unwind a transition that
-// already committed. at is the transition's own persisted timestamp
-// (Store.Transition's returned Feature.UpdatedAt), not a fresh e.now()
-// call, so the dedupe key is stable across an accidental re-run of this
-// exact crossing while two separate crossings between the same pair of
-// stages later in the card's life (a review round bouncing back through
-// implement and forward again) are always distinct events.
-func (e *Engine) appendGateEvent(ctx context.Context, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time) {
-	if e.cfg.Store == nil {
-		return
-	}
-	payload, err := json.Marshal(state.GatePayload{From: string(from), To: string(to), Actor: actor})
-	if err != nil {
-		return
-	}
-	_ = e.cfg.Store.AppendEvent(ctx, state.CardEvent{
-		Feature: id, Stage: from, Kind: state.EventGate, At: at,
-		Payload: string(payload),
-		Dedupe:  string(id) + ":gate:" + string(from) + "->" + string(to) + ":" + at.Format(time.RFC3339Nano),
-	})
 }
 
 // nextStage resolves a feature's forward target — the single edge every

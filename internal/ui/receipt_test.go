@@ -151,3 +151,18 @@ func TestThreadDecisionReceiptGolden(t *testing.T) {
 
 	golden.RequireEqual(t, []byte(ansi.Strip(m.threadView(116, 40))))
 }
+
+// The review loop crosses stages under its own actor ("review"), not the
+// driver's "auto", and it does so without a human present — so those
+// crossings belong in the receipt. Counting only "auto" was how the
+// count came to miss exactly the crossings a card makes while running
+// itself under the TUI.
+func TestBuildDecisionReceiptCountsAutomaticLoopCrossings(t *testing.T) {
+	t0 := time.Date(2026, 8, 1, 23, 40, 0, 0, time.UTC)
+	r := buildDecisionReceipt([]state.CardEvent{
+		gateEvent(domain.StageReview, domain.StageVerify, "review", t0),
+	}, nil, 0, 0, 0)
+	if len(r.gates) != 1 {
+		t.Fatalf("gates = %+v, want the review loop's own crossing counted", r.gates)
+	}
+}

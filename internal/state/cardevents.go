@@ -11,6 +11,7 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -282,6 +283,28 @@ func (s *Store) PruneStageOutput(ctx context.Context, id domain.FeatureID, stage
 		WHERE feature_id = ? AND stage = ? AND kind = ? AND status <> ?`,
 		string(id), string(stage), EventTool, StatusFail); err != nil {
 		return fmt.Errorf("pruning stage output for %s/%s: %w", id, stage, err)
+	}
+	return nil
+}
+
+// appendGateEventTx records a stage crossing inside the caller's own
+// transaction, so the event and the transition it describes commit
+// together or not at all. Unlike the best-effort mirror writes, a failure
+// here fails the crossing: a history that silently skipped a gate would
+// under-report exactly the crossings nobody watched.
+//
+// The dedupe key is the crossing's own timestamp, which the transition
+// row shares, so a retried transaction cannot leave two events behind.
+func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time) error {
+	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor})
+	if err != nil {
+		return fmt.Errorf("encoding gate event for %s: %w", id, err)
+	}
+	dedupe := "gate:" + string(from) + "->" + string(to) + ":" + at.Format(timeFmt)
+	if _, err := tx.ExecContext(ctx, appendEventSQL,
+		string(id), string(from), EventGate, "", at.Format(timeFmt),
+		string(payload), "", dedupe); err != nil {
+		return fmt.Errorf("recording gate event for %s: %w", id, err)
 	}
 	return nil
 }

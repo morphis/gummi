@@ -22,16 +22,18 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// autopilotGateActor is the gate-crossing actor the headless driver's
-// unattended loop writes (internal/driver's d.actor, set in setGate) —
-// the one value among the transitions table's "user"/"auto"/"caller"
-// vocabulary that means a design gate crossed on its own rather than by
-// a human (TUI "g", actor "user") or an attended caller (headless
-// GateOff, actor "caller"). It is repeated here rather than imported:
-// internal/driver is not a package the ui layer depends on, and this is
-// part of the shared card_events/transitions actor vocabulary, not a
-// driver-internal detail.
-const autopilotGateActor = "auto"
+// humanGateActors are the ways a person crosses a gate themselves: "user"
+// is the TUI's g, "caller" is the headless driver's attended mode. The
+// receipt counts everything else as a crossing the card made on its own.
+//
+// It is written this way round deliberately. The machine actors are
+// open-ended — "auto" is the driver's unattended loop, "review" is the
+// automatic review→fix→verify chain, and any future loop names itself —
+// so enumerating those is how the count silently starts under-reporting
+// the day one is added. The human set is bounded by how a person can
+// actually reach a gate, and that is the smaller, more stable thing to
+// name.
+var humanGateActors = map[string]bool{"user": true, "caller": true}
 
 // receiptGate is one design gate autopilot crossed on its own.
 type receiptGate struct {
@@ -65,7 +67,7 @@ type decisionReceipt struct {
 
 // buildDecisionReceipt reads a card's event log for what autopilot
 // decided on its own: gates whose actor was the unattended driver loop
-// (autopilotGateActor), and ask_user answers taken automatically
+// (any actor but a human), and ask_user answers taken automatically
 // (state.ActorAutopilot) — never a gate a human crossed or an answer a
 // human typed (rule 6, and the ask/actor split in
 // internal/engine/asktool.go's Answer). events may be nil (not loaded
@@ -76,7 +78,7 @@ func buildDecisionReceipt(events []state.CardEvent, spend map[domain.Stage]float
 		switch ev.Kind {
 		case state.EventGate:
 			var p state.GatePayload
-			if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || p.Actor != autopilotGateActor {
+			if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || humanGateActors[p.Actor] {
 				continue
 			}
 			r.gates = append(r.gates, receiptGate{from: domain.Stage(p.From), at: ev.At})

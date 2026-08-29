@@ -1166,6 +1166,15 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 		string(id), string(f.Stage), string(to), actor, now.Format(timeFmt)); err != nil {
 		return f, fmt.Errorf("recording transition for %s: %w", id, err)
 	}
+	// The gate event goes in the same transaction as the transition it
+	// describes, so a card's history cannot record a crossing the features
+	// table never made, or miss one it did. Every caller reaches a
+	// crossing through here — the engine's own Advance, the review loop's
+	// automatic steps, the headless driver — so this is the one place that
+	// sees all of them.
+	if err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now); err != nil {
+		return f, err
+	}
 	if err := tx.Commit(); err != nil {
 		return f, err
 	}
