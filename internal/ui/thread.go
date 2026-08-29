@@ -11,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
 )
 
@@ -97,7 +98,16 @@ func (m *Shell) threadView(w, h int) string {
 
 	// The decision receipt — what a run decided while nobody watched —
 	// belongs here, below the live stage and above the next card, because
-	// that is when it happened. Nothing renders it yet.
+	// that is when it happened.
+	corrective := m.round(f.ID, domain.RoundKindCorrective)
+	receipt := buildDecisionReceipt(r.Events, stageSpendByStage(r.StageSpend),
+		f.Budget.Envelope, corrective, verdict.MaxRounds(domain.RoundKindCorrective))
+	if rl := decisionReceiptBlock(s, receipt); len(rl) > 0 {
+		for _, l := range rl {
+			line(l)
+		}
+		blank()
+	}
 
 	if nl := nextCardBlock(s, m.nextInputFor(r)); len(nl) > 0 {
 		for _, l := range nl {

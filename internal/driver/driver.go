@@ -908,6 +908,24 @@ func (d *Driver) seedRounds(ctx context.Context, f domain.Feature, kind domain.R
 	return nil
 }
 
+// burnCorrective tallies an outcome that spent a corrective round against
+// the card's unified budget — the running total of every piece of work
+// done a second time: review bounces, verify bounces, conflict handoffs.
+// Each loop keeps its own cap; this is the number that says what the
+// rework cost overall, and it is the one the TUI reports back. It never
+// resets mid-run.
+//
+// Best-effort, like the TUI's counterpart: the loop's own persisted cap
+// is written above and must not drift. A missed tally miscounts a report;
+// it never re-grants budget.
+func (d *Driver) burnCorrective(ctx context.Context, id domain.FeatureID, out gatepolicy.Outcome) {
+	if !out.Burns {
+		return
+	}
+	_ = rounds.Bump(ctx, d.roundStore, id, domain.RoundKindCorrective)
+	d.setRound(id, domain.RoundKindCorrective, d.round(id, domain.RoundKindCorrective)+1)
+}
+
 // applyVerdict routes a finished autonomous stage per the loop rules
 // (mirrors internal/ui/reviewloop.go), returning a terminal Outcome or a
 // non-terminal one (the stage advanced in-floor; drive loops).
@@ -941,6 +959,7 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 				return Outcome{}, err
 			}
 			d.setRound(f.ID, domain.RoundKindReview, d.round(f.ID, domain.RoundKindReview)+1)
+			d.burnCorrective(ctx, f.ID, out)
 			return d.stepTo(ctx, f.ID, out.Stage)
 		default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
 			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {

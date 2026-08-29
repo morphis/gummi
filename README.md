@@ -209,6 +209,41 @@ your terminal's own click-drag selection keeps working for copying agent
 output; locked, clicks, drags and the wheel go to the CLI (if it asked
 for them).
 
+## Autopilot
+
+`A` on any card sets how far it runs on its own, and starts it from
+wherever it currently sits — a card in todo runs from the beginning, a
+card parked at a gate crosses it and carries on. There are three stops:
+
+| stop | what it does |
+|---|---|
+| `off` | every gate stops for you |
+| `gates` | design gates cross themselves; it still stops whenever the agent needs an answer |
+| `full` | it runs to a verified branch on its own |
+
+On `full` a card crosses its own design gates, answers its own questions
+(the agent is told its recommendation will be taken unread, so it has to
+be defensible), bounces a failed verify back for rework, and hands a
+rebase conflict to an agent. All of that is the same work done again,
+bounded by one corrective budget shared across every kind of retry.
+
+What it never does is widen its own reach. A tool asking to act outside
+the sandbox always parks — the one refusal. Research cards park at
+`decompose`, because minting new cards is creating work rather than
+redoing it. **It never lands on main**, and it never softens the floor:
+no implementation without an approved spec, no merge without review and
+verify, at every stop. If it cannot finish, it parks to the inbox and
+notifies you.
+
+Autopilot cards run inside the board process, so quitting stops them —
+the quit dialog names them and says so, since "leave it running
+overnight" means leaving the terminal open. Reopening asks once whether
+to pick them up, naming the same cards and what each was doing. Nothing
+resumes itself unless you say so.
+
+The headless driver has always had this: `gummi run --gate-approval
+full` is the same three stops from a script.
+
 ## Bringing in existing work
 
 Work rarely starts from a blank line. Two ingestion paths pre-seed the

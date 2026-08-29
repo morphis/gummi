@@ -656,6 +656,31 @@ overlay; the agent tab hosts a pty running the user's own coding CLI. Both
 are later work — this pass lands the tab shell and the backlog as the
 board's only shape.
 
+**The card page is a thread.** Opening a card does not show a detail
+pane describing it; it shows one conversation running the card's whole
+length — identity and a stage strip, the pinned spec line, one folded
+line per finished stage, the live stage, and the input. Every stage
+underneath is still a fresh agent with a fresh context window, and that
+is exactly why the thread names every reset: a single continuous surface
+implies a single memory, and the implication would be false. The spec
+stays the context carrier between stages; the thread is a log, never a
+prompt.
+
+Its history is the card's own event log rather than the session
+transcript, which holds only the live stage and is rewritten wholesale on
+every save. Guidance lives in one place — a `next` card at the bottom,
+the same ranked actions the board offers — so a gate that is open *is*
+that card and nothing on screen is offered twice. A finished autopilot
+run adds a decision receipt above it, reporting what the card chose while
+nobody was watching and carrying no actions of its own.
+
+Typing into it is first-class: a line whose first word is one of a closed
+vocabulary is a command, and every other line is a message to the agent.
+Nothing is fuzzy-matched, so the classification is deterministic — and
+because `verify` and `changes` are also ordinary English first words, a
+verb that spends money or changes state confirms in place rather than
+firing. The mitigation belongs at the point of action, not in the parser.
+
 ### 6.1 Annotation editor (line-level review, like a PR)
 
 Gates shouldn't force feedback through chat ("the third paragraph is wrong,
@@ -966,6 +991,21 @@ Decided in the design interview (2026-07-03):
     pass.
 16. **`investigate` as a borrowed pass on an existing FD/BG** is deferred
     to a follow-up.
+17. **Autopilot may redo its own work. It may never widen its own
+    reach.** A card can be pointed at a stop — *off*, *gates*, or *full*
+    — and run itself from wherever it sits. Under *full* it may cross its
+    own design gates, answer its own consequential questions, bounce a
+    failed verify, and resolve a rebase conflict: every one of those is
+    the same work, done again. It may not do anything that enlarges what
+    it is allowed to touch. A tool asking to act outside the sandbox
+    always parks — the one refusal. Research parks at `decompose`,
+    because decomposition mints new cards and creating work is not
+    redoing it. Landing on main stays a keypress. Lanes are a number the
+    operator sets, never one autopilot raises. Nothing resumes itself
+    after a quit without being asked. This is what makes autopilot
+    compatible with a quality floor that is never softened: it changes
+    *who approves*, never *what must happen* — no implementation without
+    an approved spec, no merge without review and verify, at every stop.
 
 Still open:
 

@@ -686,6 +686,7 @@ func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode s
 	if err != nil {
 		return fmt.Errorf("setting gate-approval for %s: %w", id, err)
 	}
+	s.appendAutopilotEvent(ctx, id, mode)
 	return nil
 }
 

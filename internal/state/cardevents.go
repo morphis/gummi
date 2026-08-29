@@ -66,6 +66,47 @@ type ParkPayload struct {
 	Reason string `json:"reason"`
 }
 
+// GatePayload is the JSON shape of an EventGate event's Payload: which
+// design gate crossed (the stage left and the stage entered) and who
+// crossed it. Actor mirrors the transitions table's own actor vocabulary
+// (internal/state.Store.Transition's actor parameter) verbatim — "user"
+// for a human crossing it by hand in the TUI, "caller" for a headless
+// GateOff run waiting on its caller, "auto" for the headless driver's
+// unattended loop (internal/driver's d.actor). Only "auto" is a gate the
+// card crossed on its own; the decision receipt (internal/ui/receipt.go)
+// counts exactly that value and no other.
+type GatePayload struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Actor string `json:"actor"`
+}
+
+// ActorAutopilot and ActorUser are the two actors an EventAsk's Payload
+// (AskPayload.Actor) can name: an ask_user answer taken automatically,
+// unattended, versus one a human actually typed. Distinguishing the two
+// is the whole reason AskPayload carries an actor at all — the decision
+// receipt's "took N answers" only means something once an automatic
+// answer is told apart from a typed one.
+const (
+	ActorAutopilot = "autopilot"
+	ActorUser      = "user"
+)
+
+// AskPayload is the JSON shape of an EventAsk event's Payload: the
+// question an agent asked, the answer it got, and who answered —
+// ActorAutopilot or ActorUser (see those constants).
+type AskPayload struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+	Actor    string `json:"actor"`
+}
+
+// AutopilotPayload is the JSON shape of an EventAutopilot event's
+// Payload: the gate-approval mode a card was set to.
+type AutopilotPayload struct {
+	Mode string `json:"mode"`
+}
+
 // CardEvent is one row of a card's event log.
 type CardEvent struct {
 	Seq     int64
@@ -206,6 +247,28 @@ func (s *Store) QuitStopped(ctx context.Context) (map[domain.FeatureID]bool, err
 		}
 	}
 	return out, rows.Err()
+}
+
+// appendAutopilotEvent records a gate-approval mode change in the card's
+// own event log. SetGateApproval is the single write path every caller
+// (TUI and driver) already funnels through, so calling this there means
+// no future caller can change a card's mode without it appearing in the
+// card's own history. Best-effort: a log failure never unwinds the
+// already-committed mode change. Deduped at second granularity on the
+// (card, mode) pair, loose enough that a caller retrying the identical
+// SetGateApproval call within the same second can't double-write, while
+// a later, deliberate change back to the same mode still gets its own
+// event.
+func (s *Store) appendAutopilotEvent(ctx context.Context, id domain.FeatureID, mode string) {
+	payload, err := json.Marshal(AutopilotPayload{Mode: mode})
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	_ = s.AppendEvent(ctx, CardEvent{
+		Feature: id, Kind: EventAutopilot, At: now, Payload: string(payload),
+		Dedupe: string(id) + ":autopilot:" + mode + ":" + now.Format("2006-01-02T15:04:05"),
+	})
 }
 
 // PruneStageOutput blanks the raw output of a stage's successful tool

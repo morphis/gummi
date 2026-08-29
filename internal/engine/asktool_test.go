@@ -16,6 +16,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // fixedNow is a deterministic clock for spec-capture marker dates.
@@ -1323,6 +1324,74 @@ func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
 // must be told that before they ask one — and a card that still stops
 // for a human must NOT be told it, or the agent would reason as though
 // nobody were reading when somebody is.
+// TestAnswerRecordsActorFromGateApproval: an ask_user answer records who
+// actually took it. GateFull is the one mode where unattendedAskHint has
+// already told the agent nobody is reading, so an answer landing on a
+// GateFull card is autopilot's own; any other mode reads as a human's
+// typed reply — the split the decision receipt's "took N answers" relies
+// on (internal/ui/receipt.go).
+func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
+	for _, c := range []struct {
+		gate string
+		want string
+	}{
+		{domain.GateFull, state.ActorAutopilot},
+		{domain.GateGates, state.ActorUser},
+		{domain.GateOff, state.ActorUser},
+		{"", state.ActorUser},
+	} {
+		args := askArgs(t, Ask{
+			Question: "Persist where?",
+			Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
+		})
+		ag := clientToolFake(args)
+		ws, store, wt := newRepo(t)
+		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+
+		f := feature(1, "Dark mode", domain.StageBrainstorm)
+		f.GateApproval = c.gate
+		putFeature(t, store, f) // the event log's FK needs the row to exist
+		if _, err := e.Attach(context.Background(), f); err != nil {
+			e.Close()
+			t.Fatalf("gate %q: Attach: %v", c.gate, err)
+		}
+		waitFor(t, e, EventQuestion)
+
+		if err := e.Answer(context.Background(), f.ID, "per-device"); err != nil {
+			e.Close()
+			t.Fatalf("gate %q: Answer: %v", c.gate, err)
+		}
+
+		evs, err := store.Events(context.Background(), f.ID)
+		if err != nil {
+			e.Close()
+			t.Fatalf("gate %q: Events: %v", c.gate, err)
+		}
+		var found *state.AskPayload
+		for _, ev := range evs {
+			if ev.Kind != state.EventAsk {
+				continue
+			}
+			var p state.AskPayload
+			if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+				t.Fatal(err)
+			}
+			found = &p
+		}
+		e.Close()
+
+		if found == nil {
+			t.Fatalf("gate %q: no ask event recorded", c.gate)
+		}
+		if found.Question != "Persist where?" || found.Answer != "per-device" {
+			t.Errorf("gate %q: ask payload = %+v, want question/answer preserved", c.gate, found)
+		}
+		if found.Actor != c.want {
+			t.Errorf("gate %q: actor = %q, want %q", c.gate, found.Actor, c.want)
+		}
+	}
+}
+
 func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
 	for _, c := range []struct {
 		gate string

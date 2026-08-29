@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,6 +73,99 @@ func mustAdvance(t *testing.T, e *Engine, id domain.FeatureID) AdvanceResult {
 		t.Fatalf("Advance %s: %v", id, err)
 	}
 	return res
+}
+
+// gateEvents filters a card's event log down to its EventGate rows.
+func gateEvents(t *testing.T, store *state.Store, id domain.FeatureID) []state.CardEvent {
+	t.Helper()
+	evs, err := store.Events(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []state.CardEvent
+	for _, ev := range evs {
+		if ev.Kind == state.EventGate {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestAdvanceRecordsGateEvent: a successful crossing appends a
+// state.EventGate carrying exactly the actor Advance was called with —
+// the decision receipt (internal/ui) reads this back to count only the
+// gates autopilot ("auto") crossed on its own, never a human's.
+func TestAdvanceRecordsGateEvent(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dark mode", domain.StageTodo)
+	putFeature(t, store, f)
+
+	if _, err := e.Advance(ctx, f.ID, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	gates := gateEvents(t, store, f.ID)
+	if len(gates) != 1 {
+		t.Fatalf("gate events = %+v, want exactly 1", gates)
+	}
+	var p state.GatePayload
+	if err := json.Unmarshal([]byte(gates[0].Payload), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.From != string(domain.StageTodo) || p.To != string(domain.StageBrainstorm) || p.Actor != "auto" {
+		t.Errorf("gate payload = %+v, want from=%s to=%s actor=auto", p, domain.StageTodo, domain.StageBrainstorm)
+	}
+}
+
+// TestAdvanceGateEventsOneRowPerCrossing walks a card through several
+// crossings under different actors and checks each gets its own row, in
+// order, rather than colliding on a shared dedupe key.
+func TestAdvanceGateEventsOneRowPerCrossing(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dark mode", domain.StageTodo)
+	putFeature(t, store, f)
+
+	actors := []string{"user", "auto", "caller"}
+	for _, actor := range actors {
+		if _, err := e.Advance(ctx, f.ID, actor); err != nil {
+			t.Fatalf("Advance(%s): %v", actor, err)
+		}
+	}
+	gates := gateEvents(t, store, f.ID)
+	if len(gates) != len(actors) {
+		t.Fatalf("gate events = %+v, want %d (one per crossing)", gates, len(actors))
+	}
+	for i, want := range actors {
+		var p state.GatePayload
+		if err := json.Unmarshal([]byte(gates[i].Payload), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Actor != want {
+			t.Errorf("gate[%d].Actor = %q, want %q", i, p.Actor, want)
+		}
+	}
+}
+
+// TestAdvanceNoopWritesNoGateEvent: a terminal card has nothing to
+// advance — Advance never even reaches the transition, so no gate event
+// should appear.
+func TestAdvanceNoopWritesNoGateEvent(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "dark mode", domain.StageDone)
+	putFeature(t, store, f)
+
+	res, err := e.Advance(ctx, f.ID, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusNoop {
+		t.Fatalf("status = %v, want StatusNoop", res.Status)
+	}
+	if gates := gateEvents(t, store, f.ID); len(gates) != 0 {
+		t.Fatalf("gate events = %+v, want none for a noop advance", gates)
+	}
 }
 
 // A feature walks the full forward floor; leaving Spec creates the

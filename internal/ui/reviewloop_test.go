@@ -866,3 +866,35 @@ func TestReviewRoundsWriteThroughFailsClosed(t *testing.T) {
 		t.Error("review session started despite a failing seed read")
 	}
 }
+
+// A review bounce spends a corrective round. The review loop keeps its
+// own cap, which still governs the loop; the corrective counter is the
+// running total of rework across the card — what a finished run reports,
+// and what an unattended one is finally stopped by. A bounce that did
+// not tally would make both read low.
+//
+// It is deliberately NOT reset when the loop gives up: the review cap
+// resets so the next review starts fresh, but "total across" is the
+// whole point of the corrective budget.
+func TestReviewBouncesBurnCorrectiveRounds(t *testing.T) {
+	ag := verdictAgent(func(opts agent.SessionOpts) string {
+		if isReview(opts) {
+			return "Found a bug.\nVERDICT: changes"
+		}
+		return "fixed"
+	})
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageReview)
+
+	m = openAndAttach(t, m)
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m)
+
+	if got := m.round("FD-001", domain.RoundKindCorrective); got == 0 {
+		t.Error("review bounces spent no corrective rounds — the budget never moves off zero")
+	}
+	// the loop's own cap resets on escalation; the lifetime tally does not
+	if m.round("FD-001", domain.RoundKindReview) != 0 {
+		t.Errorf("review cap not reset after escalation: %d", m.round("FD-001", domain.RoundKindReview))
+	}
+}

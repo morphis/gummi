@@ -111,6 +111,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, domain.RoundKindReview, m.round(id, domain.RoundKindReview)+1)
+		m.burnCorrective(id, out)
 		return m.autoStep(id, out.Stage, "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")")
 	default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
@@ -127,6 +128,26 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 		m.raiseEscalation(id, "review finished with no clear verdict — review manually")
 		return nil
 	}
+}
+
+// burnCorrective records an outcome that spent a corrective round against
+// the card's unified budget — the running total of everything that is the
+// same work done again: review bounces, verify bounces, conflict
+// handoffs. It is deliberately separate from each loop's own cap, which
+// still governs that loop: this counter is what says how much rework a
+// card has cost overall, and it is what an unattended run is finally
+// stopped by. It never resets mid-run, because "total across" is the
+// whole point of it.
+//
+// Best-effort: the loop's own persisted cap is the one that must not
+// drift, and it is written above. Failing to tally here miscounts a
+// report; it never re-grants budget.
+func (m *Shell) burnCorrective(id domain.FeatureID, out gatepolicy.Outcome) {
+	if !out.Burns {
+		return
+	}
+	_ = rounds.Bump(context.Background(), m.roundStore, id, domain.RoundKindCorrective)
+	m.setRound(id, domain.RoundKindCorrective, m.round(id, domain.RoundKindCorrective)+1)
 }
 
 // onVerifyDone reads the verify verdict and raises the landing gate.

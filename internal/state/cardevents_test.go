@@ -317,3 +317,48 @@ func TestCardEventsSurviveRestart(t *testing.T) {
 		t.Fatalf("Events after reopen = %+v, want one event with Payload %q", evs, "before restart")
 	}
 }
+
+// TestSetGateApprovalRecordsAutopilotEvent: every caller funnels a
+// card's gate-approval mode change through SetGateApproval, so it's the
+// single place that write can be logged — the decision receipt (and any
+// future audit) needs the card's own history to say when its mode
+// changed and to what, not just the current row.
+func TestSetGateApprovalRecordsAutopilotEvent(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "gate approval history")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetGateApproval(ctx, f.ID, domain.GateFull); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := s.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 || evs[0].Kind != EventAutopilot {
+		t.Fatalf("Events = %+v, want exactly one autopilot event", evs)
+	}
+	var p AutopilotPayload
+	if err := json.Unmarshal([]byte(evs[0].Payload), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Mode != domain.GateFull {
+		t.Errorf("payload mode = %q, want %q", p.Mode, domain.GateFull)
+	}
+
+	// an invalid mode is refused before the store write, so no event
+	// should be recorded for it.
+	if err := s.SetGateApproval(ctx, f.ID, "bogus"); err == nil {
+		t.Fatal("expected an error for an invalid mode")
+	}
+	evs, err = s.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("Events after a rejected mode = %+v, want still exactly one", evs)
+	}
+}

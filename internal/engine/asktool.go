@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // askToolName is the client tool the agent calls to put a multiple-choice
@@ -795,6 +796,12 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 
 	// record the exchange so the transcript and any restore read cleanly
 	s.appendUser(answer)
+	// best-effort card-event log capture, actor included, so the decision
+	// receipt can tell an autopilot-taken answer from a typed one; recorded
+	// unconditionally, before delivery is attempted, the same way the
+	// transcript line above is — the exchange happened regardless of
+	// whether the blocked tool call ultimately resolves.
+	e.appendAskEvent(s, ask, answer)
 	// best-effort spec capture; a bad anchor never blocks the answer
 	if note := e.captureAnswer(s, ask, answer); note != "" {
 		s.appendActivity(note)
@@ -844,6 +851,43 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 		}
 	}
 	return e.Send(ctx, id, answer)
+}
+
+// appendAskEvent records an answered ask_user question in the card's own
+// event log, actor included — the raw material the decision receipt
+// (internal/ui's receipt.go) counts as "took N answers", only for an
+// autopilot-taken one. Answer's only two callers are the TUI's chat
+// picker (always a human typing) and the headless driver's --autonomous
+// auto-take — neither is reachable from here without widening this
+// file's scope, so the card's own gate-approval mode is what's actually
+// available to tell them apart: GateFull is the one mode where
+// unattendedAskHint has already told the agent nobody is reading, so an
+// answer landing on a GateFull card is autopilot's own; any other mode
+// means a human answered it by hand. Best-effort, like every other
+// event write; deduped on the ask's own call id so a redelivered Answer
+// for the same question can never double-count (a convention-path ask
+// carries no call id, so it always appends — it has no other identity
+// to dedupe against, and asking twice is rare enough not to matter).
+func (e *Engine) appendAskEvent(s *Session, ask *Ask, answer string) {
+	if e.cfg.Store == nil {
+		return
+	}
+	actor := state.ActorUser
+	if s.Feature.GateApproval == domain.GateFull {
+		actor = state.ActorAutopilot
+	}
+	payload, err := json.Marshal(state.AskPayload{Question: ask.Question, Answer: answer, Actor: actor})
+	if err != nil {
+		return
+	}
+	dedupe := ""
+	if ask.CallID != "" {
+		dedupe = ask.CallID + ":ask"
+	}
+	_ = e.cfg.Store.AppendEvent(context.Background(), state.CardEvent{
+		Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: state.EventAsk, At: e.now(),
+		Payload: string(payload), Dedupe: dedupe,
+	})
 }
 
 // captureAnswer writes the answer into the spec under the ask's anchor,
