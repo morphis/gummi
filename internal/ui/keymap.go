@@ -94,7 +94,7 @@ func (m *Shell) agentBindings() []binding {
 	return []binding{
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent", bar: true},
-		{key: "ctrl+g", label: "lock", help: "hand tab and alt+1/2/3 to the hosted CLI too (for its own completion)", bar: true},
+		{key: "ctrl+g", label: "tab→agent", help: "hand tab and alt+1/2/3 to the hosted CLI too, for its own completion", bar: true},
 		{key: "…", label: "to agent", help: "every other key already goes to the hosted CLI, including esc, ? and ctrl+c", bar: true},
 	}
 }

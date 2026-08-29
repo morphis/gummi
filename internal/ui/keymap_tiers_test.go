@@ -330,6 +330,76 @@ func TestLockIsInertWithoutAHostedChild(t *testing.T) {
 	}
 }
 
+// TestTheLockIsOfferedOnArrival: a lock nobody knows about is the same
+// as no lock. The moment worth naming it is just before the user reaches
+// for a key gummi is holding — which is when they land on the tab.
+func TestTheLockIsOfferedOnArrival(t *testing.T) {
+	m := hostedShell(t, "sleep 30")
+	pressAlt(m, '3')
+	if m.notice.text != lockOfferNotice {
+		t.Fatalf("arriving at the agent tab: notice = %q, want the lock offer", m.notice.text)
+	}
+	// and by the cycle, not only by alt+3 — both routes go through gotoTab
+	// precisely so they cannot drift apart on this.
+	m2 := hostedShell(t, "sleep 30")
+	for m2.tab != TabAgent {
+		m2.nextTab()
+	}
+	if m2.notice.text != lockOfferNotice {
+		t.Fatalf("cycling onto the agent tab: notice = %q, want the lock offer", m2.notice.text)
+	}
+}
+
+// TestTabLeavingTheAgentExplainsItself is the other moment: tab pressed
+// at a CLI prompt means completion, and it moved the user instead. That
+// surprise is the strongest reason anyone ever wants the lock, so it is
+// the strongest place to name it.
+func TestTabLeavingTheAgentExplainsItself(t *testing.T) {
+	m := hostedShell(t, "sleep 30")
+	pressAlt(m, '3')
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.tab == TabAgent {
+		t.Fatal("tab should still cycle — teaching must not cost the keypress")
+	}
+	if m.notice.text != lockLeftNotice {
+		t.Fatalf("after tab left the agent: notice = %q, want the explanation", m.notice.text)
+	}
+}
+
+// TestTheLockStopsTeachingOnceUsed: it is an offer, not a nag. Having
+// worked it once is proof it landed, so the notices retire — while a
+// user who never tries it keeps being told, since they never learned.
+func TestTheLockStopsTeachingOnceUsed(t *testing.T) {
+	m := hostedShell(t, "sleep 30")
+	pressAlt(m, '3')
+	m.toggleLock()
+	m.toggleLock()
+	if !m.lockUsed {
+		t.Fatal("working the lock should retire the lesson")
+	}
+	m.notice = noticeMsg{}
+	pressAlt(m, '1')
+	pressAlt(m, '3')
+	if m.notice.text != "" {
+		t.Errorf("re-arriving after using the lock: notice = %q, want silence", m.notice.text)
+	}
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.notice.text != "" {
+		t.Errorf("tab away after using the lock: notice = %q, want silence", m.notice.text)
+	}
+}
+
+// TestTheLockHintNamesThePayoff: "lock" says nothing to someone who does
+// not already know what is locked, which is exactly the person the hint
+// is for. It has to name the trade.
+func TestTheLockHintNamesThePayoff(t *testing.T) {
+	m := lockedAgentShell(t, false)
+	hints := stripANSI(m.tabBarView(120)) + stripANSI(m.statusView(120))
+	if !strings.Contains(hints, "tab→agent") {
+		t.Errorf("the unlocked hint must say what ctrl+g buys:\n%s", hints)
+	}
+}
+
 // TestTheLockIsVisible: the lock changes what every other key does, so
 // it cannot be silent. It has to be legible from the other tabs too —
 // hence the tab-bar badge, not just the hint.

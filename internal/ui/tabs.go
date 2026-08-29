@@ -89,17 +89,19 @@ func (m *Shell) setTab(t Tab) {
 // stuck somewhere they did not choose to be.
 func (m *Shell) nextTab() tea.Cmd {
 	defs := m.tabDefs()
+	// noted before the switch: this is the case where tab was pressed at
+	// a CLI prompt, meaning completion, and moved the user instead. That
+	// is the most likely moment anyone ever wants the lock, so it is the
+	// moment worth naming it.
+	leftHosted := m.hostedKeyboard()
 	// Tab is an index into tabDefs by construction and setTab keeps it in
 	// range, so the successor is plain modular arithmetic over the same
 	// slice the bar draws from — a fourth tab needs no edit here.
-	next := defs[(int(m.tab)+1)%len(defs)].id
-	m.setTab(next)
-	if next == TabAgent {
-		// same deferred spawn as alt+3: the first arrival pays for the
-		// pty, and a board that never cycles that far never does.
-		return m.ensureAgent()
+	cmd := m.gotoTab(defs[(int(m.tab)+1)%len(defs)].id)
+	if leftHosted && !m.lockUsed && !m.foreignTab(m.tab) {
+		m.notice = noticeMsg{text: lockLeftNotice}
 	}
-	return nil
+	return cmd
 }
 
 // tabBadge names the small marker a tab wears next to its label, and
@@ -185,7 +187,10 @@ func (m *Shell) tabBarView(w int) string {
 		hint = s.Warning.Render("⬤ locked") + s.Faint.Render(" — every key to the agent · ") +
 			s.Muted.Render("ctrl+g") + s.Faint.Render(" unlock")
 	case m.hostedKeyboard():
-		hint += s.Faint.Render(" · ") + s.Muted.Render("ctrl+g") + s.Faint.Render(" lock")
+		// "lock" alone says nothing to someone who does not already know
+		// what is locked. Name the trade instead: this is the key that
+		// gives tab to the program you are looking at.
+		hint += s.Faint.Render(" · ") + s.Muted.Render("ctrl+g") + s.Faint.Render(" tab→agent")
 	}
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint

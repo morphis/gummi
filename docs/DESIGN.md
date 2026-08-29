@@ -603,6 +603,18 @@ one key gummi never yields, in either state and above the overlay stack:
 a lock you can enter but not leave is the trap the mechanism exists to
 remove.
 
+**Saying so before it matters.** A lock nobody knows about is the same as
+no lock, and the hint has to name the trade rather than the mechanism —
+"lock" tells someone who already understands, which is not who needs it.
+So `ctrl+g tab→agent` in the bar, plus a notice at the two moments it is
+worth anything: arriving at the tab (just before you reach for a key
+gummi is holding) and having `tab` move you when you meant completion
+(the strongest reason anyone ever wants the lock). Working the lock once
+retires both — it is an offer, not a nag, and having taken it is proof it
+landed; a user who never tries it keeps being told, because they never
+learned. Teaching never costs the keypress: `tab` still cycles, and the
+notice explains what just happened rather than swallowing it.
+
 Because the lock changes what every other key does, it is never silent:
 the tab wears a `⬤ locked` badge (visible from the other tabs too, since
 the lock outlives a tab switch), the bar's hint becomes `ctrl+g unlock`,

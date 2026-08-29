@@ -87,6 +87,14 @@ type Shell struct {
 	// the keyboard, not a property of a pane: what it answers is "who am
 	// I typing at", and there is only ever one answer at a time.
 	locked bool
+	// lockUsed records that the user has worked the lock at least once.
+	// Until then gummi says what ctrl+g is for on every arrival at a
+	// hosted tab, and again if tab is what moved them off one — a lock
+	// nobody knows about is the same as no lock, and the two moments it
+	// matters are just before you reach for the CLI's tab and just after
+	// it did something else. One press retires the lesson: it is an
+	// offer, not a nag, and having taken it once is proof it landed.
+	lockUsed bool
 	// agentConfigName is the workspace's persisted `agent:` choice
 	// (config.Config.Agent, loaded once at startup via SetAgentConfig) —
 	// the third rung of resolveAgentAttach's precedence, below
@@ -1134,16 +1142,11 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch key {
 	case "alt+1":
-		m.setTab(TabBoard)
-		return nil
+		return m.gotoTab(TabBoard)
 	case "alt+2":
-		m.setTab(TabInbox)
-		return nil
+		return m.gotoTab(TabInbox)
 	case "alt+3":
-		m.setTab(TabAgent)
-		// spawning is deferred to the first visit so a board that never
-		// opens the tab never pays for a pty or a CLI process.
-		return m.ensureAgent()
+		return m.gotoTab(TabAgent)
 	}
 	if key == "tab" {
 		return m.nextTab()
@@ -1233,7 +1236,46 @@ func (m *Shell) toggleLock() {
 		return
 	}
 	m.locked = !m.locked
+	m.lockUsed = true
 	m.clearTransientNotice()
+}
+
+// Notices that name the lock. Both stay under noticeThreshold so they
+// ride as a quiet status pill rather than taking rows off the pane —
+// this is an offer, and an offer that reformats the screen is a nag.
+const (
+	// lockOfferNotice greets an arrival at a hosted tab: said before the
+	// user reaches for a key gummi is holding, which is the only time
+	// saying it is any use.
+	lockOfferNotice = "ctrl+g hands tab and alt+N to the agent"
+	// lockLeftNotice explains the surprise in the other direction — tab
+	// was pressed at a CLI prompt and moved the user instead of
+	// completing. It names the key that would have done what they meant.
+	lockLeftNotice = "tab left the agent — ctrl+g keeps it there"
+)
+
+// offerLock names the lock on arrival at a hosted tab, while the user
+// has yet to use it. Silent once locked (the indicator says it far
+// better) and silent with no child, where there is nothing to offer.
+func (m *Shell) offerLock() {
+	if m.lockUsed || m.locked || !m.hostedKeyboard() {
+		return
+	}
+	m.notice = noticeMsg{text: lockOfferNotice}
+}
+
+// gotoTab switches to t and does the arrival work every route into a tab
+// shares, so alt+N and the tab cycle cannot drift apart on it.
+func (m *Shell) gotoTab(t Tab) tea.Cmd {
+	m.setTab(t)
+	if !m.foreignTab(m.tab) {
+		return nil
+	}
+	// spawning is deferred to the first visit so a board that never
+	// opens the tab never pays for a pty or a CLI process.
+	cmd := m.ensureAgent()
+	m.offerLock()
+	return cmd
 }
 
 // textEntry reports whether the surface holding the keyboard is taking

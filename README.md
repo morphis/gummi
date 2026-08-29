@@ -197,6 +197,11 @@ it — every key goes to the CLI, and the tab, the bar and the status
 pill all show `⬤ locked` until `ctrl+g` unlocks. `ctrl+g` is the one key
 gummi never gives away, so the lock is always one keystroke from over.
 
+You don't have to know that in advance: gummi says `ctrl+g hands tab and
+alt+N to the agent` when you land on the tab, and — if `tab` moves you
+when you meant completion — `tab left the agent, ctrl+g keeps it there`.
+Use the lock once and it stops mentioning it.
+
 ## Bringing in existing work
 
 Work rarely starts from a blank line. Two ingestion paths pre-seed the
