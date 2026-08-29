@@ -191,6 +191,19 @@ func (a *agentView) SendKey(k tea.KeyPressMsg) {
 	})
 }
 
+// SendMouse forwards a mouse event to the hosted program, pane-relative,
+// encoded for whichever mouse tracking mode the child actually asked for
+// — x/vt tracks the DECSET modes (X10, normal, button-event, any-event)
+// and picks X10 or SGR encoding itself.
+//
+// A child that never enabled tracking gets nothing: x/vt drops the event
+// rather than writing bytes nobody asked for. That is what makes it safe
+// to forward unconditionally instead of second-guessing the child's mode
+// from out here, which would mean parsing the pty stream twice.
+func (a *agentView) SendMouse(m uv.MouseEvent) {
+	a.emu.SendMouse(m)
+}
+
 // Paste forwards pasted text to the hosted program, bracketed per the
 // child's own bracketed-paste mode setting (x/vt tracks that mode itself
 // and only wraps the text when the child asked for it).

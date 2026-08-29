@@ -184,7 +184,7 @@ func (m *Shell) tabBarView(w int) string {
 		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
 	switch {
 	case m.keyboardLocked():
-		hint = s.Warning.Render("⬤ locked") + s.Faint.Render(" — every key to the agent · ") +
+		hint = s.Warning.Render("⬤ locked") + s.Faint.Render(" — all input to the agent · ") +
 			s.Muted.Render("ctrl+g") + s.Faint.Render(" unlock")
 	case m.hostedKeyboard():
 		// "lock" alone says nothing to someone who does not already know

@@ -166,7 +166,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `o` | change the card's managed repository (before worktree) |
 | `S` | toggle severity sort (todo only) |
 | `tab` / `alt+1/2/3` | cycle the tabs (board, inbox, agent) / jump straight to one — both work from inside any view |
-| `ctrl+g` | lock the keyboard to the agent tab's hosted CLI, so `tab` and `alt+1/2/3` reach it too; `ctrl+g` again unlocks |
+| `ctrl+g` | lock the input to the agent tab's hosted CLI, so `tab`, `alt+1/2/3` and the mouse reach it too; `ctrl+g` again unlocks |
+| `alt+/` | the help table, from anywhere — including the places `?` is a character you are typing (chat box, filters, the hosted CLI) |
 | `i` | open the needs-attention inbox |
 | `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
@@ -197,10 +198,15 @@ it — every key goes to the CLI, and the tab, the bar and the status
 pill all show `⬤ locked` until `ctrl+g` unlocks. `ctrl+g` is the one key
 gummi never gives away, so the lock is always one keystroke from over.
 
-You don't have to know that in advance: gummi says `ctrl+g hands tab and
-alt+N to the agent` when you land on the tab, and — if `tab` moves you
-when you meant completion — `tab left the agent, ctrl+g keeps it there`.
-Use the lock once and it stops mentioning it.
+You don't have to know that in advance: gummi says `ctrl+g hands tab,
+alt+N + mouse to the agent` when you land on the tab, and — if `tab`
+moves you when you meant completion — `tab left the agent, ctrl+g keeps
+it there`. Use the lock once and it stops mentioning it.
+
+The mouse follows the same lock. Unlocked, gummi never captures it, so
+your terminal's own click-drag selection keeps working for copying agent
+output; locked, clicks, drags and the wheel go to the CLI (if it asked
+for them).
 
 ## Bringing in existing work
 

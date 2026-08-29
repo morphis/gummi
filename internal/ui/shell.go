@@ -76,12 +76,14 @@ type Shell struct {
 	// to tell a real, useful session from a CLI that fails at startup and
 	// would otherwise spin (see agentCrashLoopWindow).
 	agentSpawnedAt time.Time
-	// locked is the keyboard lock over a foreign tab (tabs.go's
+	// locked is the input lock over a foreign tab (tabs.go's
 	// tabDef.foreign), modelled on zellij's ctrl+g: locked, gummi keeps
 	// nothing at all but ctrl+g itself, so tab, alt+1/2/3 and ? all reach
-	// the hosted CLI. Unlocked — the default — gummi keeps only the tab
-	// switches and passes everything else through, which is enough to
-	// type at the agent but not to use its tab completion.
+	// the hosted CLI, and the mouse goes to it too. Unlocked — the
+	// default — gummi keeps only the tab switches and passes every other
+	// key through, which is enough to type at the agent but not to use
+	// its tab completion, and leaves the mouse to the terminal's own
+	// selection.
 	//
 	// It is one flag rather than per-tab state because it is a mode of
 	// the keyboard, not a property of a pane: what it answers is "who am
@@ -1038,6 +1040,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, m.handlePaste(msg)
+
+	case tea.MouseMsg:
+		// gummi's own surfaces are keyboard-only by design, so the mouse
+		// has exactly one destination: a hosted CLI that has the input
+		// lock. Everywhere else the event is dropped and the terminal's
+		// native selection is left alone — see forwardMouse.
+		m.forwardMouse(msg)
+		return m, nil
 	}
 	return m, nil
 }
@@ -1147,6 +1157,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.gotoTab(TabInbox)
 	case "alt+3":
 		return m.gotoTab(TabAgent)
+	case "alt+/":
+		// the help key that is always gummi's. ? is the convenient one,
+		// but it is also ordinary punctuation, so it has to yield wherever
+		// the user is typing prose — the chat box, the bug-import filter,
+		// the hosted CLI. Those are exactly the surfaces whose key rules
+		// are least guessable, which left the help unreachable in the
+		// three places it was most wanted. alt is the prefix for keys a
+		// multiplexer or a hosted pty won't have claimed (DESIGN).
+		m.Overlay.Push(m.helpOverlay())
+		return nil
 	}
 	if key == "tab" {
 		return m.nextTab()
@@ -1247,7 +1267,7 @@ const (
 	// lockOfferNotice greets an arrival at a hosted tab: said before the
 	// user reaches for a key gummi is holding, which is the only time
 	// saying it is any use.
-	lockOfferNotice = "ctrl+g hands tab and alt+N to the agent"
+	lockOfferNotice = "ctrl+g hands tab, alt+N + mouse to the agent"
 	// lockLeftNotice explains the surprise in the other direction — tab
 	// was pressed at a CLI prompt and moved the user instead of
 	// completing. It names the key that would have done what they meant.
@@ -1743,6 +1763,14 @@ func (m *Shell) View() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = m.styles.Theme.BgBase
 	v.WindowTitle = "gummi"
+	// Mouse reporting is requested per-frame, and only while the input
+	// lock is on. Asking for it unconditionally would suppress the
+	// terminal's own click-drag selection across the whole program — a
+	// steep price on surfaces that have no use for a mouse at all, and
+	// on an agent tab whose CLI may not want one either.
+	if m.keyboardLocked() {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 
 	if m.width <= 0 || m.height <= 0 {
 		return v

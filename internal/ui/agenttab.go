@@ -247,6 +247,63 @@ func (m *Shell) drawAgentTab(scr uv.Screen) {
 	m.agent.Draw(scr, m.layout.Main)
 }
 
+// forwardMouse hands a mouse event to the hosted CLI, translated from
+// screen into pane coordinates.
+//
+// Mouse capture follows the keyboard lock rather than the tab, because
+// taking the mouse is not free: while gummi captures it the terminal's
+// own click-drag selection stops working, and selecting a block of agent
+// output to copy is something people do far more often than clicking
+// inside a CLI. Unlocked you keep the terminal's selection; locked the
+// child gets the mouse along with everything else. One gesture, one
+// meaning — the lock hands over the input, not just the keyboard.
+//
+// Events over the tab bar or the status bar are dropped: those rows are
+// gummi's own chrome and the child has no idea they exist, so a click
+// there would arrive at the wrong cell of its screen.
+func (m *Shell) forwardMouse(msg tea.MouseMsg) {
+	if ev, ok := m.paneMouse(msg); ok {
+		m.agent.SendMouse(ev)
+	}
+}
+
+// paneMouse translates a screen-space mouse message into the hosted
+// pane's own coordinates, reporting false when the event is not the
+// child's to see. Split out from forwardMouse because the arithmetic is
+// the part that can be wrong in a way no compiler catches — an off-by-one
+// here lands every click one row from where the user aimed.
+func (m *Shell) paneMouse(msg tea.MouseMsg) (uv.MouseEvent, bool) {
+	if !m.keyboardLocked() {
+		return nil, false
+	}
+	e := msg.Mouse()
+	area := m.layout.Main
+	if e.X < area.Min.X || e.X >= area.Max.X || e.Y < area.Min.Y || e.Y >= area.Max.Y {
+		return nil, false
+	}
+	pane := uv.Mouse{
+		X:      e.X - area.Min.X,
+		Y:      e.Y - area.Min.Y,
+		Button: e.Button,
+		Mod:    e.Mod,
+	}
+	// converted per concrete type rather than passed along as an
+	// interface: x/vt reads the event's dynamic type to decide whether it
+	// is encoding a press, a release or motion, so the distinction has to
+	// survive the translation.
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		return uv.MouseClickEvent(pane), true
+	case tea.MouseReleaseMsg:
+		return uv.MouseReleaseEvent(pane), true
+	case tea.MouseWheelMsg:
+		return uv.MouseWheelEvent(pane), true
+	case tea.MouseMotionMsg:
+		return uv.MouseMotionEvent(pane), true
+	}
+	return nil, false
+}
+
 // agentCursor reports where the terminal cursor belongs while the agent
 // tab is up: the child's own cursor, translated from pane-relative into
 // screen coordinates. Without this the caret sits wherever the last

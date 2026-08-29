@@ -182,6 +182,12 @@ func (c *chatPane) pickerView(s *theme.Styles, ask *engine.Ask, w int) string {
 // footer mode: the ask_user option picker, its free-form answer input,
 // or the plain message input.
 func (c *chatPane) bindings() []binding {
+	return withHelpKey(c.keyTable())
+}
+
+// keyTable is the chat pane's own bindings, before withHelpKey adds the
+// alt+/ row every text-entry surface needs.
+func (c *chatPane) keyTable() []binding {
 	if c.readOnly() {
 		// no send, no answer: this run belongs to another process.
 		return []binding{

@@ -330,6 +330,42 @@ func TestLockIsInertWithoutAHostedChild(t *testing.T) {
 	}
 }
 
+// TestAltSlashOpensHelpWhereQuestionMarkCannot: ? is the convenient help
+// key, but it is also ordinary punctuation, so it has to yield wherever
+// the user types prose — the chat box, the bug-import filter, the hosted
+// CLI. Those are the surfaces whose key rules are least guessable, which
+// left help unreachable in the three places it was most wanted.
+func TestAltSlashOpensHelpWhereQuestionMarkCannot(t *testing.T) {
+	altSlash := tea.KeyPressMsg{Code: '/', Mod: tea.ModAlt}
+
+	agent := hostedShell(t, "sleep 30")
+	pressAlt(agent, '3')
+	agent.handleKey(altSlash)
+	if !agent.Overlay.Contains("help") {
+		t.Error("alt+/ must open help on the agent tab, where ? is the CLI's")
+	}
+
+	for name, m := range openSurfaces(t) {
+		t.Run(name, func(t *testing.T) {
+			m.handleKey(altSlash)
+			if !m.Overlay.Contains("help") {
+				t.Errorf("alt+/ did not open help over an open %s", name)
+			}
+		})
+	}
+}
+
+// TestAltSlashYieldsToALockedAgent: it is a tier-1 key, not a second
+// ctrl+g. Locked means gummi keeps exactly one key, and adding a quiet
+// second one would make the lock's contract a lie again.
+func TestAltSlashYieldsToALockedAgent(t *testing.T) {
+	m := lockedAgentShell(t, true)
+	m.handleKey(tea.KeyPressMsg{Code: '/', Mod: tea.ModAlt})
+	if m.Overlay.Contains("help") {
+		t.Error("alt+/ must reach the hosted CLI while locked")
+	}
+}
+
 // TestADeadAgentTabAnswersNothing: a foreign tab whose child never
 // started still has gummi holding the keyboard, and the answer has to be
 // "nothing". It used to fall through to the inbox's keymap, so from a

@@ -592,9 +592,32 @@ controls and can see. `ctrl+g` toggles a keyboard **lock** over any
 | | board / inbox | agent, unlocked | agent, **locked** |
 |---|---|---|---|
 | `ctrl+g` | says what it is for | lock | **unlock** |
-| `tab`, `alt+1/2/3` | gummi | gummi | hosted CLI |
+| `tab`, `alt+1/2/3`, `alt+/` | gummi | gummi | hosted CLI |
 | `?` | gummi (unless typing) | hosted CLI | hosted CLI |
 | `ctrl+c`, `esc`, text | gummi | hosted CLI | hosted CLI |
+| mouse | terminal's own selection | terminal's own selection | hosted CLI |
+
+The lock is over the *input*, not just the keyboard. Mouse capture
+follows it rather than the tab because taking the mouse is not free:
+while gummi captures it the terminal's own click-drag selection stops
+working, and selecting a block of agent output to copy is something
+people do far more often than clicking inside a CLI. `MouseMode` is a
+per-frame `tea.View` field, so this costs nothing anywhere else — gummi's
+own surfaces are keyboard-only and never ask for the mouse at all.
+Forwarded events are translated into pane coordinates (the child has no
+idea the tab bar exists) and dropped over gummi's own chrome; x/vt
+encodes them for whichever tracking mode the child actually set, and
+drops them entirely if it set none.
+
+**`?` and `alt+/`.** `?` is the convenient help key, but it is ordinary
+punctuation, so it must yield wherever the user types prose: the chat's
+message box, the bug-import filter, and the hosted CLI. Those are exactly
+the surfaces whose key rules are least guessable, so leaving them without
+a route to their own key table was the worst place to leave one. `alt+/`
+is the help key that is always gummi's — alt-prefixed for the same reason
+`alt+N` is. It is tier-1, not a second `ctrl+g`: a locked keyboard yields
+it too, because "locked keeps exactly one key" stops being true the
+moment there are two.
 
 You *arrive* unlocked, so the cycle always continues and typing at the
 agent works with no extra keystroke — gummi claims only the tab switches

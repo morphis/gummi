@@ -87,16 +87,33 @@ func (m *Shell) activeSurface() (string, []binding) {
 func (m *Shell) agentBindings() []binding {
 	if m.keyboardLocked() {
 		return []binding{
-			{key: "ctrl+g", label: "unlock", help: "give the keyboard back to gummi — the only key it keeps while locked", bar: true},
+			{key: "ctrl+g", label: "unlock", help: "give the input back to gummi — the only key it keeps while locked", bar: true},
 			{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, tab and alt+1/2/3 included", bar: true},
+			{key: "mouse", label: "to agent", help: "clicks, drags and the wheel reach the CLI (if it asked for them)"},
 		}
 	}
 	return []binding{
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent", bar: true},
-		{key: "ctrl+g", label: "tab→agent", help: "hand tab and alt+1/2/3 to the hosted CLI too, for its own completion", bar: true},
-		{key: "…", label: "to agent", help: "every other key already goes to the hosted CLI, including esc, ? and ctrl+c", bar: true},
+		{key: "ctrl+g", label: "tab→agent", help: "hand tab, alt+1/2/3 and the mouse to the hosted CLI too", bar: true},
+		{key: "alt+/", label: "help", help: "this table — ? belongs to the CLI here, being ordinary punctuation", bar: true},
+		{key: "…", label: "to agent", help: "every other key already goes to the hosted CLI, including esc, ? and ctrl+c"},
+		{key: "mouse", label: "terminal", help: "left to the terminal's own selection until you lock"},
 	}
+}
+
+// withHelpKey appends the alt+/ row to a surface's table.
+//
+// It exists for the surfaces that cannot spend ? on help — the chat's
+// message box, the bug-import filter — because there a question mark is
+// ordinary punctuation the user is trying to type. Those are exactly the
+// surfaces whose key rules are least guessable, so leaving them with no
+// route to their own table was the worst place to leave one.
+func withHelpKey(bs []binding) []binding {
+	return append(bs, binding{
+		key: "alt+/", label: "help",
+		help: "this table — ? types here rather than opening help",
+	})
 }
 
 // helpOverlay builds the ? dialog for whichever surface is active.

@@ -241,12 +241,14 @@ func (bv *bugIngestView) setCursor(n int) {
 // move the cursor regardless of focus, so they aren't re-listed per state.
 func (bv *bugIngestView) bindings() []binding {
 	if bv.filtering {
-		return []binding{
+		// the filter takes every printable key, ? included, so alt+/ is
+		// the only route to this table from here.
+		return withHelpKey([]binding{
 			{key: "type", label: "filter", help: "type to filter the list", bar: true},
 			{key: "up/down/pgup/pgdn", label: "move", help: "move the highlighted row without leaving the filter"},
 			{key: "esc", label: "list", help: "leave the filter for the list, keeping the query", bar: true},
 			{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
-		}
+		})
 	}
 	return []binding{
 		{key: "j/k", label: "select", help: "move over the bugs"},
