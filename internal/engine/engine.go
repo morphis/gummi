@@ -424,7 +424,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	// the caller's ctx so the initial kickoff Send stays on the caller's
 	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
 	sctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, cardUnlock: unlock}
+	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, cardUnlock: unlock, startedAt: time.Now()}
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
 		s.transcript = append(s.transcript, ps.Transcript...)
@@ -588,7 +588,7 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s

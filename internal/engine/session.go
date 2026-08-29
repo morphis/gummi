@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -167,6 +168,12 @@ type Session struct {
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
 	kickoffNote string
+	// startedAt is when this session generation began. It is the
+	// discriminator that keeps mirrored events unique per generation:
+	// a stage that re-runs (a review bounce, a resumed card) gets a
+	// fresh transcript numbered from zero again, so ord alone would
+	// collide with the previous generation's events.
+	startedAt time.Time
 
 	done     chan struct{}
 	stopOnce sync.Once
