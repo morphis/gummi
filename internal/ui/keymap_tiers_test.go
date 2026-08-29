@@ -224,15 +224,29 @@ func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
 	}
 }
 
-// TestTabCycleSkipsForeignTabs: tab belongs to the hosted CLI the moment
-// you reach the agent tab, so cycling onto it is a one-way door — you
-// press tab a third time and nothing happens, with nothing on screen
-// saying why. alt+1/2/3 being global is an escape hatch, not a reason to
-// walk into it; the cycle covers the tabs gummi's own keymap can get you
-// out of, and alt+3 reaches the rest.
-func TestTabCycleSkipsForeignTabs(t *testing.T) {
+// lockedAgentShell is a shell parked on the agent tab with a live hosted
+// child, in the given lock state. The child is a stub: these tests are
+// about who *receives* a key, which agentKey answers before any pty is
+// involved.
+func lockedAgentShell(t *testing.T, locked bool) *Shell {
+	t.Helper()
+	m := hostedShell(t, "sleep 30")
+	pressAlt(m, '3')
+	if m.agent == nil {
+		t.Fatal("the agent tab did not spawn a child")
+	}
+	m.locked = locked
+	return m
+}
+
+// TestTabCycleCoversEveryTab: the cycle skipped the agent tab for a
+// while, because the hosted CLI held tab unconditionally and cycling
+// onto a tab that will not cycle you off it is a one-way door. The lock
+// removes the reason rather than the tab — unlocked, which is how you
+// arrive, tab is always gummi's.
+func TestTabCycleCoversEveryTab(t *testing.T) {
 	m := populatedShell(100, 30)
-	want := []Tab{TabInbox, TabBoard, TabInbox, TabBoard}
+	want := []Tab{TabInbox, TabAgent, TabBoard, TabInbox}
 	for i, w := range want {
 		m.nextTab()
 		if m.tab != w {
@@ -241,27 +255,112 @@ func TestTabCycleSkipsForeignTabs(t *testing.T) {
 	}
 }
 
-// TestTabIsNotPromisedOnAForeignTab: the bar's hint is the only thing on
-// screen that says how to move between tabs, so on a tab where tab does
-// not cycle it must stop advertising that it does. Getting this wrong is
-// how the one-way door above went unnoticed.
-func TestTabIsNotPromisedOnAForeignTab(t *testing.T) {
-	m := populatedShell(120, 30)
-	if bar := stripANSI(m.tabBarView(120)); !strings.Contains(bar, "tab") {
-		t.Fatalf("the board tab's bar should offer the cycle:\n%s", bar)
+// TestUnlockedAgentTabKeepsOnlyTheTabSwitches: arriving at the agent tab
+// must not cost the user a keystroke or a mode. gummi claims tab and
+// alt+N there and nothing else, so typing works immediately and ? , esc
+// and ctrl+c reach the CLI the user is looking at.
+func TestUnlockedAgentTabKeepsOnlyTheTabSwitches(t *testing.T) {
+	m := lockedAgentShell(t, false)
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.tab != TabBoard {
+		t.Fatalf("unlocked, tab should cycle off the agent tab, got %v", m.tab)
 	}
-	m.setTab(TabAgent)
-	bar := stripANSI(m.tabBarView(120))
-	if strings.Contains(bar, "tab board/inbox") {
-		t.Errorf("the agent tab's bar still promises the tab cycle:\n%s", bar)
-	}
-	if !strings.Contains(bar, "alt+1/2/3") {
-		t.Errorf("the agent tab's bar must name the way out:\n%s", bar)
+	m = lockedAgentShell(t, false)
+	m.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
+	if m.Overlay.Contains("help") {
+		t.Error("unlocked, ? must reach the hosted CLI — it is ordinary punctuation there")
 	}
 }
 
-// TestAgentTabIsStillReachable: skipping it in the cycle is only
-// acceptable because alt+3 goes straight there from anywhere.
+// TestLockedAgentTabKeepsNothingButCtrlG is the lock's whole contract.
+// Every key the user could otherwise use to leave goes to the CLI, which
+// is the point: it is how its own tab completion is reached.
+func TestLockedAgentTabKeepsNothingButCtrlG(t *testing.T) {
+	m := lockedAgentShell(t, true)
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: tea.KeyTab},
+		{Code: '1', Mod: tea.ModAlt},
+		{Code: '2', Mod: tea.ModAlt},
+		{Code: '?', Text: "?"},
+		{Code: 'q', Text: "q"},
+	} {
+		m.handleKey(msg)
+		if m.tab != TabAgent {
+			t.Fatalf("%v left the agent tab while locked", msg)
+		}
+		if m.Overlay.HasDialogs() {
+			t.Fatalf("%v raised a gummi dialog while locked", msg)
+		}
+	}
+}
+
+// TestCtrlGAlwaysUnlocks: a lock you can enter but not leave is the trap
+// this mechanism exists to remove, so ctrl+g is answered above the
+// overlay stack and in both states.
+func TestCtrlGAlwaysUnlocks(t *testing.T) {
+	m := lockedAgentShell(t, true)
+	m.Overlay.Push(m.helpOverlay()) // even with a dialog in the way
+	model, _ := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if model.(*Shell).locked {
+		t.Fatal("ctrl+g did not unlock")
+	}
+	model, _ = model.(*Shell).Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	if !model.(*Shell).locked {
+		t.Fatal("ctrl+g did not lock again")
+	}
+}
+
+// TestLockIsInertWithoutAHostedChild: a lock left set over a dead child
+// would swallow every key with nothing to receive them — unrecoverable
+// rather than modal. On a tab with nothing to lock, ctrl+g says what it
+// is for instead of doing nothing.
+func TestLockIsInertWithoutAHostedChild(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.locked = true
+	if m.keyboardLocked() {
+		t.Error("the lock must be inert on a tab with no hosted child")
+	}
+	m.locked = false
+	m.toggleLock()
+	if m.locked {
+		t.Error("ctrl+g locked a tab with nothing to lock")
+	}
+	if !strings.Contains(m.notice.text, "ctrl+g") {
+		t.Errorf("ctrl+g on the board should explain itself, got %q", m.notice.text)
+	}
+}
+
+// TestTheLockIsVisible: the lock changes what every other key does, so
+// it cannot be silent. It has to be legible from the other tabs too —
+// hence the tab-bar badge, not just the hint.
+func TestTheLockIsVisible(t *testing.T) {
+	m := lockedAgentShell(t, false)
+	unlocked := stripANSI(m.tabBarView(120)) + stripANSI(m.statusView(120))
+	if !strings.Contains(unlocked, "ctrl+g") {
+		t.Errorf("unlocked, the bar should offer the lock:\n%s", unlocked)
+	}
+	if strings.Contains(unlocked, "locked") {
+		t.Errorf("unlocked, nothing should claim otherwise:\n%s", unlocked)
+	}
+
+	m.locked = true
+	bar, status := stripANSI(m.tabBarView(120)), stripANSI(m.statusView(120))
+	if !strings.Contains(bar, "locked") {
+		t.Errorf("the tab bar must show the lock:\n%s", bar)
+	}
+	if !strings.Contains(status, "locked") || !strings.Contains(status, "ctrl+g") {
+		t.Errorf("the status bar must show the lock and its way out:\n%s", status)
+	}
+	// legible from another tab: the lock survives the switch, so the badge
+	// has to as well.
+	m.setTab(TabBoard)
+	if b := stripANSI(m.tabBarView(120)); !strings.Contains(b, "locked") {
+		t.Errorf("the agent tab's lock badge must show from other tabs:\n%s", b)
+	}
+}
+
+// TestAgentTabIsStillReachable: alt+3 goes straight there from anywhere,
+// which is what makes the tab the user is on never a dead end.
 func TestAgentTabIsStillReachable(t *testing.T) {
 	for name, m := range openSurfaces(t) {
 		t.Run(name, func(t *testing.T) {

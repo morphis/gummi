@@ -70,7 +70,7 @@ func (m *Shell) activeSurface() (string, []binding) {
 	case m.tab == TabInbox:
 		return "inbox", m.inboxBindings()
 	case m.tab == TabAgent:
-		return "agent", agentBindings
+		return "agent", m.agentBindings()
 	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen:
 		return "card", m.cardPageBindings()
 	case m.tab == TabBoard && len(m.rows) > 0:
@@ -80,15 +80,23 @@ func (m *Shell) activeSurface() (string, []binding) {
 	}
 }
 
-// agentBindings is the agent tab's key table. It is deliberately almost
-// empty: once a CLI is hosted there, gummi reserves only the alt+N tab
-// switches and every other key — tab, esc, ctrl+c, q, ? — belongs to
-// that program. Listing the keys gummi does NOT take would be a lie the
-// moment the hosted CLI binds one, so the table names the two things
-// that are actually true.
-var agentBindings = []binding{
-	{key: "alt+1/2/3", label: "leave", help: "back to the board / inbox — the only keys gummi keeps here", bar: true},
-	{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, including tab, esc, ? and ctrl+c", bar: true},
+// agentBindings is the agent tab's key table, in whichever of the two
+// keyboard states it is in. It is deliberately almost empty in both:
+// listing the keys gummi does NOT take would be a lie the moment the
+// hosted CLI binds one, so each table names only what is actually true.
+func (m *Shell) agentBindings() []binding {
+	if m.keyboardLocked() {
+		return []binding{
+			{key: "ctrl+g", label: "unlock", help: "give the keyboard back to gummi — the only key it keeps while locked", bar: true},
+			{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, tab and alt+1/2/3 included", bar: true},
+		}
+	}
+	return []binding{
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
+		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent", bar: true},
+		{key: "ctrl+g", label: "lock", help: "hand tab and alt+1/2/3 to the hosted CLI too (for its own completion)", bar: true},
+		{key: "…", label: "to agent", help: "every other key already goes to the hosted CLI, including esc, ? and ctrl+c", bar: true},
+	}
 }
 
 // helpOverlay builds the ? dialog for whichever surface is active.
@@ -146,7 +154,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "u", label: "envelope", help: "set the budget envelope (credits; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
-		{key: "tab", label: "next tab", help: "cycle gummi's own tabs (board, inbox); alt+3 for the agent"},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)"},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},

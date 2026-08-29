@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -34,9 +35,10 @@ type tabDef struct {
 	id    Tab
 	label string
 	// foreign marks a tab that hosts someone else's keymap. gummi keeps
-	// only alt+1/2/3 there; everything else, tab included, belongs to the
-	// hosted program. nextTab skips these — see its comment for why an
-	// escape hatch is not enough to make cycling onto one safe.
+	// only the tab switches there and passes the rest to the hosted
+	// program; ctrl+g locks the keyboard to hand over those too. It is
+	// what the lock indicator and the bar's hint key off, so a second
+	// hosted pane later declares itself here rather than editing them.
 	foreign bool
 }
 
@@ -75,32 +77,29 @@ func (m *Shell) setTab(t Tab) {
 	m.tab = t
 }
 
-// nextTab cycles the tabs gummi's own keymap covers, skipping any tab
-// that hands the keyboard to a hosted program (tabDef.foreign).
+// nextTab cycles every tab in tabDefs, the agent tab included.
 //
-// It briefly did cycle onto the agent tab, on the theory that hoisting
-// alt+1/2/3 above every surface made landing there a visit rather than a
-// trap. Driving it proved otherwise: tab belongs to the hosted CLI the
-// moment you arrive, so a user cycling tab-tab-tab stops dead on the
-// third press with no indication why. An escape hatch existing is not
-// the same as the key you were already pressing continuing to work — and
-// a cycle you can enter but not leave is worse than one that is honest
-// about its two members. alt+3 goes to the agent tab; the tab bar's own
-// hint names it, which is the discoverability the cycle would have
-// bought.
-func (m *Shell) nextTab() {
+// It briefly skipped the agent tab, and for a real reason: cycling onto
+// a tab that will not cycle you back off it is a one-way door, and that
+// is exactly what happened while the hosted CLI held tab unconditionally.
+// The keyboard lock removes the reason rather than the tab. Unlocked —
+// the default, and the state you arrive in — tab is gummi's, so the cycle
+// always continues; a user who wants the CLI's own tab completion asks
+// for it with ctrl+g and gets a lock indicator saying so. Nobody is ever
+// stuck somewhere they did not choose to be.
+func (m *Shell) nextTab() tea.Cmd {
 	defs := m.tabDefs()
-	// walk forward to the next non-foreign tab, wrapping. Bounded by the
-	// tab count, so a set that is somehow all-foreign lands back on the
-	// current tab rather than spinning.
-	cur := int(m.tab)
-	for i := 1; i <= len(defs); i++ {
-		td := defs[(cur+i)%len(defs)]
-		if !td.foreign {
-			m.setTab(td.id)
-			return
-		}
+	// Tab is an index into tabDefs by construction and setTab keeps it in
+	// range, so the successor is plain modular arithmetic over the same
+	// slice the bar draws from — a fourth tab needs no edit here.
+	next := defs[(int(m.tab)+1)%len(defs)].id
+	m.setTab(next)
+	if next == TabAgent {
+		// same deferred spawn as alt+3: the first arrival pays for the
+		// pty, and a board that never cycles that far never does.
+		return m.ensureAgent()
 	}
+	return nil
 }
 
 // tabBadge names the small marker a tab wears next to its label, and
@@ -122,6 +121,13 @@ func (m *Shell) tabBadge(t Tab) (text string, alert bool) {
 		}
 		return "✉" + strconv.Itoa(n), alert
 	case TabAgent:
+		// the lock is the one thing about this tab worth a badge: it
+		// changes what every other key on the keyboard does, so it has to
+		// be legible from the other tabs too, not just while you are on
+		// it. Alert-weighted for the same reason.
+		if m.locked && m.agent != nil {
+			return "⬤ locked", true
+		}
 		// stage 3 wires unread-output tracking (a "·" once the pty has
 		// produced output the user hasn't looked at); nothing to show
 		// before there is an agent view to watch.
@@ -168,13 +174,18 @@ func (m *Shell) tabBarView(w int) string {
 	// full at 120 columns, and it is the wrong place anyway — how to
 	// reach a tab belongs beside the tabs.
 	//
-	// On a foreign tab the hint drops its "tab cycle" half. tab goes to
-	// the hosted CLI there, and a bar that kept promising the cycle would
-	// be telling the user to press the one key that cannot work — which
-	// is exactly how the trap was found.
-	hint := s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
-	if !m.foreignTab(m.tab) {
-		hint = s.Muted.Render("tab") + s.Faint.Render(" board/inbox · ") + hint
+	// The hint states what is true *now*, never a general rule: a bar
+	// that kept advertising the tab cycle while the keyboard was locked
+	// would be telling the user to press the one key that cannot work.
+	// That is precisely how the old one-way door went unnoticed.
+	hint := s.Muted.Render("tab") + s.Faint.Render(" cycle · ") +
+		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
+	switch {
+	case m.keyboardLocked():
+		hint = s.Warning.Render("⬤ locked") + s.Faint.Render(" — every key to the agent · ") +
+			s.Muted.Render("ctrl+g") + s.Faint.Render(" unlock")
+	case m.hostedKeyboard():
+		hint += s.Faint.Render(" · ") + s.Muted.Render("ctrl+g") + s.Faint.Render(" lock")
 	}
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint

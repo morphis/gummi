@@ -76,6 +76,17 @@ type Shell struct {
 	// to tell a real, useful session from a CLI that fails at startup and
 	// would otherwise spin (see agentCrashLoopWindow).
 	agentSpawnedAt time.Time
+	// locked is the keyboard lock over a foreign tab (tabs.go's
+	// tabDef.foreign), modelled on zellij's ctrl+g: locked, gummi keeps
+	// nothing at all but ctrl+g itself, so tab, alt+1/2/3 and ? all reach
+	// the hosted CLI. Unlocked — the default — gummi keeps only the tab
+	// switches and passes everything else through, which is enough to
+	// type at the agent but not to use its tab completion.
+	//
+	// It is one flag rather than per-tab state because it is a mode of
+	// the keyboard, not a property of a pane: what it answers is "who am
+	// I typing at", and there is only ever one answer at a time.
+	locked bool
 	// agentConfigName is the workspace's persisted `agent:` choice
 	// (config.Config.Agent, loaded once at startup via SetAgentConfig) —
 	// the third rung of resolveAgentAttach's precedence, below
@@ -989,14 +1000,25 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// open dialog's text input (which is what happened) left no way
 		// out of a modal but esc.
 		if msg.String() == "ctrl+c" {
-			// ctrl+c is gummi's global quit everywhere except the agent
-			// tab, where the hosted CLI needs it to interrupt itself —
-			// taking it there would break the one key its users reach for
-			// most. alt+1 then q still quits gummi from inside the tab.
-			if m.tab == TabAgent && m.agent != nil {
+			// On a foreign tab ctrl+c belongs to the hosted CLI — it is
+			// the key its users reach for most, and gummi taking it would
+			// break interrupting a run. This is not a special case for
+			// ctrl+c but the general pass-through rule (handleKey): gummi
+			// keeps the tab switches and hands over the rest. alt+1 then q
+			// still quits from inside the tab, and ctrl+g first if locked.
+			if m.hostedKeyboard() {
 				return m, m.agentKey(msg)
 			}
 			return m, m.quitCmd()
+		}
+		// ctrl+g is hoisted for the opposite reason to ctrl+c: it is the
+		// one key gummi never yields, in either state. A lock you can
+		// enter but not leave is the trap this whole mechanism exists to
+		// remove, so nothing — not an overlay, not the hosted CLI — is
+		// allowed between the user and the way out.
+		if msg.String() == "ctrl+g" {
+			m.toggleLock()
+			return m, nil
 		}
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
 			return m, cmd
@@ -1103,6 +1125,13 @@ func (m *Shell) quitCmd() tea.Cmd {
 // child. Taking tab or ? from it would break keys its users need.
 func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
+	// A locked keyboard is answered before anything: locked means gummi
+	// keeps nothing but ctrl+g, which update already took above the
+	// overlay. Even the tier-1 tab switches go to the hosted CLI, which
+	// is the point — it is how its own tab completion, ? and esc reach it.
+	if m.keyboardLocked() {
+		return m.agentKey(msg)
+	}
 	switch key {
 	case "alt+1":
 		m.setTab(TabBoard)
@@ -1116,12 +1145,16 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		// opens the tab never pays for a pty or a CLI process.
 		return m.ensureAgent()
 	}
-	if m.tab == TabAgent && m.agent != nil {
-		return m.agentKey(msg)
-	}
 	if key == "tab" {
-		m.nextTab()
-		return nil
+		return m.nextTab()
+	}
+	// An unlocked foreign tab keeps everything gummi did not just claim.
+	// That is a short list on purpose — the tab switches and nothing else
+	// — so typing at the agent works without a mode, and ?, esc, enter and
+	// ctrl+c all land where the user is looking. Only tab is gummi's, and
+	// ctrl+g is how you hand that one over too.
+	if m.hostedKeyboard() {
+		return m.agentKey(msg)
 	}
 	if key == "?" && !m.textEntry() {
 		m.Overlay.Push(m.helpOverlay())
@@ -1178,13 +1211,39 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // on a tab switch would be its own, worse bug.
 func (m *Shell) boardSurfacesLive() bool { return m.tab == TabBoard }
 
+// hostedKeyboard reports whether a hosted program is on screen and able
+// to take keys — a foreign tab (tabs.go) with a live child.
+func (m *Shell) hostedKeyboard() bool {
+	return m.foreignTab(m.tab) && m.agent != nil
+}
+
+// keyboardLocked reports whether the keyboard is handed wholesale to the
+// hosted program. The lock is only real where there is something to hand
+// it to: a lock left set over a dead child would swallow every key with
+// nothing to receive them, which is unrecoverable rather than modal.
+func (m *Shell) keyboardLocked() bool { return m.locked && m.hostedKeyboard() }
+
+// toggleLock flips the keyboard lock, refusing where there is nothing to
+// lock. The refusal says what the key is for rather than doing nothing:
+// ctrl+g is reserved everywhere, so a user who presses it on the board
+// has already decided it means something and deserves to learn what.
+func (m *Shell) toggleLock() {
+	if !m.hostedKeyboard() {
+		m.notice = noticeMsg{text: "ctrl+g locks the agent tab — nothing to lock here"}
+		return
+	}
+	m.locked = !m.locked
+	m.clearTransientNotice()
+}
+
 // textEntry reports whether the surface holding the keyboard is taking
 // free-form text right now. Only ? consults it: every other global is a
 // modifier chord (alt+N) or a key no text field wants (tab), but a
 // question mark is ordinary punctuation, and a user typing "should we
 // retry?" into a chat must get the character rather than the help
 // overlay. The agent tab is not listed because it never reaches here —
-// the hosted CLI takes the whole keyboard above.
+// hostedKeyboard hands the hosted CLI every key gummi has not claimed,
+// ? among them.
 func (m *Shell) textEntry() bool {
 	if !m.boardSurfacesLive() {
 		return false
@@ -2119,8 +2178,16 @@ func (m *Shell) mainView(w, h int) string {
 }
 
 func (m *Shell) statusView(w int) string {
+	// the leading pill normally just names the program. While the
+	// keyboard is locked it says so instead, in the alert weight: the
+	// lock changes what every other key does, and the one place a user
+	// already looks to find out what a key will do is this row.
+	mode := statusbar.Pill{Text: "gummi", Kind: statusbar.KindMode}
+	if m.keyboardLocked() {
+		mode = statusbar.Pill{Text: "⬤ locked · ctrl+g", Kind: statusbar.KindAlert}
+	}
 	pills := []statusbar.Pill{
-		{Text: "gummi", Kind: statusbar.KindMode},
+		mode,
 		{Text: m.boardCounts(), Kind: statusbar.KindNeutral},
 	}
 	if run := m.runCounts(); run != "" {

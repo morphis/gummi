@@ -165,7 +165,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `u` | set the budget envelope (credits; 0 = uncapped) |
 | `o` | change the card's managed repository (before worktree) |
 | `S` | toggle severity sort (todo only) |
-| `tab` / `alt+1/2/3` | cycle gummi's own tabs (board, inbox) / jump straight to one, the agent tab included — both work from inside any view |
+| `tab` / `alt+1/2/3` | cycle the tabs (board, inbox, agent) / jump straight to one — both work from inside any view |
+| `ctrl+g` | lock the keyboard to the agent tab's hosted CLI, so `tab` and `alt+1/2/3` reach it too; `ctrl+g` again unlocks |
 | `i` | open the needs-attention inbox |
 | `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
@@ -184,12 +185,17 @@ previous/next card without going back. Every card verb (`g`, `v`, `m`,
 `d`, …) works from either level.
 
 The board sits behind gummi's own tab bar alongside the needs-attention
-inbox and a hosted agent pane — `tab` cycles gummi's own tabs (board and
-inbox), `alt+1/2/3` jumps straight to one, the agent tab included. Both
-are answered above whatever holds the keyboard, so they work from inside
-a chat, a spec or a diff without escaping out first. The hosted CLI on
-the agent tab keeps `tab` for itself — which is why `tab` does not cycle
-onto that tab, and why `alt+1/2/3` is the way back out of it.
+inbox and a hosted agent pane — `tab` cycles all three, `alt+1/2/3` jumps
+straight to one. Both are answered above whatever holds the keyboard, so
+they work from inside a chat, a spec or a diff without escaping out
+first.
+
+On the agent tab gummi keeps only those tab switches and hands the CLI
+everything else, so you can type at it the moment you arrive. When you
+want the CLI's own `tab` completion, `ctrl+g` **locks** the keyboard to
+it — every key goes to the CLI, and the tab, the bar and the status
+pill all show `⬤ locked` until `ctrl+g` unlocks. `ctrl+g` is the one key
+gummi never gives away, so the lock is always one keystroke from over.
 
 ## Bringing in existing work
 

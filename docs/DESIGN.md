@@ -571,21 +571,46 @@ route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
 The board sits behind a one-row tab bar shared with the status bar:
-`gummi │ board │ inbox │ agent │`. `tab` cycles the tabs gummi's own
-keymap covers (board, inbox); `alt+1`/`alt+2`/`alt+3` jump straight to
-one, the agent tab included — alt-prefixed deliberately
+`gummi │ board │ inbox │ agent │`. `tab` cycles all three;
+`alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed deliberately
 (§6.1's `alt+o` reasoning: a plain `ctrl`/bare key a terminal multiplexer
 or the hosted agent tab's own pty might already claim). Both are answered
 at the top of `handleKey`, above whatever surface holds the keyboard, so
 a tab is always one keystroke away from inside a chat, a spec or a diff.
-The hosted CLI on the agent tab is the one exception — it keeps `tab` for
-itself, which is why `alt+N` also exists and why `tab` does not cycle
-onto that tab. Cycling onto a tab that will not cycle you off it is a
-one-way door: the user presses `tab` a third time and nothing happens.
-An escape hatch existing is not the same as the key already under their
-finger continuing to work, so `tab` covers only the tabs it can leave,
-and the bar's hint drops its "tab" half on a tab where tab is not gummi's
-(`tabDef.foreign`).
+**The keyboard lock.** The agent tab hosts a program with its own
+keymap, which raises the only genuinely hard question in the scheme: a
+hosted CLI wants `tab` for completion, and gummi wants it for the cycle.
+Both cannot have it, and picking either side loses something real —
+giving it to the CLI makes cycling onto the tab a one-way door (press
+`tab` a third time, nothing happens, nothing says why); keeping it means
+the CLI's completion is unreachable.
+
+gummi resolves it the way zellij does, with an explicit mode the user
+controls and can see. `ctrl+g` toggles a keyboard **lock** over any
+`tabDef.foreign` tab:
+
+| | board / inbox | agent, unlocked | agent, **locked** |
+|---|---|---|---|
+| `ctrl+g` | says what it is for | lock | **unlock** |
+| `tab`, `alt+1/2/3` | gummi | gummi | hosted CLI |
+| `?` | gummi (unless typing) | hosted CLI | hosted CLI |
+| `ctrl+c`, `esc`, text | gummi | hosted CLI | hosted CLI |
+
+You *arrive* unlocked, so the cycle always continues and typing at the
+agent works with no extra keystroke — gummi claims only the tab switches
+there. A user who wants the CLI's own `tab` asks for it. `ctrl+g` is the
+one key gummi never yields, in either state and above the overlay stack:
+a lock you can enter but not leave is the trap the mechanism exists to
+remove.
+
+Because the lock changes what every other key does, it is never silent:
+the tab wears a `⬤ locked` badge (visible from the other tabs too, since
+the lock outlives a tab switch), the bar's hint becomes `ctrl+g unlock`,
+and the status bar's leading pill turns alert-weighted. Every one of
+those states what is true *now* rather than a general rule — a bar still
+advertising the tab cycle while the keyboard is locked would be telling
+the user to press the one key that cannot work, which is precisely how
+the original one-way door went unnoticed.
 
 The board's own overlaying surfaces (chat, spec, diff, ingest review, bug
 import, dependency picker) are scoped to the board tab: each belongs to a
