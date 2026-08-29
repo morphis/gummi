@@ -1083,9 +1083,50 @@ func (m *Shell) quitCmd() tea.Cmd {
 	return nil
 }
 
+// handleKey routes one key press. Its shape is the keymap's tiers made
+// literal, read top to bottom:
+//
+//	tier 1  alt+1/2/3 — answered here, above every surface, so a tab is
+//	        always one keystroke away no matter what holds the keyboard.
+//	        (ctrl+c is hoisted higher still, above the overlay stack, in
+//	        update.) These used to be answered in boardKey, below the
+//	        early returns for chat/spec/diff/…, which meant they did
+//	        nothing at all from inside a view — you had to esc out first.
+//	tier 2  ? — the grammar key this level owns. The rest of the grammar
+//	        (j/k, enter, esc) means the same thing everywhere because each
+//	        surface binds it the same way, not because it is intercepted.
+//	        tab still belongs to boardKey below, because spec and diff
+//	        spend it on their read/annotate toggle; hoisting it waits on
+//	        that toggle finding another home.
+//	tier 3  everything below — the active surface's own verbs.
+//
+// The hosted CLI on the agent tab is the one deliberate exception: it
+// owns its whole keymap, so past the tier-1 switch every key goes to the
+// child. Taking ? from it would break a key its users need.
 func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
-	// The chat pane captures all keys except the global quit.
+	switch key {
+	case "alt+1":
+		m.setTab(TabBoard)
+		return nil
+	case "alt+2":
+		m.setTab(TabInbox)
+		return nil
+	case "alt+3":
+		m.setTab(TabAgent)
+		// spawning is deferred to the first visit so a board that never
+		// opens the tab never pays for a pty or a CLI process.
+		return m.ensureAgent()
+	}
+	if m.tab == TabAgent && m.agent != nil {
+		return m.agentKey(msg)
+	}
+	if key == "?" && !m.textEntry() {
+		m.Overlay.Push(m.helpOverlay())
+		return nil
+	}
+	// tier 3: whichever surface owns the main pane, in the same order
+	// mainView paints them.
 	if m.chat != nil {
 		return m.handleChatKey(msg)
 	}
@@ -1104,34 +1145,34 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.deps != nil {
 		return m.handleDepsKey(key)
 	}
-	// the agent tab claims every key except gummi's reserved tab
-	// switches: the hosted CLI keeps its own keymap, which means q and ?
-	// go to it too (it has its own help), and gummi is reached with
-	// alt+1/alt+2 rather than by stealing keys the program needs.
-	if m.tab == TabAgent && m.agent != nil {
-		switch key {
-		case "alt+1":
-			m.setTab(TabBoard)
-			return nil
-		case "alt+2":
-			m.setTab(TabInbox)
-			return nil
-		case "alt+3":
-			return nil
-		}
-		return m.agentKey(msg)
-	}
-	switch key {
-	case "q":
+	// q quits only from the board root: every surface above answers it as
+	// an alias for esc, and a q that quit gummi from inside a spec would
+	// be far worse than one that doesn't.
+	if key == "q" {
 		return m.quitCmd()
-	case "?":
-		m.Overlay.Push(m.helpOverlay())
-		return nil
 	}
 	if !m.attached() {
 		return nil
 	}
 	return m.boardKey(key)
+}
+
+// textEntry reports whether the surface holding the keyboard is taking
+// free-form text right now. Only ? consults it: every other global is a
+// modifier chord (alt+N) or a key no text field wants (tab), but a
+// question mark is ordinary punctuation, and a user typing "should we
+// retry?" into a chat must get the character rather than the help
+// overlay. The agent tab is not listed because it never reaches here —
+// the hosted CLI takes the whole keyboard above.
+func (m *Shell) textEntry() bool {
+	if m.chat != nil {
+		// the message box is always live: the option picker hands the
+		// keyboard straight back to it on any printable key (chat.go), so
+		// "? sometimes types and sometimes opens help" is not a rule worth
+		// having here.
+		return true
+	}
+	return m.bugIngest != nil && m.bugIngest.filtering
 }
 
 // boardKey answers the board's keys. It is split out from handleKey so
@@ -1141,24 +1182,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
-	// tab switching is global to every tab (Keys, docs/DESIGN.md): it
-	// must win before a tab's own keys get a look, the same way q and ?
-	// win above handleKey's attached check.
-	switch key {
-	case "tab":
-		m.nextTab()
-		return nil
-	case "alt+1":
-		m.setTab(TabBoard)
-		return nil
-	case "alt+2":
-		m.setTab(TabInbox)
-		return nil
-	case "alt+3":
-		m.setTab(TabAgent)
-		// spawning is deferred to the first visit so a board that never
-		// opens the tab never pays for a pty or a CLI process.
-		return m.ensureAgent()
+	// alt+1/2/3 and ? never arrive here: handleKey answers them above
+	// every surface, which is what makes them global rather than "global
+	// as long as nothing is open". tab is still answered here, one level
+	// down, because spec and diff spend it on their own mode toggle.
+	if key == "tab" {
+		return m.nextTab()
 	}
 	if m.tab != TabBoard {
 		// the agent tab is routed in handleKey, which still has the real
@@ -1424,7 +1453,12 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				onConfirm:    func() tea.Cmd { return m.cleanupLanded(f) },
 			})
 		}
-	case "x":
+	// D, not x: x is the reversible one on every other surface (resolve a
+	// comment, dismiss an inbox item, drop a proposal, remove a
+	// dependency), and the board was the single place it destroyed work.
+	// Uppercase for what cannot be undone, matching the diff view's
+	// existing x-resolves / D-deletes pair.
+	case "D":
 		if r, ok := m.selected(); ok {
 			f := r.F
 			m.Overlay.Push(&confirmDialog{

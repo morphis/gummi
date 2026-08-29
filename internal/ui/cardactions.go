@@ -193,7 +193,7 @@ var foreignBlockedKeys = map[string]bool{
 	"m": true, // merge
 	"z": true, // squash
 	"c": true, // clean
-	"x": true, // delete
+	"D": true, // delete
 }
 
 // cardActionsFor is the full set of actions valid for this card right
@@ -291,7 +291,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// apart. The list and the command menu are how you reach it now.
 		{"duplicate", "", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
 			true},
-		{"delete", "x", "delete", "remove the worktree, branch, and record — irrecoverable", true,
+		{"delete", "D", "delete", "remove the worktree, branch, and record — irrecoverable", true,
 			true},
 	}
 

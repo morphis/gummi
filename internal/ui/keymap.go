@@ -83,8 +83,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 // moment the hosted CLI binds one, so the table names the two things
 // that are actually true.
 var agentBindings = []binding{
-	{key: "alt+1/2", label: "leave", help: "back to the board / inbox — the only keys gummi keeps here", bar: true},
-	{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, including tab, esc and ctrl+c", bar: true},
+	{key: "alt+1/2/3", label: "leave", help: "back to the board / inbox — the only keys gummi keeps here", bar: true},
+	{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, including tab, esc, ? and ctrl+c", bar: true},
 }
 
 // helpOverlay builds the ? dialog for whichever surface is active.
@@ -142,7 +142,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "u", label: "envelope", help: "set the budget envelope (credits; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
-		{key: "tab", label: "next tab", help: "cycle gummi's own tabs (board, inbox)"},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)"},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},
@@ -155,7 +155,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "I", label: "ingest", help: "ingest a spec into features"},
 		{key: "G", label: "import", help: "import bugs from GitHub"},
 		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
-		{key: "x", label: "delete", help: "delete feature"},
+		{key: "D", label: "delete", help: "delete feature (uppercase: it destroys work)"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},
 	}

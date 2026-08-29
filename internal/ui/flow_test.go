@@ -206,10 +206,11 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Fatalf("history has %d records, want 7", len(m.rows[0].History))
 	}
 
-	// x → confirm → y deletes record, worktree, branch
-	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	// D → confirm → y deletes record, worktree, branch. Uppercase: x is
+	// the reversible key on every other surface.
+	m = press(t, m, tea.KeyPressMsg{Code: 'D', Text: "D"})
 	if m.Overlay.Top() == nil {
-		t.Fatal("x did not open confirm")
+		t.Fatal("D did not open confirm")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if len(m.rows) != 0 {

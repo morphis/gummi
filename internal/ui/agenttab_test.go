@@ -21,6 +21,15 @@ import (
 // operator config, not a shell line), so an inline command with quoting
 // or spaces in an argument would be silently torn apart — and a test
 // that spawns something other than what it wrote proves nothing.
+// pressAlt sends alt+<n> the way a terminal does, through handleKey —
+// the only entry point that answers it. The tab switches used to be
+// reachable via boardKey, but they are tier-1 globals now and live above
+// every surface, so a test that called boardKey would be proving
+// something the running program no longer does.
+func pressAlt(m *Shell, n rune) tea.Cmd {
+	return m.handleKey(tea.KeyPressMsg{Code: n, Mod: tea.ModAlt})
+}
+
 func hostedShell(t *testing.T, script string) *Shell {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -84,7 +93,7 @@ func waitForAgentCell(t *testing.T, m *Shell, want string) {
 func TestAgentTabSpawnsOnFirstVisitOnly(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
 
-	if cmd := m.boardKey("alt+3"); cmd == nil {
+	if cmd := pressAlt(m, '3'); cmd == nil {
 		t.Fatal("entering the agent tab should return the output pump command")
 	}
 	if m.tab != TabAgent {
@@ -97,8 +106,8 @@ func TestAgentTabSpawnsOnFirstVisitOnly(t *testing.T) {
 
 	// leaving and coming back must not restart the child: the session and
 	// its context are the thing worth keeping across tab switches.
-	m.boardKey("alt+1")
-	m.boardKey("alt+3")
+	pressAlt(m, '1')
+	pressAlt(m, '3')
 	if m.agent != first {
 		t.Error("revisiting the agent tab respawned the child; the session should persist")
 	}
@@ -106,7 +115,7 @@ func TestAgentTabSpawnsOnFirstVisitOnly(t *testing.T) {
 
 func TestAgentTabRendersChildOutputIntoTheMainPane(t *testing.T) {
 	m := hostedShell(t, "printf Z; sleep 30")
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 	waitForAgentCell(t, m, "Z")
 }
 
@@ -115,7 +124,7 @@ func TestAgentTabForwardsKeysToTheChild(t *testing.T) {
 	// puts the typed byte on screen. That is exactly the round trip worth
 	// proving: key -> emulator -> pty -> child's terminal -> cells.
 	m := hostedShell(t, "cat")
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 
 	m.handleKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	waitForAgentCell(t, m, "y")
@@ -123,7 +132,7 @@ func TestAgentTabForwardsKeysToTheChild(t *testing.T) {
 
 func TestAgentTabKeepsCtrlCForTheChild(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 
 	// ctrl+c is gummi's global quit everywhere else; on this tab the
 	// hosted CLI needs it to interrupt itself. Update must not return
@@ -141,7 +150,7 @@ func TestAgentTabKeepsCtrlCForTheChild(t *testing.T) {
 
 func TestAgentTabAltKeysStillLeave(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 
 	m.handleKey(tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt})
 	if m.tab != TabBoard {
@@ -151,7 +160,7 @@ func TestAgentTabAltKeysStillLeave(t *testing.T) {
 
 func TestAgentTabResizeReachesTheChild(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 
 	m.update(tea.WindowSizeMsg{Width: 90, Height: 24})
 	wantW, wantH := m.agentPaneSize()
@@ -167,7 +176,7 @@ func TestAgentTabExplainsAMissingBinary(t *testing.T) {
 	t.Setenv("GUMMI_ATTACH_CMD", "definitely-not-a-real-agent-binary")
 	m := populatedShell(100, 30)
 	t.Cleanup(m.closeAgent)
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 
 	if m.agent != nil {
 		t.Fatal("spawned something for a binary that does not exist")
@@ -184,6 +193,6 @@ func TestAgentTabPassesTheWorkspaceSocket(t *testing.T) {
 	// child has nothing to dial and would fall back to a second gummi.
 	m := hostedShell(t, "printf '%s' \"$GUMMI_MCP_SOCK\"; sleep 30")
 	m.SetAgentMCPSock("/tmp/gummi-ws-test.sock")
-	m.boardKey("alt+3")
+	pressAlt(m, '3')
 	waitForAgentCell(t, m, "/")
 }

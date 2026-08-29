@@ -60,8 +60,8 @@ func (m *Shell) inboxJump(id domain.FeatureID) {
 // inboxKey answers the inbox tab's own keys: j/k walk the queue, enter
 // jumps to a card, x dismisses it, and u tops up a budget item in place
 // — nextsteps.go's budget suggestion ("top up (u) ... from there") names
-// this exact key. tab and alt+1/2/3 never reach here: boardKey answers
-// them before a tab's own keys get a look (DESIGN's global tab switch).
+// this exact key. tab, alt+1/2/3 and ? never reach here: handleKey
+// answers them above every surface.
 func (m *Shell) inboxKey(key string) tea.Cmd {
 	items := m.inbox.list()
 	m.clampInboxSel(len(items))
@@ -100,7 +100,7 @@ func (m *Shell) inboxBindings() []binding {
 		{key: "enter", label: "go", help: "jump to the card and clear this item", bar: true},
 		{key: "x", label: "dismiss", help: "clear this item without acting on it", bar: true},
 		{key: "u", label: "top up", help: "raise the envelope and resume (budget items only)"},
-		{key: "tab", label: "next tab", help: "cycle gummi's own tabs (board, inbox)", bar: true},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "stay on the needs-attention queue"},
 		{key: "?", label: "help", bar: true},

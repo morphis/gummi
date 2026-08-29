@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -59,16 +60,26 @@ func (m *Shell) setTab(t Tab) {
 	m.tab = t
 }
 
-// nextTab cycles the tabs gummi itself owns: board and inbox. The agent
-// tab is reached only by a direct alt+3 — cycling onto it with the same
-// key the hosted pty needs for its own completion would be exactly the
-// surprise DESIGN's alt-key rule exists to avoid (chat.go:412).
-func (m *Shell) nextTab() {
-	if m.tab == TabBoard {
-		m.setTab(TabInbox)
-		return
+// nextTab cycles every tab in tabDefs, the agent tab included. It used
+// to skip that one: tab belongs to the hosted pty once you are there, so
+// cycling onto it was a one-way door. That is no longer true — handleKey
+// answers alt+1/2/3 above every surface, the hosted CLI included, so the
+// way back out is always one keystroke. Landing there is a visit, not a
+// trap, and a cycle that quietly omits a third of the tab bar is its own
+// small lie.
+func (m *Shell) nextTab() tea.Cmd {
+	defs := m.tabDefs()
+	// Tab is an index into tabDefs by construction and setTab keeps it in
+	// range, so the successor is plain modular arithmetic over the same
+	// slice the bar draws from — a fourth tab needs no edit here.
+	next := defs[(int(m.tab)+1)%len(defs)].id
+	m.setTab(next)
+	if next == TabAgent {
+		// same deferred spawn as alt+3: the first arrival pays for the
+		// pty, and a board that never cycles that far never does.
+		return m.ensureAgent()
 	}
-	m.setTab(TabBoard)
+	return nil
 }
 
 // tabBadge names the small marker a tab wears next to its label, and
@@ -134,10 +145,11 @@ func (m *Shell) tabBarView(w int) string {
 	// Right-align the navigation hint in the tab bar's own free space.
 	// It cannot live in the status bar's hint row: that row is already
 	// full at 120 columns, and it is the wrong place anyway — how to
-	// reach a tab belongs beside the tabs. Without it there is nothing
-	// on screen that names alt+3, and the agent tab is unreachable by
-	// guesswork, since `tab` deliberately does not cycle onto it.
-	hint := s.Muted.Render("tab") + s.Faint.Render(" switch · ") +
+	// reach a tab belongs beside the tabs. It still names alt+1/2/3
+	// explicitly even though tab now reaches all three: the hosted CLI on
+	// the agent tab keeps tab for itself, so alt+N is the only way back
+	// out, and that is exactly where a user has no other hint to read.
+	hint := s.Muted.Render("tab") + s.Faint.Render(" cycle · ") +
 		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint
