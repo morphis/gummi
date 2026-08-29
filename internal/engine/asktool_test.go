@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1314,6 +1315,49 @@ func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
 			if !strings.Contains(h, want) {
 				t.Errorf("verifyHint(%v) missing %q", kind, want)
 			}
+		}
+	}
+}
+
+// A card on GateFull answers its own questions, so its stage sessions
+// must be told that before they ask one — and a card that still stops
+// for a human must NOT be told it, or the agent would reason as though
+// nobody were reading when somebody is.
+func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
+	for _, c := range []struct {
+		gate string
+		want bool
+	}{
+		{domain.GateFull, true},
+		{domain.GateGates, false},
+		{domain.GateOff, false},
+		{"", false},
+	} {
+		var mu sync.Mutex
+		var got agent.SessionOpts
+		ag := &agent.Fake{Caps: agent.Capabilities{ClientTools: true}, Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
+			mu.Lock()
+			got = opts
+			mu.Unlock()
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}}
+		ws, store, wt := newRepo(t)
+		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+
+		f := feature(1, "x", domain.StageSpec)
+		f.GateApproval = c.gate
+		if _, err := e.Attach(context.Background(), f); err != nil {
+			e.Close()
+			t.Fatal(err)
+		}
+		waitFor(t, e, EventIdle)
+		mu.Lock()
+		hints := strings.Join(got.SystemHints, "\n")
+		mu.Unlock()
+		e.Close()
+
+		if has := strings.Contains(hints, unattendedAskHint); has != c.want {
+			t.Errorf("gate %q: unattended ask hint present = %v, want %v", c.gate, has, c.want)
 		}
 	}
 }

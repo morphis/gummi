@@ -383,6 +383,23 @@ const askConventionHint = "When you need a decision from the user, end your mess
 	"gummi shows the user a picker and delivers their answer as the next message. " +
 	"Ask about one decision at a time."
 
+// unattendedAskHint is appended for a card running on GateFull, whichever
+// way it asks. On that mode nobody is at the keyboard: gummi takes the
+// agent's own recommended option and the run carries on. The agent is
+// told so plainly, because a recommendation that will be acted on
+// unread has to be defensible in a way a recommendation someone is
+// about to weigh does not — and because the alternative, letting it
+// believe a human is reading, would make its own reasoning wrong.
+//
+// It is deliberately not an instruction to stop asking. The question is
+// still the record of what was decided and why, and it is what the run's
+// receipt is built from; suppressing it would buy nothing and lose that.
+const unattendedAskHint = "This card is running unattended: no one will read your question " +
+	"before it is answered. gummi takes your recommended option automatically and the run " +
+	"continues, so make sure the option you mark as recommended is the one you would defend " +
+	"on the evidence you have, and put the reason in its detail. Ask anyway when a decision " +
+	"is real — the question and the answer taken are recorded for the user to read afterwards."
+
 // handleClientTool routes a client-tool invocation. ask_user parses into
 // a pending question surfaced to the UI/inbox; an unparseable ask or an
 // unknown tool is resolved immediately with an error result so the

@@ -1078,6 +1078,12 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	} else if interactiveStage(f.Stage) {
 		hints = append(hints, askConventionHint)
 	}
+	// A card left to run alone answers its own questions, so the agent is
+	// told that before it asks one — whichever of the two routes above it
+	// would have used.
+	if f.GateApproval == domain.GateFull && !readOnly {
+		hints = append(hints, unattendedAskHint)
+	}
 	// Every stage session gets its own inbound MCP endpoint, so a backend
 	// that consumes gummi's tools over MCP (rather than opts.Tools) has a
 	// socket to dial; one whose transport hasn't landed simply ignores it.
