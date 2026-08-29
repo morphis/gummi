@@ -8,6 +8,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/gatepolicy"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
@@ -87,38 +88,42 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	switch sessionVerdict(s.Snapshot()) {
-	case verdictPass:
+	out := gatepolicy.Decide(gatepolicy.Input{
+		Stage:         domain.StageReview,
+		Kind:          id.Kind(),
+		Verdict:       sessionVerdict(s.Snapshot()),
+		Corrective:    m.round(id, domain.RoundKindReview),
+		CorrectiveMax: maxReviewRounds,
+		WorkStage:     workflow.WorkStage(id.Kind()),
+	})
+	switch out.Action {
+	case gatepolicy.Advance:
 		// clear the persisted count so the next review loop starts fresh.
 		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, domain.RoundKindReview, 0)
-		return m.autoStep(id, domain.StageVerify, "review passed → verify")
-	case verdictChanges:
-		if m.round(id, domain.RoundKindReview) >= maxReviewRounds {
-			if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
-				return m.writeHalt(id, err)
-			}
-			m.setRound(id, domain.RoundKindReview, 0)
-			m.raiseEscalation(id, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
-			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
-			return nil
-		}
+		return m.autoStep(id, out.Stage, "review passed → verify")
+	case gatepolicy.BounceToWork:
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.
 		if err := rounds.Bump(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, domain.RoundKindReview, m.round(id, domain.RoundKindReview)+1)
-		return m.autoStep(id, workflow.WorkStage(id.Kind()), "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")")
-	default:
-		// no clear verdict: don't guess — reset the loop and hand it to
-		// the human.
+		return m.autoStep(id, out.Stage, "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")")
+	default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, domain.RoundKindReview, 0)
+		if out.Reason == "review-changes-cap" {
+			m.raiseEscalation(id, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
+			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
+			return nil
+		}
+		// no clear verdict: don't guess — reset the loop and hand it to
+		// the human.
 		m.raiseEscalation(id, "review finished with no clear verdict — review manually")
 		return nil
 	}
@@ -133,13 +138,23 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	switch sessionVerdict(s.Snapshot()) {
-	case verdictPass:
+	out := gatepolicy.Decide(gatepolicy.Input{
+		Stage:     domain.StageVerify,
+		Kind:      id.Kind(),
+		Verdict:   sessionVerdict(s.Snapshot()),
+		WorkStage: workflow.WorkStage(id.Kind()),
+		// verify never auto-bounces here: a failed verify always escalates
+		// to a human today (gatepolicy documents the eligible-to-bounce
+		// rule as dormant; this keeps it switched off).
+		VerifyMayBounce: false,
+	})
+	switch {
+	case out.Action == gatepolicy.RaiseGate:
 		m.raiseAttention(id, attnGate, "verify passed — review & land on main")
-	case verdictBlocked:
+	case out.Reason == "verify-blocked":
 		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
-	case verdictFail, verdictChanges:
+	case out.Reason == "verify-fail":
 		// repeat failures warn off the bounce: each prior one bought a
 		// full rework round that changed nothing (m.rows is at most one
 		// bounce stale here — fine for a warning).
@@ -156,7 +171,7 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		} else {
 			m.raiseEscalation(id, "verify FAILED — read the evidence and bounce or overrule")
 		}
-	default:
+	default: // verify-unclear
 		m.raiseEscalation(id, "verify finished with no clear verdict — check the results manually")
 	}
 	// the session edited the artifact and committed; reload so the gate's

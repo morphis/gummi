@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/gatepolicy"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
@@ -915,53 +916,67 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 	case domain.StageReview:
 		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
-		switch v {
-		case verdict.Pass:
+		max := verdict.MaxRounds(domain.RoundKindReview)
+		out := gatepolicy.Decide(gatepolicy.Input{
+			Stage:         domain.StageReview,
+			Kind:          f.Kind,
+			Verdict:       v,
+			Corrective:    d.round(f.ID, domain.RoundKindReview),
+			CorrectiveMax: max,
+			WorkStage:     workflow.WorkStage(f.Kind),
+		})
+		switch out.Action {
+		case gatepolicy.Advance:
 			// clear the persisted count so the next review loop starts fresh.
 			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 				return Outcome{}, err
 			}
 			d.setRound(f.ID, domain.RoundKindReview, 0)
-			return d.stepTo(ctx, f.ID, domain.StageVerify)
-		case verdict.Changes:
-			max := verdict.MaxRounds(domain.RoundKindReview)
-			if d.round(f.ID, domain.RoundKindReview) >= max {
-				// escalation hands the loop to a human; clear the cap so the
-				// next review cycle starts a fresh budget.
-				if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
-					return Outcome{}, err
-				}
-				d.setRound(f.ID, domain.RoundKindReview, 0)
-				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", max)), nil
-			}
+			return d.stepTo(ctx, f.ID, out.Stage)
+		case gatepolicy.BounceToWork:
 			// persist the burned round before it lands in the fast path, so a
 			// mid-loop resume observes it.
 			if err := rounds.Bump(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 				return Outcome{}, err
 			}
 			d.setRound(f.ID, domain.RoundKindReview, d.round(f.ID, domain.RoundKindReview)+1)
-			return d.stepTo(ctx, f.ID, workflow.WorkStage(f.Kind))
-		default:
+			return d.stepTo(ctx, f.ID, out.Stage)
+		default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
 			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
 				return Outcome{}, err
 			}
 			d.setRound(f.ID, domain.RoundKindReview, 0)
+			if out.Reason == "review-changes-cap" {
+				// escalation hands the loop to a human; the cap was cleared
+				// above so the next review cycle starts a fresh budget.
+				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", max)), nil
+			}
 			return d.escalation(f, "review finished with no clear verdict"), nil
 		}
 
 	case domain.StageVerify:
 		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
-		switch v {
-		case verdict.Pass:
+		out := gatepolicy.Decide(gatepolicy.Input{
+			Stage:     domain.StageVerify,
+			Kind:      f.Kind,
+			Verdict:   v,
+			WorkStage: workflow.WorkStage(f.Kind),
+			// verify never auto-bounces here: a failed verify always
+			// escalates today (gatepolicy documents the eligible-to-bounce
+			// rule as dormant; this keeps it switched off).
+			VerifyMayBounce: false,
+		})
+		switch {
+		case out.Action == gatepolicy.RaiseGate:
 			// stop at the verified branch: Advance reports NeedsMerge (branch
 			// ahead) or transitions to Done (nothing to land). Never merges.
 			return d.crossGate(ctx, f)
-		case verdict.Blocked:
+		case out.Reason == "verify-blocked":
 			return d.escalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
-		case verdict.Fail, verdict.Changes:
+		case out.Reason == "verify-fail":
 			return d.bounceEscalation(f, "verify FAILED — read the evidence in the artifact"), nil
-		default:
+		default: // verify-unclear
 			return d.escalation(f, "verify finished with no clear verdict"), nil
 		}
 
