@@ -10,11 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morphis/gummi/internal/atomicfile"
+	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/rounds"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
@@ -1493,70 +1492,15 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 // brainstorm+plan) and the overflow seeds a draft under ws.DraftsDir().
 // KindResearch has no brainstorm/plan and no draft step: the brief is
 // rendered straight to the RS artifact path via SeededResearchTemplate.
+// The actual recipe lives in internal/cardmint, shared with the workspace
+// MCP endpoint's card_new tool — this is now just the translation from a
+// Driver's own Options to a cardmint.Input.
 func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
-	var title, oneLiner, seed string
-	if kind == domain.KindResearch {
-		title, oneLiner = domain.SplitDescription(desc)
-	} else {
-		title, oneLiner, seed = domain.SplitFreeform(desc)
-	}
-	slug, err := domain.Slugify(title)
-	if err != nil {
-		return domain.Feature{}, err
-	}
-	// Reject an unconfigured repo before minting a sequence number, so a
-	// typo'd --repo never silently burns an id (matches MaterializeBugs).
-	if d.opts.Repo != "" && !d.eng.RepoKnown(d.opts.Repo) {
-		return domain.Feature{}, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", d.opts.Repo)
-	}
-	num, err := d.store.MintFeatureNum(ctx, d.ws.SeqFile())
-	if err != nil {
-		return domain.Feature{}, err
-	}
-	id, err := domain.NewID(kind, num)
-	if err != nil {
-		return domain.Feature{}, err
-	}
-	skip := domain.QuickRoute()
-	if d.opts.Full || kind == domain.KindResearch {
-		skip = domain.SkipFlags{}
-	}
-	now := time.Now()
-	f := domain.Feature{
-		ID: id, Num: num, Kind: kind, Title: title, OneLiner: oneLiner,
-		Slug: slug, Stage: workflow.Initial(kind), Skip: skip,
-		Profile: d.opts.Profile, Budget: domain.Budget{Envelope: d.opts.Envelope},
-		GateApproval: d.opts.GateApproval,
-		ExternalRef:  d.opts.Ref, Repo: d.opts.Repo, CreatedAt: now, UpdatedAt: now,
-	}
-	if kind == domain.KindResearch {
-		artifact := filepath.Join(d.ws.Root, f.ArtifactPath())
-		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: desc}, domain.DraftProvenance{})
-		if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
-			return domain.Feature{}, err
-		}
-		if err := atomicfile.Write(artifact, []byte(content), 0o600); err != nil {
-			return domain.Feature{}, err
-		}
-	} else if seed != "" || d.opts.Acceptance != "" {
-		// seed the draft before persisting: the description's overflow fills
-		// the Problem section (a title-sized description seeds nothing
-		// there), and --acceptance fills the Verification plan (D10). Either
-		// input alone is enough to warrant a draft; both are just a pre-fill
-		// the spec agent still owns and approves.
-		draft := filepath.Join(d.ws.DraftsDir(), spec.DraftFilename(&f))
-		content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed, Acceptance: d.opts.Acceptance}, domain.DraftProvenance{})
-		if err := os.MkdirAll(d.ws.DraftsDir(), 0o750); err != nil {
-			return domain.Feature{}, err
-		}
-		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
-			return domain.Feature{}, err
-		}
-	}
-	if err := d.store.CreateFeature(ctx, &f); err != nil {
-		return domain.Feature{}, err
-	}
-	return f, nil
+	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
+		Kind: kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
+		Full: d.opts.Full, Repo: d.opts.Repo, RepoKnown: d.eng.RepoKnown,
+		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
+	})
 }
 
 // enterStage resets per-stage state (the verbose activity cursor points

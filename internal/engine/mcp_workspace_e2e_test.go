@@ -82,7 +82,7 @@ func TestMCPWorkspaceEndToEndListAndBoardList(t *testing.T) {
 	child.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list"}`)
 	resp = child.receive(id)
 	tools := resp["result"].(map[string]any)["tools"].([]any)
-	want := []string{"board_list", "card_status", "card_spec", "card_diff", "card_run", "card_resume"}
+	want := []string{"board_list", "card_status", "card_spec", "card_diff", "card_run", "card_resume", "card_new"}
 	if len(tools) != len(want) {
 		t.Fatalf("tools length = %d, want %d", len(tools), len(want))
 	}

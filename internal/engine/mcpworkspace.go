@@ -12,10 +12,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/mcp"
 	"github.com/morphis/gummi/internal/state"
@@ -326,6 +328,8 @@ func (ep *workspaceEndpoint) dispatchTool(name string, args json.RawMessage) (st
 		return ep.cardRun(args)
 	case cardResumeToolName:
 		return ep.cardResume(args)
+	case cardNewToolName:
+		return ep.cardNew(args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -550,6 +554,65 @@ func (ep *workspaceEndpoint) cardResume(args json.RawMessage) (string, error) {
 	return fmt.Sprintf("%s: resume requested for stage %s", f.ID, f.Stage), nil
 }
 
+// cardNewArgs is card_new's argument shape. Envelope's zero value means
+// "no cap" (matching `gummi feature`/`bugs new` --envelope's own "0 =
+// none"), not "unset" — the workspace endpoint has no config-resolved
+// default envelope to fall back to the way cmd/gummi's flag parsing does,
+// so an agent that wants a cap has to say so.
+type cardNewArgs struct {
+	Kind         string `json:"kind"`
+	Description  string `json:"description"`
+	Profile      string `json:"profile"`
+	Envelope     int    `json:"envelope"`
+	Repo         string `json:"repo"`
+	GateApproval string `json:"gate_approval"`
+}
+
+// cardNew answers card_new: mint a fresh card via internal/cardmint, the
+// same recipe (*driver.Driver).createFeature uses for headless
+// `gummi run`/`bugs new`/`gummi research` — see that package's doc
+// comment for why the recipe lives there instead of here or in
+// internal/driver.
+//
+// Its gate-approval default deliberately differs from every headless
+// entry point's: cardmint reads an empty GateApproval as domain.GateAuto
+// (matching driver.Options' own default), but a card minted by an agent
+// hosted inside someone else's TUI is not the same thing as a card a
+// human typed `gummi run` for — the human at this board did not ask for
+// this specific card to exist yet, so its design gates checkpoint for
+// them by default (D5's spirit applied to a card the human didn't
+// initiate) instead of auto-crossing on the hosted agent's say-so. An
+// agent that has an explicit mandate to run unattended (the human said
+// "and don't wait on me for the follow-up cards either") can still pass
+// gate_approval: "auto" to opt out.
+func (ep *workspaceEndpoint) cardNew(args json.RawMessage) (string, error) {
+	var a cardNewArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("card_new: %w", err)
+	}
+	kind := domain.Kind(a.Kind)
+	if !kind.Valid() {
+		return "", fmt.Errorf("card_new: kind must be one of feature, bug, research (got %q)", a.Kind)
+	}
+	if strings.TrimSpace(a.Description) == "" {
+		return "", fmt.Errorf("card_new: description is required")
+	}
+	gate := a.GateApproval
+	if gate == "" {
+		gate = domain.GateCaller
+	} else if !domain.ValidGateApproval(gate) {
+		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateAuto, domain.GateCaller, gate)
+	}
+	f, err := cardmint.Mint(ep.ctx, ep.engine.cfg.Store, ep.engine.cfg.Workspace, cardmint.Input{
+		Kind: kind, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
+		Repo: a.Repo, RepoKnown: ep.engine.RepoKnown, GateApproval: gate,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s: created, stage %s, gate approval %s", f.ID, f.Stage, f.GateApproval), nil
+}
+
 const (
 	boardListToolName  = "board_list"
 	cardStatusToolName = "card_status"
@@ -557,6 +620,7 @@ const (
 	cardDiffToolName   = "card_diff"
 	cardRunToolName    = "card_run"
 	cardResumeToolName = "card_resume"
+	cardNewToolName    = "card_new"
 )
 
 // workspaceTools is the fixed board-level tool set the workspace endpoint
@@ -565,6 +629,7 @@ const (
 func workspaceTools() []agent.ToolDef {
 	return []agent.ToolDef{
 		boardListTool(), cardStatusTool(), cardSpecTool(), cardDiffTool(), cardRunTool(), cardResumeTool(),
+		cardNewTool(),
 	}
 }
 
@@ -658,6 +723,34 @@ func cardResumeTool() agent.ToolDef {
 				"note": map[string]any{"type": "string", "description": "Optional note appended to the stage kickoff."},
 			},
 			"required": []any{"id"},
+		},
+	}
+}
+
+func cardNewTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: cardNewToolName,
+		Description: "Mint a new card (feature, bug, or research item) from a free-form " +
+			"description and add it to this workspace's backlog. Does not start it — follow up " +
+			"with card_run once it is ready to drive. Unlike a card a human creates at the board, " +
+			"a card minted this way defaults to checkpointing its design gates for the human " +
+			"(gate_approval \"caller\") rather than auto-crossing them, since the human did not ask " +
+			"for this specific card yet; pass gate_approval \"auto\" only when explicitly told to " +
+			"run it unattended.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"kind":        map[string]any{"type": "string", "description": "One of feature, bug, research."},
+				"description": map[string]any{"type": "string", "description": "Free-form description. The first line becomes the title; anything beyond it seeds the design draft."},
+				"profile":     map[string]any{"type": "string", "description": "Optional model-role profile (workspace default if omitted)."},
+				"envelope":    map[string]any{"type": "integer", "description": "Optional credit envelope; omit or 0 for no cap."},
+				"repo":        map[string]any{"type": "string", "description": "Optional configured repo name (workspace default if omitted)."},
+				"gate_approval": map[string]any{
+					"type":        "string",
+					"description": "Optional: \"auto\" or \"caller\" (default \"caller\" — see description).",
+				},
+			},
+			"required": []any{"kind", "description"},
 		},
 	}
 }

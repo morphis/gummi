@@ -122,7 +122,7 @@ func TestWorkspaceMCPListTools(t *testing.T) {
 	c.send(mcp.Request{JSONRPC: mcp.JSONRPC, ID: jsonRaw(id), Method: "list_tools"})
 	resp := c.read(id)
 	tools := resp["result"].(map[string]any)["tools"].([]any)
-	want := []string{"board_list", "card_status", "card_spec", "card_diff", "card_run", "card_resume"}
+	want := []string{"board_list", "card_status", "card_spec", "card_diff", "card_run", "card_resume", "card_new"}
 	if len(tools) != len(want) {
 		t.Fatalf("tools length = %d, want %d", len(tools), len(want))
 	}
@@ -368,6 +368,99 @@ func TestWorkspaceMCPCardResumeAppendsNote(t *testing.T) {
 	defer mu.Unlock()
 	if !strings.Contains(got, "please fix the lint error") {
 		t.Fatalf("kickoff turn = %q, missing the resume note", got)
+	}
+}
+
+// card_new mints a card reachable by board_list right afterward, and
+// defaults its gate approval to "caller" — the one place card_new departs
+// from every headless entry point's own "auto" default (see cardNew's doc
+// comment in mcpworkspace.go for why).
+func TestWorkspaceMCPCardNewDefaultsGateCaller(t *testing.T) {
+	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
+	path, teardown, err := e.StartWorkspaceMCPEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teardown()
+
+	result, errMsg := callWorkspaceTool(t, path, "card_new", map[string]any{
+		"kind":        "feature",
+		"description": "Let a hosted agent mint its own cards",
+	})
+	if errMsg != "" {
+		t.Fatalf("card_new error: %s", errMsg)
+	}
+	if !strings.Contains(result, "FD-001") {
+		t.Fatalf("card_new result = %q, want it to name the new card", result)
+	}
+	if !strings.Contains(result, domain.GateCaller) {
+		t.Fatalf("card_new result = %q, want it to report gate approval %q", result, domain.GateCaller)
+	}
+
+	f, err := e.cfg.Store.GetFeature(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatalf("card_new did not persist FD-001: %v", err)
+	}
+	if f.GateApproval != domain.GateCaller {
+		t.Errorf("persisted gate approval = %q, want %q", f.GateApproval, domain.GateCaller)
+	}
+
+	// reachable by board_list, not just by direct store lookup.
+	blResult, errMsg := callWorkspaceTool(t, path, "board_list", map[string]any{})
+	if errMsg != "" {
+		t.Fatalf("board_list error: %s", errMsg)
+	}
+	var items []boardListItem
+	if err := json.Unmarshal([]byte(blResult), &items); err != nil {
+		t.Fatalf("board_list result not JSON: %v (%s)", err, blResult)
+	}
+	if len(items) != 1 || items[0].ID != "FD-001" {
+		t.Fatalf("board_list = %+v, want the freshly minted FD-001", items)
+	}
+}
+
+// card_new accepts an explicit gate_approval "auto" to opt out of the
+// checkpoint default, and rejects an unrecognized kind or mode before
+// minting anything.
+func TestWorkspaceMCPCardNewExplicitGateAndValidation(t *testing.T) {
+	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
+	path, teardown, err := e.StartWorkspaceMCPEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teardown()
+
+	if _, errMsg := callWorkspaceTool(t, path, "card_new", map[string]any{
+		"kind": "sandwich", "description": "not a real kind",
+	}); errMsg == "" {
+		t.Fatal("card_new with an unknown kind should error")
+	}
+	if _, errMsg := callWorkspaceTool(t, path, "card_new", map[string]any{
+		"kind": "feature", "description": "",
+	}); errMsg == "" {
+		t.Fatal("card_new with an empty description should error")
+	}
+	if _, errMsg := callWorkspaceTool(t, path, "card_new", map[string]any{
+		"kind": "feature", "description": "x", "gate_approval": "sometimes",
+	}); errMsg == "" {
+		t.Fatal("card_new with an unrecognized gate_approval should error")
+	}
+
+	result, errMsg := callWorkspaceTool(t, path, "card_new", map[string]any{
+		"kind": "bug", "description": "auto-crossed by request", "gate_approval": "auto",
+	})
+	if errMsg != "" {
+		t.Fatalf("card_new error: %s", errMsg)
+	}
+	if !strings.Contains(result, domain.GateAuto) {
+		t.Fatalf("card_new result = %q, want it to report gate approval %q", result, domain.GateAuto)
+	}
+	f, err := e.cfg.Store.GetFeature(context.Background(), "BG-001")
+	if err != nil {
+		t.Fatalf("card_new did not persist BG-001: %v", err)
+	}
+	if f.Kind != domain.KindBug || f.GateApproval != domain.GateAuto {
+		t.Errorf("persisted feature = %+v", f)
 	}
 }
 
