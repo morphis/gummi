@@ -125,6 +125,12 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if r.DepBlocked {
 		badge = " " + s.Warning.Render("⛔")
 	}
+	// a card another gummi process is driving: this board can watch it
+	// (enter / t) but must not touch it, and says so rather than
+	// presenting an actively-changing card as idle.
+	if r.DrivenAbroad {
+		badge += " " + s.Info.Render("◉ elsewhere")
+	}
 	if sev := r.F.Severity; sev != "" {
 		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
 	}

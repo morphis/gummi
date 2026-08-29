@@ -196,7 +196,7 @@ func flagType(f *flag.Flag) string {
 }
 
 // commandGrammar renders the whole command surface as an aligned block. The
-// run/resume/status flags come from the real register funcs; spec/diff have
+// run/resume/status/watch flags come from the real register funcs; spec/diff have
 // none; doctor/skill are shown with their fixed shapes.
 func commandGrammar() string {
 	var b strings.Builder
@@ -226,6 +226,8 @@ func commandGrammar() string {
 	b.WriteString("\n")
 	b.WriteString("gummi clean <id|ref>\n\n")
 	writeCmd("gummi status <id|ref>", flagLines(func(fs *flag.FlagSet) { registerStatusFlags(fs) }))
+	b.WriteString("\n")
+	writeCmd("gummi watch <id|ref>", flagLines(func(fs *flag.FlagSet) { registerWatchFlags(fs) }))
 	b.WriteString("\n")
 	b.WriteString("gummi spec <id|ref>\n\n")
 	b.WriteString("gummi diff <id|ref>\n\n")

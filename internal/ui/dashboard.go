@@ -83,6 +83,12 @@ func (m *Shell) dashboardView(w, h int) string {
 		// dialog line but survives for later inspection.
 		line(s.Muted.Render("draft    ") + s.Warning.Render(sanitize(f.CommitDraftFail)))
 	}
+	if r.DrivenAbroad {
+		// the card is moving under another process; say who owns it and
+		// when it last spoke, so a quiet run is visible as quiet rather
+		// than read as this board's own idle card.
+		line(s.Muted.Render("driven   ") + s.Info.Render(foreignSummary(r.Foreign)))
+	}
 	line(s.Muted.Render("created  ") + s.Faint.Render(f.CreatedAt.Format("2006-01-02 15:04")))
 	line("")
 

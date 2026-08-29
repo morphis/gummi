@@ -38,6 +38,13 @@ type featureRow struct {
 	// snapshot resolved against the live dependency store (never a
 	// persisted flag, so it cannot go stale and diverge from the gate).
 	DepBlocked bool
+	// Foreign is the live session another gummi process is running on this
+	// card (a headless run/resume, a second board), resolved at load from
+	// the card's live file. The board cannot drive a card someone else
+	// owns, so the row badges it and the card actions withhold everything
+	// that would fight the other process — it can still be watched.
+	Foreign      state.ForeignDrive
+	DrivenAbroad bool
 }
 
 // rowsMsg delivers a fresh load of the board content.
@@ -106,6 +113,7 @@ func (m *Shell) loadRows() tea.Msg {
 			}
 		}
 		row.DepBlocked = len(m.dependencyBlockers(ctx, f.ID)) > 0
+		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		rows = append(rows, row)
 	}
 	return rowsMsg{rows: rows}
@@ -799,6 +807,10 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		// record — they go with it (best effort: an orphan is only clutter)
 		_ = os.RemoveAll(filepath.Join(m.wt.Root(), f.ArtifactPath()))
 		_ = os.RemoveAll(filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f)))
+		// the live-stream mirror is keyed to the record too; without this
+		// a deleted card's last session would linger as a watchable file
+		// (harmless — its owner is gone — but clutter all the same).
+		_ = os.Remove(m.ws.LiveFile(id))
 		m.dropSession(id)
 		return noticeMsg{text: fmt.Sprintf("%s deleted", id), reload: true}
 	}

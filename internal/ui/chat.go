@@ -13,14 +13,30 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
+// sessionView is what a chat surface renders: anything that can produce
+// a Snapshot. A live *engine.Session is one; an *engine.Follower over
+// another process's live file is the other, which is how the board shows
+// a card it does not own (see followSession).
+type sessionView interface {
+	Snapshot() engine.Snapshot
+}
+
 // chatPane is the interactive brainstorm/spec surface: a scrollable
 // transcript over an engine session plus an input textarea. It reads
 // the session's state via Snapshot and never owns transcript state.
+//
+// With a follower as its source the pane is read-only: the transcript
+// arrives from a run this process does not own, so there is nothing to
+// send a turn to and no resolver to answer a question with. Everything
+// that would write is withheld rather than failing at the last moment.
 type chatPane struct {
 	feature domain.FeatureID
-	session *engine.Session
-	input   textarea.Model
-	width   int // last width the input was sized to
+	session sessionView
+	// follow is set when session is a follower over another process's
+	// live file; it carries the tail's cancel so detaching stops it.
+	follow *followSource
+	input  textarea.Model
+	width  int // last width the input was sized to
 
 	scroll     int  // lines scrolled up from the bottom (0 = latest)
 	bodyH      int  // transcript viewport height, from the last render
@@ -38,6 +54,25 @@ func newChatPane(feature domain.FeatureID, session *engine.Session) *chatPane {
 	in := newChatInput()
 	in.Focus()
 	return &chatPane{feature: feature, session: session, input: in}
+}
+
+// newFollowPane builds the read-only pane over a followed run. It takes
+// the follower directly rather than letting a caller poke the fields: a
+// pane whose session is a typed-nil *engine.Session would pass every
+// nil check and then panic on Snapshot.
+func newFollowPane(feature domain.FeatureID, src *followSource) *chatPane {
+	return &chatPane{feature: feature, session: src, follow: src, input: newChatInput()}
+}
+
+// readOnly reports whether the pane is watching a run owned elsewhere.
+func (c *chatPane) readOnly() bool { return c.follow != nil }
+
+// liveSession is the pane's own engine session, or nil when it is
+// following another process's. Callers that send turns or answer
+// questions must check it: neither is possible on a followed run.
+func (c *chatPane) liveSession() *engine.Session {
+	s, _ := c.session.(*engine.Session)
+	return s
 }
 
 // newChatInput builds the message textarea (shared with tests).
@@ -62,6 +97,9 @@ func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	if snap.Busy {
 		head += "  " + s.Info.Render(spin+" thinking")
 	}
+	if c.follow != nil {
+		head += "  " + s.Warning.Render(c.follow.marker())
+	}
 	if c.scroll > 0 {
 		head += "  " + s.Faint.Render("↑ scrolled — pgdn to latest")
 	}
@@ -80,7 +118,9 @@ func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	// or the message input.
 	c.syncAsk(snap.PendingAsk)
 	var footer string
-	if snap.PendingAsk != nil && !c.freeForm {
+	if c.readOnly() {
+		footer = s.Faint.Render(ansi.Truncate(c.follow.footer(snap), max(w-2, 10), "…"))
+	} else if snap.PendingAsk != nil && !c.freeForm {
 		footer = c.pickerView(s, snap.PendingAsk, w)
 	} else {
 		footer = c.input.View()
@@ -142,6 +182,14 @@ func (c *chatPane) pickerView(s *theme.Styles, ask *engine.Ask, w int) string {
 // footer mode: the ask_user option picker, its free-form answer input,
 // or the plain message input.
 func (c *chatPane) bindings() []binding {
+	if c.readOnly() {
+		// no send, no answer: this run belongs to another process.
+		return []binding{
+			{key: "pgup/pgdn", label: "scroll", bar: true},
+			{key: "alt+o", label: "outputs", help: "expand/collapse captured tool outputs", bar: true},
+			{key: "esc", label: "stop watching", help: "close the view — the other process keeps running", bar: true},
+		}
+	}
 	var ask *engine.Ask
 	if c.session != nil {
 		ask = c.session.Snapshot().PendingAsk
@@ -325,6 +373,9 @@ func (c *chatPane) syncAsk(ask *engine.Ask) {
 // chat message; answer carries the user's reply to an open ask_user
 // question. At most one of send/answer is non-empty.
 func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send, answer string, cmd tea.Cmd) {
+	if c.readOnly() {
+		return c.handleWatchKey(msg)
+	}
 	var ask *engine.Ask
 	if c.session != nil {
 		ask = c.session.Snapshot().PendingAsk
@@ -370,10 +421,30 @@ func (c *chatPane) handleKey(msg tea.KeyPressMsg) (detach bool, send, answer str
 	return false, "", "", cmd
 }
 
+// handleWatchKey drives the pane while it watches a run owned by another
+// process: scrolling and output expansion only. Every key that would
+// write is simply not bound — a followed session has nothing to write to.
+func (c *chatPane) handleWatchKey(msg tea.KeyPressMsg) (detach bool, send, answer string, cmd tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		return true, "", "", nil
+	case "pgup", "ctrl+u":
+		c.scrollBy(c.page())
+	case "pgdown", "ctrl+d":
+		c.scrollBy(-c.page())
+	case "alt+o":
+		c.showOutput = !c.showOutput
+	}
+	return false, "", "", nil
+}
+
 // handlePaste inserts bracketed-paste text into the message input.
 // While the option picker is up (and not in free-form) there is no
 // input to paste into, so the paste is dropped.
 func (c *chatPane) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	if c.readOnly() {
+		return nil // nothing to type into
+	}
 	var ask *engine.Ask
 	if c.session != nil {
 		ask = c.session.Snapshot().PendingAsk

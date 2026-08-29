@@ -8,6 +8,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/envprobe"
+	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/sandbox"
 )
 
@@ -202,6 +203,14 @@ type Session struct {
 	clientTools    bool         // resolved backend's ClientTools capability (spawn-time cache)
 	sandboxMode    sandbox.Mode // resolved confinement mode (stamped at spawn)
 
+	// live mirrors every transcript mutation to the card's live file so a
+	// second gummi process can follow the run this one owns. It is bound
+	// at construction and closed by stop; a nil Writer (no workspace
+	// configured, or the file could not be opened) is a working no-op, so
+	// no call site branches on it. Emits are non-blocking channel sends,
+	// so holding s.mu across one costs nothing the UI can feel.
+	live *livelog.Writer
+
 	// preTurnDirt is the set of paths dirty on the main checkout
 	// immediately before the pending Send. The tripwire compares it
 	// against the post-turn set at EventIdle; nil means no pre-turn
@@ -317,6 +326,7 @@ func (s *Session) setState(st SessionState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = st
+	s.live.Emit(livelog.Record{Kind: livelog.KindState, State: string(st)})
 }
 
 // agent returns the session's agent session (nil while queued).
@@ -392,6 +402,7 @@ func (s *Session) appendUser(text string) {
 	defer s.mu.Unlock()
 	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text})
 	s.err = nil
+	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
 }
 
 func (s *Session) appendSystem(text string) {
@@ -399,6 +410,7 @@ func (s *Session) appendSystem(text string) {
 	defer s.mu.Unlock()
 	s.transcript = append(s.transcript, Message{Author: AuthorSystem, Content: text})
 	s.err = nil
+	s.live.Emit(livelog.Record{Kind: livelog.KindSystem, Text: text})
 }
 
 func (s *Session) appendDelta(text string) {
@@ -407,6 +419,7 @@ func (s *Session) appendDelta(text string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.live.Delta(text)
 	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming {
 		s.transcript[n-1].Content += text
 		return
@@ -424,6 +437,9 @@ func (s *Session) appendDelta(text string) {
 func (s *Session) finishAssistant(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// the empty completion is emitted too: it closes the follower's
+	// streaming bubble exactly as it closes this transcript's.
+	s.live.Emit(livelog.Record{Kind: livelog.KindMessage, Text: text})
 	n := len(s.transcript)
 	streaming := n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming
 	if strings.TrimSpace(text) == "" {
@@ -460,6 +476,7 @@ func (s *Session) replaceMessage(i int, content string) {
 	defer s.mu.Unlock()
 	if i >= 0 && i < len(s.transcript) {
 		s.transcript[i].Content = content
+		s.live.Emit(livelog.Record{Kind: livelog.KindEdit, Text: content})
 	}
 }
 
@@ -502,6 +519,10 @@ func (s *Session) appendTool(m Message) {
 		s.transcript[n-1].Streaming = false
 	}
 	s.transcript = append(s.transcript, m)
+	s.live.Emit(livelog.Record{
+		Kind: livelog.KindTool, Text: m.Content, Call: m.callID,
+		OK: m.ToolStatus == ToolOK, Output: m.ToolOutput,
+	})
 }
 
 // resolveToolResult attaches a backend-reported outcome to the pending
@@ -524,6 +545,7 @@ func (s *Session) resolveToolResult(callID string, ok bool, output string) {
 			s.transcript[i].ToolStatus = ToolFail
 		}
 		s.transcript[i].ToolOutput = output
+		s.live.Emit(livelog.Record{Kind: livelog.KindResult, Call: callID, OK: ok, Output: output})
 		return
 	}
 }
@@ -537,6 +559,11 @@ func (s *Session) addSpend(u agent.Usage) {
 	if u.Model != "" {
 		s.spend.Model = u.Model
 	}
+	s.live.Emit(livelog.Record{
+		Kind: livelog.KindSpend, Credits: s.spend.Credits,
+		InputTokens: s.spend.InputTokens, OutputTokens: s.spend.OutputTokens,
+		Model: s.spend.Model,
+	})
 }
 
 // setContext records the latest context-window occupancy (a known limit
@@ -618,6 +645,18 @@ func (s *Session) setPendingAsk(a *Ask) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pendingAsk = a
+	s.emitAskLocked(a)
+}
+
+// emitAskLocked mirrors the open question onto the live file. A watcher
+// sees the question but can never answer it — the resolver channel lives
+// in the owning process — so the follower renders it read-only.
+func (s *Session) emitAskLocked(a *Ask) {
+	r := livelog.Record{Kind: livelog.KindAsk}
+	if a != nil {
+		r.Call, r.Text = a.CallID, a.Question
+	}
+	s.live.Emit(r)
 }
 
 // trySetPendingAsk installs a as the open question only when none is
@@ -631,6 +670,7 @@ func (s *Session) trySetPendingAsk(a *Ask) bool {
 		return false
 	}
 	s.pendingAsk = a
+	s.emitAskLocked(a)
 	return true
 }
 
@@ -934,6 +974,7 @@ func (s *Session) setBusy(b bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.busy = b
+	s.live.Emit(livelog.Record{Kind: livelog.KindBusy, Busy: b})
 }
 
 // Busy reports whether the agent is mid-turn, without copying the
@@ -983,7 +1024,55 @@ func (s *Session) stop() {
 		if teardown != nil {
 			teardown()
 		}
+		// the live file's last word: a follower learns the session ended
+		// here rather than inferring it from a stream that went quiet.
+		// Close flushes and joins the writer goroutine, so nothing is
+		// half-written once stop returns.
+		s.live.Emit(livelog.Record{Kind: livelog.KindStopped, Err: errText(s.errValue())})
+		s.live.Close()
 	})
+}
+
+// bindLive attaches the session's live-file writer and replays whatever
+// transcript it already carries, so a follower that joins mid-session — a
+// restart-reattach carries the prior conversation over — sees the whole
+// thing rather than only what arrives next. Called once, before the
+// session's pump starts.
+func (s *Session) bindLive(w *livelog.Writer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.live = w
+	for _, m := range s.transcript {
+		switch m.Author {
+		case AuthorUser:
+			w.Emit(livelog.Record{Kind: livelog.KindUser, Text: m.Content})
+		case AuthorSystem:
+			w.Emit(livelog.Record{Kind: livelog.KindSystem, Text: m.Content})
+		case AuthorAssistant:
+			w.Emit(livelog.Record{Kind: livelog.KindMessage, Text: m.Content})
+		case AuthorTool:
+			w.Emit(livelog.Record{
+				Kind: livelog.KindTool, Text: m.Content,
+				OK: m.ToolStatus == ToolOK, Output: m.ToolOutput,
+			})
+		}
+	}
+	w.Emit(livelog.Record{Kind: livelog.KindState, State: string(s.state)})
+}
+
+// errValue reads the session's recorded error under the lock.
+func (s *Session) errValue() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
+}
+
+// errText renders an error for the wire, empty when there is none.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // finalizedState reports whether the session has been stopped; a

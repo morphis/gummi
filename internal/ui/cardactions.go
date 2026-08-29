@@ -163,6 +163,39 @@ var promotedActions = map[string]bool{
 	"run": true, "pause": true, "spec": true, "diff": true,
 }
 
+// foreignSafeActions are the actions that survive on a card another
+// gummi process is driving: reading it, and watching its live stream.
+// Everything else would write to a card this board does not own — the
+// other process would either fight the change or never see it — so it is
+// withheld while the drive lasts, not disabled forever.
+//
+// foreignBlockedKeys is the same rule stated as accelerators, for the
+// board's key handler (shell.go's boardVerb). The two must stay in
+// lockstep: an action absent from the list but answered by its key is
+// exactly the divergence this table exists to prevent. Board-level keys
+// (new card, ingest, inbox, navigation) are not card verbs and are not
+// listed — they never touch the driven card.
+var foreignSafeActions = map[string]bool{
+	"run": true, "transcript": true, "spec": true, "diff": true,
+	"inbox": true, "duplicate": true,
+}
+
+var foreignBlockedKeys = map[string]bool{
+	"p": true, // pause / dependencies
+	"v": true, // verify
+	"a": true, // raw attach
+	"g": true, // advance / decompose
+	"b": true, // bounce
+	"u": true, // envelope
+	"o": true, // repo picker
+	"P": true, // route via plan
+	"r": true, // rebase
+	"m": true, // merge
+	"z": true, // squash
+	"c": true, // clean
+	"x": true, // delete
+}
+
 // cardActionsFor is the full set of actions valid for this card right
 // now — the focusable list's contents. Ordering: recommended first (the
 // same entries nextActions surfaces in the read-only block, in its
@@ -188,6 +221,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 
 	runLabel, runWhy := runLabelWhy(in)
 	pauseLabel, pauseWhy := pauseLabelWhy(in)
+	// on a card another process drives, enter can only watch — and can do
+	// so at any stage, since what it opens is that run's live stream
+	// rather than this board's session.
+	if r.DrivenAbroad {
+		runLabel = "watch"
+		runWhy = fmt.Sprintf("follow the live agent stream — pid %d owns this run", r.Foreign.PID)
+	}
 
 	advanceLabel, advanceWhy := "advance", "advance stage (gate; from verify it lands the branch on main)"
 	if research && doneStage {
@@ -198,7 +238,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 
 	specs := []actionSpec{
 		{"run", "enter", runLabel, runWhy, false,
-			workflow.Interactive(in.stage) || autonomousStage(in.stage)},
+			r.DrivenAbroad || workflow.Interactive(in.stage) || autonomousStage(in.stage)},
 		// the gate must stay in lockstep with boardVerb's `p`, which pauses
 		// whenever a non-interactive session exists — including a finished
 		// one, which p parks. Only the wording varies: "pause the running
@@ -251,7 +291,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	// seed ordering and why text from the ranked suggestions: first
 	// occurrence of a key wins, so the recommendation (steps[0]) always
 	// out-ranks a same-keyed entry appended later in the same call.
-	steps := nextActions(in)
+	// a card another process drives has no local recommendation to make:
+	// every step nextActions ranks is about driving it here. Watching is
+	// the only move, and the run action already says so.
+	var steps []nextAction
+	if !r.DrivenAbroad {
+		steps = nextActions(in)
+	}
 	rank := make(map[string]int, len(steps))
 	why := make(map[string]string, len(steps))
 	for i, st := range steps {
@@ -268,6 +314,9 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	var normal, danger []ordered
 	for i, sp := range specs {
 		if !sp.valid {
+			continue
+		}
+		if r.DrivenAbroad && !foreignSafeActions[sp.id] {
 			continue
 		}
 		w := sp.why

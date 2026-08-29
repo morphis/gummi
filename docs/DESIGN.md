@@ -821,14 +821,32 @@ Decided in the design interview (2026-07-03):
      resources (worktree creation, merge) keep git's own serialization on
      the repo's `.git` lock, and the SQLite store already serializes
      writers via WAL + `busy_timeout`.
-13. **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
+13. **A parallel process can watch what it may not drive.** The live
+    agent stream — transcript deltas, tool calls, state changes — is
+    otherwise in-process only: the backend CLI is a child of whichever
+    gummi spawned it, and the store's session snapshot lands once per
+    turn, so it records what happened, never what is happening. Each
+    session therefore mirrors its stream to `.gummi/state/live/<id>.jsonl`
+    (one JSON object per line, `internal/livelog`), which a second
+    process tails: `gummi watch <id>` renders it, `--json` hands it to a
+    calling agent, and the board opens it as a read-only pane for any
+    card another process is driving. The file is a *view*, not a log of
+    record — each new session truncates it (a follower reports the
+    truncation as a takeover) and the store stays authoritative. Writes
+    are best-effort and never block the run: a full queue drops records
+    and says so on the stream rather than stalling the agent. A card
+    driven elsewhere is badged on the board, and every verb that would
+    write to it is withheld from the action list, the key handler, and
+    the help overlay alike — watching is the only thing this board can
+    honestly offer.
+14. **Third kind, `RS-NNN`** — own compiled-in graph and artifact under
     `.gummi/research/`, no branch or worktree, reusing Review/Verify
     verbatim as the quality floor.
-14. **Decomposition is wired into the RS `verify → done` gate** —
+15. **Decomposition is wired into the RS `verify → done` gate** —
     re-runnable from `done`, back-annotates minted FD ids into `## Slices`,
     never wedges the crossing, reserves envelope for its own architect
     pass.
-15. **`investigate` as a borrowed pass on an existing FD/BG** is deferred
+16. **`investigate` as a borrowed pass on an existing FD/BG** is deferred
     to a follow-up.
 
 Still open:

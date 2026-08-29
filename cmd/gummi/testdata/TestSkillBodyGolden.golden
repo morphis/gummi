@@ -118,6 +118,11 @@ gummi clean <id|ref>
 gummi status <id|ref>
     --json  emit machine-readable JSON instead of the text summary
 
+gummi watch <id|ref>
+    --json  emit the raw record stream as NDJSON instead of the rendered transcript
+    --once  exit when the current session ends instead of following the card's next one
+    --wait  block until the card has a live stream instead of failing when none exists
+
 gummi spec <id|ref>
 
 gummi diff <id|ref>
@@ -134,8 +139,13 @@ review → verify). `--full` opts into the brainstorm + plan stages for larger
 work. The design gates auto-cross under the default `--gate-approval=auto`; pass
 `--gate-approval=caller` to approve them yourself.
 
-`status`, `spec`, and `diff` are **read-only** — they take no lock, so you can
-inspect a feature while a run is live.
+`status`, `watch`, `spec`, and `diff` are **read-only** — they take no lock, so
+you can inspect a feature while a run is live. `status` answers *where* a card
+is (a store snapshot, updated once per turn); `gummi watch <id>` follows what it
+is doing *right now* — the agent's own transcript, tool calls, and state
+changes, streamed off the driving process's live file. `watch --json` emits that
+stream as NDJSON, one record per line, for a caller that would rather parse than
+read.
 
 ## The decision loop
 
@@ -222,7 +232,8 @@ your wrapper dying (e.g. the harness killed it) can leave gummi still
 churning as an orphan. A bare retry there fights the exclusive lock and
 looks like a fresh failure. `check_running` reads that card's own pid file
 under `.gummi/state/locks/` and probes it with `kill -0`: if it prints "gummi still running as pid …",
-wait (or `tail -f .gummi/state/events.jsonl` to watch progress) until the
+wait (`gummi watch <id>` follows that run's live agent stream; `tail -f
+.gummi/state/events.jsonl` shows milestones only) until the
 pid is gone, then follow `next`. `gummi status --json` also exposes this
 under `"running"` when you'd rather branch on JSON than a shell probe.
 

@@ -151,6 +151,25 @@ func (m *Shell) boardBindings() []binding {
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},
 	}
+	if r, ok := m.selected(); ok && r.DrivenAbroad {
+		// another gummi process is driving this card: every verb that
+		// would write to it is refused (shell.go's boardVerb), so the bar
+		// and the ? help overlay must stop offering them — the same
+		// reasoning as the research-card filter below. enter still works,
+		// as the way to watch the other process's stream.
+		filtered := bs[:0:0]
+		for _, b := range bs {
+			if foreignBlockedKeys[b.key] {
+				continue
+			}
+			if b.key == "enter" {
+				b.label = "watch"
+				b.help = "follow the live agent stream of the process driving this card"
+			}
+			filtered = append(filtered, b)
+		}
+		return filtered
+	}
 	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch {
 		// research cards carry no branch: the four worktree-verb keys
 		// refuse with a notice (shell.go), so surfacing them here — in

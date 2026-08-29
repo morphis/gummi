@@ -28,6 +28,7 @@ import (
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/envprobe"
+	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -449,6 +450,9 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		s.stop() // engine closed during startup: don't leave the agent live
 		return nil, errors.New("engine is closed")
 	}
+	// replace stopped any prior session (closing its writer), so this one
+	// can safely truncate the card's live file and take it over.
+	e.bindLiveLog(s)
 	e.flushEnvNotices(s)
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.pump(s) }()
@@ -572,6 +576,9 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		old.stop() // a replaced done/paused session; free its goroutine
 		e.freeSlot(old)
 	}
+	// after the replaced session's writer is closed, never before: two
+	// writers on one live file would interleave.
+	e.bindLiveLog(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
 	e.schedule()
 	return nil
@@ -901,6 +908,33 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 	s.setSpawnInfo(name, rc.Model, clientTools)
 	s.setByokRate(rate)
 	s.setSandboxMode(e.resolveSandbox(s.Feature).Mode)
+}
+
+// bindLiveLog opens the card's live file for s and binds it, so another
+// gummi process can follow this session (internal/livelog). The live
+// stream is a courtesy to watchers, never a dependency of the run: a
+// workspace-less engine (tests, transient board helpers) and a file that
+// cannot be opened both leave the session with a nil writer, which emits
+// nowhere and costs nothing.
+//
+// Call it once per session, after any prior session for the card has been
+// stopped — Create truncates, and two writers on one file interleave.
+func (e *Engine) bindLiveLog(s *Session) {
+	if e.cfg.Workspace.Root == "" {
+		return
+	}
+	snap := s.Snapshot()
+	w, err := livelog.Create(e.cfg.Workspace.LiveFile(s.Feature.ID), livelog.Record{
+		Feature: string(s.Feature.ID),
+		Stage:   string(s.Feature.Stage),
+		Role:    string(s.Role),
+		Agent:   snap.AgentName,
+		Model:   snap.Model,
+	})
+	if err != nil {
+		return
+	}
+	s.bindLive(w)
 }
 
 // trackAgentPID records sess's backing OS process at

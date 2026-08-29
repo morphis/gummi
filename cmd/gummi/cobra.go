@@ -109,6 +109,15 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+// watchCmd implements `gummi watch <id|ref> [--json] [--wait]`.
+var watchCmd = &cobra.Command{
+	Use:   "watch <id|ref> [--json] [--wait] [--once]",
+	Short: "Follow the live agent stream of a card another gummi is driving",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runWatch(buildFlagArgs(cmd, args))
+	},
+}
+
 // specCmd implements `gummi spec <id|ref>`.
 var specCmd = &cobra.Command{
 	Use:   "spec <id|ref>",
@@ -283,6 +292,9 @@ func init() {
 	squashCmd.Flags().Bool("force", false, "proceed even if the linked PR has open review threads")
 	commitCmd.Flags().StringP("message", "m", "", "commit message for the card's uncommitted worktree changes (required; - reads from stdin)")
 	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
+	watchCmd.Flags().Bool("json", false, "emit the raw record stream as NDJSON instead of the rendered transcript")
+	watchCmd.Flags().Bool("wait", false, "block until the card has a live stream instead of failing when none exists")
+	watchCmd.Flags().Bool("once", false, "exit when the current session ends instead of following the card's next one")
 	doctorCmd.Flags().Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
 	doctorCmd.Flags().Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
 

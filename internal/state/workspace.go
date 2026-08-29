@@ -85,6 +85,17 @@ func (w Workspace) AgentPGIDFile(id domain.FeatureID) string {
 	return filepath.Join(w.StateDir(), "locks", fmt.Sprintf("%s.agent.pid", id))
 }
 
+// LiveFile is where the process driving card id mirrors its live agent
+// stream — the transcript deltas, tool calls, and state changes that
+// otherwise never leave that process's memory — one JSON object per line
+// (internal/livelog). A second gummi (a watching board, `gummi watch`)
+// tails it to render the run it does not own. Unlike EventsFile it is
+// per-card and truncated by each new session: it is the current view,
+// not the history, which stays in the store.
+func (w Workspace) LiveFile(id domain.FeatureID) string {
+	return filepath.Join(w.StateDir(), "live", fmt.Sprintf("%s.jsonl", id))
+}
+
 // EventsFile mirrors the driver's NDJSON stream, one JSON object per line,
 // append-only. It lives beside the pid file so a caller whose wrapper died
 // mid-run can tail progress off disk instead of a lost stdout pipe.

@@ -50,6 +50,7 @@ func init() {
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(specCmd)
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(doctorCmd)
