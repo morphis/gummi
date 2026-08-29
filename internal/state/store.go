@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	activity      TEXT NOT NULL DEFAULT '',
 	error         TEXT NOT NULL DEFAULT '',
 	verdict       TEXT NOT NULL DEFAULT '',
-	updated_at    TEXT NOT NULL
+	updated_at    TEXT NOT NULL,
+	started_at    TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_messages (
 	seq         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +194,33 @@ CREATE TABLE IF NOT EXISTS feature_deps (
 	PRIMARY KEY (feature_id, depends_on_id)
 );
 CREATE INDEX IF NOT EXISTS feature_deps_depends_on ON feature_deps(depends_on_id);
+
+-- The event log: one row per notable thing that happened on a card's
+-- stage session — a message, a tool call, a stage boundary, a gate
+-- crossing. It is the durable record a card's whole history is read
+-- from, unlike the ephemeral sessions/session_messages rows, which hold
+-- only the live stage and are rewritten wholesale on every save.
+-- Append-only; seq is the total order. dedupe
+-- carries a caller-chosen idempotency key so a mirrored write survives a
+-- retried save without doubling up (see the partial unique index below);
+-- '' means "always append" for events with no natural key. output holds
+-- raw tool output and is the one column the retention sweep prunes
+-- (PruneStageOutput) once a stage is no longer live and its tool calls
+-- didn't fail — payload and every other column are kept forever.
+CREATE TABLE IF NOT EXISTS card_events (
+	seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+	feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+	stage      TEXT    NOT NULL DEFAULT '',
+	kind       TEXT    NOT NULL,
+	status     TEXT    NOT NULL DEFAULT '',
+	at         TEXT    NOT NULL,
+	payload    TEXT    NOT NULL DEFAULT '',
+	output     TEXT    NOT NULL DEFAULT '',
+	dedupe     TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS card_events_feature ON card_events(feature_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS card_events_dedupe
+	ON card_events(feature_id, dedupe) WHERE dedupe <> '';
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.
@@ -465,6 +493,7 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE diff_annotations ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS diff_annotations_source_ref ON diff_annotations(feature_id, source_ref) WHERE source_ref != ''`,
+	`ALTER TABLE sessions ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -757,5 +758,158 @@ func TestMintNumGlobalAcrossRepos(t *testing.T) {
 	}
 	if c := mk("lxd"); c != 3 {
 		t.Errorf("third mint = %d, want 3", c)
+	}
+}
+
+// TestCardEventsSchemaFreshAndMigratedMatch proves the card_events table
+// (a brand-new table, unlike the columns TestOldSchemaStillOpens covers)
+// ends up identical whether it comes from a fresh database built off the
+// schema const alone, or from OpenStore applying that same schema const
+// (CREATE TABLE IF NOT EXISTS) to a pre-existing database that predates
+// card_events entirely. Both paths run the identical CREATE TABLE
+// statement, so this is really pinning that invariant down, not testing
+// two different code paths — the point is to fail loudly if a future
+// change ever moves card_events into the migrations list instead
+// (which would make it silently absent from a pre-existing database
+// that already ran a stale migrations list up to some earlier point,
+// since migrations are one-shot ADD COLUMNs, not idempotent creates).
+func TestCardEventsSchemaFreshAndMigratedMatch(t *testing.T) {
+	ctx := context.Background()
+
+	// Fresh: base schema const only, same shape as TestFreshSchemaCoversWrites.
+	freshDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer freshDB.Close()
+	if _, err := freshDB.ExecContext(ctx, schema); err != nil {
+		t.Fatalf("building base schema: %v", err)
+	}
+	freshCols := tableColumns(t, freshDB, "card_events")
+
+	// Migrated: a hand-built pre-existing database with no card_events
+	// table at all (following TestOldSchemaStillOpens' pattern), opened
+	// through the real OpenStore.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "old.db")
+	oldDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same pre-reconciliation features table TestOldSchemaStillOpens
+	// hand-builds: it already includes every column the schema const's
+	// CREATE INDEX statements reference (e.g. external_ref), which a
+	// truly minimal table would not, so it opens cleanly through the
+	// real migration path.
+	if _, err := oldDB.ExecContext(ctx, `CREATE TABLE features (
+		id              TEXT PRIMARY KEY,
+		num             INTEGER NOT NULL UNIQUE,
+		title           TEXT NOT NULL,
+		one_liner       TEXT NOT NULL DEFAULT '',
+		slug            TEXT NOT NULL,
+		stage           TEXT NOT NULL,
+		skip_brainstorm INTEGER NOT NULL DEFAULT 0,
+		skip_plan       INTEGER NOT NULL DEFAULT 0,
+		profile         TEXT NOT NULL DEFAULT '',
+		budget_envelope INTEGER NOT NULL DEFAULT 0,
+		budget_spent    INTEGER NOT NULL DEFAULT 0,
+		spend_credits   REAL NOT NULL DEFAULT 0,
+		spend_est       REAL NOT NULL DEFAULT 0,
+		spend_in        INTEGER NOT NULL DEFAULT 0,
+		spend_out       INTEGER NOT NULL DEFAULT 0,
+		created_at      TEXT NOT NULL,
+		updated_at      TEXT NOT NULL,
+		kind            TEXT NOT NULL DEFAULT 'feature',
+		external_ref    TEXT NOT NULL DEFAULT '',
+		skip_triage     INTEGER NOT NULL DEFAULT 0,
+		skip_diagnose   INTEGER NOT NULL DEFAULT 0,
+		quick           INTEGER NOT NULL DEFAULT 0,
+		verified_at     TEXT NOT NULL DEFAULT '',
+		gate_approval   TEXT NOT NULL DEFAULT '',
+		fork_point      TEXT NOT NULL DEFAULT ''
+	);`); err != nil {
+		oldDB.Close()
+		t.Fatal(err)
+	}
+	oldDB.Close()
+
+	s, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("open over pre-card_events schema: %v", err)
+	}
+	defer s.Close()
+	migratedCols := tableColumns(t, s.db, "card_events")
+
+	if len(freshCols) == 0 {
+		t.Fatal("fresh schema has no card_events columns at all")
+	}
+	if !equalStringSets(freshCols, migratedCols) {
+		t.Errorf("card_events columns differ:\n  fresh:    %v\n  migrated: %v", freshCols, migratedCols)
+	}
+}
+
+// tableColumns returns a table's column names via pragma_table_info.
+func tableColumns(t *testing.T, db *sql.DB, table string) []string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(),
+		`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		cols = append(cols, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(cols)
+	return cols
+}
+
+func equalStringSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestSessionStartedAtRoundTrip: a session's started_at survives a
+// SaveSession/LoadSessions round trip, the same way Flavor and Verdict do.
+func TestSessionStartedAtRoundTrip(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Started at")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now().UTC().Format(timeFmt)
+	if err := s.SaveSession(ctx, SessionSnapshot{
+		Feature: f.ID, Stage: f.Stage, Role: "implementer",
+		State: "running", StartedAt: started,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snaps, err := s.LoadSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("LoadSessions returned %d snapshots, want 1", len(snaps))
+	}
+	if snaps[0].StartedAt != started {
+		t.Errorf("StartedAt = %q, want %q", snaps[0].StartedAt, started)
 	}
 }
