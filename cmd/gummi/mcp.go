@@ -20,22 +20,33 @@ import (
 // tool set over MCP stdio to whichever backend spawned it. It is not in
 // the user-facing surface (Hidden), carries no tool logic of its own, and
 // only works as a child of a running engine: the session socket address
-// arrives on GUMMI_MCP_SOCK, and the feature id on --feature. Every MCP
-// request is bridged to the engine's session socket and answered by the
-// existing handleClientTool / resolver machinery.
+// always arrives on GUMMI_MCP_SOCK. Two scopes select what it bridges to:
+// --feature <id> dials the per-feature endpoint for that stage session
+// (the original mode); --workspace dials the process-lifetime board-level
+// endpoint a TUI-hosted agent uses to drive the gummi it lives inside,
+// instead of shelling out to a second `gummi` process that would contend
+// for a card's per-card lock. Exactly one of the two must be given — there
+// is no sentinel feature id that means "workspace", because the two
+// endpoints validate different handshakes and mixing them into one flag
+// would just move the ambiguity from here into that handshake. Every MCP
+// request is bridged to the engine's live socket and answered by its
+// existing tool-dispatch machinery (handleClientTool for a feature,
+// workspaceEndpoint's board-level tools for the workspace).
 var mcpCmd = &cobra.Command{
 	Use:    "__mcp",
 	Hidden: true,
-	Short:  "Serve a live feature's tools over MCP stdio (internal)",
+	Short:  "Serve a live feature's or the workspace's tools over MCP stdio (internal)",
 	RunE:   runMCP,
 }
 
 func init() {
 	mcpCmd.Flags().String("feature", "", "feature id whose stage tools to serve")
+	mcpCmd.Flags().Bool("workspace", false, "serve the process-lifetime board-level tools instead of one feature's stage tools")
 }
 
 func runMCP(cmd *cobra.Command, _ []string) error {
 	featureID, _ := cmd.Flags().GetString("feature")
+	workspace, _ := cmd.Flags().GetBool("workspace")
 	path := os.Getenv("GUMMI_MCP_SOCK")
 	if path == "" {
 		fmt.Fprintf(cmd.ErrOrStderr(),
@@ -43,8 +54,12 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 				"child spawned by gummi (there is no other way to reach a session)\n")
 		return &exitError{code: 2}
 	}
-	if featureID == "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "gummi __mcp: --feature is required\n")
+	switch {
+	case workspace && featureID != "":
+		fmt.Fprintf(cmd.ErrOrStderr(), "gummi __mcp: --feature and --workspace are mutually exclusive\n")
+		return &exitError{code: 2}
+	case !workspace && featureID == "":
+		fmt.Fprintf(cmd.ErrOrStderr(), "gummi __mcp: one of --feature or --workspace is required\n")
 		return &exitError{code: 2}
 	}
 	conn, err := (&net.Dialer{}).DialContext(context.Background(), "unix", path)
@@ -53,7 +68,12 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		return &exitError{code: 2}
 	}
 	client := newSocketClient(conn)
-	if err := client.hello(featureID); err != nil {
+	if workspace {
+		if err := client.helloWorkspace(); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "gummi __mcp: engine refused the workspace handshake: %v\n", err)
+			return &exitError{code: 2}
+		}
+	} else if err := client.hello(featureID); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "gummi __mcp: engine refused feature %s: %v\n", featureID, err)
 		return &exitError{code: 2}
 	}
@@ -164,6 +184,14 @@ func (c *socketClient) request(ctx context.Context, method string, params any) (
 // rejects a feature it is not serving.
 func (c *socketClient) hello(feature string) error {
 	_, err := c.request(context.Background(), "hello", map[string]any{"feature": feature})
+	return err
+}
+
+// helloWorkspace completes the workspace endpoint's own handshake
+// ({"mode":"workspace"}, not {"feature":"<id>"}) — the engine refuses a
+// connection that isn't bound to the endpoint it's actually dialing.
+func (c *socketClient) helloWorkspace() error {
+	_, err := c.request(context.Background(), "hello", map[string]any{"mode": "workspace"})
 	return err
 }
 

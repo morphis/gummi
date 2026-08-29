@@ -25,6 +25,22 @@ const (
 	// FeatureMismatch is gummi's own code for a hello handshake whose
 	// feature id does not match the endpoint's captured one.
 	FeatureMismatch = -32000
+	// ModeMismatch is the workspace-scoped endpoint's own handshake
+	// failure code: a hello that isn't {"mode":"workspace"}. It is
+	// distinct from FeatureMismatch because a workspace connection
+	// carries no feature id to mismatch against — the two endpoints
+	// validate different things at hello, so a caller can tell which
+	// handshake it failed rather than both collapsing to one code.
+	ModeMismatch = -32001
+	// ToolError is a generic code for a tool call (list_tools or
+	// call_tool) that failed for a reason that isn't a handshake problem
+	// — an unknown card id, a card that refused to start, a missing
+	// worktree. The workspace endpoint's board-level tools have no single
+	// "session" to blame a failure on the way the per-feature endpoint's
+	// FeatureMismatch code does double duty for, so they get their own
+	// catch-all instead of borrowing that one's name for an unrelated
+	// meaning.
+	ToolError = -32002
 )
 
 // Request is a JSON-RPC 2.0 request or notification envelope. The ID is
