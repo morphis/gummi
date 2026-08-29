@@ -165,7 +165,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `u` | set the budget envelope (credits; 0 = uncapped) |
 | `o` | change the card's managed repository (before worktree) |
 | `S` | toggle severity sort (todo only) |
-| `tab` / `alt+1/2/3` | cycle the tabs (board, inbox, agent) / jump straight to one — both work from inside any view |
+| `tab` / `alt+1/2/3` | cycle gummi's own tabs (board, inbox) / jump straight to one, the agent tab included — both work from inside any view |
 | `i` | open the needs-attention inbox |
 | `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
@@ -184,11 +184,12 @@ previous/next card without going back. Every card verb (`g`, `v`, `m`,
 `d`, …) works from either level.
 
 The board sits behind gummi's own tab bar alongside the needs-attention
-inbox and a hosted agent pane — `tab` cycles all three, `alt+1/2/3` jumps
-straight to one. Both are answered above whatever holds the keyboard, so
-they work from inside a chat, a spec or a diff without escaping out
-first; the hosted CLI on the agent tab keeps `tab` for itself, and
-`alt+1/2/3` is the way back out of it.
+inbox and a hosted agent pane — `tab` cycles gummi's own tabs (board and
+inbox), `alt+1/2/3` jumps straight to one, the agent tab included. Both
+are answered above whatever holds the keyboard, so they work from inside
+a chat, a spec or a diff without escaping out first. The hosted CLI on
+the agent tab keeps `tab` for itself — which is why `tab` does not cycle
+onto that tab, and why `alt+1/2/3` is the way back out of it.
 
 ## Bringing in existing work
 

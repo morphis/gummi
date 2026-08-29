@@ -100,7 +100,7 @@ func (m *Shell) inboxBindings() []binding {
 		{key: "enter", label: "go", help: "jump to the card and clear this item", bar: true},
 		{key: "x", label: "dismiss", help: "clear this item without acting on it", bar: true},
 		{key: "u", label: "top up", help: "raise the envelope and resume (budget items only)"},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
+		{key: "tab", label: "next tab", help: "cycle gummi's own tabs (board, inbox); alt+3 for the agent", bar: true},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "stay on the needs-attention queue"},
 		{key: "?", label: "help", bar: true},

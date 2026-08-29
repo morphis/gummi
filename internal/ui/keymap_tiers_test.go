@@ -224,17 +224,51 @@ func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
 	}
 }
 
-// TestTabCycleIncludesTheAgentTab is severity 4. The cycle used to skip
-// the agent tab because tab belongs to the hosted CLI once you are
-// there; with alt+1/2/3 answered above every surface there is always a
-// way back out, so skipping it just hid a third of the tab bar.
-func TestTabCycleIncludesTheAgentTab(t *testing.T) {
+// TestTabCycleSkipsForeignTabs: tab belongs to the hosted CLI the moment
+// you reach the agent tab, so cycling onto it is a one-way door — you
+// press tab a third time and nothing happens, with nothing on screen
+// saying why. alt+1/2/3 being global is an escape hatch, not a reason to
+// walk into it; the cycle covers the tabs gummi's own keymap can get you
+// out of, and alt+3 reaches the rest.
+func TestTabCycleSkipsForeignTabs(t *testing.T) {
 	m := populatedShell(100, 30)
-	want := []Tab{TabInbox, TabAgent, TabBoard}
+	want := []Tab{TabInbox, TabBoard, TabInbox, TabBoard}
 	for i, w := range want {
 		m.nextTab()
 		if m.tab != w {
 			t.Fatalf("cycle step %d: tab = %v, want %v", i+1, m.tab, w)
 		}
+	}
+}
+
+// TestTabIsNotPromisedOnAForeignTab: the bar's hint is the only thing on
+// screen that says how to move between tabs, so on a tab where tab does
+// not cycle it must stop advertising that it does. Getting this wrong is
+// how the one-way door above went unnoticed.
+func TestTabIsNotPromisedOnAForeignTab(t *testing.T) {
+	m := populatedShell(120, 30)
+	if bar := stripANSI(m.tabBarView(120)); !strings.Contains(bar, "tab") {
+		t.Fatalf("the board tab's bar should offer the cycle:\n%s", bar)
+	}
+	m.setTab(TabAgent)
+	bar := stripANSI(m.tabBarView(120))
+	if strings.Contains(bar, "tab board/inbox") {
+		t.Errorf("the agent tab's bar still promises the tab cycle:\n%s", bar)
+	}
+	if !strings.Contains(bar, "alt+1/2/3") {
+		t.Errorf("the agent tab's bar must name the way out:\n%s", bar)
+	}
+}
+
+// TestAgentTabIsStillReachable: skipping it in the cycle is only
+// acceptable because alt+3 goes straight there from anywhere.
+func TestAgentTabIsStillReachable(t *testing.T) {
+	for name, m := range openSurfaces(t) {
+		t.Run(name, func(t *testing.T) {
+			m.handleKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
+			if m.tab != TabAgent {
+				t.Fatalf("alt+3 from an open %s: tab = %v, want TabAgent", name, m.tab)
+			}
+		})
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -29,19 +28,35 @@ const (
 	TabAgent
 )
 
-// tabDef names one tab in the bar: its identity and its label.
+// tabDef names one tab in the bar: its identity, its label, and whether
+// it hands the keyboard to a program gummi does not control.
 type tabDef struct {
 	id    Tab
 	label string
+	// foreign marks a tab that hosts someone else's keymap. gummi keeps
+	// only alt+1/2/3 there; everything else, tab included, belongs to the
+	// hosted program. nextTab skips these — see its comment for why an
+	// escape hatch is not enough to make cycling onto one safe.
+	foreign bool
 }
 
 // tabDefs is the tab bar's contents, left to right after the wordmark.
 func (m *Shell) tabDefs() []tabDef {
 	return []tabDef{
-		{TabBoard, "board"},
-		{TabInbox, "inbox"},
-		{TabAgent, "agent"},
+		{id: TabBoard, label: "board"},
+		{id: TabInbox, label: "inbox"},
+		{id: TabAgent, label: "agent", foreign: true},
 	}
+}
+
+// foreignTab reports whether t hands the keyboard to a hosted program.
+func (m *Shell) foreignTab(t Tab) bool {
+	for _, td := range m.tabDefs() {
+		if td.id == t {
+			return td.foreign
+		}
+	}
+	return false
 }
 
 // setTab switches the active tab, clamping to a valid one. cardOpen
@@ -60,26 +75,32 @@ func (m *Shell) setTab(t Tab) {
 	m.tab = t
 }
 
-// nextTab cycles every tab in tabDefs, the agent tab included. It used
-// to skip that one: tab belongs to the hosted pty once you are there, so
-// cycling onto it was a one-way door. That is no longer true — handleKey
-// answers alt+1/2/3 above every surface, the hosted CLI included, so the
-// way back out is always one keystroke. Landing there is a visit, not a
-// trap, and a cycle that quietly omits a third of the tab bar is its own
-// small lie.
-func (m *Shell) nextTab() tea.Cmd {
+// nextTab cycles the tabs gummi's own keymap covers, skipping any tab
+// that hands the keyboard to a hosted program (tabDef.foreign).
+//
+// It briefly did cycle onto the agent tab, on the theory that hoisting
+// alt+1/2/3 above every surface made landing there a visit rather than a
+// trap. Driving it proved otherwise: tab belongs to the hosted CLI the
+// moment you arrive, so a user cycling tab-tab-tab stops dead on the
+// third press with no indication why. An escape hatch existing is not
+// the same as the key you were already pressing continuing to work — and
+// a cycle you can enter but not leave is worse than one that is honest
+// about its two members. alt+3 goes to the agent tab; the tab bar's own
+// hint names it, which is the discoverability the cycle would have
+// bought.
+func (m *Shell) nextTab() {
 	defs := m.tabDefs()
-	// Tab is an index into tabDefs by construction and setTab keeps it in
-	// range, so the successor is plain modular arithmetic over the same
-	// slice the bar draws from — a fourth tab needs no edit here.
-	next := defs[(int(m.tab)+1)%len(defs)].id
-	m.setTab(next)
-	if next == TabAgent {
-		// same deferred spawn as alt+3: the first arrival pays for the
-		// pty, and a board that never cycles that far never does.
-		return m.ensureAgent()
+	// walk forward to the next non-foreign tab, wrapping. Bounded by the
+	// tab count, so a set that is somehow all-foreign lands back on the
+	// current tab rather than spinning.
+	cur := int(m.tab)
+	for i := 1; i <= len(defs); i++ {
+		td := defs[(cur+i)%len(defs)]
+		if !td.foreign {
+			m.setTab(td.id)
+			return
+		}
 	}
-	return nil
 }
 
 // tabBadge names the small marker a tab wears next to its label, and
@@ -145,12 +166,16 @@ func (m *Shell) tabBarView(w int) string {
 	// Right-align the navigation hint in the tab bar's own free space.
 	// It cannot live in the status bar's hint row: that row is already
 	// full at 120 columns, and it is the wrong place anyway — how to
-	// reach a tab belongs beside the tabs. It still names alt+1/2/3
-	// explicitly even though tab now reaches all three: the hosted CLI on
-	// the agent tab keeps tab for itself, so alt+N is the only way back
-	// out, and that is exactly where a user has no other hint to read.
-	hint := s.Muted.Render("tab") + s.Faint.Render(" cycle · ") +
-		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
+	// reach a tab belongs beside the tabs.
+	//
+	// On a foreign tab the hint drops its "tab cycle" half. tab goes to
+	// the hosted CLI there, and a bar that kept promising the cycle would
+	// be telling the user to press the one key that cannot work — which
+	// is exactly how the trap was found.
+	hint := s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
+	if !m.foreignTab(m.tab) {
+		hint = s.Muted.Render("tab") + s.Faint.Render(" board/inbox · ") + hint
+	}
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint
 	}

@@ -1120,7 +1120,8 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.agentKey(msg)
 	}
 	if key == "tab" {
-		return m.nextTab()
+		m.nextTab()
+		return nil
 	}
 	if key == "?" && !m.textEntry() {
 		m.Overlay.Push(m.helpOverlay())

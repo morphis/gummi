@@ -571,14 +571,21 @@ route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
 The board sits behind a one-row tab bar shared with the status bar:
-`gummi │ board │ inbox │ agent │`. `tab` cycles all three;
-`alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed deliberately
+`gummi │ board │ inbox │ agent │`. `tab` cycles the tabs gummi's own
+keymap covers (board, inbox); `alt+1`/`alt+2`/`alt+3` jump straight to
+one, the agent tab included — alt-prefixed deliberately
 (§6.1's `alt+o` reasoning: a plain `ctrl`/bare key a terminal multiplexer
 or the hosted agent tab's own pty might already claim). Both are answered
 at the top of `handleKey`, above whatever surface holds the keyboard, so
 a tab is always one keystroke away from inside a chat, a spec or a diff.
 The hosted CLI on the agent tab is the one exception — it keeps `tab` for
-itself, which is why `alt+N` also exists.
+itself, which is why `alt+N` also exists and why `tab` does not cycle
+onto that tab. Cycling onto a tab that will not cycle you off it is a
+one-way door: the user presses `tab` a third time and nothing happens.
+An escape hatch existing is not the same as the key already under their
+finger continuing to work, so `tab` covers only the tabs it can leave,
+and the bar's hint drops its "tab" half on a tab where tab is not gummi's
+(`tabDef.foreign`).
 
 The board's own overlaying surfaces (chat, spec, diff, ingest review, bug
 import, dependency picker) are scoped to the board tab: each belongs to a

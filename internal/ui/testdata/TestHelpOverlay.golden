@@ -18,7 +18,7 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mu        [m  [38;2;191;188;200mset the budget envelope (credits; 0 = uncapped)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mo        [m  [38;2;191;188;200mchange the card's managed repository (before worktree)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200ma        [m  [38;2;191;188;200mraw-attach the agent CLI in the worktree[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle the tabs (board, inbox, agent)[m
+[38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle gummi's own tabs (board, inbox); alt+3 for the agent[m
 [38;2;107;80;255m│[m  [38;2;191;188;200malt+1/2/3[m  [38;2;191;188;200mjump straight to board / inbox / agent[m
 [38;2;107;80;255m│[m
 [38;2;107;80;255m│[m  [38;2;96;95;107m↑↓ scroll · 1–18 of 32 · esc close[m

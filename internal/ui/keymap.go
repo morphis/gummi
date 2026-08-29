@@ -146,7 +146,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "u", label: "envelope", help: "set the budget envelope (credits; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)"},
+		{key: "tab", label: "next tab", help: "cycle gummi's own tabs (board, inbox); alt+3 for the agent"},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},
