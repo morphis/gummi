@@ -11,6 +11,7 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -48,6 +49,22 @@ const (
 	StatusOK   = "ok"
 	StatusFail = "fail"
 )
+
+// ParkReasonQuit is the EventPark payload reason meaning a card was
+// stopped because the board process quit, not because a human parked it
+// with p. It is the one closed value QuitStopped looks for; any other
+// (or absent) reason reads as a human park.
+const ParkReasonQuit = "quit"
+
+// ParkPayload is the JSON shape of an EventPark event's Payload. The
+// reason lives here rather than in the status column deliberately:
+// status is the kind-outcome vocabulary (StatusOK/StatusFail, "not
+// applicable" otherwise), and a park's reason is not an outcome — reusing
+// status for it would mean two unrelated closed vocabularies sharing one
+// column, free to collide as either grows.
+type ParkPayload struct {
+	Reason string `json:"reason"`
+}
 
 // CardEvent is one row of a card's event log.
 type CardEvent struct {
@@ -142,6 +159,51 @@ func (s *Store) Events(ctx context.Context, id domain.FeatureID) ([]CardEvent, e
 			return nil, fmt.Errorf("corrupt card_events timestamp %q: %w", at, err)
 		}
 		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+// QuitStopped reports the cards whose most recent event in the log is a
+// park with reason ParkReasonQuit — stopped because the board process
+// exited, not because a human parked them with p. seq is a single global
+// order over every card's events (card_events.seq, an autoincrement PK),
+// so "most recent" is exactly "the row with this feature's greatest
+// seq". The result holds true only for a card in that shape: a plain
+// park (any other reason, e.g. a human's) is false, a card that never
+// parked is false, and a quit-park followed by anything at all — a later
+// stage_enter from being resumed, or a later park with a different
+// reason — is false, because that later event is what MAX(seq) now
+// finds instead. A card absent from the returned map is exactly the same
+// as one mapped to false; the map only ever holds true entries.
+func (s *Store) QuitStopped(ctx context.Context) (map[domain.FeatureID]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT feature_id, kind, payload FROM card_events
+		WHERE seq IN (SELECT MAX(seq) FROM card_events GROUP BY feature_id)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[domain.FeatureID]bool{}
+	for rows.Next() {
+		var fid, kind, payload string
+		if err := rows.Scan(&fid, &kind, &payload); err != nil {
+			return nil, err
+		}
+		if kind != EventPark {
+			continue
+		}
+		var p ParkPayload
+		// A malformed payload (should never happen — AppendEvent's callers
+		// always marshal ParkPayload) reads as "not a quit park" rather
+		// than erroring the whole query: unmarshal failure and reason=""
+		// mean the same thing here.
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			continue
+		}
+		if p.Reason == ParkReasonQuit {
+			out[domain.FeatureID(fid)] = true
+		}
 	}
 	return out, rows.Err()
 }

@@ -427,6 +427,10 @@ func (m *Shell) Init() tea.Cmd {
 		// restored, so a parked budget gate (and its top-up path) survives a
 		// restart instead of vanishing until re-triggered.
 		m.reconstructInbox()
+		// offer to pick up any card the board stopped by quitting
+		// (quitresume.go) — once, here, and nowhere else: nothing may
+		// restart a card without this dialog's own confirm.
+		m.maybeOfferQuitResume()
 		cmds = append(cmds, m.listenEngineCmd())
 	}
 	if m.copilotHint {
@@ -1115,26 +1119,41 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 }
 
 // quitCmd is the shared exit path for q and ctrl+c. Quitting with
-// autonomous work live stops sessions mid-turn, discarding the in-flight
-// turn and its spend and leaving the stage uncommitted on disk; ask
-// first so the user who means it can still get out. Idle quit stays a
-// single keypress, and a second press while the confirm is already up
-// means it — otherwise ctrl+c, hoisted above the overlay, could only
-// ever re-raise the dialog it just opened.
+// autonomous work live stops sessions mid-turn; ask first so the user
+// who means it can still get out. A live session on an autopilot card
+// (GateApproval anything but GateOff) is not lost work in the same way:
+// StopForQuit records where it stopped, and it picks back up on reopen
+// (quitresume.go) — so it gets its own wording, naming the cards and
+// saying so, never implying they keep going once the terminal closes
+// (they don't — there is no background execution). A card driven by
+// hand still loses its in-flight turn and its spend, uncommitted on
+// disk; that warning is unchanged. Idle quit stays a single keypress,
+// and a second press while the confirm is already up means it —
+// otherwise ctrl+c, hoisted above the overlay, could only ever re-raise
+// the dialog it just opened.
 func (m *Shell) quitCmd() tea.Cmd {
 	if m.Overlay.Contains("confirm-quit") {
-		m.closeAgent()
-		return tea.Quit
+		return m.quitNow()
 	}
 	question, detail := "", ""
-	switch live := m.liveSessions(); {
-	case len(live) > 0:
-		question = "quit with live sessions " + strings.Join(live, ", ") + "?"
+	confirmLabel, cancelLabel := "Quit", "Stay"
+	autopilotLive, plainLive := m.liveAutopilotSplit()
+	switch {
+	case len(autopilotLive) > 0:
+		question = autopilotQuitQuestion(autopilotLive)
+		detail = "they stop where they are and pick up when you reopen."
+		if len(plainLive) > 0 {
+			detail += " quitting also stops " + strings.Join(plainLive, ", ") +
+				" mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)."
+		}
+		confirmLabel, cancelLabel = "Stop them and quit", "Cancel"
+	case len(plainLive) > 0:
+		question = "quit with live sessions " + strings.Join(plainLive, ", ") + "?"
 		detail = "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)"
 	// an ingest or bug-import pass is not an engine session, so
-	// liveSessions never saw it. Both cost a paid architect pass, and
-	// esc already confirms before discarding one — quitting past that
-	// silently would make the confirm theatre.
+	// liveAutopilotSplit never saw it. Both cost a paid architect pass,
+	// and esc already confirms before discarding one — quitting past
+	// that silently would make the confirm theatre.
 	case m.ingestRun != nil:
 		question = "quit while a decompose is running?"
 		detail = "the architect pass is paid for and its proposals are not written anywhere yet — quitting loses them"
@@ -1148,21 +1167,68 @@ func (m *Shell) quitCmd() tea.Cmd {
 		question = "quit with unsaved import edits?"
 		detail = "your renamed titles and one-liners are not kept — re-importing fetches the issues as they are on GitHub"
 	default:
-		m.closeAgent()
-		return tea.Quit
+		return m.quitNow()
 	}
 	m.Overlay.Push(&confirmDialog{
 		id:           "confirm-quit",
-		cancelLabel:  "Stay",
-		confirmLabel: "Quit",
+		cancelLabel:  cancelLabel,
+		confirmLabel: confirmLabel,
 		question:     question,
 		detail:       detail,
-		onConfirm: func() tea.Cmd {
-			m.closeAgent()
-			return tea.Quit
-		},
+		onConfirm:    m.quitNow,
 	})
 	return nil
+}
+
+// quitNow is quitCmd's actual exit: it stops every live autopilot
+// session (best-effort, and a no-op when there is nothing to stop — see
+// engine.Engine.StopForQuit), closes the hosted CLI, and quits.
+func (m *Shell) quitNow() tea.Cmd {
+	if m.engine != nil {
+		m.engine.StopForQuit(context.Background())
+	}
+	m.closeAgent()
+	return tea.Quit
+}
+
+// liveAutopilotSplit splits the board's live (StateRunning/StateQueued)
+// sessions by whether their card is on autopilot — GateApproval
+// anything but domain.GateOff, same as everywhere else the field is
+// interpreted (domain.Feature.GateApproval's own doc: empty reads as
+// GateGates). autopilot holds bare ids, sorted — all the quit dialog
+// needs to name them; plain mirrors the old liveSessions' "<id>
+// (<stage>)" labels, so a hand-driven session's wording stays exactly
+// what it was.
+func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
+	if m.engine == nil {
+		return nil, nil
+	}
+	for id, s := range m.engine.Sessions() {
+		switch s.State() {
+		case engine.StateRunning, engine.StateQueued:
+		default:
+			continue
+		}
+		if s.Feature.GateApproval == domain.GateOff {
+			plain = append(plain, fmt.Sprintf("%s (%s)", id, s.Feature.Stage))
+			continue
+		}
+		autopilot = append(autopilot, string(id))
+	}
+	sort.Strings(autopilot)
+	sort.Strings(plain)
+	return autopilot, plain
+}
+
+// autopilotQuitQuestion words the quit dialog's title line for one or
+// more autopilot cards, e.g. "2 cards are running on autopilot — FD-047,
+// FD-044."
+func autopilotQuitQuestion(ids []string) string {
+	verb := "cards are"
+	if len(ids) == 1 {
+		verb = "card is"
+	}
+	return fmt.Sprintf("%d %s running on autopilot — %s.", len(ids), verb, strings.Join(ids, ", "))
 }
 
 // handleKey routes one key press. Its shape is the keymap's tiers made
@@ -2112,26 +2178,6 @@ func (m *Shell) loadCardEvents(id domain.FeatureID) tea.Cmd {
 		evs, err := m.store.Events(context.Background(), id)
 		return cardEventsMsg{id: id, events: evs, err: err}
 	}
-}
-
-// liveSessions names every autonomous session that holds or is waiting
-// for a slot — StateRunning or StateQueued — as sorted "<id> (<stage>)"
-// display strings. Interactive chat holds no slot and has no budget, so
-// it is not live here. Empty when nothing is running or queued.
-func (m *Shell) liveSessions() []string {
-	if m.engine == nil {
-		return nil
-	}
-	var names []string
-	for id, s := range m.engine.Sessions() {
-		st := s.State()
-		if st != engine.StateRunning && st != engine.StateQueued {
-			continue
-		}
-		names = append(names, fmt.Sprintf("%s (%s)", id, s.Feature.Stage))
-	}
-	sort.Strings(names)
-	return names
 }
 
 // openInbox switches to the needs-attention tab. It used to push a modal

@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -189,6 +190,91 @@ func TestCardEventsCascadeOnDelete(t *testing.T) {
 	}
 	if len(evs) != 0 {
 		t.Errorf("Events after DeleteFeature = %d, want 0 (cascade)", len(evs))
+	}
+}
+
+// TestQuitStopped covers QuitStopped's five load-bearing shapes: a bare
+// quit park; a quit park a card was resumed past; a human park (any
+// other reason); a card that never parked; and a quit park superseded by
+// a later human one. Only the first shape is true.
+func TestQuitStopped(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+
+	quitPayload, err := json.Marshal(ParkPayload{Reason: ParkReasonQuit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	humanPayload, err := json.Marshal(ParkPayload{Reason: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mk := func(num int, title string) *domain.Feature {
+		f := feat(num, title)
+		if err := s.CreateFeature(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := func() time.Time {
+		at = at.Add(time.Minute)
+		return at
+	}
+	add := func(f *domain.Feature, kind, payload string) {
+		t.Helper()
+		if err := s.AppendEvent(ctx, CardEvent{
+			Feature: f.ID, Stage: domain.StageImplement, Kind: kind,
+			At: next(), Payload: payload,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. a quit park with nothing after it -> true.
+	fQuit := mk(1, "bare quit park")
+	add(fQuit, EventStageEnter, "")
+	add(fQuit, EventPark, string(quitPayload))
+
+	// 2. a quit park followed by a stage_enter (resumed) -> false.
+	fResumed := mk(2, "resumed past its quit park")
+	add(fResumed, EventPark, string(quitPayload))
+	add(fResumed, EventStageEnter, "")
+
+	// 3. a human park (any other reason) -> false.
+	fHuman := mk(3, "human park")
+	add(fHuman, EventPark, string(humanPayload))
+
+	// 4. never parked -> false.
+	fNever := mk(4, "never parked")
+	add(fNever, EventStageEnter, "")
+	add(fNever, EventMessage, "")
+
+	// 5. an old quit park superseded by a newer human park -> false.
+	fSuperseded := mk(5, "superseded quit park")
+	add(fSuperseded, EventPark, string(quitPayload))
+	add(fSuperseded, EventPark, string(humanPayload))
+
+	got, err := s.QuitStopped(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		id   domain.FeatureID
+		want bool
+	}{
+		{fQuit.ID, true},
+		{fResumed.ID, false},
+		{fHuman.ID, false},
+		{fNever.ID, false},
+		{fSuperseded.ID, false},
+	}
+	for _, c := range cases {
+		if g := got[c.id]; g != c.want {
+			t.Errorf("QuitStopped()[%s] = %v, want %v", c.id, g, c.want)
+		}
 	}
 }
 
