@@ -108,7 +108,7 @@ func (m *Shell) threadView(w, h int) string {
 
 	// the input is a multi-row widget: truncate each row, or a stray tail
 	// of the second one lands on the first.
-	for _, l := range strings.Split(inputBlock(s, r, w), "\n") {
+	for _, l := range strings.Split(m.inputBlock(s, r, w), "\n") {
 		line(l)
 	}
 
@@ -553,26 +553,6 @@ func nextCardBlock(s *theme.Styles, in nextInput) []string {
 		lines = append(lines, "  "+s.KeyHint.Render(a.key)+" "+s.Subtle.Render(a.label)+s.Faint.Render(" — "+sanitize(a.why)))
 	}
 	return lines
-}
-
-// inputBlock is the thread's bottom input slot. A card owned by another
-// process withholds it — featureRow.DrivenAbroad/.Foreign, the same
-// signal newFollowPane (chat.go) withholds send/answer on — rather than
-// rendering a box that would fail at send time. Otherwise it reuses
-// chat.go's own textarea constructor for visual consistency with the
-// chat pane. It renders only: the card page's bindings are unchanged, so
-// nothing focuses this slot or feeds it keys.
-func inputBlock(s *theme.Styles, r featureRow, w int) string {
-	if r.DrivenAbroad {
-		return s.Faint.Render(ansi.Truncate("read-only — driven by "+foreignSummary(r.Foreign), w, "…"))
-	}
-	in := newChatInput()
-	in.SetWidth(max(w-2, 10))
-	// The chat pane gives the composer three rows because it is the whole
-	// surface there. Here it sits under the thread, which owns the height,
-	// so it takes one and grows only when someone is actually typing.
-	in.SetHeight(1)
-	return in.View()
 }
 
 // stageSpendByStage rolls the per-stage/model spend rows up to one total

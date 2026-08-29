@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
@@ -107,6 +108,17 @@ type Shell struct {
 	agentConfigName string
 	agentConfigPath string
 	cardOpen        bool
+	// threadInput is the card page's persistent message/verb box
+	// (thread.go, threadinput.go): a Shell field rather than one rebuilt
+	// per render so an unsent draft survives leaving and returning to the
+	// tab, same as the chat pane's own m.chat. threadChip is the inline
+	// confirm chip pending in its place, or nil. threadSkipParse makes
+	// exactly the next submit send as a message unconditionally — the
+	// "esc no, send as a message" half of the chip contract
+	// (threadinput.go's doc comments own the full story).
+	threadInput     textarea.Model
+	threadChip      *pendingChip
+	threadSkipParse bool
 	inboxSel        int      // cursor into m.inbox.list(), the inbox tab's own selection
 	sortMode        SortMode // todo-column ordering toggle (ephemeral, not persisted)
 	notice          noticeMsg
@@ -216,6 +228,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
 		expandedStages: map[string]bool{},
 		copilotHint:    true,
+		threadInput:    newThreadInput(),
 	}
 }
 
@@ -1091,6 +1104,9 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	if m.chat != nil {
 		return m.chat.handlePaste(msg)
 	}
+	if m.cardOpen && m.threadInput.Focused() {
+		return m.handleThreadPaste(msg)
+	}
 	if bv := m.bugIngest; bv != nil && bv.filtering {
 		bv.filter, _ = bv.filter.Update(msg)
 		bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
@@ -1230,6 +1246,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.deps != nil {
 			return m.handleDepsKey(key)
 		}
+		if m.cardOpen && m.threadInput.Focused() {
+			return m.handleThreadInputKey(msg)
+		}
 	}
 	// q quits only from the board root: every surface above answers it as
 	// an alias for esc, and a q that quit gummi from inside a spec would
@@ -1343,6 +1362,9 @@ func (m *Shell) textEntry() bool {
 		// having here.
 		return true
 	}
+	if m.cardOpen && m.threadInput.Focused() {
+		return true
+	}
 	return m.bugIngest != nil && m.bugIngest.filtering
 }
 
@@ -1384,6 +1406,13 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 	}
 	if key == " " || key == "space" {
 		m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
+		return nil
+	}
+	if key == "/" && m.cardOpen {
+		// The card page's own route into the thread's input
+		// (threadinput.go's doc comment): consumed here, not inserted, the
+		// same convention bugIngestView's own "/" uses to focus its filter.
+		m.focusThreadInput()
 		return nil
 	}
 	return m.boardVerb(key)

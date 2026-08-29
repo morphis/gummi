@@ -292,10 +292,21 @@ func (m *Shell) backlogBindings() []binding {
 // page's own way back and its prev/next, with the arrow keys documented
 // as the action list's (it is the only list on the page). The way out
 // leads, for the same reason enter leads on the list.
+//
+// It splits on the thread input's own focus the same way
+// bugIngestView.bindings() splits on its filtering bool: while the input
+// has the keyboard (threadinput.go's handleThreadInputKey), the card's
+// single-letter accelerators are not what's live, so the table shown here
+// switches to threadInputBindings() instead of listing keys that
+// currently just type.
 func (m *Shell) cardPageBindings() []binding {
+	if m.threadInput.Focused() {
+		return withHelpKey(m.threadInputBindings())
+	}
 	out := []binding{
 		{key: "esc", label: "backlog", help: "back to the backlog list", bar: true},
 		{key: "J/K", label: "prev/next", help: "previous / next card without leaving the page", bar: true},
+		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
 	}
 	for _, b := range m.boardBindings() {
 		switch b.key {

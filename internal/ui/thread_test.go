@@ -9,7 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -185,12 +187,13 @@ func TestAutopilotLabel(t *testing.T) {
 // thread must withhold the input the same way newFollowPane does,
 // rather than rendering a box that would fail at send time.
 func TestInputBlockWithholdsForForeignCard(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
 	r := featureRow{
 		F:            domain.Feature{ID: "FD-001"},
 		DrivenAbroad: true,
 		Foreign:      state.ForeignDrive{PID: 4242},
 	}
-	out := ansi.Strip(inputBlock(m0Styles(), r, 60))
+	out := ansi.Strip(m.inputBlock(m0Styles(), r, 60))
 	if !strings.Contains(out, "read-only") || !strings.Contains(out, "4242") {
 		t.Errorf("withheld input block = %q, want it to name the read-only reason and the owning pid", out)
 	}
@@ -320,5 +323,366 @@ func TestFoldedReceiptPrefersMeteredSpend(t *testing.T) {
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 80))
 	if !strings.Contains(line, "6 credits") {
 		t.Errorf("receipt %q dropped the fallback", line)
+	}
+}
+
+// TestThreadInputDisambiguatesTypingFromAccelerators is the contract this
+// feature turns on: "/" (and only "/") switches the card page's keyboard
+// from its single-letter accelerators to the thread input, and esc hands
+// it back without losing the draft. Every accelerator letter used below
+// (g, v) would themselves be recognised commands once focused — proving
+// they type rather than fire is the whole point.
+func TestThreadInputDisambiguatesTypingFromAccelerators(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
+	if !m.cardOpen {
+		t.Fatal("enter did not open the card page")
+	}
+	if m.threadInput.Focused() {
+		t.Fatal("thread input starts unfocused")
+	}
+
+	// unfocused: 'g' is the advance accelerator, not a character — it
+	// must not land in the input.
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.threadInput.Value() != "" {
+		t.Fatalf("accelerator 'g' leaked into the thread input: %q", m.threadInput.Value())
+	}
+
+	// "/" focuses the input without inserting itself.
+	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.threadInput.Focused() {
+		t.Fatal("/ did not focus the thread input")
+	}
+	if m.threadInput.Value() != "" {
+		t.Fatalf("/ inserted itself into the input: %q", m.threadInput.Value())
+	}
+
+	// focused: every one of those same letters now types, verify included.
+	m = typeString(t, m, "g and v are just letters here")
+	if m.threadInput.Value() != "g and v are just letters here" {
+		t.Fatalf("focused input = %q, want the typed text verbatim", m.threadInput.Value())
+	}
+
+	// esc blurs without discarding the draft.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.threadInput.Focused() {
+		t.Fatal("esc should blur the thread input")
+	}
+	if m.threadInput.Value() != "g and v are just letters here" {
+		t.Fatalf("esc discarded the draft: %q", m.threadInput.Value())
+	}
+
+	// unfocused again: accelerators resume, the draft stays untouched.
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.threadInput.Value() != "g and v are just letters here" {
+		t.Fatalf("post-blur accelerator changed the draft: %q", m.threadInput.Value())
+	}
+}
+
+// TestThreadInputSurvivesTabSwitch: the unsent buffer has to survive
+// leaving and returning to the board tab, the same rule the chat pane's
+// own m.chat already honours. Leaving the board tab closes the card page
+// itself (tabs.go's setTab — unrelated to this feature, and unchanged by
+// it), but the draft is a Shell field, not a child of that page, so it is
+// still there once the card page is reopened.
+func TestThreadInputSurvivesTabSwitch(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = typeString(t, m, "not sent yet")
+
+	m = press(t, m, tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt}) // -> inbox tab
+	if m.tab != TabInbox {
+		t.Fatalf("tab = %v, want inbox", m.tab)
+	}
+	if m.cardOpen {
+		t.Fatal("leaving the board tab should close the card page (tabs.go, unrelated to this feature)")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}) // -> board tab
+	if m.tab != TabBoard {
+		t.Fatalf("tab = %v, want board", m.tab)
+	}
+	if m.threadInput.Value() != "not sent yet" {
+		t.Fatalf("draft lost across a tab switch: %q", m.threadInput.Value())
+	}
+
+	// reopening the same card shows the preserved draft.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.cardOpen {
+		t.Fatal("enter should reopen the card page")
+	}
+	if m.threadInput.Value() != "not sent yet" {
+		t.Fatalf("draft lost once the card page reopened: %q", m.threadInput.Value())
+	}
+}
+
+// TestFocusThreadInputWithholdsForDrivenAbroad: a card another gummi
+// process drives withholds the input entirely — "/" must refuse to focus
+// it, matching the read-only line inputBlock renders for such a card.
+func TestFocusThreadInputWithholdsForDrivenAbroad(t *testing.T) {
+	m := populatedShell(120, 34)
+	m.rows[m.sel].DrivenAbroad = true
+	m.rows[m.sel].Foreign = state.ForeignDrive{PID: 99}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	if m.threadInput.Focused() {
+		t.Fatal("/ focused the input on a card driven by another process")
+	}
+}
+
+// TestSubmitThreadInputRoutesFreeVerbImmediately: diff/spec/park fire
+// straight away when they carry no remainder — no chip, no extra step.
+func TestSubmitThreadInputRoutesFreeVerbImmediately(t *testing.T) {
+	m := populatedShell(120, 34)
+	m.rows[m.sel].F.Kind = domain.KindResearch // boardVerb("d")'s guard fires a synchronous, storeless notice
+	f := m.rows[m.sel].F
+	m.threadInput.SetValue("diff")
+
+	cmd := m.submitThreadInput(f)
+	pump(t, m, cmd)
+	if m.threadChip != nil {
+		t.Fatal("a remainder-free free verb should not raise a chip")
+	}
+	if m.threadInput.Value() != "" {
+		t.Fatalf("input not cleared after an immediate fire: %q", m.threadInput.Value())
+	}
+	if !strings.Contains(m.notice.text, "no diff") {
+		t.Fatalf("diff did not reach boardVerb(\"d\"): notice = %q", m.notice.text)
+	}
+}
+
+// TestSubmitThreadInputChipsAFreeVerbWithARemainder: the one exception to
+// "free verbs fire immediately" — a remainder they have nowhere to spend
+// must not be silently dropped, so it raises the chip instead.
+func TestSubmitThreadInputChipsAFreeVerbWithARemainder(t *testing.T) {
+	m := populatedShell(120, 34)
+	f := m.rows[m.sel].F
+	m.threadInput.SetValue("diff please check line 42")
+
+	m.submitThreadInput(f)
+	if m.threadChip == nil {
+		t.Fatal("a free verb with a remainder should still raise the chip")
+	}
+	if m.threadChip.verb != "diff" || m.threadChip.remainder != "please check line 42" {
+		t.Fatalf("chip = %+v, want verb diff with the typed remainder", m.threadChip)
+	}
+	if m.notice.text != "" {
+		t.Fatalf("diff must not have fired yet: notice = %q", m.notice.text)
+	}
+}
+
+// TestSubmitThreadInputChipsStateChangingVerbs: every state-changing verb
+// chips even with no remainder at all.
+func TestSubmitThreadInputChipsStateChangingVerbs(t *testing.T) {
+	for verb := range chipVerbs {
+		t.Run(verb, func(t *testing.T) {
+			m := populatedShell(120, 34)
+			f := m.rows[m.sel].F
+			m.threadInput.SetValue(verb)
+			m.submitThreadInput(f)
+			if m.threadChip == nil {
+				t.Fatalf("%s should always raise the chip", verb)
+			}
+			if m.threadChip.verb != verb {
+				t.Fatalf("chip verb = %q, want %q", m.threadChip.verb, verb)
+			}
+		})
+	}
+}
+
+// TestChipEnterFires: confirming the chip runs the mapped board verb,
+// clears the chip, and clears the input.
+func TestChipEnterFires(t *testing.T) {
+	m := populatedShell(120, 34)
+	m.rows[m.sel].F.Kind = domain.KindResearch
+	f := m.rows[m.sel].F
+	m.threadInput.SetValue("clean")
+	m.submitThreadInput(f)
+	if m.threadChip == nil {
+		t.Fatal("clean should have raised a chip")
+	}
+
+	cmd := m.handleChipKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	pump(t, m, cmd)
+	if m.threadChip != nil {
+		t.Fatal("enter on the chip should clear it")
+	}
+	if m.threadInput.Value() != "" {
+		t.Fatalf("enter on the chip should clear the input: %q", m.threadInput.Value())
+	}
+	if !strings.Contains(m.notice.text, "no cleanup") {
+		t.Fatalf("clean did not reach boardVerb(\"c\"): notice = %q", m.notice.text)
+	}
+}
+
+// TestChipEscRestoresLineAndSendsAsMessageNext: esc on the chip puts the
+// original line back — it does not resend it — and the NEXT submit of
+// that same line sends it as a message rather than raising the same chip
+// again (the "esc no, send as a message" half of the chip contract).
+func TestChipEscRestoresLineAndSendsAsMessageNext(t *testing.T) {
+	m := populatedShell(120, 34)
+	f := m.rows[m.sel].F
+	m.threadInput.SetValue("verify the csv path")
+	m.submitThreadInput(f)
+	if m.threadChip == nil {
+		t.Fatal("verify should have raised a chip")
+	}
+
+	m.handleChipKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.threadChip != nil {
+		t.Fatal("esc should clear the chip")
+	}
+	if m.threadInput.Value() != "verify the csv path" {
+		t.Fatalf("esc should put the original line back in the input: %q", m.threadInput.Value())
+	}
+
+	// resubmitting the exact same line now sends it as a message instead
+	// of raising the same chip a second time.
+	m.submitThreadInput(f)
+	if m.threadChip != nil {
+		t.Fatal("the deliberate 'send as a message' resubmit re-raised the chip")
+	}
+	if m.threadInput.Value() != "" {
+		t.Fatalf("the message resubmit should clear the input: %q", m.threadInput.Value())
+	}
+	if !strings.Contains(m.notice.text, "no live session") {
+		t.Fatalf("expected the no-live-session notice from sendThreadMessage, got %q", m.notice.text)
+	}
+}
+
+// TestChipOtherKeyResumesEditing: any key besides enter/esc cancels the
+// chip and continues editing the (untouched) original line in place.
+func TestChipOtherKeyResumesEditing(t *testing.T) {
+	m := populatedShell(120, 34)
+	f := m.rows[m.sel].F
+	m.threadInput.Focus() // Update no-ops unfocused; the real flow always types focused
+	m.threadInput.SetValue("approve")
+	m.submitThreadInput(f)
+	if m.threadChip == nil {
+		t.Fatal("approve should have raised a chip")
+	}
+
+	m.handleChipKey(tea.KeyPressMsg{Code: '!', Text: "!"})
+	if m.threadChip != nil {
+		t.Fatal("typing over the chip should cancel it")
+	}
+	if m.threadInput.Value() != "approve!" {
+		t.Fatalf("input = %q, want the original line plus the new keystroke", m.threadInput.Value())
+	}
+}
+
+// TestNotWiredVerbsCarryTheirRemainder: changes, bounce and autopilot are
+// parsed and reported, remainder included, rather than silently dropped
+// or given invented engine behaviour.
+func TestNotWiredVerbsCarryTheirRemainder(t *testing.T) {
+	m := populatedShell(120, 34)
+	for _, verb := range []string{"changes", "bounce", "autopilot"} {
+		t.Run(verb, func(t *testing.T) {
+			m.notice = noticeMsg{}
+			cmd := m.fireVerb(verb, "because the CI flake is fixed")
+			if cmd != nil {
+				t.Fatalf("%s should have no engine effect yet", verb)
+			}
+			if !strings.Contains(m.notice.text, verb) || !strings.Contains(m.notice.text, "not wired") && !strings.Contains(m.notice.text, "isn't wired") {
+				t.Fatalf("%s notice = %q, want it to name the verb and say it isn't wired", verb, m.notice.text)
+			}
+			if !strings.Contains(m.notice.text, "because the CI flake is fixed") {
+				t.Fatalf("%s notice dropped the remainder: %q", verb, m.notice.text)
+			}
+		})
+	}
+}
+
+// TestVerbMenuOpensCommandMenuPreFiltered: a bare "/" (already consumed
+// by focusThreadInput on the way in, so this covers what happens once the
+// user re-types it as content) opens the same command menu boardKey's
+// space key does, and "/foo" pre-filters it.
+func TestVerbMenuOpensCommandMenuPreFiltered(t *testing.T) {
+	m := populatedShell(120, 34)
+	f := m.rows[m.sel].F
+
+	m.threadInput.SetValue("/")
+	m.submitThreadInput(f)
+	cm, ok := m.Overlay.Top().(*commandMenu)
+	if !ok {
+		t.Fatalf("bare / did not open the command menu: %T", m.Overlay.Top())
+	}
+	if cm.filter.Value() != "" {
+		t.Fatalf("bare / pre-filtered the menu: %q", cm.filter.Value())
+	}
+	if m.threadInput.Value() != "" {
+		t.Fatalf("submitting the menu line should clear the input: %q", m.threadInput.Value())
+	}
+	m.Overlay.Pop()
+
+	m.threadInput.SetValue("/appro")
+	m.submitThreadInput(f)
+	cm, ok = m.Overlay.Top().(*commandMenu)
+	if !ok {
+		t.Fatalf("/appro did not open the command menu: %T", m.Overlay.Top())
+	}
+	if cm.filter.Value() != "appro" {
+		t.Fatalf("menu filter = %q, want the slash remainder", cm.filter.Value())
+	}
+}
+
+// TestPlainMessageRoutesToSendWithNoLiveSession: prose with no matching
+// verb (verbNone) routes to sendThreadMessage exactly like a chat send —
+// with nothing live to send to (a detached shell in this test), it says
+// so instead of silently doing nothing.
+func TestPlainMessageRoutesToSendWithNoLiveSession(t *testing.T) {
+	m := populatedShell(120, 34)
+	f := m.rows[m.sel].F
+	m.threadInput.SetValue("looks good, but verify the padding")
+	m.submitThreadInput(f)
+	if m.threadChip != nil {
+		t.Fatal("prose starting with a non-verb word must not raise a chip")
+	}
+	if m.threadInput.Value() != "" {
+		t.Fatalf("a sent message should clear the input: %q", m.threadInput.Value())
+	}
+	if !strings.Contains(m.notice.text, "no live session") {
+		t.Fatalf("notice = %q, want the no-live-session notice", m.notice.text)
+	}
+}
+
+// TestThreadInputSendsToLiveSession is the end-to-end wiring check: a
+// message typed into the thread input, through the real key-handling
+// path, reaches the card's live engine session exactly like the chat
+// pane's own send does — against a fake agent, never the network.
+func TestThreadInputSendsToLiveSession(t *testing.T) {
+	m, eng := chatWorkspace(t, agent.NewFake("sure, got it"))
+	m = openAndAttach(t, m) // opens the card page, attaches the chat pane, kicks off a turn
+	settleChat(t, eng)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach the chat pane; the session and the card page stay
+	if m.chat != nil {
+		t.Fatal("esc did not detach the chat pane")
+	}
+	if !m.cardOpen {
+		t.Fatal("detaching the chat pane should not close the card page")
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.threadInput.Focused() {
+		t.Fatal("/ did not focus the thread input")
+	}
+	m = typeString(t, m, "quick note from the thread")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleChat(t, eng)
+
+	if m.threadInput.Value() != "" {
+		t.Fatalf("input not cleared after sending: %q", m.threadInput.Value())
+	}
+	sess := eng.Get("FD-001")
+	if sess == nil {
+		t.Fatal("the session should still be live")
+	}
+	snap := sess.Snapshot()
+	if len(snap.Transcript) != 4 {
+		t.Fatalf("transcript = %+v, want kickoff+reply+user+reply", snap.Transcript)
+	}
+	if snap.Transcript[2].Author != engine.AuthorUser || snap.Transcript[2].Content != "quick note from the thread" {
+		t.Fatalf("user turn wrong: %+v", snap.Transcript[2])
 	}
 }
