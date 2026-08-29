@@ -127,6 +127,19 @@ func runBoard() error {
 	if eng, _, cleanup := buildEngine(store, pool, ws, locks); eng != nil {
 		shell.AttachEngine(eng)
 		defer cleanup()
+		// The workspace MCP endpoint is what lets a coding agent hosted in
+		// the agent tab drive *this* gummi rather than starting a second
+		// one: its `gummi __mcp --workspace` child dials this socket and
+		// every tool call lands on the engine above, sharing its card
+		// locks instead of contending for them. Best-effort, like the
+		// engine itself — a board that cannot bind it still runs, the
+		// hosted agent just gets no gummi tools.
+		if sock, teardown, err := eng.StartWorkspaceMCPEndpoint(); err != nil {
+			fmt.Fprintf(os.Stderr, "gummi: workspace agent tools unavailable: %v\n", err)
+		} else {
+			shell.SetAgentMCPSock(sock)
+			defer teardown()
+		}
 	}
 	// layer-3 budget: new features get this credit envelope, drawn on by
 	// every stage until it runs dry and a human gate offers a top-up.

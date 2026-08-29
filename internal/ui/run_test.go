@@ -32,7 +32,7 @@ func TestRunAutonomousStage(t *testing.T) {
 	}
 
 	// enter runs the autonomous stage (no chat pane for implement)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	if m.chat != nil {
 		t.Fatal("implement should not open the chat pane")
 	}
@@ -62,7 +62,7 @@ func TestPauseStopsRun(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run
+	m = openAndAttach(t, m) // run
 	settleChat(t, eng)
 	if m.sessionFor("FD-001") == nil {
 		t.Fatal("run did not start a session")
@@ -81,7 +81,7 @@ func TestPauseStopsRun(t *testing.T) {
 func TestRunRejectsInteractiveViaRunPath(t *testing.T) {
 	// enter on a brainstorm feature opens chat, not a run
 	m, _ := chatWorkspace(t, agent.NewFake("hi"))
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	if m.chat == nil {
 		t.Fatal("brainstorm enter should open chat, not run")
 	}
@@ -105,6 +105,11 @@ func TestBugInteractiveStagesOpenChat(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("Can you reproduce it?"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
 	m = typeString(t, m, "Login loops")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	// enter's first job is opening the card page (backlog.go); once open
+	// it stays open across esc (which only detaches chat), so the loop
+	// below reuses it across both stages with a single press each time.
+	selectRow(t, m, "BG-002")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	for _, stage := range []domain.Stage{domain.StageTriage, domain.StageDiagnose} {
@@ -150,7 +155,7 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 
 	// first enter starts the run — no pane, activity goes to the dashboard
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	if m.chat != nil {
 		t.Fatal("starting a run must not open the chat pane")
 	}
@@ -221,7 +226,7 @@ func TestDashboardActivityGolden(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	golden.RequireEqual(t, []byte(m.View().Content))
 }

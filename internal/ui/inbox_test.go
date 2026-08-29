@@ -5,7 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -62,7 +61,7 @@ func TestCompletedRunRaisesGate(t *testing.T) {
 	// advance to plan (autonomous), run it
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run
+	m = openAndAttach(t, m) // run
 	settleChat(t, eng)
 
 	// drain events and loop commands: plan done → critique → pass → gate
@@ -85,7 +84,7 @@ func TestInboxErrorItem(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventError, Err: errFake}}
 	}}
 	m, _ := chatWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // attach chat (brainstorm)
+	m = openAndAttach(t, m) // attach chat (brainstorm)
 	m = typeString(t, m, "hi")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = pumpEngine(t, m)
@@ -141,31 +140,6 @@ func TestGateBlockedKeepsInboxItem(t *testing.T) {
 	}
 	if m.inbox.len() != 1 {
 		t.Fatalf("inbox len = %d, want 1 — blocked advance cleared the item", m.inbox.len())
-	}
-}
-
-func TestInboxOverlayGolden(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.inbox.add("FD-042", attnGate, "implement finished — review & advance")
-	m.inbox.add("FD-049", attnFailure, "provider rate-limited")
-	m.openInbox()
-	golden.RequireEqual(t, []byte(m.View().Content))
-}
-
-func TestTabCyclesAttention(t *testing.T) {
-	m := populatedShell(120, 34)
-	m.inbox.add("FD-044", attnGate, "review ready")
-	m.inbox.add("FD-047", attnQuestion, "which approach?")
-	// tab jumps selection to the first attention feature, then cycles
-	m.cycleAttention()
-	first := m.rows[m.sel].F.ID
-	m.cycleAttention()
-	second := m.rows[m.sel].F.ID
-	if first == second {
-		t.Error("tab did not advance through the queue")
-	}
-	if first != "FD-044" && second != "FD-044" {
-		t.Errorf("cycle never hit FD-044: %s then %s", first, second)
 	}
 }
 

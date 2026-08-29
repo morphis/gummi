@@ -108,7 +108,7 @@ func TestPasteIntoBugIngestFilter(t *testing.T) {
 
 func TestPasteIntoChat(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("Two options."))
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	if m.chat == nil {
 		t.Fatal("enter did not attach the chat pane")
 	}

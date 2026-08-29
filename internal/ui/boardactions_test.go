@@ -2,24 +2,6 @@ package ui
 
 import "testing"
 
-// TestActionEnterDispatchesOnce guards the recursion the action list
-// invited: the recommended action's own accelerator is enter, and the
-// focus layer also claims enter, so dispatching back through boardKey
-// re-selected the same row until the stack blew.
-func TestActionEnterDispatchesOnce(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.actionFocused = true
-	m.actionCursor = 0
-	a, ok := m.cardActions().Selected()
-	if !ok {
-		t.Fatal("no action under the cursor on a populated board")
-	}
-	if a.key != "enter" {
-		t.Skipf("first action key = %q; this repro needs the enter-keyed one", a.key)
-	}
-	m.boardKey("enter") // recursed to a stack overflow before boardVerb existed
-}
-
 // TestActionFocusResetsOnCardChange: the list belongs to the selected
 // card, so moving off it must not carry a cursor onto an unrelated
 // action.
@@ -51,20 +33,6 @@ func TestActionFocusResetsOnSilentSelectionChange(t *testing.T) {
 	if m.actionFocused || m.actionCursor != 0 {
 		t.Fatalf("focus=%v cursor=%d after the selection silently moved, want false/0",
 			m.actionFocused, m.actionCursor)
-	}
-}
-
-// TestRightFocusesActionsAndLeftReturns covers the board's two new focus
-// keys end to end.
-func TestRightFocusesActionsAndLeftReturns(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.boardKey("right")
-	if !m.actionFocused {
-		t.Fatal("right did not focus the action list")
-	}
-	m.boardKey("left")
-	if m.actionFocused {
-		t.Fatal("left did not return focus to the cards")
 	}
 }
 
@@ -127,9 +95,10 @@ func TestQuitIdleStillOneKeypress(t *testing.T) {
 	}
 }
 
-// TestActionFocusResetsOnAttentionCycle: tab jumps the selection to
-// another card; a cursor left on merge would otherwise merge that one.
-func TestActionFocusResetsOnAttentionCycle(t *testing.T) {
+// TestActionFocusResetsOnAttentionJump: jumping to a card from the
+// inbox tab moves the selection to another card; a cursor left on merge
+// would otherwise merge that one.
+func TestActionFocusResetsOnAttentionJump(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.syncActionFocus()
 	m.actionFocused = true
@@ -137,9 +106,39 @@ func TestActionFocusResetsOnAttentionCycle(t *testing.T) {
 	for _, r := range m.rows {
 		m.inbox.add(r.F.ID, attnGate, "gate")
 	}
-	m.cycleAttention()
+	m.setTab(TabInbox)
+	m.inboxSel = 0
+	m.inboxKey("enter")
 	if m.actionFocused || m.actionCursor != 0 {
-		t.Fatalf("focus=%v cursor=%d after the attention cycle, want false/0",
+		t.Fatalf("focus=%v cursor=%d after the inbox jump, want false/0",
 			m.actionFocused, m.actionCursor)
 	}
+}
+
+// TestCardActionEnterDispatchesOnce guards the recursion that
+// backlogKey's enter branch documents in a comment: the run action's own
+// accelerator IS enter, so dispatching it back through boardKey would
+// reselect this same row and recurse until the stack blew. The original
+// guard was deleted along with the split layout during the tab rework,
+// but a focused action list still exists on the card page — the hazard
+// moved rather than went away, so the guard moves with it.
+func TestCardActionEnterDispatchesOnce(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.openCard()
+
+	idx := -1
+	for i, a := range m.cardActions().rows() {
+		if a.key == "enter" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("no enter-keyed action on the opened card; this guard needs one to mean anything")
+	}
+	m.actionCursor = idx
+
+	// an unguarded re-entry blows the stack and takes the test binary
+	// with it, so returning from this call at all is the assertion.
+	m.boardKey("enter")
 }

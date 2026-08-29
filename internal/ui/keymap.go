@@ -59,15 +59,32 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "deps", m.deps.bindings()
 	case m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
-	case m.viewMode == ModeBacklog && len(m.rows) > 0 && m.cardOpen:
+	// the inbox and agent tabs own the main pane whenever they're active.
+	// The inbox has its own table now (inboxview.go); the agent tab is
+	// still stage 3's placeholder — it still has to answer ? and say how
+	// to get back to the board.
+	case m.tab == TabInbox:
+		return "inbox", m.inboxBindings()
+	case m.tab == TabAgent:
+		return "agent", agentBindings
+	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen:
 		return "card", m.cardPageBindings()
-	case m.viewMode == ModeBacklog && len(m.rows) > 0:
+	case m.tab == TabBoard && len(m.rows) > 0:
 		return "backlog", m.backlogBindings()
-	case len(m.rows) > 0:
-		return "board", m.boardBindings()
 	default:
 		return "board", m.splashBindings()
 	}
+}
+
+// agentBindings is the agent tab's key table. It is deliberately almost
+// empty: once a CLI is hosted there, gummi reserves only the alt+N tab
+// switches and every other key — tab, esc, ctrl+c, q, ? — belongs to
+// that program. Listing the keys gummi does NOT take would be a lie the
+// moment the hosted CLI binds one, so the table names the two things
+// that are actually true.
+var agentBindings = []binding{
+	{key: "alt+1/2", label: "leave", help: "back to the board / inbox — the only keys gummi keeps here", bar: true},
+	{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, including tab, esc and ctrl+c", bar: true},
 }
 
 // helpOverlay builds the ? dialog for whichever surface is active.
@@ -106,22 +123,8 @@ func (m *Shell) boardBindings() []binding {
 			pause.bar = true
 		}
 	}
-	// which region owns the arrow keys is a fact the bar states, not one
-	// the user has to infer from a cursor: with the action list focused,
-	// enter runs the highlighted action and ← is the way back to the
-	// cards, and the bar says exactly that.
-	move := binding{key: "j/k ↓↑", label: "select", help: "select feature"}
-	into := binding{key: "→", label: "actions", help: "focus the card's action list (↑↓ move, enter runs, ← back)", bar: true}
-	if m.actionFocused {
-		move.label, move.help = "move", "move the action cursor"
-		move.bar = true
-		into.key, into.label = "←", "cards"
-		into.help = "leave the action list, back to the cards"
-		enter.label, enter.help = "run action", "run the highlighted action"
-	}
 	bs := []binding{
-		move,
-		into,
+		{key: "j/k ↓↑", label: "select", help: "select feature"},
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
 		{key: "pgup/pgdn", label: "ends", help: "jump to the first/last card"},
 		{key: "1..9", label: "jump", help: "jump to feature"},
@@ -139,7 +142,8 @@ func (m *Shell) boardBindings() []binding {
 		{key: "u", label: "envelope", help: "set the budget envelope (credits; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "raw-attach the agent CLI in the worktree"},
-		{key: "tab", label: "attention", help: "cycle needs-attention queue"},
+		{key: "tab", label: "next tab", help: "cycle gummi's own tabs (board, inbox)"},
+		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "open needs-attention inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto main (conflicts hand off to an agent)"},
 		{key: "m", label: "merge", help: "squash-merge branch into main (review & approve the drafted message)"},
@@ -151,7 +155,6 @@ func (m *Shell) boardBindings() []binding {
 		{key: "I", label: "ingest", help: "ingest a spec into features"},
 		{key: "G", label: "import", help: "import bugs from GitHub"},
 		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
-		{key: "L", label: "layout", help: "switch between the split board and the full-width backlog"},
 		{key: "x", label: "delete", help: "delete feature"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},

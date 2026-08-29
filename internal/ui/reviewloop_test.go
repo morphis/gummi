@@ -87,7 +87,7 @@ func TestReviewPassAdvancesToVerify(t *testing.T) {
 	m = advanceTo(t, m, domain.StageReview)
 
 	// run review; a passing verdict should auto-advance to verify
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
 
@@ -108,7 +108,7 @@ func TestReviewChangesBouncesAndLoops(t *testing.T) {
 	m, eng := chatWorkspace(t, ag)
 	m = advanceTo(t, m, domain.StageReview)
 
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // first review
+	m = openAndAttach(t, m) // first review
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
 
@@ -131,7 +131,7 @@ func TestReviewUnclearVerdictEscalates(t *testing.T) {
 	ag := verdictAgent(func(opts agent.SessionOpts) string { return "I reviewed it." })
 	m, eng := chatWorkspace(t, ag)
 	m = advanceTo(t, m, domain.StageReview)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
 
@@ -160,7 +160,7 @@ func runVerify(t *testing.T, verifyReply string) *Shell {
 	})
 	m, eng := chatWorkspace(t, ag)
 	m = advanceTo(t, m, domain.StageReview)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run review → auto verify
+	m = openAndAttach(t, m) // run review → auto verify
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
 	if m.rows[0].F.Stage != domain.StageVerify {
@@ -367,7 +367,7 @@ func runPlan(t *testing.T, ag *agent.Fake) *Shell {
 	t.Helper()
 	m, eng := chatWorkspace(t, ag)
 	m = advanceTo(t, m, domain.StagePlan)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run plan
+	m = openAndAttach(t, m) // run plan
 	settleChat(t, eng)
 	return drainEngineLoop(t, m)
 }
@@ -461,7 +461,7 @@ func TestRunStageResumesCritique(t *testing.T) {
 	}}
 	m, eng := chatWorkspace(t, ag)
 	m = advanceTo(t, m, domain.StagePlan)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run the plan writer
+	m = openAndAttach(t, m) // run the plan writer
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m) // writer idles → critique starts → errors
 
@@ -600,7 +600,7 @@ func TestPlanRoundsSeedsFromStoreOnPlanEntry(t *testing.T) {
 	if err := m.store.SetPlanRounds(context.Background(), "FD-001", 1); err != nil {
 		t.Fatal(err)
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run plan → seed(1)
+	m = openAndAttach(t, m) // run plan → seed(1)
 	settleChat(t, eng)
 	m = drainUntil(t, m, func(m *Shell) bool { return m.round("FD-001", domain.RoundKindPlan) == 2 })
 	if got := m.round("FD-001", domain.RoundKindPlan); got != 2 {
@@ -659,7 +659,7 @@ func TestPlanRoundsWriteThroughFailsClosed(t *testing.T) {
 		m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "plan written" }))
 		m = advanceTo(t, m, domain.StagePlan)
 		m.roundStore = &failRoundStore{failLoad: true}
-		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = openAndAttach(t, m)
 		if !m.notice.isErr {
 			t.Error("no error notice on a failing seed read")
 		}
@@ -672,7 +672,7 @@ func TestPlanRoundsWriteThroughFailsClosed(t *testing.T) {
 		m, eng := chatWorkspace(t, planAgent(&critiques, "Missing authz check.\nVERDICT: changes"))
 		m = advanceTo(t, m, domain.StagePlan)
 		m.roundStore = &failRoundStore{failWrite: true}
-		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = openAndAttach(t, m)
 		settleChat(t, eng)
 		m = drainEngineLoop(t, m)
 		if got := critiques.Load(); got != 1 {
@@ -733,7 +733,7 @@ func TestRunStageResumesFinishedPlanAsCritique(t *testing.T) {
 
 	// run the plan writer; it exhausts into a finished (StateDone, !Critique)
 	// writer session, parked mid-cycle.
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	m = drainEngineLoop(t, m) // process the writer's exhaustion event
 	s := eng.Get("FD-001")
 	if s == nil || s.State() != engine.StateDone || s.Snapshot().Critique {
@@ -792,7 +792,7 @@ func TestReviewRoundsSeedsFromStoreOnReviewEntry(t *testing.T) {
 	if err := m.store.SetReviewRounds(context.Background(), "FD-001", 1); err != nil {
 		t.Fatal(err)
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // run review → seed(1)
+	m = openAndAttach(t, m) // run review → seed(1)
 	settleChat(t, eng)
 	m = drainUntil(t, m, func(m *Shell) bool { return m.round("FD-001", domain.RoundKindReview) == 2 })
 	if got := m.round("FD-001", domain.RoundKindReview); got != 2 {
@@ -815,7 +815,7 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 		})
 		m, _ := chatWorkspace(t, ag)
 		m = advanceTo(t, m, domain.StageReview)
-		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = openAndAttach(t, m)
 		m = drainEngineLoop(t, m)
 		if got := m.round("FD-001", domain.RoundKindReview); got != 0 {
 			t.Errorf("m.round(review) after pass = %d, want 0", got)
@@ -858,7 +858,7 @@ func TestReviewRoundsWriteThroughFailsClosed(t *testing.T) {
 	m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
 	m = advanceTo(t, m, domain.StageReview)
 	m.roundStore = &failRoundStore{failLoad: true}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	if !m.notice.isErr {
 		t.Error("no error notice on a failing seed read")
 	}

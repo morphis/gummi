@@ -10,60 +10,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// ViewMode selects the board's shape. It is an ephemeral, in-memory
-// toggle (never persisted), like SortMode: the split board is what a
-// fresh shell starts on, and `L` swaps between the two.
-type ViewMode int
-
-const (
-	// ModeSplit is the original layout: a kanban column on the left, the
-	// selected card's detail in the main pane on the right. Both are on
-	// screen at once, so the arrow keys have two regions to belong to.
-	ModeSplit ViewMode = iota
-	// ModeBacklog drops the column: the whole width is a sorted backlog
-	// you select in, and enter opens the card on a page of its own. One
-	// list at a time, so focus never has to be inferred — at the cost of
-	// not seeing the board and the card together.
-	ModeBacklog
-)
-
-// SetViewMode selects the layout before the first frame (for a caller
-// that wants to start in the backlog).
-func (m *Shell) SetViewMode(v ViewMode) {
-	m.viewMode = v
-	m.cardOpen = false
-	if m.width > 0 && m.height > 0 {
-		m.layout = m.computeLayout()
-	}
-}
-
-// toggleLayout swaps the two board shapes, closing the card page so the
-// switch always lands somewhere that exists in the other mode.
-func (m *Shell) toggleLayout() {
-	if m.viewMode == ModeBacklog {
-		m.viewMode = ModeSplit
-		m.notice = noticeMsg{text: "layout: split board"}
-	} else {
-		m.viewMode = ModeBacklog
-		m.notice = noticeMsg{text: "layout: backlog (enter opens a card)"}
-	}
-	m.cardOpen = false
-	m.blurActions()
-	if m.width > 0 && m.height > 0 {
-		m.layout = m.computeLayout()
-	}
-}
-
-// layoutCommandLabel names the layout the toggle would switch to, so the
-// command menu says what pressing it does rather than what is already on
-// screen.
-func (m *Shell) layoutCommandLabel() string {
-	if m.viewMode == ModeBacklog {
-		return "Switch to the split board layout"
-	}
-	return "Switch to the backlog layout"
-}
-
 // openCard opens the selected card's page. The action list is the only
 // list on that page, so it takes the arrow keys on arrival — there is no
 // second region to hand them to.
@@ -91,22 +37,19 @@ func (m *Shell) stepCard(delta int) {
 }
 
 // actionsOwnArrows reports whether the card's action list owns ↑↓ and
-// enter. On the split board that is a focus the user moves into with →;
-// on a card page it is simply true, because the page has one list.
+// enter — true exactly when a card page is open, because the page has
+// one list and nothing else on it to hand the arrows to.
 func (m *Shell) actionsOwnArrows() bool {
-	if m.viewMode == ModeBacklog {
-		return m.cardOpen
-	}
-	return m.actionFocused
+	return m.cardOpen
 }
 
-// backlogKey answers the keys whose meaning differs in the backlog
-// layout — movement, enter, and the way in and out of a card page. It
-// reports whether it handled the key; everything it does not handle
-// falls through to boardVerb, so the card verbs (g, v, m, …) keep
-// working from the list exactly as they do on the split board.
+// backlogKey answers the board tab's keys — movement, enter, and the way
+// in and out of a card page. It reports whether it handled the key;
+// everything it does not handle falls through to boardVerb, so the card
+// verbs (g, v, m, …) keep working from the list exactly as they do on
+// the card page.
 func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
-	// the ingest feed takes the foreground in either layout; its own keys
+	// the ingest feed takes the foreground over the board; its own keys
 	// (esc backgrounds it) must reach boardVerb unintercepted.
 	if m.ingestRun != nil && !m.ingestRun.hidden {
 		return nil, false
@@ -183,9 +126,9 @@ func (m *Shell) backlogEntries() []backlogEntry {
 	return out
 }
 
-// backlogView renders the full-width backlog: the same super-state
-// grouping the kanban column has, given the whole terminal instead of a
-// third of it, and scrolled to keep the selection on screen.
+// backlogView renders the full-width backlog: cards grouped by
+// super-state, given the whole terminal to spend on them, and scrolled
+// to keep the selection on screen.
 func (m *Shell) backlogView(w, h int) string {
 	s := m.styles
 	if len(m.rows) == 0 {
@@ -287,9 +230,8 @@ func scrollNote(render func(...string) string, arrow string, n int) string {
 }
 
 // cardPageView renders one card on the full width: a breadcrumb naming
-// the way back and the card's position in the backlog, then the same
-// detail the split board's main pane shows — with roughly twice the
-// width to spend on it.
+// the way back and the card's position in the backlog, then the card's
+// detail (dashboardView) — with the whole terminal to spend on it.
 func (m *Shell) cardPageView(w, h int) string {
 	s := m.styles
 	if _, ok := m.selected(); !ok {
@@ -310,8 +252,7 @@ func (m *Shell) cardPageView(w, h int) string {
 }
 
 // backlogBindings is the list level's key table: the board's own table
-// with the two-region movement keys dropped (there is one list here) and
-// enter re-pointed at the card page.
+// with enter re-pointed at the card page.
 //
 // The one key this level has to teach is enter, so it leads: a narrow
 // status bar fits two hints, and it should spend them on the way in
@@ -321,8 +262,6 @@ func (m *Shell) backlogBindings() []binding {
 	var lead []binding
 	for _, b := range m.boardBindings() {
 		switch b.key {
-		case "→", "←":
-			continue
 		case "j/k ↓↑":
 			b.label, b.help, b.bar = "select", "select card", false
 		case "enter":
@@ -346,8 +285,6 @@ func (m *Shell) cardPageBindings() []binding {
 	}
 	for _, b := range m.boardBindings() {
 		switch b.key {
-		case "→", "←":
-			continue
 		case "j/k ↓↑":
 			b.label, b.help, b.bar = "move", "move the action cursor", true
 		case "enter":

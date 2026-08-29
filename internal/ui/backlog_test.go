@@ -11,17 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// backlogShell is populatedShell switched into the backlog layout, sized
-// after the switch so the layout is the one under test. Detached, like
-// populatedShell: enough for anything that only renders.
-func backlogShell(w, h int) *Shell {
-	m := populatedShell(w, h)
-	m.toggleLayout()
-	m.notice = noticeMsg{}
-	model, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	return model.(*Shell)
-}
-
 // attachedBoard is the same fixture board on a real workspace — the
 // board's keys are refused while detached, so key routing needs one.
 func attachedBoard(t *testing.T, w, h int) *Shell {
@@ -32,79 +21,36 @@ func attachedBoard(t *testing.T, w, h int) *Shell {
 	return m
 }
 
-// attachedBacklog is attachedBoard already in the backlog layout.
-func attachedBacklog(t *testing.T, w, h int) *Shell {
-	t.Helper()
-	m := attachedBoard(t, w, h)
-	return press(t, m, key('L'))
-}
-
 func key(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
-func TestBacklogView80(t *testing.T) {
-	golden.RequireEqual(t, []byte(backlogShell(80, 24).View().Content))
-}
-
-func TestBacklogView120(t *testing.T) {
-	golden.RequireEqual(t, []byte(backlogShell(120, 34).View().Content))
-}
-
 func TestBacklogCardPage120(t *testing.T) {
-	m := backlogShell(120, 34)
+	m := populatedShell(120, 34)
 	m.openCard()
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-// TestBacklogTakesTheFullWidth: the point of the mode is the space, so
-// the kanban column must actually be gone — not merely unpainted.
-func TestBacklogTakesTheFullWidth(t *testing.T) {
-	m := backlogShell(120, 34)
-	if m.layout.KanbanVisible {
-		t.Fatal("backlog layout should not carve out a kanban column")
-	}
-	if m.layout.Main.Dx() != 120 || m.layout.Main.Min.X != 0 {
-		t.Fatalf("main pane should span the terminal: %+v", m.layout.Main)
-	}
-	if strings.Contains(m.View().Content, "│") {
-		t.Error("backlog layout still paints the column separator")
-	}
-}
-
-// TestLayoutToggleRoundTrips: L is a toggle, and coming back restores the
-// split board's geometry rather than leaving a half-switched shell.
-func TestLayoutToggleRoundTrips(t *testing.T) {
+// TestSwitchingTabClosesTheCardPage: the card page belongs to the board
+// tab alone (tabs.go's setTab), so leaving it has to close one left open
+// — otherwise it would reappear stale on a return trip.
+func TestSwitchingTabClosesTheCardPage(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
-	if m.viewMode != ModeSplit {
-		t.Fatal("a fresh shell should start on the split board")
-	}
-	m = press(t, m, key('L'))
-	if m.viewMode != ModeBacklog || m.layout.KanbanVisible {
-		t.Fatalf("L should switch to the backlog: mode=%v kanban=%v", m.viewMode, m.layout.KanbanVisible)
-	}
-	m = press(t, m, key('L'))
-	if m.viewMode != ModeSplit || !m.layout.KanbanVisible {
-		t.Fatalf("L should switch back to the split board: mode=%v kanban=%v", m.viewMode, m.layout.KanbanVisible)
-	}
-}
-
-// TestLayoutToggleClosesTheCardPage: the card page exists only in the
-// backlog layout, so switching away has to leave it.
-func TestLayoutToggleClosesTheCardPage(t *testing.T) {
-	m := attachedBacklog(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.cardOpen {
 		t.Fatal("enter should open the card page")
 	}
-	m = press(t, m, key('L'))
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.tab != TabInbox {
+		t.Fatalf("tab should move to the inbox tab, got %v", m.tab)
+	}
 	if m.cardOpen {
-		t.Fatal("switching layout should close the card page")
+		t.Fatal("leaving the board tab should close the card page")
 	}
 }
 
-// TestBacklogEnterOpensAndEscCloses is the mode's whole navigation
+// TestBacklogEnterOpensAndEscCloses is the board tab's whole navigation
 // contract: one keystroke in, one keystroke out.
 func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
-	m := attachedBacklog(t, 120, 34)
+	m := attachedBoard(t, 120, 34)
 	sel := m.rows[m.sel].F.ID
 
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -131,7 +77,7 @@ func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
 // TestCardPageArrowsDriveTheActionList: the page has one list, so ↑↓ move
 // it without anything first having to be focused with →.
 func TestCardPageArrowsDriveTheActionList(t *testing.T) {
-	m := attachedBacklog(t, 120, 34)
+	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.actionsOwnArrows() {
 		t.Fatal("the card page's action list should own the arrow keys on arrival")
@@ -155,7 +101,7 @@ func TestCardPageArrowsDriveTheActionList(t *testing.T) {
 // TestCardPageJKStepsCards: scanning several cards should not mean a trip
 // back to the list for each one.
 func TestCardPageJKStepsCards(t *testing.T) {
-	m := attachedBacklog(t, 120, 34)
+	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	first := m.rows[m.sel].F.ID
 
@@ -180,7 +126,7 @@ func TestCardPageJKStepsCards(t *testing.T) {
 // TestBacklogListMovesSelection: j/k belong to the list at list level —
 // the same keys that drive the action list one level in.
 func TestBacklogListMovesSelection(t *testing.T) {
-	m := attachedBacklog(t, 120, 34)
+	m := attachedBoard(t, 120, 34)
 	start := m.sel
 	m = press(t, m, key('j'))
 	if m.sel == start {
@@ -195,11 +141,10 @@ func TestBacklogListMovesSelection(t *testing.T) {
 	}
 }
 
-// TestBacklogKeepsTheCardVerbs: the mode changes where cards are shown,
-// not what the board can do to them — every verb still answers from the
-// list, so muscle memory survives the switch.
+// TestBacklogKeepsTheCardVerbs: every verb still answers from the list,
+// so muscle memory survives whichever tab it's read from.
 func TestBacklogKeepsTheCardVerbs(t *testing.T) {
-	m := attachedBacklog(t, 120, 34)
+	m := attachedBoard(t, 120, 34)
 	m = press(t, m, key('S'))
 	if m.sortMode != SortSeverity {
 		t.Error("S should still toggle the sort from the backlog list")
@@ -214,7 +159,7 @@ func TestBacklogKeepsTheCardVerbs(t *testing.T) {
 // not outgrow a third of the screen without the board being unusable
 // anyway); a full-width backlog is meant to hold more cards than fit.
 func TestBacklogScrollsToTheSelection(t *testing.T) {
-	m := backlogShell(120, 20)
+	m := populatedShell(120, 20)
 	m.rows = nil
 	for i := 1; i <= 40; i++ {
 		m.rows = append(m.rows, row(i, "card "+itoa(i), domain.StageTodo, "thrifty", false))
@@ -240,7 +185,7 @@ func TestBacklogScrollsToTheSelection(t *testing.T) {
 // from these tables, so the level's keys must be what they list — no →
 // into a region that doesn't exist here, and enter renamed at each level.
 func TestBacklogBindingsMatchTheLevel(t *testing.T) {
-	m := backlogShell(120, 34)
+	m := populatedShell(120, 34)
 
 	name, bs := m.activeSurface()
 	if name != "backlog" {

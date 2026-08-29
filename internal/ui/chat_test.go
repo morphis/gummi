@@ -99,11 +99,24 @@ func settleChat(t *testing.T, eng *engine.Engine) {
 	}
 }
 
+// openAndAttach opens the selected card's page and runs its highlighted
+// action — enter's first job is opening the card now that the split
+// board is gone (backlog.go), so attaching from the closed backlog list
+// takes two presses: this helper is the first attach in a test. A later
+// re-attach after esc only needs one more press, because esc detaches
+// the chat pane without closing the card page underneath it.
+func openAndAttach(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+}
+
 func TestChatAttachAndSend(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("Two options: localStorage or synced account."))
 
-	// enter attaches the chat pane; gummi's kickoff turn runs first
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	// enter opens the card page, enter again attaches the chat pane;
+	// gummi's kickoff turn runs first
+	m = openAndAttach(t, m)
 	if m.chat == nil {
 		t.Fatal("enter did not attach the chat pane")
 	}
@@ -151,7 +164,7 @@ func TestChatAttachAndSend(t *testing.T) {
 func TestChatReuseRespectsStage(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("hi"))
 	// attach at brainstorm, note the session, detach
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	brainstormSess := m.chat.session
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
@@ -176,7 +189,7 @@ func TestChatReuseRespectsStage(t *testing.T) {
 
 func TestChatViewGolden(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("Persist per-device via localStorage; account sync is a follow-up."))
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	settleChat(t, eng) // kickoff reply lands before the user types
 	m = typeString(t, m, "per-device or synced?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -219,7 +232,7 @@ func waitAsk(t *testing.T, eng *engine.Engine) {
 
 func TestChatPickerGolden(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // attach; kickoff triggers the ask
+	m = openAndAttach(t, m) // attach; kickoff triggers the ask
 	waitAsk(t, eng)
 	m = press(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // move cursor to the second option
 	golden.RequireEqual(t, []byte(m.View().Content))
@@ -227,7 +240,7 @@ func TestChatPickerGolden(t *testing.T) {
 
 func TestChatPickerAnswers(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	waitAsk(t, eng)
 
 	// selecting option 1 (per-device) answers the question
@@ -261,7 +274,7 @@ func TestChatNotOpenedForAutonomousStage(t *testing.T) {
 		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
 	}
 	// enter on an autonomous stage runs it, it does not open a chat pane
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	if m.chat != nil {
 		t.Fatal("chat attached for a non-interactive stage")
@@ -275,7 +288,7 @@ func TestChatNoEngine(t *testing.T) {
 	// a workspace-attached shell without an engine: enter yields a notice
 	m, _ := chatWorkspace(t, agent.NewFake("x"))
 	m.engine = nil
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	if m.chat != nil {
 		t.Fatal("chat attached without an engine")
 	}

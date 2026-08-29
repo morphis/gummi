@@ -40,9 +40,9 @@ const (
 
 // Shell is gummi's top-level Bubble Tea model. It owns the screen
 // buffer, the rectangle layout, the style set, the dialog stack, and —
-// once attached to a workspace — the kanban board state. Panes render
-// to strings and are painted into their rects (the Crush hybrid
-// pattern); all IO runs in commands, never in Update or View.
+// once attached to a workspace — the board state. Panes render to
+// strings and are painted into their rects (the Crush hybrid pattern);
+// all IO runs in commands, never in Update or View.
 type Shell struct {
 	styles  *theme.Styles
 	version string
@@ -60,11 +60,19 @@ type Shell struct {
 
 	rows []featureRow
 	sel  int
-	// viewMode picks the board's shape (backlog.go): the split board, or
-	// the full-width backlog whose cards open on a page of their own.
-	// cardOpen is that page, and means nothing in the split layout.
-	viewMode  ViewMode
+	// tab picks which of gummi's top-level tabs owns the main pane
+	// (tabs.go): board, inbox, or agent. cardOpen is the board tab's own
+	// page-within-a-tab — the selected card opened full width — and
+	// belongs to no other tab.
+	tab Tab
+	// agent is the hosted CLI on TabAgent, spawned lazily on first visit
+	// (agenttab.go). nil means it has not been opened yet, or could not
+	// start — agentErr says which.
+	agent     *agentView
+	agentErr  agentSpawnErr
+	agentSock string // workspace MCP socket handed to the hosted CLI
 	cardOpen  bool
+	inboxSel  int      // cursor into m.inbox.list(), the inbox tab's own selection
 	sortMode  SortMode // todo-column ordering toggle (ephemeral, not persisted)
 	notice    noticeMsg
 	spec      *specView      // non-nil while the spec surface is open
@@ -514,6 +522,35 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout = m.computeLayout()
+		// the hosted CLI has to learn the new pane size from both halves
+		// of the pty pair, or it keeps drawing at the old width.
+		if m.agent != nil {
+			w, h := m.agentPaneSize()
+			if err := m.agent.Resize(w, h); err != nil {
+				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+		}
+		return m, nil
+
+	case agentOutputMsg:
+		// a repaint happens for free on any message; re-arm the listener
+		// or the tab goes deaf after its first chunk.
+		if m.agent == nil || msg.view != m.agent {
+			return m, nil
+		}
+		return m, m.agent.Wait()
+
+	case agentExitedMsg:
+		if m.agent == nil || msg.view != m.agent {
+			return m, nil
+		}
+		// the last frame stays on screen (agentView.Draw still renders it);
+		// only stop re-arming, and say why the prompt went dead.
+		text := "agent exited"
+		if msg.err != nil {
+			text += ": " + sanitize(msg.err.Error())
+		}
+		m.notice = noticeMsg{text: text, isErr: msg.err != nil}
 		return m, nil
 
 	case rowsMsg:
@@ -897,6 +934,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// open dialog's text input (which is what happened) left no way
 		// out of a modal but esc.
 		if msg.String() == "ctrl+c" {
+			// ctrl+c is gummi's global quit everywhere except the agent
+			// tab, where the hosted CLI needs it to interrupt itself —
+			// taking it there would break the one key its users reach for
+			// most. alt+1 then q still quits gummi from inside the tab.
+			if m.tab == TabAgent && m.agent != nil {
+				return m, m.agentKey(msg)
+			}
 			return m, m.quitCmd()
 		}
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
@@ -916,6 +960,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handlePaste routes bracketed-paste text to whichever pane input is
 // editing; a paste with no input focused is dropped.
 func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	// the hosted CLI brackets pastes itself (x/vt honours the child's own
+	// bracketed-paste mode), so hand it the text rather than any of
+	// gummi's inputs while its tab is up.
+	if m.tab == TabAgent && m.agent != nil {
+		m.agent.Paste(msg.Content)
+		return nil
+	}
 	if m.chat != nil {
 		return m.chat.handlePaste(msg)
 	}
@@ -935,6 +986,7 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 // ever re-raise the dialog it just opened.
 func (m *Shell) quitCmd() tea.Cmd {
 	if m.Overlay.Contains("confirm-quit") {
+		m.closeAgent()
 		return tea.Quit
 	}
 	question, detail := "", ""
@@ -959,6 +1011,7 @@ func (m *Shell) quitCmd() tea.Cmd {
 		question = "quit with unsaved import edits?"
 		detail = "your renamed titles and one-liners are not kept — re-importing fetches the issues as they are on GitHub"
 	default:
+		m.closeAgent()
 		return tea.Quit
 	}
 	m.Overlay.Push(&confirmDialog{
@@ -968,6 +1021,7 @@ func (m *Shell) quitCmd() tea.Cmd {
 		question:     question,
 		detail:       detail,
 		onConfirm: func() tea.Cmd {
+			m.closeAgent()
 			return tea.Quit
 		},
 	})
@@ -995,6 +1049,23 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.deps != nil {
 		return m.handleDepsKey(key)
 	}
+	// the agent tab claims every key except gummi's reserved tab
+	// switches: the hosted CLI keeps its own keymap, which means q and ?
+	// go to it too (it has its own help), and gummi is reached with
+	// alt+1/alt+2 rather than by stealing keys the program needs.
+	if m.tab == TabAgent && m.agent != nil {
+		switch key {
+		case "alt+1":
+			m.setTab(TabBoard)
+			return nil
+		case "alt+2":
+			m.setTab(TabInbox)
+			return nil
+		case "alt+3":
+			return nil
+		}
+		return m.agentKey(msg)
+	}
 	switch key {
 	case "q":
 		return m.quitCmd()
@@ -1015,60 +1086,44 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
+	// tab switching is global to every tab (Keys, docs/DESIGN.md): it
+	// must win before a tab's own keys get a look, the same way q and ?
+	// win above handleKey's attached check.
+	switch key {
+	case "tab":
+		m.nextTab()
+		return nil
+	case "alt+1":
+		m.setTab(TabBoard)
+		return nil
+	case "alt+2":
+		m.setTab(TabInbox)
+		return nil
+	case "alt+3":
+		m.setTab(TabAgent)
+		// spawning is deferred to the first visit so a board that never
+		// opens the tab never pays for a pty or a CLI process.
+		return m.ensureAgent()
+	}
+	if m.tab != TabBoard {
+		// the agent tab is routed in handleKey, which still has the real
+		// KeyPressMsg to forward; by here a key is only a string and the
+		// hosted CLI needs the event.
+		return m.inboxKey(key)
+	}
 	// reconcile before anything can act: m.sel is written from half a
 	// dozen places (the attention cycle, the inbox jump, pgup/pgdn, a
 	// reload) and a cursor left over from another card would otherwise
 	// run its action against this one. Idempotent, so the per-site calls
 	// stay for rendering and this is the backstop for correctness.
 	m.syncActionFocus()
-	// the backlog layout answers movement, enter and esc itself (there is
-	// one list on screen at a time, so none of the two-region focus
-	// handling below applies); everything it doesn't claim is a board
-	// verb, unchanged.
-	if m.viewMode == ModeBacklog {
-		if cmd, handled := m.backlogKey(key); handled {
-			return cmd
-		}
-		if key == " " || key == "space" {
-			m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
-			return nil
-		}
-		return m.boardVerb(key)
+	// the board tab answers movement, enter and esc itself (there is one
+	// list on screen at a time — the backlog, or the card page it opens);
+	// everything it doesn't claim is a board verb, unchanged.
+	if cmd, handled := m.backlogKey(key); handled {
+		return cmd
 	}
-	// the action list, when focused, owns movement and enter; everything
-	// else still falls through to the board so the accelerators keep
-	// working from either side.
-	if m.actionFocused {
-		switch key {
-		case "j", "down":
-			m.moveAction(1)
-			return nil
-		case "k", "up":
-			m.moveAction(-1)
-			return nil
-		case "left", "esc":
-			m.blurActions()
-			return nil
-		case "enter":
-			if a, ok := m.cardActions().Selected(); ok {
-				m.clearTransientNotice()
-				// straight to the verb, never back through this layer: the
-				// run action's own accelerator IS enter, so re-entering here
-				// would pick the same row and recurse until the stack blew.
-				return m.runCardAction(a)
-			}
-			return nil
-		}
-	}
-	switch key {
-	case "right":
-		// → drills from the cards into their actions; the two panes sit
-		// side by side, so the arrow means what it looks like.
-		if m.cardActions().Len() > 0 {
-			m.actionFocused = true
-		}
-		return nil
-	case " ", "space":
+	if key == " " || key == "space" {
 		m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
 		return nil
 	}
@@ -1093,9 +1148,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		return nil
 	}
 	switch key {
-	case "tab":
-		m.cycleAttention()
-		return nil
 	case "i":
 		m.openInbox()
 		return nil
@@ -1162,8 +1214,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createBug))
 	case "R":
 		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createResearch))
-	case "L":
-		m.toggleLayout()
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
@@ -1439,15 +1489,15 @@ func (m *Shell) clampSel() {
 	}
 }
 
-// computeLayout carves the terminal for the current view mode: the
-// backlog layout asks for no kanban column, so the main pane takes the
-// full width.
+// computeLayout carves the terminal into the tab bar, the main pane, and
+// the status bar (layout.Compute) — the same three rows regardless of
+// which tab is active; only the main pane's content changes (mainView).
 func (m *Shell) computeLayout() layout.Layout {
-	return layout.Compute(m.width, m.height, m.viewMode == ModeSplit)
+	return layout.Compute(m.width, m.height)
 }
 
-// boardPaneFocused reports whether the kanban column owns the arrow keys
-// — nothing has taken over the main pane, and focus has not moved right
+// boardPaneFocused reports whether the board pane owns the arrow keys —
+// nothing has taken over the main pane, and focus has not moved right
 // into the selected card's action list. It mirrors activeSurface's
 // precedence (keymap.go): whatever surface answers the keys is the one
 // that gets to look focused.
@@ -1479,6 +1529,7 @@ func (m *Shell) View() tea.View {
 		lines[i] = strings.TrimRight(l, " ")
 	}
 	v.Content = strings.Join(lines, "\n")
+	v.Cursor = m.agentCursor()
 	return v
 }
 
@@ -1486,14 +1537,20 @@ func (m *Shell) draw(scr uv.Screen) {
 	s := m.styles
 	l := m.layout
 
-	if l.KanbanVisible {
-		uv.NewStyledString(m.boardView(l.Kanban.Dx(), m.boardPaneFocused())).Draw(scr, l.Kanban)
-		sep := strings.TrimSuffix(strings.Repeat(s.Separator.Render("│")+"\n", l.Main.Dy()), "\n")
-		uv.NewStyledString(sep).Draw(scr, uv.Rect(l.Main.Min.X, 0, 1, l.Main.Dy()))
-	}
+	uv.NewStyledString(m.tabBarView(l.Tabs.Dx())).Draw(scr, l.Tabs)
 	// a long error/remedy is wrapped into a band above the status bar
 	// rather than truncated into a one-line pill ("set permiss…"); it
 	// borrows the bottom rows of the main pane. Short notices stay pills.
+	// the agent tab paints cells, not a string: its emulator composites
+	// straight into scr so the hosted CLI's own truecolor survives. Every
+	// other surface goes through mainView below.
+	if m.tab == TabAgent && m.agent != nil {
+		m.drawAgentTab(scr)
+		uv.NewStyledString(m.statusView(l.Status.Dx())).Draw(scr, l.Status)
+		uv.NewStyledString(m.tabBarView(l.Tabs.Dx())).Draw(scr, l.Tabs)
+		m.Overlay.Draw(scr, l.Area, s)
+		return
+	}
 	band := m.noticeBand(max(l.Main.Dx()-3, 0))
 	mainH := l.Main.Dy()
 	if len(band) > 0 {
@@ -1730,44 +1787,12 @@ func (m *Shell) liveSessions() []string {
 	return names
 }
 
-// cycleAttention moves the selection to the next feature in the
-// needs-attention queue (DESIGN §6: `tab` cycles the queue).
-func (m *Shell) cycleAttention() {
-	var cur domain.FeatureID
-	if r, ok := m.selected(); ok {
-		cur = r.F.ID
-	}
-	next := m.inbox.next(cur)
-	if next == "" {
-		return
-	}
-	for i, r := range m.rows {
-		if r.F.ID == next {
-			m.sel = i
-			m.syncActionFocus()
-			return
-		}
-	}
-}
-
-// openInbox shows the needs-attention overlay.
+// openInbox switches to the needs-attention tab. It used to push a modal
+// dialog (inbox_dialog.go); that dialog is gone now that the queue is a
+// first-class tab, so this is just the tab switch — kept as its own
+// function because `i` (boardVerb) still names it, not setTab directly.
 func (m *Shell) openInbox() {
-	m.Overlay.Push(newInboxDialog(m.inbox.list(),
-		func(id domain.FeatureID) tea.Cmd {
-			m.inbox.remove(id)
-			for i, r := range m.rows {
-				if r.F.ID == id {
-					m.sel = i
-					m.syncActionFocus()
-					break
-				}
-			}
-			return nil
-		},
-		m.inbox.remove,
-		m.topUpBudget,
-		m.suggestFor,
-	))
+	m.setTab(TabInbox)
 }
 
 // suggestFor derives a feature's ranked next actions for the inbox
@@ -1935,16 +1960,21 @@ func (m *Shell) mainView(w, h int) string {
 	if m.ingestRun != nil && !m.ingestRun.hidden {
 		return m.ingestRunRender(w, h)
 	}
+	switch m.tab {
+	case TabAgent:
+		// only ever the placeholder: a live child is composited by
+		// drawAgentTab, which bypasses this string path entirely.
+		return m.agentTabPlaceholder(w, h)
+	case TabInbox:
+		return m.inboxView(w, h)
+	}
 	if len(m.rows) > 0 {
-		// the backlog layout owns the whole pane: the list, or one card's
-		// page opened out of it.
-		if m.viewMode == ModeBacklog {
-			if m.cardOpen {
-				return m.cardPageView(w, h)
-			}
-			return m.backlogView(w, h)
+		// the board tab owns the whole pane: the backlog list, or one
+		// card's page opened out of it.
+		if m.cardOpen {
+			return m.cardPageView(w, h)
 		}
-		return m.dashboardView(w, h)
+		return m.backlogView(w, h)
 	}
 	return logo.Splash(m.styles, m.version, w, h)
 }

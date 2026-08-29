@@ -36,7 +36,7 @@ func TestShellView120(t *testing.T) {
 }
 
 func TestShellViewNarrow(t *testing.T) {
-	// kanban collapses; nothing panics, content still renders
+	// a narrow terminal still renders without panicking
 	out := shellAt(50, 12).View().Content
 	if out == "" {
 		t.Fatal("narrow view rendered empty")
@@ -93,7 +93,7 @@ func TestQuitWithLiveSessionPushesDialog(t *testing.T) {
 	m, eng := chatWorkspace(t, ag)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec → plan
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})   // run plan (autonomous)
+	m = openAndAttach(t, m)                                // run plan (autonomous)
 	waitLive(t, eng, "FD-001")
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
@@ -118,7 +118,7 @@ func TestQuitConfirmYesQuits(t *testing.T) {
 	m, eng := chatWorkspace(t, ag)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
 
 	// q pushes the dialog; confirming with y returns the quit command.
@@ -144,7 +144,7 @@ func TestQuitLiveDialogCancelStays(t *testing.T) {
 	m, eng := chatWorkspace(t, ag)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
 
 	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})

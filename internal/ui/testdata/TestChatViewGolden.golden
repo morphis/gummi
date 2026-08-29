@@ -1,30 +1,30 @@
-                                 [38;2;58;57;67m│[m
- [38;2;96;95;107;1mIN PROGRESS[m                     [38;2;58;57;67m│[m [38;2;255;96;255;1mFD-001[m [38;2;247;246;251m· brainstorm[m  [38;2;96;95;107m[architect][m
-[38;2;133;131;146;48;2;58;57;67m▸[38;2;191;188;200m1[39m [38;2;107;80;255m●[39m [38;2;191;188;200;1mFD-001[39;22m [38;2;247;246;251mDark mode[39m [38;2;191;188;200m[thrifty][39m  [38;2;58;57;67;49m│[m [38;2;133;131;146mfake[38;2;96;95;107m  ·  [38;2;133;131;146mfake-model[38;2;96;95;107m  ·  2 credits spent[m
-                                 [38;2;58;57;67m│[m [38;2;58;57;67m────────────────────────────────────────────────────────────────[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m [38;2;96;95;107mgummi[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107mThe user just opened the brainstorm chat. Read the spec[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107mdraft, then open the interview: state the problem as you[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107munderstand it in a sentence or two and ask the single[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107mhighest-leverage question, with your recommended answer.[m
-                                 [38;2;58;57;67m│[m   [38;2;96;95;107mKeep it short.[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m [38;2;255;96;255;1marchitect[m
-                                 [38;2;58;57;67m│[m   [38;2;191;188;200mPersist per-device via localStorage; account sync is a[m
-                                 [38;2;58;57;67m│[m   [38;2;191;188;200mfollow-up.[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m [38;2;191;188;200myou[m
-                                 [38;2;58;57;67m│[m   [38;2;247;246;251mper-device or synced?[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m [38;2;255;96;255;1marchitect[m
-                                 [38;2;58;57;67m│[m   [38;2;191;188;200mPersist per-device via localStorage; account sync is a[m
-                                 [38;2;58;57;67m│[m   [38;2;191;188;200mfollow-up.[m
-                                 [38;2;58;57;67m│[m
-                                 [38;2;58;57;67m│[m [37;40m┃ [39;7mm[38;5;240;27message the agent…[39m                                          [m
-                                 [38;2;58;57;67m│[m [37m┃ [30m [m
-                                 [38;2;58;57;67m│[m [37m┃ [30m [m
+[48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [38;2;58;57;67;49m │ [39;48;2;90;78;127m [38;2;247;246;251mboard[39m [38;2;58;57;67;49m │ [m [38;2;133;131;146minbox[m [38;2;58;57;67m │ [m [38;2;133;131;146magent[m
+
+  [38;2;255;96;255;1mFD-001[m [38;2;247;246;251m· brainstorm[m  [38;2;96;95;107m[architect][m
+  [38;2;133;131;146mfake[38;2;96;95;107m  ·  [38;2;133;131;146mfake-model[38;2;96;95;107m  ·  2 credits spent[m
+  [38;2;58;57;67m────────────────────────────────────────────────────────────────────────────────[m
+
+
+
+
+
+
+
+  [38;2;96;95;107mgummi[m
+    [38;2;96;95;107mThe user just opened the brainstorm chat. Read the spec draft, then open the interview: state[m
+    [38;2;96;95;107mthe problem as you understand it in a sentence or two and ask the single highest-leverage[m
+    [38;2;96;95;107mquestion, with your recommended answer. Keep it short.[m
+
+  [38;2;255;96;255;1marchitect[m
+    [38;2;191;188;200mPersist per-device via localStorage; account sync is a follow-up.[m
+
+  [38;2;191;188;200myou[m
+    [38;2;247;246;251mper-device or synced?[m
+
+  [38;2;255;96;255;1marchitect[m
+    [38;2;191;188;200mPersist per-device via localStorage; account sync is a follow-up.[m
+
+  [37;40m┃ [39;7mm[38;5;240;27message the agent…[39m                                                                           [m
+  [37m┃ [30m [m
+  [37m┃ [30m [m
 [38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [m [48;2;77;76;87m [38;2;191;188;200m1 active[39m [m                        [38;2;191;188;200menter[m [38;2;133;131;146msend[38;2;96;95;107m · [38;2;191;188;200mpgup/pgdn[m [38;2;133;131;146mscroll[38;2;96;95;107m · [38;2;191;188;200malt+o[m [38;2;133;131;146moutputs[38;2;96;95;107m · [38;2;191;188;200mesc[m [38;2;133;131;146mdetach[m

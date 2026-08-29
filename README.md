@@ -153,9 +153,9 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | key | action |
 |---|---|
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
-| `→` / `←` | focus the selected card's action list / go back to the cards — `↑↓` move, `enter` runs |
+| `enter` | open the selected card's page (full width); on the page, chat (interactive stages) · run / watch (autonomous stages) |
+| `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
 | `space` | open the command menu (everything that belongs to no card); type to filter |
-| `enter` | chat (interactive stages) · run / watch (autonomous stages) |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |
 | `s` / `d` | spec / diff view — `tab` switches read ⇄ annotate |
 | `g` / `b` | advance a gate / bounce back to implement or fix |
@@ -164,30 +164,27 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `u` | set the budget envelope (credits; 0 = uncapped) |
 | `o` | change the card's managed repository (before worktree) |
 | `S` | toggle severity sort (todo only) |
-| `L` | switch layout: the split board ⇄ the full-width backlog (below) |
-| `tab` / `i` | cycle / open the needs-attention inbox |
+| `tab` / `alt+1/2/3` | cycle gummi's own tabs (board, inbox) / jump straight to the board, inbox, or agent tab |
+| `i` | open the needs-attention inbox |
 | `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
 | `a` | raw-attach the agent CLI in the worktree (escape hatch) |
 | `r` / `m` / `z` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) / squash in place (collapse the branch to one commit on its fork point) |
-| duplicate | a fresh copy starts over in todo, the original stays — no key: reach it from the card's action list (`→`) or the command menu (`space`), since `y` is "yes" in the confirm it raises |
+| duplicate | a fresh copy starts over in todo, the original stays — no key: reach it from the card page's action list (`enter` opens it) or the command menu (`space`), since `y` is "yes" in the confirm it raises |
 | `c` / `x` | clean up a landed branch / delete |
 
-### Two board layouts
+### One board, tabbed
 
-`L` (or the command menu) switches between them; the choice lasts for the
-session and is not persisted.
+The board is a single full-width backlog, grouped by super-state; `enter`
+opens the selected card on a page of its own, with roughly twice the width
+to spend on its detail. There is only ever one list on screen, so `↑↓`
+never have to be aimed. `esc` returns to the list; `J`/`K` step to the
+previous/next card without going back. Every card verb (`g`, `v`, `m`,
+`d`, …) works from either level.
 
-- **Split board** (the default, shown above) — the kanban column and the
-  selected card's detail side by side. You see the whole board while you
-  work a card, and the arrow keys belong to one of two regions (`→`
-  moves into the card's actions, `←` back).
-- **Backlog** — no column: the full width is one sorted backlog, still
-  grouped by super-state, and `enter` opens the selected card on a page
-  of its own. The card gets roughly twice the width, and there is only
-  ever one list on screen, so `↑↓` never have to be aimed. `esc` returns
-  to the list; `J`/`K` step to the previous/next card without going back.
-  Every card verb (`g`, `v`, `m`, `d`, …) works from either level.
+The board sits behind gummi's own tab bar alongside the needs-attention
+inbox and (eventually) a hosted agent pane — `tab` cycles gummi's own
+tabs, `alt+1/2/3` jumps straight to one.
 
 ## Bringing in existing work
 

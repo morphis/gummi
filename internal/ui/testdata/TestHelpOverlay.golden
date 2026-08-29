@@ -1,13 +1,12 @@
 [38;2;107;80;255m╭───────────────────────────────────────────────────────────────────────────────[m
 [38;2;107;80;255m│[m
-[38;2;107;80;255m│[m  [38;2;255;96;255;1mkeys · board[m
+[38;2;107;80;255m│[m  [38;2;255;96;255;1mkeys · backlog[m
 [38;2;107;80;255m│[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mj/k ↓↑   [m  [38;2;191;188;200mselect feature[m
-[38;2;107;80;255m│[m  [38;2;191;188;200m→        [m  [38;2;191;188;200mfocus the card's action list (↑↓ move, enter runs, ← back)[m
+[38;2;107;80;255m│[m  [38;2;191;188;200menter    [m  [38;2;191;188;200mopen the card page — full width, with the card's actions[m
+[38;2;107;80;255m│[m  [38;2;191;188;200mj/k ↓↑   [m  [38;2;191;188;200mselect card[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mspace    [m  [38;2;191;188;200mopen the command menu — everything that belongs to no card[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mpgup/pgdn[m  [38;2;191;188;200mjump to the first/last card[m
 [38;2;107;80;255m│[m  [38;2;191;188;200m1..9     [m  [38;2;191;188;200mjump to feature[m
-[38;2;107;80;255m│[m  [38;2;191;188;200menter    [m  [38;2;191;188;200mchat (brainstorm/spec) · run (autonomous)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mp        [m  [38;2;191;188;200mpause the running agent; else open the dependency picker[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mt        [m  [38;2;191;188;200mread the session transcript (tool calls and their outputs)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200ms        [m  [38;2;191;188;200mspec (tab: read ⇄ annotate)[m
@@ -19,6 +18,7 @@
 [38;2;107;80;255m│[m  [38;2;191;188;200mu        [m  [38;2;191;188;200mset the budget envelope (credits; 0 = uncapped)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200mo        [m  [38;2;191;188;200mchange the card's managed repository (before worktree)[m
 [38;2;107;80;255m│[m  [38;2;191;188;200ma        [m  [38;2;191;188;200mraw-attach the agent CLI in the worktree[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle needs-attention queue[m
+[38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle gummi's own tabs (board, inbox)[m
+[38;2;107;80;255m│[m  [38;2;191;188;200malt+1/2/3[m  [38;2;191;188;200mjump straight to board / inbox / agent[m
 [38;2;107;80;255m│[m
-[38;2;107;80;255m│[m  [38;2;96;95;107m↑↓ scroll · 1–18 of 33 · esc close[m
+[38;2;107;80;255m│[m  [38;2;96;95;107m↑↓ scroll · 1–18 of 32 · esc close[m

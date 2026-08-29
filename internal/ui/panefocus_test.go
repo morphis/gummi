@@ -74,27 +74,6 @@ func TestBoardBandDimsWhenFocusMovesRight(t *testing.T) {
 	}
 }
 
-// TestBoardPaneFocusFollowsTheArrowKeys: → hands the arrow keys to the
-// action list, ← takes them back, and boardPaneFocused — the single input
-// to how both panes render — must agree with the handler both times.
-func TestBoardPaneFocusFollowsTheArrowKeys(t *testing.T) {
-	m := populatedShell(120, 34)
-	if !m.boardPaneFocused() {
-		t.Fatal("the board should own the arrow keys at rest")
-	}
-	m.boardKey("right")
-	if !m.actionFocused {
-		t.Fatal("→ did not move focus into the action list")
-	}
-	if m.boardPaneFocused() {
-		t.Error("the board still claims focus while the action list has it")
-	}
-	m.boardKey("left")
-	if m.boardPaneFocused() != true {
-		t.Error("← did not hand focus back to the board")
-	}
-}
-
 // TestMainPaneSurfaceTakesFocusFromTheBoard: opening the spec (or any
 // other main-pane surface) routes the arrow keys away from the kanban,
 // so the kanban must stop looking live.
@@ -130,26 +109,6 @@ func TestActionListBandFollowsFocus(t *testing.T) {
 	}
 	if got := len(bandedRows(blurred, bandBG(t, s, true))); got != 0 {
 		t.Errorf("unfocused action list painted %d bright bands, want 0", got)
-	}
-}
-
-// TestStatusBarNamesTheFocusedRegion: the bar is the one place that can
-// say in words which region the arrows drive, so it has to change when
-// focus does.
-func TestStatusBarNamesTheFocusedRegion(t *testing.T) {
-	m := populatedShell(120, 34)
-	atRest := ansi.Strip(m.statusView(120))
-	if !strings.Contains(atRest, "actions") {
-		t.Fatalf("bar at rest should offer the way into the actions: %q", atRest)
-	}
-
-	m.boardKey("right")
-	focused := ansi.Strip(m.statusView(120))
-	if !strings.Contains(focused, "cards") {
-		t.Errorf("bar with the action list focused should offer the way back to the cards: %q", focused)
-	}
-	if !strings.Contains(focused, "run action") {
-		t.Errorf("bar with the action list focused should say what enter does: %q", focused)
 	}
 }
 
