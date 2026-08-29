@@ -164,6 +164,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `u` | set the budget envelope (credits; 0 = uncapped) |
 | `o` | change the card's managed repository (before worktree) |
 | `S` | toggle severity sort (todo only) |
+| `L` | switch layout: the split board ⇄ the full-width backlog (below) |
 | `tab` / `i` | cycle / open the needs-attention inbox |
 | `n` / `B` / `R` | new feature / new bug / new research card |
 | `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
@@ -171,6 +172,22 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `r` / `m` / `z` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) / squash in place (collapse the branch to one commit on its fork point) |
 | duplicate | a fresh copy starts over in todo, the original stays — no key: reach it from the card's action list (`→`) or the command menu (`space`), since `y` is "yes" in the confirm it raises |
 | `c` / `x` | clean up a landed branch / delete |
+
+### Two board layouts
+
+`L` (or the command menu) switches between them; the choice lasts for the
+session and is not persisted.
+
+- **Split board** (the default, shown above) — the kanban column and the
+  selected card's detail side by side. You see the whole board while you
+  work a card, and the arrow keys belong to one of two regions (`→`
+  moves into the card's actions, `←` back).
+- **Backlog** — no column: the full width is one sorted backlog, still
+  grouped by super-state, and `enter` opens the selected card on a page
+  of its own. The card gets roughly twice the width, and there is only
+  ever one list on screen, so `↑↓` never have to be aimed. `esc` returns
+  to the list; `J`/`K` step to the previous/next card without going back.
+  Every card verb (`g`, `v`, `m`, `d`, …) works from either level.
 
 ## Bringing in existing work
 

@@ -59,6 +59,10 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "deps", m.deps.bindings()
 	case m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
+	case m.viewMode == ModeBacklog && len(m.rows) > 0 && m.cardOpen:
+		return "card", m.cardPageBindings()
+	case m.viewMode == ModeBacklog && len(m.rows) > 0:
+		return "backlog", m.backlogBindings()
 	case len(m.rows) > 0:
 		return "board", m.boardBindings()
 	default:
@@ -147,6 +151,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "I", label: "ingest", help: "ingest a spec into features"},
 		{key: "G", label: "import", help: "import bugs from GitHub"},
 		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},
+		{key: "L", label: "layout", help: "switch between the split board and the full-width backlog"},
 		{key: "x", label: "delete", help: "delete feature"},
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},

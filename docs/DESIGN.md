@@ -557,6 +557,28 @@ design system.
   develops the rest; profile and skip flags on a demoted options row),
   `tab` cycle needs-attention queue, `1..9` jump to feature, `?` help.
 
+**Two layouts, one board.** The split above is the default; `L` switches
+to a **backlog** layout that trades the column for space. There is no
+column at all: the full width is the same super-state-grouped list, and
+`enter` opens the selected card on a page of its own (`esc` back, `J`/`K`
+to the previous/next card without going back). The trade is explicit —
+
+- *Split*: the whole board stays visible while you work a card, at the
+  cost of ~a third of the width and of the two-region focus question (`→`
+  moves the arrow keys into the card's actions, `←` back).
+- *Backlog*: card titles, badges and the card's own detail get the whole
+  terminal, and there is only ever one list on screen — so the arrow keys
+  never have to be aimed and the focus band has nothing to disambiguate.
+  What it costs is the board: you cannot watch the other cards while
+  reading one.
+
+Both are the same board underneath. Every card verb (`g`, `v`, `m`, `d`,
+…) answers from either layout and at either level, because both routes
+funnel through the one guarded `boardVerb`; only movement, `enter` and
+`esc` differ, and each level's binding table says which (`keymap.go`).
+The choice is ephemeral, like the severity sort — a session preference,
+not workspace state.
+
 ### 6.1 Annotation editor (line-level review, like a PR)
 
 Gates shouldn't force feedback through chat ("the third paragraph is wrong,

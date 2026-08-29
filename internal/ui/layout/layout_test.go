@@ -13,7 +13,7 @@ import (
 func TestComputeTable(t *testing.T) {
 	var b []byte
 	for _, dim := range [][2]int{{80, 24}, {120, 34}, {60, 20}, {64, 10}} {
-		l := Compute(dim[0], dim[1])
+		l := Compute(dim[0], dim[1], true)
 		b = fmt.Appendf(b, "%dx%d: kanban=%v main=%v status=%v visible=%v\n",
 			dim[0], dim[1], l.Kanban, l.Main, l.Status, l.KanbanVisible)
 	}
@@ -21,7 +21,7 @@ func TestComputeTable(t *testing.T) {
 }
 
 func TestComputeWide(t *testing.T) {
-	l := Compute(120, 34)
+	l := Compute(120, 34, true)
 	if !l.KanbanVisible {
 		t.Fatal("kanban should be visible at 120 cols")
 	}
@@ -40,7 +40,7 @@ func TestComputeWide(t *testing.T) {
 }
 
 func TestComputeStandard(t *testing.T) {
-	l := Compute(80, 24)
+	l := Compute(80, 24, true)
 	if !l.KanbanVisible {
 		t.Fatal("kanban should be visible at 80 cols")
 	}
@@ -53,7 +53,7 @@ func TestComputeStandard(t *testing.T) {
 }
 
 func TestComputeNarrowCollapsesKanban(t *testing.T) {
-	l := Compute(60, 20)
+	l := Compute(60, 20, true)
 	if l.KanbanVisible {
 		t.Fatal("kanban should collapse below 64 cols")
 	}
@@ -62,9 +62,30 @@ func TestComputeNarrowCollapsesKanban(t *testing.T) {
 	}
 }
 
+// TestComputeNoKanban covers the backlog layout: the column is not asked
+// for, so the main pane takes the whole width at any size — the same
+// rects a too-narrow terminal collapses to.
+func TestComputeNoKanban(t *testing.T) {
+	for _, dim := range [][2]int{{120, 34}, {80, 24}, {60, 20}} {
+		l := Compute(dim[0], dim[1], false)
+		if l.KanbanVisible {
+			t.Errorf("%v: kanban should never be visible without one", dim)
+		}
+		if l.Kanban != (Layout{}).Kanban {
+			t.Errorf("%v: kanban rect should stay zero: %+v", dim, l.Kanban)
+		}
+		if l.Main.Min.X != 0 || l.Main.Dx() != dim[0] {
+			t.Errorf("%v: main should take full width: %+v", dim, l.Main)
+		}
+		if l.Main.Dy() != dim[1]-1 || l.Status.Dy() != 1 {
+			t.Errorf("%v: status row should still be carved out: main %+v status %+v", dim, l.Main, l.Status)
+		}
+	}
+}
+
 func TestComputeDegenerate(t *testing.T) {
 	for _, dim := range [][2]int{{0, 0}, {1, 1}, {-5, -5}, {200, 1}} {
-		l := Compute(dim[0], dim[1])
+		l := Compute(dim[0], dim[1], true)
 		if l.Main.Dx() < 0 || l.Main.Dy() < 0 || l.Status.Dy() < 0 {
 			t.Errorf("negative rect for %v: %+v", dim, l)
 		}

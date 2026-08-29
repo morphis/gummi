@@ -40,7 +40,11 @@ func (m *Shell) dashboardView(w, h int) string {
 			line(s.Subtle.Render(l))
 		}
 	}
-	line(s.Separator.Render(strings.Repeat("─", max(min(w, 60), 0))))
+	// the rule runs the width of the pane, capped so it doesn't stretch
+	// across an ultra-wide terminal. It used to stop at 60 columns, which
+	// on the backlog layout's full-width card page read as a truncated
+	// line rather than an underline.
+	line(s.Separator.Render(strings.Repeat("─", max(min(w, 100), 0))))
 
 	stageLine := s.Muted.Render("stage    ") + s.StagePill(f.Stage).Render(string(f.Stage)) + "  " + s.Faint.Render(string(f.Stage.SuperState()))
 	if rr := m.round(f.ID, domain.RoundKindReview); rr > 0 {
@@ -102,14 +106,14 @@ func (m *Shell) dashboardView(w, h int) string {
 		// the same tell the kanban's group headers give the other pane, so
 		// the two regions never both look live.
 		head := s.Subtitle
-		if m.actionFocused {
+		if m.actionsOwnArrows() {
 			head = s.PaneTitleActive
 		}
 		line(head.Render("actions"))
 		// the same h-14 reserve the activity feed below uses, floored so a
 		// very short terminal still shows the recommendation and a way to
 		// reach the rest.
-		for _, row := range strings.Split(l.View(s, w, max(h-14, 4), m.actionFocused), "\n") {
+		for _, row := range strings.Split(l.View(s, w, max(h-14, 4), m.actionsOwnArrows()), "\n") {
 			line(row)
 		}
 		line("")

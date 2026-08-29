@@ -58,8 +58,13 @@ type Shell struct {
 	wt    *worktree.Pool
 	ws    state.Workspace
 
-	rows      []featureRow
-	sel       int
+	rows []featureRow
+	sel  int
+	// viewMode picks the board's shape (backlog.go): the split board, or
+	// the full-width backlog whose cards open on a page of their own.
+	// cardOpen is that page, and means nothing in the split layout.
+	viewMode  ViewMode
+	cardOpen  bool
 	sortMode  SortMode // todo-column ordering toggle (ephemeral, not persisted)
 	notice    noticeMsg
 	spec      *specView      // non-nil while the spec surface is open
@@ -508,7 +513,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.layout = layout.Compute(m.width, m.height)
+		m.layout = m.computeLayout()
 		return m, nil
 
 	case rowsMsg:
@@ -1016,6 +1021,20 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 	// run its action against this one. Idempotent, so the per-site calls
 	// stay for rendering and this is the backstop for correctness.
 	m.syncActionFocus()
+	// the backlog layout answers movement, enter and esc itself (there is
+	// one list on screen at a time, so none of the two-region focus
+	// handling below applies); everything it doesn't claim is a board
+	// verb, unchanged.
+	if m.viewMode == ModeBacklog {
+		if cmd, handled := m.backlogKey(key); handled {
+			return cmd
+		}
+		if key == " " || key == "space" {
+			m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
+			return nil
+		}
+		return m.boardVerb(key)
+	}
 	// the action list, when focused, owns movement and enter; everything
 	// else still falls through to the board so the accelerators keep
 	// working from either side.
@@ -1143,6 +1162,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createBug))
 	case "R":
 		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createResearch))
+	case "L":
+		m.toggleLayout()
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
@@ -1416,6 +1437,13 @@ func (m *Shell) clampSel() {
 	if m.sel < 0 {
 		m.sel = 0
 	}
+}
+
+// computeLayout carves the terminal for the current view mode: the
+// backlog layout asks for no kanban column, so the main pane takes the
+// full width.
+func (m *Shell) computeLayout() layout.Layout {
+	return layout.Compute(m.width, m.height, m.viewMode == ModeSplit)
 }
 
 // boardPaneFocused reports whether the kanban column owns the arrow keys
@@ -1908,6 +1936,14 @@ func (m *Shell) mainView(w, h int) string {
 		return m.ingestRunRender(w, h)
 	}
 	if len(m.rows) > 0 {
+		// the backlog layout owns the whole pane: the list, or one card's
+		// page opened out of it.
+		if m.viewMode == ModeBacklog {
+			if m.cardOpen {
+				return m.cardPageView(w, h)
+			}
+			return m.backlogView(w, h)
+		}
 		return m.dashboardView(w, h)
 	}
 	return logo.Splash(m.styles, m.version, w, h)

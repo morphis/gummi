@@ -1,6 +1,7 @@
-// Package layout computes gummi's rectangle layout: a kanban column on
-// the left, the main pane on the right, a one-line status bar at the
-// bottom. Pure geometry — no styling, no state.
+// Package layout computes gummi's rectangle layout: optionally a kanban
+// column on the left, the main pane beside (or instead of) it, and a
+// one-line status bar at the bottom. Pure geometry — no styling, no
+// state.
 package layout
 
 import (
@@ -28,8 +29,11 @@ type Layout struct {
 	KanbanVisible bool
 }
 
-// Compute lays out a w×h terminal.
-func Compute(w, h int) Layout {
+// Compute lays out a w×h terminal. kanban asks for the left column;
+// the backlog layout passes false and takes the whole width for the
+// main pane, the same geometry a too-narrow terminal already falls
+// back to.
+func Compute(w, h int, kanban bool) Layout {
 	if w < 0 {
 		w = 0
 	}
@@ -41,7 +45,7 @@ func Compute(w, h int) Layout {
 	contentH := max(h-statusHeight, 0)
 	l.Status = uv.Rect(0, contentH, w, min(statusHeight, h))
 
-	if w >= collapseBelow {
+	if kanban && w >= collapseBelow {
 		kw := min(max(w/3, minKanbanWidth), maxKanbanWidth)
 		l.Kanban = uv.Rect(0, 0, kw, contentH)
 		l.Main = uv.Rect(kw, 0, w-kw, contentH)
