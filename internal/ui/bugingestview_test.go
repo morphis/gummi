@@ -70,7 +70,7 @@ func TestBugImportEnterImportsExactlyHighlighted(t *testing.T) {
 	m = pump(t, m, m.Init())
 	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
 	// move focus off the filter and select the second row ("Logout crash").
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -122,31 +122,40 @@ func TestBugImportNoBulkMaterializePath(t *testing.T) {
 	}
 }
 
-// TestBugImportEscDiscardsFromEitherFocusStateQOnlyWhenListFocused proves
-// esc discards the whole pass and creates nothing regardless of which
-// element has focus, while q only discards once the list has focus — while
-// the filter is focused, q is an ordinary character that types into the
-// query (a query containing "q", e.g. "query" or "quota", is unremarkable).
-func TestBugImportEscDiscardsFromEitherFocusStateQOnlyWhenListFocused(t *testing.T) {
+// TestBugImportEscUnwindsOneLevelAtATime proves esc means "back one
+// level" here like it does everywhere else: from the filter it drops
+// focus to the list, and only from the list does it discard the pass.
+// q discards once the list has focus; while the filter is focused it is
+// an ordinary character that types into the query (a query containing
+// "q", e.g. "query" or "quota", is unremarkable).
+func TestBugImportEscUnwindsOneLevelAtATime(t *testing.T) {
 	m := &Shell{}
 	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
 	if !m.bugIngest.filtering {
 		t.Fatal("expected the picker to open filtering")
 	}
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.bugIngest != nil {
-		t.Error("esc while filtering should discard the pass immediately")
+	if m.bugIngest == nil {
+		t.Fatal("esc while filtering should leave the filter, not discard the pass")
 	}
-
-	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab}) // move focus off the filter
+	if m.bugIngest.filtering {
+		t.Error("esc while filtering should move focus to the list")
+	}
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.bugIngest != nil {
-		t.Error("esc with list focus should discard the pass")
+		t.Error("a second esc, with list focus, should discard the pass")
+	}
+
+	// / puts focus back on the filter, keeping the query.
+	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !m.bugIngest.filtering {
+		t.Error("/ should focus the filter")
 	}
 
 	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab}) // move focus off the filter
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape}) // move focus off the filter
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if m.bugIngest != nil {
 		t.Error("q with list focus should discard the pass")
@@ -168,26 +177,28 @@ func TestBugImportEscDiscardsFromEitherFocusStateQOnlyWhenListFocused(t *testing
 	}
 }
 
-// TestBugImportRenameAndOneLinerAfterTab proves r/c and o still edit the
-// highlighted proposal once Tab has moved focus off the filter.
-func TestBugImportRenameAndOneLinerAfterTab(t *testing.T) {
+// TestBugImportRenameAndOneLinerOffTheFilter proves r/c and o still edit
+// the highlighted proposal once focus has left the filter. esc does that
+// move now — it is "back one level" everywhere else, and the filter is a
+// level; tab used to, back when it meant five different things.
+func TestBugImportRenameAndOneLinerOffTheFilter(t *testing.T) {
 	m := &Shell{}
 	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
 	bv := m.bugIngest
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if bv.filtering {
-		t.Fatal("tab should move focus off the filter")
+		t.Fatal("esc should move focus off the filter")
 	}
 
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if !m.Overlay.Contains("text-prompt") {
-		t.Fatal("'r' after tab should open the rename prompt")
+		t.Fatal("'r' off the filter should open the rename prompt")
 	}
 	m.Overlay.Pop()
 
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	if !m.Overlay.Contains("text-prompt") {
-		t.Fatal("'o' after tab should open the one-liner prompt")
+		t.Fatal("'o' off the filter should open the one-liner prompt")
 	}
 }
 

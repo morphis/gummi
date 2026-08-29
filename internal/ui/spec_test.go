@@ -103,9 +103,12 @@ func TestSpecDependencyStatusGolden(t *testing.T) {
 		Stage: domain.StageDone, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	m, sv := depSpecShell(t, []domain.Feature{pending, done})
-	out := stripANSI(sv.renderRead(m, 90, 30))
-	if strings.Contains(out, "Depends on:") {
-		t.Fatal("static Depends on prose still rendered:\n" + out)
+	out := stripANSI(sv.renderStatus(m, 90))
+	// the status header carries live per-dependency state; the doc's own
+	// static `> Depends on:` prose stays in the source body below it,
+	// where it is simply what the file says.
+	if strings.Contains(out, "static prose") {
+		t.Fatal("the header rendered the doc's static Depends-on prose:\n" + out)
 	}
 	if strings.Contains(out, "all dependencies done") {
 		t.Fatal("all-done line shown with a pending dep:\n" + out)
@@ -121,32 +124,21 @@ func TestSpecDependencyStatusAllDone(t *testing.T) {
 		Stage: domain.StageDone, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	m, sv := depSpecShell(t, []domain.Feature{done})
-	out := stripANSI(sv.renderRead(m, 90, 30))
+	out := stripANSI(sv.renderStatus(m, 90))
 	if !strings.Contains(out, "all dependencies done") {
 		t.Fatalf("missing all-done line:\n%s", out)
 	}
 }
 
-func TestSpecViewReadGolden(t *testing.T) {
+func TestSpecViewGolden(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-func TestSpecViewAnnotateGolden(t *testing.T) {
+func TestSpecNavigation(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if !m.spec.annotate {
-		t.Fatal("tab did not enter annotate mode")
-	}
-	golden.RequireEqual(t, []byte(m.View().Content))
-}
-
-func TestSpecAnnotateNavigation(t *testing.T) {
-	m := specWorkspace(t)
-	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.spec.cursor != 1 {
 		t.Fatalf("cursor starts at %d", m.spec.cursor)
 	}
@@ -181,7 +173,6 @@ func TestSpecAnnotateNavigation(t *testing.T) {
 func TestSpecCommentFlow(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	// cursor on line 1 (the title), c → dialog, type, enter
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	if m.Overlay.Top() == nil {
@@ -221,7 +212,6 @@ func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = openSpecFor(t, m)
 	draftPath := m.spec.path
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "keep me")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -294,7 +284,7 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = model.(*Shell)
 	m.spec = sv
-	out := stripANSI(sv.renderRead(m, 90, 24))
+	out := stripANSI(sv.renderStatus(m, 90))
 	if !strings.Contains(out, "blocks approval (you)") {
 		t.Errorf("missing blocking-thread header:\n%s", out)
 	}
@@ -315,7 +305,6 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 func TestSpecResolveComment(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // annotate
 	// add an open @user marker threaded under line 1
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "open question")
@@ -356,7 +345,6 @@ func TestSpecResolveFirstOfTwoMarkers(t *testing.T) {
 	// open, so the gate stays blocked.
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // annotate
 	content := "## Problem\nTwo questions.\n" +
 		"%% @user(2026-08-16): per-device or synced?\n" +
 		"%% @user(2026-08-16): what about SSR?\n"
@@ -412,7 +400,6 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m2 = openSpecFor(t, m2)
-	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m2 = typeString(t, m2, "still open")
 	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -429,10 +416,9 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	}
 }
 
-func TestSpecViewAnnotateResolvedGolden(t *testing.T) {
+func TestSpecViewResolvedGolden(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	// one resolved thread, nothing open → no "N open" in the header and
 	// the resolution renders success-tinted
 	content := "## Problem\nResolved design question.\n" +
@@ -443,7 +429,10 @@ func TestSpecViewAnnotateResolvedGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-func TestSpecBindingsIncludeXAndA(t *testing.T) {
+// TestSpecBindingsAreOneTable: every verb is live whenever the surface
+// is. The split tables were the thing that made a mode key necessary, so
+// a x or A that only exists in one of two states is the regression.
+func TestSpecBindingsAreOneTable(t *testing.T) {
 	has := func(bindings []binding, key string) bool {
 		for _, b := range bindings {
 			if b.key == key {
@@ -454,12 +443,12 @@ func TestSpecBindingsIncludeXAndA(t *testing.T) {
 	}
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if !has(m.spec.bindings(), "x") || !has(m.spec.bindings(), "A") {
-		t.Errorf("annotate bindings missing x/A: %+v", m.spec.bindings())
+	for _, key := range []string{"c", "x", "n/p", "A", "R", "e"} {
+		if !has(m.spec.bindings(), key) {
+			t.Errorf("spec bindings missing %q: %+v", key, m.spec.bindings())
+		}
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // read mode
-	if !has(m.spec.bindings(), "A") {
-		t.Errorf("read bindings missing A: %+v", m.spec.bindings())
+	if has(m.spec.bindings(), "tab") {
+		t.Error("spec still binds tab — it cycles the tabs now")
 	}
 }

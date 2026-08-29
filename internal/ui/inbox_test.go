@@ -126,7 +126,6 @@ func TestGateBlockedKeepsInboxItem(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // todo → brainstorm
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "is this the right approach?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})

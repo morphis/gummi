@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
-	gstyles "charm.land/glamour/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -19,22 +17,23 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 )
 
-// specView is the spec surface state: one feature's design doc, in
-// glamour read mode or line-addressed annotate mode (DESIGN §6.1 —
-// glamour re-wraps text, so stable line addressing needs the source).
+// specView is the spec surface state: one feature's design doc, shown as
+// line-addressed source (DESIGN §6.1).
+//
+// There is one view, not a read mode and an annotate mode. Read mode was
+// a glamour render, and glamour re-wraps text — so a cursor on a
+// rendered row could never say which source line it was on, and comments
+// are addressed by source line. The two modes were therefore two
+// different documents, and the key that toggled between them was one of
+// five things tab meant. The source is now styled in place instead
+// (mdsource.go): headings, code and emphasis read as themselves without
+// a character moving, so one view is both readable and addressable.
 type specView struct {
-	f        domain.Feature
-	path     string
-	content  string
-	doc      spec.Doc
-	annotate bool
-	cursor   int // 1-based source line (annotate mode)
-	offset   int // scroll offset (both modes)
-	// maxOffset is the largest useful read-mode offset, derived from the
-	// wrapped render (which only the renderer knows) and cached each frame
-	// so key handling can clamp to it instead of over-scrolling into a run
-	// of dead keypresses at the bottom.
-	maxOffset int
+	f       domain.Feature
+	path    string
+	content string
+	doc     spec.Doc
+	cursor  int // 1-based source line
 }
 
 // specLoadedMsg delivers a (re)loaded spec document.
@@ -196,32 +195,19 @@ func (sv *specView) threadAtCursor() *spec.Thread {
 	return nil
 }
 
-// bindings is the spec surface's key table (see keymap.go), split by
-// mode like handleSpecKey routes.
+// bindings is the spec surface's key table (see keymap.go). One table,
+// because there is one mode: every verb is live whenever the surface is.
 func (sv *specView) bindings() []binding {
-	if sv.annotate {
-		return []binding{
-			{key: "tab", label: "read", help: "switch to read mode", bar: true},
-			{key: "j/k", label: "line", help: "move the line cursor"},
-			{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
-			{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
-			{key: "A", label: "approve", help: "approve the gate", bar: true},
-			{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
-			{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
-			{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
-			{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
-			{key: "?", label: "help", bar: true},
-		}
-	}
 	return []binding{
-		{key: "tab", label: "annotate", help: "switch to annotate mode", bar: true},
-		{key: "j/k", label: "scroll", bar: true},
-		{key: "pgup/pgdn", label: "page", help: "scroll by a page"},
-		{key: "R", label: "request changes", help: "send the open %% questions to the architect"},
+		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
+		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
+		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
+		{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
+		{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
 		{key: "A", label: "approve", help: "approve the gate", bar: true},
-		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
+		{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
+		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
 		{key: "?", label: "help", bar: true},
 	}
 }
@@ -232,13 +218,6 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	switch key {
 	case "esc", "q":
 		m.spec = nil
-		return nil
-	case "tab":
-		sv.annotate = !sv.annotate
-		return nil
-	case "?":
-		m.Overlay.Push(m.helpOverlay())
-		return nil
 	case "e":
 		return m.editSpec()
 	case "R":
@@ -247,23 +226,6 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	case "A":
 		// approve the gate: leave the surface and run the board's g
 		return m.approveSurface(sv.f)
-	}
-	if !sv.annotate {
-		switch key {
-		case "j", "down":
-			// clamp to the last render's real maximum so scrolling stops at
-			// the bottom instead of running into dead keypresses
-			sv.offset = min(sv.offset+1, sv.scrollMax())
-		case "k", "up":
-			sv.offset = max(sv.offset-1, 0)
-		case "pgdown":
-			sv.offset = min(sv.offset+m.mainPage(), sv.scrollMax())
-		case "pgup":
-			sv.offset = max(sv.offset-m.mainPage(), 0)
-		}
-		return nil
-	}
-	switch key {
 	case "j", "down":
 		sv.setCursor(sv.cursor + 1)
 	case "k", "up":
@@ -300,15 +262,6 @@ func (sv *specView) setCursor(n int) {
 	sv.cursor = min(max(n, 1), len(sv.doc.Lines))
 }
 
-// scrollMax is the largest read-mode offset the last render allowed. Before
-// the first render it falls back to a loose bound so scrolling still works.
-func (sv *specView) scrollMax() int {
-	if sv.maxOffset > 0 {
-		return sv.maxOffset
-	}
-	return len(sv.doc.Lines)
-}
-
 // jumpMarker moves the cursor to the next/previous marker line.
 func (sv *specView) jumpMarker(dir int) {
 	lines := sv.doc.MarkerLines()
@@ -334,7 +287,9 @@ func (sv *specView) jumpMarker(dir int) {
 	sv.cursor = lines[len(lines)-1] // wrap
 }
 
-// specViewRender renders the spec surface into the main pane.
+// specViewRender renders the spec surface into the main pane: the
+// status header (live dependencies and the open-thread checklist) over
+// the scrolling source.
 func (m *Shell) specViewRender(w, h int) string {
 	sv := m.spec
 	s := m.styles
@@ -342,44 +297,37 @@ func (m *Shell) specViewRender(w, h int) string {
 		return ""
 	}
 	var b strings.Builder
-	mode := "read"
-	if sv.annotate {
-		mode = "annotate"
-	}
-	open := len(sv.doc.OpenQuestions())
-	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· spec") +
-		"  " + s.Pill.Render(mode)
-	if open > 0 {
+	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· spec")
+	if open := len(sv.doc.OpenQuestions()); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
-	// keys live in the status bar (keymap.go), so the body gets the pane
-	// minus the three header lines (plus one line of slack).
-	body := h - 4
-	if sv.annotate {
-		b.WriteString(sv.renderAnnotate(m, w, body))
-	} else {
-		b.WriteString(sv.renderRead(m, w, body))
-	}
+	// the status header used to belong to read mode alone, which meant
+	// the mode you could actually act in was the one that never told you
+	// what was blocking the gate. It is fixed above the body now, so it
+	// is true of the surface rather than of a mode.
+	b.WriteString(sv.renderStatus(m, w))
+
+	// keys live in the status bar (keymap.go), so the body gets whatever
+	// the header left of the pane (plus one line of slack).
+	used := strings.Count(b.String(), "\n")
+	b.WriteString(sv.renderSource(m, w, max(h-used-1, 3)))
 	return b.String()
 }
 
-// renderRead renders the glamour view plus the open-question checklist.
-func (sv *specView) renderRead(m *Shell, w, h int) string {
+// renderStatus renders the fixed header: live dependency status, then
+// the open threads split by who they wait on. An unresolved @user
+// comment blocks the approval gate (DESIGN §6.1); agent-authored threads
+// (questions, reviewer findings) are informational here and don't gate —
+// the gate math counts only the user threads, so surfacing them under
+// one "open questions" header misread the agent's threads as blockers.
+func (sv *specView) renderStatus(m *Shell, w int) string {
 	s := m.styles
 	var b strings.Builder
-
-	// live per-dependency status replaces the static `> Depends on:` prose,
-	// resolved from the dependency store at render.
 	b.WriteString(sv.renderDependencyStatus(m, w))
 
-	// open threads split by who they wait on: an unresolved @user comment
-	// blocks the approval gate (DESIGN §6.1); agent-authored threads
-	// (questions, reviewer findings) are informational here and don't gate
-	// — the gate math counts only the user threads, so surfacing them under
-	// one "open questions" header misread the agent's threads as blockers.
 	var blocking, informational []spec.Thread
 	for _, t := range sv.doc.OpenQuestions() {
 		if userMarker(t) != nil {
@@ -405,28 +353,6 @@ func (sv *specView) renderRead(m *Shell, w, h int) string {
 	}
 	renderThreadGroup("blocks approval (you)", blocking)
 	renderThreadGroup("informational (agent)", informational)
-
-	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(gstyles.DarkStyle),
-		glamour.WithWordWrap(min(w, 100)),
-	)
-	if err != nil {
-		return b.String() + s.Error.Render(err.Error())
-	}
-	out, err := r.Render(stripDependsOnBlock(sv.content))
-	if err != nil {
-		return b.String() + s.Error.Render(err.Error())
-	}
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	used := strings.Count(b.String(), "\n")
-	visible := max(h-used, 3)
-	// clamp locally — render must not mutate the stored offset — but cache
-	// the real maximum so key handling can bound scrolling to it.
-	maxOff := max(len(lines)-visible, 0)
-	sv.maxOffset = maxOff
-	off := min(sv.offset, maxOff)
-	end := min(off+visible, len(lines))
-	b.WriteString(strings.Join(lines[off:end], "\n"))
 	return b.String()
 }
 
@@ -473,24 +399,10 @@ func (sv *specView) renderDependencyStatus(m *Shell, w int) string {
 	return b.String()
 }
 
-// stripDependsOnBlock removes the provenance `> Depends on:` blockquote
-// line from rendered content — the static prose the read view replaces with
-// live per-dependency status. Annotate mode reads the raw source, so it is
-// unaffected.
-func stripDependsOnBlock(content string) string {
-	var out []string
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "> Depends on:") {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
-}
-
-// renderAnnotate renders the source view: line numbers, gutter markers
-// on annotated lines, tinted marker lines, and the line cursor.
-func (sv *specView) renderAnnotate(m *Shell, w, h int) string {
+// renderSource renders the document: line numbers, gutter markers on
+// annotated lines, tinted %% marker lines, in-place markdown styling for
+// everything else (mdsource.go), and the line cursor.
+func (sv *specView) renderSource(m *Shell, w, h int) string {
 	s := m.styles
 	anchored := map[int]bool{}
 	for _, mk := range sv.doc.Markers {
@@ -519,27 +431,35 @@ func (sv *specView) renderAnnotate(m *Shell, w, h int) string {
 	}
 	var rows []row
 	cursorRow := 0
+	// one styler for the whole document: fenced-block state is carried
+	// line to line, so a ``` block has to be walked in order.
+	var md mdSource
 	for i, raw := range sv.doc.Lines {
 		n := i + 1
 		var segs []string
-		style := s.Base
 		if spec.IsMarkerLine(raw) {
-			style = s.Warning
+			// a %% thread is gummi's own annotation, not the document's
+			// prose: it keeps its status color and its indent, and never
+			// goes through the markdown styler.
+			style := s.Warning
 			if resolvedLine[n] {
 				style = s.Success
 			}
 			segs = strings.Split(ansi.Wrap(strings.TrimSpace(raw), max(textW-2, 4), ""), "\n")
 			for j := range segs {
-				segs[j] = "  " + segs[j]
+				segs[j] = "  " + style.Render(segs[j])
 			}
+			// the styler still has to see the line, or a %% marker inside
+			// a fenced block would be read as prose on the way past.
+			md.line(s, raw)
 		} else {
-			segs = strings.Split(ansi.Wrap(raw, textW, ""), "\n")
+			segs = wrapStyled(md.line(s, raw), textW)
 		}
 		if n == sv.cursor {
 			cursorRow = len(rows)
 		}
 		for j, seg := range segs {
-			rows = append(rows, row{n: n, content: style.Render(seg), first: j == 0})
+			rows = append(rows, row{n: n, content: seg, first: j == 0})
 		}
 	}
 

@@ -98,8 +98,8 @@ func TestPasteIntoBugIngestFilter(t *testing.T) {
 		t.Fatalf("visible after pasted filter = %d, want 1", len(m.bugIngest.visible()))
 	}
 
-	// tab moves focus to the list; a paste there is dropped.
-	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	// esc leaves the filter for the list; a paste there is dropped.
+	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m.Update(tea.PasteMsg{Content: "stray"})
 	if got := m.bugIngest.filter.Value(); got != "crash" {
 		t.Fatalf("paste landed in the filter while list-focused: %q", got)

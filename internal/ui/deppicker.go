@@ -182,9 +182,6 @@ func (m *Shell) handleDepsKey(key string) tea.Cmd {
 	case "esc", "q":
 		m.deps = nil
 		return nil
-	case "?":
-		m.Overlay.Push(m.helpOverlay())
-		return nil
 	case "j", "down":
 		dp.move(1)
 	case "k", "up":

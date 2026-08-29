@@ -807,8 +807,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1}
 		if m.spec != nil && m.spec.path == msg.path {
-			// reload in place: keep mode, cursor, and scroll
-			sv.annotate, sv.offset = m.spec.annotate, m.spec.offset
+			// reload in place: keep the cursor, clamped in case the doc
+			// shrank. The window follows the cursor, so that is the whole
+			// of the position to carry over.
 			sv.cursor = min(m.spec.cursor, len(sv.doc.Lines))
 		}
 		m.spec = sv
@@ -825,10 +826,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		dv := newDiffView(msg.f, msg.diff, msg.anns)
 		if m.diff != nil && m.diff.f.ID == msg.f.ID {
-			// reload in place: keep mode, cursor, and scroll, clamped in
-			// case the diff shrank (e.g. after a fix-up run).
-			dv.annotate = m.diff.annotate
-			dv.offset = min(m.diff.offset, max(len(dv.lines)-1, 0))
+			// reload in place: keep the cursor, clamped in case the diff
+			// shrank (e.g. after a fix-up run). The window follows the
+			// cursor, so that is the whole of the position to carry over.
 			dv.setCursor(m.diff.cursor)
 		}
 		m.diff = dv
@@ -1092,17 +1092,15 @@ func (m *Shell) quitCmd() tea.Cmd {
 //	        update.) These used to be answered in boardKey, below the
 //	        early returns for chat/spec/diff/…, which meant they did
 //	        nothing at all from inside a view — you had to esc out first.
-//	tier 2  ? — the grammar key this level owns. The rest of the grammar
-//	        (j/k, enter, esc) means the same thing everywhere because each
-//	        surface binds it the same way, not because it is intercepted.
-//	        tab still belongs to boardKey below, because spec and diff
-//	        spend it on their read/annotate toggle; hoisting it waits on
-//	        that toggle finding another home.
+//	tier 2  tab and ? — the two grammar keys this level owns. The rest of
+//	        the grammar (j/k, enter, esc) means the same thing everywhere
+//	        because each surface binds it the same way, not because it is
+//	        intercepted; these two are the ones no surface may redefine.
 //	tier 3  everything below — the active surface's own verbs.
 //
 // The hosted CLI on the agent tab is the one deliberate exception: it
 // owns its whole keymap, so past the tier-1 switch every key goes to the
-// child. Taking ? from it would break a key its users need.
+// child. Taking tab or ? from it would break keys its users need.
 func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	switch key {
@@ -1121,29 +1119,34 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.tab == TabAgent && m.agent != nil {
 		return m.agentKey(msg)
 	}
+	if key == "tab" {
+		return m.nextTab()
+	}
 	if key == "?" && !m.textEntry() {
 		m.Overlay.Push(m.helpOverlay())
 		return nil
 	}
 	// tier 3: whichever surface owns the main pane, in the same order
-	// mainView paints them.
-	if m.chat != nil {
-		return m.handleChatKey(msg)
-	}
-	if m.spec != nil {
-		return m.handleSpecKey(key)
-	}
-	if m.diff != nil {
-		return m.handleDiffKey(key)
-	}
-	if m.ingest != nil {
-		return m.handleIngestKey(key)
-	}
-	if m.bugIngest != nil {
-		return m.handleBugIngestKey(msg)
-	}
-	if m.deps != nil {
-		return m.handleDepsKey(key)
+	// mainView paints them, and only on the tab they belong to.
+	if m.boardSurfacesLive() {
+		if m.chat != nil {
+			return m.handleChatKey(msg)
+		}
+		if m.spec != nil {
+			return m.handleSpecKey(key)
+		}
+		if m.diff != nil {
+			return m.handleDiffKey(key)
+		}
+		if m.ingest != nil {
+			return m.handleIngestKey(key)
+		}
+		if m.bugIngest != nil {
+			return m.handleBugIngestKey(msg)
+		}
+		if m.deps != nil {
+			return m.handleDepsKey(key)
+		}
 	}
 	// q quits only from the board root: every surface above answers it as
 	// an alias for esc, and a q that quit gummi from inside a spec would
@@ -1157,6 +1160,23 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return m.boardKey(key)
 }
 
+// boardSurfacesLive reports whether the board tab's own overlaying
+// surfaces — a chat, a spec, a diff, an ingest review, a bug import, the
+// dependency picker, the live ingest feed — should be drawn and fed the
+// keyboard.
+//
+// They are scoped to the board tab on purpose. Each one belongs to a
+// card, and a card belongs to the board. mainView, draw and handleKey
+// used to test them *before* m.tab, so with a chat open, switching to
+// the inbox still rendered the chat and still handed it every key. That
+// was unreachable while switching tabs from a chat was impossible; the
+// tab keys going global is exactly what exposes it.
+//
+// Hidden while you are elsewhere, restored when you come back — never
+// discarded. A chat holds an unsent input buffer, and throwing that away
+// on a tab switch would be its own, worse bug.
+func (m *Shell) boardSurfacesLive() bool { return m.tab == TabBoard }
+
 // textEntry reports whether the surface holding the keyboard is taking
 // free-form text right now. Only ? consults it: every other global is a
 // modifier chord (alt+N) or a key no text field wants (tab), but a
@@ -1165,6 +1185,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // overlay. The agent tab is not listed because it never reaches here —
 // the hosted CLI takes the whole keyboard above.
 func (m *Shell) textEntry() bool {
+	if !m.boardSurfacesLive() {
+		return false
+	}
 	if m.chat != nil {
 		// the message box is always live: the option picker hands the
 		// keyboard straight back to it on any printable key (chat.go), so
@@ -1182,13 +1205,9 @@ func (m *Shell) textEntry() bool {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
-	// alt+1/2/3 and ? never arrive here: handleKey answers them above
+	// tab, alt+1/2/3 and ? never arrive here: handleKey answers them above
 	// every surface, which is what makes them global rather than "global
-	// as long as nothing is open". tab is still answered here, one level
-	// down, because spec and diff spend it on their own mode toggle.
-	if key == "tab" {
-		return m.nextTab()
-	}
+	// as long as nothing is open".
 	if m.tab != TabBoard {
 		// the agent tab is routed in handleKey, which still has the real
 		// KeyPressMsg to forward; by here a key is only a string and the
@@ -2056,26 +2075,28 @@ func (m *Shell) sendChat(text string) tea.Cmd {
 }
 
 func (m *Shell) mainView(w, h int) string {
-	if m.chat != nil {
-		return m.chat.view(m.styles, w, h, m.spinner())
-	}
-	if m.spec != nil {
-		return m.specViewRender(w, h)
-	}
-	if m.diff != nil {
-		return m.diffViewRender(w, h)
-	}
-	if m.ingest != nil {
-		return m.ingestViewRender(w, h)
-	}
-	if m.bugIngest != nil {
-		return m.bugIngestViewRender(w, h)
-	}
-	if m.deps != nil {
-		return m.depPickerView(w, h)
-	}
-	if m.ingestRun != nil && !m.ingestRun.hidden {
-		return m.ingestRunRender(w, h)
+	if m.boardSurfacesLive() {
+		if m.chat != nil {
+			return m.chat.view(m.styles, w, h, m.spinner())
+		}
+		if m.spec != nil {
+			return m.specViewRender(w, h)
+		}
+		if m.diff != nil {
+			return m.diffViewRender(w, h)
+		}
+		if m.ingest != nil {
+			return m.ingestViewRender(w, h)
+		}
+		if m.bugIngest != nil {
+			return m.bugIngestViewRender(w, h)
+		}
+		if m.deps != nil {
+			return m.depPickerView(w, h)
+		}
+		if m.ingestRun != nil && !m.ingestRun.hidden {
+			return m.ingestRunRender(w, h)
+		}
 	}
 	switch m.tab {
 	case TabAgent:

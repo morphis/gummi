@@ -42,22 +42,26 @@ func helpRows(bs []binding) [][2]string {
 }
 
 // activeSurface names the surface that owns the main pane and returns
-// its key table — the same precedence mainView paints by.
+// its key table — the same precedence mainView paints by, including the
+// board-tab scope (boardSurfacesLive), so the status bar's hint row and
+// the ? overlay describe the surface actually on screen rather than one
+// parked on a tab you left.
 func (m *Shell) activeSurface() (string, []binding) {
+	live := m.boardSurfacesLive()
 	switch {
-	case m.chat != nil:
+	case live && m.chat != nil:
 		return "chat", m.chat.bindings()
-	case m.spec != nil:
+	case live && m.spec != nil:
 		return "spec", m.spec.bindings()
-	case m.diff != nil:
+	case live && m.diff != nil:
 		return "diff", m.diff.bindings()
-	case m.ingest != nil:
+	case live && m.ingest != nil:
 		return "ingest", m.ingest.bindings()
-	case m.bugIngest != nil:
+	case live && m.bugIngest != nil:
 		return "import bugs", m.bugIngest.bindings()
-	case m.deps != nil:
+	case live && m.deps != nil:
 		return "deps", m.deps.bindings()
-	case m.ingestRun != nil && !m.ingestRun.hidden:
+	case live && m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
 	// the inbox and agent tabs own the main pane whenever they're active.
 	// The inbox has its own table now (inboxview.go); the agent tab is
@@ -133,8 +137,8 @@ func (m *Shell) boardBindings() []binding {
 		transcript,
 		// s and d are off the bar: the action list reaches both without a
 		// key, so the bar can spend its width on the two ways in instead.
-		{key: "s", label: "spec", help: "spec (tab: read ⇄ annotate)"},
-		{key: "d", label: "diff", help: "diff (tab: read ⇄ annotate)"},
+		{key: "s", label: "spec", help: "spec — comment, resolve and approve in place"},
+		{key: "d", label: "diff", help: "diff — comment, resolve and approve in place"},
 		advance,
 		{key: "b", label: "bounce", help: "bounce back to implement/fix"},
 		{key: "P", label: "add plan", help: "restore the plan stage on a quick/skip-plan feature (design phase only)"},

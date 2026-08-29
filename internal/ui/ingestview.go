@@ -155,9 +155,6 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 			},
 		})
 		return nil
-	case "?":
-		m.Overlay.Push(m.helpOverlay())
-		return nil
 	case "j", "down":
 		iv.setCursor(iv.cursor + 1)
 	case "k", "up":

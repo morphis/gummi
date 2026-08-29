@@ -68,7 +68,6 @@ func TestDiffViewOpensWithChange(t *testing.T) {
 func TestDiffCommentPersistsAndAnchors(t *testing.T) {
 	m, root := diffWorkspace(t)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // annotate mode
 
 	// move the cursor onto the "+second line" line
 	target := 0
@@ -129,7 +128,6 @@ func TestDiffRequestChangesGuardsStage(t *testing.T) {
 	t.Cleanup(func() { eng.Close() })
 	m.AttachEngine(eng)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	for i, l := range m.diff.lines {
 		if l == "+second line" {
 			m.diff.cursor = i + 1
@@ -173,7 +171,6 @@ func TestDiffRequestChangesRerunsWorkStage(t *testing.T) {
 	m = pump(t, m, m.Init()) // reload rows at the new stage
 
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	for i, l := range m.diff.lines {
 		if l == "+second line" {
 			m.diff.cursor = i + 1
@@ -251,7 +248,6 @@ func commentOnAddedLine(t *testing.T, m *Shell, text string) *Shell {
 func TestDiffDeleteAnnotation(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 
 	// D with nothing under the cursor refuses with a notice
 	m.diff.cursor = 1
@@ -278,21 +274,21 @@ func TestDiffDeleteAnnotation(t *testing.T) {
 	}
 }
 
-func TestDiffReadModeShowsComments(t *testing.T) {
+// TestDiffShowsCommentsInline is what the old read mode had to prove
+// separately: the comment block renders under the line it anchors to.
+// With one view there is no mode it could fail to show up in.
+func TestDiffShowsCommentsInline(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = commentOnAddedLine(t, m, "guard the empty case")
 
-	// back in read mode the comment block renders under its line
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	out := m.diff.renderRead(m, 80, 40)
+	out := m.diff.render(m, 80, 40)
 	if !strings.Contains(out, "guard the empty case") {
-		t.Errorf("read mode does not show the comment:\n%s", out)
+		t.Errorf("the diff does not show the comment:\n%s", out)
 	}
 }
 
-func TestDiffAnnotateWrapsLongLines(t *testing.T) {
+func TestDiffWrapsLongLines(t *testing.T) {
 	m, root := diffWorkspace(t)
 	long := "x\n" + strings.Repeat("wide ", 40) + "ENDMARK\n"
 	wtFile := filepath.Join(root, (&domain.Feature{ID: "FD-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
@@ -300,10 +296,9 @@ func TestDiffAnnotateWrapsLongLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 
 	const w = 40
-	out := m.diff.renderAnnotate(m, w, 200)
+	out := m.diff.render(m, w, 200)
 	if !strings.Contains(out, "ENDMARK") {
 		t.Errorf("long line truncated instead of wrapped:\n%s", out)
 	}
@@ -314,14 +309,13 @@ func TestDiffAnnotateWrapsLongLines(t *testing.T) {
 	}
 }
 
-func TestDiffAnnotateWrapsLongComments(t *testing.T) {
+func TestDiffWrapsLongComments(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = commentOnAddedLine(t, m, strings.Repeat("nit ", 30)+"ENDMARK")
 
 	const w = 40
-	out := m.diff.renderAnnotate(m, w, 200)
+	out := m.diff.render(m, w, 200)
 	if !strings.Contains(out, "ENDMARK") {
 		t.Errorf("long comment truncated instead of wrapped:\n%s", out)
 	}
@@ -338,7 +332,6 @@ func TestDiffOrphanReachableWithCursor(t *testing.T) {
 	// it blocks the gate with no way to clear it.
 	m, root := diffWorkspace(t)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = commentOnAddedLine(t, m, "stale nit")
 
 	wtFile := filepath.Join(root, (&domain.Feature{ID: "FD-001", Slug: "dark-mode"}).WorktreePath(), "README.md")
@@ -357,7 +350,7 @@ func TestDiffOrphanReachableWithCursor(t *testing.T) {
 		t.Fatalf("n jumped to %d, want the orphan slot %d", m.diff.cursor, want)
 	}
 	// the footer renders the cursor on the orphan block
-	out := m.diff.renderAnnotate(m, 80, 200)
+	out := m.diff.render(m, 80, 200)
 	if !strings.Contains(out, "orphaned (line changed since comment):") {
 		t.Errorf("orphan footer missing:\n%s", out)
 	}
@@ -379,7 +372,6 @@ func TestDiffOrphanReachableWithCursor(t *testing.T) {
 func TestDiffResolveTogglesOpenCount(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	for i, l := range m.diff.lines {
 		if l == "+second line" {
 			m.diff.cursor = i + 1

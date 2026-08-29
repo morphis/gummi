@@ -136,7 +136,8 @@ and the ignore rules that keep it all out of your repo's history. Then:
    on a quiet options row.
 2. Press `enter` to attach and brainstorm/spec with the architect in the
    chat pane. Open questions are tracked as a `%%` checklist in the
-   spec (`s` to view it; `tab` toggles a PR-style annotate mode).
+   spec (`s` to view it, `c` to comment on the line under the cursor,
+   `x` to resolve a thread).
 3. Press `g` to advance through gates: approving the spec creates the
    worktree and branch and settles the spec into `.gummi/specs/`;
    approving the plan launches the autonomous implementer.
@@ -157,7 +158,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
 | `space` | open the command menu (everything that belongs to no card); type to filter |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |
-| `s` / `d` | spec / diff view — `tab` switches read ⇄ annotate |
+| `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `A` approves the gate |
 | `g` / `b` | advance a gate / bounce back to implement or fix |
 | `P` | restore the plan stage on a quick / skip-plan feature (design phase only) |
 | `v` | run the verify checks |

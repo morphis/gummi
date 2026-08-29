@@ -571,11 +571,20 @@ route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
 The board sits behind a one-row tab bar shared with the status bar:
-`gummi │ board │ inbox │ agent │`. `tab` cycles the tabs gummi itself
-owns (board, inbox); `alt+1`/`alt+2`/`alt+3` jump straight to one —
-alt-prefixed deliberately (§6.1's `alt+o` reasoning: a plain `ctrl`/bare
-key a terminal multiplexer or the hosted agent tab's own pty might already
-claim). The inbox tab promotes the needs-attention queue out of its modal
+`gummi │ board │ inbox │ agent │`. `tab` cycles all three;
+`alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed deliberately
+(§6.1's `alt+o` reasoning: a plain `ctrl`/bare key a terminal multiplexer
+or the hosted agent tab's own pty might already claim). Both are answered
+at the top of `handleKey`, above whatever surface holds the keyboard, so
+a tab is always one keystroke away from inside a chat, a spec or a diff.
+The hosted CLI on the agent tab is the one exception — it keeps `tab` for
+itself, which is why `alt+N` also exists.
+
+The board's own overlaying surfaces (chat, spec, diff, ingest review, bug
+import, dependency picker) are scoped to the board tab: each belongs to a
+card, and a card belongs to the board. Leaving the tab hides them and
+returning restores them — never discards, since a chat holds an unsent
+input buffer. The inbox tab promotes the needs-attention queue out of its modal
 overlay; the agent tab hosts a pty running the user's own coding CLI. Both
 are later work — this pass lands the tab shell and the backlog as the
 board's only shape.
@@ -587,10 +596,23 @@ the one about caching…"). Specs and diffs get a **review-style annotator**:
 move a line cursor, mark a line or range, attach a comment — exactly the
 GitHub PR review interaction, in the TUI.
 
-**Interaction.** In spec/diff view, `tab` toggles read mode ↔ annotate mode.
-Annotate mode renders the *source* (raw markdown / unified diff) with line
-numbers and a cursor — glamour's pretty rendering re-wraps text, so stable
-line addressing requires the source view; read mode stays glamour.
+**Interaction.** Spec and diff are each a single view over the *source*
+(raw markdown / unified diff) with line numbers and a cursor. There is no
+read/annotate mode split: they used to have one, because the read mode
+was a glamour render and glamour re-wraps text — so a cursor on a
+rendered row could never say which source line it was on, and comments
+are addressed by source line. The two modes were therefore two different
+documents, and the key that toggled between them was one of five things
+`tab` meant.
+
+The source is styled *in place* instead (`internal/ui/mdsource.go`):
+headings, fenced blocks, inline code and `**bold**` get their own color
+without a character moving, so one view is both readable and addressable.
+What that deliberately gives up is re-wrapped prose and laid-out tables —
+both move text between lines, and here line numbers are load-bearing. The
+live dependency status and the open-thread checklist that read mode
+carried are now a fixed header above the body, so they are true of the
+surface rather than of a mode.
 
 | key | action |
 |---|---|
@@ -677,7 +699,7 @@ everything gracefully on non-truecolor terminals.
   meter, contextual key hints — quiet, single-line, always accurate.
 - **Syntax-highlighted diffs**: Crush ships a `diffview` component
   (chroma-based highlighting) — evaluate reusing it directly for our
-  diff-annotate mode instead of building one.
+  diff view instead of building one.
 - **Restraint**: generous padding, subtle separators over heavy borders,
   one accent per surface, spinners only where something is actually
   happening.
@@ -761,7 +783,7 @@ Scheduler with attention slots, pause/resume, needs-attention queue,
 multiple concurrent features, session resume across gummi restarts,
 review stage (fresh-context autonomous, capped auto re-review loop) +
 verify stage (config checks + spec plan). Skip flags at feature creation.
-Spec annotation editor (`%%`-based, annotate mode + gate feedback loop).
+Spec annotation editor (`%%`-based, line-addressed + gate feedback loop).
 
 **M3 — profiles & cost**
 `profiles.yaml`, per-role model/BYOK env injection, llama.cpp smoke test,

@@ -7,9 +7,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
+
+// emptySession is a chat pane's source with nothing in it — enough for
+// the pane to render and answer keys without an engine behind it.
+type emptySession struct{}
+
+func (emptySession) Snapshot() engine.Snapshot { return engine.Snapshot{} }
 
 // openSurfaces builds one shell per surface that used to swallow the
 // whole keyboard, keyed by the name the ? overlay gives it. The tier-1
@@ -30,11 +37,11 @@ func openSurfaces(t *testing.T) map[string]*Shell {
 	withDeps := populatedShell(100, 30)
 	withDeps.deps = &depPicker{f: f}
 
-	// no session: newChatPane would store a typed-nil *engine.Session,
-	// which passes every nil check and then panics on Snapshot (chat.go).
-	// These tests never read the transcript, only the keyboard.
+	// a stub session rather than newChatPane(id, nil): that would store a
+	// typed-nil *engine.Session, which passes every nil check and then
+	// panics on Snapshot (chat.go). These tests render the pane.
 	withChat := populatedShell(100, 30)
-	withChat.chat = &chatPane{feature: id, input: newChatInput()}
+	withChat.chat = &chatPane{feature: id, session: emptySession{}, input: newChatInput()}
 
 	return map[string]*Shell{
 		"spec": withSpec,
@@ -140,6 +147,80 @@ func TestReversibleXNeverDestroys(t *testing.T) {
 				t.Errorf("%s binds x to a destructive verb (%q) — destructive verbs are uppercase", name, b.label)
 			}
 		}
+	}
+}
+
+// TestTabCycleReachesEveryOpenSurface is severity 3: tab meant five
+// things, and the two that had to give were spec/diff's mode toggle
+// (gone with the modes) and the bug import's filter focus (now /). It
+// cycles tabs from every surface, exactly like alt+N.
+func TestTabCycleReachesEveryOpenSurface(t *testing.T) {
+	for name, m := range openSurfaces(t) {
+		t.Run(name, func(t *testing.T) {
+			m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+			if m.tab != TabInbox {
+				t.Fatalf("tab from an open %s: tab = %v, want TabInbox", name, m.tab)
+			}
+		})
+	}
+}
+
+// TestNoSurfaceRebindsTab states the rule rather than one instance: tab
+// is a tier-2 grammar key, so no surface's table may claim it. The
+// hosted CLI is the deliberate exception and declares as much in prose
+// (agentBindings), which is why it is checked by name here.
+func TestNoSurfaceRebindsTab(t *testing.T) {
+	m := populatedShell(100, 30)
+	id, _ := domain.NewFeatureID(1)
+	f := domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StageSpec}
+	content := "## Problem\n\nA line.\n"
+	tables := map[string][]binding{
+		"board":  m.boardBindings(),
+		"inbox":  m.inboxBindings(),
+		"spec":   (&specView{f: f, content: content, doc: spec.Parse(content), cursor: 1}).bindings(),
+		"diff":   newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil).bindings(),
+		"deps":   (&depPicker{f: f}).bindings(),
+		"ingest": ingestRunBindings,
+	}
+	for name, bs := range tables {
+		for _, b := range bs {
+			if b.key == "tab" && name != "board" && name != "inbox" {
+				t.Errorf("%s binds tab to %q — tab cycles the tabs", name, b.label)
+			}
+		}
+	}
+	// board and inbox may list it, but only as the cycle itself.
+	for _, name := range []string{"board", "inbox"} {
+		for _, b := range tables[name] {
+			if b.key == "tab" && !strings.Contains(b.help, "cycle") {
+				t.Errorf("%s documents tab as %q, not the tab cycle", name, b.help)
+			}
+		}
+	}
+}
+
+// TestOpenSurfacesAreScopedToTheBoardTab is severity 5. mainView and
+// handleKey tested m.chat/m.spec/m.diff before m.tab, so with a chat
+// open, switching to the inbox still rendered the chat and still fed it
+// the keyboard. It was unreachable until the tab keys went global.
+func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
+	for name, m := range openSurfaces(t) {
+		t.Run(name, func(t *testing.T) {
+			onBoard := m.mainView(90, 24)
+			m.setTab(TabInbox)
+			offBoard := m.mainView(90, 24)
+			if offBoard == onBoard {
+				t.Fatalf("the %s surface still renders on the inbox tab", name)
+			}
+			if !strings.Contains(stripANSI(offBoard), "NEEDS YOU") {
+				t.Fatalf("the inbox tab did not get its own view:\n%s", offBoard)
+			}
+			// parked, not discarded: a chat holds an unsent input buffer.
+			m.setTab(TabBoard)
+			if got := m.mainView(90, 24); got != onBoard {
+				t.Fatalf("the %s surface was not restored on return to the board", name)
+			}
+		})
 	}
 }
 

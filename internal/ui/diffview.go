@@ -11,20 +11,25 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// diffView is the diff surface: a feature's worktree diff in read mode
-// (colorized unified diff) or line-addressed annotate mode, with line
-// comments anchored by content hash (DESIGN §6.1). Annotations live in
-// the store, not the diff, so they persist across reloads and rebases.
+// diffView is the diff surface: a feature's worktree diff, colorized and
+// line-addressed, with comments anchored by content hash (DESIGN §6.1).
+// Annotations live in the store, not the diff, so they persist across
+// reloads and rebases.
+//
+// There is one view, not a read mode and an annotate mode. The two
+// rendered almost the same thing — the same colorized diff with the same
+// annotation blocks interleaved — differing only in a line-number
+// column, a cursor, and whether the window followed an offset or the
+// cursor. A diff line is addressable either way, so the split bought
+// nothing and cost a mode key, a mode pill, and a state where c and x
+// silently did nothing.
 type diffView struct {
-	f         domain.Feature
-	lines     []string                // the unified diff, split
-	anns      []domain.DiffAnnotation // this feature's annotations
-	located   map[int][]int           // diff line index → annotation indices anchored there
-	orphans   []int                   // annotation indices whose anchor no longer matches
-	annotate  bool
-	cursor    int // 1-based diff line (annotate mode)
-	offset    int // scroll offset (both modes)
-	maxOffset int // largest useful read-mode offset from the last render
+	f       domain.Feature
+	lines   []string                // the unified diff, split
+	anns    []domain.DiffAnnotation // this feature's annotations
+	located map[int][]int           // diff line index → annotation indices anchored there
+	orphans []int                   // annotation indices whose anchor no longer matches
+	cursor  int                     // 1-based diff line
 }
 
 // diffLoadedMsg delivers a (re)loaded diff plus its annotations.
@@ -108,15 +113,6 @@ func (dv *diffView) openCount() int {
 // reach a comment whose line changed).
 func (dv *diffView) setCursor(n int) {
 	dv.cursor = min(max(n, 1), len(dv.lines)+len(dv.orphans))
-}
-
-// scrollMax is the largest read-mode offset the last render allowed,
-// falling back to a loose bound before the first render.
-func (dv *diffView) scrollMax() int {
-	if dv.maxOffset > 0 {
-		return dv.maxOffset
-	}
-	return max(len(dv.lines)-1, 0)
 }
 
 // jumpAnn moves the cursor to the next/previous annotated position —
@@ -252,31 +248,19 @@ func (m *Shell) deleteDiffAnnotation() tea.Cmd {
 	}
 }
 
-// bindings is the diff surface's key table (see keymap.go), split by
-// mode like handleDiffKey routes.
+// bindings is the diff surface's key table (see keymap.go). One table,
+// because there is one mode: every verb is live whenever the surface is.
 func (dv *diffView) bindings() []binding {
-	if dv.annotate {
-		return []binding{
-			{key: "tab", label: "read", help: "switch to read mode", bar: true},
-			{key: "j/k", label: "line", help: "move the line cursor"},
-			{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-			{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
-			{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
-			{key: "D", label: "delete", help: "delete the annotation at the cursor"},
-			{key: "A", label: "approve", help: "approve the gate", bar: true},
-			{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
-			{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
-			{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
-			{key: "?", label: "help", bar: true},
-		}
-	}
 	return []binding{
-		{key: "tab", label: "annotate", help: "switch to annotate mode", bar: true},
-		{key: "j/k", label: "scroll", bar: true},
-		{key: "pgup/pgdn", label: "page", help: "scroll by a page"},
-		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
+		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
+		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
+		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
+		{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
+		{key: "D", label: "delete", help: "delete the annotation at the cursor"},
+		{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
 		{key: "A", label: "approve", help: "approve the gate", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
+		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 		{key: "?", label: "help", bar: true},
 	}
 }
@@ -287,33 +271,11 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 	switch key {
 	case "esc", "q":
 		m.diff = nil
-		return nil
-	case "tab":
-		dv.annotate = !dv.annotate
-		return nil
-	case "?":
-		m.Overlay.Push(m.helpOverlay())
-		return nil
 	case "R":
 		return m.requestDiffChanges(dv)
 	case "A":
 		// approve the gate: leave the surface and run the board's g
 		return m.approveSurface(dv.f)
-	}
-	if !dv.annotate {
-		switch key {
-		case "j", "down":
-			dv.offset = min(dv.offset+1, dv.scrollMax())
-		case "k", "up":
-			dv.offset = max(dv.offset-1, 0)
-		case "pgdown":
-			dv.offset = min(dv.offset+m.mainPage(), dv.scrollMax())
-		case "pgup":
-			dv.offset = max(dv.offset-m.mainPage(), 0)
-		}
-		return nil
-	}
-	switch key {
 	case "j", "down":
 		dv.setCursor(dv.cursor + 1)
 	case "k", "up":

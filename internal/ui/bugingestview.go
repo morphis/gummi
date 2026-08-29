@@ -244,15 +244,14 @@ func (bv *bugIngestView) bindings() []binding {
 		return []binding{
 			{key: "type", label: "filter", help: "type to filter the list", bar: true},
 			{key: "up/down/pgup/pgdn", label: "move", help: "move the highlighted row without leaving the filter"},
-			{key: "tab", label: "list", help: "move focus to the list (rename/one-liner)", bar: true},
+			{key: "esc", label: "list", help: "leave the filter for the list, keeping the query", bar: true},
 			{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
-			{key: "esc", label: "discard", help: "discard the import — nothing created", bar: true},
 		}
 	}
 	return []binding{
 		{key: "j/k", label: "select", help: "move over the bugs"},
 		{key: "pgup/pgdn", label: "page", help: "move by a page over the bugs"},
-		{key: "tab", label: "filter", help: "move focus back to the filter", bar: true},
+		{key: "/", label: "filter", help: "focus the filter", bar: true},
 		{key: "r", label: "rename", help: "rename the bug (also c)", bar: true},
 		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
 		{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
@@ -287,14 +286,16 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	if bv.filtering {
 		switch key {
-		case "tab":
-			// move focus to the list, keeping the query and the pass intact
+		case "esc":
+			// esc is "back one level" everywhere else, and the filter is a
+			// level: it drops focus to the list, keeping the query and the
+			// pass intact. A second esc from the list discards. This used
+			// to be tab, which is a tab switch now, and esc-discards-from-
+			// anywhere was the more dangerous of the two shapes anyway.
 			bv.filtering = false
 			bv.filter.Blur()
 		case "enter":
 			return m.importHighlighted()
-		case "esc":
-			return m.discardBugIngest()
 		default:
 			bv.filter, _ = bv.filter.Update(msg)
 			bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
@@ -304,10 +305,9 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch key {
 	case "esc", "q":
 		return m.discardBugIngest()
-	case "?":
-		m.Overlay.Push(m.helpOverlay())
-		return nil
-	case "tab":
+	case "/":
+		// the conventional "focus the filter" key, and free here — tab
+		// used to do this, back when it meant five different things.
 		bv.filtering = true
 		bv.filter.Focus()
 	case "j":

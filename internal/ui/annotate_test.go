@@ -39,7 +39,6 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	}
 	// open the spec and add a user annotation
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "is this the right approach?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -56,7 +55,6 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 
 	// resolve it, then approval proceeds
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "resolved — yes, going with it")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -92,7 +90,6 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
 	}
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "the plan misses the migration step")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -108,7 +105,6 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 
 	// resolve it, then the gate opens
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "resolved — added below")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -129,7 +125,6 @@ func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
 		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
 	}
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "the plan misses the migration step")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -158,7 +153,6 @@ func TestRequestChangesSendsToAgent(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("I'll address those."))
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → spec (interactive)
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "please reconsider the storage choice")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})

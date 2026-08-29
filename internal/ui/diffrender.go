@@ -30,11 +30,7 @@ func (m *Shell) diffViewRender(w, h int) string {
 		return ""
 	}
 	var b strings.Builder
-	mode := "read"
-	if dv.annotate {
-		mode = "annotate"
-	}
-	head := s.Title.Render(string(dv.f.ID)) + " " + s.Base.Render("· diff") + "  " + s.Pill.Render(mode)
+	head := s.Title.Render(string(dv.f.ID)) + " " + s.Base.Render("· diff")
 	if open := dv.openCount(); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}
@@ -46,12 +42,7 @@ func (m *Shell) diffViewRender(w, h int) string {
 
 	// keys live in the status bar (keymap.go), so the body gets the pane
 	// minus the three header lines (plus one line of slack).
-	body := h - 4
-	if dv.annotate {
-		b.WriteString(dv.renderAnnotate(m, w, body))
-	} else {
-		b.WriteString(dv.renderRead(m, w, body))
-	}
+	b.WriteString(dv.render(m, w, h-4))
 	return b.String()
 }
 
@@ -82,36 +73,10 @@ func diffStyleFor(m *Shell, line string) lipgloss.Style {
 	}
 }
 
-// renderRead shows the colorized unified diff scrolled to the offset,
-// with annotation blocks interleaved under their anchored lines (and the
-// orphan footer at the bottom), so comments are visible without
-// switching to annotate mode.
-func (dv *diffView) renderRead(m *Shell, w, h int) string {
-	var display []string
-	push := func(str string) { display = append(display, strings.Split(str, "\n")...) }
-	for i := range dv.lines {
-		push(diffLineStyle(m, diffCell(dv.lines[i], w-1)))
-		for _, ai := range dv.located[i] {
-			push(dv.annBlock(m, dv.anns[ai], 2, w))
-		}
-	}
-	if len(dv.orphans) > 0 {
-		push("")
-		push(m.styles.Faint.Render("orphaned (line changed since comment):"))
-		for _, oi := range dv.orphans {
-			push(strings.Join(dv.orphanRows(m, dv.anns[oi], 2, w), "\n"))
-		}
-	}
-	visible := max(h, 3)
-	dv.maxOffset = max(len(display)-visible, 0)
-	off := min(dv.offset, dv.maxOffset)
-	end := min(off+visible, len(display))
-	return strings.Join(display[off:end], "\n")
-}
-
-// renderAnnotate shows the source diff with line numbers, gutter markers
-// on annotated lines, the annotation blocks, and the line cursor.
-func (dv *diffView) renderAnnotate(m *Shell, w, h int) string {
+// render draws the diff: line numbers, gutter markers on annotated
+// lines, the annotation blocks interleaved under the lines they anchor
+// to, the orphan footer, and the line cursor.
+func (dv *diffView) render(m *Shell, w, h int) string {
 	s := m.styles
 	numW := len(strconv.Itoa(len(dv.lines)))
 	textW := max(w-numW-3, 4)
