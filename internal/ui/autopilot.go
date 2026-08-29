@@ -1,0 +1,382 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/verdict"
+)
+
+// The `A` overlay: point autopilot at a card and the card runs — not at
+// the next gate, now, from wherever it currently sits. It replaces the
+// old two-state gate-approval toggle (boardactions.go's former
+// toggleGateApproval/confirmGateAuto) with the three stored stops
+// (domain.GateOff/GateGates/GateFull) and, unlike that toggle, actually
+// moves the card rather than only recording a preference for next time.
+//
+// Both entry points — the `A` key (shell.go's boardVerb) and the "gate"
+// card action it supersedes (boardactions.go's runCardAction) — go
+// through openAutopilot, so the plan they show can never drift apart.
+
+// autopilotStop is one of the three gate-approval modes the overlay
+// offers, in the order they are shown.
+type autopilotStop struct {
+	mode  string
+	label string
+	why   string
+}
+
+var autopilotStops = []autopilotStop{
+	{domain.GateOff, "off", "every gate stops for you"},
+	{domain.GateGates, "gates", "design gates cross themselves; questions still stop for you"},
+	{domain.GateFull, "full", "it runs to a verified branch on its own"},
+}
+
+// autopilotCursorFor finds the stop index matching a card's stored mode,
+// reading empty as domain.GateGates like everywhere else the field is
+// interpreted (domain.Feature.GateApproval's own doc comment).
+func autopilotCursorFor(mode string) int {
+	if mode == "" {
+		mode = domain.GateGates
+	}
+	for i, st := range autopilotStops {
+		if st.mode == mode {
+			return i
+		}
+	}
+	return autopilotCursorFor(domain.GateGates)
+}
+
+// autopilotPlan is the concrete, card-specific effect of turning
+// autopilot on right now, resolved from f's LIVE state at the moment the
+// overlay opens — never from the mode a user later picks in it, which
+// only changes how a run behaves, not whether one starts.
+type autopilotPlan struct {
+	bucket    string         // "todo" | "gate" | "running" — drives the confirm label and the body
+	to        domain.Stage   // the stage a non-off mode enters now; "" when bucket == "running"
+	remaining []domain.Stage // to and everything after it, short of done
+}
+
+// confirmLabel words the confirm button to what pressing it actually
+// does to this card, per state (the run/pause card actions already use
+// this "name what pressing it does" convention — cardactions.go's
+// runLabelWhy/pauseLabelWhy).
+func (p autopilotPlan) confirmLabel() string {
+	switch p.bucket {
+	case "todo":
+		return "Start on autopilot"
+	case "gate":
+		return "Cross the gate and continue"
+	default:
+		return "Set"
+	}
+}
+
+// autopilotForward names the single stage a parked gate would move into
+// were it crossed, and reports whether that edge is one autopilot may
+// take on its own: a critiqued plan into implement, a diagnosed bug into
+// fix, a finished implement/fix's first completion into review, a
+// finished investigate into shape.
+//
+// Review and Verify are deliberately excluded even though a parked gate
+// can sit at either: a Review gate only ever reaches the inbox by
+// escalating (a clean pass already auto-continues on its own today,
+// gate mode or not — reviewloop.go's onReviewDone), so crossing it here
+// would just be re-running a loop that already gave up. Verify's gate is
+// the landing decision — autopilot's own guarantee that it never lands
+// on main means that call always stays the human's, parked or not.
+func autopilotForward(f domain.Feature) (domain.Stage, bool) {
+	switch f.Stage {
+	case domain.StagePlan:
+		return domain.StageImplement, true
+	case domain.StageDiagnose:
+		return domain.StageFix, true
+	case domain.StageImplement, domain.StageFix:
+		return domain.StageReview, true
+	case domain.StageInvestigate:
+		return domain.StageShape, true
+	default:
+		return "", false
+	}
+}
+
+// remainingStages is stageSequence's (thread.go) ordered stage list for
+// f's own workflow, truncated to start at `from` (inclusive) and to
+// exclude domain.StageDone — the one stop a non-off mode never carries a
+// card into by itself.
+func remainingStages(f domain.Feature, from domain.Stage) []domain.Stage {
+	seq := stageSequence(f)
+	idx := -1
+	for i, st := range seq {
+		if st == from {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	out := append([]domain.Stage(nil), seq[idx:]...)
+	if n := len(out); n > 0 && out[n-1] == domain.StageDone {
+		out = out[:n-1]
+	}
+	return out
+}
+
+// planAutopilot resolves f's autopilotPlan: a todo card's first real
+// stage, a parked gate's forward edge (only when autopilotForward allows
+// one), or — for everything else, including a card already running and a
+// parked gate autopilot never crosses on its own — the "running" bucket,
+// where the switch only ever writes the mode.
+func (m *Shell) planAutopilot(f domain.Feature) autopilotPlan {
+	if f.Stage == domain.StageTodo {
+		// workflow.Initial names the stage every item is *created* in
+		// (domain.StageTodo itself), not the one to run — that is the
+		// next stop on f's own sequence (thread.go's stageSequence),
+		// which already resolves brainstorm vs. spec vs. plan for a
+		// skip-flagged card the same way advanceStage does.
+		if seq := stageSequence(f); len(seq) > 1 {
+			to := seq[1]
+			return autopilotPlan{bucket: "todo", to: to, remaining: remainingStages(f, to)}
+		}
+		return autopilotPlan{bucket: "todo"}
+	}
+	if it, ok := m.inbox.get(f.ID); ok && it.Kind == attnGate {
+		if to, ok2 := autopilotForward(f); ok2 {
+			return autopilotPlan{bucket: "gate", to: to, remaining: remainingStages(f, to)}
+		}
+	}
+	return autopilotPlan{bucket: "running"}
+}
+
+// englishList joins stage names as "brainstorm, spec, plan, implement,
+// review and verify" — comma-separated with a bare "and" before the
+// last, no serial comma.
+func englishList(stages []domain.Stage) string {
+	if len(stages) == 0 {
+		return ""
+	}
+	names := make([]string, len(stages))
+	for i, st := range stages {
+		names[i] = string(st)
+	}
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// autopilotHeader is the rule line naming the card's current situation —
+// the thing "cross the gate" or "start on autopilot" is relative to.
+func autopilotHeader(f domain.Feature, plan autopilotPlan) string {
+	switch plan.bucket {
+	case "todo":
+		return "this card is in todo"
+	case "gate":
+		return "this card is parked at " + string(f.Stage)
+	default:
+		return string(f.ID) + " is already underway"
+	}
+}
+
+// autopilotBody names the concrete consequence of setting mode on f
+// right now — never the mode's abstract definition, which the stop list
+// above it already gives. off never starts anything, so it gets no
+// stage list, no budget, and no envelope: there is nothing concrete to
+// name. Every other mode says which stages run next, the shared
+// corrective budget (verdict.MaxRounds, never hardcoded), the card's own
+// envelope when it has one, and — unconditionally, because these are the
+// two guarantees that make the switch safe to use at all — that it parks
+// to the inbox if it can't finish and that it never lands on main.
+func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
+	if mode == domain.GateOff {
+		return []string{"off never starts anything on its own — every gate, including this one, waits for you."}
+	}
+
+	verb := "starting"
+	if plan.bucket == "gate" {
+		verb = "crossing"
+	}
+	if plan.bucket != "todo" && plan.bucket != "gate" {
+		return []string{
+			fmt.Sprintf("setting %s doesn't change what %s is doing right now — only how its next gate is handled.", mode, f.ID),
+			"it parks to the inbox if it can't finish, and it never lands on main.",
+		}
+	}
+
+	// The two modes promise different things, so they must not share a
+	// sentence. full is the only one that runs a card unattended end to
+	// end, and the only one the corrective budget applies to; gates still
+	// stops the moment the agent needs an answer, and saying otherwise
+	// would be the one lie this dialog cannot afford — it is what someone
+	// reads before leaving the room.
+	envelope := ""
+	if f.Budget.Envelope > 0 {
+		envelope = fmt.Sprintf(", inside a %d credit envelope", f.Budget.Envelope)
+	}
+	var lead string
+	if mode == domain.GateFull {
+		lead = fmt.Sprintf("%s it on full runs %s without you — up to %d corrections%s.",
+			verb, englishList(plan.remaining), verdict.MaxRounds(domain.RoundKindCorrective), envelope)
+	} else {
+		lead = fmt.Sprintf("%s it on gates runs %s, crossing each design gate for you%s — but it still stops whenever the agent needs an answer.",
+			verb, englishList(plan.remaining), envelope)
+	}
+	return []string{lead, "it parks to the inbox if it can't finish, and it never lands on main."}
+}
+
+const autopilotDialogWidth = 62
+
+// autopilotDialog is the `A` overlay: the three gate-approval stops,
+// cursor pre-set to the card's current mode, and a confirm button worded
+// to this card's live state.
+type autopilotDialog struct {
+	feature  domain.Feature
+	plan     autopilotPlan
+	cursor   int
+	onSubmit func(mode string) tea.Cmd
+}
+
+func newAutopilotDialog(f domain.Feature, plan autopilotPlan, onSubmit func(string) tea.Cmd) *autopilotDialog {
+	return &autopilotDialog{feature: f, plan: plan, cursor: autopilotCursorFor(f.GateApproval), onSubmit: onSubmit}
+}
+
+// openAutopilot pushes the overlay for f, computing its plan once so the
+// body it shows and the run it starts on confirm can't disagree. The
+// sole entry point for both `A` (shell.go's boardVerb) and the "gate"
+// card action it replaces (boardactions.go's runCardAction).
+func (m *Shell) openAutopilot(f domain.Feature) tea.Cmd {
+	plan := m.planAutopilot(f)
+	m.Overlay.Push(newAutopilotDialog(f, plan, func(mode string) tea.Cmd {
+		return m.startAutopilot(f, mode, plan)
+	}))
+	return nil
+}
+
+// startAutopilot persists mode on f and, when it names anything other
+// than off, actually moves the card the way the overlay promised:
+// plan.to — resolved when the overlay opened, from f's live state — is
+// where a todo card's initial stage or a parked gate's forward edge
+// leads. autoStep (reviewloop.go) runs it when it's autonomous;
+// autoStepStage just clears the way to an interactive one, the same
+// split reviewloop.go's own continuations use (its onAutonomousDone,
+// e.g. the investigate→shape re-entry). A card with nothing safe to
+// cross on its own (plan.bucket == "running", including a parked Review/
+// Verify gate — see autopilotForward) is left exactly where it is: the
+// mode write alone is the whole effect for it.
+func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan) tea.Cmd {
+	return func() tea.Msg {
+		msg := m.setGateApproval(f.ID, mode)()
+		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
+			return msg
+		}
+		if mode == domain.GateOff || plan.to == "" {
+			// nothing to start: the plain "gate approval now …" notice
+			// already says the whole of what changed.
+			return msg
+		}
+		if autonomousStage(plan.to) && m.engine == nil {
+			return noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
+		}
+		note := "autopilot: entering " + string(plan.to)
+		var cmd tea.Cmd
+		if autonomousStage(plan.to) {
+			cmd = m.autoStep(f.ID, plan.to, note)
+		} else {
+			cmd = m.autoStepStage(f.ID, plan.to, note)
+		}
+		return cmd()
+	}
+}
+
+// ID implements overlay.Dialog.
+func (d *autopilotDialog) ID() string { return "autopilot" }
+
+// HandleKey implements overlay.Dialog.
+func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		return true, nil
+	case "up", "k":
+		d.cursor = max(d.cursor-1, 0)
+		return false, nil
+	case "down", "j":
+		d.cursor = min(d.cursor+1, len(autopilotStops)-1)
+		return false, nil
+	case "enter":
+		return true, d.onSubmit(autopilotStops[d.cursor].mode)
+	}
+	return false, nil
+}
+
+// autopilotStopLines renders one stop row, wrapped and hanging-indented
+// under its label when its "why" text doesn't fit width — "gates"'s does
+// not, in the overlay's usual size.
+func autopilotStopLines(s *theme.Styles, st autopilotStop, selected bool, labelWidth, width int) []string {
+	marker := "  "
+	style := s.Faint
+	if selected {
+		marker = "▸ "
+		style = s.Selection
+	}
+	indent := ansi.StringWidth(marker) + labelWidth + 2
+	wrapped := strings.Split(wrapText(st.why, max(width-indent, 8)), "\n")
+	label := padRight(st.label, labelWidth)
+	lines := make([]string, len(wrapped))
+	lines[0] = style.Render(marker + label + "  " + wrapped[0])
+	for i := 1; i < len(wrapped); i++ {
+		lines[i] = style.Render(strings.Repeat(" ", indent) + wrapped[i])
+	}
+	return lines
+}
+
+// dashRule renders "── label ────…" filled to width, the same dash-fill
+// shape as thread.go's boundaryRule without the trailing timestamp.
+func dashRule(label string, width int) string {
+	head := "── " + label + " "
+	fill := max(width-ansi.StringWidth(head), 0)
+	return head + strings.Repeat("─", fill)
+}
+
+// View implements overlay.Dialog.
+func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
+	width := min(autopilotDialogWidth, max(w-8, 30))
+
+	var b strings.Builder
+	title := "autopilot · " + string(d.feature.ID)
+	if d.feature.Title != "" {
+		title += " · " + d.feature.Title
+	}
+	b.WriteString(s.DialogTitle.Render(title) + "\n\n")
+
+	labelWidth := 0
+	for _, st := range autopilotStops {
+		labelWidth = max(labelWidth, ansi.StringWidth(st.label))
+	}
+	for i, st := range autopilotStops {
+		for _, l := range autopilotStopLines(s, st, i == d.cursor, labelWidth, width) {
+			b.WriteString(l + "\n")
+		}
+	}
+	b.WriteString("\n")
+
+	b.WriteString(s.Faint.Render(dashRule(autopilotHeader(d.feature, d.plan), width)) + "\n")
+	mode := autopilotStops[d.cursor].mode
+	for _, l := range autopilotBody(d.feature, d.plan, mode) {
+		for _, wl := range strings.Split(wrapText(l, width), "\n") {
+			b.WriteString(s.Subtle.Render(wl) + "\n")
+		}
+	}
+	b.WriteString("\n")
+
+	buttons := newButtonRow(button{label: "Cancel"}, button{label: d.plan.confirmLabel()})
+	buttons.SetCursor(1)
+	b.WriteString(buttons.View(s, true) + "\n")
+	b.WriteString("\n" + s.Faint.Render("↑↓ choose · enter set · esc cancel"))
+	return s.DialogFrame.Render(b.String())
+}

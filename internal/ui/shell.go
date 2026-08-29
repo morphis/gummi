@@ -1482,6 +1482,17 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.attachRaw(r.F)
 		}
+	case "A":
+		if r, ok := m.selected(); ok {
+			if r.DrivenAbroad {
+				m.notice = noticeMsg{
+					text:  fmt.Sprintf("%s is being driven by pid %d — read-only here (enter watches it)", r.F.ID, r.Foreign.PID),
+					isErr: true,
+				}
+				return nil
+			}
+			return m.openAutopilot(r.F)
+		}
 	case "agent-cli":
 		// Menu-only, and dispatched on an id rather than a letter on
 		// purpose: A already means "approve the gate" in the spec, diff
@@ -2201,8 +2212,8 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 }
 
 // setGateApproval persists a card's gate-approval mode — the write half
-// of the gate-toggle card action (boardactions.go's toggleGateApproval/
-// confirmGateAuto). Like SetVerifiedAt/SetGateApproval on the store side
+// of the autopilot overlay's confirm (autopilot.go's startAutopilot).
+// Like SetVerifiedAt/SetGateApproval on the store side
 // this is a side-channel write: it touches neither a session nor the
 // stage, so — unlike deleteFeature/cleanupLanded — it carries no card
 // lock, the same call shape as setRepo and setEnvelope above.

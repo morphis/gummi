@@ -8,11 +8,14 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// TestGateToggleTighteningAppliesImmediately: auto -> caller is the safer
-// direction (a human checkpoints every design gate from here on), so it
-// must not stop to ask — the same way the board never confirms a plain
-// pause.
-func TestGateToggleTighteningAppliesImmediately(t *testing.T) {
+// TestGateActionOpensAutopilotOverlay: the "gate" card action (its label/
+// why still come from cardActionsFor's gateLabelWhy) is superseded by the
+// autopilot overlay rather than writing the store directly — it must
+// raise the overlay, pre-selected on the card's current mode, and must
+// not touch the store until the overlay's own confirm fires. That confirm
+// is the one deliberation a loosening move gets; there is no second
+// confirm layered underneath it.
+func TestGateActionOpensAutopilotOverlay(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
 	m := NewShell(theme.GummiDark(), "v0-test")
@@ -25,50 +28,18 @@ func TestGateToggleTighteningAppliesImmediately(t *testing.T) {
 	m.rows = []featureRow{{F: f}}
 	m.sel = 0
 
-	cmd := m.runCardAction(cardAction{id: "gate"})
-	if m.Overlay.HasDialogs() {
-		t.Fatal("tightening (auto -> caller) should not raise a confirm dialog")
-	}
-	if cmd == nil {
-		t.Fatal("expected a command that writes the new mode")
-	}
-	if msg := cmd(); msg != nil {
-		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
-			t.Fatalf("gate toggle failed: %s", nm.text)
-		}
-	}
-	got, err := store.GetFeature(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.GateApproval != domain.GateOff {
-		t.Fatalf("gate approval = %q, want %q", got.GateApproval, domain.GateOff)
-	}
-}
-
-// TestGateToggleLooseningConfirmsFirst: caller -> auto removes the human
-// checkpoint at every design gate this card crosses from here on, so it
-// must confirm first — and must not write anything until that confirm
-// fires, the same contract confirmDuplicate and the board's delete/
-// clean-up confirms already hold.
-func TestGateToggleLooseningConfirmsFirst(t *testing.T) {
-	ws, store, wt := uiRepo(t)
-	ctx := context.Background()
-	m := NewShell(theme.GummiDark(), "v0-test")
-	m.Attach(store, wt, ws)
-
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "caller card", Slug: "caller-card", Stage: domain.StageTodo, GateApproval: domain.GateOff}
-	if err := store.CreateFeature(ctx, &f); err != nil {
-		t.Fatal(err)
-	}
-	m.rows = []featureRow{{F: f}}
-	m.sel = 0
-
 	if cmd := m.runCardAction(cardAction{id: "gate"}); cmd != nil {
-		t.Fatal("loosening should raise a confirm rather than return a command directly")
+		t.Fatal("the gate action should open the overlay, not return a command directly")
 	}
-	if !m.Overlay.Contains("confirm-gate-auto") {
-		t.Fatal("loosening (caller -> auto) did not open its confirm dialog")
+	if m.Overlay.Contains("confirm-gate-auto") {
+		t.Fatal("the old confirm-gate-auto dialog should never be raised any more")
+	}
+	d, ok := m.Overlay.Top().(*autopilotDialog)
+	if !ok {
+		t.Fatalf("top overlay is %T, want *autopilotDialog", m.Overlay.Top())
+	}
+	if d.cursor != autopilotCursorFor(domain.GateGates) {
+		t.Fatalf("cursor = %d, want the card's current mode (%d)", d.cursor, autopilotCursorFor(domain.GateGates))
 	}
 
 	// unconfirmed: the store must be untouched.
@@ -76,36 +47,15 @@ func TestGateToggleLooseningConfirmsFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateOff {
-		t.Fatalf("gate approval changed before confirm: %q", got.GateApproval)
-	}
-
-	d, ok := m.Overlay.Top().(*confirmDialog)
-	if !ok {
-		t.Fatalf("top overlay is %T, want *confirmDialog", m.Overlay.Top())
-	}
-	if cmd := d.onConfirm(); cmd != nil {
-		if msg := cmd(); msg != nil {
-			if nm, ok := msg.(noticeMsg); ok && nm.isErr {
-				t.Fatalf("gate toggle failed: %s", nm.text)
-			}
-		}
-	}
-	got, err = store.GetFeature(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
 	if got.GateApproval != domain.GateGates {
-		t.Fatalf("gate approval after confirm = %q, want %q", got.GateApproval, domain.GateGates)
+		t.Fatalf("gate approval changed before the overlay was confirmed: %q", got.GateApproval)
 	}
 }
 
-// TestGateToggleLooseningFromEmptyConfirmsToo: an empty GateApproval
-// reads as auto already, but the toggle's two destinations are only
-// caller and auto — starting from empty, the toggle still lands on auto
-// (making it explicit) and still goes through the confirm, exactly as
-// described for "caller/empty -> auto".
-func TestGateToggleLooseningFromEmptyConfirmsToo(t *testing.T) {
+// TestGateActionOverlayCursorReadsEmptyAsGates: an empty GateApproval
+// reads as gates everywhere else in the code; the overlay's starting
+// cursor must agree.
+func TestGateActionOverlayCursorReadsEmptyAsGates(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
@@ -117,11 +67,13 @@ func TestGateToggleLooseningFromEmptyConfirmsToo(t *testing.T) {
 	m.rows = []featureRow{{F: f}}
 	m.sel = 0
 
-	if cmd := m.runCardAction(cardAction{id: "gate"}); cmd != nil {
-		t.Fatal("loosening from empty should raise a confirm rather than return a command directly")
+	m.runCardAction(cardAction{id: "gate"})
+	d, ok := m.Overlay.Top().(*autopilotDialog)
+	if !ok {
+		t.Fatalf("top overlay is %T, want *autopilotDialog", m.Overlay.Top())
 	}
-	if !m.Overlay.Contains("confirm-gate-auto") {
-		t.Fatal("loosening from empty did not open its confirm dialog")
+	if want := autopilotCursorFor(domain.GateGates); d.cursor != want {
+		t.Fatalf("cursor for empty mode = %d, want %d (gates)", d.cursor, want)
 	}
 }
 

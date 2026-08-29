@@ -307,6 +307,7 @@ func (m *Shell) cardPageBindings() []binding {
 		{key: "esc", label: "backlog", help: "back to the backlog list", bar: true},
 		{key: "J/K", label: "prev/next", help: "previous / next card without leaving the page", bar: true},
 		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
+		{key: "A", label: "autopilot", help: "open the autopilot switch — off/gates/full, and it starts the card"},
 	}
 	for _, b := range m.boardBindings() {
 		switch b.key {
