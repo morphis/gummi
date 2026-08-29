@@ -149,8 +149,15 @@ type Config struct {
 	// Pool caches one manager per configured repository; every per-card git
 	// operation resolves its manager here. New selects Pool when set and
 	// otherwise wraps Worktrees as a single-repo pool.
-	Pool       *worktree.Pool
-	Workspace  state.Workspace
+	Pool      *worktree.Pool
+	Workspace state.Workspace
+	// CardLocks makes this engine take the workspace's per-card lock for
+	// every card it drives, so a headless run/resume/merge/clean for the
+	// same card is refused instead of racing it (and vice versa). The
+	// board sets it — it is the long-lived process that drives many cards
+	// at once. Nil (the headless driver, which already holds the card's
+	// lock around the whole command, and tests) disables card locking.
+	CardLocks  *state.CardLocks
 	Model      string
 	Permission agent.Permission
 	// Sandbox is the workspace-wide confinement mode (enforce|warn|off),
@@ -403,12 +410,21 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		return prior, nil
 	}
 
+	// Nothing expensive happens before the card is ours: a backend spawn
+	// against a card another gummi is already driving is exactly the race
+	// this lock exists to lose early. A prior session of ours holds a ref
+	// of its own, so this joins rather than fights it.
+	unlock, err := e.lockCard(f.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	// The session's lifecycle context is bound to nothing: it is canceled by
 	// Session.stop, not by the caller's ctx going away. Keep it distinct from
 	// the caller's ctx so the initial kickoff Send stays on the caller's
 	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
 	sctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel}
+	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, cardUnlock: unlock}
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
 		s.transcript = append(s.transcript, ps.Transcript...)
@@ -431,6 +447,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
 	if err != nil {
 		cancel()
+		unlock()
 		return nil, err
 	}
 	s.setSpecPath(specPath)
@@ -441,6 +458,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	// symmetry with the autonomous path.
 	if !s.attachAgent(sess) {
 		_ = sess.Close()
+		unlock()
 		return nil, errors.New("engine is closed")
 	}
 	e.trackAgentPID(f.ID, sess)
@@ -564,8 +582,13 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 			return nil // already scheduled
 		}
 	}
+	unlock, err := e.lockCard(f.ID)
+	if err != nil {
+		e.mu.Unlock()
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
@@ -908,6 +931,28 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 	s.setSpawnInfo(name, rc.Model, clientTools)
 	s.setByokRate(rate)
 	s.setSandboxMode(e.resolveSandbox(s.Feature).Mode)
+}
+
+// UseCardLocks makes this engine take the workspace's per-card lock for
+// every card it drives, so a headless run/resume/merge/clean for the same
+// card is refused instead of racing it. Call it once, right after New and
+// before anything drives a card: the board does, since it is the process
+// that holds cards for a long time; one-shot commands leave it unset and
+// keep taking the card's lock around the whole command themselves.
+func (e *Engine) UseCardLocks(l *state.CardLocks) { e.cfg.CardLocks = l }
+
+// lockCard takes this engine's hold on the workspace's per-card lock,
+// returning the release to hand to the session that will own it. With no
+// CardLocks configured — the headless driver, which already holds the
+// card's lock around the whole command, and tests — it is a no-op that
+// hands back a no-op release, so every call site stays branch-free.
+//
+// Holds inside one process share a single flock and are refcounted, so a
+// second session (or a merge) on a card this engine already drives joins
+// the lock rather than deadlocking against it; another gummi process is
+// excluded throughout.
+func (e *Engine) lockCard(id domain.FeatureID) (func(), error) {
+	return e.cfg.CardLocks.Acquire(id)
 }
 
 // bindLiveLog opens the card's live file for s and binds it, so another
@@ -1510,6 +1555,11 @@ func (e *Engine) pump(s *Session) {
 				// so Answer treats the in-flight calls as gone and fails
 				// loudly instead of silently succeeding into the void.
 				s.clearResolversWaiting()
+				// the backend is gone either way, so nothing of ours is
+				// driving this card any more: release its lock rather than
+				// holding a card hostage to a dead agent until the user
+				// pauses or advances it.
+				s.releaseCard()
 				if s.State() == StateRunning {
 					e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: errSessionDied})
 				}

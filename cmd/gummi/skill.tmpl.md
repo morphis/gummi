@@ -80,6 +80,14 @@ changes, streamed off the driving process's live file. `watch --json` emits that
 stream as NDJSON, one record per line, for a caller that would rather parse than
 read.
 
+**A card the user is driving in the open board is locked, too.** The board takes
+the same per-card lock as `run`/`resume`/`merge`/`clean` for every card it
+drives, so one of those verbs on such a card exits 1 with "another gummi process
+is already driving this card". That is a wait-or-ask, not a fault to repair:
+`gummi watch <id>` shows what it is doing, and the lock clears when that card's
+session ends. Independent cards are unaffected — the lock is per card, never per
+workspace.
+
 ## The decision loop
 
 Each `gummi run` / `gummi resume` streams milestone + decision NDJSON on stdout

@@ -63,7 +63,7 @@ func (m *Shell) prepareSquash(f domain.Feature) tea.Cmd {
 // point in place. It re-checks landed state at run time so a stale board
 // row cannot rewrite history after the work has already reached main.
 func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
-	return func() tea.Msg {
+	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
@@ -89,5 +89,5 @@ func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
 			return noticeMsg{text: string(f.ID) + " already collapsed, nothing to do"}
 		}
 		return noticeMsg{text: string(f.ID) + " squashed to " + sha + "\n  git push --force-with-lease origin " + f.BranchName(), reload: true}
-	}
+	})
 }

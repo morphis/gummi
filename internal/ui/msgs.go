@@ -608,7 +608,7 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 // leaving the worktree untouched) it offers the agent hand-off — or,
 // with no engine, reports the conflicted files to resolve by hand.
 func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
-	return func() tea.Msg {
+	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
@@ -660,7 +660,7 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + " rebased onto main", reload: true}
-	}
+	})
 }
 
 // cleanupLanded removes a landed feature's worktree and branch, keeping
@@ -668,7 +668,7 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 // re-checks Landed at run time so a stale board row can't trigger a
 // cleanup of unmerged work (DESIGN §9 M4, §10 landed-branch detection).
 func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
-	return func() tea.Msg {
+	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		landed, err := m.wt.Landed(ctx, &f)
 		if err != nil {
@@ -711,7 +711,7 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 			}
 		}
 		return noticeMsg{text: string(f.ID) + " cleaned up — worktree and merged branch removed", reload: true}
-	}
+	})
 }
 
 // dropSession ends and forgets a feature's engine session and clears
@@ -780,7 +780,7 @@ func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
 
 // deleteFeature removes worktree, branch, and record.
 func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
-	return func() tea.Msg {
+	return m.cardLocked(id, func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
@@ -813,5 +813,5 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		_ = os.Remove(m.ws.LiveFile(id))
 		m.dropSession(id)
 		return noticeMsg{text: fmt.Sprintf("%s deleted", id), reload: true}
-	}
+	})
 }

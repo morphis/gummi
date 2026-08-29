@@ -203,6 +203,13 @@ type Session struct {
 	clientTools    bool         // resolved backend's ClientTools capability (spawn-time cache)
 	sandboxMode    sandbox.Mode // resolved confinement mode (stamped at spawn)
 
+	// cardUnlock retires this session's hold on the workspace's per-card
+	// lock (state.CardLocks), taken before the session was created so a
+	// headless drive of the same card is refused rather than racing it.
+	// It is idempotent and nil when card locking is off (the headless
+	// driver, which holds the lock itself; tests).
+	cardUnlock func()
+
 	// live mirrors every transcript mutation to the card's live file so a
 	// second gummi process can follow the run this one owns. It is bound
 	// at construction and closed by stop; a nil Writer (no workspace
@@ -1030,6 +1037,11 @@ func (s *Session) stop() {
 		// half-written once stop returns.
 		s.live.Emit(livelog.Record{Kind: livelog.KindStopped, Err: errText(s.errValue())})
 		s.live.Close()
+		// the agent is closed, so this session no longer drives the card:
+		// let its hold on the card lock go. A successor session took its
+		// own hold before this one stopped, so the card stays locked
+		// across a replace and unlocks only when the last holder leaves.
+		s.releaseCard()
 	})
 }
 
@@ -1058,6 +1070,16 @@ func (s *Session) bindLive(w *livelog.Writer) {
 		}
 	}
 	w.Emit(livelog.Record{Kind: livelog.KindState, State: string(s.state)})
+}
+
+// releaseCard retires this session's hold on the card lock. Safe to call
+// on a session that never took one, and safe to call twice: the release
+// CardLocks hands out is one-shot, so the death path and the teardown
+// path can both call it.
+func (s *Session) releaseCard() {
+	if s.cardUnlock != nil {
+		s.cardUnlock()
+	}
 }
 
 // errValue reads the session's recorded error under the lock.

@@ -71,14 +71,16 @@ func artifactNoun(k domain.Kind) string {
 // wedge the run goroutine forever.
 const verifyTimeout = 10 * time.Minute
 
-// execChecks runs the checks in a command (off the UI goroutine).
+// execChecks runs the checks in a command (off the UI goroutine), holding
+// the card's lock while repo commands execute in its worktree — the same
+// lock `gummi verify` takes for the same work.
 func (m *Shell) execChecks(f domain.Feature, workDir string, checks []domain.Check) tea.Cmd {
-	return func() tea.Msg {
+	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 		defer cancel()
 		results := verify.RunBounded(ctx, workDir, checks, verify.CheckTimeout)
 		return verifyResultMsg{feature: f.ID, results: results}
-	}
+	})
 }
 
 // verifyDialog surfaces the check commands and asks for confirmation

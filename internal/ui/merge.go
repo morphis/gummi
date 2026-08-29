@@ -73,7 +73,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 // merge also moves the feature to Done — the user's "this is done"
 // decision and the landing are one action.
 func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bool) tea.Cmd {
-	return func() tea.Msg {
+	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
@@ -97,7 +97,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — press c to clean up", reload: true}
 		}
 		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up", reload: true}
-	}
+	})
 }
 
 // recordCommitDraftFail persists a squash-merge scribe pass's outcome on

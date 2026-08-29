@@ -106,6 +106,13 @@ func runBoard() error {
 	th, _ := theme.ByName(cmp.Or(os.Getenv("GUMMI_THEME"), "dark"))
 	shell := ui.NewShell(th, version())
 	shell.Attach(store, pool, ws)
+	// One registry of per-card locks for the whole board, shared by the
+	// engine (which holds a card while it drives it) and the board's own
+	// git verbs (merge, rebase, clean, …). Sharing it is what lets a merge
+	// on a card this board is already driving join the lock instead of
+	// deadlocking against this very process.
+	locks := state.NewCardLocks(ws)
+	shell.AttachCardLocks(locks)
 
 	// Profile names for the new-feature/bug/ingest dialogs come purely
 	// from .gummi/profiles.yaml and are available whether or not any agent
@@ -117,7 +124,7 @@ func runBoard() error {
 	shell.SetRepoNames(pool.Names())
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
-	if eng, _, cleanup := buildEngine(store, pool, ws); eng != nil {
+	if eng, _, cleanup := buildEngine(store, pool, ws, locks); eng != nil {
 		shell.AttachEngine(eng)
 		defer cleanup()
 	}
@@ -162,7 +169,7 @@ func runBoard() error {
 //	                        headless adapter's token→credit rate, for a
 //	                        local endpoint (llama.cpp) that the engine
 //	                        still needs to meter against a credit budget
-func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, []string, func()) {
+func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, locks *state.CardLocks) (*engine.Engine, []string, func()) {
 	eng, agents, names, err := newEngineFromEnv(store, pool, ws)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
@@ -170,6 +177,11 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*
 	if eng == nil {
 		return nil, nil, nil
 	}
+	// The board drives cards for as long as it is open, so it takes each
+	// card's lock the way a headless command does — before the first
+	// session, so a `gummi run` for the same card is refused rather than
+	// racing it (and vice versa).
+	eng.UseCardLocks(locks)
 	// reload any sessions from a previous run so the board shows where
 	// each feature left off.
 	if err := eng.Restore(context.Background()); err != nil {

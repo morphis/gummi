@@ -814,13 +814,19 @@ Decided in the design interview (2026-07-03):
  12. **One process per card, not per workspace.** Headless
      run/resume/verify/merge/clean each hold an exclusive per-card lock
      (`.gummi/state/locks/<id>.lock`), so independent cards drive
-     concurrently while two headless drives of the same card are mutually
-     excluded. The TUI holds
-     the whole-workspace lock only for its own lifetime, so a second board
-     refuses to open; it no longer serializes headless drives. Shared
-     resources (worktree creation, merge) keep git's own serialization on
-     the repo's `.git` lock, and the SQLite store already serializes
-     writers via WAL + `busy_timeout`.
+     concurrently while two drives of the same card are mutually excluded.
+     The board holds that same lock for every card *it* drives — a session
+     takes it before the backend spawns and lets it go when the session
+     stops, and the board's own git verbs take it for their duration — so
+     the exclusion runs both ways rather than only between headless
+     commands. Holds inside one process are refcounted
+     (`state.CardLocks`), because a flock is per open file description:
+     without that, a merge on a card the board is already driving would
+     refuse itself. The TUI additionally holds the whole-workspace lock for
+     its own lifetime, so a second board refuses to open. Shared resources
+     (worktree creation, merge) keep git's own serialization on the repo's
+     `.git` lock, and the SQLite store already serializes writers via WAL +
+     `busy_timeout`.
 13. **A parallel process can watch what it may not drive.** The live
     agent stream — transcript deltas, tool calls, state changes — is
     otherwise in-process only: the backend CLI is a child of whichever

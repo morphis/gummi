@@ -253,3 +253,77 @@ func TestFollowerEmptyBeforeRecords(t *testing.T) {
 		t.Errorf("title = %q, want the seeded card's", snap.Feature.Title)
 	}
 }
+
+// A board git verb on a card another gummi process holds is refused
+// before it touches the worktree, and says what the board can offer
+// instead.
+func TestCardLockedRefusesForeignHeldCard(t *testing.T) {
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir, RepoRoot: dir}
+	m := &Shell{locks: state.NewCardLocks(ws)}
+
+	foreign, err := state.AcquireLock(ws.CardLockFile("FD-300"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreign()
+
+	ran := false
+	msg := m.cardLocked("FD-300", func() tea.Msg {
+		ran = true
+		return noticeMsg{text: "did the work"}
+	})()
+	if ran {
+		t.Fatal("the verb ran against a card another process is driving")
+	}
+	n, ok := msg.(noticeMsg)
+	if !ok || !n.isErr {
+		t.Fatalf("msg = %#v, want an error notice", msg)
+	}
+	if !strings.Contains(n.text, "FD-300") || !strings.Contains(n.text, "watch") {
+		t.Errorf("notice = %q, want it to name the card and offer watching", n.text)
+	}
+}
+
+// The board's verbs and its engine share one registry, so a merge on a
+// card the board is already driving joins that hold instead of refusing
+// itself — the deadlock a naive per-verb flock would cause.
+func TestCardLockedJoinsThisProcessHold(t *testing.T) {
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir, RepoRoot: dir}
+	locks := state.NewCardLocks(ws)
+	m := &Shell{locks: locks}
+
+	// stand in for the engine's session hold on the same card.
+	held, err := locks.Acquire("FD-301")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held()
+
+	ran := false
+	m.cardLocked("FD-301", func() tea.Msg {
+		ran = true
+		return nil
+	})()
+	if !ran {
+		t.Fatal("a verb was refused on a card this very process holds")
+	}
+	if !locks.Holds("FD-301") {
+		t.Error("the verb's release dropped the session's hold")
+	}
+}
+
+// With no registry wired (a static test scaffold) the verbs run
+// unlocked, exactly as they did before locking existed.
+func TestCardLockedWithoutRegistry(t *testing.T) {
+	m := &Shell{}
+	ran := false
+	m.cardLocked("FD-302", func() tea.Msg {
+		ran = true
+		return nil
+	})()
+	if !ran {
+		t.Fatal("a verb was refused with no lock registry wired")
+	}
+}

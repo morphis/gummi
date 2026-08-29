@@ -93,6 +93,9 @@ type Shell struct {
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
 	foreignTicks int
+	// locks is the board's per-card lock registry, shared with the engine
+	// (AttachCardLocks). Nil leaves the board's git verbs unlocked.
+	locks        *state.CardLocks
 	inbox        *inbox // needs-attention queue
 	checks       map[domain.FeatureID][]verify.Result
 	baselining   map[domain.FeatureID]bool // a baseline check run is in flight
@@ -162,6 +165,44 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace
 	// swap in a failing store to prove the fail-closed path.
 	m.roundStore = store
 }
+
+// cardLocked runs fn holding the card's lock for its whole duration, so a
+// git verb this board runs can't interleave with a headless
+// run/resume/merge/clean of the same card (each of which takes the very
+// same lock). Holds inside this process are refcounted, so a verb on a
+// card the board's own engine is already driving joins that hold instead
+// of refusing itself.
+//
+// With no registry wired (a test scaffold) it is a plain pass-through,
+// which is the behavior these verbs had before locking existed.
+func (m *Shell) cardLocked(id domain.FeatureID, fn func() tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		release, err := m.locks.Acquire(id)
+		if err != nil {
+			return noticeMsg{text: cardLockedNotice(id, err), isErr: true}
+		}
+		defer release()
+		return fn()
+	}
+}
+
+// cardLockedNotice renders a dispatch failure, adding what the board can
+// offer when the card turned out to be locked by another gummi process:
+// watching the run it may not drive. Any other error passes through as
+// itself.
+func cardLockedNotice(id domain.FeatureID, err error) string {
+	if errors.Is(err, state.ErrLocked) {
+		return fmt.Sprintf("%s is being driven by another gummi process — press enter to watch it, or wait for it to finish", id)
+	}
+	return sanitize(err.Error())
+}
+
+// AttachCardLocks wires the board's per-card lock registry — the same one
+// its engine holds cards with — so the board's own git verbs (merge,
+// rebase, squash, clean, verify, delete) take the card's lock for their
+// duration too. Without it those verbs run unlocked, which is the old
+// behavior and all a test scaffold needs.
+func (m *Shell) AttachCardLocks(l *state.CardLocks) { m.locks = l }
 
 // AttachEngine wires the agent orchestrator, enabling interactive chat
 // and autonomous stages. Optional: without it the board is static.
@@ -838,7 +879,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the attach ran in a command (spawning the backend can take
 		// seconds); open the pane now, on the Update goroutine.
 		if msg.err != nil {
-			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			m.notice = noticeMsg{text: cardLockedNotice(msg.feature.ID, msg.err), isErr: true}
 			return m, nil
 		}
 		m.setChat(newChatPane(msg.feature.ID, msg.session))
@@ -1579,7 +1620,7 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 			if f.Stage == domain.StagePlan && s.Snapshot().Critique {
 				return func() tea.Msg {
 					if err := m.engine.RunCritique(f, ""); err != nil {
-						return noticeMsg{text: sanitize(err.Error()), isErr: true}
+						return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
 					}
 					return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)", clearInbox: f.ID}
 				}
@@ -1590,7 +1631,7 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 	// so a slow agent launch can't freeze the TUI.
 	return func() tea.Msg {
 		if err := m.engine.Run(f); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + " queued", clearInbox: f.ID}
 	}
