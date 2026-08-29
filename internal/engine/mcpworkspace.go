@@ -575,7 +575,7 @@ type cardNewArgs struct {
 // internal/driver.
 //
 // Its gate-approval default deliberately differs from every headless
-// entry point's: cardmint reads an empty GateApproval as domain.GateAuto
+// entry point's: cardmint reads an empty GateApproval as domain.GateGates
 // (matching driver.Options' own default), but a card minted by an agent
 // hosted inside someone else's TUI is not the same thing as a card a
 // human typed `gummi run` for — the human at this board did not ask for
@@ -599,9 +599,11 @@ func (ep *workspaceEndpoint) cardNew(args json.RawMessage) (string, error) {
 	}
 	gate := a.GateApproval
 	if gate == "" {
-		gate = domain.GateCaller
-	} else if !domain.ValidGateApproval(gate) {
-		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateAuto, domain.GateCaller, gate)
+		gate = domain.GateOff
+	} else if norm, ok := domain.NormalizeGateApproval(gate); !ok {
+		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateGates, domain.GateOff, gate)
+	} else {
+		gate = norm
 	}
 	f, err := cardmint.Mint(ep.ctx, ep.engine.cfg.Store, ep.engine.cfg.Workspace, cardmint.Input{
 		Kind: kind, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,

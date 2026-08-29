@@ -42,8 +42,8 @@ var resumeCmd = &cobra.Command{
 // resumeArgv is buildFlagArgs plus one exception for `resume`:
 // buildFlagArgs drops a flag whose explicit value equals its cobra default,
 // since it can't tell "never passed" from "passed the default value" apart.
-// --gate-approval auto is a legitimate no-op re-affirmation (it overrides a
-// persisted "caller" mode), so re-add it here when that's exactly what
+// --gate-approval gates is a legitimate no-op re-affirmation (it overrides a
+// persisted "off" mode), so re-add it here when that's exactly what
 // buildFlagArgs dropped. The exception lives at this one call site rather
 // than in buildFlagArgs itself, which stays generic for the ~20 other
 // commands routed through it.
@@ -323,7 +323,7 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)")
 	f.String("profile", "", "profile mapping roles to models (default: first configured)")
 	f.Bool("full", false, "run the full route (brainstorm + plan), not the quick route")
-	f.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller (persisted on the card; resume keeps it)")
+	f.String("gate-approval", driver.GateGates, "who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
@@ -342,7 +342,7 @@ func bindResearchFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.Int("envelope", 0, "credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)")
 	f.String("profile", "", "profile mapping roles to models (default: first configured)")
-	f.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller (persisted on the card; resume keeps it)")
+	f.String("gate-approval", driver.GateGates, "who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
@@ -371,7 +371,7 @@ func bindResumeFlags(cmd *cobra.Command) {
 	f.String("request-changes", "", "send a caller design gate back with a note")
 	f.Bool("bounce", false, "rewind a verify/review-fail escalation to the work stage and continue (the TUI's b key)")
 	f.String("note", "", "addendum to the reborn implement/fix kickoff (used with --bounce)")
-	f.String("gate-approval", driver.GateAuto, "who approves later design gates: auto|caller (inherits the run's mode when omitted; pass to change it)")
+	f.String("gate-approval", driver.GateGates, "who approves later design gates: off|gates|full (aliases: auto=gates, caller=off; inherits the run's mode when omitted; pass to change it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")

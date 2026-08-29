@@ -23,12 +23,13 @@ import (
 
 // GateApproval selects who approves a design gate. The quality floor
 // (review/verify, blockers) runs the same either way — this only decides
-// whether a design gate auto-crosses or checkpoints to the caller. The
-// canonical values live in domain (persisted on the card); these alias them
-// so the driver's callers keep a local name.
+// whether a design gate crosses itself or stops for the caller. The
+// canonical values live in domain (they are what is persisted on the
+// card); these alias them so the driver's callers keep a local name.
 const (
-	GateAuto   = domain.GateAuto
-	GateCaller = domain.GateCaller
+	GateOff   = domain.GateOff
+	GateGates = domain.GateGates
+	GateFull  = domain.GateFull
 )
 
 // Options configures one run. Envelope is required (D6); a missing agent
@@ -37,7 +38,7 @@ type Options struct {
 	Envelope     int
 	Profile      string
 	Full         bool   // opt into the brainstorm+plan route (default: quick)
-	GateApproval string // GateAuto (default) | GateCaller
+	GateApproval string // GateGates (default) | GateOff
 	// GateApprovalSet reports that the caller passed --gate-approval
 	// explicitly on this invocation. A resume uses it to decide between
 	// overriding the card's persisted mode (set) and inheriting it (unset),
@@ -99,7 +100,7 @@ func (d *Driver) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 // the engine and agent lifetime (as cmd/gummi/ingest.go does).
 func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interface{ Write([]byte) (int, error) }, opts Options) *Driver {
 	if opts.GateApproval == "" {
-		opts.GateApproval = GateAuto
+		opts.GateApproval = GateGates
 	}
 	d := &Driver{
 		eng:        eng,
@@ -116,15 +117,15 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 
 // setGate points the driver at a gate-approval mode, keeping the derived
 // transition actor ("auto"|"caller") in lockstep. An empty mode reads as
-// GateAuto. It is called at construction and again on resume once the
+// GateGates. It is called at construction and again on resume once the
 // card's persisted mode is known.
 func (d *Driver) setGate(mode string) {
 	if mode == "" {
-		mode = GateAuto
+		mode = GateGates
 	}
 	d.opts.GateApproval = mode
 	d.actor = "auto"
-	if mode == GateCaller {
+	if mode == GateOff {
 		d.actor = "caller"
 	}
 }
@@ -216,10 +217,10 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	// --gate-approval overrides (and re-persists) it; one that doesn't
 	// inherits the mode `run` chose, instead of silently reverting to auto.
 	if d.opts.GateApprovalSet {
-		mode := d.opts.GateApproval // "auto"|"caller", validated by the CLI
+		mode := d.opts.GateApproval // canonical (off|gates|full), aliases already resolved by the CLI
 		stored := f.GateApproval
 		if stored == "" {
-			stored = GateAuto
+			stored = GateGates
 		}
 		if mode != stored {
 			if err := d.store.SetGateApproval(ctx, id, mode); err != nil {
@@ -1119,7 +1120,7 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 	if d.opts.Until != "" && f.Stage == d.opts.Until {
 		return d.stopped(f), nil
 	}
-	if d.opts.GateApproval == GateCaller && f.Stage != domain.StageVerify {
+	if d.opts.GateApproval == GateOff && f.Stage != domain.StageVerify {
 		// a caller gate on a design stage: report any blockers, else
 		// checkpoint for --approve/--request-changes. Verify is never a
 		// caller gate — it is the floor's stop-at-verified, always auto.

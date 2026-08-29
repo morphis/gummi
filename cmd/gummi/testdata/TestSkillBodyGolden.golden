@@ -69,7 +69,7 @@ gummi run [flags] "<description>"
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --envelope int            credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)
     --full                    run the full route (brainstorm + plan), not the quick route
-    --gate-approval string    who approves design gates: auto|caller (persisted on the card; resume keeps it)
+    --gate-approval string    who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
     --repo string             managed repository to create the card in (a configured repos: name; default: the workspace default repo)
@@ -80,7 +80,7 @@ gummi run [flags] "<description>"
 gummi research [flags] "<brief>"
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --envelope int            credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)
-    --gate-approval string    who approves design gates: auto|caller (persisted on the card; resume keeps it)
+    --gate-approval string    who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
     --repo string             managed repository to create the card in (a configured repos: name; default: the workspace default repo)
@@ -94,7 +94,7 @@ gummi resume <id|ref> [decision]
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --bounce                  rewind a verify/review-fail escalation to the work stage and continue (the TUI's b key)
     --envelope int            raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)
-    --gate-approval string    who approves later design gates: auto|caller (inherits the run's mode when omitted; pass to change it)
+    --gate-approval string    who approves later design gates: off|gates|full (aliases: auto=gates, caller=off; inherits the run's mode when omitted; pass to change it)
     --note string             addendum to the reborn implement/fix kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
     --request-changes string  send a caller design gate back with a note

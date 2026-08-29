@@ -18,7 +18,7 @@ func TestGateToggleTighteningAppliesImmediately(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
 
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "auto card", Slug: "auto-card", Stage: domain.StageTodo, GateApproval: domain.GateAuto}
+	f := domain.Feature{ID: "FD-001", Num: 1, Title: "auto card", Slug: "auto-card", Stage: domain.StageTodo, GateApproval: domain.GateGates}
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +41,8 @@ func TestGateToggleTighteningAppliesImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateCaller {
-		t.Fatalf("gate approval = %q, want %q", got.GateApproval, domain.GateCaller)
+	if got.GateApproval != domain.GateOff {
+		t.Fatalf("gate approval = %q, want %q", got.GateApproval, domain.GateOff)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestGateToggleLooseningConfirmsFirst(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
 
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "caller card", Slug: "caller-card", Stage: domain.StageTodo, GateApproval: domain.GateCaller}
+	f := domain.Feature{ID: "FD-001", Num: 1, Title: "caller card", Slug: "caller-card", Stage: domain.StageTodo, GateApproval: domain.GateOff}
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestGateToggleLooseningConfirmsFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateCaller {
+	if got.GateApproval != domain.GateOff {
 		t.Fatalf("gate approval changed before confirm: %q", got.GateApproval)
 	}
 
@@ -95,8 +95,8 @@ func TestGateToggleLooseningConfirmsFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateAuto {
-		t.Fatalf("gate approval after confirm = %q, want %q", got.GateApproval, domain.GateAuto)
+	if got.GateApproval != domain.GateGates {
+		t.Fatalf("gate approval after confirm = %q, want %q", got.GateApproval, domain.GateGates)
 	}
 }
 
@@ -140,10 +140,10 @@ func TestGateActionLabelReflectsCurrentMode(t *testing.T) {
 		t.Fatalf("no gate action found for mode %q", mode)
 		return ""
 	}
-	if got := label(domain.GateAuto); got != "require approval" {
+	if got := label(domain.GateGates); got != "require approval" {
 		t.Errorf("label for explicit auto = %q, want %q", got, "require approval")
 	}
-	if got := label(domain.GateCaller); got != "auto-approve gates" {
+	if got := label(domain.GateOff); got != "auto-approve gates" {
 		t.Errorf("label for caller = %q, want %q", got, "auto-approve gates")
 	}
 	if got := label(""); got != "auto-approve gates" {

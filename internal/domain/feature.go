@@ -9,20 +9,63 @@ import (
 	"time"
 )
 
-// Gate approval modes: who crosses a feature's design gates. GateAuto
-// auto-crosses them; GateCaller checkpoints each for the caller. The mode
-// is chosen at `run` and persisted on the card so an unattended `resume`
-// keeps it instead of silently reverting to auto. Empty reads as GateAuto.
-// These are the canonical values; internal/driver aliases them.
+// Gate approval modes: who crosses a feature's design gates on an
+// unattended resume.
+//
+//   - GateOff stops every design gate for the caller: nothing crosses
+//     without an explicit --approve/--request-changes.
+//   - GateGates lets design gates cross themselves; a question raised
+//     mid-stage still stops for the caller. This is the default when the
+//     field is empty.
+//   - GateFull runs all the way to a verified branch on its own — design
+//     gates, review/verify bounces, and conflict handoffs all auto-cross
+//     — and stops there: it never lands on main by itself.
+//
+// The mode is chosen at `run` and persisted on the card so an unattended
+// `resume` keeps it instead of silently reverting to the default. Empty
+// reads as GateGates. These are the canonical, stored values — the only
+// ones ValidGateApproval accepts. "auto" and "caller" are the spellings
+// that came before them ("auto" == GateGates, "caller" == GateOff): they
+// are still accepted as INPUT through NormalizeGateApproval, so existing
+// scripts keep working and old rows migrate, but they are never stored
+// and nothing branches on them.
 const (
-	GateAuto   = "auto"
-	GateCaller = "caller"
+	GateOff   = "off"
+	GateGates = "gates"
+	GateFull  = "full"
 )
 
-// ValidGateApproval reports whether s is a storable gate-approval mode
-// (empty, "auto", or "caller"). Empty is valid and reads as GateAuto.
+// ValidGateApproval reports whether s is a storable gate-approval mode:
+// empty, "off", "gates", or "full". Empty is valid and reads as
+// GateGates. It does not accept the legacy "auto"/"caller" input
+// spellings — those are resolved to their canonical form by
+// NormalizeGateApproval before anything reaches storage or Validate.
 func ValidGateApproval(s string) bool {
-	return s == "" || s == GateAuto || s == GateCaller
+	return s == "" || s == GateOff || s == GateGates || s == GateFull
+}
+
+// NormalizeGateApproval resolves a gate-approval mode as given by a
+// caller (CLI flag, MCP tool argument, …) to its canonical stored form,
+// reporting false when s is not a recognized mode or alias. It is the
+// ONE place a legacy alias is resolved: "auto" maps to GateGates and
+// "caller" maps to GateOff (preserving their historical meaning exactly,
+// under the new spelling); the three canonical values pass through
+// unchanged; and "" passes through unchanged too — the empty string
+// carries no default here, the caller decides what empty means for it
+// (persisted rows and Feature.GateApproval read it as GateGates).
+func NormalizeGateApproval(s string) (string, bool) {
+	switch s {
+	case "":
+		return "", true
+	case "auto":
+		return GateGates, true
+	case "caller":
+		return GateOff, true
+	case GateOff, GateGates, GateFull:
+		return s, true
+	default:
+		return "", false
+	}
 }
 
 // Kind distinguishes the units of work gummi tracks. They share the
@@ -159,9 +202,10 @@ type Feature struct {
 	Skip     SkipFlags
 	Profile  string // profile name mapping roles to agent configs
 	// GateApproval is who crosses this feature's design gates on an
-	// unattended resume: GateAuto (default) or GateCaller. Persisted at
-	// creation so a `resume` that doesn't re-pass --gate-approval inherits
-	// the run's choice rather than reverting to auto. Empty reads as auto.
+	// unattended resume: GateOff, GateGates (default), or GateFull.
+	// Persisted at creation so a `resume` that doesn't re-pass
+	// --gate-approval inherits the run's choice rather than reverting to
+	// the default. Empty reads as GateGates.
 	GateApproval string
 	Budget       Budget
 	Spend        Spend // metered cost across all stages

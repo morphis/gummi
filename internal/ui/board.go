@@ -131,13 +131,13 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if r.DrivenAbroad {
 		badge += " " + s.Info.Render("◉ elsewhere")
 	}
-	// an explicit "auto" gate-approval mode crosses this card's design
+	// an explicit "gates" gate-approval mode crosses this card's design
 	// gates unattended, worth flagging at a glance. Only the explicit
-	// value badges: empty reads as domain.GateAuto too everywhere else in
+	// value badges: empty reads as domain.GateGates too everywhere else in
 	// the code, but every TUI-created card stores empty, and badging that
 	// as well would light up the whole board as if each card had opted in
 	// to something nobody chose.
-	if r.F.GateApproval == domain.GateAuto {
+	if r.F.GateApproval == domain.GateGates {
 		badge += " " + s.Info.Render("⚡")
 	}
 	if sev := r.F.Severity; sev != "" {

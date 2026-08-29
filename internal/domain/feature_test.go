@@ -139,6 +139,65 @@ func TestFeatureValidate(t *testing.T) {
 	}
 }
 
+func TestValidGateApproval(t *testing.T) {
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		{"", true},
+		{GateOff, true},
+		{GateGates, true},
+		{GateFull, true},
+		{"auto", false},   // legacy input spelling — not a stored form
+		{"caller", false}, // legacy input spelling — not a stored form
+		{"bogus", false},
+	}
+	for _, c := range cases {
+		if got := ValidGateApproval(c.s); got != c.want {
+			t.Errorf("ValidGateApproval(%q) = %v, want %v", c.s, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeGateApproval(t *testing.T) {
+	cases := []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{"", "", true},
+		{"auto", GateGates, true},
+		{"caller", GateOff, true},
+		{GateOff, GateOff, true},
+		{GateGates, GateGates, true},
+		{GateFull, GateFull, true},
+		{"bogus", "", false},
+	}
+	for _, c := range cases {
+		got, ok := NormalizeGateApproval(c.in)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("NormalizeGateApproval(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.want, c.wantOK)
+		}
+	}
+}
+
+// The gate-approval constants are stored verbatim in the features table,
+// so their spellings are data, not just identifiers: changing one
+// silently strands every row already written with the old value. Pin
+// them here so that has to be a deliberate edit with a migration behind
+// it.
+func TestGateApprovalStoredSpellings(t *testing.T) {
+	for _, c := range []struct{ got, want string }{
+		{GateOff, "off"},
+		{GateGates, "gates"},
+		{GateFull, "full"},
+	} {
+		if c.got != c.want {
+			t.Errorf("stored gate-approval spelling = %q, want %q", c.got, c.want)
+		}
+	}
+}
+
 func TestDerivedPaths(t *testing.T) {
 	f := testFeature()
 	if got, want := f.BranchName(), "gummi/FD-042-dark-mode"; got != want {

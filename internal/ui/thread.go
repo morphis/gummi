@@ -143,12 +143,12 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow) []string {
 }
 
 // autopilotLabel names the card's gate-approval mode as stored
-// (domain.GateAuto/GateCaller; empty reads as auto). It shows exactly
-// what the card carries rather than inventing wording the stored value
-// does not have.
+// (domain.GateOff/GateGates/GateFull; empty reads as gates). It shows
+// exactly what the card carries rather than inventing wording the stored
+// value does not have.
 func autopilotLabel(mode string) string {
 	if mode == "" {
-		return domain.GateAuto
+		return domain.GateGates
 	}
 	return mode
 }

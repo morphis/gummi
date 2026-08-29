@@ -67,8 +67,8 @@ func TestMintFeatureQuickRoute(t *testing.T) {
 	if f.Skip != domain.QuickRoute() {
 		t.Errorf("skip = %+v, want quick route", f.Skip)
 	}
-	if f.GateApproval != domain.GateAuto {
-		t.Errorf("gate approval = %q, want empty-default %q", f.GateApproval, domain.GateAuto)
+	if f.GateApproval != domain.GateGates {
+		t.Errorf("gate approval = %q, want empty-default %q", f.GateApproval, domain.GateGates)
 	}
 	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
 	raw, err := os.ReadFile(draft)
@@ -241,13 +241,13 @@ func TestMintPropagatesGateApprovalAndRef(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
 		Kind: domain.KindFeature, Description: "checkpointed card", Envelope: 2400,
-		GateApproval: domain.GateCaller, ExternalRef: "gh-123",
+		GateApproval: domain.GateOff, ExternalRef: "gh-123",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.GateApproval != domain.GateCaller {
-		t.Errorf("gate approval = %q, want %q", f.GateApproval, domain.GateCaller)
+	if f.GateApproval != domain.GateOff {
+		t.Errorf("gate approval = %q, want %q", f.GateApproval, domain.GateOff)
 	}
 	if f.ExternalRef != "gh-123" {
 		t.Errorf("external ref = %q, want gh-123", f.ExternalRef)

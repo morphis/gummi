@@ -81,7 +81,7 @@ func TestRunRequiresEnvelope(t *testing.T) {
 // GUMMI_ENVELOPE supplies the envelope when --envelope is absent.
 func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "250")
-	opts, err := driverOptions(0, "", false, driver.GateAuto, time.Minute, false, false, "", "", "", "")
+	opts, err := driverOptions(0, "", false, driver.GateGates, time.Minute, false, false, "", "", "", "")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
@@ -97,11 +97,11 @@ func TestDriverOptionsGateValidation(t *testing.T) {
 	if _, err := driverOptions(100, "", false, "sometimes", time.Minute, false, false, "", "", "", ""); err == nil {
 		t.Fatal("bad gate-approval accepted")
 	}
-	opts, err := driverOptions(100, "", true, driver.GateCaller, 0, true, true, "JIRA-9", "must handle empty input", "plan", "")
+	opts, err := driverOptions(100, "", true, driver.GateOff, 0, true, true, "JIRA-9", "must handle empty input", "plan", "")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
-	if !opts.Full || opts.GateApproval != driver.GateCaller || !opts.Autonomous || opts.Ref != "JIRA-9" {
+	if !opts.Full || opts.GateApproval != driver.GateOff || !opts.Autonomous || opts.Ref != "JIRA-9" {
 		t.Fatalf("options not threaded through: %+v", opts)
 	}
 	if opts.Acceptance != "must handle empty input" || opts.Until != "plan" {

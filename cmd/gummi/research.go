@@ -90,7 +90,7 @@ func registerResearchFlags(fs *flag.FlagSet) *researchFlagValues {
 	return &researchFlagValues{
 		envelope:   fs.Int("envelope", 0, "credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)"),
 		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
-		gate:       fs.String("gate-approval", driver.GateAuto, "who approves design gates: auto|caller (persisted on the card; resume keeps it)"),
+		gate:       fs.String("gate-approval", driver.GateGates, "who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)"),
 		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),

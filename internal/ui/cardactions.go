@@ -419,13 +419,13 @@ func pauseLabelWhy(in nextInput) (label, why string) {
 // gateLabelWhy words the gate-approval toggle for the card's current
 // mode, the same "name what pressing it does" adaptation runLabelWhy and
 // pauseLabelWhy already give run/pause. mode is r.F.GateApproval as
-// stored — empty and "caller" both word the same way here (the toggle's
-// only two destinations are auto and caller; landing on caller from
-// empty is exactly what tightening already meant), and only an explicit
-// domain.GateAuto reads as the unattended side, matching the badge's own
+// stored — empty and "off" both word the same way here (the toggle's
+// only two destinations are gates and off; landing on off from empty is
+// exactly what tightening already meant), and only an explicit
+// domain.GateGates reads as the unattended side, matching the badge's own
 // explicit-only rule (board.go's cardLine).
 func gateLabelWhy(mode string) (label, why string) {
-	if mode == domain.GateAuto {
+	if mode == domain.GateGates {
 		return "require approval", "switch back to caller-approved design gates (attended)"
 	}
 	return "auto-approve gates", "let this card cross its design gates unattended (asks first — loosens control)"

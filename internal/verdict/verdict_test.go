@@ -110,6 +110,9 @@ func TestMaxRounds(t *testing.T) {
 	if got := MaxRounds(domain.RoundKindReview); got != 3 {
 		t.Errorf("MaxRounds(RoundKindReview) = %d, want 3", got)
 	}
+	if got := MaxRounds(domain.RoundKindCorrective); got != 5 {
+		t.Errorf("MaxRounds(RoundKindCorrective) = %d, want 5", got)
+	}
 }
 
 func TestSessionVerdictFloor(t *testing.T) {

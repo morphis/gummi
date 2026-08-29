@@ -168,12 +168,12 @@ func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
 }
 
 // TestAutopilotLabel: the header shows exactly what the card carries,
-// without inventing new vocabulary (empty reads as auto).
+// without inventing new vocabulary (empty reads as gates).
 func TestAutopilotLabel(t *testing.T) {
 	cases := map[string]string{
-		"":                domain.GateAuto,
-		domain.GateAuto:   domain.GateAuto,
-		domain.GateCaller: domain.GateCaller,
+		"":               domain.GateGates,
+		domain.GateGates: domain.GateGates,
+		domain.GateOff:   domain.GateOff,
 	}
 	for in, want := range cases {
 		if got := autopilotLabel(in); got != want {

@@ -110,8 +110,8 @@ type Input struct {
 	// because Decide consults them today.
 	PlanRounds int
 	PlanMax    int
-	// Gate is the card's stored gate-approval mode (domain.GateAuto /
-	// domain.GateCaller). Decide does not branch on it: which design
+	// Gate is the card's stored gate-approval mode (domain.GateGates /
+	// domain.GateOff). Decide does not branch on it: which design
 	// gates auto-cross versus checkpoint for a caller is decided
 	// downstream (engine.Advance / the driver's crossGate), not here.
 	// It is carried on Input for callers that want to log/assert it

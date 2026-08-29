@@ -2212,7 +2212,7 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		label := "attended — caller approves each design gate"
-		if mode == domain.GateAuto {
+		if mode == domain.GateGates {
 			label = "unattended — design gates auto-approve"
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: gate approval now %s", id, label), reload: true}

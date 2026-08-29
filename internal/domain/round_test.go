@@ -9,6 +9,7 @@ func TestRoundKindValid(t *testing.T) {
 	}{
 		{RoundKindPlan, true},
 		{RoundKindReview, true},
+		{RoundKindCorrective, true},
 		{RoundKind(""), false},
 		{RoundKind("bogus"), false},
 	}
@@ -25,5 +26,8 @@ func TestRoundKindStoredForm(t *testing.T) {
 	}
 	if string(RoundKindReview) != "review" {
 		t.Errorf("RoundKindReview stored form = %q, want %q", RoundKindReview, "review")
+	}
+	if string(RoundKindCorrective) != "corrective" {
+		t.Errorf("RoundKindCorrective stored form = %q, want %q", RoundKindCorrective, "corrective")
 	}
 }

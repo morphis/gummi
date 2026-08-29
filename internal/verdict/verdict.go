@@ -20,13 +20,20 @@ import (
 // slice's review loop reuses this cap verbatim, with no separate
 // constant), 2 for the plan→critique→replan loop (RoundKindPlan — lower
 // than the review cap, since plan revisions are cheap to judge and the
-// human gate is right behind the critique anyway). Past the cap, every
-// consumer escalates to the human instead of looping.
+// human gate is right behind the critique anyway), 5 for the corrective
+// budget (RoundKindCorrective — review was capped at 3 on its own, and
+// this unified counter now also absorbs verify bounces and conflict
+// handoffs, so 5 keeps roughly the same headroom per concern folded in).
+// Past the cap, every consumer escalates to the human instead of looping.
 func MaxRounds(k domain.RoundKind) int {
-	if k == domain.RoundKindPlan {
+	switch k {
+	case domain.RoundKindPlan:
 		return 2
+	case domain.RoundKindCorrective:
+		return 5
+	default:
+		return 3
 	}
-	return 3
 }
 
 // Verdict is the outcome parsed from a review/verify/critique session.

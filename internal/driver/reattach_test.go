@@ -20,7 +20,7 @@ func TestRunPersistsGateApproval(t *testing.T) {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 	})
-	out, err := h.driver(Options{GateApproval: GateCaller}).Run(context.Background(), "a feature")
+	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "a feature")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -28,8 +28,8 @@ func TestRunPersistsGateApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.GateApproval != domain.GateCaller {
-		t.Fatalf("persisted gate-approval = %q, want %q", f.GateApproval, domain.GateCaller)
+	if f.GateApproval != domain.GateOff {
+		t.Fatalf("persisted gate-approval = %q, want %q", f.GateApproval, domain.GateOff)
 	}
 }
 
@@ -39,7 +39,7 @@ func TestRunPersistsGateApproval(t *testing.T) {
 func TestResumeInheritsPersistedGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec)
-	f.GateApproval = domain.GateCaller
+	f.GateApproval = domain.GateOff
 	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestResumeInheritsPersistedGate(t *testing.T) {
 	if out.Status != StatusQuestion {
 		t.Fatalf("status = %q, want question (inherited caller gate); stream=%v", out.Status, h.eventKinds())
 	}
-	if d.opts.GateApproval != GateCaller || d.actor != "caller" {
+	if d.opts.GateApproval != GateOff || d.actor != "caller" {
 		t.Fatalf("driver gate = %q/actor %q, want caller/caller", d.opts.GateApproval, d.actor)
 	}
 }
@@ -65,13 +65,13 @@ func TestResumeInheritsPersistedGate(t *testing.T) {
 func TestResumeOverridesPersistedGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec)
-	f.GateApproval = domain.GateCaller
+	f.GateApproval = domain.GateOff
 	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
 
-	out, err := h.driver(Options{GateApproval: GateAuto, GateApprovalSet: true}).
+	out, err := h.driver(Options{GateApproval: GateGates, GateApprovalSet: true}).
 		Resume(context.Background(), f.ID, ResumeInput{})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
@@ -83,8 +83,8 @@ func TestResumeOverridesPersistedGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateAuto {
-		t.Fatalf("persisted gate-approval = %q, want %q (override re-persisted)", got.GateApproval, domain.GateAuto)
+	if got.GateApproval != domain.GateGates {
+		t.Fatalf("persisted gate-approval = %q, want %q (override re-persisted)", got.GateApproval, domain.GateGates)
 	}
 }
 

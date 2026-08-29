@@ -147,9 +147,9 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 }
 
 // toggleGateApproval flips the selected card's gate-approval mode.
-// Tightening (auto → caller) applies immediately: caller is the more
+// Tightening (gates → off) applies immediately: off is the more
 // conservative mode, so there is nothing here worth protecting the user
-// from. Loosening (caller, or empty which already reads as auto today —
+// from. Loosening (off, or empty which already reads as gates today —
 // but this toggle is what makes that explicit and permanent) goes through
 // confirmGateAuto first, because it is the one direction that removes a
 // human checkpoint the card would otherwise keep crossing unattended.
@@ -158,17 +158,17 @@ func (m *Shell) toggleGateApproval() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if r.F.GateApproval == domain.GateAuto {
-		return m.setGateApproval(r.F.ID, domain.GateCaller)
+	if r.F.GateApproval == domain.GateGates {
+		return m.setGateApproval(r.F.ID, domain.GateOff)
 	}
 	return m.confirmGateAuto(r.F)
 }
 
 // confirmGateAuto raises the confirm before setting a card's gate mode to
-// auto. Phrased like confirmDuplicate/the board's cleanup and delete
-// confirms: the question names the card, the detail spells out the
-// concrete consequence (design gates crossed without the user) rather
-// than restating the mode name.
+// gates (design gates auto-cross). Phrased like confirmDuplicate/the
+// board's cleanup and delete confirms: the question names the card, the
+// detail spells out the concrete consequence (design gates crossed
+// without the user) rather than restating the mode name.
 func (m *Shell) confirmGateAuto(f domain.Feature) tea.Cmd {
 	m.Overlay.Push(&confirmDialog{
 		id:           "confirm-gate-auto",
@@ -176,7 +176,7 @@ func (m *Shell) confirmGateAuto(f domain.Feature) tea.Cmd {
 		confirmLabel: "Auto-approve",
 		question:     "auto-approve " + string(f.ID) + "'s design gates?",
 		detail:       f.Title + " — its design gates will be crossed without you from here on, until this is switched back",
-		onConfirm:    func() tea.Cmd { return m.setGateApproval(f.ID, domain.GateAuto) },
+		onConfirm:    func() tea.Cmd { return m.setGateApproval(f.ID, domain.GateGates) },
 	})
 	return nil
 }

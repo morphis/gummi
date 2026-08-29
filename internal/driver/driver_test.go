@@ -651,7 +651,7 @@ func TestCallerGateApproveResume(t *testing.T) {
 			return toolVerdict(o.Model, "pass")
 		},
 	})
-	out, err := h.driver(Options{GateApproval: GateCaller}).Run(context.Background(), "feature")
+	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "feature")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 	})
-	out, err := h.driver(Options{GateApproval: GateCaller}).Run(context.Background(), "feature")
+	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "feature")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 	// bare resume: no decision. A short timeout makes a regression (turn-less
 	// await) fail fast instead of hanging the suite.
 	h.buf.Reset()
-	out2, err := h.driver(Options{GateApproval: GateCaller, StageTimeout: 2 * time.Second}).
+	out2, err := h.driver(Options{GateApproval: GateOff, StageTimeout: 2 * time.Second}).
 		Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
@@ -845,7 +845,7 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 				return msgIdle(o.Model, "Spec drafted.")
 			},
 		})
-		out, err := h.driver(Options{GateApproval: GateCaller}).Run(context.Background(), "feature")
+		out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "feature")
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -1160,7 +1160,7 @@ func TestCallerGatePreCheckDependency(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := h.driver(Options{GateApproval: GateCaller}).drive(context.Background(), f.ID)
+	out, err := h.driver(Options{GateApproval: GateOff}).drive(context.Background(), f.ID)
 	if err != nil {
 		t.Fatalf("drive: %v", err)
 	}

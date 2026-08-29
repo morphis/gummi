@@ -494,6 +494,14 @@ var migrations = []string{
 	`ALTER TABLE diff_annotations ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS diff_annotations_source_ref ON diff_annotations(feature_id, source_ref) WHERE source_ref != ''`,
 	`ALTER TABLE sessions ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`,
+	// gate_approval vocabulary rename: rewrite the old stored spellings to
+	// their new canonical form (domain.GateGates/domain.GateOff). Both
+	// UPDATEs are idempotent by construction (a row not matching the WHERE
+	// clause is left untouched, so re-running on an already-migrated or
+	// fresh DB is a no-op) and, unlike the ADD COLUMN statements above,
+	// never error — they just affect zero rows when there is nothing to do.
+	`UPDATE features SET gate_approval = 'gates' WHERE gate_approval = 'auto'`,
+	`UPDATE features SET gate_approval = 'off'   WHERE gate_approval = 'caller'`,
 }
 
 // Close releases the database.
@@ -668,7 +676,7 @@ func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.T
 // side-channel write — it neither touches updated_at nor moves the stage —
 // so `run` records the chosen mode at creation and a later `resume` that
 // re-passes --gate-approval can override it without a full-feature write.
-// An empty mode reads as domain.GateAuto.
+// An empty mode reads as domain.GateGates.
 func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode string) error {
 	if !domain.ValidGateApproval(mode) {
 		return fmt.Errorf("setting gate-approval for %s: unknown mode %q", id, mode)

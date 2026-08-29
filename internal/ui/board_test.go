@@ -167,10 +167,10 @@ func TestCardLineNeverShellsGH(t *testing.T) {
 func TestCardLineGateMarker(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
 	auto := row(1, "auto card", domain.StageTodo, "", false)
-	auto.F.GateApproval = domain.GateAuto
+	auto.F.GateApproval = domain.GateGates
 	empty := row(2, "empty card", domain.StageTodo, "", false)
 	caller := row(3, "caller card", domain.StageTodo, "", false)
-	caller.F.GateApproval = domain.GateCaller
+	caller.F.GateApproval = domain.GateOff
 
 	if !strings.Contains(m.cardLine(auto, 1, false, true, 80), "⚡") {
 		t.Error("explicit auto gate mode should show the ⚡ marker")

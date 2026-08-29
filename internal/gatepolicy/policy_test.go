@@ -97,7 +97,7 @@ func TestDecide(t *testing.T) {
 			name: "verify blocked at every gate mode",
 			in: Input{
 				Stage: domain.StageVerify, Kind: domain.KindFeature,
-				Verdict: verdict.Blocked, Gate: domain.GateCaller, WorkStage: workStage,
+				Verdict: verdict.Blocked, Gate: domain.GateOff, WorkStage: workStage,
 			},
 			want: Outcome{Action: Park, Stage: domain.StageVerify, Reason: "verify-blocked"},
 		},
@@ -176,7 +176,7 @@ func TestDecide(t *testing.T) {
 			name: "sandbox refusal parks under gate-auto",
 			in: Input{
 				Stage: domain.StageImplement, Kind: domain.KindFeature,
-				Halt: HaltSandboxRefusal, Gate: domain.GateAuto, WorkStage: workStage,
+				Halt: HaltSandboxRefusal, Gate: domain.GateGates, WorkStage: workStage,
 			},
 			want: Outcome{Action: Park, Stage: domain.StageImplement, Reason: "sandbox-refusal"},
 		},
@@ -184,7 +184,7 @@ func TestDecide(t *testing.T) {
 			name: "sandbox refusal parks under gate-caller too — at every gate mode",
 			in: Input{
 				Stage: domain.StageVerify, Kind: domain.KindFeature,
-				Verdict: verdict.Pass, Halt: HaltSandboxRefusal, Gate: domain.GateCaller, WorkStage: workStage,
+				Verdict: verdict.Pass, Halt: HaltSandboxRefusal, Gate: domain.GateOff, WorkStage: workStage,
 			},
 			want: Outcome{Action: Park, Stage: domain.StageVerify, Reason: "sandbox-refusal"},
 		},
