@@ -60,6 +60,28 @@ func captureStderr(t *testing.T, fn func()) string {
 	return string(b)
 }
 
+// resetRootHelpFlag clears cobra's --help value on the shared rootCmd.
+// Execute triggers InitDefaultHelpFlag, which adds "help" as a local
+// bool flag on rootCmd the first time it runs; pflag then only calls
+// Set() on flags actually present in the parsed argv, so a single
+// --help run leaves that flag's value true forever after on this
+// package-level rootCmd. Every later Execute call that doesn't repeat
+// --help still finds helpVal true and silently prints help instead of
+// acting on its own args — that's what broke TestCobraVersionFlag under
+// -shuffle=on when it ran after a --help test: cobra returned the help
+// text instead of the version stamp. Any test that runs rootCmd with
+// --help must reset this afterward (t.Cleanup, so it fires even if a
+// later assertion in the same test fails first) rather than relying on
+// test order to keep the pollution from mattering.
+func resetRootHelpFlag(t *testing.T) {
+	t.Helper()
+	if f := rootCmd.Flags().Lookup("help"); f != nil {
+		if err := f.Value.Set("false"); err != nil {
+			t.Fatalf("resetting rootCmd's help flag: %v", err)
+		}
+	}
+}
+
 // The `version` subcommand prints the same stamp as the old dispatch.
 func TestCobraVersion(t *testing.T) {
 	out := captureStdout(t, func() {
@@ -92,6 +114,7 @@ func TestCobraVersionFlag(t *testing.T) {
 
 // --help shows the hierarchical command list cobra derives from the tree.
 func TestCobraHelp(t *testing.T) {
+	t.Cleanup(func() { resetRootHelpFlag(t) })
 	out := captureStdout(t, func() {
 		rootCmd.SetArgs([]string{"--help"})
 		if err := rootCmd.Execute(); err != nil {

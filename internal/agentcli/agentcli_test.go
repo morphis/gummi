@@ -1,4 +1,4 @@
-package ui
+package agentcli
 
 import (
 	"os"
@@ -18,10 +18,10 @@ func writeFakeBin(t *testing.T, dir, name string) string {
 	return path
 }
 
-// TestDetectAgentCLIsRespectsPathAndBinOverrides proves detection uses a
-// fake PATH (never the real host's) and honors a *_BIN override even
-// when that override points outside PATH entirely.
-func TestDetectAgentCLIsRespectsPathAndBinOverrides(t *testing.T) {
+// TestDetectRespectsPathAndBinOverrides proves detection uses a fake
+// PATH (never the real host's) and honors a *_BIN override even when
+// that override points outside PATH entirely.
+func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 	fakePath := t.TempDir()
 	writeFakeBin(t, fakePath, "claude")
 	elsewhere := t.TempDir()
@@ -33,7 +33,7 @@ func TestDetectAgentCLIsRespectsPathAndBinOverrides(t *testing.T) {
 	t.Setenv("GUMMI_ZZ_BIN", "")
 
 	got := map[string]bool{}
-	for _, a := range detectAgentCLIs() {
+	for _, a := range Detect() {
 		got[a.Name] = a.Installed
 	}
 	if !got["claude"] {
@@ -49,14 +49,14 @@ func TestDetectAgentCLIsRespectsPathAndBinOverrides(t *testing.T) {
 	}
 }
 
-// TestDetectAgentCLIsKnownSet pins the known set's names, independent of
-// what happens to be installed — a regression here silently drops a
-// backend from the picker.
-func TestDetectAgentCLIsKnownSet(t *testing.T) {
+// TestDetectKnownSet pins the known set's names, independent of what
+// happens to be installed — a regression here silently drops a backend
+// from the picker.
+func TestDetectKnownSet(t *testing.T) {
 	want := map[string]bool{"copilot": true, "claude": true, "codex": true, "opencode": true, "zz": true}
-	agents := knownAgentCLIs()
+	agents := Known()
 	if len(agents) != len(want) {
-		t.Fatalf("knownAgentCLIs has %d entries, want %d", len(agents), len(want))
+		t.Fatalf("Known has %d entries, want %d", len(agents), len(want))
 	}
 	for _, a := range agents {
 		if !want[a.Name] {
@@ -76,19 +76,19 @@ func TestDetectAgentCLIsKnownSet(t *testing.T) {
 	}
 }
 
-// TestAgentCLIBinaryUnknownName proves an unrecognized name (a stale or
+// TestBinaryUnknownName proves an unrecognized name (a stale or
 // hand-typo'd config `agent:` value) is reported as not-ok rather than
 // silently resolving to some default binary.
-func TestAgentCLIBinaryUnknownName(t *testing.T) {
-	if _, ok := agentCLIBinary("not-a-real-backend"); ok {
+func TestBinaryUnknownName(t *testing.T) {
+	if _, ok := Binary("not-a-real-backend"); ok {
 		t.Error("unknown name should not resolve")
 	}
 	t.Setenv("GUMMI_CLAUDE_BIN", "")
-	if bin, ok := agentCLIBinary("claude"); !ok || bin != "claude" {
-		t.Errorf("agentCLIBinary(claude) = (%q, %v), want (claude, true)", bin, ok)
+	if bin, ok := Binary("claude"); !ok || bin != "claude" {
+		t.Errorf("Binary(claude) = (%q, %v), want (claude, true)", bin, ok)
 	}
 	t.Setenv("GUMMI_CLAUDE_BIN", "/opt/claude/bin/claude")
-	if bin, ok := agentCLIBinary("claude"); !ok || bin != "/opt/claude/bin/claude" {
-		t.Errorf("agentCLIBinary(claude) with override = (%q, %v), want override honored", bin, ok)
+	if bin, ok := Binary("claude"); !ok || bin != "/opt/claude/bin/claude" {
+		t.Errorf("Binary(claude) with override = (%q, %v), want override honored", bin, ok)
 	}
 }

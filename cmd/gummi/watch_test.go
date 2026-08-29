@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,7 +127,7 @@ func TestFollowLiveStreams(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	var b bytes.Buffer
+	var b syncBuf
 	done := make(chan error, 1)
 	go func() { done <- followLive(ctx, &b, path, false, false) }()
 
@@ -165,7 +166,7 @@ func TestFollowLiveJSON(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	var b bytes.Buffer
+	var b syncBuf
 	done := make(chan error, 1)
 	go func() { done <- followLive(ctx, &b, path, true, false) }()
 	deadline := time.After(3 * time.Second)
@@ -181,4 +182,26 @@ func TestFollowLiveJSON(t *testing.T) {
 	if !strings.Contains(b.String(), `"id":"FD-303"`) {
 		t.Errorf("the header record is not in the JSON stream:\n%s", b.String())
 	}
+}
+
+// syncBuf is a bytes.Buffer that survives being written by followLive on
+// its own goroutine while the test polls it. Reading a plain
+// bytes.Buffer across that boundary is a data race — invisible until a
+// C compiler made `go test -race` runnable here, then reported
+// immediately against both follow tests.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

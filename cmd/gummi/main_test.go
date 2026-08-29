@@ -101,6 +101,87 @@ func TestDefaultBackendCodex(t *testing.T) {
 	}
 }
 
+// writeFakeAgentBin drops an executable file named name into dir, so
+// agentcli.Detect's exec.LookPath finds it on a fake PATH without
+// needing the real CLI installed in this environment.
+func writeFakeAgentBin(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFallbackBackendNameNothingInstalled pins the bare-machine behavior
+// this fix must not disturb: no GUMMI_AGENT, no GUMMI_AGENT_CMD, nothing
+// on PATH — still "copilot", exactly as the old unconditional fallback
+// answered, so a machine with no coding-agent CLI at all sees no new
+// error path.
+func TestFallbackBackendNameNothingInstalled(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("PATH", t.TempDir())
+	if got := defaultBackendName(); got != "copilot" {
+		t.Fatalf("defaultBackendName() = %q, want copilot (nothing on PATH)", got)
+	}
+}
+
+// TestFallbackBackendNameOneInstalled proves the fallback now actually
+// looks at PATH instead of answering copilot unconditionally: the fixed
+// bug was exactly that a resolved-but-absent "copilot" broke every path
+// on a machine that had some other CLI instead.
+func TestFallbackBackendNameOneInstalled(t *testing.T) {
+	clearDoctorEnv(t)
+	fake := t.TempDir()
+	writeFakeAgentBin(t, fake, "claude")
+	t.Setenv("PATH", fake)
+	if got := defaultBackendName(); got != "claude" {
+		t.Fatalf("defaultBackendName() = %q, want claude (the only installed CLI)", got)
+	}
+}
+
+// TestFallbackBackendNamePrefersDocumentedOrder proves several installed
+// CLIs resolve through the fixed order documented on
+// fallbackBackendName (copilot, claude, codex, opencode, zz) rather than
+// Go's randomized map iteration, which would make the answer differ
+// from run to run for the exact same machine.
+func TestFallbackBackendNamePrefersDocumentedOrder(t *testing.T) {
+	clearDoctorEnv(t)
+	fake := t.TempDir()
+	t.Setenv("PATH", fake)
+
+	writeFakeAgentBin(t, fake, "zz")
+	writeFakeAgentBin(t, fake, "opencode")
+	writeFakeAgentBin(t, fake, "codex")
+	if got := defaultBackendName(); got != "codex" {
+		t.Fatalf("defaultBackendName() = %q, want codex (first of codex/opencode/zz in the documented order)", got)
+	}
+
+	writeFakeAgentBin(t, fake, "claude")
+	if got := defaultBackendName(); got != "claude" {
+		t.Fatalf("defaultBackendName() = %q, want claude (ahead of codex/opencode/zz once it's installed too)", got)
+	}
+
+	writeFakeAgentBin(t, fake, "copilot")
+	if got := defaultBackendName(); got != "copilot" {
+		t.Fatalf("defaultBackendName() = %q, want copilot (leads the order once it's installed too)", got)
+	}
+}
+
+// TestFallbackBackendNameGummiAgentWinsRegardlessOfPath proves the
+// explicit GUMMI_AGENT rung is untouched by this fix: it wins outright
+// even when the name it picks isn't on PATH at all, and even when other
+// CLIs are.
+func TestFallbackBackendNameGummiAgentWinsRegardlessOfPath(t *testing.T) {
+	clearDoctorEnv(t)
+	fake := t.TempDir()
+	writeFakeAgentBin(t, fake, "copilot")
+	writeFakeAgentBin(t, fake, "codex")
+	t.Setenv("PATH", fake)
+	t.Setenv("GUMMI_AGENT", "opencode")
+	if got := defaultBackendName(); got != "opencode" {
+		t.Fatalf("defaultBackendName() = %q, want opencode (GUMMI_AGENT wins even though it's not the installed/leading CLI)", got)
+	}
+}
+
 func TestRequiredBackendsSkipsUnneededDefault(t *testing.T) {
 	// BG-001: when every role in every profile names an explicit
 	// non-default backend, the default backend (here "copilot", what an
@@ -171,14 +252,24 @@ func TestRequiredBackendsSkipsUnneededDefault(t *testing.T) {
 }
 
 // TestBuildAgentsSkipsUnstartableDefault exercises the bug at its call
-// site: with GUMMI_AGENT unset the default backend is copilot, which is
-// often not installed. When every profile role names a usable non-default
-// backend, buildAgents must start only those backends and must not abort
-// on the missing default. opencode is pointed at the test binary via
+// site: with GUMMI_AGENT unset the default backend falls back to
+// whatever's on PATH (copilot when nothing is), which is often not
+// installed. When every profile role names a usable non-default backend,
+// buildAgents must start only those backends and must not abort on the
+// missing default. opencode is pointed at the test binary via
 // GUMMI_OPENCODE_BIN so it starts without any external CLI, keeping the
 // case hermetic; it intentionally stays a different name than the
 // "copilot" default. Before the fix this failed — buildAgents tried to
 // start copilot first and returned its error.
+//
+// PATH is pinned to an empty directory for the precondition check: this
+// container has claude/codex/opencode on the real PATH (dev tooling),
+// and fallbackBackendName now looks at PATH, so leaving it alone would
+// make the precondition assert "claude" here instead of "copilot" and
+// the test would be asserting on the host's toolchain rather than the
+// behavior under test. GUMMI_OPENCODE_BIN is set only after that check,
+// since agentcli.Detect also honors it and setting it earlier would make
+// opencode "installed" and win the precondition race instead of copilot.
 func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
 	bin, err := os.Executable()
 	if err != nil {
@@ -186,7 +277,7 @@ func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
 	}
 	t.Setenv("GUMMI_AGENT", "")
 	t.Setenv("GUMMI_AGENT_CMD", "")
-	t.Setenv("GUMMI_OPENCODE_BIN", bin)
+	t.Setenv("PATH", t.TempDir())
 	profiles := config.Profiles{
 		Default: "test",
 		Profiles: map[string]config.Profile{
@@ -201,6 +292,7 @@ func TestBuildAgentsSkipsUnstartableDefault(t *testing.T) {
 	if got := defaultBackendName(); got != "copilot" {
 		t.Fatalf("precondition: default backend = %q, want copilot", got)
 	}
+	t.Setenv("GUMMI_OPENCODE_BIN", bin)
 	agents, err := buildAgents(profiles)
 	if err != nil {
 		t.Fatalf("buildAgents failed when only the (absent) default backend was skipped: %v", err)

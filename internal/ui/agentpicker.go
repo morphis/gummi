@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -23,12 +24,12 @@ const agentChooseCommandLabel = "Choose the agent tab's CLI"
 // named options), and a returning user should feel no difference in how
 // it drives.
 type agentPickerDialog struct {
-	agents   []AgentCLI // detectAgentCLIs' result, in its fixed display order
+	agents   []agentcli.AgentCLI // agentcli.Detect's result, in its fixed display order
 	idx      int
 	onSubmit func(name string) tea.Cmd
 }
 
-// newAgentPickerDialog builds the picker over agents (detectAgentCLIs'
+// newAgentPickerDialog builds the picker over agents (agentcli.Detect's
 // result). It preselects current (the configured `agent:` value) when it
 // names one of the candidates; otherwise it preselects the first
 // installed candidate. That means a workspace with exactly one CLI
@@ -36,7 +37,7 @@ type agentPickerDialog struct {
 // (never auto-applied without asking — the user may have a reason to
 // pick something else), and a workspace with nothing installed opens on
 // index 0 rather than an undefined cursor.
-func newAgentPickerDialog(agents []AgentCLI, current string, onSubmit func(string) tea.Cmd) *agentPickerDialog {
+func newAgentPickerDialog(agents []agentcli.AgentCLI, current string, onSubmit func(string) tea.Cmd) *agentPickerDialog {
 	idx := 0
 	for i, a := range agents {
 		if a.Name == current {
@@ -91,7 +92,7 @@ func (d *agentPickerDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString(s.Faint.Render("this only picks the agent tab's hosted CLI — the engine's own") + "\n")
 	b.WriteString(s.Faint.Render("per-role backend routing (profiles.yaml) is untouched") + "\n\n")
 	if len(d.agents) == 0 {
-		// unreachable with the real knownAgentCLIs() (always five fixed
+		// unreachable with the real agentcli.Known() (always five fixed
 		// entries), but a test double or a future edit could still pass
 		// an empty slice, and an empty dialog with no way to say so would
 		// be worse than this one line.
@@ -101,7 +102,7 @@ func (d *agentPickerDialog) View(s *theme.Styles, w, h int) string {
 	}
 	if !anyInstalled(d.agents) {
 		// The known set is fixed and always listed in full (see
-		// knownAgentCLIs) — "none detected" means every row says so, not
+		// agentcli.Known), "none detected" means every row says so, not
 		// an empty list, so there is always something to pick, install
 		// later, or fix a PATH/*_BIN override for.
 		b.WriteString(s.Warning.Render("none of these were found on PATH") + "\n")
@@ -119,7 +120,7 @@ func (d *agentPickerDialog) View(s *theme.Styles, w, h int) string {
 }
 
 // anyInstalled reports whether at least one candidate resolved on PATH.
-func anyInstalled(agents []AgentCLI) bool {
+func anyInstalled(agents []agentcli.AgentCLI) bool {
 	for _, a := range agents {
 		if a.Installed {
 			return true
@@ -131,7 +132,7 @@ func anyInstalled(agents []AgentCLI) bool {
 // agentPickerOptions renders the candidate row, marking each with a
 // checkmark (installed) or a dimmed "not found" so it is clear at a
 // glance which choices actually work right now.
-func agentPickerOptions(s *theme.Styles, agents []AgentCLI, idx int) string {
+func agentPickerOptions(s *theme.Styles, agents []agentcli.AgentCLI, idx int) string {
 	parts := make([]string, len(agents))
 	for i, a := range agents {
 		label := a.Name
@@ -149,20 +150,20 @@ func agentPickerOptions(s *theme.Styles, agents []AgentCLI, idx int) string {
 	return strings.Join(parts, "   ")
 }
 
-// agentPickerLoadedMsg carries detectAgentCLIs' result into Update. The
-// probe itself (agentdetect.go) runs inside the command this backs
+// agentPickerLoadedMsg carries agentcli.Detect's result into Update. The
+// probe itself (internal/agentcli) runs inside the command this backs
 // (openAgentPickerCmd), never in Update or a dialog constructor — the
 // same "IO only in commands" discipline every other surface in this
 // package follows, even though the probe is fast enough it wouldn't be
 // noticed either way.
-type agentPickerLoadedMsg struct{ agents []AgentCLI }
+type agentPickerLoadedMsg struct{ agents []agentcli.AgentCLI }
 
 // openAgentPickerCmd builds the command that detects installed CLIs and
 // delivers them for the picker. It backs the space menu's agent-cli entry
 // (boardactions.go), which calls it unconditionally so reopening the
 // dialog later always works regardless of what's already chosen.
 func (m *Shell) openAgentPickerCmd() tea.Cmd {
-	return func() tea.Msg { return agentPickerLoadedMsg{agents: detectAgentCLIs()} }
+	return func() tea.Msg { return agentPickerLoadedMsg{agents: agentcli.Detect()} }
 }
 
 // MaybeShowAgentPicker opens the agent-tab CLI picker up front when
@@ -187,7 +188,7 @@ func (m *Shell) MaybeShowAgentPicker() {
 	if !m.attached() || m.agentConfigured() {
 		return
 	}
-	m.Overlay.Push(newAgentPickerDialog(detectAgentCLIs(), m.agentConfigName, m.chooseAgentCLI))
+	m.Overlay.Push(newAgentPickerDialog(agentcli.Detect(), m.agentConfigName, m.chooseAgentCLI))
 }
 
 // agentChosenMsg carries the outcome of persisting a picker choice. name

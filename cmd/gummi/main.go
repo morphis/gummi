@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -354,8 +355,12 @@ func configuredAgentCLI(ws state.Workspace) string {
 }
 
 // defaultBackendName returns the backend name selected by GUMMI_AGENT
-// (or "copilot" when unset). For back-compat, GUMMI_AGENT_CMD without
-// GUMMI_AGENT selects headless.
+// (or fallbackBackendName's answer when unset). For back-compat,
+// GUMMI_AGENT_CMD without GUMMI_AGENT selects headless. These explicit
+// rungs are unconditional — set GUMMI_AGENT=claude and that's the
+// answer whether or not claude is actually installed, exactly as
+// before; only the last-resort fallback below is allowed to look at
+// what's on PATH.
 func defaultBackendName() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUMMI_AGENT"))) {
 	case "claude":
@@ -371,6 +376,32 @@ func defaultBackendName() string {
 	}
 	if strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")) != "" {
 		return "headless"
+	}
+	return fallbackBackendName()
+}
+
+// fallbackBackendName is defaultBackendName's last rung: nothing named
+// in GUMMI_AGENT, no GUMMI_AGENT_CMD either. It used to return "copilot"
+// unconditionally — not "copilot if present", just copilot — so a
+// machine without it installed had every path silently resolve to a
+// missing binary, discovered only when startAdapter tried to run it.
+// internal/agentcli's picker made that failure mode visible for the
+// hosted agent tab; this closes the same hole for the engine's own
+// backend selection by picking something that actually exists.
+//
+// The preference order among several installed CLIs comes from
+// agentcli.Known()/Detect(), not map iteration (which Go randomizes per
+// run and would make the choice differ between two otherwise identical
+// invocations): copilot first, so a machine that has it keeps behaving
+// exactly as every prior release did, then claude, codex, opencode, zz
+// in agentcli's own declaration order. copilot remains the answer when
+// nothing at all is detected — a bare machine's behavior, and the error
+// path startAdapter("copilot") takes from there, are both unchanged.
+func fallbackBackendName() string {
+	for _, a := range agentcli.Detect() {
+		if a.Installed {
+			return a.Name
+		}
 	}
 	return "copilot"
 }

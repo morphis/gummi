@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+
+	"github.com/morphis/gummi/internal/agentcli"
 )
 
 // agenttab.go is the Shell's half of the agent tab: it decides when to
@@ -130,7 +132,7 @@ func (m *Shell) resolveAgentAttach() (argv []string, dir string, problem string)
 	case strings.TrimSpace(os.Getenv("GUMMI_AGENT")) != "":
 		cmdline = strings.TrimSpace(defaultAttachCommand())
 	case m.agentConfigName != "":
-		if bin, ok := agentCLIBinary(m.agentConfigName); ok {
+		if bin, ok := agentcli.Binary(m.agentConfigName); ok {
 			cmdline = bin
 		}
 	}

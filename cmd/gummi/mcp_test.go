@@ -27,6 +27,7 @@ func TestMCPHiddenRegistration(t *testing.T) {
 
 // gummi --help does not list __mcp…
 func TestMCPHiddenFromParentHelp(t *testing.T) {
+	t.Cleanup(func() { resetRootHelpFlag(t) })
 	out := captureStdout(t, func() {
 		rootCmd.SetArgs([]string{"--help"})
 		if err := rootCmd.Execute(); err != nil {

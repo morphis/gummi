@@ -1,17 +1,18 @@
 package ui
 
 import (
+	"github.com/morphis/gummi/internal/agentcli"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 )
 
-// fixedAgentSet is a deterministic stand-in for detectAgentCLIs' result:
+// fixedAgentSet is a deterministic stand-in for agentcli.Detect's result:
 // tests must not depend on what happens to be installed on the machine
 // running them.
-func fixedAgentSet() []AgentCLI {
-	return []AgentCLI{
+func fixedAgentSet() []agentcli.AgentCLI {
+	return []agentcli.AgentCLI{
 		{Name: "copilot", Bin: "copilot", Installed: true},
 		{Name: "claude", Bin: "claude", Installed: false},
 		{Name: "codex", Bin: "codex", Installed: false},
@@ -21,7 +22,7 @@ func fixedAgentSet() []AgentCLI {
 }
 
 func TestAgentPickerPreselectsInstalledWhenNoneConfigured(t *testing.T) {
-	agents := []AgentCLI{
+	agents := []agentcli.AgentCLI{
 		{Name: "copilot", Bin: "copilot", Installed: false},
 		{Name: "claude", Bin: "claude", Installed: true},
 		{Name: "codex", Bin: "codex", Installed: false},
@@ -91,7 +92,7 @@ func TestAgentPickerDialogGolden(t *testing.T) {
 // requirement: every known CLI still gets listed even when none of them
 // are on PATH, plus a banner explaining why they're all marked that way.
 func TestAgentPickerDialogNoneInstalledGolden(t *testing.T) {
-	agents := []AgentCLI{
+	agents := []agentcli.AgentCLI{
 		{Name: "copilot", Bin: "copilot", Installed: false},
 		{Name: "claude", Bin: "claude", Installed: false},
 		{Name: "codex", Bin: "codex", Installed: false},
