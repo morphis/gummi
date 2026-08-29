@@ -152,8 +152,9 @@ func (a *agentView) pumpOutput() {
 
 // pumpInput drains the emulator's input pipe — the bytes SendKey, Paste,
 // and SendText encode — into the pty master, so a keystroke fed to the
-// emulator actually reaches the child. It ends when a.emu.Close (called
-// from Close) closes that pipe with io.EOF.
+// emulator actually reaches the child. It is parked rather than stopped
+// at teardown — see Close for why the emulator is deliberately not
+// closed, and why leaving this goroutine blocked is the lesser evil.
 func (a *agentView) pumpInput() {
 	_, _ = io.Copy(a.ptmx, a.emu)
 }
@@ -279,7 +280,21 @@ func (a *agentView) Close() error {
 			_ = a.cmd.Process.Kill() // best-effort: a race with natural exit just errors here, harmlessly
 		}
 		_ = a.ptmx.Close()
-		a.emu.Close() // unblocks pumpInput, whose io.Copy is otherwise reading forever
+		// Deliberately NOT a.emu.Close(). x/vt's SafeEmulator guards
+		// Write, Draw and Resize with its mutex but leaves Close and
+		// Read unguarded, and both touch Emulator.closed — so closing
+		// the emulator while pumpInput sits in its Read is a data
+		// race, which `go test -race` reports against emulator.go's
+		// Close and Read. Closing it is also the only way to make that
+		// Read return, so the choice is between a real race and
+		// parking one goroutine.
+		//
+		// We park it. pumpInput is left blocked on an io.Pipe read that
+		// will never be satisfied: it holds no lock, burns no CPU, and
+		// dies with the process. A shell hosts one agent at a time, so
+		// this is bounded by hosted sessions rather than by anything
+		// that grows. If x/vt ever guards Close, this goes back to
+		// being a plain a.emu.Close().
 	}
 	<-a.doneCh // pumpOutput's cmd.Wait() is the actual reap; wait for it to finish (idempotent: already closed if a second caller races in)
 

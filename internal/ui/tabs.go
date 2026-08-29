@@ -129,7 +129,20 @@ func (m *Shell) tabBarView(w int) string {
 		segs = append(segs, seg)
 	}
 	sep := s.Separator.Render(" │ ")
-	return ansi.Truncate(strings.Join(segs, sep), w, "…")
+	bar := strings.Join(segs, sep)
+
+	// Right-align the navigation hint in the tab bar's own free space.
+	// It cannot live in the status bar's hint row: that row is already
+	// full at 120 columns, and it is the wrong place anyway — how to
+	// reach a tab belongs beside the tabs. Without it there is nothing
+	// on screen that names alt+3, and the agent tab is unreachable by
+	// guesswork, since `tab` deliberately does not cycle onto it.
+	hint := s.Muted.Render("tab") + s.Faint.Render(" switch · ") +
+		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
+	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
+		bar += strings.Repeat(" ", pad) + hint
+	}
+	return ansi.Truncate(bar, w, "…")
 }
 
 // centeredNotice places an already-styled message in the middle of a

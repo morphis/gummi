@@ -48,10 +48,14 @@ func hostedShell(t *testing.T, script string) *Shell {
 // one, because CI reports it as a timeout with no message.
 func waitForAgentCell(t *testing.T, m *Shell, want string) {
 	t.Helper()
+	// Capture the view once: the pump goroutine outlives the test body,
+	// and t.Cleanup's closeAgent sets m.agent to nil — reading the field
+	// from in here would race with that (caught by -race, not by eye).
+	av := m.agent
 	pump := make(chan tea.Msg, 1)
 	go func() {
 		for {
-			msg := m.agent.Wait()()
+			msg := av.Wait()()
 			pump <- msg
 			if _, done := msg.(agentExitedMsg); done {
 				return
