@@ -85,6 +85,66 @@ func TestLoadRejectsBadSandbox(t *testing.T) {
 	}
 }
 
+func TestLoadAutopilotLanes(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("autopilot_lanes: 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AutopilotLanes != 3 {
+		t.Errorf("autopilot_lanes = %d, want 3", c.AutopilotLanes)
+	}
+}
+
+func TestLoadRejectsNegativeAutopilotLanes(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("autopilot_lanes: -1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("negative autopilot_lanes should error at load")
+	}
+}
+
+func TestLoadLayeredAutopilotLanesPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	userPath := filepath.Join(dir, "user.yaml")
+	if err := os.WriteFile(userPath, []byte("autopilot_lanes: 4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wsPath := filepath.Join(dir, "ws.yaml")
+	if err := os.WriteFile(wsPath, []byte("autopilot_lanes: 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, sources, err := LoadLayered(userPath, wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.AutopilotLanes != 3 {
+		t.Errorf("autopilot_lanes = %d, want 3 (workspace wins)", merged.AutopilotLanes)
+	}
+	if sources["autopilot_lanes"] != wsPath {
+		t.Errorf("autopilot_lanes source = %q, want %q", sources["autopilot_lanes"], wsPath)
+	}
+
+	// with no workspace value, the user-level one is used
+	if err := os.WriteFile(wsPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, sources, err = LoadLayered(userPath, wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.AutopilotLanes != 4 || sources["autopilot_lanes"] != userPath {
+		t.Errorf("autopilot_lanes = %d source %q, want 4 from %q", merged.AutopilotLanes, sources["autopilot_lanes"], userPath)
+	}
+}
+
 func TestLoadRepo(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.yaml")
@@ -291,7 +351,7 @@ func TestLoadLayeredDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"permissions", "sandbox", "repo", "repos", "instructions"} {
+	for _, key := range []string{"permissions", "sandbox", "autopilot_lanes", "repo", "repos", "instructions"} {
 		if sources[key] != "default" {
 			t.Errorf("%s source = %q, want default", key, sources[key])
 		}

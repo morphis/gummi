@@ -250,6 +250,9 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	perm := agent.PermissionAllowAll
 	var sandboxMode string
 	var instructions []string
+	// autopilotLanesCfg is the configured autopilot_lanes value (0 = unset,
+	// resolved to the built-in default of 2 below).
+	var autopilotLanesCfg int
 	userPath, err := config.UserConfigPath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
@@ -267,6 +270,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		}
 		sandboxMode = cfg.Sandbox
 		instructions = cfg.Instructions
+		autopilotLanesCfg = cfg.AutopilotLanes
 	}
 	// Adapter selection: GUMMI_AGENT picks the default backend, and any
 	// distinct `backend:` referenced across the loaded profiles is
@@ -281,14 +285,19 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		return nil, nil, nil, nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
-	// No cap by default: driving five cards at once is the operator's
-	// call. GUMMI_MAX_ACTIVE re-imposes one (a value < 1 means uncapped).
-	maxActive := 0
+	// Two independent attention pools (internal/engine): attended (a card
+	// whose gate-approval mode is off — a human is expected to stay with
+	// it) defaults to one lane so it never queues behind autopilot work;
+	// autopilot (every other card, including the everyday default)
+	// defaults to two. GUMMI_MAX_ACTIVE overrides only the attended pool's
+	// size; autopilot_lanes in config.yaml overrides the autopilot pool's.
+	maxActive := 1
 	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxActive = n
 		}
 	}
+	autopilotLanes := cmp.Or(autopilotLanesCfg, 2)
 	var stageBudget float64
 	if v := os.Getenv("GUMMI_STAGE_BUDGET"); v != "" {
 		if b, err := strconv.ParseFloat(v, 64); err == nil && b > 0 {
@@ -305,7 +314,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	}
 	eng := engine.New(engine.Config{
 		Agents: agents, Store: store, Pool: pool, Workspace: ws,
-		Model: model, MaxActive: maxActive, Persist: true,
+		Model: model, MaxActive: maxActive, AutopilotLanes: autopilotLanes, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
 	})

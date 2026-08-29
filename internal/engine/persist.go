@@ -257,8 +257,8 @@ func (e *Engine) Restore(ctx context.Context) error {
 			// a paused/done session freed its slot on the way out; release
 			// defensively so a replaced holder can never leak the count
 			// (Restore runs under e.mu, so freeSlot's own lock is out).
-			if old.releaseSlot() && e.running > 0 {
-				e.running--
+			if held, p := old.releaseSlot(); held && e.lanes[p].running > 0 {
+				e.lanes[p].running--
 			}
 		}
 		e.live[snap.Feature] = s

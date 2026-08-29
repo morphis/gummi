@@ -25,6 +25,16 @@ type Config struct {
 	// or "off". Empty means unset — profiles that omit their own value fall
 	// back to the built-in "warn".
 	Sandbox string `yaml:"sandbox"`
+	// AutopilotLanes caps how many autopilot-pool cards — every card whose
+	// gate-approval mode is domain.GateGates or domain.GateFull, which
+	// includes the empty default — can drive at once (internal/engine's
+	// autopilot pool). 0 or unset means the built-in default of 2; a
+	// negative value is rejected by Load. The ATTENDED pool (a card whose
+	// mode is domain.GateOff) is sized separately: it defaults to 1 and is
+	// overridden by GUMMI_MAX_ACTIVE, not by this key — a human is expected
+	// to stay with an attended card, so it must never queue behind
+	// autopilot work.
+	AutopilotLanes int `yaml:"autopilot_lanes"`
 	// Repo is the git repository root gummi manages, when it is not the
 	// workspace root. Empty = the workspace root (the sibling layout, where
 	// .gummi and .git share a directory). A nested repo is named relative
@@ -116,6 +126,9 @@ func Load(path string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s: sandbox must be \"enforce\", \"warn\", or \"off\", got %q", path, c.Sandbox)
 	}
+	if c.AutopilotLanes < 0 {
+		return Config{}, fmt.Errorf("%s: autopilot_lanes must be >= 0, got %d", path, c.AutopilotLanes)
+	}
 	for name, p := range c.Env {
 		if name == "" {
 			return Config{}, fmt.Errorf("%s: env: entry has an empty name", path)
@@ -186,10 +199,11 @@ func UserConfigPath() (string, error) {
 // LoadLayered loads the user-level and workspace config files and returns a
 // merged Config plus a source map describing which file supplied each value.
 // A missing user config is treated as an empty Config. The returned map has
-// one entry per top-level field: "permissions", "sandbox", "agent", "repo",
-// "repos", "instructions", and "env.<name>" for each distinct env key. Scalar fields
-// that are unset in both files use the literal "default". Instructions list
-// both contributing paths when both files supply entries.
+// one entry per top-level field: "permissions", "sandbox", "autopilot_lanes",
+// "agent", "repo", "repos", "instructions", and "env.<name>" for each
+// distinct env key. Scalar fields that are unset in both files use the
+// literal "default". Instructions list both contributing paths when both
+// files supply entries.
 func LoadLayered(userPath, workspacePath string) (Config, map[string]string, error) {
 	user, err := Load(userPath)
 	if err != nil {
@@ -238,6 +252,16 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["sandbox"] = userPath
 	} else {
 		sources["sandbox"] = "default"
+	}
+
+	if ws.AutopilotLanes != 0 {
+		merged.AutopilotLanes = ws.AutopilotLanes
+		sources["autopilot_lanes"] = workspacePath
+	} else if user.AutopilotLanes != 0 {
+		merged.AutopilotLanes = user.AutopilotLanes
+		sources["autopilot_lanes"] = userPath
+	} else {
+		sources["autopilot_lanes"] = "default"
 	}
 
 	if ws.Agent != "" {
@@ -429,6 +453,14 @@ permissions: allow-all
 # for bootstrap/test sessions that legitimately touch main). Profiles may
 # override this per-profile in .gummi/profiles.yaml.
 # sandbox: warn
+
+# autopilot_lanes: how many autopilot cards (gate-approval mode gates or
+# full, which includes the everyday default) can drive at once. Default 2.
+# The attended pool (gate-approval mode off — a human is expected to stay
+# with the card) is sized separately, defaulting to 1 and overridden by
+# GUMMI_MAX_ACTIVE, not this key: an attended card must never queue behind
+# autopilot work.
+# autopilot_lanes: 2
 
 # instructions: — a list of absolute paths to extra instruction files that
 # are appended to the workspace environment card, in user-then-workspace

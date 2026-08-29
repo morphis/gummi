@@ -164,6 +164,12 @@ type Session struct {
 	// refuse mutating client tools (spec_replace_section, spec_annotate)
 	// even when a hand-crafted MCP call names them.
 	ReadOnly bool
+	// pool is the attention pool (attended/autopilot) this session
+	// competes in — decided once by lanePoolFor at construction from the
+	// feature's gate-approval mode, and immutable after. It is what lets
+	// freeSlot return a slot to the same pool the session took it from
+	// (see heldSlot and releaseSlot).
+	pool lanePool
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
@@ -393,22 +399,24 @@ func (s *Session) finishRunning() bool {
 	return true
 }
 
-// takeSlot marks that this session holds an attention slot.
+// takeSlot marks that this session holds an attention slot in its pool.
 func (s *Session) takeSlot() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.heldSlot = true
 }
 
-// releaseSlot clears the slot flag, returning whether it was held (so
-// the engine decrements the running count exactly once, and never for a
-// session — queued or interactive — that never took a slot).
-func (s *Session) releaseSlot() bool {
+// releaseSlot clears the slot flag, reporting whether it was held (so the
+// engine decrements the running count exactly once, and never for a
+// session — queued or interactive — that never took a slot) and which
+// pool it was held in, so the engine returns the slot to that same pool
+// and never the other one. pool is meaningful only when held is true.
+func (s *Session) releaseSlot() (held bool, pool lanePool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	held := s.heldSlot
+	held = s.heldSlot
 	s.heldSlot = false
-	return held
+	return held, s.pool
 }
 
 func (s *Session) appendUser(text string) {

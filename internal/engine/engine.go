@@ -4,12 +4,15 @@
 //
 // Interactive sessions (brainstorm/spec chat) run whenever you attach
 // and hold no slot — you are the scarce resource. Autonomous sessions
-// (plan/implement/review/verify) start as soon as they are run: how many
-// cards to drive at once is the operator's call, not the engine's, so
-// max_active is unlimited by default. Setting it to a positive number
-// re-imposes a cap for anyone who wants one — excess runs then queue and
-// start automatically as slots free (a session freeing its slot on
-// pause, or on going idle when its turn completes).
+// (plan/implement/review/verify) compete for one of two independent
+// attention pools: attended (a card whose gate-approval mode is
+// domain.GateOff — a human is expected to stay with it) and autopilot
+// (everything else, including the empty default). Each pool has its own
+// cap and its own FIFO queue, so a slot freed in one pool is never handed
+// to a session waiting in the other — an attended card never queues
+// behind autopilot work. Excess runs queue and start automatically as
+// slots free (a session freeing its slot on pause, or on going idle when
+// its turn completes). A pool's cap of 0 means uncapped.
 package engine
 
 import (
@@ -164,11 +167,22 @@ type Config struct {
 	// taken from .gummi/config.yaml. Empty means a profile that also omits
 	// a value falls back to the built-in default (warn).
 	Sandbox string
-	// MaxActive caps concurrent autonomous slots. Zero or negative — the
-	// default — means no cap: every run started begins immediately, and
-	// parallel token burn is the operator's choice. A positive value
-	// queues runs beyond it.
+	// MaxActive caps concurrent autonomous slots in the ATTENDED pool — a
+	// card whose gate-approval mode is domain.GateOff. Zero or
+	// negative — the default — means no cap: every attended run started
+	// begins immediately. cmd/gummi's own default for this field is 1;
+	// GUMMI_MAX_ACTIVE overrides it from there. A positive value queues
+	// attended runs beyond it.
 	MaxActive int
+	// AutopilotLanes caps concurrent autonomous slots in the AUTOPILOT
+	// pool — every card whose gate-approval mode is domain.GateGates or
+	// domain.GateFull, which includes the empty default (see
+	// domain.Feature.GateApproval). Zero or negative means no cap, the
+	// same "unlimited" semantics MaxActive has always had — kept
+	// available here for tests and any caller that wants both pools
+	// uncapped. internal/config.Config's autopilot_lanes key supplies
+	// cmd/gummi's real default (2).
+	AutopilotLanes int
 	// Persist writes session transcripts to Store so they survive a
 	// restart (Restore reloads them).
 	Persist bool
@@ -191,11 +205,44 @@ type Config struct {
 	Instructions []string
 }
 
+// lanePool identifies which of the two attention pools an autonomous
+// session competes in. See lanePoolFor.
+type lanePool int
+
+const (
+	poolAttended lanePool = iota
+	poolAutopilot
+	numLanePools
+)
+
+// laneState is one pool's scheduling bookkeeping: its cap (0 =
+// uncapped), how many sessions currently hold a slot, and the FIFO of
+// features waiting for one. Each pool schedules from its own queue —
+// see Engine.schedule — so a slot freed in one pool is never handed to a
+// session waiting in the other.
+type laneState struct {
+	max     int
+	running int
+	queue   []domain.FeatureID // autonomous features awaiting this pool's slot, FIFO
+}
+
+// lanePoolFor decides which attention pool an autonomous session for f
+// competes in. GateOff is the only mode that reads as attended: a human
+// is expected to stay with that card, so it must never queue behind
+// unattended work. Everything else — GateGates, GateFull, and the empty
+// default (domain.Feature.GateApproval documents empty as reading like
+// GateGates) — runs unattended and belongs in the autopilot pool.
+func lanePoolFor(f domain.Feature) lanePool {
+	if f.GateApproval == domain.GateOff {
+		return poolAttended
+	}
+	return poolAutopilot
+}
+
 // Engine orchestrates all live sessions and the autonomous run queue.
 type Engine struct {
-	cfg       Config
-	maxActive int
-	now       func() time.Time // injectable clock (spec-capture timestamps)
+	cfg Config
+	now func() time.Time // injectable clock (spec-capture timestamps)
 
 	// raw carries events from pump goroutines to the forwarder; events
 	// is the UI-facing stream, owned solely by the forwarder.
@@ -203,11 +250,10 @@ type Engine struct {
 	events  chan Event
 	stopped chan struct{}
 
-	mu      sync.Mutex
-	live    map[domain.FeatureID]*Session
-	queue   []domain.FeatureID // autonomous features awaiting a slot, FIFO
-	running int                // autonomous sessions currently holding slots
-	closed  bool
+	mu     sync.Mutex
+	live   map[domain.FeatureID]*Session
+	lanes  [numLanePools]laneState // per-pool cap/running/queue — see laneState
+	closed bool
 
 	// wg tracks the pump and kickoff goroutines so Close can join them
 	// before returning: a barrier for any filesystem touch (git subprocess
@@ -258,11 +304,9 @@ func New(cfg Config) *Engine {
 		cfg.Permission = agent.PermissionAllowAll
 	}
 	// 0 = uncapped; a negative value is normalized to it so every
-	// "no cap configured" spelling behaves the same.
-	max := cfg.MaxActive
-	if max < 0 {
-		max = 0
-	}
+	// "no cap configured" spelling behaves the same, in either pool.
+	attendedMax := normalizeCap(cfg.MaxActive)
+	autopilotMax := normalizeCap(cfg.AutopilotLanes)
 	pool := cfg.Pool
 	if pool == nil && cfg.Worktrees != nil {
 		pool = worktree.WrapSingle(cfg.Worktrees)
@@ -283,7 +327,6 @@ func New(cfg Config) *Engine {
 	}
 	e := &Engine{
 		cfg:          cfg,
-		maxActive:    max,
 		now:          time.Now,
 		raw:          make(chan Event, 256),
 		events:       make(chan Event),
@@ -292,6 +335,8 @@ func New(cfg Config) *Engine {
 		pool:         pool,
 		dirtyPathsFn: dirtyPathsFn,
 	}
+	e.lanes[poolAttended].max = attendedMax
+	e.lanes[poolAutopilot].max = autopilotMax
 	e.envWarn = func(msg string) {
 		e.envMu.Lock()
 		e.envNotices = append(e.envNotices, msg)
@@ -299,6 +344,15 @@ func New(cfg Config) *Engine {
 	}
 	go e.forward()
 	return e
+}
+
+// normalizeCap folds a negative cap to 0, so every "no cap configured"
+// spelling (unset, explicit 0, or negative) behaves identically: uncapped.
+func normalizeCap(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 // mgr resolves the manager for a card's repository. With a pool configured
@@ -375,6 +429,27 @@ func (e *Engine) Sessions() map[domain.FeatureID]*Session {
 		out[id] = s
 	}
 	return out
+}
+
+// LaneCounts is a point-in-time snapshot of each attention pool's
+// occupancy and cap, for display (e.g. the board's "attended 1/1 ·
+// autopilot 2/2"). A Max of 0 means that pool is uncapped.
+type LaneCounts struct {
+	AttendedRunning, AttendedMax   int
+	AutopilotRunning, AutopilotMax int
+}
+
+// LaneCounts reports the current running/cap figures for both attention
+// pools.
+func (e *Engine) LaneCounts() LaneCounts {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return LaneCounts{
+		AttendedRunning:  e.lanes[poolAttended].running,
+		AttendedMax:      e.lanes[poolAttended].max,
+		AutopilotRunning: e.lanes[poolAutopilot].running,
+		AutopilotMax:     e.lanes[poolAutopilot].max,
+	}
 }
 
 // Attach starts (or reuses) an interactive chat session for a feature's
@@ -588,11 +663,12 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
+	pool := lanePoolFor(f)
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), pool: pool, state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
-	e.queue = append(e.queue, f.ID)
+	e.lanes[pool].queue = append(e.lanes[pool].queue, f.ID)
 	e.mu.Unlock()
 
 	if old != nil {
@@ -607,24 +683,35 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	return nil
 }
 
-// schedule fills free slots from the queue. With maxActive 0 (the
-// default) there is no cap, so it drains the queue on every pass and a
-// run never sits in StateQueued waiting on another card.
+// schedule fills free slots from each pool's own queue. With a pool's cap
+// at 0 (the default) there is no cap on it, so it drains that queue on
+// every pass and a run never sits in StateQueued waiting on another card
+// in the SAME pool. The two pools are scheduled independently — see
+// scheduleLane — so a card waiting in one never starts by way of a slot
+// freed in the other.
 func (e *Engine) schedule() {
+	for p := lanePool(0); p < numLanePools; p++ {
+		e.scheduleLane(p)
+	}
+}
+
+// scheduleLane drains pool p's queue into its free slots.
+func (e *Engine) scheduleLane(p lanePool) {
 	for {
 		e.mu.Lock()
-		if (e.maxActive > 0 && e.running >= e.maxActive) || len(e.queue) == 0 {
+		lane := &e.lanes[p]
+		if (lane.max > 0 && lane.running >= lane.max) || len(lane.queue) == 0 {
 			e.mu.Unlock()
 			return
 		}
-		id := e.queue[0]
-		e.queue = e.queue[1:]
+		id := lane.queue[0]
+		lane.queue = lane.queue[1:]
 		s := e.live[id]
 		if s == nil || s.State() != StateQueued {
 			e.mu.Unlock()
 			continue
 		}
-		e.running++
+		lane.running++
 		s.takeSlot()
 		e.mu.Unlock()
 		e.startAutonomous(s)
@@ -1282,11 +1369,17 @@ func (e *Engine) dropLocked(id domain.FeatureID) {
 	e.removeFromQueue(id)
 }
 
+// removeFromQueue drops id from whichever pool's queue holds it (a
+// feature is only ever queued in the one pool its session took, but the
+// caller here doesn't always know which). Caller holds e.mu.
 func (e *Engine) removeFromQueue(id domain.FeatureID) {
-	for i, q := range e.queue {
-		if q == id {
-			e.queue = append(e.queue[:i], e.queue[i+1:]...)
-			return
+	for p := range e.lanes {
+		q := e.lanes[p].queue
+		for i, qid := range q {
+			if qid == id {
+				e.lanes[p].queue = append(q[:i], q[i+1:]...)
+				return
+			}
 		}
 	}
 }
@@ -1312,16 +1405,19 @@ func (e *Engine) replace(id domain.FeatureID, s *Session) bool {
 	return true
 }
 
-// freeSlot releases an autonomous session's attention slot and promotes
-// the queue. It is a no-op for a session that never took a slot
-// (interactive, or queued-and-dropped), and idempotent for one that did.
+// freeSlot releases an autonomous session's attention slot — returning it
+// to the pool the session actually took it from, per its remembered
+// pool — and promotes that pool's queue. It is a no-op for a session that
+// never took a slot (interactive, or queued-and-dropped), and idempotent
+// for one that did.
 func (e *Engine) freeSlot(s *Session) {
-	if !s.releaseSlot() {
+	held, p := s.releaseSlot()
+	if !held {
 		return
 	}
 	e.mu.Lock()
-	if e.running > 0 {
-		e.running--
+	if e.lanes[p].running > 0 {
+		e.lanes[p].running--
 	}
 	e.mu.Unlock()
 	e.schedule()
@@ -1515,7 +1611,9 @@ func (e *Engine) Close() error {
 		sessions = append(sessions, s)
 	}
 	e.live = map[domain.FeatureID]*Session{}
-	e.queue = nil
+	for p := range e.lanes {
+		e.lanes[p].queue = nil
+	}
 	e.mu.Unlock()
 
 	for _, s := range sessions {

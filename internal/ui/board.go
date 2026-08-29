@@ -243,7 +243,36 @@ func (m *Shell) boardCounts() string {
 			parts = append(parts, formatCount(super, n))
 		}
 	}
+	if m.engine != nil {
+		if lanes := laneCountsText(m.engine.LaneCounts()); lanes != "" {
+			parts = append(parts, lanes)
+		}
+	}
 	return strings.Join(parts, " · ")
+}
+
+// laneCountsText renders the two attention pools in the board's compact
+// count shape: "attended 1/1 · autopilot 2/2". Empty when neither pool
+// has a cap to report or anything running in it — an uncapped, idle
+// engine has nothing to say here, and "attended 0 · autopilot 0" beside
+// a card count reads like a contradiction rather than an absence.
+func laneCountsText(lc engine.LaneCounts) string {
+	if lc.AttendedMax <= 0 && lc.AutopilotMax <= 0 &&
+		lc.AttendedRunning == 0 && lc.AutopilotRunning == 0 {
+		return ""
+	}
+	return laneCountText("attended", lc.AttendedRunning, lc.AttendedMax) + " · " +
+		laneCountText("autopilot", lc.AutopilotRunning, lc.AutopilotMax)
+}
+
+// laneCountText renders one pool's running/cap pair. An uncapped pool
+// (max <= 0 — see engine.LaneCounts) has no total to divide by, so it
+// shows the running count alone.
+func laneCountText(name string, running, max int) string {
+	if max <= 0 {
+		return fmt.Sprintf("%s %d", name, running)
+	}
+	return fmt.Sprintf("%s %d/%d", name, running, max)
 }
 
 func formatCount(super domain.SuperState, n int) string {

@@ -331,7 +331,7 @@ func TestSchedulerQueuesBeyondMaxActive(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -365,7 +365,7 @@ func TestPauseFreesSlotAndPromotes(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -399,7 +399,7 @@ func TestMaxActiveTwo(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 2})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 2})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -461,14 +461,14 @@ func TestRunRequiresWorktree(t *testing.T) {
 func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
 	// Regression: dropping/pausing a QUEUED session must not decrement
 	// the running count (it never held a slot), which would let an extra
-	// autonomous session start beyond MaxActive.
+	// autonomous session start beyond the pool's cap.
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		<-release
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
 	t.Cleanup(func() {
 		close(release)
 		e.Close()
@@ -494,12 +494,12 @@ func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
 	waitState(t, e, "FD-003", StateQueued)
 
 	// drop the queued FD-002 — the slot is still held by FD-001, so
-	// FD-003 must NOT start (that would be 2 running with MaxActive 1).
+	// FD-003 must NOT start (that would be 2 running with AutopilotLanes 1).
 	e.Drop("FD-002")
 	// give any erroneous scheduling a moment to happen
 	time.Sleep(50 * time.Millisecond)
 	if s := e.Get("FD-003"); s == nil || s.State() != StateQueued {
-		t.Fatalf("FD-003 wrongly promoted past MaxActive after dropping a queued session: %v", s)
+		t.Fatalf("FD-003 wrongly promoted past the pool cap after dropping a queued session: %v", s)
 	}
 	if e.Get("FD-001").State() != StateRunning {
 		t.Error("FD-001 stopped running unexpectedly")

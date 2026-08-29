@@ -29,9 +29,17 @@ gummi solves three problems at once:
    and review, cheap/local models for mechanical steps.
 
 The parallelism model is **attention-based, not throughput-based**: you are
-the scarce resource. One or two agents active, the rest paused or waiting on
-you. gummi's job is to make the "waiting on you" queue visible and make
-context-switching between features cheap.
+the scarce resource. Autonomous runs draw from two independent attention
+pools, each with its own cap and its own FIFO queue (internal/engine): one
+**attended** lane for a card whose gate-approval mode is `off` — you've
+said you'll stay with it, so it must never queue behind unattended
+work — and, by default, two **autopilot** lanes for every other card
+(`gates` or `full`, including the everyday default). A slot freed in one
+pool is never handed to a session waiting in the other; an attended run
+always starts immediately. `GUMMI_MAX_ACTIVE` overrides the attended
+pool's size (default 1); `autopilot_lanes` in `config.yaml` overrides the
+autopilot pool's (default 2). gummi's job is to make the "waiting on you"
+queue visible and make context-switching between features cheap.
 
 ## 2. Core concepts (domain model)
 
@@ -261,13 +269,17 @@ envelope that is gummi's real spend limiter.
   configured; the engine only honors skip flags and rerun transitions.
   Transitions fire actions (start session, run checks, request human gate)
   and emit events.
-- **Scheduler with attention slots**: `max_active` is uncapped by default —
-  every autonomous run you start begins immediately, however many cards
-  that is. Set it to a positive number and excess sessions queue behind
-  the cap; a paused/blocked session frees its slot. Parallel token burn is
-  the operator's call: cards drive in disjoint worktrees under per-card
-  locks (§8.2 Decision 12), so nothing in the engine needs the
-  serialization.
+- **Scheduler with attention slots, split into two pools** (§1): an
+  attended lane (default cap 1, `GUMMI_MAX_ACTIVE`) for a card whose
+  gate-approval mode is `off`, and autopilot lanes (default cap 2,
+  `autopilot_lanes`) for every other card. Each pool has its own FIFO
+  queue; a slot freed in one pool is never handed to a session waiting in
+  the other, so an attended run always starts immediately regardless of
+  how full the autopilot pool is. Either cap can be raised (or, internally,
+  set to 0 for uncapped) and excess autopilot sessions queue behind it; a
+  paused/blocked session frees its slot. Parallel token burn is the
+  operator's call: cards drive in disjoint worktrees under per-card locks
+  (§8.2 Decision 12), so nothing in the engine needs the serialization.
   Interactive stages only run when you attach.
 - **Needs-attention queue**: gates, agent questions, budget exhaustion, and
   failures — plus permission requests when running in `guarded` mode — land

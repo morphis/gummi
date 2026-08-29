@@ -25,9 +25,14 @@ stay in your hands.
 ## Three ideas
 
 **You are the scarce resource.** gummi's parallelism is attention-based,
-not throughput-based. By default one autonomous agent runs at a time
-while the rest queue, and everything that needs a human — gates, agent
-questions, failures, exhausted budgets — lands in a single
+not throughput-based. Autonomous runs compete for one of two lane pools:
+one **attended** lane, for a card you've told to stop at every gate
+(`off`) and so keep watching yourself, and by default two **autopilot**
+lanes for everything left to run on its own (`gates` or `full`, the
+everyday default). An attended card always gets its lane immediately —
+it never queues behind autopilot work — while excess autopilot runs
+queue and start as lanes free. Everything that needs a human — gates,
+agent questions, failures, exhausted budgets — lands in a single
 needs-attention inbox. The point isn't to run ten agents at once; it's
 to make context-switching between features cheap and to never leave an
 agent waiting on you without you knowing.
@@ -529,7 +534,9 @@ Two files in `.gummi/`, both scaffolded on first run:
   with the engine's own per-role backend routing below; the TUI's
   first-run picker (`A` on the board, or shown once automatically when
   nothing is configured) writes this key back without disturbing
-  anything else in the file.
+  anything else in the file. `autopilot_lanes:` (default 2) sizes the
+  autopilot attention pool; the attended pool is sized separately by
+  `GUMMI_MAX_ACTIVE` (default 1) — see below.
 - **`profiles.yaml`** — role → `{backend, model}` maps per profile
   (`premium`, `thrifty`, …) with a declared default. `backend:` is
   optional (`copilot` | `claude` | `codex` | `opencode` | `headless` | `zz`); omitted, the
@@ -559,7 +566,7 @@ Environment variables:
 | `GUMMI_ZZ_CREDITS_PER_1K` | zz adapter's token→credit rate; 0 uses the engine default |
 | `GUMMI_ZZ_MAX_TURNS` | zz adapter's runaway-turn backstop (default 200); a session that hits the cap ends with an actionable error |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
-| `GUMMI_MAX_ACTIVE` | cap on concurrent autonomous sessions (default: no cap — every run you start begins immediately) |
+| `GUMMI_MAX_ACTIVE` | cap on the **attended** lane pool (default 1) — a card whose autopilot mode is `off`. The autopilot pool (default 2 lanes) is sized by `autopilot_lanes` in `config.yaml`, not this variable |
 | `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_TURN_RESERVE` | one turn's credits — the floor under envelope-derived stage budgets (default `domain.TurnReserveCredits`; override for unusual models) |
