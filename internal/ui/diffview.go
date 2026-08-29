@@ -258,7 +258,7 @@ func (dv *diffView) bindings() []binding {
 		{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
 		{key: "D", label: "delete", help: "delete the annotation at the cursor"},
 		{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
-		{key: "A", label: "approve", help: "approve the gate", bar: true},
+		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 		{key: "?", label: "help", bar: true},
@@ -273,8 +273,8 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 		m.diff = nil
 	case "R":
 		return m.requestDiffChanges(dv)
-	case "A":
-		// approve the gate: leave the surface and run the board's g
+	case "g":
+		// cross the gate: leave the surface and run the board's g
 		return m.approveSurface(dv.f)
 	case "j", "down":
 		dv.setCursor(dv.cursor + 1)

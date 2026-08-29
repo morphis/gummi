@@ -158,8 +158,9 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
 | `space` | open the command menu (everything that belongs to no card); type to filter |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |
-| `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `A` approves the gate |
+| `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `g` crosses the gate |
 | `g` / `b` | advance a gate / bounce back to implement or fix |
+| `A` | autopilot: set how far the card runs on its own — off, gates, or full — and start it from wherever it sits |
 | `P` | restore the plan stage on a quick / skip-plan feature (design phase only) |
 | `v` | run the verify checks |
 | `u` | set the budget envelope (credits; 0 = uncapped) |

@@ -395,9 +395,9 @@ func TestDiffApproveFromSurface(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	ctx := context.Background()
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m.diff != nil {
-		t.Fatal("A did not close the diff surface")
+		t.Fatal("g did not close the diff surface")
 	}
 	f, _ := m.store.GetFeature(ctx, "FD-001")
 	if f.Stage != domain.StageVerify {
@@ -414,7 +414,7 @@ func TestDiffApproveFromSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	m2 = openDiffFor(t, m2)
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m2.diff != nil {
 		t.Fatal("A should close the surface even when blocked")
 	}

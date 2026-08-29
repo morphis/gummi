@@ -204,7 +204,7 @@ func (sv *specView) bindings() []binding {
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
 		{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
-		{key: "A", label: "approve", help: "approve the gate", bar: true},
+		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 		{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
@@ -223,8 +223,8 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	case "R":
 		// request changes: send the open %% questions to the architect
 		return m.requestSpecChanges(sv)
-	case "A":
-		// approve the gate: leave the surface and run the board's g
+	case "g":
+		// cross the gate: leave the surface and run the board's g
 		return m.approveSurface(sv.f)
 	case "j", "down":
 		sv.setCursor(sv.cursor + 1)

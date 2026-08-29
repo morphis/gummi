@@ -385,9 +385,9 @@ func TestSpecApproveFromSurface(t *testing.T) {
 		t.Fatalf("setup: feature at %s, want spec", f.Stage)
 	}
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m.spec != nil {
-		t.Fatal("A did not close the spec surface")
+		t.Fatal("g did not close the spec surface")
 	}
 	f, _ = m.store.GetFeature(ctx, "FD-001")
 	if f.Stage != domain.StagePlan {
@@ -403,7 +403,7 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m2 = typeString(t, m2, "still open")
 	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'A', Text: "A"})
+	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m2.spec != nil {
 		t.Fatal("A should close the surface even when blocked")
 	}
@@ -443,7 +443,7 @@ func TestSpecBindingsAreOneTable(t *testing.T) {
 	}
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
-	for _, key := range []string{"c", "x", "n/p", "A", "R", "e"} {
+	for _, key := range []string{"c", "x", "n/p", "g", "R", "e"} {
 		if !has(m.spec.bindings(), key) {
 			t.Errorf("spec bindings missing %q: %+v", key, m.spec.bindings())
 		}
