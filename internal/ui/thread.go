@@ -58,8 +58,9 @@ func (m *Shell) threadView(w, h int) string {
 
 	segs := stageSegments(r.Events)
 	if len(segs) > 1 {
+		spend := stageSpendByStage(r.StageSpend)
 		for _, seg := range segs[:len(segs)-1] {
-			line(foldedReceiptLine(s, seg, w))
+			line(foldedReceiptLine(s, seg, spend, w))
 			// Expansion is real and driven by Shell.expandedStages; no
 			// key sets that flag yet, so every receipt renders folded —
 			// binding ⌄ to it is all that remains.
@@ -79,6 +80,21 @@ func (m *Shell) threadView(w, h int) string {
 		blank()
 	}
 
+	// A finished `v` run's results have nowhere else to surface: with no
+	// live session there is no stage block to carry them, and they are
+	// not events on the card. The detail pane showed them in exactly this
+	// slot, so the thread does too.
+	if m.sessionFor(f.ID) == nil {
+		if res := m.checks[f.ID]; len(res) > 0 {
+			for _, l := range strings.Split(verifySummary(s, res), "\n") {
+				if l != "" {
+					line(l)
+				}
+			}
+			blank()
+		}
+	}
+
 	// The decision receipt — what a run decided while nobody watched —
 	// belongs here, below the live stage and above the next card, because
 	// that is when it happened. Nothing renders it yet.
@@ -90,7 +106,11 @@ func (m *Shell) threadView(w, h int) string {
 		blank()
 	}
 
-	line(inputBlock(s, r, w))
+	// the input is a multi-row widget: truncate each row, or a stray tail
+	// of the second one lands on the first.
+	for _, l := range strings.Split(inputBlock(s, r, w), "\n") {
+		line(l)
+	}
 
 	if h > 0 && len(lines) > h {
 		lines = lines[:h]
@@ -110,6 +130,11 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow) []string {
 	head += "  " + s.Faint.Render("autopilot: "+autopilotLabel(f.GateApproval))
 	if f.Budget.Envelope > 0 {
 		head += "  " + s.Faint.Render(budgetSummary(f))
+	} else if !f.Spend.Zero() {
+		head += "  " + s.Faint.Render(featureSpend(f.Spend))
+	}
+	if sk := skipSummary(f); sk != "" {
+		head += "  " + s.Faint.Render("skips "+sk)
 	}
 	if rl := roundLabel(m, f); rl != "" {
 		head += "  " + s.Faint.Render(rl)
@@ -347,7 +372,7 @@ func stageSegments(events []state.CardEvent) []stageSegment {
 // foldedReceiptLine renders one finished stage session as the single
 // line folding really means: stage, role, turn count, spend, and the
 // outcome marker with the time it closed.
-func foldedReceiptLine(s *theme.Styles, seg stageSegment, w int) string {
+func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage]float64, w int) string {
 	turns := 0
 	for _, ev := range seg.events {
 		if ev.Kind == state.EventMessage {
@@ -359,8 +384,16 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, w int) string {
 		head += " · " + seg.role
 	}
 	head += " · " + itoa(turns) + " turns"
-	if seg.credits > 0 {
-		head += fmt.Sprintf(" · %g credits", roundSpend(seg.credits))
+	// Spend is metered into stage_spend already; reading it back from the
+	// event payload would be a second source of truth for the same number,
+	// free to drift from the first. The payload is only the fallback for a
+	// stage whose rollup has not been loaded.
+	credits := spend[seg.stage]
+	if credits == 0 {
+		credits = seg.credits
+	}
+	if credits > 0 {
+		head += fmt.Sprintf(" · %g credits", roundSpend(credits))
 	}
 	mark := eventMarker(s, "")
 	if seg.exited {
@@ -412,6 +445,14 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		for _, a := range recentTools(snap, 6) {
 			lines = append(lines, "  "+toolMarker(s, a.ToolStatus)+toolLineView(s, sanitize(a.Content), max(w-6, 8)))
 		}
+		if last := lastAssistant(snap); last != "" {
+			for _, l := range strings.Split(wrapText(sanitize(last), max(w-4, 8)), "\n") {
+				lines = append(lines, "  "+s.Faint.Render(l))
+			}
+		}
+		if meta := sessionMeta(snap); meta != "" {
+			lines = append(lines, "  "+s.Faint.Render(meta))
+		}
 		switch {
 		case snap.Busy:
 			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.runningLabel(snap)))
@@ -434,7 +475,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		lines = append(lines, "  "+stageEventLine(s, ev, w))
 	}
 	if r.DrivenAbroad {
-		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — pid "+itoa(r.Foreign.PID)+", enter to watch"))
+		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 	}
 	return lines
 }
@@ -523,9 +564,27 @@ func nextCardBlock(s *theme.Styles, in nextInput) []string {
 // nothing focuses this slot or feeds it keys.
 func inputBlock(s *theme.Styles, r featureRow, w int) string {
 	if r.DrivenAbroad {
-		return s.Faint.Render(ansi.Truncate("read-only — driven by pid "+itoa(r.Foreign.PID)+" (enter to watch)", w, "…"))
+		return s.Faint.Render(ansi.Truncate("read-only — driven by "+foreignSummary(r.Foreign), w, "…"))
 	}
 	in := newChatInput()
 	in.SetWidth(max(w-2, 10))
+	// The chat pane gives the composer three rows because it is the whole
+	// surface there. Here it sits under the thread, which owns the height,
+	// so it takes one and grows only when someone is actually typing.
+	in.SetHeight(1)
 	return in.View()
+}
+
+// stageSpendByStage rolls the per-stage/model spend rows up to one total
+// per stage, the shape a folded receipt line needs. stage_spend is the
+// meter of record for credits; the event log only carries a copy.
+func stageSpendByStage(rows []state.StageSpend) map[domain.Stage]float64 {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make(map[domain.Stage]float64, len(rows))
+	for _, r := range rows {
+		out[r.Stage] += r.Credits
+	}
+	return out
 }

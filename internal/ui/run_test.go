@@ -213,7 +213,7 @@ func waitForActivity(t *testing.T, eng *engine.Engine) {
 	}
 }
 
-func TestDashboardActivityGolden(t *testing.T) {
+func TestThreadActivityGolden(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{
 			{Kind: agent.EventToolCall, Tool: "edit", Detail: "palette.go"},

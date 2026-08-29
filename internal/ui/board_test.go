@@ -99,9 +99,9 @@ func TestBoardNavigation(t *testing.T) {
 	}
 }
 
-func TestDashboardShowsSelected(t *testing.T) {
+func TestThreadShowsSelected(t *testing.T) {
 	m := populatedShell(120, 34)
-	golden.RequireEqual(t, []byte(m.dashboardView(70, 30)))
+	golden.RequireEqual(t, []byte(m.threadView(70, 30)))
 }
 
 func TestHelpOverlay(t *testing.T) {
@@ -201,7 +201,7 @@ func TestBoardCostColumnGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(populatedShellView(m)))
 }
 
-func TestDashboardSpendGolden(t *testing.T) {
+func TestThreadSpendGolden(t *testing.T) {
 	m := populatedShell(120, 34)
 	m.sel = 1
 	m.rows[1].F.Spend = domain.Spend{Credits: 12.4, InputTokens: 3200, OutputTokens: 1800}

@@ -151,7 +151,7 @@ func TestVerifyDialogGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-func TestVerifyResultsInDashboardGolden(t *testing.T) {
+func TestVerifyResultsInThreadGolden(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.sel = 1 // FD-042 (implement)
 	m.checks["FD-042"] = fakeResults()

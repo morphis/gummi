@@ -133,7 +133,7 @@ func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 			{Kind: state.EventMessage}, {Kind: state.EventMessage}, {Kind: state.EventTool},
 		},
 	}
-	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, 80))
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 80))
 	if strings.Contains(line, "\n") {
 		t.Fatalf("folded receipt spans more than one line: %q", line)
 	}
@@ -300,3 +300,25 @@ func TestOpenCardLoadsEventsIntoTheThread(t *testing.T) {
 // m0Styles is a plain style set for thread-rendering unit tests that
 // don't need a whole Shell.
 func m0Styles() *theme.Styles { return NewShell(theme.GummiDark(), "test").styles }
+
+// TestFoldedReceiptPrefersMeteredSpend: credits shown on a folded receipt
+// come from the stage_spend rollup, the meter of record, not from the
+// copy carried in the stage_exit event — the two are free to drift, and
+// only one of them is authoritative.
+func TestFoldedReceiptPrefersMeteredSpend(t *testing.T) {
+	seg := stageSegment{stage: domain.StageImplement, role: "implementer", exited: true, credits: 6}
+	metered := map[domain.Stage]float64{domain.StageImplement: 41}
+
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, metered, 80))
+	if !strings.Contains(line, "41 credits") {
+		t.Errorf("receipt %q did not use the metered rollup", line)
+	}
+	if strings.Contains(line, "6 credits") {
+		t.Errorf("receipt %q used the event payload over the meter", line)
+	}
+	// with no rollup loaded the payload is still better than nothing
+	line = ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 80))
+	if !strings.Contains(line, "6 credits") {
+		t.Errorf("receipt %q dropped the fallback", line)
+	}
+}
