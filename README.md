@@ -139,8 +139,8 @@ and the ignore rules that keep it all out of your repo's history. Then:
    Problem section, so brainstorm starts from your words instead of a
    blank page (`alt+enter` for a newline). Profile and skip flags sit
    on a quiet options row.
-2. Press `enter` to attach and brainstorm/spec with the architect in the
-   chat pane. Open questions are tracked as a `%%` checklist in the
+2. Open the card and brainstorm/spec with the architect directly in its
+   thread. Open questions are tracked as a `%%` checklist in the
    spec (`s` to view it, `c` to comment on the line under the cursor,
    `x` to resolve a thread).
 3. Press `g` to advance through gates: approving the spec creates the
@@ -159,8 +159,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | key | action |
 |---|---|
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
-| `enter` | open the selected card's page (full width); in its composer, send the typed line (an empty line does nothing) |
-| `↑` | on a card page with an empty composer, open the action pop-over; `↑↓` chooses and `enter` runs |
+| `enter` | open the selected card's page (full width); in its composer, send the typed line — an empty line answers the card's open decision, and does nothing when none is open |
+| `↑` | on a card page with an empty composer and no decision open, open the action pop-over (`↑↓` moves, `enter` runs); while a decision is open, `↑↓` choose its options instead |
 | `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
 | `space` | open the command menu (everything that belongs to no card); type to filter |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |
@@ -191,6 +191,11 @@ to spend on its detail. There is only ever one list on screen, so `↑↓`
 never have to be aimed. `esc` returns to the list; `J`/`K` step to the
 previous/next card without going back. Every card verb (`g`, `v`, `m`,
 `d`, …) works from either level.
+
+That card page is a thread. When the card needs a decision, the question
+and its regenerated legal answers stay pinned directly above the composer;
+once answered, the result becomes ordinary chronological history. When no
+decision is open, the composer stands alone.
 
 The board sits behind gummi's own tab bar alongside the needs-attention
 inbox and a hosted agent pane — `tab` cycles all three, `alt+1/2/3` jumps

@@ -481,9 +481,9 @@ func TestRunStageResumesCritique(t *testing.T) {
 	mu.Unlock()
 
 	// re-run the stage: the critique leg resumes, the plan writer does not.
-	// Reached through the action pop-over — an empty composer's enter runs
-	// nothing (DESIGN §10.19).
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	// Reached through the pinned decision a paused run opens — its
+	// highlighted option is "re-run plan", what enter answers on an empty
+	// composer (DESIGN §10.19).
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	settleChat(t, eng)
 	drainEngineLoop(t, m)

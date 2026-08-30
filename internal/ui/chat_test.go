@@ -119,16 +119,19 @@ func toKeys(t *testing.T, m *Shell) *Shell {
 
 // openAndAttach opens the selected card and starts its conversation.
 //
-// The second step goes through the action pop-over rather than a second
-// enter: on the card page the composer holds the keyboard, and an empty
-// composer's enter deliberately runs nothing (DESIGN §10.19). ↑ raises
-// the inventory, where the stage's recommended action — chat, at an
-// interactive stage — is the one under the cursor.
+// The second step answers the card's pinned decision: at an interactive
+// stage with no live session the decision's highlighted option is "start
+// the architect" — what enter does now that an empty composer's enter
+// only ever answers what the screen is offering (DESIGN §10.19). Once
+// the session is live the decision is gone (the thread IS the
+// conversation), and re-attaching after an esc goes through the action
+// pop-over instead.
 func openAndAttach(t *testing.T, m *Shell) *Shell {
 	t.Helper()
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
-	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	open := tea.KeyPressMsg{Code: tea.KeyEnter}
+	m = press(t, m, open)
+	m = press(t, m, open)
+	return m
 }
 
 func TestChatAttachAndSend(t *testing.T) {
@@ -174,8 +177,9 @@ func TestChatAttachAndSend(t *testing.T) {
 		t.Fatal("detach killed the engine session")
 	}
 
-	// re-attach reuses the same session (transcript preserved), reached
-	// through the action pop-over like the first attach
+	// re-attach reuses the same session (transcript preserved). With the
+	// conversation already live the decision is gone, so the inventory is
+	// the door: ↑ opens it, and its highlighted "chat" action attaches.
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.chat == nil || len(m.chat.session.Snapshot().Transcript) != 4 {

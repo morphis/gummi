@@ -45,6 +45,7 @@ leaf services.
 |---|---|
 | `domain` | Core types: features, bugs, stages, work items. No I/O. |
 | `workflow` | The single fixed state machine: stages, legal transitions, skip flags, rerun caps. **Compiled in, never configurable.** |
+| `gatepolicy` | Shared checkpoint policy used by both the TUI and headless driver to raise and cross workflow gates. |
 | `spec` | The markdown spec artifact + its `gummi-checks` verification block. |
 | `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
 | `engine` | The orchestrator. Binds stages to agent sessions, schedules autonomous runs across attention slots, routes turns, streams activity. Start here to trace behavior. |

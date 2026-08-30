@@ -145,6 +145,12 @@ type Shell struct {
 	// (cardactions.go); this is whether the fold is currently open. It
 	// lives here, not on the list, because the list is rebuilt per frame.
 	actionsExpanded bool
+	// decision selection belongs to the pinned control in the card thread.
+	// The decision itself is regenerated from live ask/next-step state on
+	// every render; only ephemeral picker position lives on Shell.
+	decisionKey    string
+	decisionCursor int
+	decisionPicked map[int]bool
 
 	// agent orchestration (nil engine means no agent wired)
 	engine *engine.Engine

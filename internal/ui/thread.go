@@ -21,7 +21,7 @@ import (
 // line, one folded line per finished stage session, the live stage (a
 // session boundary naming the fresh context it started, its events, and
 // the streaming activity line while one is running), the decision-receipt
-// slot, the "next" card verbatim from nextsteps.go, and the input.
+// slot, a pinned open decision when the card needs one, and the input.
 //
 // The thread never blocks a frame on IO: its per-stage history comes
 // from featureRow.Events, populated lazily and only for the selected
@@ -40,9 +40,9 @@ const threadGutter = 2
 
 // threadView renders the selected card's thread into the card page.
 //
-// The surface is three regions, not one list. The masthead and the
-// pinned spec line hold the top; the next card and the input hold the
-// bottom; the conversation scrolls between them. That split is what
+// The surface is four regions, not one list. The masthead and the pinned
+// spec line hold the top; an open decision and the input hold the bottom;
+// the conversation scrolls between them. That split is what
 // makes the page usable on a short terminal: the old single list was
 // truncated to the window height from the top, so the first thing lost
 // on a small screen was the input box — the one part you always need.
@@ -150,46 +150,75 @@ func (m *Shell) threadView(w, h int) string {
 		foot = append(foot, clip(l))
 	}
 
-	return strings.Join(composeThread(head, body, foot, h, m.threadScroll), "\n")
+	// --- decision: pinned directly above the composer while open ---
+	// its row budget is everything the foot leaves: the decision may not
+	// be squeezed out by the body (the body yields first), and within the
+	// budget windowDecisionBlock keeps the question and the highlighted
+	// answer visible however many options the legal set holds. The h<=0
+	// measure pass (maxThreadScroll) renders it unbounded, so the scroll
+	// clamp counts the whole control rather than its narrow-terminal
+	// window.
+	budget := 0
+	if h > 0 {
+		budget = max(h-len(foot), 1)
+	}
+	decision := m.openDecisionBlock(s, r, inner, budget)
+	for i := range decision {
+		decision[i] = clip(decision[i])
+	}
+
+	return strings.Join(composeThread(head, body, decision, foot, h, m.threadScroll), "\n")
 }
 
-// composeThread lays the three regions into h rows: head at the top,
-// foot at the bottom, and as much of the end of body as fits between
-// them, scrolled back by up lines.
+// composeThread lays the four regions into h rows: head at the top, foot
+// at the bottom, a pinned open decision immediately above it, and as much
+// of the end of body as fits between them, scrolled back by up lines.
 //
 // When the window cannot hold everything, the foot wins. The input and
 // the actions beside it are what the page is for, and a terminal too
-// short for the masthead is still perfectly usable without it — whereas
-// one showing only the masthead is not usable at all. So the body yields
-// first, then the head, and the foot is trimmed only when it alone
-// exceeds the window, and then from its own top so the input survives
-// last of all.
-func composeThread(head, body, foot []string, h, up int) []string {
+// short for the masthead is still perfectly usable without it. Priority
+// is foot, decision, head, body. The decision arrives already windowed
+// to what the foot leaves it (windowDecisionBlock), so the trim below is
+// only a safety net for a caller that skipped that step.
+func composeThread(head, body, decision, foot []string, h, up int) []string {
 	if h <= 0 {
-		return append(append(append([]string{}, head...), body...), foot...)
+		out := append(append(append([]string{}, head...), body...), decision...)
+		return append(out, foot...)
 	}
 	if len(foot) >= h {
 		return foot[len(foot)-h:]
 	}
-	if len(head)+len(foot) >= h {
-		head = head[:h-len(foot)]
+	remaining := h - len(foot)
+	if len(decision) > remaining {
+		decision = decision[:remaining]
+		head, body = nil, nil
+		remaining = 0
+	} else {
+		remaining -= len(decision)
 	}
-	avail := h - len(head) - len(foot)
+	if len(head) > remaining {
+		head = head[:remaining]
+		body = nil
+		remaining = 0
+	} else {
+		remaining -= len(head)
+	}
 
 	window := body
-	if len(body) > avail {
-		up = min(max(up, 0), len(body)-avail)
+	if len(body) > remaining {
+		up = min(max(up, 0), len(body)-remaining)
 		end := len(body) - up
-		window = body[end-avail : end]
+		window = body[end-remaining : end]
 	}
 
 	out := append([]string{}, head...)
 	out = append(out, window...)
 	// pad so the foot sits on the last row rather than floating up under
 	// a short conversation
-	for len(out)+len(foot) < h {
+	for len(out)+len(decision)+len(foot) < h {
 		out = append(out, "")
 	}
+	out = append(out, decision...)
 	return append(out, foot...)
 }
 
@@ -543,15 +572,6 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// makes it read as a boundary rather than a heading glued to the
 		// first thing that happened after it
 		lines := []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
-		if ask := snap.PendingAsk; ask != nil {
-			// reuse chat.go's own picker renderer rather than
-			// reimplementing it; a zero-value pane is enough since
-			// pickerView only reads c.feature/c.cursor/c.picked, and this
-			// step renders it, it does not yet wire its keys.
-			pane := &chatPane{feature: f.ID}
-			lines = append(lines, strings.Split(pane.pickerView(s, ask, w), "\n")...)
-			return lines
-		}
 		for _, a := range recentTools(snap, 6) {
 			lines = append(lines, "  "+toolMarker(s, a.ToolStatus)+toolLineView(s, sanitize(a.Content), max(w-6, 8)))
 		}
@@ -643,6 +663,33 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
 		}
 		return s.Faint.Render(messageAuthorLabel(p.Author)+" ") +
 			body.Render(ansi.Truncate(sanitize(p.Content), max(w-6, 8), "…"))
+	case state.EventAsk:
+		var p state.AskPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		who := "you"
+		if p.Actor == state.ActorAutopilot {
+			who = "autopilot"
+		}
+		line := who + " answered"
+		if p.Question != "" {
+			line += " “" + sanitize(p.Question) + "”"
+		}
+		if p.Answer != "" {
+			line += " — " + sanitize(p.Answer)
+		}
+		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+	case state.EventGate:
+		var p state.GatePayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		who := "you"
+		if p.Actor != "" && p.Actor != state.ActorUser {
+			who = p.Actor
+		}
+		line := who + " advanced"
+		if p.From != "" || p.To != "" {
+			line += " " + p.From + " → " + p.To
+		}
+		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)
 	}

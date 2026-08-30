@@ -343,11 +343,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		steps = nextActions(in)
 	}
 	rank := make(map[string]int, len(steps))
-	why := make(map[string]string, len(steps))
+	detail := make(map[string]string, len(steps))
 	for i, st := range steps {
-		if _, ok := rank[st.key]; !ok {
-			rank[st.key] = i
-			why[st.key] = st.why
+		if _, ok := rank[st.id]; !ok {
+			rank[st.id] = i
+			detail[st.id] = st.detail
 		}
 	}
 
@@ -366,8 +366,8 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		w := sp.why
 		order := len(steps) + i // canonical fallback order, after every recommendation
 		folded := !promotedActions[sp.id]
-		if r, ok := rank[sp.key]; ok {
-			w = why[sp.key]
+		if r, ok := rank[sp.id]; ok {
+			w = detail[sp.id]
 			order = r
 			folded = false // recommended for this state: it belongs on screen
 		}

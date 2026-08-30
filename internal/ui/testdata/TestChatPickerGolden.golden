@@ -24,7 +24,7 @@
     [38;2;191;188;200mthe problem as you understand it in a sentence or two and ask the single highest-leverage[m
     [38;2;191;188;200mquestion, with your recommended answer. Keep it short.[m
 
-  [38;2;255;96;255;1mFD-001 asks[m  [38;2;247;246;251mPersist where?[m
+  [38;2;133;131;146mFD-001 asks[m  [38;2;247;246;251mPersist where?[m
   [38;2;247;246;251m  1. per-device[38;2;96;95;107m — localStorage[m
   [38;2;191;188;200;1m▸ [m2. synced[38;2;96;95;107m — account[m
 [38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [m [48;2;77;76;87m [38;2;191;188;200m1 active[39m [m                    [38;2;191;188;200m↑↓[m [38;2;133;131;146mmove[38;2;96;95;107m · [38;2;191;188;200m1..9[m [38;2;133;131;146mpick[38;2;96;95;107m · [38;2;191;188;200menter[m [38;2;133;131;146mselect[38;2;96;95;107m · [38;2;191;188;200mo[m [38;2;133;131;146mown answer[38;2;96;95;107m · [38;2;191;188;200mesc[m [38;2;133;131;146mdetach[m

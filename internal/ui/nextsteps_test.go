@@ -75,8 +75,8 @@ func TestNextActionsCapAndRanking(t *testing.T) {
 			t.Errorf("stage %s: %d suggestions, cap is 3", in.stage, len(acts))
 		}
 		for _, a := range acts {
-			if a.label == "" || a.why == "" {
-				t.Errorf("stage %s: suggestion %q missing label/why", in.stage, a.key)
+			if a.id == "" || a.label == "" || a.why == "" || a.detail == "" {
+				t.Errorf("stage %s: suggestion %q missing id/label/why/detail", in.stage, a.key)
 			}
 		}
 	}

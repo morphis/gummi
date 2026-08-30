@@ -203,14 +203,18 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertLabel(t, bs, "enter", "open card")
 
 	// a card opens with its composer holding the keyboard, so the bar
-	// teaches the line's keys first
+	// teaches the line's keys first. FD-042 (implement, nothing running)
+	// has an open decision, so enter names the highlighted answer rather
+	// than plain send — the bar states what enter is about to do before
+	// it does it (DESIGN §6.3).
 	m.openCard()
 	name, bs = m.activeSurface()
 	if name != "card" {
 		t.Fatalf("active surface = %q, want card", name)
 	}
 	assertNoKey(t, bs, "→")
-	assertLabel(t, bs, "enter", "send")
+	assertLabel(t, bs, "↑↓", "choose")
+	assertLabel(t, bs, "enter", "run implement")
 	assertLabel(t, bs, "esc", "keys")
 
 	// esc hands the keys back, and the page's own table returns with them
@@ -220,6 +224,14 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertLabel(t, bs, "enter", "run action")
 	assertLabel(t, bs, "esc", "backlog")
 	assertLabel(t, bs, "J/K", "prev/next")
+
+	// with no decision open (a done card), enter is back to send: a bare
+	// composer means exactly one thing — nothing is waiting on a person
+	m.threadInput.Focus()
+	m.sel = 5 // FD-039, done
+	_, bs = m.activeSurface()
+	assertLabel(t, bs, "enter", "send")
+	assertLabel(t, bs, "↑", "actions")
 }
 
 func assertNoKey(t *testing.T, bs []binding, key string) {

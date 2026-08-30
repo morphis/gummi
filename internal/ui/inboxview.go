@@ -150,7 +150,7 @@ func (m *Shell) inboxView(w, h int) string {
 			if acts := m.suggestFor(it.Feature); len(acts) > 0 {
 				a := acts[0]
 				line("  " + s.Faint.Render("↳ ") + s.KeyHint.Render(a.key) + " " +
-					s.Subtle.Render(a.label) + s.Faint.Render(" — "+sanitize(a.why)))
+					s.Subtle.Render(a.label) + s.Faint.Render(" — "+sanitize(a.detail)))
 			}
 		}
 	}

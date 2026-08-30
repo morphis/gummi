@@ -351,8 +351,13 @@ func TestThreadInputOwnsTheKeyboardOnOpen(t *testing.T) {
 	}
 }
 
+// TestThreadInputUpOpensCardActions: with no decision open, ↑ on an empty
+// composer raises the action inventory. The card used here is done — a
+// stage with nothing to decide — because while a decision IS open the
+// arrows belong to it (TestThreadDecisionOwnsThePickerKeys).
 func TestThreadInputUpOpensCardActions(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
+	m.sel = 5 // FD-039, done — no open decision, so ↑ is the inventory's door
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 
@@ -377,6 +382,34 @@ func TestThreadInputUpOpensCardActions(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.Overlay.HasDialogs() {
 		t.Fatal("up opened actions while the composer contained text")
+	}
+}
+
+// TestThreadDecisionOwnsThePickerKeys: while a decision is open and the
+// composer is empty, ↑↓ move its cursor (wrapping, like the chat pane's
+// picker) and enter answers the highlighted option — the arrows are the
+// decision's, not the inventory's, so there is still only ever one list
+// on screen (DESIGN §6.3).
+func TestThreadDecisionOwnsThePickerKeys(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m.sel = 3 // FD-049, spec — nothing running, so a decision is open
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || len(d.actions) < 2 {
+		t.Fatalf("precondition: an idle spec card has a multi-option decision, got %+v", d)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp}) // no pop-over may open
+	if _, ok := m.Overlay.Top().(*cardActionsDialog); ok {
+		t.Fatal("up opened the action pop-over while a decision was open")
+	}
+	if m.decisionCursor != len(d.actions)-1 {
+		t.Fatalf("up moved the decision cursor to %d, want %d (wrapped to the last option)", m.decisionCursor, len(d.actions)-1)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.decisionCursor != 1 {
+		t.Fatalf("downs moved the decision cursor to %d, want 1 (wrapped back around)", m.decisionCursor)
 	}
 }
 
@@ -733,12 +766,13 @@ func TestThreadPinsTheInputToTheBottom(t *testing.T) {
 // A card opens on its newest event, the way a chat does — the oldest
 // stage scrolls off the top, not the live one off the bottom.
 // The height matters: with the pinned next block retired the foot is a
-// bare composer, so the body window grew by several rows and the whole
-// fixture fits at the heights these tests used to use. They need a window
-// the history actually overflows, or they assert nothing.
+// bare composer, and now the pinned decision costs the body window two
+// more rows. The fixture fits outright above 20, and below it the live
+// stage boundary scrolls off — the heights are the window where the
+// history actually overflows, or these assert nothing.
 func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 	m := threadWithHistory(t)
-	out := ansi.Strip(m.threadView(80, 17))
+	out := ansi.Strip(m.threadView(80, 20))
 	if !strings.Contains(out, "fresh context") {
 		t.Error("the live stage is not on screen — the thread did not open at its end")
 	}
@@ -748,15 +782,23 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 }
 
 // Paging up reaches the history and paging back down returns to the
-// newest, clamped at both ends so neither runs into blank space.
+// newest, clamped at both ends so neither runs into blank space. The
+// height is the narrow band where the fixture's history actually
+// overflows the window (the pinned decision costs the body two rows) and
+// the live-stage boundary still fits the newest view; the scroll amount
+// is asserted against the clamp rather than assumed.
 func TestThreadScrollsWithPageKeys(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 19
+	m.width, m.height = 80, 20
+	w, h := m.threadSize()
 
 	for range 6 { // more pages than the body has, to prove the clamp
 		m.scrollThread(true)
 	}
-	up := ansi.Strip(m.threadView(m.threadSize()))
+	if m.threadScroll != m.maxThreadScroll(w, h) {
+		t.Errorf("threadScroll = %d after paging up, want the clamp %d", m.threadScroll, m.maxThreadScroll(w, h))
+	}
+	up := ansi.Strip(m.threadView(w, h))
 	if !strings.Contains(up, "brainstorm · architect") {
 		t.Error("paging up never reached the oldest receipt")
 	}
@@ -767,7 +809,7 @@ func TestThreadScrollsWithPageKeys(t *testing.T) {
 	if m.threadScroll != 0 {
 		t.Errorf("threadScroll = %d after paging back down, want 0 (pinned to the newest)", m.threadScroll)
 	}
-	if !strings.Contains(ansi.Strip(m.threadView(m.threadSize())), "fresh context") {
+	if !strings.Contains(ansi.Strip(m.threadView(w, h)), "fresh context") {
 		t.Error("paging back down did not return to the live stage")
 	}
 }

@@ -121,7 +121,8 @@ func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	if c.readOnly() {
 		footer = s.Faint.Render(ansi.Truncate(c.follow.footer(snap), max(w-2, 10), "…"))
 	} else if snap.PendingAsk != nil && !c.freeForm {
-		footer = c.pickerView(s, snap.PendingAsk, w)
+		footer = pickerView(s, string(c.feature)+" asks", snap.PendingAsk.Question,
+			askPickerOptions(snap.PendingAsk), c.cursor, c.picked, snap.PendingAsk.MultiPick, w)
 	} else {
 		footer = c.input.View()
 	}
@@ -145,33 +146,54 @@ func (c *chatPane) view(s *theme.Styles, w, h int, spin string) string {
 	return b.String()
 }
 
-// pickerView renders the inline ask_user option picker: the question,
-// then one line per option with a cursor and (multi-select) tick, then a
-// muted key-hint line. No dialog frame — it reads as part of the chat,
-// per gummi's minimal styling.
-func (c *chatPane) pickerView(s *theme.Styles, ask *engine.Ask, w int) string {
+type pickerOption struct {
+	label  string
+	detail string
+	key    string
+	danger bool
+}
+
+func askPickerOptions(ask *engine.Ask) []pickerOption {
+	options := make([]pickerOption, 0, len(ask.Options))
+	for _, option := range ask.Options {
+		options = append(options, pickerOption{label: option.Label, detail: option.Detail})
+	}
+	return options
+}
+
+// pickerView is the shared inline decision picker. The chat pane feeds it
+// a live ask_user question; the card thread feeds it regenerated workflow
+// actions. Selection state is explicit so neither caller has to fake the
+// other's model merely to reuse its renderer.
+func pickerView(s *theme.Styles, title, question string, options []pickerOption, selected int, picked map[int]bool, multi bool, w int) string {
 	width := max(w-2, 10)
 	var b strings.Builder
-	b.WriteString(s.Title.Render(string(c.feature)+" asks") + "  " +
-		s.Base.Render(ansi.Truncate(sanitize(ask.Question), max(width-len(c.feature)-8, 8), "…")) + "\n")
-	for i, o := range ask.Options {
-		cursor := "  "
+	b.WriteString(s.Muted.Render(sanitize(title)) + "  " +
+		s.Base.Render(ansi.Truncate(sanitize(question), max(width-ansi.StringWidth(title)-2, 8), "…")) + "\n")
+	for i, option := range options {
+		marker := "  "
 		label := s.Base
-		if i == c.cursor {
-			cursor = s.KeyHint.Render("▸ ")
+		if i == selected {
+			marker = s.KeyHint.Render("▸ ")
 			label = s.Title
 		}
 		tick := ""
-		if ask.MultiPick {
+		if multi {
 			box := "○ "
-			if c.picked[i] {
+			if picked[i] {
 				box = "● "
 			}
 			tick = s.Faint.Render(box)
 		}
-		line := fmt.Sprintf("%s%s%d. %s", cursor, tick, i+1, sanitize(o.Label))
-		if o.Detail != "" {
-			line += s.Faint.Render(" — " + sanitize(o.Detail))
+		line := fmt.Sprintf("%s%s%d. %s", marker, tick, i+1, sanitize(option.label))
+		if option.detail != "" {
+			line += s.Faint.Render(" — " + sanitize(option.detail))
+		}
+		if option.key != "" {
+			line += "  " + s.KeyHint.Render(option.key)
+		}
+		if option.danger && i != selected {
+			label = s.Error
 		}
 		b.WriteString(ansi.Truncate(label.Render(line), width, "…") + "\n")
 	}

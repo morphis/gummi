@@ -13,11 +13,21 @@ import (
 // lives (and is table-tested) in one place; assembling nextInput does
 // no IO, so the dashboard renders the block every frame.
 
-// nextAction is one entry in the dashboard's "next" block.
+// nextAction is one option in a workflow decision. The key is only its
+// current accelerator; id is the stable semantic identity carried into
+// decision answers, so two options that happen to share a key do not
+// become the same choice.
 type nextAction struct {
-	key   string // the key to press, as shown in the status bar
-	label string // what pressing it does
-	why   string // why gummi suggests it for the current state
+	id     string // stable option id, matching cardAction.id
+	key    string // the key to press, as shown in the status bar
+	label  string // what pressing it does
+	why    string // why gummi recommends it for the current state
+	detail string // option detail rendered beside the label
+	danger bool   // the option crosses a destructive boundary
+}
+
+func nextStep(id, key, label, detail string) nextAction {
+	return nextAction{id: id, key: key, label: label, why: detail, detail: detail}
 }
 
 // nextInput is the in-memory state the suggestions derive from. All
@@ -104,16 +114,14 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 // comments block the gate (DESIGN §6.1), or nil when g is clear.
 func blockedGate(in nextInput) *nextAction {
 	if in.openSpecQs > 0 {
-		return &nextAction{
-			"s", "resolve open comments",
-			itoa(in.openSpecQs) + " open in the " + artifactNoun(in.kind) + " block the gate — R requests changes",
-		}
+		a := nextStep("spec", "s", "resolve open comments",
+			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" block the gate — R requests changes")
+		return &a
 	}
 	if in.openDiffComments > 0 {
-		return &nextAction{
-			"d", "resolve diff comments",
-			itoa(in.openDiffComments) + " open block the gate — R requests changes, x resolves",
-		}
+		a := nextStep("diff", "d", "resolve diff comments",
+			itoa(in.openDiffComments)+" open block the gate — R requests changes, x resolves")
+		return &a
 	}
 	return nil
 }
@@ -135,7 +143,7 @@ func talkAction(in nextInput, who, why string) []nextAction {
 	if in.sess == engine.StatePaused {
 		verb = "resume"
 	}
-	return []nextAction{{"enter", verb + " " + who, why}}
+	return []nextAction{nextStep("run", "enter", verb+" "+who, why)}
 }
 
 // nextActions derives the ranked suggestion list — the first entry is
@@ -143,7 +151,9 @@ func talkAction(in nextInput, who, why string) []nextAction {
 // state speaks for itself (an agent mid-run, a done feature).
 func nextActions(in nextInput) []nextAction {
 	if in.landed {
-		return []nextAction{{"c", "clean up", "branch landed on main — remove the worktree and branch"}}
+		a := nextStep("clean", "c", "clean up", "branch landed on main — remove the worktree and branch")
+		a.danger = true
+		return []nextAction{a}
 	}
 	if in.stage == domain.StageDone {
 		return nil
@@ -157,15 +167,15 @@ func nextActions(in nextInput) []nextAction {
 	case engine.StateRunning:
 		if in.hasAsk {
 			return []nextAction{
-				{"enter", "answer the agent", "it asked a question and is blocked on your reply"},
-				{"p", "pause", "free the slot — enter re-runs the stage later"},
+				nextStep("run", "enter", "answer the agent", "it asked a question and is blocked on your reply"),
+				nextStep("pause", "p", "pause", "free the slot — enter re-runs the stage later"),
 			}
 		}
 		return nil
 	case engine.StatePaused:
 		return []nextAction{
-			{"enter", "re-run " + string(in.stage), "the run is paused — a fresh run picks the stage back up"},
-			{"a", "attach the agent CLI", "work in the worktree by hand instead"},
+			nextStep("run", "enter", "re-run "+string(in.stage), "the run is paused — a fresh run picks the stage back up"),
+			nextStep("attach", "a", "attach the agent CLI", "work in the worktree by hand instead"),
 		}
 	}
 
@@ -173,17 +183,13 @@ func nextActions(in nextInput) []nextAction {
 	switch in.attn {
 	case attnFailure:
 		return []nextAction{
-			{"enter", "re-run " + string(in.stage), "the session errored — a fresh run retries the stage"},
-			{"a", "attach the agent CLI", "debug it by hand in the worktree"},
+			nextStep("run", "enter", "re-run "+string(in.stage), "the session errored — a fresh run retries the stage"),
+			nextStep("attach", "a", "attach the agent CLI", "debug it by hand in the worktree"),
 		}
 	case attnBudget:
-		return []nextAction{
-			{"i", "open the inbox", "the stage hit its budget — top up (u) or park (x) from there"},
-		}
+		return []nextAction{nextStep("inbox", "i", "open the inbox", "the stage hit its budget — top up (u) or park (x) from there")}
 	case attnQuestion:
-		return []nextAction{
-			{"enter", "attach & answer", "the agent asked a question and is waiting"},
-		}
+		return []nextAction{nextStep("run", "enter", "attach & answer", "the agent asked a question and is waiting")}
 	}
 
 	work := workflow.WorkStage(in.kind) // implement (feature) or fix (bug)
@@ -191,24 +197,24 @@ func nextActions(in nextInput) []nextAction {
 
 	switch in.stage {
 	case domain.StageTodo:
-		return []nextAction{{"g", "start", "advance into the design flow"}}
+		return []nextAction{nextStep("advance", "g", "start", "advance into the design flow")}
 
 	case domain.StageInvestigate:
 		return append(
 			talkAction(in, "the researcher", "explore the question and shape the doc"),
-			nextAction{"g", "advance", "move on to " + string(domain.StageShape)},
+			nextStep("advance", "g", "advance", "move on to "+string(domain.StageShape)),
 		)
 
 	case domain.StageShape:
 		return append(
 			talkAction(in, "the researcher", "converge the findings into the answer"),
-			nextAction{"g", "advance", "move on to " + string(domain.StageReview)},
+			nextStep("advance", "g", "advance", "move on to "+string(domain.StageReview)),
 		)
 
 	case domain.StageBrainstorm, domain.StageTriage:
 		return append(
 			talkAction(in, "the architect", "explore the problem and candidate approaches"),
-			nextAction{"g", "advance", "converged? move on to the " + artifactNoun(in.kind)},
+			nextStep("advance", "g", "advance", "converged? move on to the "+artifactNoun(in.kind)),
 		)
 
 	case domain.StageSpec, domain.StageDiagnose:
@@ -219,7 +225,7 @@ func nextActions(in nextInput) []nextAction {
 		if b := blockedGate(in); b != nil {
 			return append([]nextAction{*b}, acts...)
 		}
-		gate := nextAction{"g", "approve", "creates the worktree and starts the agent stages"}
+		gate := nextStep("advance", "g", "approve", "creates the worktree and starts the agent stages")
 		if in.quick {
 			gate.why = "creates the worktree and starts implementing — P first if it outgrew quick"
 		}
@@ -227,9 +233,9 @@ func nextActions(in nextInput) []nextAction {
 
 	case domain.StagePlan:
 		if !finished {
-			return []nextAction{{"enter", "run the planner", "no active run — writes the line-level plan into the spec"}}
+			return []nextAction{nextStep("run", "enter", "run the planner", "no active run — writes the line-level plan into the spec")}
 		}
-		acts := []nextAction{{"s", "read the plan", "it lives in the spec's Implementation notes"}}
+		acts := []nextAction{nextStep("spec", "s", "read the plan", "it lives in the spec's Implementation notes")}
 		if b := blockedGate(in); b != nil {
 			return append(acts, *b)
 		}
@@ -237,21 +243,21 @@ func nextActions(in nextInput) []nextAction {
 		if in.escalated {
 			why = "the critique loop gave up — judge the plan yourself before approving"
 		}
-		return append(acts, nextAction{"g", "approve & " + string(work), why})
+		return append(acts, nextStep("advance", "g", "approve & "+string(work), why))
 
 	case domain.StageImplement, domain.StageFix:
 		if !finished {
-			return []nextAction{{"enter", "run " + string(in.stage), "no active run — start (or restart) the stage"}}
+			return []nextAction{nextStep("run", "enter", "run "+string(in.stage), "no active run — start (or restart) the stage")}
 		}
-		acts := []nextAction{{"d", "review the diff", "spot-check what the " + string(in.stage) + " run produced"}}
+		acts := []nextAction{nextStep("diff", "d", "review the diff", "spot-check what the "+string(in.stage)+" run produced")}
 		if b := blockedGate(in); b != nil {
 			return append(acts, *b)
 		}
-		return append(acts, nextAction{"g", "advance to review", "hand it to the fresh-context reviewer"})
+		return append(acts, nextStep("advance", "g", "advance to review", "hand it to the fresh-context reviewer"))
 
 	case domain.StageReview:
 		if !finished {
-			return []nextAction{{"enter", "run review", "no active run — start the fresh-context review"}}
+			return []nextAction{nextStep("run", "enter", "run review", "no active run — start the fresh-context review")}
 		}
 		// a review gate is always an escalation: clean verdicts advance
 		// automatically, so this review gave up (round cap or no verdict).
@@ -259,29 +265,29 @@ func nextActions(in nextInput) []nextAction {
 		if in.reviewRound >= maxReviewRounds {
 			why = "still requesting changes after " + itoa(maxReviewRounds) + " rounds — read the findings yourself"
 		}
-		acts := []nextAction{{"s", "read the findings", why}}
+		acts := []nextAction{nextStep("spec", "s", "read the findings", why)}
 		if b := blockedGate(in); b != nil {
 			return append(acts, *b)
 		}
 		return append(acts,
-			nextAction{"b", "bounce to " + string(work), "send the findings back for another round"},
-			nextAction{"g", "advance to verify", "overrule the reviewer if the findings don't hold"})
+			nextStep("bounce", "b", "bounce to "+string(work), "send the findings back for another round"),
+			nextStep("advance", "g", "advance to verify", "overrule the reviewer if the findings don't hold"))
 
 	case domain.StageVerify:
 		if !finished {
-			return []nextAction{{"enter", "run verify", "no active run — runs the checks and the verification plan"}}
+			return []nextAction{nextStep("run", "enter", "run verify", "no active run — runs the checks and the verification plan")}
 		}
 		if b := blockedGate(in); b != nil {
 			return []nextAction{
 				*b,
-				{"b", "bounce to " + string(work), "or send the open items back as rework"},
+				nextStep("bounce", "b", "bounce to "+string(work), "or send the open items back as rework"),
 			}
 		}
 		if in.failedCheck != "" {
 			return []nextAction{
-				{"v", "re-run checks", "'" + in.failedCheck + "' failed on the last manual run"},
-				{"enter", "re-run verify", "let the agent chase the failure and update the " + artifactNoun(in.kind)},
-				{"b", "bounce to " + string(work), "if the failure is the implementation's fault"},
+				nextStep("verify", "v", "re-run checks", "'"+in.failedCheck+"' failed on the last manual run"),
+				nextStep("run", "enter", "re-run verify", "let the agent chase the failure and update the "+artifactNoun(in.kind)),
+				nextStep("bounce", "b", "bounce to "+string(work), "if the failure is the implementation's fault"),
 			}
 		}
 		// blocked: the environment can't run the plan, so rework can't
@@ -290,9 +296,9 @@ func nextActions(in nextInput) []nextAction {
 		// inbox gate text still says BLOCKED.)
 		if in.verdict == verdictBlocked {
 			return []nextAction{
-				{"s", "read the blockers", "verify is blocked on the environment — the missing prerequisites are in the " + artifactNoun(in.kind)},
-				{"enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"},
-				{"g", "land on main", "only if you verified it by hand — verify never proved this build"},
+				nextStep("spec", "s", "read the blockers", "verify is blocked on the environment — the missing prerequisites are in the "+artifactNoun(in.kind)),
+				nextStep("run", "enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"),
+				nextStep("advance", "g", "land on main", "only if you verified it by hand — verify never proved this build"),
 			}
 		}
 		// a verify gate carries a verdict (or, session gone, at least the
@@ -309,35 +315,35 @@ func nextActions(in nextInput) []nextAction {
 			if in.verifyBounces >= 1 {
 				n := itoa(in.verifyBounces + 1)
 				return []nextAction{
-					{"s", "read the verify results", "verify has failed " + n + " times — the evidence is in the " + artifactNoun(in.kind)},
-					{"g", "land on main", "overrule if the failures don't hold up"},
-					{"b", "bounce to " + string(work), "unlikely to help after " + n + " failed verifies — check the environment and the verification plan first"},
+					nextStep("spec", "s", "read the verify results", "verify has failed "+n+" times — the evidence is in the "+artifactNoun(in.kind)),
+					nextStep("advance", "g", "land on main", "overrule if the failures don't hold up"),
+					nextStep("bounce", "b", "bounce to "+string(work), "unlikely to help after "+n+" failed verifies — check the environment and the verification plan first"),
 				}
 			}
 			return []nextAction{
-				{"s", "read the verify results", why},
-				{"b", "bounce to " + string(work), "send the failures back as rework"},
-				{"g", "land on main", "overrule if the failure doesn't hold up"},
+				nextStep("spec", "s", "read the verify results", why),
+				nextStep("bounce", "b", "bounce to "+string(work), "send the failures back as rework"),
+				nextStep("advance", "g", "land on main", "overrule if the failure doesn't hold up"),
 			}
 		}
 		if in.kind == domain.KindResearch {
 			return []nextAction{
-				{"g", "mark done", "verify passed — advance to done"},
-				{"b", "bounce to investigate", "not convinced — send it back with comments"},
+				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
+				nextStep("bounce", "b", "bounce to investigate", "not convinced — send it back with comments"),
 			}
 		}
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"
 		if in.verdict == verdictPass {
 			why = "verify passed — " + why
 		}
-		gate := nextAction{"g", "land on main", why}
+		gate := nextStep("advance", "g", "land on main", why)
 		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
-			gate = nextAction{"g", "merge the PR", hint}
+			gate = nextStep("advance", "g", "merge the PR", hint)
 		}
 		return []nextAction{
 			gate,
-			{"d", "final read of the diff", "one last look before it lands"},
-			{"b", "bounce to " + string(work), "not convinced — send it back with comments"},
+			nextStep("diff", "d", "final read of the diff", "one last look before it lands"),
+			nextStep("bounce", "b", "bounce to "+string(work), "not convinced — send it back with comments"),
 		}
 	}
 	return nil

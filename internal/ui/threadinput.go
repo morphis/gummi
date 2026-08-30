@@ -31,11 +31,10 @@ import (
 //   - as keys, after esc. Blurring hands the keyboard back to the
 //     accelerator table with the draft intact; esc again leaves the page.
 //
-// Two keys keep their old meaning while the composer is empty, because
-// an empty composer has nothing for them to do: enter runs the next
-// card's highlighted action, and up/down move its cursor. Neither can
-// surprise anyone mid-sentence — the moment there is text, both belong
-// to the text.
+// While a decision is open and the composer is empty, enter and the
+// picker keys answer that visible control. With no decision, enter is a
+// no-op and up opens the action inventory. None can surprise anyone
+// mid-sentence — the moment there is text, they belong to the text.
 type pendingChip struct {
 	feature   domain.FeatureID
 	verb      string
@@ -95,6 +94,10 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "enter":
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
+			if d := m.openDecision(r); d != nil {
+				m.syncDecision(d)
+				return m.answerDecision(r, d)
+			}
 			return nil
 		}
 		return m.submitThreadInput(r.F)
@@ -103,6 +106,17 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.scrollThread(msg.String() == "pgup")
 		return nil
 	case "up", "down":
+		if strings.TrimSpace(m.threadInput.Value()) == "" {
+			if d := m.openDecision(r); d != nil {
+				m.syncDecision(d)
+				delta := 1
+				if msg.String() == "up" {
+					delta = -1
+				}
+				m.moveDecision(d, delta)
+				return nil
+			}
+		}
 		// Up on an empty composer reveals the action inventory. Once open,
 		// the modal owns both arrows and enter; down remains ordinary
 		// textarea input until there is a visible list to move through.
@@ -110,6 +124,30 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			if msg.String() == "up" {
 				m.openCardActions(r)
 				return nil
+			}
+		}
+	case "space":
+		if strings.TrimSpace(m.threadInput.Value()) == "" {
+			if d := m.openDecision(r); d != nil && d.ask != nil && d.ask.MultiPick && len(d.ask.Options) > 0 {
+				m.syncDecision(d)
+				m.decisionPicked[m.decisionCursor] = !m.decisionPicked[m.decisionCursor]
+				return nil
+			}
+		}
+	}
+	if strings.TrimSpace(m.threadInput.Value()) == "" {
+		if d := m.openDecision(r); d != nil && d.ask != nil {
+			if key := msg.String(); len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+				i := int(key[0] - '1')
+				if i < len(d.ask.Options) {
+					m.syncDecision(d)
+					m.decisionCursor = i
+					if d.ask.MultiPick {
+						m.decisionPicked[i] = !m.decisionPicked[i]
+						return nil
+					}
+					return m.answerDecision(r, d)
+				}
 			}
 		}
 	}
@@ -369,10 +407,24 @@ func (m *Shell) threadInputBindings() []binding {
 			{key: "esc", label: "cancel", help: "back out — the line goes back in the input as a message", bar: true},
 		}
 	}
+	if r, ok := m.selected(); ok {
+		if d := m.openDecision(r); d != nil {
+			label := "answer"
+			if d.ask == nil && m.decisionCursor >= 0 && m.decisionCursor < len(d.actions) {
+				label = d.actions[m.decisionCursor].label
+			}
+			return []binding{
+				{key: "↑↓", label: "choose", help: "move through the open decision", bar: true},
+				{key: "enter", label: label, help: "answer the highlighted option", bar: true},
+				{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
+				{key: "esc", label: "keys", help: "hand the keyboard back to the card accelerators", bar: true},
+			}
+		}
+	}
 	return []binding{
-		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; runs the highlighted action when the line is empty", bar: true},
+		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; does nothing when the line is empty", bar: true},
 		{key: "esc", label: "keys", help: "hand the keyboard back to the card's single-letter accelerators (the draft is kept)", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
-		{key: "↑↓", label: "actions", help: "move the next card's cursor while the line is empty"},
+		{key: "↑", label: "actions", help: "open the action inventory while the line is empty"},
 	}
 }
