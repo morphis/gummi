@@ -73,6 +73,7 @@ func TestCompletedRunRaisesGate(t *testing.T) {
 		t.Errorf("item kind = %s, want gate", m.inbox.list()[0].Kind)
 	}
 	// acting on the feature (advance) clears the item
+	m = toKeys(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m.inbox.len() != 0 {
 		t.Error("advancing did not clear the gate item")

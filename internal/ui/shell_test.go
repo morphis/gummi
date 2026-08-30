@@ -96,6 +96,7 @@ func TestQuitWithLiveSessionPushesDialog(t *testing.T) {
 	m = openAndAttach(t, m)                                // run plan (autonomous)
 	waitLive(t, eng, "FD-001")
 
+	m = toKeys(t, m)
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd != nil {
 		t.Fatalf("q with a live session returned a command, want the dialog")
@@ -122,6 +123,7 @@ func TestQuitConfirmYesQuits(t *testing.T) {
 	waitLive(t, eng, "FD-001")
 
 	// q pushes the dialog; confirming with y returns the quit command.
+	m = toKeys(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd == nil {
@@ -146,6 +148,8 @@ func TestQuitLiveDialogCancelStays(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
+
+	m = toKeys(t, m)
 
 	m = press(t, m, tea.KeyPressMsg{Code: 'q', Text: "q"})
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})

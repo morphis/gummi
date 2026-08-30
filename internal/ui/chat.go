@@ -266,8 +266,12 @@ func (c *chatPane) transcript(s *theme.Styles, snap engine.Snapshot, w, bodyH in
 				label += " " + s.Faint.Render("· recorded in the spec")
 			}
 		case engine.AuthorSystem:
+			// the label is what marks a turn as gummi's own; the body is
+			// still something you are meant to read, and rendering it at
+			// the faintest weight on the palette made the one message that
+			// opens every stage the hardest to read on the page
 			label = s.Faint.Render("gummi")
-			style = s.Faint
+			style = s.Subtle
 		default:
 			label = s.Title.Render(string(snap.Role))
 			style = s.Subtle

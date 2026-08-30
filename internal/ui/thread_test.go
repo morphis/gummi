@@ -327,57 +327,44 @@ func TestFoldedReceiptPrefersMeteredSpend(t *testing.T) {
 	}
 }
 
-// TestThreadInputDisambiguatesTypingFromAccelerators is the contract this
-// feature turns on: "/" (and only "/") switches the card page's keyboard
-// from its single-letter accelerators to the thread input, and esc hands
-// it back without losing the draft. Every accelerator letter used below
-// (g, v) would themselves be recognised commands once focused — proving
-// they type rather than fire is the whole point.
-func TestThreadInputDisambiguatesTypingFromAccelerators(t *testing.T) {
+// The composer owns the keyboard the moment a card opens, the way a
+// coding agent's does: you type your reply, you do not unlock a field
+// first. The accelerators are still there, one esc away, with the draft
+// kept — and the keys that are not text (enter on an empty line, the
+// arrows, the page keys) keep working without leaving the line at all.
+func TestThreadInputOwnsTheKeyboardOnOpen(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
 	if !m.cardOpen {
 		t.Fatal("enter did not open the card page")
 	}
-	if m.threadInput.Focused() {
-		t.Fatal("thread input starts unfocused")
-	}
-
-	// unfocused: 'g' is the advance accelerator, not a character — it
-	// must not land in the input.
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	if m.threadInput.Value() != "" {
-		t.Fatalf("accelerator 'g' leaked into the thread input: %q", m.threadInput.Value())
-	}
-
-	// "/" focuses the input without inserting itself.
-	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
 	if !m.threadInput.Focused() {
-		t.Fatal("/ did not focus the thread input")
-	}
-	if m.threadInput.Value() != "" {
-		t.Fatalf("/ inserted itself into the input: %q", m.threadInput.Value())
+		t.Fatal("the composer is not focused on arrival — it has to be ready to type into")
 	}
 
-	// focused: every one of those same letters now types, verify included.
+	// letters that used to be accelerators are just letters now
 	m = typeString(t, m, "g and v are just letters here")
-	if m.threadInput.Value() != "g and v are just letters here" {
-		t.Fatalf("focused input = %q, want the typed text verbatim", m.threadInput.Value())
+	if got := m.threadInput.Value(); got != "g and v are just letters here" {
+		t.Fatalf("composer = %q, want the typed text verbatim", got)
 	}
 
-	// esc blurs without discarding the draft.
+	// esc hands the keyboard back without eating the draft
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.threadInput.Focused() {
-		t.Fatal("esc should blur the thread input")
+		t.Fatal("esc did not blur the composer")
 	}
-	if m.threadInput.Value() != "g and v are just letters here" {
-		t.Fatalf("esc discarded the draft: %q", m.threadInput.Value())
+	if got := m.threadInput.Value(); got != "g and v are just letters here" {
+		t.Fatalf("esc discarded the draft: %q", got)
+	}
+	if !m.cardOpen {
+		t.Fatal("esc left the card page instead of only blurring")
 	}
 
-	// unfocused again: accelerators resume, the draft stays untouched.
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	if m.threadInput.Value() != "g and v are just letters here" {
-		t.Fatalf("post-blur accelerator changed the draft: %q", m.threadInput.Value())
+	// blurred, the accelerators answer again and do not leak into the line
+	before := m.threadInput.Value()
+	m = press(t, m, tea.KeyPressMsg{Code: 'J', Text: "J"})
+	if m.threadInput.Value() != before {
+		t.Fatalf("accelerator leaked into the composer: %q", m.threadInput.Value())
 	}
 }
 
@@ -390,7 +377,6 @@ func TestThreadInputDisambiguatesTypingFromAccelerators(t *testing.T) {
 func TestThreadInputSurvivesTabSwitch(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = typeString(t, m, "not sent yet")
 
 	m = press(t, m, tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt}) // -> inbox tab
@@ -426,7 +412,6 @@ func TestFocusThreadInputWithholdsForDrivenAbroad(t *testing.T) {
 	m.rows[m.sel].DrivenAbroad = true
 	m.rows[m.sel].Foreign = state.ForeignDrive{PID: 99}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
 	if m.threadInput.Focused() {
 		t.Fatal("/ focused the input on a card driven by another process")
 	}
@@ -663,8 +648,6 @@ func TestThreadInputSendsToLiveSession(t *testing.T) {
 	if !m.cardOpen {
 		t.Fatal("detaching the chat pane should not close the card page")
 	}
-
-	m = press(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
 	if !m.threadInput.Focused() {
 		t.Fatal("/ did not focus the thread input")
 	}

@@ -15,62 +15,55 @@ import (
 // The thread's input (thread.go's bottom slot) is a persistent textarea
 // on Shell, not one rebuilt per render — so an unsent draft survives
 // leaving the tab and coming back (boardSurfacesLive hides, never
-// destroys, exactly like the chat pane's m.chat). It has two states,
-// which is the SAME convention chat.go and bugIngestView already use for
-// "typing vs. the surface's own keys" (chat.go: an always-focused
-// textarea with a short reserved-key list intercepted first; bugIngestView:
-// a filtering bool, toggled by "/", that the surface's own key handler
-// checks before falling through to its input):
+// destroys, exactly like the chat pane's m.chat).
 //
-//   - unfocused (the default, and the state a freshly opened card page is
-//     in): every one of the card page's existing single-letter
-//     accelerators fires exactly as before — this file changes nothing
-//     about that path, which is what "must keep working" means literally
-//     here: zero new code runs on that route.
-//   - focused: entered by pressing "/" (focusThreadInput, boardKey) —
-//     the same trigger and the same "consumed, not inserted" behaviour
-//     bugIngestView's own filter uses. Once focused, every key types into
-//     the textarea except enter (submit) and esc (blur back to
-//     accelerators, keeping the draft).
+// It is FOCUSED the moment a card page opens, the way a coding agent's
+// composer is: the thread is a conversation, and a conversation you have
+// to unlock before you can answer it is a worse conversation. Typing
+// goes straight in.
 //
-// "/" was chosen over any letter because the accelerator alphabet is
-// almost fully claimed (see cardPageBindings/boardVerb) — no single
-// letter was free to double as "start typing" without shadowing an
-// existing key on its very first press. "/" is free, and it already
-// carries the right connotation: parseInput's own bare-"/"/"/foo" rule
-// means typing "/" once focused, then enter, reaches the exact same
-// command menu this key would have opened directly.
+// That leaves the page's single-letter accelerators reachable two ways
+// rather than one, which is the trade this makes deliberately:
+//
+//   - as words. The closed verb vocabulary (verbs.go) covers what the
+//     letters cover — "diff", "approve", "verify" — and the next card
+//     lists them beside their keys.
+//   - as keys, after esc. Blurring hands the keyboard back to the
+//     accelerator table with the draft intact; esc again leaves the page.
+//
+// Two keys keep their old meaning while the composer is empty, because
+// an empty composer has nothing for them to do: enter runs the next
+// card's highlighted action, and up/down move its cursor. Neither can
+// surprise anyone mid-sentence — the moment there is text, both belong
+// to the text.
 type pendingChip struct {
 	feature   domain.FeatureID
 	verb      string
 	remainder string
 }
 
-// newThreadInput builds the thread's persistent input. Mirrors chat.go's
-// newChatInput for visual consistency, but starts blurred: unlike the
-// chat pane (the only widget on its screen), the card page's input shares
-// the keyboard with a full accelerator table, so it opts in rather than
-// grabbing focus on arrival.
+// newThreadInput builds the thread's persistent input, mirroring
+// chat.go's newChatInput for visual consistency with the pane it stands
+// in for.
 func newThreadInput() textarea.Model {
 	in := textarea.New()
-	in.Placeholder = "message the agent, or a verb (approve, verify, diff…) — / to compose"
+	in.Placeholder = "message the agent, or a verb (approve, verify, diff…)"
 	in.CharLimit = 4000
 	in.ShowLineNumbers = false
 	in.SetHeight(1)
 	return in
 }
 
-// focusThreadInput switches the card page's keyboard from accelerators to
-// the thread's input, per this file's doc comment. A card driven by
-// another process withholds it entirely — the same guard inputBlock
-// applies when rendering a read-only line for it (thread.go).
-func (m *Shell) focusThreadInput() bool {
+// focusThreadInput gives the thread's input the keyboard. A card driven
+// by another process withholds it entirely — the same guard inputBlock
+// applies when rendering a read-only line for it (thread.go) — which is
+// why opening a card calls this rather than focusing unconditionally.
+func (m *Shell) focusThreadInput() {
 	r, ok := m.selected()
 	if !ok || r.DrivenAbroad {
-		return false
+		return
 	}
 	m.threadInput.Focus()
-	return true
 }
 
 // blurThreadInput hands the keyboard back to the card's accelerators
@@ -101,7 +94,29 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.threadInput.Blur()
 		return nil
 	case "enter":
+		// Nothing typed means nothing to send, so enter keeps meaning what
+		// it meant before the input took the keyboard: run whatever the
+		// next card has highlighted. That is what lets the composer stay
+		// focused by default without swallowing the page's primary key.
+		if strings.TrimSpace(m.threadInput.Value()) == "" {
+			if a, ok := m.cardActions().Selected(); ok {
+				m.clearTransientNotice()
+				return m.runCardAction(a)
+			}
+			return nil
+		}
 		return m.submitThreadInput(r.F)
+	case "pgup", "pgdown":
+		// scrolling the conversation is never text, so it works mid-draft
+		m.scrollThread(msg.String() == "pgup")
+		return nil
+	case "up", "down":
+		// an empty composer has no line to move within, so the arrows
+		// still drive the action list underneath it
+		if strings.TrimSpace(m.threadInput.Value()) == "" {
+			m.moveAction(map[string]int{"up": -1, "down": 1}[msg.String()])
+			return nil
+		}
 	}
 	var cmd tea.Cmd
 	m.threadInput, cmd = m.threadInput.Update(msg)
@@ -118,8 +133,7 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 	return cmd
 }
 
-// submitThreadInput parses the input's current line and routes it
-// (PART 3 of the leading-verbs work):
+// submitThreadInput parses the input's current line and routes it:
 //
 //   - verbNone -> sent as a message to the agent, exactly as the chat
 //     pane's own send path does.
@@ -349,8 +363,9 @@ func (m *Shell) threadInputBindings() []binding {
 		}
 	}
 	return []binding{
-		{key: "type", label: "type", help: "everything types into the line — a message, or a leading verb", bar: true},
-		{key: "enter", label: "send", help: "send the line — a message, or route a verb command", bar: true},
-		{key: "esc", label: "accelerators", help: "blur the input; the card's single-letter keys take over again", bar: true},
+		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; runs the highlighted action when the line is empty", bar: true},
+		{key: "esc", label: "keys", help: "hand the keyboard back to the card's single-letter accelerators (the draft is kept)", bar: true},
+		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
+		{key: "↑↓", label: "actions", help: "move the next card's cursor while the line is empty"},
 	}
 }

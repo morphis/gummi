@@ -65,6 +65,12 @@ func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
 		t.Errorf("card page has no way back in its breadcrumb:\n%s", view)
 	}
 
+	// the composer owns the keyboard on arrival, so leaving is two steps:
+	// esc hands the keys back, esc again leaves the page
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !m.cardOpen {
+		t.Fatal("the first esc should only blur the composer, not leave the page")
+	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.cardOpen {
 		t.Fatal("esc on the card page should return to the backlog")
@@ -79,6 +85,7 @@ func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
 func TestCardPageArrowsDriveTheActionList(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = toKeys(t, m)
 	if !m.actionsOwnArrows() {
 		t.Fatal("the card page's action list should own the arrow keys on arrival")
 	}
@@ -103,6 +110,7 @@ func TestCardPageArrowsDriveTheActionList(t *testing.T) {
 func TestCardPageJKStepsCards(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = toKeys(t, m)
 	first := m.rows[m.sel].F.ID
 
 	m = press(t, m, key('J'))
@@ -194,11 +202,20 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "enter", "open card")
 
+	// a card opens with its composer holding the keyboard, so the bar
+	// teaches the line's keys first
 	m.openCard()
 	name, bs = m.activeSurface()
 	if name != "card" {
 		t.Fatalf("active surface = %q, want card", name)
 	}
+	assertNoKey(t, bs, "→")
+	assertLabel(t, bs, "enter", "send")
+	assertLabel(t, bs, "esc", "keys")
+
+	// esc hands the keys back, and the page's own table returns with them
+	m.blurThreadInput()
+	_, bs = m.activeSurface()
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "enter", "run action")
 	assertLabel(t, bs, "esc", "backlog")

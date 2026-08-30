@@ -105,6 +105,18 @@ func settleChat(t *testing.T, eng *engine.Engine) {
 // takes two presses: this helper is the first attach in a test. A later
 // re-attach after esc only needs one more press, because esc detaches
 // the chat pane without closing the card page underneath it.
+// toKeys hands the keyboard from the card page's composer back to its
+// single-letter accelerators. The composer is focused whenever a card is
+// open, so a test driving the page with bare keys (p, q, J, g) has to
+// step out of the line first — exactly as a user does.
+func toKeys(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	if !m.threadInput.Focused() {
+		return m
+	}
+	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+}
+
 func openAndAttach(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -169,6 +181,7 @@ func TestChatReuseRespectsStage(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// advance brainstorm → spec while detached
+	m = toKeys(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("stage = %s, want spec", m.rows[0].F.Stage)

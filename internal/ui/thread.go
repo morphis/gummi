@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
@@ -635,7 +636,19 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
 	case state.EventMessage:
 		var p messagePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		return s.Faint.Render(ansi.Truncate(sanitize(p.Author+": "+p.Content), max(w-4, 8), "…"))
+		// who said it decides the weight, the same way the live pane's
+		// transcript does (chat.go): rendering every logged turn at one
+		// faint weight made a replayed conversation unreadable next to the
+		// live one it is the history of.
+		body := s.Subtle
+		switch p.Author {
+		case string(engine.AuthorUser):
+			body = s.Base
+		case string(engine.AuthorSystem):
+			body = s.Subtle
+		}
+		return s.Faint.Render(messageAuthorLabel(p.Author)+" ") +
+			body.Render(ansi.Truncate(sanitize(p.Content), max(w-6, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)
 	}
@@ -682,4 +695,21 @@ func stageSpendByStage(rows []state.StageSpend) map[domain.Stage]float64 {
 		out[r.Stage] += r.Credits
 	}
 	return out
+}
+
+// messageAuthorLabel names a logged turn's author the way the live pane
+// labels the same turn: the user by name, gummi's own kickoffs as gummi,
+// and the agent by whichever role was speaking.
+func messageAuthorLabel(author string) string {
+	switch author {
+	case string(engine.AuthorUser):
+		return "you"
+	case string(engine.AuthorSystem):
+		return "gummi"
+	default:
+		if author == "" {
+			return "agent"
+		}
+		return author
+	}
 }

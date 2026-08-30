@@ -328,6 +328,8 @@ func TestVerifyLoopBreakerWarnsOnSecondFailure(t *testing.T) {
 		t.Fatalf("first failure already warns: %q", it.Text)
 	}
 
+	m = toKeys(t, m)
+
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"}) // bounce to implement
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("bounce did not reach implement (at %s)", m.rows[0].F.Stage)

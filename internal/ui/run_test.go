@@ -69,6 +69,7 @@ func TestPauseStopsRun(t *testing.T) {
 		t.Fatal("run did not start a session")
 	}
 	// p pauses: the session is stopped and marked paused (kept visible)
+	m = toKeys(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
 	s := m.engine.Get("FD-001")
 	if s == nil || s.State() != engine.StatePaused {
@@ -115,6 +116,8 @@ func TestBugInteractiveStagesOpenChat(t *testing.T) {
 
 	for _, stage := range []domain.Stage{domain.StageTriage, domain.StageDiagnose} {
 		selectRow(t, m, "BG-002")
+		// the card page is open, so its composer holds the keyboard
+		m = toKeys(t, m)
 		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 		if m.rows[m.sel].F.Stage != stage {
 			t.Fatalf("setup: stage = %s, want %s", m.rows[m.sel].F.Stage, stage)

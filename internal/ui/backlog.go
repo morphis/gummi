@@ -24,8 +24,11 @@ func (m *Shell) openCard() tea.Cmd {
 	m.cardOpen = true
 	m.actionCursor = 0
 	m.actionsExpanded = false
-	// a card opens on its newest event, the way a chat does
+	// a card opens on its newest event with the composer ready, the way a
+	// chat does — focusThreadInput still refuses a card another process
+	// is driving
 	m.threadScroll = 0
+	m.focusThreadInput()
 	return m.loadCardEvents(r.F.ID)
 }
 
@@ -48,6 +51,13 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 	// rather than inheriting how far back this one was scrolled
 	m.threadScroll = 0
 	r, ok := m.selected()
+	// stepping cards is not a mode change: someone scanning with J/K from
+	// the accelerator layer stays there, and someone mid-draft keeps the
+	// keyboard. The one exception is a card another process drives, which
+	// has no input to hold.
+	if ok && r.DrivenAbroad {
+		m.blurThreadInput()
+	}
 	if !ok {
 		return nil
 	}
