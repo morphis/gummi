@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS card_events (
 	dedupe     TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS card_events_feature ON card_events(feature_id, seq);
+CREATE INDEX IF NOT EXISTS card_events_kind ON card_events(kind, feature_id);
 CREATE UNIQUE INDEX IF NOT EXISTS card_events_dedupe
 	ON card_events(feature_id, dedupe) WHERE dedupe <> '';
 `
@@ -1171,8 +1172,10 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	// table never made, or miss one it did. Every caller reaches a
 	// crossing through here — the engine's own Advance, the review loop's
 	// automatic steps, the headless driver — so this is the one place that
-	// sees all of them.
-	if err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now); err != nil {
+	// sees all of them. The crossing answers the newest still-open gate
+	// decision, looked up in this same transaction so the crossing and its
+	// answer commit together.
+	if err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, s.newestOpenGateDecisionTx(ctx, tx, id)); err != nil {
 		return f, err
 	}
 	if err := tx.Commit(); err != nil {

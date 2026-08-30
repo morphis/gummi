@@ -918,6 +918,25 @@ Rules that make the control safe:
   credits — a model-backed conductor would be a new way to spend money to
   be told what the compiled-in workflow already knows, and a thing the
   user could argue with.
+- **An open ask survives the process that asked it, or dies honestly.**
+  Durability without an answer path would be worse than the evaporation
+  it replaces — after a restart the blocked tool call, its id and its
+  RPC are all gone, so a restored open ask needs a route back or a
+  marked exit, and it gets both. **Re-armed on restore:** when the engine
+  rehydrates a card's session for the stage an open ask decision was
+  raised in, the question is re-armed as that session's pending ask from
+  the durable record — free-form only, because the recorded options died
+  with the process and are never stored (§ above), so the answer is
+  prose, which the control always allows. The answer rides a fresh turn
+  (the convention path), not a tool resolution — the blocked call is
+  gone — and still carries the same decision id, so the record closes on
+  the answer event like any other. **Abandoned when the stage moves on:**
+  a decision whose stage is no longer the card's stage — the gate was
+  crossed over it, the card was bounced, the stage re-ran without the
+  answer — is dead, and `Store.OpenDecisions` reports it as nothing:
+  only decisions whose stage still matches the card's current stage are
+  open, so a question nobody answered reads as what it is once the card
+  has moved past it rather than as a question waiting forever.
 
 Because the same event is what the headless driver raises at its own
 checkpoints, the two loops share the decision rather than each modelling

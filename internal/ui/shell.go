@@ -403,13 +403,53 @@ func exhaustedActivity(activity []string) bool {
 	return false
 }
 
+// raiseEscalation is raiseAttention for gates an automatic loop gave up
+// on (round cap, unclear verdict): the item carries the escalation flag
+// so surfaces tint it as needs-you rather than finished-clean. Every
+// escalation is a gate — the loop stopped at a decision only the human
+// can take — and it is recorded as one, the same seam the driver's
+// escalations raise through.
+func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
+	if m.inbox.addEscalated(id, attnGate, text) {
+		m.notifier.Alert(string(id) + ": " + text)
+		m.logPark(id, state.ParkReasonGaveUp, text)
+		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
+	}
+}
+
 // raiseAttention adds a needs-attention item and, when it is a new alert
-// (not an update of an existing one), fires the notification hook.
+// (not an update of an existing one), fires the notification hook and
+// records the stop's decision — the one row §10.18 requires. Only gate
+// items record here: asks and budget stops open their decisions where
+// they happen (the engine's ask path and exhaust), so the TUI writing
+// them too would mint a second row for the same decision. The inbox's own
+// already-present check keeps one stop from being recorded twice, exactly
+// as the park beside it does.
 func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
 	if m.inbox.add(id, kind, text) {
 		m.notifier.Alert(string(id) + ": " + text)
 		m.logPark(id, state.ParkReasonNeedsYou, text)
+		if kind == attnGate {
+			m.logDecision(id, state.DecisionKindGate, text)
+		}
 	}
+}
+
+// logDecision records a card's open decision in its own history
+// (best-effort and silent, like logPark beside it): a card blocked on a
+// person leaves a row, whoever drove it here. The id is minted per
+// raise, generation-scoped so a re-raised stop after a bounce never
+// collides with its predecessor's row.
+func (m *Shell) logDecision(id domain.FeatureID, kind, question string) {
+	if m.store == nil {
+		return
+	}
+	stage := m.stageOf(id)
+	_ = m.store.OpenDecision(context.Background(), id, stage, state.DecisionPayload{
+		ID:       kind + ":" + string(id) + ":" + string(stage) + ":" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Kind:     kind,
+		Question: question,
+	}, time.Now())
 }
 
 // logPark records a card stopping in its own history. It hangs off the
@@ -439,20 +479,17 @@ func (m *Shell) stageOf(id domain.FeatureID) domain.Stage {
 	return ""
 }
 
-// raiseEscalation is raiseAttention for gates an automatic loop gave up
-// on (round cap, unclear verdict): the item carries the escalation flag
-// so surfaces tint it as needs-you rather than finished-clean. Every
-// escalation is a gate — the loop stopped at a decision only the human
-// can take.
-func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
-	if m.inbox.addEscalated(id, attnGate, text) {
-		m.notifier.Alert(string(id) + ": " + text)
-		m.logPark(id, state.ParkReasonGaveUp, text)
+// decisionKindForStage maps a stopped card's stage to the decision kind
+// its stop records: a failed verify escalates as the verify decision it
+// is; every other give-up is a gate the human judges.
+func decisionKindForStage(stage domain.Stage) string {
+	if stage == domain.StageVerify {
+		return state.DecisionKindVerify
 	}
+	return state.DecisionKindGate
 }
 
 // Styles exposes the derived style set to panes.
-func (m *Shell) Styles() *theme.Styles { return m.styles }
 
 // attached reports whether a workspace is wired in.
 func (m *Shell) attached() bool { return m.store != nil }

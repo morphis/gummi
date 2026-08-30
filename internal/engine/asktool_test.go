@@ -1324,21 +1324,27 @@ func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
 // must be told that before they ask one — and a card that still stops
 // for a human must NOT be told it, or the agent would reason as though
 // nobody were reading when somebody is.
+//
 // TestAnswerRecordsActorFromGateApproval: an ask_user answer records who
-// actually took it. GateFull is the one mode where unattendedAskHint has
-// already told the agent nobody is reading, so an answer landing on a
-// GateFull card is autopilot's own; any other mode reads as a human's
-// typed reply — the split the decision receipt's "took N answers" relies
-// on (internal/ui/receipt.go).
+// actually took it. The answerer declares itself; the card's stored
+// gate-approval mode has no vote. The engine's Answer entry point is the
+// human path (state.ActorUser) whoever's mode the card runs under;
+// AnswerAs is the unattended loop's declared word. The old rule —
+// GateFull ⇒ autopilot, read off the stored mode — recorded a headless
+// --autonomous run's own taken answers as a human's whenever the stored
+// mode disagreed with how the run was driven, and the receipt silently
+// dropped them.
 func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 	for _, c := range []struct {
 		gate string
+		by   string
 		want string
 	}{
-		{domain.GateFull, state.ActorAutopilot},
-		{domain.GateGates, state.ActorUser},
-		{domain.GateOff, state.ActorUser},
-		{"", state.ActorUser},
+		{domain.GateFull, state.ActorUser, state.ActorUser},
+		{domain.GateGates, state.ActorUser, state.ActorUser},
+		{domain.GateGates, state.ActorAutopilot, state.ActorAutopilot},
+		{domain.GateOff, state.ActorUser, state.ActorUser},
+		{"", state.ActorUser, state.ActorUser},
 	} {
 		args := askArgs(t, Ask{
 			Question: "Persist where?",
@@ -1357,7 +1363,8 @@ func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 		}
 		waitFor(t, e, EventQuestion)
 
-		if err := e.Answer(context.Background(), f.ID, "per-device"); err != nil {
+		err := e.AnswerAs(context.Background(), f.ID, "per-device", c.by)
+		if err != nil {
 			e.Close()
 			t.Fatalf("gate %q: Answer: %v", c.gate, err)
 		}
@@ -1386,8 +1393,12 @@ func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 		if found.Question != "Persist where?" || found.Answer != "per-device" {
 			t.Errorf("gate %q: ask payload = %+v, want question/answer preserved", c.gate, found)
 		}
-		if found.Actor != c.want {
-			t.Errorf("gate %q: actor = %q, want %q", c.gate, found.Actor, c.want)
+		if found.Actor != c.want || found.By != c.want {
+			t.Errorf("gate %q: actor/by = %q/%q, want %q (the answerer declares itself, not the stored mode)",
+				c.gate, found.Actor, found.By, c.want)
+		}
+		if c.by == state.ActorAutopilot && found.Choice != "per-device" {
+			t.Errorf("gate %q: choice = %q, want the chosen option", c.gate, found.Choice)
 		}
 	}
 }

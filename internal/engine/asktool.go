@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -30,6 +31,14 @@ type Ask struct {
 	MultiPick  bool        `json:"multi_select"`
 	FreeForm   bool        `json:"allow_free_form"`
 	SpecAnchor string      `json:"spec_anchor"`
+	// DecisionID is the identity of the durable decision this ask opened
+	// (the decision_open row's id): the tool-call id, or a minted,
+	// generation-scoped stand-in on the convention path. It correlates the
+	// answer event to its open decision, and it is what a restored ask
+	// re-arms under — the answer then closes the same record the ask
+	// opened. Engine-side only; never parsed from or persisted to the
+	// tool arguments.
+	DecisionID string `json:"-"`
 }
 
 // AskOption is one selectable answer.
@@ -479,15 +488,64 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 		e.resolveNow(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
 		return
 	}
+	// mint the decision id before the ask installs: the pump goroutine owns
+	// the ask's identity until takePendingAsk hands it over, and minting
+	// after install would race the answer that reads it.
+	ask.DecisionID = decisionIDFor(s, ask)
 	if !s.trySetPendingAsk(ask) {
 		e.resolveNow(s, tc.ID, "the user is still answering your previous question — "+
 			"ask one question at a time; re-ask this after that answer arrives")
 		return
 	}
-	e.persist(s)
-	// the agent is waiting on the user, not the model; drop the busy spinner
+	// the question is now blocking a human: the open decision's durable
+	// row goes down in the same breath, on both the tool and convention
+	// paths, TUI and driver alike — this is the one seam every ask_user
+	// passes through (DESIGN §10.18: nothing may block a card without
+	// leaving a row).
+	// the question is now blocking a human: the open decision's durable
+	// row goes down in the same breath, on both the tool and convention
+	// paths, TUI and driver alike — this is the one seam every ask_user
+	// passes through (DESIGN §10.18: nothing may block a card without
+	// leaving a row). It sits after the spinner drop so the render pass
+	// that sees the pending ask does not also see a busy spinner.
 	s.setBusy(false)
+	e.openAskDecision(s, ask)
+	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
+}
+
+// decisionIDFor mints the ask's durable identity: the tool-call id on the
+// tool path, or a generation-scoped stand-in on the convention path — a
+// natural key (the question alone) would no-op the same question re-asked
+// after a bounce.
+func decisionIDFor(s *Session, ask *Ask) string {
+	if ask.CallID != "" {
+		return ask.CallID
+	}
+	return askDecisionID(s, ask.Question)
+}
+
+// openAskDecision records the blocking ask as a durable decision_open
+// under the id minted before the ask installed. Best-effort, like every
+// mirror write: the pending ask is already installed, and the log must
+// never break a live question.
+func (e *Engine) openAskDecision(s *Session, ask *Ask) {
+	if e.cfg.Store == nil || ask.DecisionID == "" {
+		return
+	}
+	_ = e.cfg.Store.OpenDecision(context.Background(), s.Feature.ID, s.Feature.Stage,
+		state.DecisionPayload{
+			ID: ask.DecisionID, Kind: state.DecisionKindAsk,
+			Question: ask.Question, FreeForm: ask.FreeForm, Multi: ask.MultiPick,
+			Anchor: ask.SpecAnchor,
+		}, e.now())
+}
+
+// askDecisionID mints a convention-path ask's decision id, scoped to the
+// session generation so two generations of the same question never share
+// a dedupe key.
+func askDecisionID(s *Session, question string) string {
+	return "ask:" + strconv.FormatInt(s.startedAt.UnixNano(), 10) + ":" + question
 }
 
 // handleAnnotate writes a %% marker onto a spec line and resolves the
@@ -770,8 +828,12 @@ func (e *Engine) maybeConventionAsk(s *Session) bool {
 	if !ok {
 		return false
 	}
+	// mint the decision id before the ask installs, for the same
+	// ownership the tool path keeps (see decisionIDFor).
+	ask.DecisionID = decisionIDFor(s, ask)
 	s.replaceMessage(idx, stripped)
 	s.setPendingAsk(ask)
+	e.openAskDecision(s, ask)
 	return true
 }
 
@@ -779,7 +841,20 @@ func (e *Engine) maybeConventionAsk(s *Session) bool {
 // chosen text, records it in the transcript, and — when the ask carried
 // a spec anchor — writes it into the spec as a resolved marker. The
 // model's blocked turn resumes with the answer as the tool's result.
+// The answerer is the person who chose it (state.ActorUser); the
+// unattended loop answers through AnswerAs.
 func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string) error {
+	return e.AnswerAs(ctx, id, answer, state.ActorUser)
+}
+
+// AnswerAs is Answer with the answerer declared: ActorUser for an answer
+// a person chose, ActorAutopilot for one the unattended loop took by
+// itself. The actor is the caller's to declare, not the engine's to
+// infer from the card's stored gate-approval mode — a headless
+// --autonomous run on a card stored at "gates" takes its own answers,
+// and the record must say so, or the morning receipt silently
+// under-counts what ran unattended (DESIGN §6.3).
+func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by string) error {
 	s := e.Get(id)
 	if s == nil {
 		return fmt.Errorf("no session for %s", id)
@@ -801,7 +876,7 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 	// unconditionally, before delivery is attempted, the same way the
 	// transcript line above is — the exchange happened regardless of
 	// whether the blocked tool call ultimately resolves.
-	e.appendAskEvent(s, ask, answer)
+	e.appendAskEvent(s, ask, answer, by)
 	// best-effort spec capture; a bad anchor never blocks the answer
 	if note := e.captureAnswer(s, ask, answer); note != "" {
 		s.appendActivity(note)
@@ -810,10 +885,13 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
 
 	// resolve the blocked tool call if the backend supports it; otherwise
-	// deliver the answer as a normal turn (the convention path). An MCP
-	// dispatch — a non-ClientTools backend bridged over the session
-	// socket — resolves via its registered waiter channel first, so the
-	// bridge's blocked call resumes exactly like a native one.
+	// deliver the answer as a normal turn (the convention path, and the
+	// only path a restored ask has — its blocked call died with the
+	// process). An MCP dispatch — a non-ClientTools backend bridged over
+	// the session socket — resolves via its registered waiter channel
+	// first, so the bridge's blocked call resumes exactly like a native
+	// one. The turn carries the answer text; the transcript above already
+	// recorded it, so delivery must not append it a second time.
 	if ask.CallID != "" {
 		// Only treat the bridge's blocked call as resolved when it is
 		// actually live. A buffered send alone proves nothing: the backend
@@ -850,38 +928,48 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 			return nil
 		}
 	}
-	return e.Send(ctx, id, answer)
+	// the convention path — and the only path a restored ask has: the
+	// blocked call and its resolver died with the process, so the answer
+	// rides a fresh turn. The transcript above already recorded it; the
+	// turn must deliver it without appending it a second time.
+	return e.deliverTurn(ctx, s, answer)
 }
 
 // appendAskEvent records an answered ask_user question in the card's own
 // event log, actor included — the raw material the decision receipt
 // (internal/ui's receipt.go) counts as "took N answers", only for an
-// autopilot-taken one. Answer's only two callers are the TUI's chat
-// picker (always a human typing) and the headless driver's --autonomous
-// auto-take — neither is reachable from here without widening this
-// file's scope, so the card's own gate-approval mode is what's actually
-// available to tell them apart: GateFull is the one mode where
-// unattendedAskHint has already told the agent nobody is reading, so an
-// answer landing on a GateFull card is autopilot's own; any other mode
-// means a human answered it by hand. Best-effort, like every other
-// event write; deduped on the ask's own call id so a redelivered Answer
-// for the same question can never double-count (a convention-path ask
-// carries no call id, so it always appends — it has no other identity
-// to dedupe against, and asking twice is rare enough not to matter).
-func (e *Engine) appendAskEvent(s *Session, ask *Ask, answer string) {
+// autopilot-taken one. The answerer declares itself (by) instead of the
+// event inferring it from the card's stored gate-approval mode: the
+// headless driver auto-answers off its own --autonomous flag, so a mode
+// read here recorded a machine-taken answer as a human's whenever the
+// card's stored mode disagreed with how the run was actually being
+// driven, and the receipt silently under-counted what ran unattended.
+// The answerer's word is the record. Best-effort, like every other
+// event write; deduped on the decision id the ask opened, so a
+// redelivered Answer for the same question can never double-count.
+func (e *Engine) appendAskEvent(s *Session, ask *Ask, answer, by string) {
 	if e.cfg.Store == nil {
 		return
 	}
-	actor := state.ActorUser
-	if s.Feature.GateApproval == domain.GateFull {
-		actor = state.ActorAutopilot
+	choice := ""
+	for _, o := range ask.Options {
+		if o.Label == answer {
+			choice = o.Label
+			break
+		}
 	}
-	payload, err := json.Marshal(state.AskPayload{Question: ask.Question, Answer: answer, Actor: actor})
+	payload, err := json.Marshal(state.AskPayload{
+		Question: ask.Question, Answer: answer,
+		Actor: by, By: by,
+		ID: ask.DecisionID, Choice: choice,
+	})
 	if err != nil {
 		return
 	}
 	dedupe := ""
-	if ask.CallID != "" {
+	if ask.DecisionID != "" {
+		dedupe = "decision:" + ask.DecisionID
+	} else if ask.CallID != "" {
 		dedupe = ask.CallID + ":ask"
 	}
 	_ = e.cfg.Store.AppendEvent(context.Background(), state.CardEvent{

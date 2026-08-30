@@ -368,11 +368,24 @@ Every `run`/`resume` ends on a typed exit the caller branches on:
 | `6` | `timeout` | a stage went quiet (likely hang) — report; resumable |
 | `1` | `error` | setup/agent failure — nothing partial landed |
 
+`gummi resume` carries one decision flag at a time. `--answer` resolves a
+**delegated ask_user question**: the durable decision record says one is
+open, the answer rides through the same ask round trip the board's picker
+rides (recorded in the card's history with who answered and which option
+was chosen), and the stream's `question` event names that decision's id.
+When the run parked at an ask, `--answer` is the verb; at a caller design
+gate it is `--approve`/`--request-changes`, and `--answer` is refused with
+a usage error naming which verb this stop actually takes — the record
+replaces the guess. When more than one decision is open on a card, the
+newest one is the one an answer resolves.
+
 Useful `run` flags: `--ref <id>` correlates a feature with your own tracker
 (and lets `status`/`resume` look it up by that id), `--acceptance <file|->`
 seeds the spec's verification plan, `--until spec` stops cleanly for a human
 design review before implementation burns tokens, and `--autonomous`
-auto-takes the recommended answer instead of checkpointing questions.
+auto-takes the recommended answer instead of checkpointing questions — an
+unattended answer is told apart from a typed one in the card's own history,
+so an unattended run's receipt counts what it ran.
 
 ### Landing through a PR
 

@@ -42,6 +42,13 @@ const (
 	// EventPark marks a card being parked (taken out of the autonomous
 	// loop pending human attention).
 	EventPark = "park"
+	// EventDecisionOpen marks a card blocking on a human: a design gate,
+	// an ask_user, a failed verify, a rebase conflict, an exhausted
+	// envelope, or an idle card with nothing running. Its answer is the
+	// existing gate or ask event carrying the same payload id — the open
+	// record and its answer correlate, and neither is ever pruned (§10.18:
+	// nothing may block a card without leaving a row).
+	EventDecisionOpen = "decision_open"
 )
 
 // Event outcomes: the closed vocabulary stored in card_events.status.
@@ -95,10 +102,23 @@ type ParkPayload struct {
 // unattended loop (internal/driver's d.actor). Only "auto" is a gate the
 // card crossed on its own; the decision receipt (internal/ui/receipt.go)
 // counts exactly that value and no other.
+//
+// ID correlates the crossing to the EventDecisionOpen it answers (the
+// newest still-open gate decision when it crossed); empty on crossings
+// raised before decisions were durable — old rows decode to zero values.
+// Choice is deliberately zero on gate events: the crossing's own
+// From→To edge IS the choice for a design gate, and no caller-side
+// option vocabulary is invented for it here.
 type GatePayload struct {
 	From  string `json:"from"`
 	To    string `json:"to"`
 	Actor string `json:"actor"`
+	ID    string `json:"id,omitempty"`
+	// By is the answerer, mirroring Actor. It exists so the answer record's
+	// actor has one name across both payload kinds; the crossing has always
+	// carried it explicitly (as Actor), so this stays zero rather than
+	// duplicating it — a mapping, not a second source of truth.
+	By string `json:"by,omitempty"`
 }
 
 // ActorAutopilot and ActorUser are the two actors an EventAsk's Payload
@@ -115,10 +135,25 @@ const (
 // AskPayload is the JSON shape of an EventAsk event's Payload: the
 // question an agent asked, the answer it got, and who answered —
 // ActorAutopilot or ActorUser (see those constants).
+//
+// ID, Choice and By are additive (old rows decode to zero values): ID
+// correlates the answer to its decision_open row, Choice names the chosen
+// option when the answer was one of the offered options (empty for a
+// free-form answer), and By is the answerer stated explicitly by the
+// caller — the same value as Actor. Actor is inferred from the card's
+// stored gate-approval mode and exists for history written before By
+// did; every new write sets both, and By is what the receipt trusts.
 type AskPayload struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
 	Actor    string `json:"actor"`
+	// By is the actor the answerer declared ("user" or "autopilot"),
+	// set at the call site rather than inferred from the card's stored
+	// gate-approval mode — a headless --autonomous run on a card stored
+	// at "gates" takes its own answers, and the record must say so.
+	By     string `json:"by,omitempty"`
+	ID     string `json:"id,omitempty"`     // correlates to decision_open
+	Choice string `json:"choice,omitempty"` // option id, not free text
 }
 
 // AutopilotPayload is the JSON shape of an EventAutopilot event's
@@ -312,14 +347,23 @@ func (s *Store) PruneStageOutput(ctx context.Context, id domain.FeatureID, stage
 // here fails the crossing: a history that silently skipped a gate would
 // under-report exactly the crossings nobody watched.
 //
-// The dedupe key is the crossing's own timestamp, which the transition
-// row shares, so a retried transaction cannot leave two events behind.
-func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time) error {
-	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor})
+// answerID, when non-empty, correlates the crossing to the open
+// EventDecisionOpen it answers — the newest still-open gate decision,
+// looked up by the caller in this same transaction so the crossing and
+// its answer cannot diverge. The dedupe key rides that id (scoped per
+// generation when the decision was minted), so a retried transaction
+// cannot leave two events behind, and two crossings of the same edge can
+// no longer collide on a shared timestamp; crossings with no open
+// decision to answer keep the crossing's own timestamp as their key.
+func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) error {
+	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor, ID: answerID})
 	if err != nil {
 		return fmt.Errorf("encoding gate event for %s: %w", id, err)
 	}
 	dedupe := "gate:" + string(from) + "->" + string(to) + ":" + at.Format(timeFmt)
+	if answerID != "" {
+		dedupe = "decision:" + answerID
+	}
 	if _, err := tx.ExecContext(ctx, appendEventSQL,
 		string(id), string(from), EventGate, "", at.Format(timeFmt),
 		string(payload), "", dedupe); err != nil {

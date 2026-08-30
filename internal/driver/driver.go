@@ -2,11 +2,13 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,13 +72,17 @@ type Driver struct {
 	actor      string // transition actor recorded in history ("auto" | "caller")
 
 	// loop state for the single feature this process governs.
-	rounds      map[roundKey]int // automatic loop rounds burned, keyed by (id, round_kind)
-	reviewsRun  int              // review stages entered so far (for the done receipt)
-	opening     string           // one-shot message to send on the next interactive stage (resume answer / change note)
-	bounceNote  string           // one-shot addendum to the next implement/fix kickoff after a --bounce resume
-	curStage    domain.Stage     // stage currently being driven (for verbose activity lines)
-	activityCur int              // cursor into the live session's activity feed
-	sentTurn    bool             // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
+	rounds     map[roundKey]int // automatic loop rounds burned, keyed by (id, round_kind)
+	reviewsRun int              // review stages entered so far (for the done receipt)
+	opening    string           // one-shot message to send on the next interactive stage (resume answer / change note)
+	// openingIsAnswer marks d.opening as a --answer: it rides engine.Answer
+	// (which records the ask's round trip and closes the decision) rather
+	// than Send (a plain turn, what --request-changes sends).
+	openingIsAnswer bool
+	bounceNote      string       // one-shot addendum to the next implement/fix kickoff after a --bounce resume
+	curStage        domain.Stage // stage currently being driven (for verbose activity lines)
+	activityCur     int          // cursor into the live session's activity feed
+	sentTurn        bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
 }
 
 // roundKey is the fast-path round-counter map's key: one entry per
@@ -191,6 +197,11 @@ func (d *Driver) Drive(ctx context.Context, f domain.Feature) (Outcome, error) {
 // `b` key — with the (possibly empty) string carried as an addendum to the
 // next implement/fix kickoff; all-zero re-runs the parked stage (after an
 // exhaustion top-up, a timeout, or an escalation).
+//
+// There is no decision-id field: when more than one decision is open on a
+// card (a verify gate and a budget stop can co-exist, DESIGN §6.3's R2),
+// the newest open decision is the one an answer resolves — the card
+// stopped there last.
 type ResumeInput struct {
 	Answer         *string
 	Approve        bool
@@ -235,6 +246,19 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 
 	// the correlation line first, so a resume's stream is self-identifying.
 	d.out.emit(resumedEvent{Event: "resumed", ID: string(id), Ref: d.opts.Ref, Stage: string(f.Stage)})
+
+	// --answer resolves a delegated ask_user question, and the durable
+	// decision is the record of one being open. Before decisions were
+	// durable, an answer to a card parked anywhere else was silently
+	// delivered as a plain turn — a change note wearing an answer's flag.
+	// The record makes that checkable: no open ask means the flag does not
+	// apply, and the caller is told which verb this stop actually takes.
+	if in.Answer != nil && d.pendingAsk(id) == nil {
+		if open := d.newestOpenDecision(ctx, id); open == nil || open.Kind != state.DecisionKindAsk {
+			return d.fail(ctx, string(id), fmt.Errorf(
+				"%s has no open question to answer — it waits at a design gate (--approve/--request-changes) or an escalation (--bounce)", id))
+		}
+	}
 
 	// --envelope raises the feature's credit budget before the parked stage
 	// re-runs — the headless path to clear an `exhausted` exit. It is a floor:
@@ -297,6 +321,7 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		d.opening = *in.RequestChanges
 	case in.Answer != nil:
 		d.opening = *in.Answer
+		d.openingIsAnswer = true
 	}
 	return d.drive(ctx, id)
 }
@@ -664,13 +689,17 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 	// finished interview, so Attach reattaches silently (interactive stages
 	// advance on human turns, and a completed one has nothing to send).
 	// Re-entering would park a turn-less session that can only time out —
-	// the deadlock the operator report caught. Present the gate instead: the
-	// identical checkpoint a fresh run reaches here. crossGate auto-advances
-	// under --gate-approval=auto, checkpoints under caller, and surfaces any
-	// open-question blockers — so an incomplete interview reports its
-	// blockers rather than hanging, and neither path waits on a turn that
-	// was never sent. (A resume carrying an answer / change note does have a
-	// turn to send, so it falls through to Attach + Send below.)
+	// the deadlock the operator report caught. Present the checkpoint the
+	// card actually stopped at, read from the durable decision record where
+	// one exists: an open ask is answered (re-presented), not crossed; only
+	// its absence defers to the transcript-emptiness proxy, which legacy
+	// cards written before decisions were durable still need. crossGate
+	// auto-advances under --gate-approval=auto, checkpoints under caller,
+	// and surfaces any open-question blockers — so an incomplete interview
+	// reports its blockers rather than hanging, and neither path waits on a
+	// turn that was never sent. (A resume carrying an answer / change note
+	// does have a turn to send, so it falls through to Attach + answer
+	// below.)
 	if d.opening == "" {
 		if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage && snap.Err != nil {
 			// The backend died mid-turn on this interactive stage: failRun
@@ -682,6 +711,17 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 			// send) instead of crossing the gate on an interview that never
 			// ran.
 			d.eng.Drop(f.ID)
+		} else if open := d.newestOpenDecision(ctx, f.ID); open != nil && open.Kind == state.DecisionKindAsk {
+			// the card is blocked on an answer, not on the gate: present the
+			// question checkpoint again (the restored session re-armed its
+			// pending ask, so the next --answer lands through engine.Answer).
+			d.out.emit(questionEvent{
+				Event: "question", ID: string(f.ID), Q: open.Question,
+				Decision: open.ID, FreeForm: true,
+				Resume: string(f.ID),
+				Next:   resumeCmd(string(f.ID), "--answer", `"<answer>"`),
+			})
+			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 		} else if d.reattachSilent(f) {
 			return d.crossGate(ctx, f)
 		}
@@ -695,8 +735,18 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 	d.sentTurn = true
 	if d.opening != "" {
 		msg := d.opening
-		d.opening = ""
-		if err := d.eng.Send(ctx, f.ID, msg); err != nil {
+		answers := d.openingIsAnswer
+		d.opening, d.openingIsAnswer = "", false
+		// An answer is routed through engine.Answer, not Send: Answer
+		// records the ask's round trip in the card's own log — who
+		// answered, and which decision it closed — and delivers as a fresh
+		// turn when the blocked tool call is gone (every restored ask).
+		// A request-changes note is a turn, never an answer.
+		if answers {
+			if err := d.eng.Answer(ctx, f.ID, msg); err != nil {
+				return Outcome{}, err
+			}
+		} else if err := d.eng.Send(ctx, f.ID, msg); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -723,17 +773,25 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 			}
 			if d.opts.Autonomous {
 				rec := recommendedOption(ask)
-				if err := d.eng.Answer(ctx, f.ID, rec); err != nil {
+				// the answerer declares itself: the record must say an
+				// unattended loop took it, whoever's stored mode the card
+				// runs under, or the morning receipt under-counts it.
+				if err := d.eng.AnswerAs(ctx, f.ID, rec, state.ActorAutopilot); err != nil {
 					return Outcome{}, err
 				}
 				d.out.activity(string(f.ID), string(f.Stage), "auto-answered: "+rec)
 				continue // the turn resumes with the answer; keep reading
 			}
+			decisionID := ""
+			if ask.DecisionID != "" {
+				decisionID = ask.DecisionID
+			}
 			d.out.emit(questionEvent{
 				Event: "question", ID: string(f.ID), Q: ask.Question,
 				Options: askLabels(ask), Recommended: recommendedOption(ask),
 				FreeForm: ask.FreeForm, Resume: string(f.ID),
-				Next: resumeCmd(string(f.ID), "--answer", `"<answer>"`),
+				Next:     resumeCmd(string(f.ID), "--answer", `"<answer>"`),
+				Decision: decisionID,
 			})
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 		case endIdle:
@@ -1148,27 +1206,37 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 			return Outcome{}, err
 		}
 		if specOpen > 0 {
+			d.recordBlocked(f, fmt.Sprintf("%d open spec threads block %s.", specOpen, f.Stage))
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage), OpenSpec: specOpen, Resume: string(f.ID)})
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		if diffOpen > 0 {
+			d.recordBlocked(f, fmt.Sprintf("%d open diff comments block %s.", diffOpen, f.Stage))
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage), OpenDiff: diffOpen, Resume: string(f.ID)})
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		if len(deps) > 0 {
+			d.recordBlocked(f, dependencyBlockedQuestion(deps))
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage), BlockingDeps: deps, Resume: string(f.ID)})
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		next := forwardEdge(f)
+		decisionID := d.openDecision(f, state.DecisionKindGate,
+			string(f.Stage)+" is ready for your decision.")
 		d.out.emit(gatePendingEvent{
 			Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(next), Resume: string(f.ID),
-			Next: resumeCmd(string(f.ID), "--approve"),
+			Decision: decisionID,
+			Next:     resumeCmd(string(f.ID), "--approve"),
 		})
 		return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 	}
 	return d.autoAdvance(ctx, f)
 }
 
+// autoAdvance crosses the current gate via the shared engine floor and
+// maps the result to NDJSON + Outcome. StatusNeedsMerge (verify→done) is
+// the stop-at-verified point; a non-terminal Outcome means the gate
+// advanced and drive should loop.
 // autoAdvance crosses the current gate via the shared engine floor and
 // maps the result to NDJSON + Outcome. StatusNeedsMerge (verify→done) is
 // the stop-at-verified point; a non-terminal Outcome means the gate
@@ -1180,18 +1248,23 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 	}
 	switch res.Status {
 	case engine.StatusBlockedQuestions:
+		d.recordBlocked(f, fmt.Sprintf("%d open spec threads block %s.", res.Blockers, res.From))
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), OpenSpec: res.Blockers, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedDiff:
+		d.recordBlocked(f, fmt.Sprintf("%d open diff comments block %s.", res.Blockers, res.From))
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), OpenDiff: res.Blockers, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedDependency:
+		d.recordBlocked(f, dependencyBlockedQuestion(res.BlockingDeps))
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), BlockingDeps: res.BlockingDeps, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedDocument:
+		d.recordBlocked(f, "the citation/coverage floor blocks the decompose gate.")
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Document: newDocumentSummary(res.DocumentReport), Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedOmission:
+		d.recordBlocked(f, res.Reason)
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusNeedsMerge:
@@ -1221,6 +1294,23 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 	default:
 		return d.escalation(f, "unexpected gate status"), nil
 	}
+}
+
+// recordBlocked records a blocked-gate decision (the threads, dependency
+// or floor holding a gate open are a stop a person resolves), then hands
+// back nothing — the caller's NDJSON emit already carried the detail.
+func (d *Driver) recordBlocked(f domain.Feature, question string) {
+	d.openDecision(f, state.DecisionKindGate, question)
+}
+
+// dependencyBlockedQuestion names each outstanding dependency in the
+// question a dependency block records.
+func dependencyBlockedQuestion(deps []engine.BlockingDep) string {
+	ids := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		ids = append(ids, string(dep.ID)+" ("+string(dep.Stage)+")")
+	}
+	return "a dependency is still short of done — wait for " + strings.Join(ids, ", ") + " to land."
 }
 
 // discoverStageTimeout bounds discoverAndBaselineChecks when the driver
@@ -1275,6 +1365,12 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 // escalation, and a successful pass only ever checkpoints as a `question`
 // for a later --approve, never auto-mints.
 func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note string) (Outcome, error) {
+	if note != "" {
+		// the caller sent the previous decompose checkpoint back: its
+		// answer closes that decision before the pass re-runs and opens a
+		// fresh one.
+		d.answerDecomposeDecision(ctx, f, "changes requested: "+note)
+	}
 	res, err := d.eng.DecomposeForCard(ctx, f.ID, note)
 	if err != nil {
 		d.out.emit(escalationEvent{
@@ -1297,10 +1393,39 @@ func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note strin
 	}
 	d.out.emit(decomposeQuestionEvent{
 		Event: "question", ID: string(f.ID),
+		Decision:  d.openDecision(f, state.DecisionKindGate, "decompose — review the proposals and mint them, or send the pass back with a note."),
 		Proposals: wireDecomposeProposals(res), Coverage: wireDecomposeCoverage(res),
 		Resume: string(f.ID), Next: resumeCmd(string(f.ID), "--approve"),
 	})
 	return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
+}
+
+// answerDecomposeDecision records the caller's answer to the newest open
+// decision on a decompose checkpoint: the ask-shaped round trip whose id
+// closes that decision (an approve, or a request-changes note). Without
+// it the decision would read open forever — decompose never moves the
+// card, so no gate crossing would ever close it (R3's closure rule).
+func (d *Driver) answerDecomposeDecision(ctx context.Context, f domain.Feature, answer string) {
+	open := d.newestOpenDecision(ctx, f.ID)
+	if open == nil {
+		return
+	}
+	if d.store == nil {
+		return
+	}
+	payload, err := json.Marshal(state.AskPayload{
+		Question: "decompose — review the proposals",
+		Answer:   answer,
+		Actor:    state.ActorUser, By: state.ActorUser,
+		ID: open.ID,
+	})
+	if err != nil {
+		return
+	}
+	_ = d.store.AppendEvent(context.Background(), state.CardEvent{
+		Feature: f.ID, Stage: f.Stage, Kind: state.EventAsk, At: time.Now(),
+		Payload: string(payload), Dedupe: "decision:" + open.ID,
+	})
 }
 
 // approveDecompose mints a done RS card's pending decompose proposals
@@ -1320,6 +1445,10 @@ func (d *Driver) approveDecompose(ctx context.Context, f domain.Feature) (Outcom
 	}
 	minted, mintErr := d.eng.MintProposals(ctx, f.ID, res)
 	_ = d.eng.ClearPendingDecompose(f.ID)
+	// the caller's answer closes the checkpoint's decision whether or not
+	// the mint fully landed: the pending file is cleared above either way,
+	// and the card never leaves done.
+	d.answerDecomposeDecision(ctx, f, fmt.Sprintf("approved — %d minted", len(minted)))
 	ids := make([]string, len(minted))
 	for i, m := range minted {
 		ids[i] = string(m.ID)
@@ -1373,17 +1502,28 @@ const timeoutHintStalled = "the stage went silent for the whole --stage-timeout 
 	"--stage-timeout (e.g. double the current value) before blaming the backend."
 
 // timeoutHintParked is the cause note when gummi never sent the agent a turn
-// this stage: the stage is parked at a gate with nothing to drive, so the
-// fault is caller-side, not the backend. It points at the decision that
-// advances the gate instead of sending the operator to debug the backend —
-// the misdiagnosis the operator report flagged.
-const timeoutHintParked = "the stage is parked at a gate and no turn was sent this stage — advance it with " +
-	"--approve (or --request-changes / --answer), not by a bare resume, which has nothing to drive here"
+// this stage: the stage is parked at a checkpoint with nothing to drive, so
+// the fault is caller-side, not the backend. The decision record names the
+// verb that actually advances this stop — the static verb list this hint
+// used to guess from is what a durable open decision replaces.
+func (d *Driver) timeoutHintParked(f domain.Feature) string {
+	verb := "--approve (or --request-changes / --answer)"
+	if open := d.newestOpenDecision(context.Background(), f.ID); open != nil {
+		switch open.Kind {
+		case state.DecisionKindAsk:
+			verb = "--answer"
+		case state.DecisionKindVerify:
+			verb = "--bounce (or --approve to overrule)"
+		}
+	}
+	return "the stage is parked at a checkpoint and no turn was sent this stage — advance it with " +
+		verb + ", not by a bare resume, which has nothing to drive here"
+}
 
 func (d *Driver) timeout(f domain.Feature) Outcome {
 	hint := timeoutHintStalled
 	if !d.sentTurn {
-		hint = timeoutHintParked
+		hint = d.timeoutHintParked(f)
 	}
 	used := ""
 	if d.opts.StageTimeout > 0 {
@@ -1474,8 +1614,19 @@ func (d *Driver) logPark(f domain.Feature, reason, detail string) {
 	_ = d.store.AppendPark(context.Background(), f.ID, f.Stage, reason, detail, "", time.Now())
 }
 
+// escalationDecisionKind maps an escalation's stage to the decision kind
+// its stop records: a failed verify escalates as the verify decision it
+// is; every other give-up is a gate the human judges.
+func escalationDecisionKind(f domain.Feature) string {
+	if f.Stage == domain.StageVerify {
+		return state.DecisionKindVerify
+	}
+	return state.DecisionKindGate
+}
+
 func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	d.logPark(f, state.ParkReasonGaveUp, reason)
+	d.openDecision(f, escalationDecisionKind(f), reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: resumeCmd(string(f.ID)),
@@ -1501,6 +1652,7 @@ func (d *Driver) tripwire(f domain.Feature, paths []string) Outcome {
 // carried as a placeholder for the caller's own change note.
 func (d *Driver) bounceEscalation(f domain.Feature, reason string) Outcome {
 	d.logPark(f, state.ParkReasonGaveUp, reason)
+	d.openDecision(f, escalationDecisionKind(f), reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: resumeCmd(string(f.ID), "--bounce", "--note", `"<why>"`),
@@ -1584,6 +1736,41 @@ func (d *Driver) snapshot(id domain.FeatureID) engine.Snapshot {
 // pendingAsk returns the feature's open ask_user question, or nil.
 func (d *Driver) pendingAsk(id domain.FeatureID) *engine.Ask {
 	return d.snapshot(id).PendingAsk
+}
+
+// newestOpenDecision returns the card's newest still-open durable
+// decision, or nil. The durable record is what a resume reasons from:
+// it survives the process, where the in-memory pending ask does not.
+func (d *Driver) newestOpenDecision(ctx context.Context, id domain.FeatureID) *state.OpenDecision {
+	opens, err := d.store.OpenDecisions(ctx)
+	if err != nil {
+		return nil
+	}
+	list := opens[id]
+	if len(list) == 0 {
+		return nil
+	}
+	last := list[len(list)-1]
+	return &state.OpenDecision{
+		ID: last.ID, Kind: last.Kind, Question: last.Question,
+		Stage: last.Stage, At: last.At,
+	}
+}
+
+// openDecision records the decision a checkpoint just raised — the one
+// row §10.18 requires for every stop, the same seam the TUI's review
+// loop raises through. Best-effort like the park it sits beside: the
+// stream already told the caller the card stopped, and a log failure
+// must never unwind a checkpoint that was already announced.
+func (d *Driver) openDecision(f domain.Feature, kind, question string) string {
+	id := kind + ":" + string(f.ID) + ":" + string(f.Stage) + ":" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if d.store == nil {
+		return id
+	}
+	_ = d.store.OpenDecision(context.Background(), f.ID, f.Stage, state.DecisionPayload{
+		ID: id, Kind: kind, Question: question,
+	}, time.Now())
+	return id
 }
 
 // emitResult emits a stage result line (verify pass/fail, review pass/

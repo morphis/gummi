@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -505,6 +506,12 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		s.transcript = append(s.transcript, ps.Transcript...)
 		s.activity = append(s.activity, ps.Activity...)
 		s.spend = ps.Spend
+		// a restored ask rides the swap: the prior session was re-armed
+		// with the durably recorded question (DESIGN §6.3's reopen path),
+		// and the fresh backend behind this attach has never seen it —
+		// dropping the pending ask here would strand the question the
+		// record says is open.
+		s.setPendingAsk(ps.PendingAsk)
 	}
 	// A fresh conversation opens with a stage kickoff so the agent leads;
 	// a carried-over transcript means the interview is already underway
@@ -1308,8 +1315,23 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
+	return e.deliverTurn(ctx, s, msg)
+}
+
+// deliverTurn dispatches msg as the session's next turn to the backend.
+// It is Send's dispatch half with the transcript append already done —
+// Answer's convention path uses it so an answer the transcript already
+// recorded (and the durable decision log cites) is not appended a second
+// time by the delivery that carries it.
+func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string) error {
+	if s.agent() == nil {
+		return fmt.Errorf("%s is queued, not yet running", s.Feature.ID)
+	}
+	s.setBusy(true)
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
 	e.beforeTurn(s)
-	if err := a.Send(ctx, msg); err != nil {
+	if err := s.agent().Send(ctx, msg); err != nil {
 		e.failRun(s, err)
 		return err
 	}
@@ -1567,6 +1589,22 @@ func (e *Engine) exhaust(s *Session) {
 	}
 	s.setState(StateDone)
 	e.persist(s)
+	// the budget stop is a decision like any other (the one kind autopilot
+	// must refuse — a top-up widens the card's reach, §10.17): the record
+	// goes down where the stop happens, so both loops see it by
+	// construction. Best-effort: the park above is already durable.
+	if e.cfg.Store != nil {
+		question := string(s.Feature.Stage) + " reached its envelope."
+		if committed {
+			question = string(s.Feature.Stage) + " reached its envelope with work committed."
+		}
+		_ = e.cfg.Store.OpenDecision(context.Background(), s.Feature.ID, s.Feature.Stage,
+			state.DecisionPayload{
+				ID:       "budget:" + strconv.FormatInt(time.Now().UnixNano(), 10),
+				Kind:     state.DecisionKindBudget,
+				Question: question,
+			}, e.now())
+	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted, Committed: committed})
 	e.freeSlot(s)
 }

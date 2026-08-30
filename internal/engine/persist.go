@@ -237,7 +237,15 @@ func (e *Engine) Restore(ctx context.Context) error {
 		s.verdict = snap.Verdict
 		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
-		// A resumable live session is being rehydrated (a parked interactive
+		// An ask that was open when the process died is re-armed from its
+		// durable decision row (DESIGN §6.3's reopen path): the blocked
+		// tool call and its resolver died with the process, but the record
+		// of the question did not. Free-form only — the recorded options
+		// are never stored — so the answer is prose, riding a fresh turn.
+		if open := e.openAskFor(ctx, snap.Feature, snap.Stage); open != nil {
+			s.setPendingAsk(open)
+		}
+		// A resumable live session is being rehydrated (a paused interactive
 		// question, an autonomous run picked up again): stop the prior one,
 		// or its pump would outlive Restore and, unjoined by Close, leak.
 		// Mirrors the old.stop() both replace and RunWith do on overwrite.
@@ -262,6 +270,29 @@ func (e *Engine) Restore(ctx context.Context) error {
 			}
 		}
 		e.live[snap.Feature] = s
+	}
+	return nil
+}
+
+// openAskFor returns the ask a card is durably waiting on at stage,
+// re-armed for the session being restored, or nil when no open ask
+// decision names it. The newest open ask wins. Best-effort: an unreadable
+// log degrades to today's behavior (the ask evaporates) rather than
+// failing the restore.
+func (e *Engine) openAskFor(ctx context.Context, id domain.FeatureID, stage domain.Stage) *Ask {
+	opens, err := e.cfg.Store.OpenDecisions(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, d := range opens[id] {
+		if d.Kind != state.DecisionKindAsk || d.Stage != stage {
+			continue
+		}
+		return &Ask{
+			Question:   d.Question,
+			FreeForm:   true, // the options died with the process and are never stored
+			DecisionID: d.ID,
+		}
 	}
 	return nil
 }

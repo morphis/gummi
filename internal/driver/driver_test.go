@@ -158,6 +158,64 @@ func TestAutonomousAutoAnswers(t *testing.T) {
 	}
 }
 
+// An unattended answer is recorded as the machine's own, whoever's stored
+// mode it runs under. appendAskEvent used to read the card's gate-approval
+// mode (GateFull ⇒ autopilot), while the driver auto-answers off a
+// separate flag — so `resume <id> --autonomous` on a card stored at
+// "gates" recorded its own taken answers as a human's, and the morning
+// receipt (internal/ui/receipt.go) silently dropped them. The answer
+// event must say who answered, explicitly.
+func TestAutonomousAnswerRecordsItsOwnActor(t *testing.T) {
+	h := newHarness(t, false, map[domain.Stage]stageFn{
+		domain.StageSpec: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+			if n == 0 {
+				return convAsk(o.Model, "Schema header?", "no (recommended)", "yes")
+			}
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return prosePass(o.Model)
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return prosePass(o.Model)
+		},
+	})
+
+	// the card's stored mode is the default "gates": a design gate would
+	// stop for the caller, but --autonomous takes the recommended answer
+	// by itself. The receipt must still see that answer as machine-taken.
+	out, err := h.driver(Options{Autonomous: true, GateApproval: GateGates}).Run(context.Background(), "add export")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("status = %q, want done (auto-answered); stream=%v", out.Status, h.eventKinds())
+	}
+
+	evs, err := h.store.Events(context.Background(), h.only())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *state.AskPayload
+	for _, ev := range evs {
+		if ev.Kind != state.EventAsk {
+			continue
+		}
+		var p state.AskPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			t.Fatal(err)
+		}
+		found = &p
+	}
+	if found == nil {
+		t.Fatal("no ask event recorded for the auto-taken answer")
+	}
+	if found.Actor != state.ActorAutopilot {
+		t.Fatalf("auto-taken answer recorded actor %q, want %q — the morning receipt under-counts what ran unattended",
+			found.Actor, state.ActorAutopilot)
+	}
+}
+
 // Review requesting changes bounces to implement (under the cap) and
 // re-reviews; a subsequent pass reaches a verified branch.
 func TestReviewChangesThenPass(t *testing.T) {

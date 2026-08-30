@@ -97,6 +97,10 @@ type questionEvent struct {
 	// stream never has to recall which flag a given stop takes. Free-form
 	// values (an answer, a change note) appear as a <placeholder> to fill in.
 	Next string `json:"next,omitempty"`
+	// Decision is the id of the durable decision_open row this question
+	// opened, so a caller can correlate the stream's checkpoint with the
+	// row `gummi status`-level tooling reads. Empty on legacy streams.
+	Decision string `json:"decision,omitempty"`
 }
 
 type gatePendingEvent struct {
@@ -106,6 +110,10 @@ type gatePendingEvent struct {
 	To     string `json:"to"`
 	Resume string `json:"resume"`
 	Next   string `json:"next,omitempty"`
+	// Decision is the id of the decision_open row this checkpoint raised —
+	// the same id the eventual gate event (the crossing) carries in its
+	// payload, so a driving script can correlate the stop with its answer.
+	Decision string `json:"decision,omitempty"`
 }
 
 type blockedEvent struct {
@@ -179,10 +187,13 @@ type decomposeCoverageWire struct {
 // checkpoint: the architect's proposals + coverage map, awaiting
 // --approve (mint them) or --request-changes (re-run with a note). The RS
 // card stays at done throughout — this is a side-effect of the crossing,
-// never a gate the crossing itself waits on.
+// never a gate the crossing itself waits on. Decision is the id of the
+// decision_open row the checkpoint raised; the eventual --approve /
+// --request-changes answer closes it with the same id.
 type decomposeQuestionEvent struct {
 	Event     string                  `json:"event"`
 	ID        string                  `json:"id"`
+	Decision  string                  `json:"decision,omitempty"`
 	Proposals []decomposeProposalWire `json:"proposals"`
 	Coverage  []decomposeCoverageWire `json:"coverage,omitempty"`
 	Resume    string                  `json:"resume"`
