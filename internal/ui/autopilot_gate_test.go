@@ -305,3 +305,108 @@ func TestAutopilotBlockedGateParksEvenOnFull(t *testing.T) {
 		t.Error("the blocked gate did not park to the inbox")
 	}
 }
+
+// --- the review pass's findings, held down ---
+
+// TestAutopilotMarkClearsOnAnInteractiveCrossing: crossing onto an
+// interactive stage returns a plain notice rather than the continue
+// message, and the answering mark used to be cleared only by the
+// messages that happened to be enumerated. The card then advertised
+// "autopilot is taking this one" over a decision autopilot had already
+// finished with, for the rest of the session.
+func TestAutopilotMarkClearsOnAnInteractiveCrossing(t *testing.T) {
+	m := populatedShell(100, 30)
+	id := m.rows[m.sel].F.ID
+	m.markAutopilotAnswering(id)
+	if !m.autopilotAnswering[id] {
+		t.Fatal("fixture did not mark the card")
+	}
+	// whatever the wrapped command came back as — here the plain notice a
+	// crossing onto an interactive stage produces
+	model, _ := m.update(autopilotSettledMsg{
+		id:    id,
+		inner: noticeMsg{text: string(id) + " → shape", reload: true},
+	})
+	m = model.(*Shell)
+	if m.autopilotAnswering[id] {
+		t.Error("the answering mark survived a crossing that ended in a plain notice")
+	}
+}
+
+// TestAutopilotSettledStillHandlesItsInnerMessage: the wrapper must not
+// swallow what it wraps — the notice, the reload and the inbox clear all
+// still have to land.
+func TestAutopilotSettledStillHandlesItsInnerMessage(t *testing.T) {
+	m := populatedShell(100, 30)
+	id := m.rows[m.sel].F.ID
+	m.inbox.add(id, attnGate, "implement finished — review & advance")
+	m.markAutopilotAnswering(id)
+
+	model, _ := m.update(autopilotSettledMsg{
+		id:    id,
+		inner: noticeMsg{text: string(id) + " → review", reload: true, clearInbox: id},
+	})
+	m = model.(*Shell)
+	if m.notice.text != string(id)+" → review" {
+		t.Errorf("inner notice lost: %q", m.notice.text)
+	}
+	if _, ok := m.inbox.get(id); ok {
+		t.Error("the inner message's inbox clear did not run")
+	}
+}
+
+// TestAutopilotAnswerFailureParksTheQuestion: when the answer never
+// reaches the agent — the session swapped out from under the command —
+// the agent is still blocked on its question. Without a queue entry
+// nothing on screen points at it.
+func TestAutopilotAnswerFailureParksTheQuestion(t *testing.T) {
+	m := populatedShell(100, 30)
+	id := m.rows[m.sel].F.ID
+	m.markAutopilotAnswering(id)
+
+	model, _ := m.update(autopilotAnsweredMsg{
+		id:     id,
+		notice: noticeMsg{text: "no session for " + string(id), isErr: true},
+		park:   "asks: persist where?",
+	})
+	m = model.(*Shell)
+	if m.autopilotAnswering[id] {
+		t.Error("the answering mark survived a failed answer")
+	}
+	it, ok := m.inbox.get(id)
+	if !ok {
+		t.Fatal("a failed auto-answer left the blocked question out of the queue")
+	}
+	if it.Kind != attnQuestion {
+		t.Errorf("parked kind = %s, want question", it.Kind)
+	}
+	if it.Text != "asks: persist where?" {
+		t.Errorf("parked text = %q, want the question", it.Text)
+	}
+}
+
+// TestAutopilotAdvanceErrorParksTheCard: a crossing that fails outright
+// (a store write, a worktree error) is not a blocked status, and the
+// raise site skipped its own park on the strength of the attempt. An
+// error that only became a notice left the card with an open decision
+// row and nothing in the queue.
+func TestAutopilotAdvanceErrorParksTheCard(t *testing.T) {
+	m := populatedShell(100, 30)
+	id := m.rows[m.sel].F.ID
+
+	got := blockedMsg(state.ActorAutopilot, id, "boom")
+	blocked, ok := got.(autopilotGateBlockedMsg)
+	if !ok {
+		t.Fatalf("autopilot's error routed to %T, want a park", got)
+	}
+	model, _ := m.update(blocked)
+	m = model.(*Shell)
+	if _, ok := m.inbox.get(id); !ok {
+		t.Error("a failed autopilot crossing left the card out of the queue")
+	}
+
+	// a human's own advance keeps the plain error notice it always had
+	if _, ok := blockedMsg("user", id, "boom").(noticeMsg); !ok {
+		t.Error("a human's advance error stopped being a plain notice")
+	}
+}

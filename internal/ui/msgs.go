@@ -500,7 +500,13 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 		}
 		res, err := eng.Advance(ctx, id, actor)
 		if err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			// actor-aware like the blocked statuses below, and for the same
+			// reason: the caller that tried this crossing skipped its own
+			// raiseAttention on the strength of the attempt, so an error
+			// that only became a notice would leave the card with an open
+			// decision row, nothing in the needs-you queue, and no sign
+			// anything had gone wrong until the next restart re-seeded it.
+			return blockedMsg(actor, id, sanitize(err.Error()))
 		}
 		switch res.Status {
 		case engine.StatusNoop:

@@ -319,7 +319,29 @@ func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool
 	// spoken for until it lands — the pinned decision says so rather than
 	// letting it read as waiting for you (decision.go).
 	m.markAutopilotAnswering(f.ID)
-	return m.advanceStageAs(f.ID, state.ActorAutopilot), true
+	return autopilotSettled(f.ID, m.advanceStageAs(f.ID, state.ActorAutopilot)), true
+}
+
+// autopilotSettledMsg wraps whatever an autopilot-dispatched command
+// returned, so the answering mark is dropped before the message is
+// handled.
+type autopilotSettledMsg struct {
+	id    domain.FeatureID
+	inner tea.Msg
+}
+
+// autopilotSettled wraps a command autopilot dispatched so the answering
+// mark comes off however that command ends — including through exits
+// added later. Enumerating the outcomes instead was wrong the first time
+// it was tried: a crossing onto an interactive stage returns a plain
+// notice, which cleared nothing, and the card then advertised "autopilot
+// is taking this one" over a decision autopilot had already finished
+// with, for the rest of the session.
+func autopilotSettled(id domain.FeatureID, cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg { return autopilotSettledMsg{id: id, inner: cmd()} }
 }
 
 // autopilotRun starts the stage autopilot's own crossing just opened —

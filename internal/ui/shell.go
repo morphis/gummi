@@ -583,6 +583,10 @@ func (m *Shell) clearAutopilotAnswering(id domain.FeatureID) {
 type autopilotAnsweredMsg struct {
 	id     domain.FeatureID
 	notice noticeMsg
+	// park is the needs-you text to queue when the answer did not land:
+	// the agent is still blocked on its question, so something has to
+	// point the user at it. Empty when the answer went through.
+	park string
 }
 
 // autopilotAnswerAsk answers id's live pending ask with rec as autopilot.
@@ -593,11 +597,17 @@ type autopilotAnsweredMsg struct {
 // its own: the engine's ask path already opened one when it raised the
 // question (DESIGN §6.3), and the answer event AnswerAs records carries
 // that same id, closing it exactly as a human's answer would.
-func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec string) tea.Cmd {
+func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec, question string) tea.Cmd {
 	m.markAutopilotAnswering(id)
 	return func() tea.Msg {
 		if err := m.engine.AnswerAs(context.Background(), id, rec, state.ActorAutopilot); err != nil {
-			return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: sanitize(err.Error()), isErr: true}}
+			// the agent is still blocked on the question, so the card has
+			// to reach the queue after all — park is what says so.
+			return autopilotAnsweredMsg{
+				id:     id,
+				notice: noticeMsg{text: sanitize(err.Error()), isErr: true},
+				park:   question,
+			}
 		}
 		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: string(id) + ": auto-answered: " + rec}}
 	}
@@ -744,7 +754,10 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			if s := m.engine.Get(ev.Feature); s != nil {
 				if ask := s.Snapshot().PendingAsk; ask != nil {
 					if rec := engine.RecommendedOption(ask); rec != "" {
-						return m.autopilotAnswerAsk(ev.Feature, rec)
+						// the question travels with the command: if the answer
+						// fails to land the agent is still blocked on it, and
+						// the queue is the only thing that would say so.
+						return m.autopilotAnswerAsk(ev.Feature, rec, "asks: "+ask.Question)
 					}
 				}
 			}
@@ -1052,8 +1065,26 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case autopilotSettledMsg:
+		// whatever the crossing came back as, autopilot is done holding
+		// this decision (autopilot.go's autopilotSettled) — then the inner
+		// message is handled exactly as if it had arrived on its own.
+		m.clearAutopilotAnswering(msg.id)
+		if msg.inner == nil {
+			return m, nil
+		}
+		return m.update(msg.inner)
+
 	case autopilotAnsweredMsg:
 		m.clearAutopilotAnswering(msg.id)
+		if msg.park != "" {
+			// the answer never reached the agent — a session swapped out
+			// from under the command, an empty recommendation — and the
+			// agent is still blocked on the question. Park it the way the
+			// non-autopilot path would have, or the card waits on a
+			// question with nothing on screen pointing at it.
+			m.parkAttentionItem(msg.id, attnQuestion, msg.park)
+		}
 		m.notice = msg.notice
 		return m, nil
 

@@ -216,11 +216,13 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 		if err != nil {
 			return nil, err
 		}
-		reran, err := s.latestStageEnterSeq(ctx, fid)
+		cur := domain.Stage(curStage)
+		// only the current stage can still hold an open decision (the
+		// stage-match below), so that is the only stage worth asking about.
+		reran, err := s.stageRerunSeq(ctx, fid, cur)
 		if err != nil {
 			return nil, err
 		}
-		cur := domain.Stage(curStage)
 		for _, d := range pendings {
 			if answered[d.dec.ID] {
 				continue // answered: it lives in the history now
@@ -232,12 +234,12 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 				// A budget stop has no answer event — the answer kinds are
 				// gate and ask, and minting one of those for a top-up would
 				// fork their meaning. What resolves it is the stage running
-				// again on a raised envelope, and every generation writes a
-				// stage_enter, so a later one is that fact. Scoped to budget
-				// deliberately: an open ask must survive a restore to be
-				// re-armed into the restored session, and that session writes
-				// a stage_enter of its own — closing asks here would strand
-				// the reopen path.
+				// again on a raised envelope, and a plain run of that stage
+				// (stageRerunSeq, which is why the borrowed kinds do not
+				// count) is that fact. Scoped to budget deliberately: an
+				// open ask must survive a restore to be re-armed into the
+				// restored session, and that session writes a stage_enter of
+				// its own — closing asks here would strand the reopen path.
 				continue
 			}
 			out[fid] = append(out[fid], d.dec)
@@ -246,23 +248,53 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 	return out, nil
 }
 
-// latestStageEnterSeq is the seq of the card's newest stage_enter, or 0
-// when it has none. Every session generation writes one (deduped on its
-// own start time), so a stage_enter later than a decision means the
-// stage has run again since — which is what closes a budget stop, the
-// one decision kind with no answer event of its own.
-func (s *Store) latestStageEnterSeq(ctx context.Context, id domain.FeatureID) (int64, error) {
-	var seq sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT MAX(seq) FROM card_events WHERE feature_id = ? AND kind = ?`,
-		string(id), EventStageEnter).Scan(&seq)
+// stageRunFlavor is the flavor a plain stage run records in its
+// stage_enter payload. The other two — a plan critique and a rebase
+// resolution — borrow a stage without being a run of it, so they are not
+// evidence that the stage itself went again.
+const stageRunFlavor = "stage"
+
+// stageRerunSeq is the seq of the newest plain run of `stage` on this
+// card, or 0 when it has none. Every session generation writes a
+// stage_enter (deduped on its own start time), so one later than a
+// decision means the stage has run again since — which is what closes a
+// budget stop, the one decision kind with no answer event of its own.
+//
+// It is scoped twice, and both scopes are load-bearing. To the
+// decision's own stage, because a later stage's first run says nothing
+// about the exhausted one. And to plain runs: a rebase resolution and a
+// plan critique both open a session on the stage they borrow, so
+// counting them would read a conflict handoff — which raises nobody's
+// envelope — as a top-up, and quietly take the card's `u` away.
+func (s *Store) stageRerunSeq(ctx context.Context, id domain.FeatureID, stage domain.Stage) (int64, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT seq, payload FROM card_events
+		WHERE feature_id = ? AND kind = ? AND stage = ? ORDER BY seq DESC`,
+		string(id), EventStageEnter, string(stage))
 	if err != nil {
-		return 0, fmt.Errorf("reading %s's newest stage_enter: %w", id, err)
+		return 0, fmt.Errorf("reading %s's %s runs: %w", id, stage, err)
 	}
-	if !seq.Valid {
-		return 0, nil
+	defer rows.Close()
+
+	for rows.Next() {
+		var seq int64
+		var payload string
+		if err := rows.Scan(&seq, &payload); err != nil {
+			return 0, err
+		}
+		var p struct {
+			Flavor string `json:"flavor"`
+		}
+		// a legacy row wrote no flavor at all; that predates both borrowed
+		// kinds, so it reads as the plain run it was.
+		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			continue
+		}
+		if p.Flavor == "" || p.Flavor == stageRunFlavor {
+			return seq, nil
+		}
 	}
-	return seq.Int64, nil
+	return 0, rows.Err()
 }
 
 // answeredIDs returns the decision ids a card's later gate/ask events

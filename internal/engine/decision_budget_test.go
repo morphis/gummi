@@ -103,3 +103,63 @@ func TestOpenAskSurvivesItsStageRunningAgain(t *testing.T) {
 		t.Errorf("surviving decision kind = %q, want ask", got)
 	}
 }
+
+// enterBorrowedStage appends the stage_enter a session that borrows a
+// stage writes — a plan critique or a rebase resolution. Both open a
+// session on the stage they borrow without being a run of it.
+func enterBorrowedStage(t *testing.T, store *state.Store, id domain.FeatureID, stage domain.Stage, generation, flavor string) {
+	t.Helper()
+	if err := store.AppendEvent(context.Background(), state.CardEvent{
+		Feature: id, Stage: stage, Kind: state.EventStageEnter,
+		At:      time.Now(),
+		Payload: `{"role":"implementer","model":"m","flavor":"` + flavor + `"}`,
+		Dedupe:  generation + ":stage_enter",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBudgetDecisionSurvivesABorrowedStageRun: a rebase resolution and a
+// plan critique both open a session on the stage they borrow, but
+// neither is a run of that stage and neither raises anybody's envelope.
+// Reading one as a top-up would close a budget stop nobody answered and
+// take the card's top-up affordance out of the queue with it.
+func TestBudgetDecisionSurvivesABorrowedStageRun(t *testing.T) {
+	for _, flavor := range []string{"rebase", "critique"} {
+		t.Run(flavor, func(t *testing.T) {
+			_, store, _ := newRepo(t)
+			ctx := context.Background()
+
+			f := feature(1, "Dark mode", domain.StageVerify)
+			putFeature(t, store, f)
+
+			enterStage(t, store, f.ID, domain.StageVerify, "gen-1")
+			if err := store.OpenDecision(ctx, f.ID, domain.StageVerify, state.DecisionPayload{
+				ID: "budget:FD-001:verify:1", Kind: state.DecisionKindBudget,
+				Question: "verify hit its budget — top up or park.",
+			}, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+
+			enterBorrowedStage(t, store, f.ID, domain.StageVerify, "gen-2", flavor)
+
+			opens, err := store.OpenDecisions(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(opens["FD-001"]) != 1 {
+				t.Fatalf("a %s generation closed the budget stop nobody topped up: %+v", flavor, opens["FD-001"])
+			}
+
+			// the real thing still closes it
+			enterStage(t, store, f.ID, domain.StageVerify, "gen-3")
+			opens, err = store.OpenDecisions(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(opens["FD-001"]) != 0 {
+				t.Fatalf("a genuine re-run did not close the budget stop: %+v", opens["FD-001"])
+			}
+		})
+	}
+}
