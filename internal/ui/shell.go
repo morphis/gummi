@@ -173,11 +173,17 @@ type Shell struct {
 	// cards' fold state never collides. Nothing sets a key yet — this is
 	// the seam a key binds to, not a live toggle yet.
 	expandedStages map[string]bool
-	roundStore     rounds.Store     // persistence seam for rounds (defaults to store)
-	profileNames   []string         // profile names for the new-feature form
-	repoNames      []string         // configured managed-repo names for the new-card forms
-	envelope       int              // default spend-plan envelope for new features (0 = none)
-	notifier       *notify.Notifier // bell/desktop hook for needs-attention events
+	// threadScroll is how many lines back from the newest the card
+	// thread's body is scrolled. Zero is the bottom, which is where a
+	// card opens and where it stays as a live stage streams — counting
+	// back from the end rather than forward from the start is what keeps
+	// arriving output from shoving the view out from under a reader.
+	threadScroll int
+	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
+	profileNames []string         // profile names for the new-feature form
+	repoNames    []string         // configured managed-repo names for the new-card forms
+	envelope     int              // default spend-plan envelope for new features (0 = none)
+	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
 
 	// Copilot quota hint (copilotquota.go): the latest reading shown as
 	// a status-bar pill, its enable flag, and the gh seam for tests.
@@ -1525,6 +1531,14 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 		m.Overlay.Push(newCommandMenu(m.globalCommands(), m.runCommand))
 		return nil
 	}
+	// On the card page pgup/pgdn scroll the conversation. On the board
+	// they still jump to the first and last card — but the card page
+	// already steps cards with J/K, so the pair is free here, and a long
+	// thread has nothing else to reach its history with.
+	if m.cardOpen && (key == "pgup" || key == "pgdown") {
+		m.scrollThread(key == "pgup")
+		return nil
+	}
 	if key == "/" && m.cardOpen {
 		// The card page's own route into the thread's input
 		// (threadinput.go's doc comment): consumed here, not inserted, the
@@ -1533,6 +1547,33 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 		return nil
 	}
 	return m.boardVerb(key)
+}
+
+// threadSize is the width and height the card thread is rendered into:
+// the main pane less the card page's own breadcrumb row (backlog.go's
+// cardPageView). The key handler needs it to page by a screenful, and
+// getting it from the layout rather than a remembered number keeps a
+// resize from leaving the scroll step stale.
+func (m *Shell) threadSize() (int, int) {
+	main := m.computeLayout().Main
+	return main.Dx(), max(main.Dy()-1, 1)
+}
+
+// scrollThread pages the card thread's body. The step is the visible body
+// height rather than a fixed number of lines, so a page means what it
+// says on a phone-sized terminal and on a tall one alike.
+//
+// Scrolling is clamped at both ends: at the newest it stays at zero, so
+// the view keeps tracking a live stage, and at the oldest it stops on
+// the first line instead of paging into blank space.
+func (m *Shell) scrollThread(up bool) {
+	w, h := m.threadSize()
+	step := max(h-1, 1)
+	if up {
+		m.threadScroll = min(m.threadScroll+step, m.maxThreadScroll(w, h))
+		return
+	}
+	m.threadScroll = max(m.threadScroll-step, 0)
 }
 
 // boardVerb performs a board action. It is the layer below boardKey's

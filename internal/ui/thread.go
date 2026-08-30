@@ -29,6 +29,19 @@ import (
 // engine session already holds in memory.
 
 // threadView renders the selected card's thread into the card page.
+//
+// The surface is three regions, not one list. The masthead and the
+// pinned spec line hold the top; the next card and the input hold the
+// bottom; the conversation scrolls between them. That split is what
+// makes the page usable on a short terminal: the old single list was
+// truncated to the window height from the top, so the first thing lost
+// on a small screen was the input box — the one part you always need.
+//
+// The body is anchored to its END, so opening a card lands on the newest
+// event the way a chat does, and threadScroll counts lines back from
+// there rather than forward from the start. Keeping the offset relative
+// to the bottom means arriving output does not shove the view upward
+// while you are reading the latest of it.
 func (m *Shell) threadView(w, h int) string {
 	if m.sel < 0 || m.sel >= len(m.rows) {
 		return ""
@@ -42,32 +55,35 @@ func (m *Shell) threadView(w, h int) string {
 	r.Events = m.cardEvents[r.F.ID]
 	f := r.F
 
-	var lines []string
-	line := func(str string) { lines = append(lines, ansi.Truncate(str, w, "…")) }
-	blank := func() { lines = append(lines, "") }
+	clip := func(str string) string { return ansi.Truncate(str, w, "…") }
 
-	line("")
+	// --- head: pinned to the top ---
+	var head []string
+	head = append(head, "")
 	for _, l := range threadHeader(s, m, r) {
-		line(l)
+		head = append(head, clip(l))
 	}
-	blank()
-
+	head = append(head, "")
 	if sl := pinnedSpecLine(s, r); sl != "" {
-		line(sl)
-		blank()
+		head = append(head, clip(sl), "")
 	}
+
+	// --- body: the conversation, scrollable ---
+	var body []string
+	add := func(str string) { body = append(body, clip(str)) }
+	blank := func() { body = append(body, "") }
 
 	segs := stageSegments(r.Events)
 	if len(segs) > 1 {
 		spend := stageSpendByStage(r.StageSpend)
 		for _, seg := range segs[:len(segs)-1] {
-			line(foldedReceiptLine(s, seg, spend, w))
+			add(foldedReceiptLine(s, seg, spend, w))
 			// Expansion is real and driven by Shell.expandedStages; no
 			// key sets that flag yet, so every receipt renders folded —
 			// binding ⌄ to it is all that remains.
 			if m.expandedStages[stageSegmentKey(f.ID, seg)] {
 				for _, ev := range seg.events {
-					line("    " + stageEventLine(s, ev, w))
+					add("    " + stageEventLine(s, ev, w))
 				}
 			}
 		}
@@ -76,7 +92,7 @@ func (m *Shell) threadView(w, h int) string {
 
 	if ls := m.liveStageBlock(s, r, segs, w); len(ls) > 0 {
 		for _, l := range ls {
-			line(l)
+			add(l)
 		}
 		blank()
 	}
@@ -89,7 +105,7 @@ func (m *Shell) threadView(w, h int) string {
 		if res := m.checks[f.ID]; len(res) > 0 {
 			for _, l := range strings.Split(verifySummary(s, res), "\n") {
 				if l != "" {
-					line(l)
+					add(l)
 				}
 			}
 			blank()
@@ -104,28 +120,87 @@ func (m *Shell) threadView(w, h int) string {
 		f.Budget.Envelope, corrective, verdict.MaxRounds(domain.RoundKindCorrective))
 	if rl := decisionReceiptBlock(s, receipt); len(rl) > 0 {
 		for _, l := range rl {
-			line(l)
+			add(l)
 		}
 		blank()
 	}
+	body = trimTrailingBlanks(body)
 
+	// --- foot: pinned to the bottom ---
+	var foot []string
 	if nl := nextCardBlock(s, m.nextInputFor(r)); len(nl) > 0 {
 		for _, l := range nl {
-			line(l)
+			foot = append(foot, clip(l))
 		}
-		blank()
+		foot = append(foot, "")
 	}
-
-	// the input is a multi-row widget: truncate each row, or a stray tail
-	// of the second one lands on the first.
+	// the input is a multi-row widget: clip each row, or a stray tail of
+	// the second one lands on the first.
 	for _, l := range strings.Split(m.inputBlock(s, r, w), "\n") {
-		line(l)
+		foot = append(foot, clip(l))
 	}
 
-	if h > 0 && len(lines) > h {
-		lines = lines[:h]
+	return strings.Join(composeThread(head, body, foot, h, m.threadScroll), "\n")
+}
+
+// composeThread lays the three regions into h rows: head at the top,
+// foot at the bottom, and as much of the end of body as fits between
+// them, scrolled back by up lines.
+//
+// When the window cannot hold everything, the foot wins. The input and
+// the actions beside it are what the page is for, and a terminal too
+// short for the masthead is still perfectly usable without it — whereas
+// one showing only the masthead is not usable at all. So the body yields
+// first, then the head, and the foot is trimmed only when it alone
+// exceeds the window, and then from its own top so the input survives
+// last of all.
+func composeThread(head, body, foot []string, h, up int) []string {
+	if h <= 0 {
+		return append(append(append([]string{}, head...), body...), foot...)
 	}
-	return strings.Join(lines, "\n")
+	if len(foot) >= h {
+		return foot[len(foot)-h:]
+	}
+	if len(head)+len(foot) >= h {
+		head = head[:h-len(foot)]
+	}
+	avail := h - len(head) - len(foot)
+
+	window := body
+	if len(body) > avail {
+		up = min(max(up, 0), len(body)-avail)
+		end := len(body) - up
+		window = body[end-avail : end]
+	}
+
+	out := append([]string{}, head...)
+	out = append(out, window...)
+	// pad so the foot sits on the last row rather than floating up under
+	// a short conversation
+	for len(out)+len(foot) < h {
+		out = append(out, "")
+	}
+	return append(out, foot...)
+}
+
+// maxThreadScroll is how far back the body can be scrolled for a given
+// window — the clamp the key handler needs so paging up stops at the
+// first line instead of running off into blank space.
+func (m *Shell) maxThreadScroll(w, h int) int {
+	if m.sel < 0 || m.sel >= len(m.rows) {
+		return 0
+	}
+	// rendering is the only honest measure of how tall the body is: it
+	// depends on wrapping, fold state and whether a session is live.
+	full := len(strings.Split(m.threadView(w, 0), "\n"))
+	return max(full-h, 0)
+}
+
+func trimTrailingBlanks(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // threadHeader is the thread's two-line masthead: identity, profile,

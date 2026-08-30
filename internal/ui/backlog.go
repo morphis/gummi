@@ -24,6 +24,8 @@ func (m *Shell) openCard() tea.Cmd {
 	m.cardOpen = true
 	m.actionCursor = 0
 	m.actionsExpanded = false
+	// a card opens on its newest event, the way a chat does
+	m.threadScroll = 0
 	return m.loadCardEvents(r.F.ID)
 }
 
@@ -42,6 +44,9 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 	m.moveSel(delta)
 	m.actionCursor = 0
 	m.actionsExpanded = false
+	// the next card is a different conversation; it opens at its own end
+	// rather than inheriting how far back this one was scrolled
+	m.threadScroll = 0
 	r, ok := m.selected()
 	if !ok {
 		return nil
@@ -306,6 +311,7 @@ func (m *Shell) cardPageBindings() []binding {
 	out := []binding{
 		{key: "esc", label: "backlog", help: "back to the backlog list", bar: true},
 		{key: "J/K", label: "prev/next", help: "previous / next card without leaving the page", bar: true},
+		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread — it opens on the newest event", bar: true},
 		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
 		{key: "A", label: "autopilot", help: "open the autopilot switch — off/gates/full, and it starts the card"},
 	}
@@ -315,6 +321,10 @@ func (m *Shell) cardPageBindings() []binding {
 			b.label, b.help, b.bar = "move", "move the action cursor", true
 		case "enter":
 			b.label, b.help = "run action", "run the highlighted action"
+		case "pgup/pgdn":
+			// the board's jump-to-first/last card; here the pair scrolls the
+			// thread instead, taught above, and J/K is how you step cards
+			continue
 		}
 		out = append(out, b)
 	}

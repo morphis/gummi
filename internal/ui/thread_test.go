@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -684,5 +685,105 @@ func TestThreadInputSendsToLiveSession(t *testing.T) {
 	}
 	if snap.Transcript[2].Author != engine.AuthorUser || snap.Transcript[2].Content != "quick note from the thread" {
 		t.Fatalf("user turn wrong: %+v", snap.Transcript[2])
+	}
+}
+
+// threadWithHistory is a card carrying enough conversation that the
+// thread cannot fit a small window — the case the layout exists for.
+func threadWithHistory(t *testing.T) *Shell {
+	t.Helper()
+	m := populatedShell(120, 34)
+	id := m.rows[m.sel].F.ID
+	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "m"})
+	exit, _ := json.Marshal(map[string]any{"verdict": "pass"})
+
+	var evs []state.CardEvent
+	for _, st := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan} {
+		evs = append(evs,
+			state.CardEvent{Stage: st, Kind: state.EventStageEnter, At: at, Payload: string(enter)},
+			state.CardEvent{Stage: st, Kind: state.EventStageExit, At: at, Payload: string(exit)},
+		)
+	}
+	evs = append(evs, state.CardEvent{
+		Stage: domain.StageImplement, Kind: state.EventStageEnter, At: at, Payload: string(enter),
+	})
+	for range 20 {
+		evs = append(evs, state.CardEvent{
+			Stage: domain.StageImplement, Kind: state.EventTool, Status: state.StatusOK, At: at,
+			Payload: `{"label":"edit internal/theme/palette.go"}`,
+		})
+	}
+	m.cardEvents[id] = evs
+	return m
+}
+
+// The input is the one row the page cannot do without: it is how you
+// reply, and on a short terminal it used to be the first thing dropped,
+// because the view was truncated to the window height from the top.
+func TestThreadPinsTheInputToTheBottom(t *testing.T) {
+	m := threadWithHistory(t)
+	for _, size := range []struct{ w, h int }{{40, 20}, {60, 14}, {80, 10}, {100, 8}} {
+		lines := strings.Split(ansi.Strip(m.threadView(size.w, size.h)), "\n")
+		if len(lines) > size.h {
+			t.Errorf("%dx%d rendered %d lines, want at most %d", size.w, size.h, len(lines), size.h)
+		}
+		last := lines[len(lines)-1]
+		if !strings.Contains(last, "┃") {
+			t.Errorf("%dx%d: last row is %q, want the input", size.w, size.h, last)
+		}
+	}
+}
+
+// A card opens on its newest event, the way a chat does — the oldest
+// stage scrolls off the top, not the live one off the bottom.
+func TestThreadOpensAtTheNewestEvent(t *testing.T) {
+	m := threadWithHistory(t)
+	out := ansi.Strip(m.threadView(80, 20))
+	if !strings.Contains(out, "fresh context") {
+		t.Error("the live stage is not on screen — the thread did not open at its end")
+	}
+	if strings.Contains(out, "brainstorm · architect") {
+		t.Error("the oldest folded receipt is still on screen — the body was not anchored to its end")
+	}
+}
+
+// Paging up reaches the history and paging back down returns to the
+// newest, clamped at both ends so neither runs into blank space.
+func TestThreadScrollsWithPageKeys(t *testing.T) {
+	m := threadWithHistory(t)
+	m.width, m.height = 80, 22
+
+	for range 6 { // more pages than the body has, to prove the clamp
+		m.scrollThread(true)
+	}
+	up := ansi.Strip(m.threadView(m.threadSize()))
+	if !strings.Contains(up, "brainstorm · architect") {
+		t.Error("paging up never reached the oldest receipt")
+	}
+
+	for range 6 {
+		m.scrollThread(false)
+	}
+	if m.threadScroll != 0 {
+		t.Errorf("threadScroll = %d after paging back down, want 0 (pinned to the newest)", m.threadScroll)
+	}
+	if !strings.Contains(ansi.Strip(m.threadView(m.threadSize())), "fresh context") {
+		t.Error("paging back down did not return to the live stage")
+	}
+}
+
+// Stepping to another card is a different conversation: it opens at its
+// own end rather than inheriting how far back the last one was scrolled.
+func TestSteppingCardsResetsTheScroll(t *testing.T) {
+	m := threadWithHistory(t)
+	m.width, m.height = 80, 22
+	m.scrollThread(true)
+	if m.threadScroll == 0 {
+		t.Fatal("precondition: the thread did not scroll")
+	}
+	m.stepCard(1)
+	if m.threadScroll != 0 {
+		t.Errorf("threadScroll = %d after stepping cards, want 0", m.threadScroll)
 	}
 }
