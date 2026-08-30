@@ -267,11 +267,10 @@ func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
-	return &Shell{
+	m := &Shell{
 		styles:         theme.New(t),
 		version:        version,
 		now:            time.Now,
-		inbox:          newInbox(),
 		checks:         map[domain.FeatureID][]verify.Result{},
 		baselining:     map[domain.FeatureID]bool{},
 		rounds:         map[roundKey]int{},
@@ -280,6 +279,12 @@ func NewShell(t theme.Theme, version string) *Shell {
 		copilotHint:    true,
 		threadInput:    newThreadInput(),
 	}
+	// indirected through m rather than passing m.now's current value: a
+	// test fixes m.now after this constructor returns (agentWorkspace,
+	// populatedShell), and a closure over the field's value at this point
+	// would keep calling the real clock regardless.
+	m.inbox = newInbox(func() time.Time { return m.now() })
+	return m
 }
 
 // Attach wires the shell to a workspace: its store, worktree pool (one
@@ -401,14 +406,18 @@ func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 	return d.startDraft()
 }
 
-// reconstructInbox rebuilds the needs-attention queue from the engine's
-// restored sessions at startup — the queue is otherwise in-memory and a
-// restart drops parked gates, budget stops, and failures (a parked budget
-// item's only top-up path is the inbox, so losing it stranded the card).
-// Derived from durable session state: a failed run (paused with a stored
-// error) → failure; a settled autonomous stage → a budget park if its
-// activity recorded an exhaustion, else a review-&-advance gate. Live
-// events refine these as they arrive; this only seeds what a restart lost.
+// reconstructInbox is the needs-attention queue's fallback source at
+// startup, covering whatever the durable decision_open records
+// (seedInboxFromDecisions, dispatched ahead of this from the
+// openDecisionsMsg handler) did not: a card driven by a pre-decision
+// binary, or one whose stop predates this change. Derived from durable
+// session state: a failed run (paused with a stored error) → failure; a
+// settled autonomous stage → a budget park if its activity recorded an
+// exhaustion, else a review-&-advance gate.
+//
+// Every add here goes through seed, not add/put: it must not clobber a
+// feature the decision seeding (or a live engine event racing it) already
+// gave an item, since both of those are fresher than this inference.
 func (m *Shell) reconstructInbox() {
 	if m.engine == nil {
 		return
@@ -417,14 +426,14 @@ func (m *Shell) reconstructInbox() {
 		snap := s.Snapshot()
 		switch {
 		case snap.Err != nil:
-			m.inbox.add(id, attnFailure, sanitize(snap.Err.Error()))
+			m.inbox.seed(attnItem{Feature: id, Kind: attnFailure, Text: sanitize(snap.Err.Error())})
 		case snap.State != engine.StateDone || !autonomousStage(snap.Feature.Stage):
 			// running/queued/interactive sessions raise their own items live
 			continue
 		case exhaustedActivity(snap.Activity):
-			m.inbox.add(id, attnBudget, string(snap.Feature.Stage)+" hit its budget — u top up or x park")
+			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: string(snap.Feature.Stage) + " hit its budget — u top up or x park"})
 		default:
-			m.inbox.add(id, attnGate, string(snap.Feature.Stage)+" finished — review & advance")
+			m.inbox.seed(attnItem{Feature: id, Kind: attnGate, Text: string(snap.Feature.Stage) + " finished — review & advance"})
 		}
 	}
 }
@@ -616,10 +625,20 @@ func (m *Shell) Init() tea.Cmd {
 		cmds = append(cmds, m.loadRows)
 	}
 	if m.engine != nil {
-		// rebuild the needs-attention queue from the sessions the engine
-		// restored, so a parked budget gate (and its top-up path) survives a
-		// restart instead of vanishing until re-triggered.
-		m.reconstructInbox()
+		// Seed the needs-attention queue from the durable decision_open
+		// records (openDecisionsMsg's handler in update, which also runs
+		// reconstructInbox as the session-inference fallback) rather than
+		// rebuilding it here by inference alone. Store.OpenDecisions hits
+		// the database, and Init runs on the Update goroutine — see
+		// attachChat's no-IO-in-Update contract — so the query has to be a
+		// dispatched command, not a direct call. A store-less engine (never
+		// happens outside a test scaffold) falls back to the synchronous
+		// inference immediately, since there is nothing to query.
+		if m.store != nil {
+			cmds = append(cmds, m.fetchOpenDecisions)
+		} else {
+			m.reconstructInbox()
+		}
 		// offer to pick up any card the board stopped by quitting
 		// (quitresume.go) — once, here, and nowhere else: nothing may
 		// restart a card without this dialog's own confirm.
@@ -889,6 +908,22 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// keypress (a card was deleted, or the sort reordered), which would
 		// leave the action cursor pointing into another card's list.
 		m.syncActionFocus()
+		return m, nil
+
+	case openDecisionsMsg:
+		// The record is the primary source: seed from it first, then let
+		// reconstructInbox's session inference fill whatever it didn't
+		// cover (a pre-decision card, or a query that came back empty). A
+		// failed query has nothing to seed from, so reconstructInbox runs
+		// alone and the notice says the queue may be short a few items
+		// rather than silently pretending it is complete.
+		if msg.err != nil {
+			m.notice = noticeMsg{text: "needs-you queue: " + sanitize(msg.err.Error()), isErr: true}
+			m.reconstructInbox()
+			return m, nil
+		}
+		m.seedInboxFromDecisions(msg.decisions)
+		m.reconstructInbox()
 		return m, nil
 
 	case noticeMsg:

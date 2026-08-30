@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
@@ -64,8 +65,30 @@ func TestInboxTabEnterJumpsToCard(t *testing.T) {
 	if m.rows[m.sel].F.ID != "FD-044" {
 		t.Fatalf("enter should select the jumped-to card, got %s", m.rows[m.sel].F.ID)
 	}
+	if !m.cardOpen {
+		t.Fatal("enter should open the card page — the decision is pinned there, not on the backlog row")
+	}
 	if m.inbox.len() != 0 {
 		t.Fatal("enter should clear the item it jumped to")
+	}
+}
+
+// TestInboxViewOldestFirst: the tab renders items oldest-first by At,
+// independent of the order they were added in.
+func TestInboxViewOldestFirst(t *testing.T) {
+	m := populatedShell(120, 34)
+	newer := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 8, 30, 8, 0, 0, 0, time.UTC)
+	// added newer-first, so a naive insertion-order render would get this
+	// backwards
+	m.inbox.seed(attnItem{Feature: "FD-042", Kind: attnGate, Text: "implement finished", At: newer})
+	m.inbox.seed(attnItem{Feature: "FD-049", Kind: attnFailure, Text: "provider rate-limited", At: older})
+	m.setTab(TabInbox)
+	view := ansi.Strip(m.inboxView(120, 34))
+	iOlder := strings.Index(view, "FD-049")
+	iNewer := strings.Index(view, "FD-042")
+	if iOlder == -1 || iNewer == -1 || iOlder > iNewer {
+		t.Fatalf("expected the older item (FD-049) before the newer one (FD-042):\n%s", view)
 	}
 }
 

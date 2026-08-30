@@ -12,7 +12,7 @@ import (
 )
 
 func TestInboxOps(t *testing.T) {
-	b := newInbox()
+	b := newInbox(time.Now)
 	if b.len() != 0 || b.next("") != "" {
 		t.Fatal("empty inbox misbehaves")
 	}

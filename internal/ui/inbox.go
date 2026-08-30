@@ -2,6 +2,7 @@ package ui
 
 import (
 	"sync"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -29,6 +30,11 @@ type attnItem struct {
 	// unclear verdict) rather than finished clean, so surfaces can tint
 	// it as needs-you instead of ready-to-approve.
 	Escalated bool
+	// At is when the item's decision was raised: a seeded item takes the
+	// durable decision_open record's own timestamp; a live-raised item is
+	// stamped by put/seed with the shared clock the moment it lands. It is
+	// what the inbox tab sorts oldest-first by.
+	At time.Time
 }
 
 // inbox is the needs-attention queue (DESIGN §4.2): gates, failures,
@@ -41,10 +47,14 @@ type inbox struct {
 	mu    sync.Mutex
 	items map[domain.FeatureID]attnItem
 	order []domain.FeatureID
+	// now is the shared clock (indirected through Shell.now so tests that
+	// fix it after construction still take effect — see NewShell) used to
+	// stamp a live-raised item that arrives with no At of its own.
+	now func() time.Time
 }
 
-func newInbox() *inbox {
-	return &inbox{items: map[domain.FeatureID]attnItem{}}
+func newInbox(now func() time.Time) *inbox {
+	return &inbox{items: map[domain.FeatureID]attnItem{}, now: now}
 }
 
 // add upserts a feature's attention item, returning true when the feature
@@ -62,12 +72,37 @@ func (b *inbox) addEscalated(id domain.FeatureID, kind attnKind, text string) bo
 func (b *inbox) put(it attnItem) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if it.At.IsZero() {
+		it.At = b.now()
+	}
 	_, existed := b.items[it.Feature]
 	if !existed {
 		b.order = append(b.order, it.Feature)
 	}
 	b.items[it.Feature] = it
 	return !existed
+}
+
+// seed is put's add-if-absent twin: it adds it only when the feature has
+// no pending item yet, and is a no-op otherwise. A live engine event can
+// raise a feature's item before a startup seed (the decision-open query's
+// reply, or reconstructInbox's session inference) gets around to the same
+// feature — both of those look at state that is, by the time their
+// message lands, at best as fresh as the live event and often staler — so
+// clobbering it with put/add would resurrect exactly what §10.18's record
+// is not supposed to fight with: the live surface. Startup seeding and
+// reconstructInbox's own adds both go through this instead.
+func (b *inbox) seed(it attnItem) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, existed := b.items[it.Feature]; existed {
+		return
+	}
+	if it.At.IsZero() {
+		it.At = b.now()
+	}
+	b.order = append(b.order, it.Feature)
+	b.items[it.Feature] = it
 }
 
 // get returns a feature's pending attention item, if any.
