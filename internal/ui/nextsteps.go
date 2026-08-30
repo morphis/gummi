@@ -118,6 +118,26 @@ func blockedGate(in nextInput) *nextAction {
 	return nil
 }
 
+// talkAction is how the next card offers an interactive stage's own
+// conversation.
+//
+// Once a session is live the thread IS that conversation — its input
+// sits at the bottom of the very same page — so "chat with the
+// architect" would be an action pointing at the surface you are already
+// looking at, costing a row of the one block that exists to tell you
+// something you did not know. It appears only when there is nobody to
+// talk to yet, and then it says what enter actually does: start them.
+func talkAction(in nextInput, who, why string) []nextAction {
+	if in.sess == engine.StateInteractive {
+		return nil
+	}
+	verb := "start"
+	if in.sess == engine.StatePaused {
+		verb = "resume"
+	}
+	return []nextAction{{"enter", verb + " " + who, why}}
+}
+
 // nextActions derives the ranked suggestion list — the first entry is
 // the recommendation, at most three entries total. Empty means the
 // state speaks for itself (an agent mid-run, a done feature).
@@ -174,28 +194,26 @@ func nextActions(in nextInput) []nextAction {
 		return []nextAction{{"g", "start", "advance into the design flow"}}
 
 	case domain.StageInvestigate:
-		return []nextAction{
-			{"enter", "chat with the researcher", "explore the question and shape the doc"},
-			{"g", "advance", "move on to " + string(domain.StageShape)},
-		}
+		return append(
+			talkAction(in, "the researcher", "explore the question and shape the doc"),
+			nextAction{"g", "advance", "move on to " + string(domain.StageShape)},
+		)
 
 	case domain.StageShape:
-		return []nextAction{
-			{"enter", "shape the doc", "converge the findings into the answer"},
-			{"g", "advance", "move on to " + string(domain.StageReview)},
-		}
+		return append(
+			talkAction(in, "the researcher", "converge the findings into the answer"),
+			nextAction{"g", "advance", "move on to " + string(domain.StageReview)},
+		)
 
 	case domain.StageBrainstorm, domain.StageTriage:
-		return []nextAction{
-			{"enter", "chat with the architect", "explore the problem and candidate approaches"},
-			{"g", "advance", "converged? move on to the " + artifactNoun(in.kind)},
-		}
+		return append(
+			talkAction(in, "the architect", "explore the problem and candidate approaches"),
+			nextAction{"g", "advance", "converged? move on to the " + artifactNoun(in.kind)},
+		)
 
 	case domain.StageSpec, domain.StageDiagnose:
-		acts := []nextAction{
-			{"enter", "chat with the architect", "shape the " + artifactNoun(in.kind) + " until it convinces you"},
-		}
-		if in.quick {
+		acts := talkAction(in, "the architect", "shape the "+artifactNoun(in.kind)+" until it convinces you")
+		if in.quick && len(acts) > 0 {
 			acts[0].why = "quick route — it drafts the whole spec in one pass; steer and refine"
 		}
 		if b := blockedGate(in); b != nil {

@@ -28,6 +28,15 @@ import (
 // simply omits the folded receipts and falls back to whatever a live
 // engine session already holds in memory.
 
+// threadGutter is the space the thread keeps clear on its right, in
+// columns. The pane already insets the surface from the left; without a
+// matching gutter the folded receipts' rules, the session boundary and
+// the input all ran flush into the terminal edge, so the page read as
+// pinned on one side and floating on the other. Reserving it here rather
+// than trimming afterwards means each block lays itself out inside the
+// width it will actually occupy.
+const threadGutter = 2
+
 // threadView renders the selected card's thread into the card page.
 //
 // The surface is three regions, not one list. The masthead and the
@@ -55,7 +64,13 @@ func (m *Shell) threadView(w, h int) string {
 	r.Events = m.cardEvents[r.F.ID]
 	f := r.F
 
-	clip := func(str string) string { return ansi.Truncate(str, w, "…") }
+	inner := max(w-threadGutter, 8)
+	clip := func(str string) string {
+		if strings.TrimSpace(str) == "" {
+			return "" // a blank row is blank, not a run of spaces
+		}
+		return ansi.Truncate(str, inner, "…")
+	}
 
 	// --- head: pinned to the top ---
 	var head []string
@@ -64,7 +79,7 @@ func (m *Shell) threadView(w, h int) string {
 		head = append(head, clip(l))
 	}
 	head = append(head, "")
-	if sl := pinnedSpecLine(s, r); sl != "" {
+	if sl := pinnedSpecLine(s, r, inner); sl != "" {
 		head = append(head, clip(sl), "")
 	}
 
@@ -77,20 +92,20 @@ func (m *Shell) threadView(w, h int) string {
 	if len(segs) > 1 {
 		spend := stageSpendByStage(r.StageSpend)
 		for _, seg := range segs[:len(segs)-1] {
-			add(foldedReceiptLine(s, seg, spend, w))
+			add(foldedReceiptLine(s, seg, spend, inner))
 			// Expansion is real and driven by Shell.expandedStages; no
 			// key sets that flag yet, so every receipt renders folded —
 			// binding ⌄ to it is all that remains.
 			if m.expandedStages[stageSegmentKey(f.ID, seg)] {
 				for _, ev := range seg.events {
-					add("    " + stageEventLine(s, ev, w))
+					add("    " + stageEventLine(s, ev, inner))
 				}
 			}
 		}
 		blank()
 	}
 
-	if ls := m.liveStageBlock(s, r, segs, w); len(ls) > 0 {
+	if ls := m.liveStageBlock(s, r, segs, inner); len(ls) > 0 {
 		for _, l := range ls {
 			add(l)
 		}
@@ -136,7 +151,7 @@ func (m *Shell) threadView(w, h int) string {
 	}
 	// the input is a multi-row widget: clip each row, or a stray tail of
 	// the second one lands on the first.
-	for _, l := range strings.Split(m.inputBlock(s, r, w), "\n") {
+	for _, l := range strings.Split(m.inputBlock(s, r, inner), "\n") {
 		foot = append(foot, clip(l))
 	}
 
@@ -356,18 +371,30 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 // pinnedSpecLine is the thread's anchor back to the design artifact: the
 // section current for this stage, how many open %% questions block the
 // gate, and the key that opens the full view.
-func pinnedSpecLine(s *theme.Styles, r featureRow) string {
+func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	f := r.F
 	section := currentSpecSection(f.Kind, f.Stage)
 	if section == "" {
 		return ""
 	}
-	line := s.Faint.Render("⌄ ") + s.Muted.Render(artifactNoun(f.Kind)) + s.Faint.Render(" · "+section)
+	head := "⌄ " + artifactNoun(f.Kind) + " · " + section
+	tail := ""
 	if r.OpenSpecQs > 0 {
-		line += "  " + s.Warning.Render(itoa(r.OpenSpecQs)+" open %%")
+		tail = itoa(r.OpenSpecQs) + " open %%  "
 	}
-	line += "  " + s.KeyHint.Render("s")
-	return line
+	tail += "s"
+
+	// a rule carries the eye from the section name to the key that opens
+	// it, and right-aligns the hint the way a folded receipt's timestamp
+	// is aligned — without it the hint floats mid-line, at a different
+	// place on every card
+	fill := max(w-ansi.StringWidth(head)-ansi.StringWidth(tail)-2, 1)
+	out := s.Faint.Render("⌄ ") + s.Muted.Render(artifactNoun(f.Kind)) + s.Faint.Render(" · "+section) +
+		" " + s.Separator.Render(strings.Repeat("─", fill)) + " "
+	if r.OpenSpecQs > 0 {
+		out += s.Warning.Render(itoa(r.OpenSpecQs)+" open %%") + "  "
+	}
+	return out + s.KeyHint.Render("s")
 }
 
 // stageEnterPayload/stageExitPayload/messagePayload/toolPayload mirror
@@ -517,7 +544,10 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		if len(segs) > 0 {
 			at = segs[len(segs)-1].enterAt
 		}
-		lines := []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w)}
+		// the rule names a context reset; the blank line under it is what
+		// makes it read as a boundary rather than a heading glued to the
+		// first thing that happened after it
+		lines := []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
 		if ask := snap.PendingAsk; ask != nil {
 			// reuse chat.go's own picker renderer rather than
 			// reimplementing it; a zero-value pane is enough since
@@ -551,7 +581,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		return nil
 	}
 	last := segs[len(segs)-1]
-	lines := []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w)}
+	lines := []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
 	shown := last.events
 	if len(shown) > 6 {
 		shown = shown[len(shown)-6:]

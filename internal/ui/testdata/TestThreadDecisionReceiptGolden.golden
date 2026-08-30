@@ -2,7 +2,7 @@
 FD-042 · dark mode  [thrifty]  autopilot: gates  612 / 2400 credits  ·  1788 left
 todo─brainstorm─spec─plan─ implement ─review─verify─done
 
-⌄ spec · Implementation notes  s
+⌄ spec · Implementation notes ────────────────────────────────────────────────────────────────────────────────── s
 
 what it decided while you were away
   crossed 1 gate — spec 23:40
@@ -37,4 +37,4 @@ what it decided while you were away
 next
   enter run implement — no active run — start (or restart) the stage
 
-┃ message the agent, or a verb (approve, verify, diff…) — / to compose                                            
+┃ message the agent, or a verb (approve, verify, diff…) — / to compose                                          

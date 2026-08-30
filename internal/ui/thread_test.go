@@ -154,7 +154,7 @@ func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
 		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StageSpec},
 		OpenSpecQs: 2,
 	}
-	line := ansi.Strip(pinnedSpecLine(m0Styles(), r))
+	line := ansi.Strip(pinnedSpecLine(m0Styles(), r, 80))
 	for _, want := range []string{"spec", "Chosen approach", "2 open %%", "s"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("pinned spec line %q missing %q", line, want)
@@ -163,7 +163,7 @@ func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
 
 	// a stage with no natural section (todo) renders nothing to pin.
 	r.F.Stage = domain.StageTodo
-	if got := pinnedSpecLine(m0Styles(), r); got != "" {
+	if got := pinnedSpecLine(m0Styles(), r, 80); got != "" {
 		t.Errorf("pinnedSpecLine at todo = %q, want empty", got)
 	}
 }

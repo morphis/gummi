@@ -140,3 +140,36 @@ func TestNextInputForAssembly(t *testing.T) {
 		t.Errorf("nextInputFor = %+v, want %+v", in, want)
 	}
 }
+
+// The thread is the conversation: its input sits at the bottom of the
+// same page. So once a session is live, offering "chat with the
+// architect" as a next action points at the surface you are already
+// looking at, and spends a row of the one block whose job is to tell you
+// something you did not already know.
+func TestNextCardDropsTheChatActionWhenTheChatIsLive(t *testing.T) {
+	for _, stage := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StageInvestigate} {
+		live := nextActions(nextInput{stage: stage, kind: domain.KindFeature, sess: engine.StateInteractive})
+		for _, a := range live {
+			if a.key == "enter" {
+				t.Errorf("%s with a live session still offers %q — the input is already on screen", stage, a.label)
+			}
+		}
+
+		// with nobody to talk to yet the action earns its place, and says
+		// what enter actually does rather than naming a pane that no
+		// longer exists
+		cold := nextActions(nextInput{stage: stage, kind: domain.KindFeature})
+		var found bool
+		for _, a := range cold {
+			if a.key == "enter" {
+				found = true
+				if strings.HasPrefix(a.label, "chat with") {
+					t.Errorf("%s: %q names a chat pane the thread replaced", stage, a.label)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s with no session offers no way to start one", stage)
+		}
+	}
+}
