@@ -419,16 +419,74 @@ func (m *Shell) routeViaPlan(id domain.FeatureID) tea.Cmd {
 	}
 }
 
-// advanceStage moves the feature along its primary forward edge by
-// running the engine's shared advance floor (engine.Advance) — the same
-// gate mechanics the headless driver uses, so the quality floor can't
-// fork between the two. This wrapper only maps the typed result back to
-// the board's notices and follow-on commands; the blocker checks,
-// worktree creation, artifact promotion, plan-time estimation, and the
-// recorded transition all live in the engine now (DESIGN §10.11, §6.1,
-// §5.1). When the feature leaves Spec its worktree and branch are created
-// there first.
+// advanceStage moves the feature along its primary forward edge as the
+// user — advanceStageAs(id, "user"). Every hand-driven call site (the
+// board's own g, the spec view's approve) goes through this name
+// unchanged; autopilot's own crossing (autopilot.go) calls advanceStageAs
+// directly with state.ActorAutopilot instead.
 func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
+	return m.advanceStageAs(id, "user")
+}
+
+// autopilotGateBlockedMsg reports that actor state.ActorAutopilot's own
+// attempt to cross a design gate (advanceStageAs) found the gate
+// blocked — an open %%/diff thread, an unmet dependency, or the
+// document floor. Autopilot cannot resolve any of those itself, so the
+// card must park exactly as if autopilot had never tried the crossing;
+// the Update handler (shell.go) raises the attention item that the
+// event which tried autopilot first skipped in favor of the attempt.
+// It carries plain text rather than an AdvanceStatus because every
+// blocked branch below already renders the right explanation once, for
+// both actors — there is nothing left for the handler to add.
+type autopilotGateBlockedMsg struct {
+	id   domain.FeatureID
+	text string
+}
+
+// autopilotContinueMsg follows a crossing autopilot made itself onto an
+// autonomous stage. The card now sits at a stage with nothing running,
+// which is decisionIdle — the last kind in §10.17's table, and the one
+// that makes the rest of the table mean anything: crossing a gate and
+// then sitting at the stage behind it would leave "it runs to a verified
+// branch on its own" false, and would leave `gates` promising that
+// design gates cross themselves while the card stopped anyway, one stage
+// further along.
+//
+// It is sent only for autopilot's OWN crossing. An idle card the board
+// merely finds that way — restored at startup, parked by a quit — is
+// never started down this path, because nothing resumes itself after a
+// quit without being asked (§10.17, and the reason quitresume.go's
+// dialog exists at all).
+type autopilotContinueMsg struct {
+	id   domain.FeatureID
+	to   domain.Stage
+	note string
+}
+
+// blockedMsg maps one blocked Advance outcome to the message the calling
+// actor should see: a human gets the plain error notice advanceStage has
+// always returned; autopilot — which only attempted the crossing because
+// autopilotCrossGate (autopilot.go) had already decided the mode and the
+// edge allow it — gets autopilotGateBlockedMsg instead, so Update parks
+// the card rather than just flashing an error nobody is watching for.
+func blockedMsg(actor string, id domain.FeatureID, text string) tea.Msg {
+	if actor == state.ActorAutopilot {
+		return autopilotGateBlockedMsg{id: id, text: text}
+	}
+	return noticeMsg{text: text, isErr: true}
+}
+
+// advanceStageAs is advanceStage's actor-parameterized form: it runs the
+// engine's shared advance floor (engine.Advance) — the same gate
+// mechanics the headless driver uses, so the quality floor can't fork
+// between the two — and maps the typed result back to the board's
+// notices and follow-on commands. The blocker checks, worktree creation,
+// artifact promotion, plan-time estimation, and the recorded transition
+// all live in the engine now (DESIGN §10.11, §6.1, §5.1); this wrapper's
+// only actor-specific behavior is where a blocked outcome goes
+// (blockedMsg above) — a successful crossing is identical either way,
+// including which actor Store.Transition records on the gate event.
+func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		// A static board (no coding agent) still advances: engine.Advance
@@ -440,7 +498,7 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			eng = engine.New(engine.Config{Store: m.store, Pool: m.wt, Workspace: m.ws})
 			defer func() { _ = eng.Close() }()
 		}
-		res, err := eng.Advance(ctx, id, "user")
+		res, err := eng.Advance(ctx, id, actor)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
@@ -454,40 +512,36 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 			if res.Feature.Kind == domain.KindBug {
 				surface = "report"
 			}
-			return noticeMsg{
-				text:  fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, res.Blockers, surface),
-				isErr: true,
-			}
+			text := fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, res.Blockers, surface)
+			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedDiff:
-			return noticeMsg{
-				text:  fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, res.Blockers),
-				isErr: true,
-			}
+			text := fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, res.Blockers)
+			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedOmission:
-			return noticeMsg{text: res.Reason, isErr: true}
+			return blockedMsg(actor, id, res.Reason)
 		case engine.StatusBlockedDependency:
 			names := make([]string, 0, len(res.BlockingDeps))
 			for _, d := range res.BlockingDeps {
 				names = append(names, d.String())
 			}
-			return noticeMsg{
-				text:  fmt.Sprintf("%s: blocked by unmet dependency %s — land it before this card can start coding", id, strings.Join(names, ", ")),
-				isErr: true,
-			}
+			text := fmt.Sprintf("%s: blocked by unmet dependency %s — land it before this card can start coding", id, strings.Join(names, ", "))
+			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedDocument:
 			// the deterministic citation/coverage floor (internal/verifydoc)
 			// failed — the document stays at verify rather than reaching done
 			// on a broken citation or an unmapped brief question.
 			rep := res.DocumentReport
-			return noticeMsg{
-				text: fmt.Sprintf("%s: document floor failed — %d open thread(s), %d broken citation(s), %d unmapped question(s)",
-					id, rep.OpenThreads, len(rep.Citations), len(rep.Coverage)),
-				isErr: true,
-			}
+			text := fmt.Sprintf("%s: document floor failed — %d open thread(s), %d broken citation(s), %d unmapped question(s)",
+				id, rep.OpenThreads, len(rep.Citations), len(rep.Coverage))
+			return blockedMsg(actor, id, text)
 		case engine.StatusNeedsMerge:
 			// verify→done is the user's "this feature is done" decision: the
 			// merge flow (user-written message → squash merge) finishes the
-			// transition to Done itself.
+			// transition to Done itself. Autopilot never reaches this branch
+			// — autopilotForward excludes verify, because landing on main
+			// stays a keypress (DESIGN §10.17) — so it is never worth a
+			// blockedMsg-style fork; a mergeThenDoneMsg is the right answer
+			// for whichever actor somehow got here.
 			return mergeThenDoneMsg{f: res.Feature}
 		}
 		// StatusAdvanced: show the transition notice, then kick off the
@@ -500,6 +554,9 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 		est := res.From == domain.StageSpec && m.envelope == 0
 		if discover || est {
 			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est}
+		}
+		if actor == state.ActorAutopilot && autonomousStage(res.To) {
+			return autopilotContinueMsg{id: id, to: res.To, note: note}
 		}
 		return noticeMsg{text: note, reload: true, clearInbox: id}
 	}

@@ -365,10 +365,18 @@ func planAgent(counter *atomic.Int32, verdicts ...string) *agent.Fake {
 }
 
 // runPlan advances the feature to Plan, runs it, and drains the
-// critique loop to completion.
+// critique loop to completion. Pinned to GateOff: this helper's callers
+// are testing the plan-critique loop itself (round counters, escalation,
+// the raised gate), not autopilot's own crossing of a clean gate
+// (autopilot_gate_test.go covers that on gates/full), so a clean pass
+// here must still park for a human exactly as it always did.
 func runPlan(t *testing.T, ag *agent.Fake) *Shell {
 	t.Helper()
 	m, eng := chatWorkspace(t, ag)
+	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateOff); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
 	m = advanceTo(t, m, domain.StagePlan)
 	m = openAndAttach(t, m) // run plan
 	settleChat(t, eng)

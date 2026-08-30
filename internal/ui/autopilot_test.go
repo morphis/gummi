@@ -133,6 +133,56 @@ func TestAutopilotBodyOffNeverStarts(t *testing.T) {
 	}
 }
 
+// TestAutopilotAnswersRuleTable is DESIGN §10.17's rule table, exhaustive
+// over every (mode × decisionKind) pair the TUI ever asks about,
+// including the empty mode string (domain.Feature.GateApproval's own
+// "empty reads as GateGates" rule).
+func TestAutopilotAnswersRuleTable(t *testing.T) {
+	modes := []string{domain.GateOff, domain.GateGates, domain.GateFull, ""}
+	kinds := []decisionKind{decisionAsk, decisionGate, decisionVerify, decisionBudget, decisionIdle}
+
+	// want[mode][kind]
+	want := map[string]map[decisionKind]bool{
+		domain.GateOff: {
+			decisionAsk: false, decisionGate: false, decisionVerify: false,
+			decisionBudget: false, decisionIdle: false,
+		},
+		domain.GateGates: {
+			decisionAsk: false, decisionGate: true, decisionVerify: false,
+			decisionBudget: false, decisionIdle: true,
+		},
+		domain.GateFull: {
+			decisionAsk: true, decisionGate: true, decisionVerify: true,
+			decisionBudget: false, decisionIdle: true,
+		},
+		"": { // empty reads as GateGates
+			decisionAsk: false, decisionGate: true, decisionVerify: false,
+			decisionBudget: false, decisionIdle: true,
+		},
+	}
+
+	for _, mode := range modes {
+		for _, kind := range kinds {
+			got := autopilotAnswers(mode, kind)
+			if got != want[mode][kind] {
+				t.Errorf("autopilotAnswers(%q, %q) = %v, want %v", mode, kind, got, want[mode][kind])
+			}
+		}
+	}
+}
+
+// TestAutopilotAnswersNeverBudget restates the one universal refusal on
+// its own, so a future rule-table edit that accidentally starts granting
+// budget under some mode fails loudly and specifically, not just as one
+// row in the table above.
+func TestAutopilotAnswersNeverBudget(t *testing.T) {
+	for _, mode := range []string{domain.GateOff, domain.GateGates, domain.GateFull, ""} {
+		if autopilotAnswers(mode, decisionBudget) {
+			t.Errorf("autopilotAnswers(%q, budget) = true, want false — budget always parks", mode)
+		}
+	}
+}
+
 // --- plan resolution against live Shell state ---
 
 func TestAutopilotPlanTodoCard(t *testing.T) {

@@ -772,7 +772,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 				return d.crossGate(ctx, f)
 			}
 			if d.opts.Autonomous {
-				rec := recommendedOption(ask)
+				rec := engine.RecommendedOption(ask)
 				// the answerer declares itself: the record must say an
 				// unattended loop took it, whoever's stored mode the card
 				// runs under, or the morning receipt under-counts it.
@@ -788,7 +788,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 			}
 			d.out.emit(questionEvent{
 				Event: "question", ID: string(f.ID), Q: ask.Question,
-				Options: askLabels(ask), Recommended: recommendedOption(ask),
+				Options: askLabels(ask), Recommended: engine.RecommendedOption(ask),
 				FreeForm: ask.FreeForm, Resume: string(f.ID),
 				Next:     resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 				Decision: decisionID,

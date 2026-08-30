@@ -47,6 +47,27 @@ type AskOption struct {
 	Detail string `json:"detail"`
 }
 
+// RecommendedOption picks the option the agent flagged as recommended —
+// by convention it marks that option's label ("… (recommended)") — and
+// falls back to the first option when none is marked. It is the single
+// implementation both the TUI and the headless driver take an unattended
+// answer from: the value surfaced on the question event/notice, and the
+// answer an autonomous loop auto-takes when it may not park (DESIGN §10
+// decision 17). Living beside Ask itself, rather than in either loop,
+// is what keeps the two from drifting into two different ideas of
+// "recommended".
+func RecommendedOption(a *Ask) string {
+	if a == nil || len(a.Options) == 0 {
+		return ""
+	}
+	for _, o := range a.Options {
+		if strings.Contains(strings.ToLower(o.Label), "recommend") {
+			return o.Label
+		}
+	}
+	return a.Options[0].Label
+}
+
 const (
 	annotateToolName = "spec_annotate"
 	verdictToolName  = "submit_verdict"

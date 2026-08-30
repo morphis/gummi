@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
 )
@@ -228,6 +230,128 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 			verb, englishList(plan.remaining), envelope)
 	}
 	return []string{lead, "it parks to the inbox if it can't finish, and it never lands on main."}
+}
+
+// autopilotAnswers reports whether mode answers a decision of kind on
+// its own — §10.17's rule table ("Autopilot may redo its own work. It
+// may never widen its own reach.") turned into code, so nothing else in
+// the TUI is free to re-derive (or drift from) this table.
+//
+//   - decisionBudget is refused under every mode, full included. It is
+//     the one decision the design names explicitly as autopilot's own
+//     refusal: topping up an exhausted envelope enlarges what the card
+//     may spend, which is the definition of widening its reach rather
+//     than redoing its work, and `u` (the top-up key) never silently
+//     restarts a run on its own.
+//   - domain.GateOff never answers anything, by the stop's own words
+//     (autopilotStops above: "every gate stops for you").
+//   - domain.GateFull answers every kind but budget — "it runs to a
+//     verified branch on its own" is the promise, and a card that must
+//     stop for its own design gates or its own questions is not that.
+//     Reporting true here for decisionVerify is the rule table's own
+//     word for what full may do (bounce a failed verify); it is not a
+//     license to flip gatepolicy.Input.VerifyMayBounce on, which stays
+//     false everywhere in this change — that switch is a behavior change
+//     of its own the design reserves for later, not a side effect of
+//     this table.
+//   - domain.GateGates, and the empty default that reads as it
+//     (autopilotCursorFor's own rule), answers only decisionGate and
+//     decisionIdle. The stop's own words are "design gates cross
+//     themselves; questions still stop for you" — decisionAsk is
+//     refused for exactly that reason, and decisionVerify with it: a
+//     failed verify is a question about what to do next (bounce, or
+//     hand it to a human), not a design gate crossing itself.
+func autopilotAnswers(mode string, kind decisionKind) bool {
+	if kind == decisionBudget {
+		return false
+	}
+	switch mode {
+	case domain.GateFull:
+		return true
+	case domain.GateGates, "":
+		return kind == decisionGate || kind == decisionIdle
+	default: // domain.GateOff and anything unrecognized: off's own guarantee
+		return false
+	}
+}
+
+// autopilotCrossGate is the two live raise sites' (shell.go's
+// EventIdle, reviewloop.go's onPlanDone) shared attempt to cross a
+// parked design gate as autopilot (DESIGN §10.17) instead of parking it:
+// a mode that answers gate decisions on its own (autopilotAnswers) and
+// an edge autopilot may take on its own (autopilotForward). Neither
+// check writes anything, so a card that fails either falls straight back
+// to the caller's own raiseAttention — ok reports which.
+//
+// When both hold, the decision row is opened here, before Advance runs,
+// through the same m.logDecision seam raiseAttention itself uses: the
+// stop still leaves a row per §10.18 even though it is about to close.
+// Store.Transition correlates the crossing's gate event to the newest
+// open gate decision for the card inside its own transaction, so a
+// successful crossing closes the very row this call just opened. If
+// Advance instead reports the gate is blocked (an open %%/diff thread, an
+// unmet dependency), advanceStageAs's actor-aware mapping returns
+// autopilotGateBlockedMsg rather than a plain error notice; shell.go's
+// Update handles that by parking the card through parkAttentionItem, not
+// raiseAttention, so the decision opened here isn't logged a second time
+// for the one stop.
+//
+// Crossing always runs through advanceStageAs — never autoStep or
+// m.store.Transition directly — so the same blocker checks a human's own
+// g would hit apply here too: autopilot may never cross a gate a human
+// could not.
+func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool) {
+	// autopilotModeFor (shell.go, beside stageOf), not f.GateApproval:
+	// f comes from the just-finished session's own snapshot, which can be
+	// a stage or more stale than the board's row — a mode set through the
+	// `A` overlay while that session was already running would not be
+	// reflected on it until the next stage's session is created. The row
+	// is the same source every other live mode read in this package
+	// treats as authoritative.
+	if !autopilotAnswers(m.autopilotModeFor(f.ID), decisionGate) {
+		return nil, false
+	}
+	if _, ok := autopilotForward(f); !ok {
+		return nil, false
+	}
+	m.logDecision(f.ID, state.DecisionKindGate, text)
+	// the crossing runs in a command, so the gate is open and already
+	// spoken for until it lands — the pinned decision says so rather than
+	// letting it read as waiting for you (decision.go).
+	m.markAutopilotAnswering(f.ID)
+	return m.advanceStageAs(f.ID, state.ActorAutopilot), true
+}
+
+// autopilotRun starts the stage autopilot's own crossing just opened —
+// the idle decision that crossing created, answered by the only answer
+// an idle card offers. It re-reads the card rather than trusting the
+// stage the crossing aimed at: between the transition and this command
+// something else (a bounce, another process) may have moved it, and
+// starting a stage the card is no longer at would be running something
+// nobody decided on.
+func (m *Shell) autopilotRun(id domain.FeatureID, to domain.Stage) tea.Cmd {
+	return func() tea.Msg {
+		if m.engine == nil {
+			return noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
+		}
+		f, err := m.store.GetFeature(context.Background(), id)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		if f.Stage != to {
+			return nil
+		}
+		if !autopilotAnswers(f.GateApproval, decisionIdle) {
+			// the mode was turned off between the crossing and here; the
+			// card keeps the stage it gained and stops, which is what off
+			// means.
+			return nil
+		}
+		if err := m.engine.Run(f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(id) + ": autopilot started " + string(to), reload: true}
+	}
 }
 
 const autopilotDialogWidth = 62

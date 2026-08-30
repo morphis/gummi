@@ -229,6 +229,23 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	title := "gummi"
 	options := make([]pickerOption, 0, len(d.actions))
 	multi := false
+	// A decision autopilot has taken renders open, with its options,
+	// saying whose it is — never a countdown. The answer runs in a
+	// command, so there is a real interval where the question is on
+	// screen and already spoken for, and the honest thing is to name the
+	// answerer rather than let it read as waiting for you. It collapses
+	// when the answer event lands, not on a timer: a timer would make the
+	// same decision behave differently depending on whether a human
+	// happened to be looking, and would diverge the TUI from the driver,
+	// which answers immediately. esc keeps its two meanings (blur the
+	// composer, close the card) — the take-it-back gesture belonged to
+	// the countdown that was cut.
+	//
+	// The flag, not autopilotAnswers: the rule table says which decisions
+	// this card's mode MAY take, and a card sitting idle on gates is one
+	// nothing is going to move — marking it from the table would put a
+	// standing claim on screen that no answer was ever coming to honour.
+	autopilots := m.autopilotAnswering[r.F.ID]
 	if d.ask != nil {
 		title = string(r.F.ID) + " asks"
 		if m.threadFreeForm {
@@ -253,6 +270,13 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 				label: label, detail: action.detail, key: action.key, danger: action.danger,
 			})
 		}
+	}
+	if autopilots {
+		// on the title, not a row of its own: the pinned region's height
+		// is load-bearing at 36×9, where a spent row costs an option, and
+		// the free-form arming above already set the precedent that who
+		// owns the answer is said on the title.
+		title += " · autopilot is taking this one"
 	}
 	lines := strings.Split(pickerView(s, title, d.question, options,
 		m.decisionCursor, m.decisionPicked, multi, w), "\n")

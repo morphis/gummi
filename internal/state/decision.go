@@ -216,6 +216,10 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 		if err != nil {
 			return nil, err
 		}
+		reran, err := s.latestStageEnterSeq(ctx, fid)
+		if err != nil {
+			return nil, err
+		}
 		cur := domain.Stage(curStage)
 		for _, d := range pendings {
 			if answered[d.dec.ID] {
@@ -224,10 +228,41 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 			if d.stage != cur {
 				continue // the stage moved on: the decision is abandoned
 			}
+			if d.dec.Kind == DecisionKindBudget && reran > d.seq {
+				// A budget stop has no answer event — the answer kinds are
+				// gate and ask, and minting one of those for a top-up would
+				// fork their meaning. What resolves it is the stage running
+				// again on a raised envelope, and every generation writes a
+				// stage_enter, so a later one is that fact. Scoped to budget
+				// deliberately: an open ask must survive a restore to be
+				// re-armed into the restored session, and that session writes
+				// a stage_enter of its own — closing asks here would strand
+				// the reopen path.
+				continue
+			}
 			out[fid] = append(out[fid], d.dec)
 		}
 	}
 	return out, nil
+}
+
+// latestStageEnterSeq is the seq of the card's newest stage_enter, or 0
+// when it has none. Every session generation writes one (deduped on its
+// own start time), so a stage_enter later than a decision means the
+// stage has run again since — which is what closes a budget stop, the
+// one decision kind with no answer event of its own.
+func (s *Store) latestStageEnterSeq(ctx context.Context, id domain.FeatureID) (int64, error) {
+	var seq sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT MAX(seq) FROM card_events WHERE feature_id = ? AND kind = ?`,
+		string(id), EventStageEnter).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("reading %s's newest stage_enter: %w", id, err)
+	}
+	if !seq.Valid {
+		return 0, nil
+	}
+	return seq.Int64, nil
 }
 
 // answeredIDs returns the decision ids a card's later gate/ask events

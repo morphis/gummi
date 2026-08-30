@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -58,6 +59,14 @@ func TestCompletedRunRaisesGate(t *testing.T) {
 		}
 	}}
 	m, eng := chatWorkspace(t, ag)
+	// this test is about the gate-raising/clearing mechanism itself, not
+	// autopilot — pin the card to off so a clean critique still parks the
+	// gate for a human, unaffected by gates' own crossing (autopilot_gate_test.go
+	// covers that).
+	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateOff); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
 	// advance to plan (autonomous), run it
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})

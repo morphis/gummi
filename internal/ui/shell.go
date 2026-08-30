@@ -182,6 +182,17 @@ type Shell struct {
 	// line verbatim as the answer. Disarmed by blur, by an answer, or by
 	// the decision changing.
 	threadFreeForm bool
+	// autopilotAnswering names the cards whose open decision autopilot has
+	// already taken and is in the middle of delivering — the interval
+	// between dispatching the answer and the answer event landing. It is
+	// what the pinned decision marks itself with (decision.go).
+	//
+	// Deliberately not "this card's mode would answer a decision of this
+	// kind": a card sitting idle on gates is not being taken by anyone —
+	// autopilot only ever starts a stage it crossed into itself — so
+	// marking it from the rule table alone would be a standing lie about
+	// a card nothing is going to move.
+	autopilotAnswering map[domain.FeatureID]bool
 	// foreignTicks counts live-drive probes, pacing the slower full row
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
@@ -453,13 +464,26 @@ func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
 // already-present check keeps one stop from being recorded twice, exactly
 // as the park beside it does.
 func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
-	if m.inbox.add(id, kind, text) {
-		m.notifier.Alert(string(id) + ": " + text)
-		m.logPark(id, state.ParkReasonNeedsYou, text)
-		if kind == attnGate {
-			m.logDecision(id, state.DecisionKindGate, text)
-		}
+	if m.parkAttentionItem(id, kind, text) && kind == attnGate {
+		m.logDecision(id, state.DecisionKindGate, text)
 	}
+}
+
+// parkAttentionItem is raiseAttention without the decision write: the
+// inbox add, the notification, and the park-history row, reporting
+// whether it was a new alert (the same "is this new" gate raiseAttention
+// itself checks before logging a decision). It exists for
+// autopilotCrossGate's own park fallback (autopilot.go): that caller
+// already opened the gate's decision row before attempting the crossing,
+// so parking after a blocked Advance must add the inbox item without
+// minting a second decision row for the same stop.
+func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text string) bool {
+	if !m.inbox.add(id, kind, text) {
+		return false
+	}
+	m.notifier.Alert(string(id) + ": " + text)
+	m.logPark(id, state.ParkReasonNeedsYou, text)
+	return true
 }
 
 // logDecision records a card's open decision in its own history
@@ -504,6 +528,70 @@ func (m *Shell) stageOf(id domain.FeatureID) domain.Stage {
 		}
 	}
 	return ""
+}
+
+// autopilotModeFor reads a card's stored gate-approval mode: the board's
+// own row when the card is loaded there (the same source stageOf reads,
+// kept fresh by every reload) wins, because it is what every other
+// autopilot-mode read in this package (autopilotCursorFor, planAutopilot)
+// already treats as authoritative. A card whose row hasn't loaded yet —
+// an event arriving before the first loadRows lands — falls back to the
+// engine session's own copy of the feature, which Attach/dispatch loaded
+// fresh no longer ago than the row would have.
+func (m *Shell) autopilotModeFor(id domain.FeatureID) string {
+	for _, r := range m.rows {
+		if r.F.ID == id {
+			return r.F.GateApproval
+		}
+	}
+	if m.engine != nil {
+		if s := m.engine.Get(id); s != nil {
+			return s.Snapshot().Feature.GateApproval
+		}
+	}
+	return ""
+}
+
+// markAutopilotAnswering / clearAutopilotAnswering bracket the interval
+// the pinned decision reports as autopilot's. Both run on the Update
+// goroutine (the dispatch, and the message the dispatched command sends
+// back), so the map needs no lock of its own.
+func (m *Shell) markAutopilotAnswering(id domain.FeatureID) {
+	if m.autopilotAnswering == nil {
+		m.autopilotAnswering = map[domain.FeatureID]bool{}
+	}
+	m.autopilotAnswering[id] = true
+}
+
+func (m *Shell) clearAutopilotAnswering(id domain.FeatureID) {
+	delete(m.autopilotAnswering, id)
+}
+
+// autopilotAnsweredMsg closes the interval markAutopilotAnswering opened,
+// whatever the answer's outcome was: the decision is no longer autopilot's
+// to take, either because it took it or because the attempt failed and
+// the card is the human's again.
+type autopilotAnsweredMsg struct {
+	id     domain.FeatureID
+	notice noticeMsg
+}
+
+// autopilotAnswerAsk answers id's live pending ask with rec as autopilot.
+// AnswerAs talks to the agent backend (it delivers the answer as a fresh
+// turn), which is exactly the IO the no-IO-in-Update contract keeps out
+// of Update itself, so it runs inside the returned command rather than
+// where handleEngineEvent decided to call it. It opens no decision row of
+// its own: the engine's ask path already opened one when it raised the
+// question (DESIGN §6.3), and the answer event AnswerAs records carries
+// that same id, closing it exactly as a human's answer would.
+func (m *Shell) autopilotAnswerAsk(id domain.FeatureID, rec string) tea.Cmd {
+	m.markAutopilotAnswering(id)
+	return func() tea.Msg {
+		if err := m.engine.AnswerAs(context.Background(), id, rec, state.ActorAutopilot); err != nil {
+			return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: sanitize(err.Error()), isErr: true}}
+		}
+		return autopilotAnsweredMsg{id: id, notice: noticeMsg{text: string(id) + ": auto-answered: " + rec}}
+	}
 }
 
 // decisionKindForStage maps a stopped card's stage to the decision kind
@@ -620,6 +708,25 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 		}
 	case engine.EventQuestion:
+		// A card whose stored mode answers its own questions (§10.17: full
+		// only — gates still stops for a question) takes the recommended
+		// option itself, whether or not anyone is looking at the card page
+		// right now: a decision must not resolve differently because a
+		// human happened to be on screen (the same reason the design
+		// forbids a countdown). This has to run before the cardOpen check
+		// below, which is about where a *parked* question is shown, not
+		// whether one gets parked at all.
+		if autopilotAnswers(m.autopilotModeFor(ev.Feature), decisionAsk) {
+			if s := m.engine.Get(ev.Feature); s != nil {
+				if ask := s.Snapshot().PendingAsk; ask != nil {
+					if rec := engine.RecommendedOption(ask); rec != "" {
+						return m.autopilotAnswerAsk(ev.Feature, rec)
+					}
+				}
+			}
+			// no live ask, or RecommendedOption came back empty: nothing
+			// safe to answer with, so fall through and park like today.
+		}
 		// the agent asked something. When the card page is open on the
 		// asking card, its pinned decision already shows the question
 		// inline; otherwise queue it so you can jump to it from the
@@ -661,7 +768,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
 			return cmd
 		}
-		m.raiseAttention(ev.Feature, attnGate, string(ev.Stage)+" finished — review & advance")
+		text := string(ev.Stage) + " finished — review & advance"
+		if cmd, attempted := m.autopilotCrossGate(s.Snapshot().Feature, text); attempted {
+			return cmd
+		}
+		m.raiseAttention(ev.Feature, attnGate, text)
 		// the session may have edited the artifact or committed; reload so
 		// the gate's row state (landed, open-comment counts) is fresh
 		return m.loadRows
@@ -900,6 +1011,30 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case autopilotAnsweredMsg:
+		m.clearAutopilotAnswering(msg.id)
+		m.notice = msg.notice
+		return m, nil
+
+	case autopilotContinueMsg:
+		// the crossing landed; the stage behind it is autopilot's to start
+		// (msgs.go's autopilotContinueMsg says why this is the idle
+		// decision being answered rather than a second gate crossing).
+		m.clearAutopilotAnswering(msg.id)
+		m.notice = noticeMsg{text: msg.note}
+		m.inbox.remove(msg.id)
+		return m, tea.Batch(m.loadRows, m.autopilotRun(msg.id, msg.to))
+
+	case autopilotGateBlockedMsg:
+		// autopilotCrossGate (autopilot.go) already opened the gate's
+		// decision row before attempting the crossing, so parking here
+		// uses parkAttentionItem, not raiseAttention — logging the
+		// decision a second time for the one stop would leave a
+		// duplicate open row for what is a single park.
+		m.clearAutopilotAnswering(msg.id)
+		m.parkAttentionItem(msg.id, attnGate, msg.text)
+		return m, m.loadRows
 
 	case mergeThenDoneMsg:
 		// the verify→done gate routes through the merge flow: collect the

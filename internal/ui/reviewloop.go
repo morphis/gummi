@@ -234,7 +234,11 @@ func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, domain.RoundKindPlan, 0)
-		m.raiseAttention(id, attnGate, "plan critiqued: clean — review & approve")
+		text := "plan critiqued: clean — review & approve"
+		if cmd, attempted := m.autopilotCrossGate(snap.Feature, text); attempted {
+			return cmd
+		}
+		m.raiseAttention(id, attnGate, text)
 		return nil
 	case verdictChanges:
 		if m.round(id, domain.RoundKindPlan) >= maxPlanRounds {

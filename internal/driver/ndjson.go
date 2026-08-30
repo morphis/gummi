@@ -3,7 +3,6 @@ package driver
 import (
 	"encoding/json"
 	"io"
-	"strings"
 	"sync"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -407,21 +406,4 @@ func askLabels(a *engine.Ask) []string {
 		out = append(out, o.Label)
 	}
 	return out
-}
-
-// recommendedOption picks the option the agent flagged as recommended —
-// by convention it marks that option's label ("… (recommended)") — and
-// falls back to the first option when none is marked. It is both the
-// value surfaced in the question event and the answer --autonomous
-// auto-takes (D5).
-func recommendedOption(a *engine.Ask) string {
-	if a == nil || len(a.Options) == 0 {
-		return ""
-	}
-	for _, o := range a.Options {
-		if strings.Contains(strings.ToLower(o.Label), "recommend") {
-			return o.Label
-		}
-	}
-	return a.Options[0].Label
 }
