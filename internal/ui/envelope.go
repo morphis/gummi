@@ -30,6 +30,11 @@ type envelopeDialog struct {
 	buttons  *buttonRow
 	focus    int
 	onSubmit func(to int) tea.Cmd
+	// onResume restarts the card, for the second step submit() raises on a
+	// parked autopilot run. Separate from onSubmit because raising an
+	// envelope and resuming a run are two decisions, and topping up has
+	// never implied the second.
+	onResume func() tea.Cmd
 	problem  string // parse error shown under the input, cleared on edit
 
 	// askResume/resumeTo/resumeButtons carry the follow-up "resume it?"
@@ -42,14 +47,14 @@ type envelopeDialog struct {
 	resumeButtons *buttonRow
 }
 
-func newEnvelopeDialog(f domain.Feature, onSubmit func(int) tea.Cmd) *envelopeDialog {
+func newEnvelopeDialog(f domain.Feature, onSubmit func(int) tea.Cmd, onResume func() tea.Cmd) *envelopeDialog {
 	in := textinput.New()
 	in.Placeholder = "credits (0 = uncapped)"
 	in.CharLimit = 8
 	in.SetWidth(28)
 	in.Focus()
 	return &envelopeDialog{
-		feature: f, input: in, onSubmit: onSubmit,
+		feature: f, input: in, onSubmit: onSubmit, onResume: onResume,
 		buttons:       newButtonRow(button{label: "Cancel"}, button{label: "Set"}),
 		resumeButtons: newButtonRow(button{label: "Not now"}, button{label: "Resume"}),
 	}
@@ -101,18 +106,20 @@ func (d *envelopeDialog) offersResume(to int) bool {
 	return f.Spend.CreditEquivalent() >= float64(f.Budget.Envelope)
 }
 
-// resumeNotice answers "yes" on the resume question. Actually restarting
-// the run needs the engine handle this dialog never carries — wiring
-// that reach belongs with whichever file constructs it (out of this
-// one's scope) — so this names where to do it instead of pretending the
-// run resumed.
+// resumeNotice answers "yes" on the resume question: restart the card
+// through whatever the constructing surface handed us. A dialog with no
+// resume wired says so rather than reporting a restart that did not
+// happen — the whole reason the question is a separate step is that the
+// answer has to be true.
 func (d *envelopeDialog) resumeNotice() tea.Cmd {
 	id := d.feature.ID
-	return func() tea.Msg {
-		return noticeMsg{text: fmt.Sprintf(
-			"%s: envelope raised — resuming isn't wired from this dialog; pick it back up from the inbox (i) or `gummi resume %s`",
-			id, id)}
+	if d.onResume == nil {
+		return func() tea.Msg {
+			return noticeMsg{text: fmt.Sprintf(
+				"%s: envelope raised — pick it back up from the inbox (i) or `gummi resume %s`", id, id)}
+		}
 	}
+	return d.onResume()
 }
 
 // HandleKey implements overlay.Dialog.

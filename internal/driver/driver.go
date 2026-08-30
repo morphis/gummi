@@ -1462,7 +1462,20 @@ func (d *Driver) stopped(f domain.Feature) Outcome {
 	return Outcome{Status: StatusStopped, ID: string(f.ID)}
 }
 
+// logPark records a card stopping in its own history, so a run driven
+// headlessly leaves the same account of why it stopped as one driven
+// from the board. Best-effort and silent: the escalation itself is
+// already on the output stream, and the run's exit status does not
+// depend on the log.
+func (d *Driver) logPark(f domain.Feature, reason, detail string) {
+	if d.store == nil {
+		return
+	}
+	_ = d.store.AppendPark(context.Background(), f.ID, f.Stage, reason, detail, "", time.Now())
+}
+
 func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
+	d.logPark(f, state.ParkReasonGaveUp, reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: resumeCmd(string(f.ID)),
@@ -1487,6 +1500,7 @@ func (d *Driver) tripwire(f domain.Feature, paths []string) Outcome {
 // stream never has to recall which verb un-parks this stop; `--note` is
 // carried as a placeholder for the caller's own change note.
 func (d *Driver) bounceEscalation(f domain.Feature, reason string) Outcome {
+	d.logPark(f, state.ParkReasonGaveUp, reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: resumeCmd(string(f.ID), "--bounce", "--note", `"<why>"`),

@@ -57,6 +57,21 @@ const (
 // (or absent) reason reads as a human park.
 const ParkReasonQuit = "quit"
 
+// The other reasons a card stops and waits for someone. ParkReasonGaveUp
+// is an automatic loop that reached its cap or could not read a verdict
+// — it stopped at a decision only a human can take. ParkReasonNeedsYou
+// is every other way a card lands in the needs-attention queue (a failed
+// run, an exhausted envelope, a gate raised for review).
+//
+// Only ParkReasonQuit is load-bearing: QuitStopped looks for exactly it,
+// and any other reason reads as a park nobody should silently undo. The
+// rest exist so a card's history can answer "why did this stop" rather
+// than leaving the run's end unexplained.
+const (
+	ParkReasonGaveUp   = "gave-up"
+	ParkReasonNeedsYou = "needs-you"
+)
+
 // ParkPayload is the JSON shape of an EventPark event's Payload. The
 // reason lives here rather than in the status column deliberately:
 // status is the kind-outcome vocabulary (StatusOK/StatusFail, "not
@@ -65,6 +80,10 @@ const ParkReasonQuit = "quit"
 // column, free to collide as either grows.
 type ParkPayload struct {
 	Reason string `json:"reason"`
+	// Detail is the sentence the user was shown when the card stopped,
+	// kept verbatim so the history explains itself without the reader
+	// having to reconstruct it from the reason code.
+	Detail string `json:"detail,omitempty"`
 }
 
 // GatePayload is the JSON shape of an EventGate event's Payload: which
@@ -307,4 +326,24 @@ func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, fro
 		return fmt.Errorf("recording gate event for %s: %w", id, err)
 	}
 	return nil
+}
+
+// AppendPark records a card coming to a stop and waiting for someone,
+// with why. Best-effort by contract: parking is something the caller has
+// already decided and usually already told the user about, so a log
+// failure must never unwind it — callers discard the error.
+//
+// dedupe may be empty, and usually is: two escalations on one card are
+// two real events, and collapsing them would hide a loop that gave up
+// twice. Pass a key only where the same stop can be recorded more than
+// once (a repeated quit sweep, say).
+func (s *Store) AppendPark(ctx context.Context, id domain.FeatureID, stage domain.Stage, reason, detail, dedupe string, at time.Time) error {
+	payload, err := json.Marshal(ParkPayload{Reason: reason, Detail: detail})
+	if err != nil {
+		return fmt.Errorf("encoding park event for %s: %w", id, err)
+	}
+	return s.AppendEvent(ctx, CardEvent{
+		Feature: id, Stage: stage, Kind: EventPark, At: at,
+		Payload: string(payload), Dedupe: dedupe,
+	})
 }

@@ -19,7 +19,7 @@ func typeInto(d *envelopeDialog, text string) {
 func TestEnvelopeDialogSubmitsFigure(t *testing.T) {
 	f := domain.Feature{ID: "FD-001", Budget: domain.Budget{Envelope: 300}}
 	got := -1
-	d := newEnvelopeDialog(f, func(to int) tea.Cmd { got = to; return nil })
+	d := newEnvelopeDialog(f, func(to int) tea.Cmd { got = to; return nil }, nil)
 
 	typeInto(d, "450")
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -31,7 +31,7 @@ func TestEnvelopeDialogSubmitsFigure(t *testing.T) {
 func TestEnvelopeDialogRejectsNonNumbers(t *testing.T) {
 	f := domain.Feature{ID: "FD-001"}
 	called := false
-	d := newEnvelopeDialog(f, func(int) tea.Cmd { called = true; return nil })
+	d := newEnvelopeDialog(f, func(int) tea.Cmd { called = true; return nil }, nil)
 
 	typeInto(d, "lots")
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -51,7 +51,7 @@ func TestEnvelopeDialogRejectsNonNumbers(t *testing.T) {
 func TestEnvelopeDialogEmptyEnterCancels(t *testing.T) {
 	f := domain.Feature{ID: "FD-001"}
 	called := false
-	d := newEnvelopeDialog(f, func(int) tea.Cmd { called = true; return nil })
+	d := newEnvelopeDialog(f, func(int) tea.Cmd { called = true; return nil }, nil)
 
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !closed || called {
@@ -78,7 +78,7 @@ func parkedAutopilotFeature() domain.Feature {
 // silently restart the run.
 func TestEnvelopeDialogOffersResumeOnParkedAutopilotRaise(t *testing.T) {
 	got := -1
-	d := newEnvelopeDialog(parkedAutopilotFeature(), func(to int) tea.Cmd { got = to; return nil })
+	d := newEnvelopeDialog(parkedAutopilotFeature(), func(to int) tea.Cmd { got = to; return nil }, nil)
 
 	typeInto(d, "4000")
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -102,7 +102,7 @@ func TestEnvelopeDialogOffersResumeOnParkedAutopilotRaise(t *testing.T) {
 func TestEnvelopeDialogNoResumeOffGateApproval(t *testing.T) {
 	f := parkedAutopilotFeature()
 	f.GateApproval = domain.GateOff
-	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil })
+	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil }, nil)
 	typeInto(d, "4000")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d.askResume {
@@ -117,7 +117,7 @@ func TestEnvelopeDialogNoResumeOffGateApproval(t *testing.T) {
 func TestEnvelopeDialogNoResumeWhenNotExhausted(t *testing.T) {
 	f := parkedAutopilotFeature()
 	f.Spend.Credits = 100 // nowhere near the 2400 envelope
-	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil })
+	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil }, nil)
 	typeInto(d, "4000")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d.askResume {
@@ -130,7 +130,7 @@ func TestEnvelopeDialogNoResumeWhenNotExhausted(t *testing.T) {
 // live session state to actually restart the run, so it says so rather
 // than pretending the run resumed.
 func TestEnvelopeDialogResumeAnswerYes(t *testing.T) {
-	d := newEnvelopeDialog(parkedAutopilotFeature(), func(int) tea.Cmd { return nil })
+	d := newEnvelopeDialog(parkedAutopilotFeature(), func(int) tea.Cmd { return nil }, nil)
 	typeInto(d, "4000")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !d.askResume {
@@ -153,12 +153,58 @@ func TestEnvelopeDialogResumeAnswerYes(t *testing.T) {
 // TestEnvelopeDialogResumeAnswerNo: saying no just closes the dialog —
 // the envelope stays raised (already set), nothing else happens.
 func TestEnvelopeDialogResumeAnswerNo(t *testing.T) {
-	d := newEnvelopeDialog(parkedAutopilotFeature(), func(int) tea.Cmd { return nil })
+	d := newEnvelopeDialog(parkedAutopilotFeature(), func(int) tea.Cmd { return nil }, nil)
 	typeInto(d, "4000")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	closed, cmd := d.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if !closed || cmd != nil {
 		t.Fatalf("'n' on the resume question: closed=%v cmd=%v, want true/nil", closed, cmd)
+	}
+}
+
+// Saying yes to the resume question must actually resume. The question
+// is a separate step precisely so its answer can be trusted; a dialog
+// that asked and then only printed advice would be worse than not
+// asking, because it looks like it worked.
+func TestEnvelopeDialogResumeAnswerFiresTheResume(t *testing.T) {
+	resumed := 0
+	d := newEnvelopeDialog(parkedAutopilotFeature(),
+		func(int) tea.Cmd { return nil },
+		func() tea.Cmd { resumed++; return func() tea.Msg { return nil } })
+
+	typeInto(d, "4000")
+	if closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); closed {
+		t.Fatal("raising a parked autopilot card's envelope closed without asking about the resume")
+	}
+	if resumed != 0 {
+		t.Fatal("the raise resumed the run before anyone answered")
+	}
+
+	closed, cmd := d.HandleKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if !closed || cmd == nil {
+		t.Fatalf("answering yes = (closed %v, cmd %v), want it closed with a command", closed, cmd != nil)
+	}
+	if resumed != 1 {
+		t.Errorf("resume callback fired %d times, want 1", resumed)
+	}
+}
+
+// Answering no raises the envelope and leaves the card alone — topping
+// up has never implied restarting, and that is the whole reason the two
+// are separate answers.
+func TestEnvelopeDialogDeclinedResumeNeverRestarts(t *testing.T) {
+	resumed := 0
+	d := newEnvelopeDialog(parkedAutopilotFeature(),
+		func(int) tea.Cmd { return nil },
+		func() tea.Cmd { resumed++; return nil })
+
+	typeInto(d, "4000")
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if closed, _ := d.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"}); !closed {
+		t.Fatal("answering no did not close the dialog")
+	}
+	if resumed != 0 {
+		t.Errorf("declining the resume still restarted the run (%d times)", resumed)
 	}
 }

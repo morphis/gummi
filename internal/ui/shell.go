@@ -396,7 +396,35 @@ func exhaustedActivity(activity []string) bool {
 func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
 	if m.inbox.add(id, kind, text) {
 		m.notifier.Alert(string(id) + ": " + text)
+		m.logPark(id, state.ParkReasonNeedsYou, text)
 	}
+}
+
+// logPark records a card stopping in its own history. It hangs off the
+// two raise paths rather than their callers because those are where a
+// card actually comes to rest, and because the inbox's own
+// already-present check is what keeps one stop from being logged twice.
+//
+// Best-effort and deliberately silent: the user has already been told
+// the card stopped, and failing to write the history entry is not worth
+// a second, more confusing message about it.
+func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
+	if m.store == nil {
+		return
+	}
+	_ = m.store.AppendPark(context.Background(), id, m.stageOf(id), reason, detail, "", time.Now())
+}
+
+// stageOf reads the card's current stage from the loaded rows. A card
+// that is not on the board (deleted mid-flight) reports an empty stage,
+// which the log stores as-is rather than guessing.
+func (m *Shell) stageOf(id domain.FeatureID) domain.Stage {
+	for _, r := range m.rows {
+		if r.F.ID == id {
+			return r.F.Stage
+		}
+	}
+	return ""
 }
 
 // raiseEscalation is raiseAttention for gates an automatic loop gave up
@@ -407,6 +435,7 @@ func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) 
 func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.notifier.Alert(string(id) + ": " + text)
+		m.logPark(id, state.ParkReasonGaveUp, text)
 	}
 }
 
@@ -1231,6 +1260,28 @@ func autopilotQuitQuestion(ids []string) string {
 	return fmt.Sprintf("%d %s running on autopilot — %s.", len(ids), verb, strings.Join(ids, ", "))
 }
 
+// resumeAfterTopUp restarts a card that had stopped for want of budget,
+// once its envelope has been raised and the user has said yes to the
+// separate resume question.
+//
+// It re-reads the card rather than reusing the row the dialog was built
+// from: that snapshot still carries the old, exhausted envelope, and
+// resuming against it would put the run straight back into the wall it
+// just stopped at.
+func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
+	if m.store == nil {
+		return nil
+	}
+	f, err := m.store.GetFeature(context.Background(), id)
+	if err != nil {
+		return func() tea.Msg { return noticeMsg{text: sanitize(err.Error()), isErr: true} }
+	}
+	return tea.Batch(
+		m.resumeCard(f),
+		func() tea.Msg { return noticeMsg{text: string(id) + ": envelope raised — resuming", reload: true} },
+	)
+}
+
 // handleKey routes one key press. Its shape is the keymap's tiers made
 // literal, read top to bottom:
 //
@@ -1642,6 +1693,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			m.Overlay.Push(newEnvelopeDialog(r.F, func(to int) tea.Cmd {
 				return m.setEnvelope(r.F.ID, to)
+			}, func() tea.Cmd {
+				return m.resumeAfterTopUp(r.F.ID)
 			}))
 		}
 	case "o":

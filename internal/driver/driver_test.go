@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1238,4 +1239,39 @@ func TestResumeRejudgesLostCritiqueVerdict(t *testing.T) {
 	if h.calls[domain.StagePlan] == 0 {
 		t.Fatal("no fresh critique session was spawned on resume")
 	}
+}
+
+// A headless run that escalates leaves the same account of why it
+// stopped as one driven from the board: the card's own history, not just
+// the NDJSON stream the caller may not have kept.
+func TestDriverEscalationRecordsAPark(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{})
+	d := h.driver(Options{})
+	f := domain.Feature{
+		ID: "FD-001", Num: 1, Title: "t", Slug: "t",
+		Stage: domain.StageReview, Kind: domain.KindFeature,
+	}
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	d.escalation(f, "review still requesting changes")
+
+	evs, err := h.store.Events(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if ev.Kind != state.EventPark {
+			continue
+		}
+		var p state.ParkPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			t.Fatalf("undecodable park payload %q: %v", ev.Payload, err)
+		}
+		if p.Reason == state.ParkReasonGaveUp && p.Detail == "review still requesting changes" {
+			return
+		}
+	}
+	t.Fatal("escalation logged no gave-up park carrying its reason")
 }

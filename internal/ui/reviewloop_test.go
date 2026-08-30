@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -896,5 +897,50 @@ func TestReviewBouncesBurnCorrectiveRounds(t *testing.T) {
 	// the loop's own cap resets on escalation; the lifetime tally does not
 	if m.round("FD-001", domain.RoundKindReview) != 0 {
 		t.Errorf("review cap not reset after escalation: %d", m.round("FD-001", domain.RoundKindReview))
+	}
+}
+
+// A run that gives up must leave a record of why in the card's own
+// history. Until this, only a quit wrote a park event, so the log could
+// say a card stopped but never that a loop had exhausted itself — which
+// is the one question worth asking of a card you find parked in the
+// morning.
+func TestEscalationRecordsAPark(t *testing.T) {
+	ag := verdictAgent(func(opts agent.SessionOpts) string {
+		if isReview(opts) {
+			return "Found a bug.\nVERDICT: changes"
+		}
+		return "fixed"
+	})
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageReview)
+
+	m = openAndAttach(t, m)
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m)
+
+	evs, err := m.store.Events(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parks []state.ParkPayload
+	for _, ev := range evs {
+		if ev.Kind != state.EventPark {
+			continue
+		}
+		var p state.ParkPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			t.Fatalf("undecodable park payload %q: %v", ev.Payload, err)
+		}
+		parks = append(parks, p)
+	}
+	if len(parks) == 0 {
+		t.Fatal("the loop escalated and logged no park — the history cannot say why the card stopped")
+	}
+	if parks[0].Reason != state.ParkReasonGaveUp {
+		t.Errorf("park reason = %q, want %q", parks[0].Reason, state.ParkReasonGaveUp)
+	}
+	if parks[0].Detail == "" {
+		t.Error("park carries no detail — the reason code alone does not explain the stop")
 	}
 }
