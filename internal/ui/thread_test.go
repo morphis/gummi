@@ -681,18 +681,20 @@ func TestPlainMessageRoutesToSendWithNoLiveSession(t *testing.T) {
 // TestThreadInputSendsToLiveSession is the end-to-end wiring check: a
 // message typed into the thread input, through the real key-handling
 // path, reaches the card's live engine session exactly like the chat
-// pane's own send does — against a fake agent, never the network.
+// pane's own send did — against a fake agent, never the network.
 func TestThreadInputSendsToLiveSession(t *testing.T) {
-	m, eng := chatWorkspace(t, agent.NewFake("sure, got it"))
-	m = openAndAttach(t, m) // opens the card page, attaches the chat pane, kicks off a turn
+	m, eng := agentWorkspace(t, agent.NewFake("sure, got it"))
+	m = openAndAttach(t, m) // opens the card page, attaches the conversation, kicks off a turn
 	settleChat(t, eng)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach the chat pane; the session and the card page stay
-	if m.chat != nil {
-		t.Fatal("esc did not detach the chat pane")
+	m = toKeys(t, m) // esc blurs the composer; the session and the card page stay
+	if m.threadInput.Focused() {
+		t.Fatal("esc did not blur the thread input")
 	}
 	if !m.cardOpen {
-		t.Fatal("detaching the chat pane should not close the card page")
+		t.Fatal("blurring the composer should not close the card page")
 	}
+	// '/' refocuses the composer, which is where a message is typed
+	m = press(t, m, tea.KeyPressMsg{Code: '/'})
 	if !m.threadInput.Focused() {
 		t.Fatal("/ did not focus the thread input")
 	}

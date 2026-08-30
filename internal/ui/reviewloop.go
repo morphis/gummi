@@ -44,8 +44,6 @@ func parseVerdict(text string) reviewVerdict { return verdict.Parse(text) }
 
 func sessionVerdict(snap engine.Snapshot) reviewVerdict { return verdict.SessionVerdict(snap) }
 
-func lastAssistant(snap engine.Snapshot) string { return verdict.LastAssistant(snap) }
-
 // onAutonomousDone drives the review loop when an autonomous session
 // finishes. It returns (handled, cmd): handled means the loop consumed
 // this completion (so the caller must not also raise a generic gate),

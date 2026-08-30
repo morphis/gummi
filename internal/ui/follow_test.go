@@ -117,10 +117,10 @@ func TestBoardRowBadgesForeignDrive(t *testing.T) {
 	}
 }
 
-// A watch pane renders the followed transcript and refuses to send: the
-// input is replaced by a read-only footer, and keys that would write
-// return no message to send.
-func TestWatchPaneIsReadOnly(t *testing.T) {
+// A watched card renders the followed transcript in its thread and stays
+// read-only: the input is withheld, so nothing on the page can send a
+// turn or answer the question the run's owner will answer.
+func TestWatchRendersInThread(t *testing.T) {
 	dir := t.TempDir()
 	ws := state.Workspace{Root: dir, RepoRoot: dir}
 	f := domain.Feature{ID: "FD-205", Stage: domain.StageImplement, Title: "watched"}
@@ -137,48 +137,40 @@ func TestWatchPaneIsReadOnly(t *testing.T) {
 	th, _ := theme.ByName("dark")
 	m := NewShell(th, "test")
 	m.ws = ws
-	pane, pump := m.followSession(f)
-	m.setChat(pane)
-	defer m.closeChat()
-	if pump == nil {
-		t.Fatal("followSession returned no pump command")
+	m.rows = []featureRow{foreignRow("FD-205", domain.StageImplement)}
+	m.sel = 0
+	cmd := m.startFollow(f)
+	if cmd == nil {
+		t.Fatal("startFollow returned no pump command")
 	}
-	if !pane.readOnly() {
-		t.Fatal("a followed pane is not read-only")
-	}
-	if pane.liveSession() != nil {
-		t.Fatal("a followed pane reports a local session; sends would land in the wrong place")
+	defer m.stopFollow()
+	if m.follow == nil || m.follow.feature != f.ID {
+		t.Fatal("startFollow did not install a follow source")
 	}
 
 	// feed the records the tail would deliver.
-	pane.follow.fl.Apply(livelog.Record{Kind: livelog.KindSession, Feature: string(f.ID), Stage: string(f.Stage), PID: 4242})
-	pane.follow.pid = 4242
-	pane.follow.fl.Apply(livelog.Record{Kind: livelog.KindMessage, Text: "working on it"})
+	m.follow.fl.Apply(livelog.Record{Kind: livelog.KindSession, Feature: string(f.ID), Stage: string(f.Stage), PID: 4242})
+	m.follow.pid = 4242
+	m.follow.fl.Apply(livelog.Record{Kind: livelog.KindMessage, Text: "working on it"})
 
-	detach, send, answer, _ := pane.handleKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	if detach || send != "" || answer != "" {
-		t.Errorf("a keystroke on a watched pane produced detach=%v send=%q answer=%q, want all empty",
-			detach, send, answer)
-	}
-	if _, send, answer, _ := pane.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); send != "" || answer != "" {
-		t.Errorf("enter on a watched pane sent %q / answered %q, want neither", send, answer)
-	}
-
-	view := ansi.Strip(pane.view(m.styles, 80, 24, "·"))
+	view := ansi.Strip(m.threadView(80, 24))
 	if !strings.Contains(view, "working on it") {
-		t.Errorf("view = %q, want the followed transcript", view)
+		t.Errorf("thread = %q, want the followed transcript", view)
 	}
 	if !strings.Contains(view, "watching") {
-		t.Errorf("view = %q, want the watching marker", view)
+		t.Errorf("thread = %q, want the watching marker", view)
 	}
 	if !strings.Contains(view, "read-only") {
-		t.Errorf("view = %q, want the read-only footer in place of the input", view)
+		t.Errorf("thread = %q, want the read-only footer", view)
+	}
+	if strings.Contains(view, "message the agent") {
+		t.Errorf("thread = %q, must not render the live composer on a watched card", view)
 	}
 }
 
-// Detaching a watch pane cancels its tail, so a session that opens many
-// watches does not leak a poller per pane.
-func TestCloseChatCancelsFollow(t *testing.T) {
+// Closing the watched card's page cancels its tail, so a session that
+// opens many watches does not leak a poller per card.
+func TestStopFollowCancelsTail(t *testing.T) {
 	dir := t.TempDir()
 	ws := state.Workspace{Root: dir, RepoRoot: dir}
 	f := domain.Feature{ID: "FD-206", Stage: domain.StageImplement}
@@ -191,12 +183,11 @@ func TestCloseChatCancelsFollow(t *testing.T) {
 	th, _ := theme.ByName("dark")
 	m := NewShell(th, "test")
 	m.ws = ws
-	pane, _ := m.followSession(f)
-	m.setChat(pane)
-	src := pane.follow
-	m.closeChat()
-	if m.chat != nil {
-		t.Fatal("closeChat left the pane open")
+	m.startFollow(f)
+	src := m.follow
+	m.stopFollow()
+	if m.follow != nil {
+		t.Fatal("stopFollow left a follow installed")
 	}
 	// the follower's context is canceled: its tail goroutine returns and
 	// the channel closes. Re-canceling is a no-op, so the only observable

@@ -792,7 +792,13 @@ func (e *Engine) startAutonomous(s *Session) {
 	e.flushEnvNotices(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
 
-	s.appendUser(s.kickoffMessage())
+	// The kickoff is gummi's own turn, not the user's, on this loop the
+	// same as the interactive one (see startInteractive's appendSystem):
+	// it's boilerplate gummi composed, with any review note the user
+	// attached (RunWith) quoted inside it rather than spoken as it. The
+	// TUI labels every transcript turn by its author now, so appendUser
+	// here would put gummi's own words in the user's mouth on screen.
+	s.appendSystem(s.kickoffMessage())
 	s.setBusy(true)
 	e.persist(s)
 	// The kickoff is sent off the scheduler goroutine: the Verify stage

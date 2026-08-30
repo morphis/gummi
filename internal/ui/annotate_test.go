@@ -142,7 +142,7 @@ func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
 	if snap.Feature.Stage != domain.StagePlan || snap.Interactive {
 		t.Fatalf("wrong session: stage=%s interactive=%v", snap.Feature.Stage, snap.Interactive)
 	}
-	// the comments ride in the kickoff (the first user turn)
+	// the comments ride in the kickoff (gummi's own first turn)
 	if len(snap.Transcript) == 0 || !strings.Contains(snap.Transcript[0].Content, "misses the migration step") {
 		t.Fatalf("kickoff missing the review comments: %+v", snap.Transcript)
 	}

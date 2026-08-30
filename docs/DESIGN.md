@@ -100,9 +100,9 @@ through plan. Skip flags loosen in one direction only: clearing a flag
 Stage semantics:
 
 - **Brainstorm** *(interactive, role: architect)* — you talk to the agent
-  inside gummi's chat pane. Output: problem statement + candidate approaches
-  appended to the spec draft. Unresolved questions flagged with `%%` markers
-  (schipper convention) that gummi surfaces as a checklist.
+  in the card's own thread (§6). Output: problem statement + candidate
+  approaches appended to the spec draft. Unresolved questions flagged
+  with `%%` markers (schipper convention) that gummi surfaces as a checklist.
 - **Spec** *(interactive, role: architect)* — converge on one approach.
   Gate: you mark the spec **Approved**. gummi promotes the spec to its
   workspace home (`.gummi/specs/`).
@@ -171,7 +171,7 @@ the audit trail is part of the quality story.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  TUI (Bubble Tea)                                        │
-│  kanban │ feature detail │ chat/attach │ activity/queue  │
+│  kanban │ card thread │ activity/queue                   │
 └───────────────▲─────────────────────────────────────────┘
                 │ (Elm msgs; engine events via channel)
 ┌───────────────┴─────────────────────────────────────────┐
@@ -232,11 +232,12 @@ Each session gets its own env, so BYOK routing
 [docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models))
 is per-role, exactly what profiles need.
 
-**Interactive mode is gummi-native chat, not embedded copilot TUI.** Because
-the SDK exposes full duplex sessions, the Brainstorm/Spec stages render as a
-charm-styled chat pane inside gummi (glamour for markdown, streaming
-responses, tool-call collapsibles). One integration surface for both
-interactive and autonomous stages; the UI stays coherent and beautiful.
+**Interactive mode is gummi-native, not embedded copilot TUI.** Because
+the SDK exposes full duplex sessions, the Brainstorm/Spec stages render
+inside the card's own thread (glamour for markdown, streaming responses,
+tool-call collapsibles, §6) rather than a pane of their own — one
+integration surface for both interactive and autonomous stages, and the
+UI stays coherent and beautiful.
 
 *Escape hatch:* a "raw attach" action that suspends the TUI and hands the
 terminal to a real `copilot` session in the worktree (`tea.ExecProcess`),
@@ -378,10 +379,12 @@ The one tool today is **`ask_user`** (`{question, options[], multi_select,
 allow_free_form, spec_anchor}`). When the model calls it, the adapter
 surfaces an `EventClientToolCall` and *blocks that call* until the
 orchestrator answers — a blocked call spends no tokens, so waiting on a
-human is free. gummi renders the question as an inline option picker in
-the chat pane (or, when detached, a needs-attention item that jumps to
-the picker). The chosen answer is fed back as the tool's result, so the
-model's turn resumes in-context — cheaper than a fresh chat round-trip.
+human is free. gummi renders the question as the card's open decision
+(§6.3) — an inline option picker pinned above the composer in the
+card's thread, and, when the card isn't the one on screen, a
+needs-attention item that opens straight to it. The chosen answer is
+fed back as the tool's result, so the model's turn resumes in-context —
+cheaper than a fresh chat round-trip.
 If the ask carries a `spec_anchor` (a unique snippet of a spec line),
 gummi writes the answer into the spec as a resolved `%%` marker, so
 decisions become durable spec content with no model effort.
@@ -571,7 +574,11 @@ design system.
 
 **One board, tabbed.** The split layout the diagram above shows (a kanban
 column beside the dashboard, with `→`/`←` moving the arrow keys between
-them) is retired. The board is the **backlog**: no column, the full width
+them) is retired, and so is the *Chat/attach* mode it lists: an
+interactive stage no longer has an attach/detach state of its own to
+switch a pane into (§6.3, §10 decision 5) — opening the card is opening
+its thread, and `esc` blurs the composer rather than leaving a pane to
+return to. The board is the **backlog**: no column, the full width
 is the same super-state-grouped list, and `enter` opens the selected card
 on a page of its own (`esc` back, `J`/`K` to the previous/next card
 without leaving it). Card titles, badges and the card's own detail get
@@ -585,10 +592,11 @@ route through the one guarded `boardVerb`; only movement, `enter` and
 The board sits behind a one-row tab bar shared with the status bar:
 `gummi │ board │ inbox │ agent │`. `tab` cycles all three;
 `alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed deliberately
-(§6.1's `alt+o` reasoning: a plain `ctrl`/bare key a terminal multiplexer
-or the hosted agent tab's own pty might already claim). Both are answered
-at the top of `handleKey`, above whatever surface holds the keyboard, so
-a tab is always one keystroke away from inside a chat, a spec or a diff.
+(the same reasoning as the thread's `alt+o` outputs toggle: a plain
+`ctrl`/bare key a terminal multiplexer or the hosted agent tab's own pty
+might already claim). Both are answered at the top of `handleKey`, above
+whatever surface holds the keyboard, so a tab is always one keystroke
+away from inside a card's thread, its spec view or its diff view.
 **The keyboard lock.** The agent tab hosts a program with its own
 keymap, which raises the only genuinely hard question in the scheme: a
 hosted CLI wants `tab` for completion, and gummi wants it for the cycle.
@@ -622,8 +630,8 @@ encodes them for whichever tracking mode the child actually set, and
 drops them entirely if it set none.
 
 **`?` and `alt+/`.** `?` is the convenient help key, but it is ordinary
-punctuation, so it must yield wherever the user types prose: the chat's
-message box, the bug-import filter, and the hosted CLI. Those are exactly
+punctuation, so it must yield wherever the user types prose: the thread's
+composer, the bug-import filter, and the hosted CLI. Those are exactly
 the surfaces whose key rules are least guessable, so leaving them without
 a route to their own key table was the worst place to leave one. `alt+/`
 is the help key that is always gummi's — alt-prefixed for the same reason
@@ -659,14 +667,14 @@ advertising the tab cycle while the keyboard is locked would be telling
 the user to press the one key that cannot work, which is precisely how
 the original one-way door went unnoticed.
 
-The board's own overlaying surfaces (chat, spec, diff, ingest review, bug
+The board's own overlaying surfaces (spec, diff, ingest review, bug
 import, dependency picker) are scoped to the board tab: each belongs to a
 card, and a card belongs to the board. Leaving the tab hides them and
-returning restores them — never discards, since a chat holds an unsent
-input buffer. The inbox tab promotes the needs-attention queue out of its modal
-overlay; the agent tab hosts a pty running the user's own coding CLI. Both
-are later work — this pass lands the tab shell and the backlog as the
-board's only shape.
+returning restores them — never discards, since a card's thread holds an
+unsent composer draft the same way. The inbox tab promotes the
+needs-attention queue out of its modal overlay; the agent tab hosts a
+pty running the user's own coding CLI. Both are later work — this pass
+lands the tab shell and the backlog as the board's only shape.
 
 **The card page is a thread.** Opening a card does not show a detail
 pane describing it; it shows one conversation running the card's whole
@@ -797,8 +805,8 @@ techniques that make Crush look the way it does, and how gummi uses them.
 **Rendering architecture (hybrid, à la Crush).** The top-level model owns
 an ultraviolet `ScreenBuffer` and computes a rectangle layout each resize
 (`layout.kanban`, `layout.main`, `layout.status`, overlay region).
-Sub-components (kanban list, chat, spec view) render to strings and are
-painted into their rects; dialogs live on an **overlay stack** (gate
+Sub-components (kanban list, card thread, spec view) render to strings
+and are painted into their rects; dialogs live on an **overlay stack** (gate
 prompts, comment popovers, new-feature form) composited over a dimmed
 backdrop. Craft rules imported from Crush's own UI guidelines: never do IO
 or expensive work in `Update` (always `tea.Cmd`), never manipulate ANSI

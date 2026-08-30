@@ -106,16 +106,16 @@ func TestPasteIntoBugIngestFilter(t *testing.T) {
 	}
 }
 
-func TestPasteIntoChat(t *testing.T) {
-	m, eng := chatWorkspace(t, agent.NewFake("Two options."))
+func TestPasteIntoComposer(t *testing.T) {
+	m, eng := agentWorkspace(t, agent.NewFake("Two options."))
 	m = openAndAttach(t, m)
-	if m.chat == nil {
-		t.Fatal("enter did not attach the chat pane")
+	if m.sessionFor("FD-001") == nil {
+		t.Fatal("enter did not attach a session")
 	}
 	settleChat(t, eng)
 
 	m = paste(t, m, "line one\nline two")
-	if got := m.chat.input.Value(); got != "line one\nline two" {
-		t.Fatalf("chat input = %q", got)
+	if got := m.threadInput.Value(); got != "line one\nline two" {
+		t.Fatalf("thread input = %q", got)
 	}
 }

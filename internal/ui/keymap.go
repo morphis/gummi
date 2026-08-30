@@ -49,8 +49,6 @@ func helpRows(bs []binding) [][2]string {
 func (m *Shell) activeSurface() (string, []binding) {
 	live := m.boardSurfacesLive()
 	switch {
-	case live && m.chat != nil:
-		return "chat", m.chat.bindings()
 	case live && m.spec != nil:
 		return "spec", m.spec.bindings()
 	case live && m.diff != nil:
@@ -129,7 +127,7 @@ func (m *Shell) helpOverlay() *helpDialog {
 func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
 	pause := binding{key: "p", label: "pause", help: "pause the running agent; else open the dependency picker"}
-	transcript := binding{key: "t", label: "transcript", help: "read the session transcript (tool calls and their outputs)"}
+	transcript := binding{key: "t", label: "transcript", help: "open the thread's transcript view — events and tool outputs"}
 	advance := binding{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true}
 	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
 		// FD-081: a done RS card has nothing left to advance — g re-runs

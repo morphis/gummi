@@ -7,21 +7,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
-
-// emptySession is a chat pane's source with nothing in it — enough for
-// the pane to render and answer keys without an engine behind it.
-type emptySession struct{}
-
-func (emptySession) Snapshot() engine.Snapshot { return engine.Snapshot{} }
 
 // openSurfaces builds one shell per surface that used to swallow the
 // whole keyboard, keyed by the name the ? overlay gives it. The tier-1
 // and tier-2 tests below run over all of them, so a seventh surface
 // added later is one line here rather than a test nobody writes.
+//
+// The card page is not listed: it lives on the board tab as the board's
+// own shape (the backlog opens into it), and it claims the keyboard only
+// while its composer is focused — the tiers it answers to are covered by
+// the board's own tables. The chat pane it replaced is gone (DESIGN
+// §10.5).
 func openSurfaces(t *testing.T) map[string]*Shell {
 	t.Helper()
 	content := "## Problem\n\nA line to sit on.\n%% @user(2026-07-14): really?\n"
@@ -37,17 +36,10 @@ func openSurfaces(t *testing.T) map[string]*Shell {
 	withDeps := populatedShell(100, 30)
 	withDeps.deps = &depPicker{f: f}
 
-	// a stub session rather than newChatPane(id, nil): that would store a
-	// typed-nil *engine.Session, which passes every nil check and then
-	// panics on Snapshot (chat.go). These tests render the pane.
-	withChat := populatedShell(100, 30)
-	withChat.chat = &chatPane{feature: id, session: emptySession{}, input: newChatInput()}
-
 	return map[string]*Shell{
 		"spec": withSpec,
 		"diff": withDiff,
 		"deps": withDeps,
-		"chat": withChat,
 	}
 }
 
@@ -76,7 +68,7 @@ func TestAltTabSwitchReachesEveryOpenSurface(t *testing.T) {
 // global now — except where the user is typing prose, since a question
 // mark is ordinary punctuation and eating it would be the worse bug.
 func TestHelpReachesEveryOpenSurfaceThatIsNotTyping(t *testing.T) {
-	typing := map[string]bool{"chat": true}
+	typing := map[string]bool{}
 	for name, m := range openSurfaces(t) {
 		t.Run(name, func(t *testing.T) {
 			m.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})

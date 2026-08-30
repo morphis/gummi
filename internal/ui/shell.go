@@ -162,7 +162,26 @@ type Shell struct {
 
 	// agent orchestration (nil engine means no agent wired)
 	engine *engine.Engine
-	chat   *chatPane // non-nil while attached to a session (own, or watched)
+	// follow is the live tail of a card another process is driving, opened
+	// by watchForeign and rendered read-only by the card thread's live
+	// stage block. Non-nil only while the card page is open on that card;
+	// openCard/closeCard/stepCard stop it (follow.go).
+	follow *followSource
+	// threadOutputs expands every captured tool output in the thread
+	// (alt+o); failures always show their tail either way. Sticky, like
+	// the chat pane's toggle was.
+	threadOutputs bool
+	// threadTranscript is the transcript view (t): every stage segment
+	// renders its events instead of one collapsed line, so the whole run
+	// reads in the body. Scoped to the visit (openCard/stepCard reset it).
+	threadTranscript bool
+	// threadFreeForm arms the composer as the open ask's free-form answer
+	// channel — the chat pane's 'o' channel, inherited now that the pane
+	// is gone. While armed, the decision's picker keys stand down so a
+	// line that starts with a digit types as prose; enter delivers the
+	// line verbatim as the answer. Disarmed by blur, by an answer, or by
+	// the decision changing.
+	threadFreeForm bool
 	// foreignTicks counts live-drive probes, pacing the slower full row
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
@@ -601,10 +620,11 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
 		}
 	case engine.EventQuestion:
-		// the agent asked something. When you're attached to this feature
-		// the inline picker already shows it; otherwise queue it so you can
-		// jump to the picker from the needs-attention inbox.
-		if m.chat != nil && m.chat.feature == ev.Feature {
+		// the agent asked something. When the card page is open on the
+		// asking card, its pinned decision already shows the question
+		// inline; otherwise queue it so you can jump to it from the
+		// needs-attention inbox.
+		if m.cardOpen && m.sel >= 0 && m.sel < len(m.rows) && m.rows[m.sel].F.ID == ev.Feature {
 			return nil
 		}
 		q := "the agent has a question — attach to answer"
@@ -1009,10 +1029,8 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// the user explicitly asked for this decomposition and has been
-		// waiting on it, so it takes the foreground: clear any pane opened
-		// meanwhile (chat detaches, its session keeps running) so the review
-		// surface is never installed hidden behind another view.
-		m.closeChat()
+		// waiting on it, so it takes the foreground: the review surface
+		// installs over whatever the board tab held.
 		m.spec, m.diff = nil, nil
 		if msg.decomposeFor != "" && len(msg.res.Proposals) == 0 {
 			// every `## Slices` row is already settled (or there were none) —
@@ -1066,7 +1084,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: "no new bugs to import" + extra}
 			return m, nil
 		}
-		m.closeChat()
 		m.spec, m.diff, m.ingest = nil, nil, nil
 		m.bugIngest = newBugIngestView(msg.res, msg.profile, msg.envelope)
 		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " bug(s) — review & approve"}
@@ -1103,24 +1120,42 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.listenEngineCmd(), cmd)
 
 	case engineClosedMsg:
-		// the agent backend shut down unexpectedly; drop the pane so the
-		// user isn't left on a frozen chat, and say why.
-		if m.chat != nil {
-			m.closeChat()
+		// the agent backend shut down unexpectedly. There is no pane left
+		// to freeze — a card's own thread renders its session's error —
+		// but anyone with a live session was watching something that just
+		// stopped, so say why.
+		if m.engine != nil && len(m.engine.Sessions()) > 0 {
 			m.notice = noticeMsg{text: "agent backend stopped", isErr: true}
 		}
 		return m, nil
 
 	case chatAttachedMsg:
 		// the attach ran in a command (spawning the backend can take
-		// seconds); open the pane now, on the Update goroutine.
+		// seconds). The card page is the conversation's surface now, so
+		// arrival means landing on it with the composer ready — the pane
+		// this message used to open is gone (DESIGN §10.5: retired into
+		// the thread).
 		if msg.err != nil {
 			m.notice = noticeMsg{text: cardLockedNotice(msg.feature.ID, msg.err), isErr: true}
 			return m, nil
 		}
-		m.setChat(newChatPane(msg.feature.ID, msg.session))
 		m.inbox.remove(msg.feature.ID)
-		return m, nil
+		if r, ok := m.selected(); !ok || r.F.ID != msg.feature.ID {
+			// the board moved on while the backend spawned. The page is
+			// the selected card's, so there is nowhere honest to land the
+			// arrival: the session is live and the card shows it the next
+			// time it is opened.
+			return m, nil
+		}
+		var open tea.Cmd
+		if !m.cardOpen {
+			// openCard also kicks the event-log load the thread's folded
+			// receipts read — dropping its command would leave the page
+			// showing a live session over an empty history.
+			open = m.openCard()
+		}
+		m.focusThreadInput()
+		return m, open
 
 	case cardEventsMsg:
 		// a late reply for a card the page has since moved off (esc, or a
@@ -1190,9 +1225,6 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	if m.hostedKeyboard() {
 		m.agent.Paste(msg.Content)
 		return nil
-	}
-	if m.chat != nil {
-		return m.chat.handlePaste(msg)
 	}
 	if m.cardOpen && m.threadInput.Focused() {
 		return m.handleThreadPaste(msg)
@@ -1402,9 +1434,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// tier 3: whichever surface owns the main pane, in the same order
 	// mainView paints them, and only on the tab they belong to.
 	if m.boardSurfacesLive() {
-		if m.chat != nil {
-			return m.handleChatKey(msg)
-		}
 		if m.spec != nil {
 			return m.handleSpecKey(key)
 		}
@@ -1528,13 +1557,6 @@ func (m *Shell) gotoTab(t Tab) tea.Cmd {
 func (m *Shell) textEntry() bool {
 	if !m.boardSurfacesLive() {
 		return false
-	}
-	if m.chat != nil {
-		// the message box is always live: the option picker hands the
-		// keyboard straight back to it on any printable key (chat.go), so
-		// "? sometimes types and sometimes opens help" is not a rule worth
-		// having here.
-		return true
 	}
 	if m.cardOpen && m.threadInput.Focused() {
 		return true
@@ -2029,7 +2051,7 @@ func (m *Shell) boardPaneFocused() bool {
 	if m.actionFocused {
 		return false
 	}
-	return m.chat == nil && m.spec == nil && m.diff == nil && m.ingest == nil &&
+	return m.spec == nil && m.diff == nil && m.ingest == nil &&
 		m.bugIngest == nil && m.deps == nil && (m.ingestRun == nil || m.ingestRun.hidden)
 }
 
@@ -2130,8 +2152,9 @@ func (m *Shell) noticeInBand() bool {
 	return m.notice.text != "" && m.notice.isErr && len(m.notice.text) > noticeThreshold
 }
 
-// attachOrRun handles `enter`: interactive stages open the chat pane;
-// autonomous stages start (or observe) an autonomous run.
+// attachOrRun handles `enter`: interactive stages attach the agent into
+// the card's thread (the conversation's surface); autonomous stages
+// start (or watch) an autonomous run.
 func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	// another process owns this card: the only thing this board can
 	// honestly do with enter is watch it.
@@ -2154,11 +2177,12 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	}
 }
 
-// attachChat opens the interactive chat pane for a feature, starting
-// (or reusing) its engine session. Attach spawns the agent backend, which
-// can take seconds, so it runs in a command (never in Update — see the
-// no-IO-in-Update contract above); the pane opens when chatAttachedMsg
-// lands.
+// attachChat attaches a feature's engine session, starting (or reusing)
+// it. Attach spawns the agent backend, which can take seconds, so it
+// runs in a command (never in Update — see the no-IO-in-Update contract
+// above). The card page is the conversation's surface — chatAttachedMsg
+// lands on it with the composer ready; the pane this used to open is
+// retired into the thread (DESIGN §10.5).
 func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		s, err := m.engine.Attach(context.Background(), f)
@@ -2171,8 +2195,8 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 // at the decision's run answer. Attach runs in a command (the backend
 // can take seconds to spawn), so the line rides the same closure, the
 // way the review-comments path attaches-then-sends (annotate.go); the
-// pane opens when chatAttachedMsg lands, exactly as a plain attach's
-// does, so the conversation the line opens is where the user lands.
+// card page shows the conversation when chatAttachedMsg lands, exactly
+// as a plain attach's does.
 func (m *Shell) attachChatWith(f domain.Feature, opening string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -2202,10 +2226,10 @@ func (m *Shell) seedRounds(f domain.Feature, kind domain.RoundKind) error {
 }
 
 // runStage enqueues an autonomous run for a feature's stage; the engine
-// schedules and kicks it off. Activity streams into the dashboard;
-// `p` pauses it. On an already-running session, enter attaches the chat
-// pane as an observer: the full scrollable transcript, with steering
-// via the input (esc detaches, the run keeps going).
+// schedules and kicks it off. Activity streams into the thread's live
+// stage block; `p` pauses it. On an already-running session, enter opens
+// the card page as the observer: the full scrollable transcript is the
+// thread's body now, with steering via the composer.
 func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 	return m.runStageWithNote(f, "")
 }
@@ -2240,7 +2264,14 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	if s := m.engine.Get(f.ID); s != nil {
 		switch s.State() {
 		case engine.StateRunning:
-			m.setChat(newChatPane(f.ID, s))
+			// already running: the thread is the watch surface. Opening
+			// the card page (when it somehow isn't) is all there is to do
+			// — the pane enter used to attach as an observer is gone. It
+			// opens through openCard, not by setting the flag, so the
+			// history the live block sits on top of is loaded too.
+			if !m.cardOpen {
+				return m.openCard()
+			}
 			return nil
 		case engine.StateQueued:
 			m.notice = noticeMsg{text: string(f.ID) + " is queued"}
@@ -2299,26 +2330,32 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	}
 }
 
-// openTranscript attaches the chat pane to a feature's existing session
-// in whatever state it is — running, done, paused — so the full
-// scrollable transcript (tool calls with captured outputs, messages) can
-// be read after the fact, e.g. to see why a verify run failed. Unlike
-// enter it never starts or re-runs anything. A card another process is
-// driving opens the read-only live view instead — the store's transcript
-// for such a card is a turn behind, when it exists at all.
+// openTranscript opens the card thread's transcript view: every stage
+// segment renders its events instead of one folded line, and the whole
+// run reads in the body — tool calls with their captured outputs
+// included. It never starts or re-runs anything; on a card page it
+// toggles back to the folded view. A card another process is driving
+// opens the read-only live view instead — the store's transcript for
+// such a card is a turn behind, when it exists at all.
 func (m *Shell) openTranscript(f domain.Feature) tea.Cmd {
 	if _, ok := m.foreignFor(f.ID); ok {
 		// the live file is the only transcript of a run this process does
 		// not own; the store's copy lags a whole turn behind.
 		return m.watchForeign(f)
 	}
-	s := m.sessionFor(f.ID)
-	if s == nil {
-		m.notice = noticeMsg{text: string(f.ID) + " has no session transcript", isErr: true}
-		return nil
+	if m.cardOpen {
+		if r, ok := m.selected(); ok && r.F.ID == f.ID {
+			// already on the page: the key toggles the transcript view
+			m.threadTranscript = !m.threadTranscript
+			return nil
+		}
 	}
-	m.setChat(newChatPane(f.ID, s))
-	return nil
+	// from the list (or from another card's page) t opens the page with
+	// the view already on — openCard resets it to folded, so the flag is
+	// set after, and its event-log load is the command that carries.
+	cmd := m.openCard()
+	m.threadTranscript = true
+	return cmd
 }
 
 // pauseRun stops a feature's autonomous session, freeing its slot.
@@ -2477,74 +2514,8 @@ func autonomousStage(s domain.Stage) bool {
 	}
 }
 
-// handleChatKey routes keys while the chat pane is open.
-func (m *Shell) handleChatKey(msg tea.KeyPressMsg) tea.Cmd {
-	detach, send, answer, cmd := m.chat.handleKey(msg)
-	if detach {
-		// esc detaches; the engine session keeps running (DESIGN §6). A
-		// watched run is another process's — closing the pane only stops
-		// this side's tail.
-		m.closeChat()
-		return nil
-	}
-	if answer != "" {
-		return m.answerChat(answer)
-	}
-	if send != "" {
-		return m.sendChat(send)
-	}
-	return cmd
-}
-
-// answerChat delivers the user's reply to an open ask_user question,
-// resolving the agent's blocked tool call. Like sendChat it captures the
-// session at call time and refuses to answer a since-swapped session.
-func (m *Shell) answerChat(text string) tea.Cmd {
-	sess := m.chat.liveSession()
-	if sess == nil {
-		return nil // a watched run is answered where it is owned
-	}
-	eng := m.engine
-	id := sess.Feature.ID
-	return func() tea.Msg {
-		if eng.Get(id) != sess {
-			return noticeMsg{text: "chat session is no longer active", isErr: true}
-		}
-		if err := eng.Answer(context.Background(), id, text); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return nil
-	}
-}
-
-// sendChat delivers a user turn to the engine in a command. It captures
-// the pane's session and engine at call time (not inside the goroutine,
-// which would race the main loop) and refuses to send if that session
-// is no longer the active one — the turn would otherwise land in the
-// wrong feature's session.
-func (m *Shell) sendChat(text string) tea.Cmd {
-	sess := m.chat.liveSession()
-	if sess == nil {
-		return nil // a watched run takes no turns from this process
-	}
-	eng := m.engine
-	id := sess.Feature.ID
-	return func() tea.Msg {
-		if eng.Get(id) != sess {
-			return noticeMsg{text: "chat session is no longer active", isErr: true}
-		}
-		if err := eng.Send(context.Background(), id, text); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return nil
-	}
-}
-
 func (m *Shell) mainView(w, h int) string {
 	if m.boardSurfacesLive() {
-		if m.chat != nil {
-			return m.chat.view(m.styles, w, h, m.spinner())
-		}
 		if m.spec != nil {
 			return m.specViewRender(w, h)
 		}

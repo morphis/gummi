@@ -239,8 +239,10 @@ func TestAutonomousRunKicksOff(t *testing.T) {
 	if snap.Spend.Credits != 2 {
 		t.Errorf("spend = %+v", snap.Spend)
 	}
-	// the kickoff turn is recorded as the first user message
-	if len(snap.Transcript) < 1 || snap.Transcript[0].Author != AuthorUser {
+	// the kickoff turn is gummi's own boilerplate, not the user's, so it
+	// is recorded as the first system message (matches the interactive
+	// kickoff's appendSystem)
+	if len(snap.Transcript) < 1 || snap.Transcript[0].Author != AuthorSystem {
 		t.Errorf("kickoff not recorded: %+v", snap.Transcript)
 	}
 }

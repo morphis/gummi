@@ -94,12 +94,14 @@ func (m *Shell) threadView(w, h int) string {
 		spend := stageSpendByStage(r.StageSpend)
 		for _, seg := range segs[:len(segs)-1] {
 			add(foldedReceiptLine(s, seg, spend, inner))
-			// Expansion is real and driven by Shell.expandedStages; no
-			// key sets that flag yet, so every receipt renders folded —
-			// binding ⌄ to it is all that remains.
-			if m.expandedStages[stageSegmentKey(f.ID, seg)] {
+			// Expansion is real: a receipt unfolds either through
+			// Shell.expandedStages or, wholesale, through the transcript
+			// view (t) — every stage's events laid out in the body.
+			if m.expandedStages[stageSegmentKey(f.ID, seg)] || m.threadTranscript {
 				for _, ev := range seg.events {
-					add("    " + stageEventLine(s, ev, inner))
+					for _, l := range stageEventLines(s, ev, inner, m.threadOutputs) {
+						add("    " + l)
+					}
 				}
 			}
 		}
@@ -552,14 +554,15 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // rule naming the stage, role, model and "fresh context" — every stage
 // session starts one, since the spec (not a transcript) is what carries
 // context between stages, so the label is never conditional — then that
-// stage's events, then, while an agent is mid-turn, the streaming
-// activity line. It prefers a live engine.Session's Snapshot (freshest,
-// and the only place an open ask_user question lives); with none
-// attached to this board it falls back to the last reconstructed segment
-// from the event log, so a card between runs still shows what its last
-// session did. A card another process drives has no local session here
-// either way — its live stream is watched, not rendered inline (chat.go's
-// followSession, via enter).
+// stage's whole conversation, then, while an agent is mid-turn, the
+// streaming activity line. It prefers a live engine.Session's Snapshot
+// (freshest, and the only place an open ask_user question lives); a
+// watched card another process drives renders its followed stream
+// read-only instead; with neither, the last reconstructed segment from
+// the event log stands in, so a card between runs still shows what its
+// last session did. A card another process drives without an open tail
+// has only that fallback either way — watching it is what opens the tail
+// (follow.go's watchForeign, via enter).
 func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int) []string {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
@@ -572,16 +575,16 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// makes it read as a boundary rather than a heading glued to the
 		// first thing that happened after it
 		lines := []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
-		for _, a := range recentTools(snap, 6) {
-			lines = append(lines, "  "+toolMarker(s, a.ToolStatus)+toolLineView(s, sanitize(a.Content), max(w-6, 8)))
-		}
-		if last := lastAssistant(snap); last != "" {
-			for _, l := range strings.Split(wrapText(sanitize(last), max(w-4, 8)), "\n") {
-				lines = append(lines, "  "+s.Faint.Render(l))
-			}
-		}
+		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 		if meta := sessionMeta(snap); meta != "" {
 			lines = append(lines, "  "+s.Faint.Render(meta))
+		}
+		if snap.Err != nil {
+			// a failure's diagnosis lives in its tail; wrap the whole
+			// message rather than truncating it away, capped to errLines
+			for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
+				lines = append(lines, "  "+s.Error.Render(l))
+			}
 		}
 		switch {
 		case snap.Busy:
@@ -592,17 +595,47 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		return lines
 	}
 
+	// an open tail is the freshest thing this board has for this card, so
+	// it renders whether or not the foreign-drive probe still reports the
+	// card as driven abroad — a run that ended between probes is what the
+	// footer's "dropped" says, and falling back to the event log instead
+	// would silently swap the stream for a staler copy of it.
+	if m.follow != nil && m.follow.feature == f.ID {
+		snap := m.follow.fl.Snapshot()
+		at := time.Time{}
+		if len(segs) > 0 {
+			at = segs[len(segs)-1].enterAt
+		}
+		stage := snap.Feature.Stage
+		if stage == "" {
+			stage = r.F.Stage
+		}
+		lines := []string{boundaryRule(s, string(stage), string(snap.Role), runModel(snap), at, w), ""}
+		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
+		if meta := sessionMeta(snap); meta != "" {
+			lines = append(lines, "  "+s.Faint.Render(meta))
+		}
+		lines = append(lines, "  "+s.Warning.Render(m.follow.marker())+
+			s.Faint.Render(" — "+m.follow.footer(snap)))
+		return lines
+	}
+
 	if len(segs) == 0 {
 		return nil
 	}
 	last := segs[len(segs)-1]
 	lines := []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
 	shown := last.events
-	if len(shown) > 6 {
+	// the transcript view (t) reads a finished stage in full; otherwise
+	// the block keeps its recent-events summary and the receipts above
+	// stay folded.
+	if !m.threadTranscript && len(shown) > 6 {
 		shown = shown[len(shown)-6:]
 	}
 	for _, ev := range shown {
-		lines = append(lines, "  "+stageEventLine(s, ev, w))
+		for _, l := range stageEventLines(s, ev, w, m.threadOutputs) {
+			lines = append(lines, "  "+l)
+		}
 	}
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
@@ -638,9 +671,30 @@ func boundaryRule(s *theme.Styles, stage, role, model string, at time.Time, w in
 	return s.Faint.Render(head + strings.Repeat("─", fill) + tail)
 }
 
+// stageEventLines renders one logged card event as lines, the event-log
+// counterpart to a live session's transcript (transcript.go): one line
+// for most events, plus the captured output beneath a tool call — a
+// failure's tail always, everything with alt+o. The single-line
+// stageEventLine stays for the collapse-into-history ask/gate lines,
+// which are one row by contract (DESIGN §6.3).
+func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool) []string {
+	lines := []string{stageEventLine(s, ev, w)}
+	if ev.Kind != state.EventTool || ev.Output == "" {
+		return lines
+	}
+	status := engine.ToolPending
+	switch ev.Status {
+	case state.StatusOK:
+		status = engine.ToolOK
+	case state.StatusFail:
+		status = engine.ToolFail
+	}
+	return append(lines, toolOutputLines(s, status, ev.Output, w, showOutput)...)
+}
+
 // stageEventLine renders one logged card event as a single line, the
-// event-log counterpart to a live session's tool ticker (chat.go's
-// transcript / dashboard.go's recentTools).
+// event-log counterpart to a live session's tool ticker (transcript.go's
+// transcriptLines).
 func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
 	switch ev.Kind {
 	case state.EventTool:
@@ -650,10 +704,10 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
 	case state.EventMessage:
 		var p messagePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		// who said it decides the weight, the same way the live pane's
-		// transcript does (chat.go): rendering every logged turn at one
-		// faint weight made a replayed conversation unreadable next to the
-		// live one it is the history of.
+		// who said it decides the weight, the same way the live
+		// transcript does (transcript.go): rendering every logged turn at
+		// one faint weight made a replayed conversation unreadable next
+		// to the live one it is the history of.
 		body := s.Subtle
 		switch p.Author {
 		case string(engine.AuthorUser):
@@ -695,8 +749,8 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
 	}
 }
 
-// eventMarker is toolMarker's (chat.go) counterpart for a logged event's
-// stored status string rather than a live engine.ToolStatus.
+// eventMarker is toolMarker's (transcript.go) counterpart for a logged
+// event's stored status string rather than a live engine.ToolStatus.
 func eventMarker(s *theme.Styles, status string) string {
 	switch status {
 	case state.StatusOK:

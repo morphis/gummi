@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -99,6 +100,63 @@ func (d *threadDecision) wordConsumer() int {
 	return -1
 }
 
+// pickerOption is one row in the decision's picker: what the choice is,
+// and the detail that says what it does.
+type pickerOption struct {
+	label  string
+	detail string
+	key    string
+	danger bool
+}
+
+// askPickerOptions shapes a live ask_user question for the picker.
+func askPickerOptions(ask *engine.Ask) []pickerOption {
+	options := make([]pickerOption, 0, len(ask.Options))
+	for _, option := range ask.Options {
+		options = append(options, pickerOption{label: option.Label, detail: option.Detail})
+	}
+	return options
+}
+
+// pickerView is the shared inline decision picker. The card thread feeds
+// it a live ask_user question; it also renders regenerated workflow
+// actions. Selection state is explicit so neither caller has to fake the
+// other's model merely to reuse its renderer.
+func pickerView(s *theme.Styles, title, question string, options []pickerOption, selected int, picked map[int]bool, multi bool, w int) string {
+	width := max(w-2, 10)
+	var b strings.Builder
+	b.WriteString(s.Muted.Render(sanitize(title)) + "  " +
+		s.Base.Render(ansi.Truncate(sanitize(question), max(width-ansi.StringWidth(title)-2, 8), "…")) + "\n")
+	for i, option := range options {
+		marker := "  "
+		label := s.Base
+		if i == selected {
+			marker = s.KeyHint.Render("▸ ")
+			label = s.Title
+		}
+		tick := ""
+		if multi {
+			box := "○ "
+			if picked[i] {
+				box = "● "
+			}
+			tick = s.Faint.Render(box)
+		}
+		line := fmt.Sprintf("%s%s%d. %s", marker, tick, i+1, sanitize(option.label))
+		if option.detail != "" {
+			line += s.Faint.Render(" — " + sanitize(option.detail))
+		}
+		if option.key != "" {
+			line += "  " + s.KeyHint.Render(option.key)
+		}
+		if option.danger && i != selected {
+			label = s.Error
+		}
+		b.WriteString(ansi.Truncate(label.Render(line), width, "…") + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	switch kind {
 	case decisionBudget:
@@ -137,12 +195,16 @@ func (m *Shell) wordAim(d *threadDecision) int {
 func (m *Shell) syncDecision(d *threadDecision) {
 	if d == nil {
 		m.decisionKey, m.decisionCursor, m.decisionPicked = "", 0, nil
+		m.threadFreeForm = false
 		return
 	}
 	if d.key != m.decisionKey {
 		m.decisionKey = d.key
 		m.decisionCursor = 0
 		m.decisionPicked = map[int]bool{}
+		// a different question invalidates the armed free-form channel —
+		// it belonged to the answer that is gone
+		m.threadFreeForm = false
 	}
 	n := len(d.actions)
 	if d.ask != nil {
@@ -169,6 +231,12 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	multi := false
 	if d.ask != nil {
 		title = string(r.F.ID) + " asks"
+		if m.threadFreeForm {
+			// armed: the composer below is the answer channel — say so on
+			// the pinned control, the way the pane's free-form mode put
+			// the textarea where the picker stood
+			title += " · your line is the answer"
+		}
 		options = askPickerOptions(d.ask)
 		multi = d.ask.MultiPick
 	} else {

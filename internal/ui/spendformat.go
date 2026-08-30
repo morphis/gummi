@@ -12,24 +12,10 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 )
 
-// recentTools returns the last n AuthorTool transcript entries — the
-// tool ticker under a live stage. The transcript (not snap.Activity, its
-// plain-string twin) carries each call's outcome, so markers stay honest.
-func recentTools(snap engine.Snapshot, n int) []engine.Message {
-	var out []engine.Message
-	for _, m := range snap.Transcript {
-		if m.Author == engine.AuthorTool {
-			out = append(out, m)
-		}
-	}
-	if len(out) > n {
-		out = out[len(out)-n:]
-	}
-	return out
-}
-
 // sessionMeta is the who-is-running line under the activity header:
-// backend · model · provider · running spend, each shown once known.
+// backend · model · provider · running spend · context occupancy, each
+// shown once known. The context window appears only once the agent
+// reports any occupancy — a fraction of the limit when one is known.
 func sessionMeta(snap engine.Snapshot) string {
 	var parts []string
 	if snap.AgentName != "" {
@@ -41,7 +27,26 @@ func sessionMeta(snap engine.Snapshot) string {
 	if sp := spendSummary(snap); sp != "" {
 		parts = append(parts, sp)
 	}
+	if c := snap.Context; c.Tokens > 0 {
+		ctx := humanTokens(c.Tokens) + " ctx"
+		if c.Limit > 0 {
+			ctx = fmt.Sprintf("%s/%s ctx (%d%%)", humanTokens(c.Tokens), humanTokens(c.Limit), c.Tokens*100/c.Limit)
+		}
+		parts = append(parts, ctx)
+	}
 	return strings.Join(parts, " · ")
+}
+
+// humanTokens renders a token count compactly: 1234 → "1.2k", 2e6 → "2M".
+func humanTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // runModel prefers the model the agent reported in usage events over the

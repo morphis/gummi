@@ -75,15 +75,25 @@ func (m *Shell) focusThreadInput() {
 
 // blurThreadInput hands the keyboard back to the card's accelerators
 // without discarding the draft — "leaving hides, never discards" applies
-// within the page too, not just across a tab switch.
+// within the page too, not just across a tab switch. Arming ends with
+// the blur: refocusing returns to the picker contract (threadinput.go's
+// doc comment owns the full story).
 func (m *Shell) blurThreadInput() {
 	m.threadInput.Blur()
 	m.threadChip = nil
+	m.threadFreeForm = false
 }
 
 // handleThreadInputKey routes a key while the thread input has the
 // keyboard (shell.go's handleKey, gated on m.cardOpen &&
 // m.threadInput.Focused()).
+//
+// While the composer is armed as the open ask's free-form channel ('o' —
+// the chat pane's channel, inherited with its retirement), the composer
+// owns every key the way a plain input does: the decision's picker keys
+// stand down so a line that starts with a digit types as prose, and
+// enter delivers the line verbatim as the answer. Esc still blurs with
+// the draft kept — refocusing disarms.
 func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	r, ok := m.selected()
 	if !ok || r.DrivenAbroad {
@@ -96,24 +106,49 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.threadChip != nil {
 		return m.handleChipKey(msg)
 	}
+	// alt+o, not ctrl+o: zellij binds ctrl+o to session mode, so the
+	// toggle never arrived there. The composer owns every printable key,
+	// so this needs a modifier — alt is the one no multiplexer claims,
+	// and alt+enter already sets that precedent in the forms.
+	if msg.String() == "alt+o" {
+		m.threadOutputs = !m.threadOutputs
+		return nil
+	}
 	switch msg.String() {
 	case "esc":
 		m.threadInput.Blur()
+		m.threadFreeForm = false
 		return nil
 	case "enter":
 		text := strings.TrimSpace(m.threadInput.Value())
 		if text == "" {
+			if m.threadFreeForm {
+				// armed, an empty line sends nothing — the pane's own
+				// free-form contract, inherited
+				return nil
+			}
 			if d := m.openDecision(r); d != nil {
 				m.syncDecision(d)
+				m.threadScroll = 0 // jump to the newest, where the answer lands
 				return m.answerDecision(r, d)
 			}
 			return nil
 		}
+		m.threadScroll = 0 // jump to the latest on send, as the pane did
 		return m.submitThreadLine(r, text)
 	case "pgup", "pgdown":
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")
 		return nil
+	}
+	if m.threadFreeForm {
+		// armed: the line is the answer, not a picker — everything else
+		// is text
+		var cmd tea.Cmd
+		m.threadInput, cmd = m.threadInput.Update(msg)
+		return cmd
+	}
+	switch msg.String() {
 	case "up", "down":
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
 			if d := m.openDecision(r); d != nil {
@@ -143,6 +178,18 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 				return nil
 			}
 		}
+	case "o":
+		// the free-form channel: with a question that allows it, 'o' arms
+		// the composer as the answer — the picker keys stand down so the
+		// words type unmolested, digit-leading included (the pane's own
+		// 'o', inherited when the pane retired).
+		if strings.TrimSpace(m.threadInput.Value()) == "" {
+			if d := m.openDecision(r); d != nil && d.ask != nil && d.ask.FreeForm {
+				m.syncDecision(d)
+				m.threadFreeForm = true
+				return nil
+			}
+		}
 	}
 	if strings.TrimSpace(m.threadInput.Value()) == "" {
 		if d := m.openDecision(r); d != nil && d.ask != nil {
@@ -155,6 +202,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 						m.decisionPicked[i] = !m.decisionPicked[i]
 						return nil
 					}
+					m.threadScroll = 0
 					return m.answerDecision(r, d)
 				}
 			}
@@ -197,6 +245,12 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 // classification is deterministic and context-free and the mitigation
 // belongs at the point of action. Prose nothing consumes, and the chip's
 // esc contract, send as a message — always safe prose (§6.3).
+//
+// One state outranks the classification: an armed composer ('o' — the
+// free-form channel the chat pane owned) is typing an answer to the
+// question the screen is showing, so the line goes to the ask verbatim,
+// the way the pane's free-form input did — the parser never saw that
+// text either.
 func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	if m.threadSkipParse {
 		// the chip's esc promised this line goes out as a message; the
@@ -205,6 +259,11 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	}
 	if d := m.openDecision(r); d != nil {
 		m.syncDecision(d)
+		if m.threadFreeForm && d.ask != nil && d.ask.FreeForm {
+			m.threadInput.Reset()
+			m.threadFreeForm = false
+			return m.answerAskWith(r, text)
+		}
 		if parseInput(text).Kind == verbNone {
 			if d.ask != nil && d.ask.FreeForm {
 				m.threadInput.Reset()
@@ -460,6 +519,17 @@ func (m *Shell) threadInputBindings() []binding {
 		if d := m.openDecision(r); d != nil {
 			aim := m.wordAim(d)
 			typed := strings.TrimSpace(m.threadInput.Value()) != ""
+			freeForm := d.ask != nil && d.ask.FreeForm
+			if m.threadFreeForm && freeForm {
+				// armed: the composer owns the keyboard the way a plain
+				// input does; enter delivers the line as the answer
+				return []binding{
+					{key: "enter", label: "answer", help: "your line is the answer — empty sends nothing", bar: true},
+					{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
+					m.threadOutputsBinding(),
+					{key: "esc", label: "keys", help: "drop the free-form channel and hand the keyboard back (the draft is kept)", bar: true},
+				}
+			}
 			label, help := "answer", "answer the highlighted option"
 			switch {
 			case d.ask == nil && typed && aim < 0:
@@ -485,18 +555,40 @@ func (m *Shell) threadInputBindings() []binding {
 					}
 				}
 			}
-			return []binding{
+			bs := []binding{
 				{key: "↑↓", label: "choose", help: "move through the open decision", bar: true},
 				{key: "enter", label: label, help: help, bar: true},
 				{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
-				{key: "esc", label: "keys", help: "hand the keyboard back to the card accelerators", bar: true},
 			}
+			if freeForm {
+				bs = append(bs, binding{key: "o", label: "own answer", help: "type your own answer — the digits stop picking while it's armed", bar: true})
+			}
+			bs = append(bs, m.threadOutputsBinding())
+			// esc stays last: the status bar drops hints from the
+			// second-to-last backwards precisely so the surface's escape
+			// hatch outlives every other row (statusbar.Render).
+			return append(bs, binding{key: "esc", label: "keys", help: "hand the keyboard back to the card accelerators", bar: true})
 		}
 	}
 	return []binding{
 		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; does nothing when the line is empty", bar: true},
-		{key: "esc", label: "keys", help: "hand the keyboard back to the card's single-letter accelerators (the draft is kept)", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
+		m.threadOutputsBinding(),
+		// esc last, for the reason the decision table gives above: the
+		// bar sheds the second-to-last hint first, so the way out is the
+		// last thing to go.
+		{key: "esc", label: "keys", help: "hand the keyboard back to the card's single-letter accelerators (the draft is kept)", bar: true},
 		{key: "↑", label: "actions", help: "open the action inventory while the line is empty"},
 	}
+}
+
+// threadOutputsBinding is the alt+o row every card-page table carries:
+// the toggle that expands (or folds back) the captured tool outputs in
+// the thread, working mid-draft like pgup/pgdn — it is not text.
+func (m *Shell) threadOutputsBinding() binding {
+	label, help := "outputs", "expand the captured tool outputs"
+	if m.threadOutputs {
+		help = "fold the captured tool outputs back"
+	}
+	return binding{key: "alt+o", label: label, help: help, bar: true}
 }

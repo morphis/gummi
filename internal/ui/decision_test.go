@@ -102,7 +102,8 @@ func TestThreadDecisionAnswersLiveAsk(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach; the ask stays pending
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // the composer blurs; the ask stays pending
+	m = press(t, m, tea.KeyPressMsg{Code: '/'})           // back into the line
 
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // answer the pinned decision
 	deadline := time.After(testWaitTimeout)
@@ -278,7 +279,9 @@ func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 	settleChat(t, eng)
 
 	snap := eng.Get("FD-001").Snapshot()
-	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != engine.AuthorUser {
+	// the kickoff is gummi's own turn, not the user's — the bounce note
+	// rides inside it, quoted, the same way a RunWith review note does
+	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != engine.AuthorSystem {
 		t.Fatalf("kickoff missing from the transcript: %+v", snap.Transcript)
 	}
 	if !strings.Contains(snap.Transcript[0].Content, "the findings say retry the flaky check first") {
@@ -316,8 +319,10 @@ func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
 	if len(snap.Transcript) == 0 {
 		t.Fatal("run never started")
 	}
+	// the typed line rides gummi's own kickoff turn, not a user turn —
+	// same as the bounce note in TestThreadDecisionBounceNoteRidesTheNextRun
 	for _, msg := range snap.Transcript {
-		if msg.Author == engine.AuthorUser && strings.Contains(msg.Content, "focus the plan on the retry path") {
+		if msg.Author == engine.AuthorSystem && strings.Contains(msg.Content, "focus the plan on the retry path") {
 			return
 		}
 	}
@@ -331,7 +336,8 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach; the ask stays pending
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // the composer blurs; the ask stays pending
+	m = press(t, m, tea.KeyPressMsg{Code: '/'})           // back into the line
 
 	// The line starts with a word on purpose: on an empty line a digit is
 	// a picker key that answers an option (the pane's own contract), so

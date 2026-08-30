@@ -24,6 +24,16 @@ func (m *Shell) openCard() tea.Cmd {
 	m.cardOpen = true
 	m.actionCursor = 0
 	m.actionsExpanded = false
+	// the transcript view (t) is scoped to the visit, like the action
+	// list's own fold: a card opens on its newest event with the receipts
+	// folded, the way a chat opens on the latest.
+	m.threadTranscript = false
+	// moving between cards stops a tail a previous card's watch left
+	// behind — an uncanceled follow would keep polling a file nobody
+	// reads.
+	if m.follow != nil && m.follow.feature != r.F.ID {
+		m.stopFollow()
+	}
 	// a card opens on its newest event with the composer ready, the way a
 	// chat does — focusThreadInput still refuses a card another process
 	// is driving
@@ -32,10 +42,12 @@ func (m *Shell) openCard() tea.Cmd {
 	return m.loadCardEvents(r.F.ID)
 }
 
-// closeCard returns to the backlog list.
+// closeCard returns to the backlog list, stopping a live watch tail —
+// the followed stream renders on the page, so its lifetime is the page's.
 func (m *Shell) closeCard() {
 	m.cardOpen = false
 	m.blurActions()
+	m.stopFollow()
 }
 
 // stepCard moves to the previous/next card without leaving the page —
@@ -48,8 +60,10 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 	m.actionCursor = 0
 	m.actionsExpanded = false
 	// the next card is a different conversation; it opens at its own end
-	// rather than inheriting how far back this one was scrolled
+	// rather than inheriting how far back this one was scrolled, and any
+	// transcript view is scoped to the card that asked for it.
 	m.threadScroll = 0
+	m.threadTranscript = false
 	r, ok := m.selected()
 	// stepping cards is not a mode change: someone scanning with J/K from
 	// the accelerator layer stays there, and someone mid-draft keeps the
@@ -57,6 +71,9 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 	// has no input to hold.
 	if ok && r.DrivenAbroad {
 		m.blurThreadInput()
+	}
+	if ok && m.follow != nil && m.follow.feature != r.F.ID {
+		m.stopFollow()
 	}
 	if !ok {
 		return nil
@@ -104,6 +121,11 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	case "K":
 		return m.stepCard(-1), true
 	case "right":
+		return nil, true
+	case "alt+o":
+		// not text, so it is answered at the accelerator layer too: the
+		// thread's captured tool outputs expand (or fold back) in place.
+		m.threadOutputs = !m.threadOutputs
 		return nil, true
 	case "enter":
 		if a, ok := m.cardActions().Selected(); ok {
@@ -325,6 +347,7 @@ func (m *Shell) cardPageBindings() []binding {
 		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
 		{key: "A", label: "autopilot", help: "open the autopilot switch — off/gates/full, and it starts the card"},
 	}
+	out = append(out, m.threadOutputsBinding())
 	for _, b := range m.boardBindings() {
 		switch b.key {
 		case "j/k ↓↑":

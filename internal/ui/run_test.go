@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -23,7 +24,7 @@ func TestRunAutonomousStage(t *testing.T) {
 			{Kind: agent.EventIdle},
 		}
 	}}
-	m, eng := chatWorkspace(t, ag)
+	m, eng := agentWorkspace(t, ag)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
@@ -31,11 +32,9 @@ func TestRunAutonomousStage(t *testing.T) {
 		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
 	}
 
-	// enter runs the autonomous stage (no chat pane for implement)
+	// enter runs the autonomous stage (the thread is the run's surface,
+	// not a pane — DESIGN §10.5)
 	m = openAndAttach(t, m)
-	if m.chat != nil {
-		t.Fatal("implement should not open the chat pane")
-	}
 	settleChat(t, eng)
 
 	sess := m.sessionFor("FD-001")
@@ -59,7 +58,7 @@ func TestRunAutonomousStage(t *testing.T) {
 }
 
 func TestPauseStopsRun(t *testing.T) {
-	m, eng := chatWorkspace(t, agent.NewFake("working…"))
+	m, eng := agentWorkspace(t, agent.NewFake("working…"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
@@ -81,11 +80,13 @@ func TestPauseStopsRun(t *testing.T) {
 }
 
 func TestRunRejectsInteractiveViaRunPath(t *testing.T) {
-	// enter on a brainstorm feature opens chat, not a run
-	m, _ := chatWorkspace(t, agent.NewFake("hi"))
+	// enter on a brainstorm feature attaches the conversation, it does
+	// not start a run — the thread is the interactive surface
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
 	m = openAndAttach(t, m)
-	if m.chat == nil {
-		t.Fatal("brainstorm enter should open chat, not run")
+	s := m.sessionFor("FD-001")
+	if s == nil || !s.Interactive {
+		t.Fatal("brainstorm enter should attach an interactive session, not run")
 	}
 }
 
@@ -101,22 +102,22 @@ func selectRow(t *testing.T, m *Shell, id domain.FeatureID) {
 	t.Fatalf("row %s not found in %d rows", id, len(m.rows))
 }
 
-func TestBugInteractiveStagesOpenChat(t *testing.T) {
-	// enter on a bug at its interactive stages (triage/diagnose) opens
-	// the gummi chat pane, exactly like brainstorm/spec for features.
-	m, _ := chatWorkspace(t, agent.NewFake("Can you reproduce it?"))
+func TestBugInteractiveStagesAttachConversation(t *testing.T) {
+	// enter on a bug at its interactive stages (triage/diagnose) attaches
+	// the architect conversation in the thread, exactly like brainstorm
+	// and spec for features.
+	m, _ := agentWorkspace(t, agent.NewFake("Can you reproduce it?"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
 	m = typeString(t, m, "Login loops")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	// enter's first job is opening the card page (backlog.go); once open
-	// it stays open across esc (which only detaches chat), so the loop
-	// below reuses it across both stages with a single press each time.
 	selectRow(t, m, "BG-002")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	for _, stage := range []domain.Stage{domain.StageTriage, domain.StageDiagnose} {
 		selectRow(t, m, "BG-002")
-		// the card page is open, so its composer holds the keyboard
+		// the card page is open, so its composer holds the keyboard; the
+		// next stage's attach runs from the action list instead, because
+		// the composer blur is where esc leaves you
 		m = toKeys(t, m)
 		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 		if m.rows[m.sel].F.Stage != stage {
@@ -124,17 +125,10 @@ func TestBugInteractiveStagesOpenChat(t *testing.T) {
 		}
 		selectRow(t, m, "BG-002")
 		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-		if m.chat == nil {
-			t.Fatalf("enter at %s did not open the chat pane (notice: %q)", stage, m.notice.text)
-		}
-		if m.chat.feature != "BG-002" {
-			t.Fatalf("chat bound to %s, want BG-002", m.chat.feature)
-		}
-		s := m.engine.Get("BG-002")
+		s := m.sessionFor("BG-002")
 		if s == nil || !s.Interactive {
-			t.Fatalf("%s did not start an interactive session", stage)
+			t.Fatalf("enter at %s did not attach an interactive session (notice: %q)", stage, m.notice.text)
 		}
-		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach for the next round
 	}
 }
 
@@ -153,36 +147,34 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
 		}
 	}}
-	m, eng := chatWorkspace(t, ag)
+	m, eng := agentWorkspace(t, ag)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 
-	// first enter starts the run — no pane, activity goes to the dashboard
+	// first enter answers the idle decision and starts the run — the
+	// thread shows it live, no pane to open
 	m = openAndAttach(t, m)
-	if m.chat != nil {
-		t.Fatal("starting a run must not open the chat pane")
+	if m.sessionFor("FD-001") == nil {
+		t.Fatal("starting a run did not start a session")
 	}
 	waitForActivity(t, eng)
 
-	// Watching remains available through the visible action inventory;
-	// empty-composer enter deliberately sends nothing and runs nothing.
+	// empty-composer enter deliberately sends nothing and runs nothing
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.chat != nil {
-		t.Fatal("empty-composer enter unexpectedly ran an action")
+	if m.threadInput.Value() != "" {
+		t.Fatal("empty-composer enter changed the draft")
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.chat == nil {
-		t.Fatalf("watch action on a running session did not attach (notice: %q)", m.notice.text)
-	}
-	view := m.View().Content
+
+	// the thread's live stage block is the watch surface: the running
+	// session's full transcript, messages and tools in order
+	view := ansi.Strip(m.threadView(100, 30))
 	if !strings.Contains(view, "Wiring the toggle.") || !strings.Contains(view, "edit theme.go") {
-		t.Errorf("watch pane missing transcript content:\n%s", view)
+		t.Errorf("thread missing the running session's transcript:\n%s", view)
 	}
 
 	// the tool call is a transcript entry, ordered after the message
-	snap := m.chat.session.Snapshot()
+	snap := m.sessionFor("FD-001").Snapshot()
 	var msgAt, toolAt int
 	for i, msg := range snap.Transcript {
 		switch {
@@ -196,13 +188,13 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 		t.Errorf("tool call not interleaved after its message: %+v", snap.Transcript)
 	}
 
-	// esc detaches; the run keeps going
+	// esc blurs the composer; the run keeps going
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.chat != nil {
-		t.Fatal("esc did not detach the watch pane")
+	if m.threadInput.Focused() {
+		t.Fatal("esc did not blur the composer")
 	}
 	if s := eng.Get("FD-001"); s == nil || s.State() != engine.StateRunning {
-		t.Error("detaching stopped the run")
+		t.Error("blurring stopped the run")
 	}
 }
 
@@ -232,7 +224,7 @@ func TestThreadActivityGolden(t *testing.T) {
 			{Kind: agent.EventIdle},
 		}
 	}}
-	m, eng := chatWorkspace(t, ag)
+	m, eng := agentWorkspace(t, ag)
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
