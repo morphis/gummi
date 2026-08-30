@@ -1799,7 +1799,8 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 // resize from leaving the scroll step stale.
 func (m *Shell) threadSize() (int, int) {
 	main := m.computeLayout().Main
-	return main.Dx(), max(main.Dy()-1, 1)
+	crumb, blank := cardPageChrome(main.Dy())
+	return main.Dx(), max(main.Dy()-crumb-blank, 1)
 }
 
 // scrollThread pages the card thread's body. The step is the visible body

@@ -122,11 +122,42 @@ func askPickerOptions(ask *engine.Ask) []pickerOption {
 // it a live ask_user question; it also renders regenerated workflow
 // actions. Selection state is explicit so neither caller has to fake the
 // other's model merely to reuse its renderer.
+// pickerQuestionLines caps how far a question may wrap onto its own
+// rows. Two is enough for the questions the guide actually poses, and a
+// cap is what stops a long one from eating the answers it is asking
+// about.
+const pickerQuestionLines = 2
+
+// pickerHead renders the control's opening rows: the title, with the
+// question beside it when it fits and beneath it when it does not.
+//
+// The question is what the control is for, so it is never the thing that
+// gives up width. At the widths the thread is actually driven at, keeping
+// it on the title's line meant truncating it away — "review is ready for
+// y…" — which is the one row on the page that has to survive.
+func pickerHead(s *theme.Styles, title, question string, width int) []string {
+	t, q := sanitize(title), sanitize(question)
+	if ansi.StringWidth(q) <= max(width-ansi.StringWidth(t)-2, 0) {
+		return []string{s.Muted.Render(t) + "  " + s.Base.Render(q)}
+	}
+	out := []string{s.Muted.Render(t)}
+	wrapped := strings.Split(wrapText(q, max(width-1, 8)), "\n")
+	if len(wrapped) > pickerQuestionLines {
+		wrapped = wrapped[:pickerQuestionLines]
+		wrapped[pickerQuestionLines-1] = ansi.Truncate(wrapped[pickerQuestionLines-1], max(width-2, 4), "") + "…"
+	}
+	for _, l := range wrapped {
+		out = append(out, " "+s.Base.Render(l))
+	}
+	return out
+}
+
 func pickerView(s *theme.Styles, title, question string, options []pickerOption, selected int, picked map[int]bool, multi bool, w int) string {
 	width := max(w-2, 10)
 	var b strings.Builder
-	b.WriteString(s.Muted.Render(sanitize(title)) + "  " +
-		s.Base.Render(ansi.Truncate(sanitize(question), max(width-ansi.StringWidth(title)-2, 8), "…")) + "\n")
+	for _, l := range pickerHead(s, title, question, width) {
+		b.WriteString(l + "\n")
+	}
 	for i, option := range options {
 		marker := "  "
 		label := s.Base
@@ -280,7 +311,11 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	}
 	lines := strings.Split(pickerView(s, title, d.question, options,
 		m.decisionCursor, m.decisionPicked, multi, w), "\n")
-	return windowDecisionBlock(s, lines, len(options), m.decisionCursor, maxRows)
+	// the head is however many rows the question needed (pickerHead wraps
+	// it onto its own when it will not sit beside the title), so the
+	// window has to be told rather than assuming one.
+	head := len(pickerHead(s, title, d.question, max(w-2, 10)))
+	return windowDecisionBlock(s, lines, head, len(options), m.decisionCursor, maxRows)
 }
 
 // windowDecisionBlock keeps a decision taller than its row budget usable:
@@ -290,14 +325,19 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 // list's fold honours (cardactions.go), and the shape the design's 36×9
 // frame shows. composeThread would otherwise trim from the bottom, which
 // can leave the cursor on an option that is no longer visible.
-func windowDecisionBlock(s *theme.Styles, lines []string, nOptions, cursor, maxRows int) []string {
+func windowDecisionBlock(s *theme.Styles, lines []string, headRows, nOptions, cursor, maxRows int) []string {
 	if maxRows <= 0 || len(lines) <= maxRows {
 		return lines
 	}
-	// lines[0] is the question; lines[1:] are one row per option.
-	rows := maxRows - 1
+	// lines[:headRows] are the title and the question (one row when the
+	// two fit together, more when the question wrapped onto its own);
+	// lines[headRows:] are one row per option.
+	rows := maxRows - headRows
 	if rows <= 0 {
-		return lines[:1]
+		// no room for both the question and an answer to it: the question
+		// wins, and as much of it as the budget holds — a control whose
+		// question you cannot read is not one you can answer.
+		return lines[:min(maxRows, headRows)]
 	}
 	marker := nOptions > rows
 	if marker {
@@ -308,9 +348,9 @@ func windowDecisionBlock(s *theme.Styles, lines []string, nOptions, cursor, maxR
 			rows, marker = 1, false
 		}
 	}
-	out := make([]string, 0, rows+2)
-	out = append(out, lines[0])
-	out = append(out, windowLines(lines[1:], cursor, rows)...)
+	out := make([]string, 0, rows+headRows+1)
+	out = append(out, lines[:headRows]...)
+	out = append(out, windowLines(lines[headRows:], cursor, rows)...)
 	if marker {
 		out = append(out, s.Faint.Render(fmt.Sprintf("  …%d more — ↑↓ to reach them", nOptions-rows)))
 	}

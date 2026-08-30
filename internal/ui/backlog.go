@@ -296,10 +296,25 @@ func (m *Shell) cardPageView(w, h int) string {
 			break
 		}
 	}
+	// The crumb is the page's chrome, and it is the first row the page
+	// gives up: on a nine-row terminal the card's own identity is worth
+	// more than a line naming the way back out of it, which esc answers
+	// whether or not anything says so. Spending the row on the masthead
+	// instead is what keeps the card you are deciding about named while
+	// you decide (thread.go's cardPageChrome, which threadSize resolves
+	// the same way so the scroll clamp measures what is rendered).
+	crumbRows, blank := cardPageChrome(h)
+	out := m.threadView(w, max(h-crumbRows-blank, 1))
+	if blank > 0 {
+		out += "\n"
+	}
+	if crumbRows == 0 {
+		return out
+	}
 	crumb := " " + s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
 		"  " + s.KeyHint.Render("J/K") + s.Faint.Render(" prev/next card")
-	return ansi.Truncate(crumb, w, "…") + "\n" + m.threadView(w, max(h-1, 1))
+	return ansi.Truncate(crumb, w, "…") + "\n" + out
 }
 
 // backlogBindings is the list level's key table: the board's own table

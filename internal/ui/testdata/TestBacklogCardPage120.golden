@@ -27,8 +27,8 @@
 
 
 
-
   [38;2;133;131;146mgummi[m  [38;2;247;246;251mnothing is running — choose what happens next.[m
   [38;2;191;188;200;1m▸ [m1. run implement[38;2;96;95;107m — no active run — start (or restart) the stage[m  [38;2;191;188;200menter[m
   [37;40m┃ [39;7mm[38;5;240;27message the agent, or a verb (approve, verify, diff…)[39m                                                          [m
+
 [38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [m [48;2;77;76;87m [38;2;191;188;200m1 todo · 3 active · 1 in review · 1 done[39m [m         [38;2;191;188;200m↑↓[m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[m [38;2;133;131;146mrun implement[38;2;96;95;107m · [38;2;191;188;200mpgup/pgdn[m [38;2;133;131;146mscroll[38;2;96;95;107m · [38;2;191;188;200mesc[m [38;2;133;131;146mkeys[m

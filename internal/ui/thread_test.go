@@ -789,9 +789,14 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 // overflows the window (the pinned decision costs the body two rows) and
 // the live-stage boundary still fits the newest view; the scroll amount
 // is asserted against the clamp rather than assumed.
+//
+// The band sits a row higher than it used to: the card page now spends
+// one of its rows on the blank that separates the composer from the
+// status bar (thread.go's cardPageChrome), so the thread's own budget at
+// a given terminal height is one smaller than before.
 func TestThreadScrollsWithPageKeys(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 20
+	m.width, m.height = 80, 21
 	w, h := m.threadSize()
 
 	for range 6 { // more pages than the body has, to prove the clamp

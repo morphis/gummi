@@ -167,7 +167,7 @@ func TestThreadDecisionWindowsAroundTheCursor(t *testing.T) {
 		lines = append(lines, "  "+label)
 	}
 	// three rows: the question, one option row, the hidden count
-	got := windowDecisionBlock(s, lines, 5, 3, 3)
+	got := windowDecisionBlock(s, lines, 1, 5, 3, 3)
 	if len(got) != 3 {
 		t.Fatalf("windowed decision = %q, want 3 rows", got)
 	}
@@ -182,7 +182,7 @@ func TestThreadDecisionWindowsAroundTheCursor(t *testing.T) {
 	}
 
 	// a budget of two keeps the highlighted answer over the count
-	got = windowDecisionBlock(s, lines, 5, 4, 2)
+	got = windowDecisionBlock(s, lines, 1, 5, 4, 2)
 	if len(got) != 2 || !strings.Contains(ansi.Strip(got[1]), "five") {
 		t.Fatalf("two-row window = %q, want the question and the cursor's row", got)
 	}
