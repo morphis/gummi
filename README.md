@@ -159,7 +159,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | key | action |
 |---|---|
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
-| `enter` | open the selected card's page (full width); in its composer, send the typed line — an empty line answers the card's open decision, and does nothing when none is open |
+| `enter` | open the selected card's page (full width); in its composer, deliver the typed line — to the card's open decision, when an option takes prose (the words ride the bounce, or open the run they're aimed at) — and to the agent otherwise; an empty line answers the highlighted option, and does nothing when none is open |
 | `↑` | on a card page with an empty composer and no decision open, open the action pop-over (`↑↓` moves, `enter` runs); while a decision is open, `↑↓` choose its options instead |
 | `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
 | `space` | open the command menu (everything that belongs to no card); type to filter |

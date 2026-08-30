@@ -31,10 +31,18 @@ import (
 //   - as keys, after esc. Blurring hands the keyboard back to the
 //     accelerator table with the draft intact; esc again leaves the page.
 //
-// While a decision is open and the composer is empty, enter and the
-// picker keys answer that visible control. With no decision, enter is a
-// no-op and up opens the action inventory. None can surprise anyone
-// mid-sentence — the moment there is text, they belong to the text.
+// While a decision is open the composer and the decision are one control
+// (DESIGN §6.3): the composer's emptiness drives the highlight — an empty
+// line keeps the highlight where the arrows put it and enter answers it,
+// while a typed prose line aims it at the option that consumes words,
+// whose label then names what enter will do with them — and enter
+// delivers the words to what the screen names. A command never aims: the
+// first word being a verb makes the line a command, so the parser (and
+// its confirm chip) keeps verb-words while the decision keeps prose; the
+// chip's esc hands the line back as a message untouched. With no
+// decision, enter is a no-op and up opens the action inventory. None can
+// surprise anyone mid-sentence — the moment there is text, they belong to
+// the text.
 type pendingChip struct {
 	feature   domain.FeatureID
 	verb      string
@@ -93,14 +101,15 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.threadInput.Blur()
 		return nil
 	case "enter":
-		if strings.TrimSpace(m.threadInput.Value()) == "" {
+		text := strings.TrimSpace(m.threadInput.Value())
+		if text == "" {
 			if d := m.openDecision(r); d != nil {
 				m.syncDecision(d)
 				return m.answerDecision(r, d)
 			}
 			return nil
 		}
-		return m.submitThreadInput(r.F)
+		return m.submitThreadLine(r, text)
 	case "pgup", "pgdown":
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")
@@ -178,7 +187,43 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 	return cmd
 }
 
-// submitThreadInput parses the input's current line and routes it:
+// submitThreadLine routes a non-empty line from the composer, deciding
+// first whether a decision gets it. With one open, the line and the
+// decision are one control (DESIGN §6.3): classified prose is aimed at
+// the option that consumes words and enter delivers it there — the ask's
+// free-form answer, or the run/bounce whose delivery takes prose. A
+// command keeps the parser: a line whose first word is a verb routes
+// exactly as the bare composer routes it, chip included, because the
+// classification is deterministic and context-free and the mitigation
+// belongs at the point of action. Prose nothing consumes, and the chip's
+// esc contract, send as a message — always safe prose (§6.3).
+func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
+	if m.threadSkipParse {
+		// the chip's esc promised this line goes out as a message; the
+		// decision yields to that promise
+		return m.submitThreadInput(r.F)
+	}
+	if d := m.openDecision(r); d != nil {
+		m.syncDecision(d)
+		if parseInput(text).Kind == verbNone {
+			if d.ask != nil && d.ask.FreeForm {
+				m.threadInput.Reset()
+				return m.answerAskWith(r, text)
+			}
+			if i := d.wordConsumer(); i >= 0 {
+				m.threadInput.Reset()
+				m.decisionCursor = i
+				return m.deliverDecisionWords(r, d, i, text)
+			}
+		}
+		// a command keeps the parser; prose nothing consumes sends as a
+		// turn — always safe, and exactly what the bare composer did.
+	}
+	return m.submitThreadInput(r.F)
+}
+
+// submitThreadInput parses a line and routes it as the bare composer
+// always has (no decision open, or a line the decision does not claim):
 //
 //   - verbNone -> sent as a message to the agent, exactly as the chat
 //     pane's own send path does.
@@ -399,7 +444,11 @@ func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 
 // threadInputBindings is the card page's key table while the thread
 // input has the keyboard — cardPageBindings' focused branch (backlog.go),
-// the same filtering-split convention bugIngestView.bindings() uses.
+// the same filtering-split convention bugIngestView.bindings() uses. The
+// enter row names what enter will do in THIS state: the highlighted
+// option's label on an empty line, the words' destination while one is
+// typed (wordAim), and plain "send" when nothing consumes the words —
+// the bar may not claim enter for a choice the line is not aimed at.
 func (m *Shell) threadInputBindings() []binding {
 	if m.threadChip != nil {
 		return []binding{
@@ -409,13 +458,36 @@ func (m *Shell) threadInputBindings() []binding {
 	}
 	if r, ok := m.selected(); ok {
 		if d := m.openDecision(r); d != nil {
-			label := "answer"
-			if d.ask == nil && m.decisionCursor >= 0 && m.decisionCursor < len(d.actions) {
-				label = d.actions[m.decisionCursor].label
+			aim := m.wordAim(d)
+			typed := strings.TrimSpace(m.threadInput.Value()) != ""
+			label, help := "answer", "answer the highlighted option"
+			switch {
+			case d.ask == nil && typed && aim < 0:
+				// prose nothing consumes: the line sends as a turn
+				label = "send"
+			case d.ask != nil && typed && d.ask.FreeForm:
+				help = "your line is the answer"
+			case d.ask == nil:
+				// the option the highlight sits on — the word-eater while
+				// the composer holds prose aimed at it, the cursor's own
+				// choice otherwise. The bar carries the option's own name:
+				// the relabel ("with your words") is the decision row's
+				// statement, and a suffix long enough to spell the words
+				// out here is the first hint the bar drops.
+				i := aim
+				if i < 0 {
+					i = m.decisionCursor
+				}
+				if i >= 0 && i < len(d.actions) {
+					label = d.actions[i].label
+					if i == aim {
+						help = "your line goes with this answer"
+					}
+				}
 			}
 			return []binding{
 				{key: "↑↓", label: "choose", help: "move through the open decision", bar: true},
-				{key: "enter", label: label, help: "answer the highlighted option", bar: true},
+				{key: "enter", label: label, help: help, bar: true},
 				{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
 				{key: "esc", label: "keys", help: "hand the keyboard back to the card accelerators", bar: true},
 			}

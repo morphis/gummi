@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -183,5 +184,240 @@ func TestThreadDecisionWindowsAroundTheCursor(t *testing.T) {
 	got = windowDecisionBlock(s, lines, 5, 4, 2)
 	if len(got) != 2 || !strings.Contains(ansi.Strip(got[1]), "five") {
 		t.Fatalf("two-row window = %q, want the question and the cursor's row", got)
+	}
+}
+
+// reviewGateWorkspace walks a fresh feature to review and raises the gate
+// attention, so its card page carries a gate decision — read the findings,
+// bounce to implement, advance to verify — with the bounce as the option
+// that consumes words.
+func reviewGateWorkspace(t *testing.T) *Shell {
+	t.Helper()
+	m, _ := newWorkspace(t)
+	m = pump(t, m, m.Init())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = typeString(t, m, "Bouncy")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	for range 5 { // todo→brainstorm→spec→plan→implement→review
+		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	}
+	if m.rows[0].F.Stage != domain.StageReview {
+		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
+	}
+	m.raiseAttention("FD-001", attnGate, "review is ready for your decision")
+	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
+}
+
+// TestThreadDecisionTypingGolden is the coupled state's review surface:
+// the composer holds prose, so the decision's highlight has moved onto
+// the option that consumes the words, that option's label names what
+// enter will do with them, and the status bar's enter hint says the same
+// — the screen states the delivery before it happens (DESIGN §6.3).
+// 120 columns so the bar has room to name enter beside the pills.
+func TestThreadDecisionTypingGolden(t *testing.T) {
+	m := reviewGateWorkspace(t)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	m = model.(*Shell)
+	m = typeString(t, m, "the contrast is off in dark mode")
+	golden.RequireEqual(t, []byte(m.View().Content))
+}
+
+// TestThreadDecisionTypingIsChoosing is the composer coupling (DESIGN
+// §6.3): typing prose while a decision is open aims the highlight at the
+// option that consumes words and relabels it to say what enter will do
+// with them, and enter delivers the line there. At a review gate that
+// option is the bounce: the findings go back with it.
+func TestThreadDecisionTypingIsChoosing(t *testing.T) {
+	m := reviewGateWorkspace(t)
+
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || d.kind != decisionGate {
+		t.Fatalf("review gate has no gate decision: %+v", d)
+	}
+	if i := d.wordConsumer(); i != 1 {
+		t.Fatalf("word consumer = %d, want the bounce at 1 (actions %v)", i, d.actions)
+	}
+
+	m = typeString(t, m, "the contrast is off in dark mode")
+	out := ansi.Strip(m.threadView(100, 30))
+	if !strings.Contains(out, "bounce to implement with your words") {
+		t.Errorf("typing did not aim and relabel the word-eating option:\n%s", out)
+	}
+	if m.decisionCursor != 1 {
+		t.Errorf("typed prose left the cursor at %d, want the bounce at 1", m.decisionCursor)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.rows[m.sel].F.Stage != domain.StageImplement {
+		t.Fatalf("enter did not deliver the line to the bounce: stage %s", m.rows[m.sel].F.Stage)
+	}
+	if got := m.bounceNotes["FD-001"]; got != "the contrast is off in dark mode" {
+		t.Errorf("bounce carried %q, want the composer's line", got)
+	}
+}
+
+// TestThreadDecisionBounceNoteRidesTheNextRun: the note a bounce carries
+// has nowhere to land until the reborn work stage runs — it waits in
+// bounceNotes and rides that run's kickoff, the delivery the headless
+// --bounce note takes.
+func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
+	m, eng := chatWorkspace(t, agent.NewFake("on it"))
+	// advance to implement: the work stage a bounce rewinds to
+	for range 3 { // brainstorm→spec→plan→implement
+		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	}
+	if m.rows[m.sel].F.Stage != domain.StageImplement {
+		t.Fatalf("stage = %s, want implement", m.rows[m.sel].F.Stage)
+	}
+	m.bounceNotes = map[domain.FeatureID]string{
+		"FD-001": "the findings say retry the flaky check first",
+	}
+
+	// the run the stash waits for: enter answers the idle decision
+	m = openAndAttach(t, m)
+	settleChat(t, eng)
+
+	snap := eng.Get("FD-001").Snapshot()
+	if len(snap.Transcript) == 0 || snap.Transcript[0].Author != engine.AuthorUser {
+		t.Fatalf("kickoff missing from the transcript: %+v", snap.Transcript)
+	}
+	if !strings.Contains(snap.Transcript[0].Content, "the findings say retry the flaky check first") {
+		t.Errorf("bounce note did not ride the kickoff: %q", snap.Transcript[0].Content)
+	}
+	if _, ok := m.bounceNotes["FD-001"]; ok {
+		t.Error("the bounce note survived the run that consumed it")
+	}
+}
+
+// TestThreadDecisionTypedProseRidesTheRun: at an autonomous idle decision
+// the word-eater is the run — typed prose re-runs the stage with the line
+// appended to its kickoff.
+func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
+	m, eng := chatWorkspace(t, agent.NewFake("on it"))
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
+
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || d.wordConsumer() != 0 || d.actions[0].id != "run" {
+		t.Fatalf("plan idle decision has no run to aim at: %+v", d)
+	}
+
+	m = typeString(t, m, "focus the plan on the retry path")
+	out := ansi.Strip(m.threadView(100, 30))
+	if !strings.Contains(out, "run the planner with your words") {
+		t.Errorf("typing did not relabel the run:\n%s", out)
+	}
+	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleChat(t, eng)
+
+	snap := eng.Get("FD-001").Snapshot()
+	if len(snap.Transcript) == 0 {
+		t.Fatal("run never started")
+	}
+	for _, msg := range snap.Transcript {
+		if msg.Author == engine.AuthorUser && strings.Contains(msg.Content, "focus the plan on the retry path") {
+			return
+		}
+	}
+	t.Errorf("the line did not ride the kickoff: %+v", snap.Transcript)
+}
+
+// TestThreadDecisionTypedProseAnswersTheAsk: a free-form ask consumes the
+// composer's line as the answer — the pane's 'o' channel, always on here
+// because the composer is always on.
+func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach; the ask stays pending
+
+	// The line starts with a word on purpose: on an empty line a digit is
+	// a picker key that answers an option (the pane's own contract), so
+	// prose wanting to start with one would be hijacked mid-sentence —
+	// the thread types prose the way the pane's 'o' channel does, from
+	// the second keystroke on.
+	m = typeString(t, m, "the floor is 2.4 to 1, note the exception in the spec")
+	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	deadline := time.After(testWaitTimeout)
+	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
+		select {
+		case <-deadline:
+			t.Fatal("typed prose did not answer the ask")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	var got string
+	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+		if msg.Author == engine.AuthorUser {
+			got = msg.Content
+		}
+	}
+	if got != "the floor is 2.4 to 1, note the exception in the spec" {
+		t.Errorf("ask answered with %q, want the composer's line", got)
+	}
+}
+
+// TestThreadDecisionACommandKeepsTheParser: the collision the composer
+// coupling settles — verb-words are commands the parser owns (the chip is
+// their confirmation), so typing one leaves the highlight where it was,
+// raises the chip on enter, and its esc still sends the line as a
+// message. The screen never claims the words for an option enter will
+// not deliver them to.
+func TestThreadDecisionACommandKeepsTheParser(t *testing.T) {
+	m := reviewGateWorkspace(t)
+
+	m = typeString(t, m, "verify the contrast is right")
+	out := ansi.Strip(m.threadView(100, 30))
+	if strings.Contains(out, "with your words") {
+		t.Errorf("a command aimed the highlight at the word-eater:\n%s", out)
+	}
+	if m.decisionCursor != 0 {
+		t.Errorf("a command moved the cursor to %d, want 0", m.decisionCursor)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.threadChip == nil || m.threadChip.verb != "verify" {
+		t.Fatalf("enter did not raise the chip: %+v", m.threadChip)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // no — send as a message
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(m.notice.text, "no live session") {
+		t.Errorf("chip esc did not send the line as a message: %+v", m.notice)
+	}
+	if m.rows[m.sel].F.Stage != domain.StageReview {
+		t.Fatalf("the bounced card moved to %s", m.rows[m.sel].F.Stage)
+	}
+}
+
+// TestThreadDecisionProseNothingConsumesSends: where no option takes
+// prose — a budget stop offers top-up and park, not a listener — the
+// line sends as a turn, always safe (DESIGN §6.3), and the bar says so.
+func TestThreadDecisionProseNothingConsumesSends(t *testing.T) {
+	m, _ := chatWorkspace(t, agent.NewFake("on it"))
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.raiseAttention("FD-001", attnBudget, "the plan stage reached its envelope")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
+
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || d.kind != decisionBudget || d.wordConsumer() != -1 {
+		t.Fatalf("budget decision mis-shaped: %+v", d)
+	}
+
+	m = typeString(t, m, "top it up to 400")
+	for _, b := range m.threadInputBindings() {
+		if b.key == "enter" && b.label != "send" {
+			t.Errorf("bar claims enter for %q while nothing consumes the words", b.label)
+		}
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(m.notice.text, "no live session") {
+		t.Errorf("prose with no consumer did not send as a message: %+v", m.notice)
+	}
+	if m.rows[m.sel].F.Stage != domain.StagePlan {
+		t.Fatalf("the card moved to %s", m.rows[m.sel].F.Stage)
 	}
 }

@@ -119,14 +119,22 @@ type Shell struct {
 	threadInput     textarea.Model
 	threadChip      *pendingChip
 	threadSkipParse bool
-	inboxSel        int      // cursor into m.inbox.list(), the inbox tab's own selection
-	sortMode        SortMode // todo-column ordering toggle (ephemeral, not persisted)
-	notice          noticeMsg
-	spec            *specView      // non-nil while the spec surface is open
-	diff            *diffView      // non-nil while the diff surface is open
-	ingest          *ingestView    // non-nil while the ingest review surface is open
-	ingestRun       *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
-	deps            *depPicker     // non-nil while the dependency picker is open
+
+	// bounceNotes holds the line the composer aimed at a decision's
+	// bounce answer: the card is rewound now, but its reborn work stage
+	// only runs when someone starts it, so the note waits in memory and
+	// rides that run's kickoff (runStage) — the same delivery and the
+	// same lifetime the headless driver's --bounce note takes. Lost when
+	// the process exits, exactly as the driver's is.
+	bounceNotes map[domain.FeatureID]string
+	inboxSel    int      // cursor into m.inbox.list(), the inbox tab's own selection
+	sortMode    SortMode // todo-column ordering toggle (ephemeral, not persisted)
+	notice      noticeMsg
+	spec        *specView      // non-nil while the spec surface is open
+	diff        *diffView      // non-nil while the diff surface is open
+	ingest      *ingestView    // non-nil while the ingest review surface is open
+	ingestRun   *ingestRunView // non-nil while an ingest pass is decomposing (one at a time)
+	deps        *depPicker     // non-nil while the dependency picker is open
 
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
@@ -1771,7 +1779,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "b":
 		if r, ok := m.selected(); ok {
-			return m.bounceStage(r.F.ID)
+			return m.bounceStage(r.F.ID, "")
 		}
 	case "u":
 		if r, ok := m.selected(); ok {
@@ -2158,6 +2166,27 @@ func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
 	}
 }
 
+// attachChatWith attaches the interactive stage's session and delivers
+// the composer's line as the conversation's first turn — the prose aimed
+// at the decision's run answer. Attach runs in a command (the backend
+// can take seconds to spawn), so the line rides the same closure, the
+// way the review-comments path attaches-then-sends (annotate.go); the
+// pane opens when chatAttachedMsg lands, exactly as a plain attach's
+// does, so the conversation the line opens is where the user lands.
+func (m *Shell) attachChatWith(f domain.Feature, opening string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		s, err := m.engine.Attach(ctx, f)
+		if err != nil {
+			return chatAttachedMsg{feature: f, session: s, err: err}
+		}
+		if err := m.engine.Send(ctx, f.ID, opening); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return chatAttachedMsg{feature: f, session: s}
+	}
+}
+
 // seedRounds hydrates the in-memory round counter for kind from the store
 // on loop entry, so a resumed (or relaunched) loop resumes with the rounds
 // already burned instead of a fresh budget. A failed read returns the
@@ -2178,6 +2207,14 @@ func (m *Shell) seedRounds(f domain.Feature, kind domain.RoundKind) error {
 // pane as an observer: the full scrollable transcript, with steering
 // via the input (esc detaches, the run keeps going).
 func (m *Shell) runStage(f domain.Feature) tea.Cmd {
+	return m.runStageWithNote(f, "")
+}
+
+// runStageWithNote is runStage with a note appended to the stage kickoff:
+// the composer's prose aimed at the run (a decision's run answer) or a
+// bounce's stashed note. engine.RunWith is Run's note-carrying path —
+// the kickoff the fresh session opens with says what it starts from.
+func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	// entering the plan stage hydrates the loop's round counter from the
 	// store, so a resumed plan resumes with the rounds already burned. A
 	// failed read aborts dispatch rather than guessing at a fresh budget.
@@ -2236,13 +2273,29 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 			}
 		}
 	}
+	// A stashed bounce note rides the reborn work stage's kickoff — the
+	// only delivery the rewind's note has (shell.go's bounceNotes), the
+	// driver's --bounce note lifetime in miniature. A note the decision's
+	// own answer carries wins this kickoff; the stash then still rides
+	// the next one rather than being silently dropped.
+	if note == "" {
+		if stashed, ok := m.bounceNotes[f.ID]; ok &&
+			(f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
+			delete(m.bounceNotes, f.ID)
+			note = stashed
+		}
+	}
 	// Run schedules and spawns the backend synchronously; do it in a command
 	// so a slow agent launch can't freeze the TUI.
 	return func() tea.Msg {
-		if err := m.engine.Run(f); err != nil {
+		if err := m.engine.RunWith(f, note); err != nil {
 			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " queued", clearInbox: f.ID}
+		text := string(f.ID) + " queued"
+		if note != "" {
+			text += " — your line rides the kickoff"
+		}
+		return noticeMsg{text: text, clearInbox: f.ID}
 	}
 }
 

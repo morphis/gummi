@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 type decisionKind string
@@ -78,6 +79,26 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	return &threadDecision{key: key, kind: kind, question: question, actions: actions}
 }
 
+// wordConsumer is the index of the option that consumes the composer's
+// line, or -1 when none does: the first action in the decision's order
+// whose delivery takes prose — the run that opens (or re-runs) a stage,
+// which rides the line as its kickoff note or first turn, and the bounce
+// that sends findings back with it. Everything else — advance, read the
+// spec, open the inbox — has nowhere to spend words, so a typed line sends
+// as a turn instead (DESIGN §6.3: prose is always accepted and always
+// safe; it becomes a turn, never an action nobody offered).
+func (d *threadDecision) wordConsumer() int {
+	if d == nil || d.ask != nil {
+		return -1
+	}
+	for i, action := range d.actions {
+		if action.id == "run" || action.id == "bounce" {
+			return i
+		}
+	}
+	return -1
+}
+
 func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	switch kind {
 	case decisionBudget:
@@ -92,6 +113,25 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	default:
 		return "nothing is running — choose what happens next."
 	}
+}
+
+// wordAim is the composer's emptiness driving the highlight (DESIGN
+// §6.3): while a decision is open, a typed prose line aims the cursor at
+// the option that consumes words, so the screen always states what enter
+// is about to do with them before it does. A command never aims — the
+// first word being a verb makes the line a command the parser owns (the
+// chip is its confirmation), so verb-words leave the highlight where the
+// user put it, and while a chip is pending the line belongs to the chip
+// anyway.
+func (m *Shell) wordAim(d *threadDecision) int {
+	if d == nil || d.ask != nil || m.threadChip != nil {
+		return -1
+	}
+	text := strings.TrimSpace(m.threadInput.Value())
+	if text == "" || parseInput(text).Kind != verbNone {
+		return -1
+	}
+	return d.wordConsumer()
 }
 
 func (m *Shell) syncDecision(d *threadDecision) {
@@ -113,6 +153,9 @@ func (m *Shell) syncDecision(d *threadDecision) {
 	} else {
 		m.decisionCursor = clamp(m.decisionCursor, 0, n-1)
 	}
+	if i := m.wordAim(d); i >= 0 {
+		m.decisionCursor = i
+	}
 }
 
 func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int) []string {
@@ -129,9 +172,17 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 		options = askPickerOptions(d.ask)
 		multi = d.ask.MultiPick
 	} else {
-		for _, action := range d.actions {
+		aim := m.wordAim(d)
+		for i, action := range d.actions {
+			// the aimed row's label names what enter will do with the
+			// words before it does it (DESIGN §6.3) — the only render that
+			// follows the composer's text rather than the card's state
+			label := action.label
+			if i == aim {
+				label += " with your words"
+			}
 			options = append(options, pickerOption{
-				label: action.label, detail: action.detail, key: action.key, danger: action.danger,
+				label: label, detail: action.detail, key: action.key, danger: action.danger,
 			})
 		}
 	}
@@ -183,6 +234,46 @@ func (m *Shell) moveDecision(d *threadDecision, delta int) {
 		return
 	}
 	m.decisionCursor = (m.decisionCursor + delta + n) % n
+}
+
+// answerAskWith delivers free-form prose as the answer to the open ask —
+// the chat pane's 'o' channel, which the composer makes always-on: the
+// question declared allow_free_form, so the line is the answer the ask
+// invited (DESIGN §6.3; a structured ask keeps its terms and prose
+// routes as a turn instead). Same live-session guard as the picker path.
+func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
+	sess := m.sessionFor(r.F.ID)
+	eng := m.engine
+	return func() tea.Msg {
+		if sess == nil || eng.Get(r.F.ID) != sess {
+			return noticeMsg{text: "session is no longer active", isErr: true}
+		}
+		if err := eng.Answer(context.Background(), r.F.ID, text); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return nil
+	}
+}
+
+// deliverDecisionWords sends the composer's line through the highlighted
+// word-eating option. run opens (or re-runs) the stage with the line as
+// its kickoff note — an interactive stage attaches and the line is the
+// conversation's first turn — and bounce rewinds the card with the line
+// riding the reborn work stage's kickoff, the same delivery the headless
+// --bounce note takes. Both are actions the screen is already offering,
+// highlighted and named, which is what makes answering unambiguous
+// (DESIGN §6.3) rather than a guess.
+func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, text string) tea.Cmd {
+	switch d.actions[i].id {
+	case "run":
+		if workflow.Interactive(r.F.Stage) {
+			return m.attachChatWith(r.F, text)
+		}
+		return m.runStageWithNote(r.F, text)
+	case "bounce":
+		return m.bounceStage(r.F.ID, text)
+	}
+	return nil
 }
 
 func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {

@@ -765,8 +765,17 @@ func (m *Shell) artifactFile(f *domain.Feature) string {
 
 // bounceStage sends a review/verify feature back to implement (the
 // rerun edge). Only those two stages bounce: from anywhere else the
-// edge into Implement is a forward move and belongs to g.
-func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
+// edge into Implement is a forward move and belongs to g. note is the
+// prose the composer aimed at the bounce — the findings it carries
+// rewind with the card and ride the reborn work stage's kickoff when
+// that run starts (shell.go's bounceNotes); empty for the plain b key.
+func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
+	if note != "" {
+		if m.bounceNotes == nil {
+			m.bounceNotes = map[domain.FeatureID]string{}
+		}
+		m.bounceNotes[id] = note
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
@@ -781,7 +790,11 @@ func (m *Shell) bounceStage(id domain.FeatureID) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		m.dropSession(id)
-		return noticeMsg{text: fmt.Sprintf("%s bounced back to %s", id, back), reload: true, clearInbox: id}
+		text := fmt.Sprintf("%s bounced back to %s", id, back)
+		if note != "" {
+			text += " — your line rides the next run's kickoff"
+		}
+		return noticeMsg{text: text, reload: true, clearInbox: id}
 	}
 }
 
