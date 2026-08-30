@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -149,19 +150,17 @@ type actionSpec struct {
 }
 
 // promotedActions are the ids that stay above the fold whatever the
-// stage: the marquee run/pause pair and the two artifact readers.
-// cardActionsFor promotes the rest of the visible tier from its rank map
-// — whatever nextActions recommends for this exact state — so the tier
-// reads as "what to do now" and the fold holds what is merely legal.
+// stage. The action pop-over has no permanent promotions: cardActionsFor
+// promotes the visible tier only from its rank map, so whatever
+// nextActions recommends for this exact state is what reads as "what to
+// do now" and the fold holds what is merely legal.
 //
 // This is also how an action that is valid but never the advice stays
 // out of the way without being gated out: merge and rebase on a
 // mid-implement card, the envelope, attach, duplicate. Gating them out
 // would put the table back at odds with the key handler (see below);
 // folding leaves them in the list, on their key, one row away.
-var promotedActions = map[string]bool{
-	"run": true, "pause": true, "spec": true, "diff": true,
-}
+var promotedActions = map[string]bool{}
 
 // foreignSafeActions are the actions that survive on a card another
 // gummi process is driving: reading it, and watching its live stream.
@@ -238,61 +237,99 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval)
 
 	specs := []actionSpec{
-		{"run", "enter", runLabel, runWhy, false,
-			r.DrivenAbroad || workflow.Interactive(in.stage) || autonomousStage(in.stage)},
+		{
+			"run", "enter", runLabel, runWhy, false,
+			r.DrivenAbroad || workflow.Interactive(in.stage) || autonomousStage(in.stage),
+		},
 		// the gate must stay in lockstep with boardVerb's `p`, which pauses
 		// whenever a non-interactive session exists — including a finished
 		// one, which p parks. Only the wording varies: "pause the running
 		// agent" was a lie on a session that had already stopped.
-		{"pause", "p", pauseLabel, pauseWhy, false,
-			in.sess != ""},
-		{"deps", "p", "dependencies", "open the dependency picker for this card", false,
-			in.sess == ""},
-		{"transcript", "t", "transcript", "read the session transcript (tool calls and their outputs)", false,
-			in.sess != ""},
-		{"spec", "s", "spec", "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,
-			true},
-		{"diff", "d", "diff", "read or annotate the diff (tab toggles annotate)", false,
-			needsWT},
-		{"advance", "g", advanceLabel, advanceWhy, false,
-			!doneStage || research},
-		{"bounce", "b", "bounce", "send it back to " + string(work) + " for rework", false,
-			in.stage == domain.StageReview || in.stage == domain.StageVerify},
-		{"addplan", "P", "add plan", "restore the plan stage on a quick/skip-plan feature (design phase only)", false,
+		{
+			"pause", "p", pauseLabel, pauseWhy, false,
+			in.sess != "",
+		},
+		{
+			"deps", "p", "dependencies", "open the dependency picker for this card", false,
+			in.sess == "",
+		},
+		{
+			"transcript", "t", "transcript", "read the session transcript (tool calls and their outputs)", false,
+			in.sess != "",
+		},
+		{
+			"spec", "s", "spec", "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,
+			true,
+		},
+		{
+			"diff", "d", "diff", "read or annotate the diff (tab toggles annotate)", false,
+			needsWT,
+		},
+		{
+			"advance", "g", advanceLabel, advanceWhy, false,
+			!doneStage || research,
+		},
+		{
+			"bounce", "b", "bounce", "send it back to " + string(work) + " for rework", false,
+			in.stage == domain.StageReview || in.stage == domain.StageVerify,
+		},
+		{
+			"addplan", "P", "add plan", "restore the plan stage on a quick/skip-plan feature (design phase only)", false,
 			in.kind != domain.KindBug && r.F.Skip.Plan &&
-				(in.stage == domain.StageTodo || in.stage == domain.StageBrainstorm || in.stage == domain.StageSpec)},
-		{"verify", "v", "verify", "run verify checks", false,
-			research || needsWT},
-		{"envelope", "u", "envelope", "set the budget envelope (credits; 0 = uncapped)", false,
-			true},
+				(in.stage == domain.StageTodo || in.stage == domain.StageBrainstorm || in.stage == domain.StageSpec),
+		},
+		{
+			"verify", "v", "verify", "run verify checks", false,
+			research || needsWT,
+		},
+		{
+			"envelope", "u", "envelope", "set the budget envelope (credits; 0 = uncapped)", false,
+			true,
+		},
 		// no accelerator, for the same reason duplicate has none: this is a
 		// rare, deliberate setting change, not something to fat-finger from
 		// the board. Always valid — the mode is a property of the card, not
 		// of its stage or kind.
-		{"gate", "", gateLabel, gateWhy, false,
-			true},
+		{
+			"gate", "", gateLabel, gateWhy, false,
+			true,
+		},
 		// the inbox is global, but it is also the recommended action for a
 		// card that stopped on budget — nextActions returns exactly one
 		// entry there, keyed `i`. Without a spec to land on, that
 		// recommendation (and its "top up or park from there" why) was
 		// dropped and the card said nothing about why it had stalled.
-		{"inbox", "i", "inbox", "open the needs-you inbox", false,
-			in.attn != ""},
-		{"attach", "a", "attach", "raw-attach the agent CLI in the worktree", false,
-			r.HasWorktree},
-		{"rebase", "r", "rebase", "rebase branch onto main (conflicts hand off to an agent)", false,
-			needsWT},
-		{"merge", "m", "merge", "squash-merge branch into main (review & approve the drafted message)", false,
-			needsWT && r.HasWorktree && !r.Landed},
-		{"clean", "c", "clean up", "branch landed on main — remove the worktree and branch", true,
-			needsWT && r.Landed},
+		{
+			"inbox", "i", "inbox", "open the needs-you inbox", false,
+			in.attn != "",
+		},
+		{
+			"attach", "a", "attach", "raw-attach the agent CLI in the worktree", false,
+			r.HasWorktree,
+		},
+		{
+			"rebase", "r", "rebase", "rebase branch onto main (conflicts hand off to an agent)", false,
+			needsWT,
+		},
+		{
+			"merge", "m", "merge", "squash-merge branch into main (review & approve the drafted message)", false,
+			needsWT && r.HasWorktree && !r.Landed,
+		},
+		{
+			"clean", "c", "clean up", "branch landed on main — remove the worktree and branch", true,
+			needsWT && r.Landed,
+		},
 		// no accelerator: y is "yes" in the confirm this very action raises,
 		// so binding it here made one letter mean two things one keystroke
 		// apart. The list and the command menu are how you reach it now.
-		{"duplicate", "", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
-			true},
-		{"delete", "D", "delete", "remove the worktree, branch, and record — irrecoverable", true,
-			true},
+		{
+			"duplicate", "", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
+			true,
+		},
+		{
+			"delete", "D", "delete", "remove the worktree, branch, and record — irrecoverable", true,
+			true,
+		},
 	}
 
 	// seed ordering and why text from the ranked suggestions: first
@@ -572,4 +609,72 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 		out = append(out, s.Faint.Render(ansi.Truncate("  ↳ "+a.why, w, "…")))
 	}
 	return strings.Join(out, "\n")
+}
+
+// cardActionsDialog gives the card's complete legal action inventory a
+// visible keyboard surface. The list itself remains the source of cursor,
+// folding, filtering, and rendering behaviour; the dialog only provides a
+// frame and routes modal keys to it.
+type cardActionsDialog struct {
+	feature string
+	list    *cardActionList
+	onMove  func(cursor int, expanded bool)
+	onRun   func(cardAction) tea.Cmd
+}
+
+func newCardActionsDialog(feature string, list *cardActionList, onMove func(int, bool), onRun func(cardAction) tea.Cmd) *cardActionsDialog {
+	// Folding protects an inline list's scarce rows. A modal is the explicit
+	// request for the whole inventory, so expose every action and let View's
+	// height window state exactly how many remain off-screen.
+	for i := range list.actions {
+		list.actions[i].folded = false
+	}
+	list.expanded = false
+	list.cursor = clamp(list.cursor, 0, list.Len()-1)
+	return &cardActionsDialog{feature: feature, list: list, onMove: onMove, onRun: onRun}
+}
+
+// ID implements overlay.Dialog.
+func (d *cardActionsDialog) ID() string { return "card-actions" }
+
+// HandleKey implements overlay.Dialog.
+func (d *cardActionsDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		return true, nil
+	case "up", "k":
+		d.list.Move(-1)
+		d.onMove(d.list.cursor, d.list.expanded)
+	case "down", "j":
+		d.list.Move(1)
+		d.onMove(d.list.cursor, d.list.expanded)
+	case "enter":
+		a, ok := d.list.Selected()
+		if !ok {
+			return true, nil
+		}
+		if a.id == expandID {
+			d.list.expanded = !d.list.expanded
+			d.list.cursor = clamp(d.list.cursor, 0, d.list.Len()-1)
+			d.onMove(d.list.cursor, d.list.expanded)
+			return false, nil
+		}
+		return true, d.onRun(a)
+	}
+	return false, nil
+}
+
+// View implements overlay.Dialog.
+func (d *cardActionsDialog) View(s *theme.Styles, w, h int) string {
+	frameW := min(max(w-4, 8), 76)
+	innerW := max(frameW-6, 1) // border plus two-cell padding on each side
+	listRows := max(h-8, 3)
+	footer := "↑↓ choose · enter run · esc back to the line"
+	if ansi.StringWidth(footer) > innerW {
+		footer = "↑↓ · enter run · esc back"
+	}
+	body := s.DialogTitle.Render("actions · "+d.feature) + "\n\n" +
+		d.list.View(s, innerW, listRows, true) + "\n\n" +
+		s.Faint.Render(footer)
+	return s.DialogFrame.Width(frameW).Render(body)
 }

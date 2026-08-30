@@ -129,7 +129,7 @@ func (m *Shell) threadView(w, h int) string {
 	}
 
 	// The decision receipt — what a run decided while nobody watched —
-	// belongs here, below the live stage and above the next card, because
+	// belongs here, below the live stage, because
 	// that is when it happened.
 	corrective := m.round(f.ID, domain.RoundKindCorrective)
 	receipt := buildDecisionReceipt(r.Events, stageSpendByStage(r.StageSpend),
@@ -144,12 +144,6 @@ func (m *Shell) threadView(w, h int) string {
 
 	// --- foot: pinned to the bottom ---
 	var foot []string
-	if nl := nextCardBlock(s, m.nextInputFor(r)); len(nl) > 0 {
-		for _, l := range nl {
-			foot = append(foot, clip(l))
-		}
-		foot = append(foot, "")
-	}
 	// the input is a multi-row widget: clip each row, or a stray tail of
 	// the second one lands on the first.
 	for _, l := range strings.Split(m.inputBlock(s, r, inner), "\n") {
@@ -665,22 +659,6 @@ func eventMarker(s *theme.Styles, status string) string {
 	default:
 		return s.Faint.Render("· ")
 	}
-}
-
-// nextCardBlock renders nextsteps.go's nextActions verbatim — the gate
-// card any open gate lives on. nextsteps.go stays untouched: this only
-// turns its []nextAction into thread lines, the same "key label — why"
-// shape inboxView already gives its top suggestion (inboxview.go).
-func nextCardBlock(s *theme.Styles, in nextInput) []string {
-	acts := nextActions(in)
-	if len(acts) == 0 {
-		return nil
-	}
-	lines := []string{s.Subtitle.Render("next")}
-	for _, a := range acts {
-		lines = append(lines, "  "+s.KeyHint.Render(a.key)+" "+s.Subtle.Render(a.label)+s.Faint.Render(" — "+sanitize(a.why)))
-	}
-	return lines
 }
 
 // stageSpendByStage rolls the per-stage/model spend rows up to one total

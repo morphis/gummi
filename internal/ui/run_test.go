@@ -165,10 +165,16 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 	}
 	waitForActivity(t, eng)
 
-	// second enter attaches the observer pane over the running session
+	// Watching remains available through the visible action inventory;
+	// empty-composer enter deliberately sends nothing and runs nothing.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.chat != nil {
+		t.Fatal("empty-composer enter unexpectedly ran an action")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.chat == nil {
-		t.Fatalf("enter on a running session did not attach (notice: %q)", m.notice.text)
+		t.Fatalf("watch action on a running session did not attach (notice: %q)", m.notice.text)
 	}
 	view := m.View().Content
 	if !strings.Contains(view, "Wiring the toggle.") || !strings.Contains(view, "edit theme.go") {

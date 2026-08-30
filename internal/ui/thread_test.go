@@ -203,26 +203,9 @@ func TestInputBlockWithholdsForForeignCard(t *testing.T) {
 	}
 }
 
-// TestNextCardBlockRendersNextActionsVerbatim: the thread's "next" card
-// is nextsteps.go's nextActions(nextInput), not a reimplementation of it.
-func TestNextCardBlockRendersNextActionsVerbatim(t *testing.T) {
-	in := nextInput{stage: domain.StageTodo, kind: domain.KindFeature}
-	want := nextActions(in)
-	lines := nextCardBlock(m0Styles(), in)
-	if len(lines) != len(want)+1 { // +1 for the "next" header line
-		t.Fatalf("nextCardBlock() has %d lines, want %d (header + one per action)", len(lines), len(want)+1)
-	}
-	for i, a := range want {
-		got := ansi.Strip(lines[i+1])
-		if !strings.Contains(got, a.key) || !strings.Contains(got, a.label) || !strings.Contains(got, a.why) {
-			t.Errorf("nextCardBlock line %q does not carry action %+v verbatim", got, a)
-		}
-	}
-}
-
 // TestThreadViewDegradesWithoutEvents: a card page opened with nothing
 // loaded into the event cache yet must still render the header, the
-// pinned spec line and the next card, simply omitting the folded
+// pinned spec line and composer, simply omitting the folded
 // receipts — and never panic.
 func TestThreadViewDegradesWithoutEvents(t *testing.T) {
 	m := populatedShell(120, 34)
@@ -365,6 +348,35 @@ func TestThreadInputOwnsTheKeyboardOnOpen(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'J', Text: "J"})
 	if m.threadInput.Value() != before {
 		t.Fatalf("accelerator leaked into the composer: %q", m.threadInput.Value())
+	}
+}
+
+func TestThreadInputUpOpensCardActions(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+
+	top, ok := m.Overlay.Top().(*cardActionsDialog)
+	if !ok {
+		t.Fatalf("up on the empty composer opened %T, want cardActionsDialog", m.Overlay.Top())
+	}
+	if top.list.Len() != len(top.list.actions) {
+		t.Fatalf("popover shows %d navigable rows for %d legal actions", top.list.Len(), len(top.list.actions))
+	}
+	before := top.list.cursor
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if top.list.cursor != before+1 {
+		t.Fatalf("down moved cursor to %d, want %d", top.list.cursor, before+1)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("esc did not return from the action pop-over to the composer")
+	}
+
+	m = typeString(t, m, "draft")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("up opened actions while the composer contained text")
 	}
 }
 
@@ -720,9 +732,13 @@ func TestThreadPinsTheInputToTheBottom(t *testing.T) {
 
 // A card opens on its newest event, the way a chat does — the oldest
 // stage scrolls off the top, not the live one off the bottom.
+// The height matters: with the pinned next block retired the foot is a
+// bare composer, so the body window grew by several rows and the whole
+// fixture fits at the heights these tests used to use. They need a window
+// the history actually overflows, or they assert nothing.
 func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 	m := threadWithHistory(t)
-	out := ansi.Strip(m.threadView(80, 20))
+	out := ansi.Strip(m.threadView(80, 17))
 	if !strings.Contains(out, "fresh context") {
 		t.Error("the live stage is not on screen — the thread did not open at its end")
 	}
@@ -735,7 +751,7 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 // newest, clamped at both ends so neither runs into blank space.
 func TestThreadScrollsWithPageKeys(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 22
+	m.width, m.height = 80, 19
 
 	for range 6 { // more pages than the body has, to prove the clamp
 		m.scrollThread(true)
@@ -760,7 +776,7 @@ func TestThreadScrollsWithPageKeys(t *testing.T) {
 // own end rather than inheriting how far back the last one was scrolled.
 func TestSteppingCardsResetsTheScroll(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 22
+	m.width, m.height = 80, 19
 	m.scrollThread(true)
 	if m.threadScroll == 0 {
 		t.Fatal("precondition: the thread did not scroll")

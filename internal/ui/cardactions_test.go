@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -46,16 +49,16 @@ func TestCardActionsForOrdering(t *testing.T) {
 
 	acts := cardActionsFor(in, r)
 	got := idsOf(acts)
-	// the promoted tier comes first — the three ranked entries in
-	// nextActions' order, then the two readers — and the fold holds the
-	// rest in board order. inbox is in there because attn is set: it is
-	// the spec the budget/gate recommendation (keyed i) lands on.
-	want := "verify run bounce spec diff " +
-		"deps advance envelope gate inbox attach rebase merge duplicate delete"
+	// The promoted tier is exactly the three ranked entries in
+	// nextActions' order; the fold holds the rest in board order. Inbox is
+	// in there because attn is set: it is the surface the gate
+	// recommendation (keyed i) lands on.
+	want := "verify run bounce " +
+		"deps spec diff advance envelope gate inbox attach rebase merge duplicate delete"
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
 	}
-	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps advance envelope gate inbox attach rebase merge duplicate delete" {
+	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps spec diff advance envelope gate inbox attach rebase merge duplicate delete" {
 		t.Fatalf("unexpected folded tail: %q", gotFolded)
 	}
 }
@@ -74,14 +77,14 @@ func foldedOnly(acts []cardAction, folded bool) []cardAction {
 
 func TestCardActionsForFoldsTheTail(t *testing.T) {
 	// The whole point of the fold: a mid-flow card offers a dozen-odd
-	// actions, and only the handful nextActions ranks (plus run/pause and
-	// the two readers) earn a row before you ask for the rest.
+	// actions, and only the handful nextActions ranks earn a row before
+	// you ask for the rest.
 	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictPass}
 	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
 
 	acts := cardActionsFor(in, r)
 	promoted := foldedOnly(acts, false)
-	if got, want := idsOf(promoted), "advance diff bounce run spec"; got != want {
+	if got, want := idsOf(promoted), "advance diff bounce"; got != want {
 		t.Fatalf("promoted tier:\n got  %q\n want %q", got, want)
 	}
 	if n := len(foldedOnly(acts, true)); n < foldMin {
@@ -310,6 +313,69 @@ func TestCardActionListViewContainsKeyAndLabel(t *testing.T) {
 	if !strings.Contains(lines[2], "raw-attach the agent CLI") {
 		t.Errorf("explainer line = %q, want it to describe the focused row", lines[2])
 	}
+}
+
+func TestCardActionListViewAccountsForEveryRow(t *testing.T) {
+	tests := []struct {
+		name string
+		in   nextInput
+		row  featureRow
+	}{
+		{
+			name: "mid-run",
+			in:   nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning},
+			row:  cardRow(domain.KindFeature, domain.StageImplement, false, true),
+		},
+		{
+			name: "gate",
+			in:   nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate},
+			row:  cardRow(domain.KindFeature, domain.StagePlan, false, true),
+		},
+	}
+	for _, tt := range tests {
+		for _, width := range []int{40, 100} {
+			t.Run(fmt.Sprintf("%s/%d", tt.name, width), func(t *testing.T) {
+				l := newCardActionList(cardActionsFor(tt.in, tt.row))
+				newCardActionsDialog("FD-042", l, func(int, bool) {}, func(cardAction) tea.Cmd { return nil })
+				assertRenderedActionCount(t, l, width, 8)
+			})
+		}
+	}
+}
+
+func assertRenderedActionCount(t *testing.T, l *cardActionList, width, maxRows int) {
+	t.Helper()
+	plain := ansi.Strip(l.View(theme.New(theme.GummiDark()), width, maxRows, true))
+	shown, hidden := 0, 0
+	for _, line := range strings.Split(plain, "\n") {
+		switch {
+		case strings.HasPrefix(line, sepPrefix), strings.HasPrefix(line, "  ↳"):
+			continue
+		case strings.HasPrefix(line, "  …"):
+			if _, err := fmt.Sscanf(line, "  …%d more", &hidden); err != nil {
+				t.Fatalf("parse hidden count from %q: %v", line, err)
+			}
+		default:
+			shown++
+		}
+	}
+	if got, want := shown+hidden, l.Len(); got != want {
+		t.Fatalf("rendered %d rows + stated %d hidden = %d, want Len() %d\n%s", shown, hidden, got, want, plain)
+	}
+}
+
+func TestCardActionsDialogWideGolden(t *testing.T) {
+	in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning}
+	l := newCardActionList(cardActionsFor(in, cardRow(domain.KindFeature, domain.StageImplement, false, true)))
+	d := newCardActionsDialog("FD-042", l, func(int, bool) {}, func(cardAction) tea.Cmd { return nil })
+	golden.RequireEqual(t, []byte(d.View(theme.New(theme.GummiDark()), 100, 16)))
+}
+
+func TestCardActionsDialogNarrowGolden(t *testing.T) {
+	in := nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate}
+	l := newCardActionList(cardActionsFor(in, cardRow(domain.KindFeature, domain.StagePlan, false, true)))
+	d := newCardActionsDialog("FD-042", l, func(int, bool) {}, func(cardAction) tea.Cmd { return nil })
+	golden.RequireEqual(t, []byte(d.View(theme.New(theme.GummiDark()), 40, 16)))
 }
 
 // TestCardActionListViewUnfocusedKeepsMarker: the trailing explainer

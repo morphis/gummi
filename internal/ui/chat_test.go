@@ -117,9 +117,17 @@ func toKeys(t *testing.T, m *Shell) *Shell {
 	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 }
 
+// openAndAttach opens the selected card and starts its conversation.
+//
+// The second step goes through the action pop-over rather than a second
+// enter: on the card page the composer holds the keyboard, and an empty
+// composer's enter deliberately runs nothing (DESIGN §10.19). ↑ raises
+// the inventory, where the stage's recommended action — chat, at an
+// interactive stage — is the one under the cursor.
 func openAndAttach(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
@@ -166,7 +174,9 @@ func TestChatAttachAndSend(t *testing.T) {
 		t.Fatal("detach killed the engine session")
 	}
 
-	// re-attach reuses the same session (transcript preserved)
+	// re-attach reuses the same session (transcript preserved), reached
+	// through the action pop-over like the first attach
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.chat == nil || len(m.chat.session.Snapshot().Transcript) != 4 {
 		t.Fatal("re-attach lost the transcript")

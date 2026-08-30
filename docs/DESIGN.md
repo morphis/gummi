@@ -680,11 +680,19 @@ prompt.
 
 Its history is the card's own event log rather than the session
 transcript, which holds only the live stage and is rewritten wholesale on
-every save. Guidance lives in one place — a `next` card at the bottom,
-the same ranked actions the board offers — so a gate that is open *is*
-that card and nothing on screen is offered twice. A finished autopilot
-run adds a decision receipt above it, reporting what the card chose while
-nobody was watching and carrying no actions of its own.
+every save. Guidance lives in one place, and that place is **the open
+decision** (§6.3): when the card is waiting on a human, the thread asks,
+inline, with the legal answers beside the question; when it is not, the
+foot of the page is a bare composer and nothing else. A finished
+autopilot run adds a decision receipt above it, reporting what the card
+chose while nobody was watching and carrying no actions of its own.
+
+This replaces the earlier rule, which was that guidance lived in a
+persistent `next` card at the bottom of the page. That rule put a tray of
+ranked suggestions on screen whether or not anything needed deciding, and
+it answered "what could I do" at a moment when the honest answer was
+usually "nothing — watch". The decision answers "what does this card need
+from me", and it is absent exactly when the card needs nothing.
 
 Typing into it is first-class: a line whose first word is one of a closed
 vocabulary is a command, and every other line is a message to the agent.
@@ -692,6 +700,26 @@ Nothing is fuzzy-matched, so the classification is deterministic — and
 because `verify` and `changes` are also ordinary English first words, a
 verb that spends money or changes state confirms in place rather than
 firing. The mitigation belongs at the point of action, not in the parser.
+
+**Who writes the spec.** An agent does. A line typed into the thread is a
+turn to the agent and nothing else — gummi never copies the user's prose
+into the artifact. The agent receiving that turn may judge the point worth
+keeping and write it into the Implementation notes itself, in its own
+words and under its own role, exactly as it does with everything else it
+learns; a fresh agent after a bounce then reads it because it *is* the
+spec. The one thing gummi writes on the user's behalf is an answer to a
+question the agent anchored (`spec_anchor`, §4.5): there the agent has
+already declared where the answer belongs, so writing it is executing the
+agent's instruction rather than editorialising over it.
+
+That gives corrections three levels, each saying something different
+about how much the user meant it: **a turn** (heard now, may not outlive
+the session); **a note the agent chose to keep** (it judged the point
+durable and wrote it); **a `%%` annotation** (§6.1 — attributed, anchored
+to a line, and it blocks the gate until resolved). Persistence at the
+middle level is the agent's judgment rather than a mechanism, which is
+the price of a document with one author; the annotation editor is the
+instrument for anything that must not depend on that judgment.
 
 ### 6.1 Annotation editor (line-level review, like a PR)
 
@@ -839,6 +867,65 @@ does the same from M0 — every component gets golden-file snapshot tests at
 several widths, so visual regressions fail CI, not eyes. Demo GIFs via
 `vhs`, scripted and reproducible.
 
+### 6.3 The decision — one control for every human checkpoint
+
+A card stops for a human in several unrelated-looking ways: a design gate
+opens, an agent calls `ask_user`, verify fails, a rebase conflicts, a
+stage exhausts its envelope, nothing is running and something must be
+started. These were separate mechanisms with separate surfaces — the
+inbox's `attnKind` queue, the live session's in-memory `PendingAsk`, the
+`next` block's ranked suggestions, and the headless driver's own wire
+vocabulary. They are one thing: **the card is blocked on a person, and
+here are the legal answers.**
+
+They therefore become one thing in the log. A `decision_open` event
+records that the card is waiting and what it is waiting for; the existing
+`gate` and `ask` events become its *answers*, gaining an id that
+correlates them and the id of the option chosen. Nothing new is invented
+for the closed case — those two records already exist and are already
+durable; what has never existed is a record of a decision that is still
+open, which is why an unanswered `ask_user` evaporates when the process
+exits and why the inbox has to be reconstructed by inference at startup.
+
+Rules that make the control safe:
+
+- **Options are never stored.** A `decision_open` carries the question,
+  its kind and its anchor; the answers are regenerated at render time
+  from `nextsteps.go` for a workflow decision, or from the live `Ask` for
+  an agent question. Freezing them would create a second source of truth
+  free to drift from the card's actual state — the same reason a folded
+  receipt reads credits from `stage_spend` rather than from its own
+  payload.
+- **It is pinned while open, inline once answered.** An open decision
+  holds its own region directly above the composer, so it cannot be
+  scrolled away from and cannot be squeezed out on a short terminal —
+  the thread's body is the first region to yield, and at 36×9 it yields
+  entirely. The moment it is answered it collapses into the body's
+  history at the point in time where it happened.
+- **Answering is never ambiguous.** `enter` sends the composer's line
+  when there is one, and answers the highlighted option when there is
+  not. Typing moves the highlight onto the option that consumes words and
+  relabels it to say what it will do with them, so the screen always
+  states what `enter` is about to do before it does it.
+- **There is no *other* option.** Every answer offered comes from the
+  legal set — `workflow.Next` and the stage's own guidance. Prose is
+  always accepted and always safe: it becomes a turn, never an action
+  nobody offered. This is what makes the thread a guide through the
+  workflow rather than a prompt that can be talked out of it.
+- **The guide is deterministic.** The voice that poses a workflow
+  decision is gummi's own (`AuthorSystem`), rendering `workflow` and
+  `nextsteps` in sentences. It is not a fourth role and costs no
+  credits — a model-backed conductor would be a new way to spend money to
+  be told what the compiled-in workflow already knows, and a thing the
+  user could argue with.
+
+Because the same event is what the headless driver raises at its own
+checkpoints, the two loops share the decision rather than each modelling
+it: `internal/gatepolicy`'s `RaiseGate` outcome is the single place a
+decision is opened, which is what keeps the TUI and `gummi run` from
+drifting the way `attnKind` and the driver's NDJSON vocabulary already
+have.
+
 ## 7. What gummi is not (scope guards)
 
 - Not a CI system — Verify runs local checks; real CI stays in your PR flow.
@@ -930,7 +1017,16 @@ Decided in the design interview (2026-07-03):
    then the human gate — catching design-level security/correctness
    flaws before implementation tokens are spent.
 5. **Interactive stages are gummi-native chat** over SDK sessions; raw
-   copilot attach is an escape hatch only.
+   copilot attach is an escape hatch only. **The surface is the card
+   thread** (§6): opening a card in brainstorm or spec *is* opening the
+   conversation, with no separate pane to attach to and detach from, so a
+   card has one conversation in one place for its whole length. The chat
+   pane that used to host these stages is retired into the thread, which
+   inherits what only it could do — unbounded scrollback, raw tool-output
+   expansion, the failure tail, and the option picker — since those are
+   requirements of reading a run, not of the pane that happened to hold
+   them. Watching a run another process drives stays a read-only view
+   (decision 13).
 6. **The endgame is a squash commit on main.** When you accept a
    verified feature, gummi lands its branch on local main as one squash
    commit with a message you approve — no PR or push automation; sharing
@@ -1018,6 +1114,38 @@ Decided in the design interview (2026-07-03):
     compatible with a quality floor that is never softened: it changes
     *who approves*, never *what must happen* — no implementation without
     an approved spec, no merge without review and verify, at every stop.
+
+    Stated mechanically against §6.3: autopilot may answer decisions of
+    kind `gate`, `verify`, `conflict`, `ask` and `idle`, and may not
+    answer one of kind `budget` — topping up an exhausted envelope is
+    enlarging what the card may spend, which is the definition of
+    widening its reach, and `u` never silently restarts a run. A sandbox
+    refusal is not a decision at all: it is a typed error raised before a
+    session starts, with no options and no answer from anyone, and it
+    parks. "One refusal" is therefore two statements — the one decision
+    autopilot must hand back, and the one condition that was never
+    negotiable.
+18. **Every human checkpoint is a decision, and a decision is an event.**
+    A design gate, an `ask_user`, a failed verify, a rebase conflict, an
+    exhausted envelope and an idle card with nothing running are one
+    thing — the card is blocked on a person — and they get one control
+    (§6.3) and one durable record. The `gate` and `ask` events already in
+    `card_events` become the *answer* half of that record, correlated by
+    id to a new `decision_open`; the options themselves are never stored,
+    only regenerated. This is additive: the existing kinds keep their
+    meaning, so history written before the change still reads, which
+    matters because card events are never pruned. The rule it enforces is
+    that **nothing may block a card without leaving a row** — the reason
+    an unanswered question could previously vanish with the process, and
+    the reason the needs-you queue had to be re-derived by inference at
+    every startup.
+19. **`enter` means send.** In the card thread `enter` sends the
+    composer's line when there is one and answers the open decision's
+    highlighted option when there is not; it never runs an action the
+    screen is not offering. The state that used to have no visible
+    control — a card with nothing running — becomes a decision like any
+    other, so a bare composer means exactly one thing: an agent is
+    working and there is nothing to decide.
 
 Still open:
 

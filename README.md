@@ -146,7 +146,7 @@ and the ignore rules that keep it all out of your repo's history. Then:
 3. Press `g` to advance through gates: approving the spec creates the
    worktree and branch and settles the spec into `.gummi/specs/`;
    approving the plan launches the autonomous implementer.
-4. Watch the running agent (`enter`), review the diff (`d`), and let the
+4. Watch the running agent (`↑`, then `enter`), review the diff (`d`), and let the
    review/verify loop run. `b` bounces work back with your annotations.
 5. Done means a verified branch. Press `m` to squash-merge it into main:
    the dialog drafts a suggested landing message from the spec and the
@@ -159,7 +159,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | key | action |
 |---|---|
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
-| `enter` | open the selected card's page (full width); on the page, chat (interactive stages) · run / watch (autonomous stages) |
+| `enter` | open the selected card's page (full width); in its composer, send the typed line (an empty line does nothing) |
+| `↑` | on a card page with an empty composer, open the action pop-over; `↑↓` chooses and `enter` runs |
 | `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
 | `space` | open the command menu (everything that belongs to no card); type to filter |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / read the session transcript |

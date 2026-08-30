@@ -94,15 +94,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.threadInput.Blur()
 		return nil
 	case "enter":
-		// Nothing typed means nothing to send, so enter keeps meaning what
-		// it meant before the input took the keyboard: run whatever the
-		// next card has highlighted. That is what lets the composer stay
-		// focused by default without swallowing the page's primary key.
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
-			if a, ok := m.cardActions().Selected(); ok {
-				m.clearTransientNotice()
-				return m.runCardAction(a)
-			}
 			return nil
 		}
 		return m.submitThreadInput(r.F)
@@ -111,16 +103,31 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.scrollThread(msg.String() == "pgup")
 		return nil
 	case "up", "down":
-		// an empty composer has no line to move within, so the arrows
-		// still drive the action list underneath it
+		// Up on an empty composer reveals the action inventory. Once open,
+		// the modal owns both arrows and enter; down remains ordinary
+		// textarea input until there is a visible list to move through.
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
-			m.moveAction(map[string]int{"up": -1, "down": 1}[msg.String()])
-			return nil
+			if msg.String() == "up" {
+				m.openCardActions(r)
+				return nil
+			}
 		}
 	}
 	var cmd tea.Cmd
 	m.threadInput, cmd = m.threadInput.Update(msg)
 	return cmd
+}
+
+func (m *Shell) openCardActions(r featureRow) {
+	l := m.cardActions()
+	d := newCardActionsDialog(string(r.F.ID), l, func(cursor int, expanded bool) {
+		m.actionCursor = cursor
+		m.actionsExpanded = expanded
+	}, func(a cardAction) tea.Cmd {
+		m.clearTransientNotice()
+		return m.runCardAction(a)
+	})
+	m.Overlay.Push(d)
 }
 
 // handleThreadPaste routes a bracketed paste into the thread input
