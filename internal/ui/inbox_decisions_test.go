@@ -184,3 +184,40 @@ func TestSeedInboxSkipsAbandonedDecision(t *testing.T) {
 		t.Fatalf("inbox len = %d, want 0 — the decision moved on with the stage", m.inbox.len())
 	}
 }
+
+// TestInitSeedsDecisionsWithoutAnEngine: the record outliving the process
+// that raised it is the point of it, so a board with no agent wired still
+// learns what a headless run left waiting. The query needs a store, not
+// an engine — the session inference behind it is the part that needs one.
+func TestInitSeedsDecisionsWithoutAnEngine(t *testing.T) {
+	ws, store, wt := uiRepo(t)
+	ctx := context.Background()
+	f := mkFeature(t, store, 1, "parked by a headless run", domain.StageSpec)
+	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
+		ID: "gate:headless", Kind: state.DecisionKindGate,
+		Question: "spec is ready for your decision.",
+	}, time.Date(2026, 8, 30, 9, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.Attach(store, wt, ws) // no AttachEngine: a board with no agent wired
+	if m.engine != nil {
+		t.Fatal("fixture wired an engine; this test is about a board without one")
+	}
+
+	msg := m.fetchOpenDecisions()
+	got, ok := msg.(openDecisionsMsg)
+	if !ok {
+		t.Fatalf("fetchOpenDecisions returned %T, want openDecisionsMsg", msg)
+	}
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	model, _ := m.update(got)
+	m = model.(*Shell)
+
+	if _, ok := m.inbox.get(f.ID); !ok {
+		t.Fatalf("an engine-less board did not seed the headless run's stop: %+v", m.inbox.list())
+	}
+}

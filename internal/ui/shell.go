@@ -623,20 +623,25 @@ func (m *Shell) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.attached() {
 		cmds = append(cmds, m.loadRows)
-	}
-	if m.engine != nil {
 		// Seed the needs-attention queue from the durable decision_open
 		// records (openDecisionsMsg's handler in update, which also runs
 		// reconstructInbox as the session-inference fallback) rather than
-		// rebuilding it here by inference alone. Store.OpenDecisions hits
-		// the database, and Init runs on the Update goroutine — see
+		// rebuilding it by inference alone. Store.OpenDecisions hits the
+		// database, and Init runs on the Update goroutine — see
 		// attachChat's no-IO-in-Update contract — so the query has to be a
-		// dispatched command, not a direct call. A store-less engine (never
-		// happens outside a test scaffold) falls back to the synchronous
-		// inference immediately, since there is nothing to query.
-		if m.store != nil {
-			cmds = append(cmds, m.fetchOpenDecisions)
-		} else {
+		// dispatched command, not a direct call.
+		//
+		// A store is all it needs: the record outliving the process that
+		// raised it is the whole point of it, so a board with no agent
+		// wired still learns what a headless run left waiting. The session
+		// inference behind it is the part that needs an engine, and it
+		// no-ops without one.
+		cmds = append(cmds, m.fetchOpenDecisions)
+	}
+	if m.engine != nil {
+		if !m.attached() {
+			// no store to query, so the inference is the only source there
+			// is — a scaffold-only shape, but it must still seed something.
 			m.reconstructInbox()
 		}
 		// offer to pick up any card the board stopped by quitting
