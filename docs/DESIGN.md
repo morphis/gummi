@@ -1269,6 +1269,16 @@ Still open:
 2. **Metering fidelity** — how precisely credits/premium requests can be
    attributed per stage from SDK events; may need an estimation fallback
    for the kanban cost column.
+3. **A steer typed mid-turn goes straight through.** The design drew it
+   as held — a line sent while an agent is working showed as *queued for
+   the end of the turn* — and it is not built that way: the turn is
+   dispatched immediately, and only a budget nudge is ever held back for
+   the next one. Neither is obviously right. Delivering at once is what a
+   chat does and lets a correction land before more work is done on the
+   wrong thing; holding until the turn ends keeps the agent from being
+   interrupted mid-thought and matches what the picture promised. Worth
+   settling deliberately rather than by whichever the backend happens to
+   tolerate.
 
 ## 11. Spec ingestion — decomposing an existing spec into features
 
