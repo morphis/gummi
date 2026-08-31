@@ -86,6 +86,15 @@ type chatAttachedMsg struct {
 	err     error
 }
 
+// boardOpenedMsg carries the result of engine.OpenBoard — boardthread.go's
+// ensureBoardSession dispatches it in a command for the same reason
+// chatAttachedMsg's Attach runs in one: spawning the backend can take
+// seconds, so it must not block Update.
+type boardOpenedMsg struct {
+	session *engine.BoardSession
+	err     error
+}
+
 // loadRows reads all features, their histories, and worktree presence.
 func (m *Shell) loadRows() tea.Msg {
 	ctx := context.Background()

@@ -9,10 +9,18 @@ import (
 
 // mouseShell is a shell parked on the agent tab with a live child, in
 // the given lock state, laid out so m.layout.Main is real.
+//
+// pressAlt alone no longer spawns the child: gotoTab now opens the
+// board's own conversation on the agent tab (boardthread.go) instead of
+// the hosted pty, so entering the tab and spawning it are two separate
+// steps here — ensureAgent is still exactly what agenttab.go's own
+// pty-hosting code answers to, it is just no longer reached from the
+// tab switch itself.
 func mouseShell(t *testing.T, locked bool) *Shell {
 	t.Helper()
 	m := hostedShell(t, "sleep 30")
 	pressAlt(m, '3')
+	m.ensureAgent()
 	if m.agent == nil {
 		t.Fatal("the agent tab did not spawn a child")
 	}

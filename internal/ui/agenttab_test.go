@@ -90,24 +90,37 @@ func waitForAgentCell(t *testing.T, m *Shell, want string) {
 	}
 }
 
+// Entering the agent tab no longer spawns the hosted CLI on its own:
+// gotoTab now opens the board's own conversation there instead
+// (boardthread.go), so every test below that still wants a live pty
+// calls ensureAgent itself, right after the tab switch — the pty-hosting
+// code these tests exercise (agentview.go, agenttab.go) is untouched and
+// still fully reachable, just no longer wired to the tab switch. It is
+// deleted in a later phase; until then these tests keep covering it via
+// the one entry point still left for it.
+
 func TestAgentTabSpawnsOnFirstVisitOnly(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
-
-	if cmd := pressAlt(m, '3'); cmd == nil {
-		t.Fatal("entering the agent tab should return the output pump command")
-	}
+	pressAlt(m, '3')
 	if m.tab != TabAgent {
 		t.Fatalf("tab = %v, want TabAgent", m.tab)
+	}
+
+	if cmd := m.ensureAgent(); cmd == nil {
+		t.Fatal("ensureAgent should return the output pump command on first spawn")
 	}
 	first := m.agent
 	if first == nil {
 		t.Fatal("no agent view spawned on first visit")
 	}
 
-	// leaving and coming back must not restart the child: the session and
-	// its context are the thing worth keeping across tab switches.
+	// leaving and coming back, then calling ensureAgent again — its own
+	// "no-op on every later visit" contract (agenttab.go) — must not
+	// restart the child: the session and its context are the thing worth
+	// keeping.
 	pressAlt(m, '1')
 	pressAlt(m, '3')
+	m.ensureAgent()
 	if m.agent != first {
 		t.Error("revisiting the agent tab respawned the child; the session should persist")
 	}
@@ -116,6 +129,7 @@ func TestAgentTabSpawnsOnFirstVisitOnly(t *testing.T) {
 func TestAgentTabRendersChildOutputIntoTheMainPane(t *testing.T) {
 	m := hostedShell(t, "printf Z; sleep 30")
 	pressAlt(m, '3')
+	m.ensureAgent()
 	waitForAgentCell(t, m, "Z")
 }
 
@@ -125,6 +139,7 @@ func TestAgentTabForwardsKeysToTheChild(t *testing.T) {
 	// proving: key -> emulator -> pty -> child's terminal -> cells.
 	m := hostedShell(t, "cat")
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	m.handleKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	waitForAgentCell(t, m, "y")
@@ -133,6 +148,7 @@ func TestAgentTabForwardsKeysToTheChild(t *testing.T) {
 func TestAgentTabKeepsCtrlCForTheChild(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	// ctrl+c is gummi's global quit everywhere else; on this tab the
 	// hosted CLI needs it to interrupt itself. Update must not return
@@ -151,6 +167,7 @@ func TestAgentTabKeepsCtrlCForTheChild(t *testing.T) {
 func TestAgentTabAltKeysStillLeave(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	m.handleKey(tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt})
 	if m.tab != TabBoard {
@@ -161,6 +178,7 @@ func TestAgentTabAltKeysStillLeave(t *testing.T) {
 func TestAgentTabResizeReachesTheChild(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	m.update(tea.WindowSizeMsg{Width: 90, Height: 24})
 	wantW, wantH := m.agentPaneSize()
@@ -177,6 +195,7 @@ func TestAgentTabExplainsAMissingBinary(t *testing.T) {
 	m := populatedShell(100, 30)
 	t.Cleanup(m.closeAgent)
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	if m.agent != nil {
 		t.Fatal("spawned something for a binary that does not exist")
@@ -194,5 +213,6 @@ func TestAgentTabPassesTheWorkspaceSocket(t *testing.T) {
 	m := hostedShell(t, "printf '%s' \"$GUMMI_MCP_SOCK\"; sleep 30")
 	m.SetAgentMCPSock("/tmp/gummi-ws-test.sock")
 	pressAlt(m, '3')
+	m.ensureAgent()
 	waitForAgentCell(t, m, "/")
 }

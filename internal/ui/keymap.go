@@ -88,26 +88,29 @@ func (m *Shell) activeSurface() (string, []binding) {
 	}
 }
 
-// agentBindings is the agent tab's key table, in whichever of the two
-// keyboard states it is in. It is deliberately almost empty in both:
-// listing the keys gummi does NOT take would be a lie the moment the
-// hosted CLI binds one, so each table names only what is actually true.
+// agentBindings is the agent tab's key table. It used to be two states —
+// locked/unlocked, for a hosted pty gummi only partly controlled — but
+// the tab now hosts gummi's own board conversation (boardthread.go),
+// answerable by one ordinary table like every other surface: there is no
+// foreign keymap underneath it any more to carve exceptions around, and
+// the two-state shape would be describing a mode (the input lock) that
+// hostedKeyboard() can no longer even enter (it requires a live m.agent,
+// and nothing spawns one now — gotoTab's own comment).
+//
+// withHelpKey, not a bare alt+/ row: the board composer takes every
+// printable key including ?, the same reason threadInputBindings' own
+// callers reach for it (cardPageBindings) rather than listing the key
+// unconditionally — a literal question mark typed into a board message
+// must not open the help overlay instead.
 func (m *Shell) agentBindings() []binding {
-	if m.keyboardLocked() {
-		return []binding{
-			{key: "ctrl+g", label: "unlock", help: "give the input back to gummi — the only key it keeps while locked", bar: true},
-			{key: "…", label: "to agent", help: "every other key goes to the hosted CLI, tab and alt+1/2/3 included", bar: true},
-			{key: "mouse", label: "to agent", help: "clicks, drags and the wheel reach the CLI (if it asked for them)"},
-		}
-	}
-	return []binding{
+	return withHelpKey([]binding{
+		{key: "enter", label: "send", help: "send the line to the board — it can read and act on every card through the same tools a hosted agent reaches", bar: true},
+		{key: "esc", label: "interrupt", help: "interrupt the board's in-flight turn", bar: true},
+		{key: "pgup/pgdn", label: "scroll", help: "scroll the conversation without leaving the line", bar: true},
+		m.boardOutputsBinding(),
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
-		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent", bar: true},
-		{key: "ctrl+g", label: "tab→agent", help: "hand tab, alt+1/2/3 and the mouse to the hosted CLI too", bar: true},
-		{key: "alt+/", label: "help", help: "this table — ? belongs to the CLI here, being ordinary punctuation", bar: true},
-		{key: "…", label: "to agent", help: "every other key already goes to the hosted CLI, including esc, ? and ctrl+c"},
-		{key: "mouse", label: "terminal", help: "left to the terminal's own selection until you lock"},
-	}
+		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
+	})
 }
 
 // withHelpKey appends the alt+/ row to a surface's table.

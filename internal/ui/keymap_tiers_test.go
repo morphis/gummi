@@ -220,9 +220,20 @@ func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
 // child, in the given lock state. The child is a stub: these tests are
 // about who *receives* a key, which agentKey answers before any pty is
 // involved.
+//
+// ensureAgent is called explicitly, before the tab switch rather than
+// relying on it (gotoTab's own doc comment): the agent tab now opens the
+// board's own conversation on arrival instead of the hosted pty
+// (boardthread.go), so spawning the pty and entering the tab are two
+// separate steps. Spawning first — the pty-hosting code these tests
+// exercise doesn't care what tab is active when it starts — also means
+// gotoTab's own offerLock (called right after the tab switch) actually
+// finds a live child, the same as it would have found synchronously
+// under the old wiring.
 func lockedAgentShell(t *testing.T, locked bool) *Shell {
 	t.Helper()
 	m := hostedShell(t, "sleep 30")
+	m.ensureAgent()
 	pressAlt(m, '3')
 	if m.agent == nil {
 		t.Fatal("the agent tab did not spawn a child")
@@ -393,6 +404,7 @@ func TestADeadAgentTabAnswersNothing(t *testing.T) {
 // for a key gummi is holding — which is when they land on the tab.
 func TestTheLockIsOfferedOnArrival(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
+	m.ensureAgent() // spawn first — see lockedAgentShell's own comment
 	pressAlt(m, '3')
 	if m.notice.text != lockOfferNotice {
 		t.Fatalf("arriving at the agent tab: notice = %q, want the lock offer", m.notice.text)
@@ -400,6 +412,7 @@ func TestTheLockIsOfferedOnArrival(t *testing.T) {
 	// and by the cycle, not only by alt+3 — both routes go through gotoTab
 	// precisely so they cannot drift apart on this.
 	m2 := hostedShell(t, "sleep 30")
+	m2.ensureAgent()
 	for m2.tab != TabAgent {
 		m2.nextTab()
 	}
@@ -414,6 +427,7 @@ func TestTheLockIsOfferedOnArrival(t *testing.T) {
 // the strongest place to name it.
 func TestTabLeavingTheAgentExplainsItself(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
+	m.ensureAgent() // spawn first — see lockedAgentShell's own comment
 	pressAlt(m, '3')
 	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.tab == TabAgent {
@@ -429,6 +443,7 @@ func TestTabLeavingTheAgentExplainsItself(t *testing.T) {
 // user who never tries it keeps being told, since they never learned.
 func TestTheLockStopsTeachingOnceUsed(t *testing.T) {
 	m := hostedShell(t, "sleep 30")
+	m.ensureAgent() // spawn first — see lockedAgentShell's own comment
 	pressAlt(m, '3')
 	m.toggleLock()
 	m.toggleLock()

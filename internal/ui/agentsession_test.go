@@ -141,6 +141,7 @@ func TestEnsureAgentResumesOnBackendMatch(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args.txt")
 	m := hostedShellWithBackend(t, ws, store, wt, "claude", "GUMMI_CLAUDE_BIN", argsFile)
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	if got, want := waitForFileContent(t, argsFile), "ARGS:--continue"; got != want {
 		t.Fatalf("argv = %q, want %q (matching backend should resume)", got, want)
@@ -158,6 +159,7 @@ func TestEnsureAgentNoResumeOnFirstRun(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args.txt")
 	m := hostedShellWithBackend(t, ws, store, wt, "claude", "GUMMI_CLAUDE_BIN", argsFile)
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	if got, want := waitForFileContent(t, argsFile), "ARGS:"; got != want {
 		t.Fatalf("argv = %q, want %q (a first run must not resume)", got, want)
@@ -175,6 +177,7 @@ func TestEnsureAgentNoResumeOnBackendMismatch(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args.txt")
 	m := hostedShellWithBackend(t, ws, store, wt, "claude", "GUMMI_CLAUDE_BIN", argsFile)
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	if got, want := waitForFileContent(t, argsFile), "ARGS:"; got != want {
 		t.Fatalf("argv = %q, want %q (switching backends must start clean)", got, want)
@@ -193,6 +196,7 @@ func TestEnsureAgentCodexResumeIsSubcommandEndToEnd(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args.txt")
 	m := hostedShellWithBackend(t, ws, store, wt, "codex", "GUMMI_CODEX_BIN", argsFile)
 	pressAlt(m, '3')
+	m.ensureAgent()
 
 	if got, want := waitForFileContent(t, argsFile), "ARGS:resume --last"; got != want {
 		t.Fatalf("argv = %q, want %q", got, want)
@@ -205,6 +209,7 @@ func TestEnsureAgentCodexResumeIsSubcommandEndToEnd(t *testing.T) {
 func TestAgentRestartCrashLoopGuardStopsFastExit(t *testing.T) {
 	m := hostedShell(t, "sleep 5")
 	pressAlt(m, '3')
+	m.ensureAgent()
 	first := m.agent
 	if first == nil {
 		t.Fatal("no agent view spawned")
@@ -231,6 +236,7 @@ func TestAgentRestartCrashLoopGuardStopsFastExit(t *testing.T) {
 func TestAgentRestartsAfterALongLivedSessionExits(t *testing.T) {
 	m := hostedShell(t, "sleep 5")
 	pressAlt(m, '3')
+	m.ensureAgent()
 	first := m.agent
 	if first == nil {
 		t.Fatal("no agent view spawned")
