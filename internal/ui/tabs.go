@@ -71,9 +71,21 @@ func (m *Shell) setTab(t Tab) {
 	if int(t) < 0 || int(t) >= len(m.tabDefs()) {
 		return
 	}
-	if m.tab == TabBoard && t != TabBoard {
-		m.cardOpen = false
-	}
+	// An open card page is not closed on the way out. It is a board
+	// surface like the spec view, the diff and the dependency picker, and
+	// the rule for all of them is that leaving the tab hides them and
+	// returning restores them — never discards (DESIGN §6). The card page
+	// used to be the exception, which made it the one surface where a
+	// glance at the inbox cost you your place: back on the board you were
+	// at the list, and the card you were reading — with the draft still
+	// sitting in its composer, since the input itself always survived the
+	// trip — had to be found and opened again.
+	//
+	// Nothing here needs closing to stay honest. boardSurfacesLive gates
+	// the page's rendering and its keyboard both, so while another tab is
+	// up the page is neither drawn nor listening, and the rows and events
+	// behind it are reloaded on the board's own cadence rather than
+	// frozen at the moment you left.
 	m.tab = t
 }
 

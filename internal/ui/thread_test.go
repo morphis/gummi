@@ -414,11 +414,12 @@ func TestThreadDecisionOwnsThePickerKeys(t *testing.T) {
 }
 
 // TestThreadInputSurvivesTabSwitch: the unsent buffer has to survive
-// leaving and returning to the board tab, the same rule the chat pane's
-// own m.chat already honours. Leaving the board tab closes the card page
-// itself (tabs.go's setTab — unrelated to this feature, and unchanged by
-// it), but the draft is a Shell field, not a child of that page, so it is
-// still there once the card page is reopened.
+// leaving and returning to the board tab. It always did — the draft is a
+// Shell field, not a child of the page — but it used to survive into a
+// page that had been closed behind it, so coming back meant finding the
+// card again to reach your own half-written line. The page is a board
+// surface now like every other, hidden on the way out and restored on
+// the way in (DESIGN §6), so the draft comes back where it was left.
 func TestThreadInputSurvivesTabSwitch(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -428,24 +429,20 @@ func TestThreadInputSurvivesTabSwitch(t *testing.T) {
 	if m.tab != TabInbox {
 		t.Fatalf("tab = %v, want inbox", m.tab)
 	}
-	if m.cardOpen {
-		t.Fatal("leaving the board tab should close the card page (tabs.go, unrelated to this feature)")
-	}
 	m = press(t, m, tea.KeyPressMsg{Code: '1', Mod: tea.ModAlt}) // -> board tab
 	if m.tab != TabBoard {
 		t.Fatalf("tab = %v, want board", m.tab)
 	}
+	if !m.cardOpen {
+		t.Fatal("the card page did not come back with the board tab")
+	}
 	if m.threadInput.Value() != "not sent yet" {
 		t.Fatalf("draft lost across a tab switch: %q", m.threadInput.Value())
 	}
-
-	// reopening the same card shows the preserved draft.
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.cardOpen {
-		t.Fatal("enter should reopen the card page")
-	}
-	if m.threadInput.Value() != "not sent yet" {
-		t.Fatalf("draft lost once the card page reopened: %q", m.threadInput.Value())
+	// and it is still the composer's, not the accelerators' — the trip
+	// restores the page as it was rather than as it opens fresh
+	if !m.threadInput.Focused() {
+		t.Error("the composer lost the keyboard across the trip")
 	}
 }
 

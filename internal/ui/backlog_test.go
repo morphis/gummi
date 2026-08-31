@@ -29,21 +29,46 @@ func TestBacklogCardPage120(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-// TestSwitchingTabClosesTheCardPage: the card page belongs to the board
-// tab alone (tabs.go's setTab), so leaving it has to close one left open
-// — otherwise it would reappear stale on a return trip.
-func TestSwitchingTabClosesTheCardPage(t *testing.T) {
+// TestSwitchingTabKeepsTheCardPage: the card page is a board surface
+// like the spec view and the diff, and the rule for all of them is that
+// leaving the tab hides them and coming back restores them — never
+// discards (DESIGN §6). It used to be the one exception, which made a
+// glance at the inbox cost you your place: the card you were reading was
+// closed behind you, draft and all, and had to be found again.
+func TestSwitchingTabKeepsTheCardPage(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.cardOpen {
 		t.Fatal("enter should open the card page")
 	}
+	open := m.rows[m.sel].F.ID
+	m = typeString(t, m, "a draft I have not sent")
+
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.tab != TabInbox {
 		t.Fatalf("tab should move to the inbox tab, got %v", m.tab)
 	}
-	if m.cardOpen {
-		t.Fatal("leaving the board tab should close the card page")
+	// hidden, not closed: the board's own surfaces are not drawn or
+	// listening while another tab is up, which boardSurfacesLive answers
+	// for all of them at once.
+	if m.boardSurfacesLive() {
+		t.Error("the board's surfaces should not be live on the inbox tab")
+	}
+
+	// all the way round and back
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.tab != TabBoard {
+		t.Fatalf("cycling should return to the board tab, got %v", m.tab)
+	}
+	if !m.cardOpen {
+		t.Fatal("coming back to the board dropped the open card page")
+	}
+	if got := m.rows[m.sel].F.ID; got != open {
+		t.Errorf("came back to %s, want the card that was open (%s)", got, open)
+	}
+	if got := m.threadInput.Value(); got != "a draft I have not sent" {
+		t.Errorf("draft = %q, want the unsent line still there", got)
 	}
 }
 
