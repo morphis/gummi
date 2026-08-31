@@ -794,7 +794,7 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 // given terminal height is smaller by that many.
 func TestThreadScrollsWithPageKeys(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 23
+	m.width, m.height = 80, 24
 	w, h := m.threadSize()
 
 	for range 6 { // more pages than the body has, to prove the clamp

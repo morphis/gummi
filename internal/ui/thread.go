@@ -132,6 +132,16 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		return ansi.Truncate(str, inner, "…")
 	}
 
+	// The page's regions are separated by a blank row apiece, so the
+	// conversation, the decision it ends in and the line you type on read
+	// as three things rather than one wall of text running into the
+	// chrome. They are decorations: on a short page the rows buy an
+	// option instead, which is why the 36×9 frame has none of them.
+	sep := 0
+	if h >= composerBlankRows {
+		sep = 1
+	}
+
 	// --- head: pinned to the top, most important row first ---
 	// The order is the order it yields in: composeThread trims the head to
 	// a prefix, so whatever must survive a short terminal has to come
@@ -139,18 +149,22 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// are deciding about is worth more than the strip, the spec line or
 	// the spacing around them.
 	var head []string
-	for _, l := range threadHeader(s, m, r) {
+	for i, l := range threadHeader(s, m, r) {
+		// a row between the card's title and its stage strip: they are two
+		// different questions — which card is this, and how far along is it
+		// — and stacked flush they read as one block of small print.
+		if i > 0 {
+			head = append(head, make([]string, sep)...)
+		}
 		head = append(head, clip(l))
 	}
 	head = append(head, "")
 	if sl := pinnedSpecLine(s, r, inner); sl != "" {
 		head = append(head, clip(sl), "")
 	}
-	if h >= composerBlankRows && len(head) > 0 {
+	if sep > 0 && len(head) > 0 {
 		// the leading blank separates the masthead from the page's crumb
-		// above it. It is the head's own decoration and yields on the same
-		// terms the composer's does: on a short page the row buys an
-		// option instead.
+		// above it.
 		head = append([]string{""}, head...)
 	}
 
@@ -213,17 +227,6 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 	body = trimTrailingBlanks(body)
-
-	// The page's regions are separated by a blank row apiece, so the
-	// conversation, the decision it ends in and the line you type on read
-	// as three things rather than one wall of text running into the
-	// chrome. They are decorations on the same terms as the row beneath
-	// the composer (cardPageChrome): on a short page the rows buy an
-	// option instead, which is why the 36×9 frame has none of them.
-	sep := 0
-	if h >= composerBlankRows {
-		sep = 1
-	}
 
 	// --- foot: pinned to the bottom ---
 	foot := make([]string, sep)
@@ -304,7 +307,10 @@ func composeThread(head, body, decision, foot []string, h, up int) []string {
 		remaining -= len(decision)
 	}
 	if len(head) > remaining {
-		head = head[:remaining]
+		// trailing blanks go with the trim: the head's separators are
+		// decorations, and a head cut short mid-way should not spend its
+		// last surviving row on the space under a row that no longer fits.
+		head = trimTrailingBlanks(head[:remaining])
 		body = nil
 		remaining = 0
 	} else {
