@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -42,6 +43,29 @@ func TestShellViewNarrow(t *testing.T) {
 		t.Fatal("narrow view rendered empty")
 	}
 	golden.RequireEqual(t, []byte(out))
+}
+
+// TestViewPaintsEveryCell holds the frame to its own background. The
+// shell asks for BgBase once, as tea.View's BackgroundColor — an OSC 11
+// that tmux swallows — so any cell handed over without an explicit fill
+// is painted in whatever background the terminal prefers, as is every
+// span the renderer clears with EL/ECH after a style reset. That was the
+// black bar trailing each transcript row: the bar started where the
+// line's last glyph ended and ran to the right edge.
+//
+// Two properties keep it gone: every line is padded to the full width,
+// and no line resets its style before its final cell (a mid-line reset
+// hands the erase behind it back to the terminal).
+func TestViewPaintsEveryCell(t *testing.T) {
+	const w = 80
+	for i, line := range strings.Split(populatedShell(w, 24).View().Content, "\n") {
+		if got := ansi.StringWidth(line); got != w {
+			t.Errorf("line %d is %d cells wide, want %d: %q", i, got, w, line)
+		}
+		if idx := strings.Index(line, ansi.ResetStyle); idx >= 0 && idx != len(line)-len(ansi.ResetStyle) {
+			t.Errorf("line %d drops its background mid-line: %q", i, line)
+		}
+	}
 }
 
 func TestShellQuitKeys(t *testing.T) {

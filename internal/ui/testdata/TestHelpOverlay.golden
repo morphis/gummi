@@ -1,24 +1,24 @@
-[38;2;107;80;255m╭───────────────────────────────────────────────────────────────────────────────[m
-[38;2;107;80;255m│[m
-[38;2;107;80;255m│[m  [38;2;255;96;255;1mkeys · backlog[m
-[38;2;107;80;255m│[m
-[38;2;107;80;255m│[m  [38;2;191;188;200menter    [m  [38;2;191;188;200mopen the card page — full width, with the card's actions[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mj/k ↓↑   [m  [38;2;191;188;200mselect card[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mspace    [m  [38;2;191;188;200mopen the command menu — everything that belongs to no card[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mpgup/pgdn[m  [38;2;191;188;200mjump to the first/last card[m
-[38;2;107;80;255m│[m  [38;2;191;188;200m1..9     [m  [38;2;191;188;200mjump to feature[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mp        [m  [38;2;191;188;200mpause the running agent; else open the dependency picker[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mt        [m  [38;2;191;188;200mopen the thread's transcript view — events and tool outputs[m
-[38;2;107;80;255m│[m  [38;2;191;188;200ms        [m  [38;2;191;188;200mspec — comment, resolve and approve in place[m
-[38;2;107;80;255m│[m  [38;2;191;188;200md        [m  [38;2;191;188;200mdiff — comment, resolve and approve in place[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mg        [m  [38;2;191;188;200madvance stage (gate; from verify it lands the branch on main)[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mb        [m  [38;2;191;188;200mbounce back to implement/fix[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mP        [m  [38;2;191;188;200mrestore the plan stage on a quick/skip-plan feature (design phase [m
-[38;2;107;80;255m│[m  [38;2;191;188;200mv        [m  [38;2;191;188;200mrun verify checks[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mu        [m  [38;2;191;188;200mset the budget envelope (credits; 0 = uncapped)[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mo        [m  [38;2;191;188;200mchange the card's managed repository (before worktree)[m
-[38;2;107;80;255m│[m  [38;2;191;188;200ma        [m  [38;2;191;188;200mraw-attach the agent CLI in the worktree[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mA        [m  [38;2;191;188;200mset how far this card runs on its own, and start it[m
-[38;2;107;80;255m│[m  [38;2;191;188;200mtab      [m  [38;2;191;188;200mcycle the tabs (board, inbox, agent)[m
-[38;2;107;80;255m│[m
-[38;2;107;80;255m│[m  [38;2;96;95;107m↑↓ scroll · 1–18 of 33 · esc close[m
+[38;2;107;80;255;48;2;32;31;38m╭───────────────────────────────────────────────────────────────────────────────[m
+[38;2;107;80;255;48;2;32;31;38m│[39m                                                                               [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;255;96;255;1mkeys · backlog[39;22m                                                               [m
+[38;2;107;80;255;48;2;32;31;38m│[39m                                                                               [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200menter    [39m  [38;2;191;188;200mopen the card page — full width, with the card's actions[39m          [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mj/k ↓↑   [39m  [38;2;191;188;200mselect card[39m                                                       [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mspace    [39m  [38;2;191;188;200mopen the command menu — everything that belongs to no card[39m        [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mpgup/pgdn[39m  [38;2;191;188;200mjump to the first/last card[39m                                       [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200m1..9     [39m  [38;2;191;188;200mjump to feature[39m                                                   [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mp        [39m  [38;2;191;188;200mpause the running agent; else open the dependency picker[39m          [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mt        [39m  [38;2;191;188;200mopen the thread's transcript view — events and tool outputs[39m       [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200ms        [39m  [38;2;191;188;200mspec — comment, resolve and approve in place[39m                      [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200md        [39m  [38;2;191;188;200mdiff — comment, resolve and approve in place[39m                      [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mg        [39m  [38;2;191;188;200madvance stage (gate; from verify it lands the branch on main)[39m     [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mb        [39m  [38;2;191;188;200mbounce back to implement/fix[39m                                      [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mP        [39m  [38;2;191;188;200mrestore the plan stage on a quick/skip-plan feature (design phase [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mv        [39m  [38;2;191;188;200mrun verify checks[39m                                                 [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mu        [39m  [38;2;191;188;200mset the budget envelope (credits; 0 = uncapped)[39m                   [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mo        [39m  [38;2;191;188;200mchange the card's managed repository (before worktree)[39m            [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200ma        [39m  [38;2;191;188;200mraw-attach the agent CLI in the worktree[39m                          [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mA        [39m  [38;2;191;188;200mset how far this card runs on its own, and start it[39m               [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mtab      [39m  [38;2;191;188;200mcycle the tabs (board, inbox, agent)[39m                              [m
+[38;2;107;80;255;48;2;32;31;38m│[39m                                                                               [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;96;95;107m↑↓ scroll · 1–18 of 33 · esc close[39m                                           [m

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"sort"
 	"strconv"
 	"strings"
@@ -2335,6 +2336,7 @@ func (m *Shell) View() tea.View {
 	}
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	m.draw(&canvas)
+	paintBase(canvas.Buffer, m.styles.Theme.BgBase)
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n")
 	lines := strings.Split(content, "\n")
@@ -2344,6 +2346,40 @@ func (m *Shell) View() tea.View {
 	v.Content = strings.Join(lines, "\n")
 	v.Cursor = m.agentCursor()
 	return v
+}
+
+// paintBase gives every cell of a finished frame the theme's base
+// background.
+//
+// The frame asks for its background once, as tea.View.BackgroundColor —
+// an OSC 11 that requests BgBase as the terminal's *default* background.
+// A terminal that ignores that request (tmux swallows OSC 11, and the
+// board runs inside tmux) is then left to fill, in its own default
+// background, every cell we handed it without an explicit one: the pad
+// past the end of a line, and every span the renderer clears with EL/ECH
+// after a style reset. That is the black bar trailing a transcript line
+// — the text there carries a foreground and no fill, so the erase behind
+// it runs on the terminal's black rather than on ours, and the bar stops
+// exactly where the line's last glyph does.
+//
+// Carrying the fill on the cells themselves makes the background ours in
+// every terminal, whether or not OSC 11 lands. Cells that already chose a
+// background (bands, pills, the hosted agent's own paint) keep it.
+func paintBase(b *uv.Buffer, bg color.Color) {
+	if b == nil || bg == nil {
+		return
+	}
+	for y := range b.Height() {
+		for x := range b.Width() {
+			c := b.CellAt(x, y)
+			// a zero cell is a wide glyph's placeholder, not a cell of
+			// its own: styling it would render it as a second glyph.
+			if c == nil || c.IsZero() || c.Style.Bg != nil {
+				continue
+			}
+			c.Style.Bg = bg
+		}
+	}
 }
 
 func (m *Shell) draw(scr uv.Screen) {
