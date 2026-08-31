@@ -931,6 +931,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 			}
 			select {
 			case ch <- answer:
+				e.resumeAfterAnswer(s)
 				return nil
 			default: // live waiter but the buffer is unexpectedly full
 				s.trySetPendingAsk(ask)
@@ -946,6 +947,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 				s.trySetPendingAsk(ask)
 				return err
 			}
+			e.resumeAfterAnswer(s)
 			return nil
 		}
 	}
@@ -954,6 +956,25 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// rides a fresh turn. The transcript above already recorded it; the
 	// turn must deliver it without appending it a second time.
 	return e.deliverTurn(ctx, s, answer)
+}
+
+// resumeAfterAnswer marks the session working again once the answer has
+// unblocked the agent's call, and says so on the stream.
+//
+// handleAsk drops the working flag when the question goes up, which is
+// right — a card waiting on a person is not working, and a spinner
+// beside a question you have not answered is a lie. But the two resolve
+// paths hand the turn straight back to the agent without going through
+// deliverTurn, which is where every other dispatch sets the flag. So the
+// flag stayed down over a turn that was very much alive: from the moment
+// you answered, the thread showed no spinner and no running label, and a
+// run that was busy thinking read exactly like one that had stopped.
+// Sending a message appeared to restart it only because Send sets the
+// flag on its way past.
+func (e *Engine) resumeAfterAnswer(s *Session) {
+	s.setBusy(true)
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
 }
 
 // appendAskEvent records an answered ask_user question in the card's own

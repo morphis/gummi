@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
@@ -161,5 +162,57 @@ func TestBudgetDecisionSurvivesABorrowedStageRun(t *testing.T) {
 				t.Fatalf("a genuine re-run did not close the budget stop: %+v", opens["FD-001"])
 			}
 		})
+	}
+}
+
+// TestAnswerResumesTheWorkingFlag: a question drops the session's working
+// flag while it waits on a person, and answering it hands the turn
+// straight back to the agent — through the resolver, not through
+// deliverTurn, which is where every other dispatch raises the flag again.
+// Left down, the thread showed no spinner and no running label from the
+// moment you answered, so a live turn read as a stopped one and the only
+// way to make anything move again looked like sending a message.
+func TestAnswerResumesTheWorkingFlag(t *testing.T) {
+	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
+	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	s := &Session{
+		Feature: f, Role: agent.RoleArchitect, Interactive: true,
+		state: StateInteractive, done: make(chan struct{}),
+	}
+	if !e.replace(f.ID, s) {
+		t.Fatal("replace")
+	}
+	defer s.stop()
+
+	const callID = "mcp-1"
+	ch := s.registerResolver(callID)
+	s.markResolverWaiting(callID)
+	e.handleClientTool(s, &agent.ToolCall{
+		ID: callID, Name: "ask_user",
+		Args: []byte(`{"question":"pick","options":[{"label":"a"},{"label":"b"}]}`),
+	})
+	if s.Snapshot().PendingAsk == nil {
+		t.Fatal("ask never registered")
+	}
+	if s.Snapshot().Busy {
+		t.Error("a card waiting on a person must not read as working")
+	}
+
+	delivered := make(chan string, 1)
+	go func() { delivered <- <-ch }() // the agent's blocked call, resumed
+
+	if err := e.Answer(context.Background(), f.ID, "a"); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	select {
+	case got := <-delivered:
+		if got != "a" {
+			t.Errorf("the agent's blocked call got %q, want the answer", got)
+		}
+	case <-time.After(testWaitTimeout):
+		t.Fatal("the answer never reached the agent's blocked call")
+	}
+	if !s.Snapshot().Busy {
+		t.Error("the answer resumed the agent but the session still reads idle")
 	}
 }
