@@ -790,13 +790,14 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 // the live-stage boundary still fits the newest view; the scroll amount
 // is asserted against the clamp rather than assumed.
 //
-// The band sits a row higher than it used to: the card page now spends
-// one of its rows on the blank that separates the composer from the
-// status bar (thread.go's cardPageChrome), so the thread's own budget at
-// a given terminal height is one smaller than before.
+// The band sits higher than it used to: the page now spends rows on the
+// blanks that separate its regions — the conversation from the decision,
+// the decision from the composer, and the composer from the status bar
+// (thread.go's sep and cardPageChrome) — so the body's own budget at a
+// given terminal height is smaller by that many.
 func TestThreadScrollsWithPageKeys(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 21
+	m.width, m.height = 80, 23
 	w, h := m.threadSize()
 
 	for range 6 { // more pages than the body has, to prove the clamp

@@ -200,8 +200,19 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	}
 	body = trimTrailingBlanks(body)
 
+	// The page's regions are separated by a blank row apiece, so the
+	// conversation, the decision it ends in and the line you type on read
+	// as three things rather than one wall of text running into the
+	// chrome. They are decorations on the same terms as the row beneath
+	// the composer (cardPageChrome): on a short page the rows buy an
+	// option instead, which is why the 36×9 frame has none of them.
+	sep := 0
+	if h >= composerBlankRows {
+		sep = 1
+	}
+
 	// --- foot: pinned to the bottom ---
-	var foot []string
+	foot := make([]string, sep)
 	// the input is a multi-row widget: clip each row, or a stray tail of
 	// the second one lands on the first.
 	for _, l := range strings.Split(m.inputBlock(s, r, inner), "\n") {
@@ -230,11 +241,17 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		if len(head) > 0 {
 			reserve = 1
 		}
-		budget = max(h-len(foot)-reserve, 1)
+		// sep is subtracted too: the decision's own separator is a row it
+		// will occupy, so budgeting without it would let the block grow
+		// one row past what the page can hold.
+		budget = max(h-len(foot)-reserve-sep, 1)
 	}
 	decision := m.openDecisionBlock(s, r, inner, budget)
 	for i := range decision {
 		decision[i] = clip(decision[i])
+	}
+	if len(decision) > 0 && sep > 0 {
+		decision = append(make([]string, sep), decision...)
 	}
 
 	// the measure wants every row there is, so it composes at zero — the
