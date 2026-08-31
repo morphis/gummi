@@ -2,6 +2,8 @@ package cardmint
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,8 +179,8 @@ func TestMintRejectsUnknownRepoBeforeMinting(t *testing.T) {
 
 	_, err := Mint(context.Background(), store, ws, Input{
 		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400,
-		Repo:      "nope",
-		RepoKnown: func(string) bool { return false },
+		Repo:        "nope",
+		RequireRepo: func(string) error { return errors.New("repository \"nope\" is not configured") },
 	})
 	if err == nil {
 		t.Fatal("expected an error minting against an unconfigured repo")
@@ -188,18 +190,54 @@ func TestMintRejectsUnknownRepoBeforeMinting(t *testing.T) {
 	}
 }
 
-// TestMintNilRepoKnownFailsClosed: a non-empty Repo with a nil RepoKnown
-// must be rejected, not silently accepted — cardmint has no way to ask a
-// caller-less "is this configured" question, and failing open here would
-// let an unvalidated repo name slip past every future caller that forgets
-// to wire the callback.
-func TestMintNilRepoKnownFailsClosed(t *testing.T) {
+// nameIsA is a RequireRepo that configures exactly one repository, "a" —
+// so it refuses both a wrong name and the unnamed card, the way a
+// `repos:`-only workspace's pool does.
+func nameIsA(name string) error {
+	if name == "a" {
+		return nil
+	}
+	if name == "" {
+		return errors.New("no default repository configured")
+	}
+	return fmt.Errorf("repository %q is not configured", name)
+}
+
+// TestMintNilRequireRepoFailsClosed: a non-empty Repo with a nil
+// RequireRepo must be rejected, not silently accepted — cardmint has no
+// way to ask a caller-less "is this configured" question, and failing
+// open here would let an unvalidated repo name slip past every future
+// caller that forgets to wire the callback.
+func TestMintNilRequireRepoFailsClosed(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	_, err := Mint(context.Background(), store, ws, Input{
 		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400, Repo: "a",
 	})
 	if err == nil {
-		t.Fatal("expected an error minting with Repo set and RepoKnown nil")
+		t.Fatal("expected an error minting with Repo set and RequireRepo nil")
+	}
+}
+
+// TestMintRejectsUnnamedRepoWhenThereIsNoDefault: the card that names no
+// repository is checked too. In a `repos:`-only workspace nothing
+// resolves the empty name, so such a card is unmintable — and must be
+// refused before a sequence number is spent, exactly like a misnamed one.
+// cardmint used to skip the check entirely when Repo was empty, which let
+// the card through and burned its id on something that could never cut a
+// worktree.
+func TestMintRejectsUnnamedRepoWhenThereIsNoDefault(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	seq := readSeq(t, ws.SeqFile())
+
+	_, err := Mint(context.Background(), store, ws, Input{
+		Kind: domain.KindFeature, Description: "should not exist", Envelope: 2400,
+		RequireRepo: nameIsA,
+	})
+	if err == nil {
+		t.Fatal("expected an error minting an unnamed card with no default repository")
+	}
+	if got := readSeq(t, ws.SeqFile()); got != seq {
+		t.Errorf("seq advanced on rejected mint: %s -> %s", seq, got)
 	}
 }
 
@@ -209,8 +247,8 @@ func TestMintAcceptsKnownRepo(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
 		Kind: domain.KindFeature, Description: "lives in repo a", Envelope: 2400,
-		Repo:      "a",
-		RepoKnown: func(name string) bool { return name == "a" },
+		Repo:        "a",
+		RequireRepo: func(name string) error { return nameIsA(name) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -220,9 +258,12 @@ func TestMintAcceptsKnownRepo(t *testing.T) {
 	}
 }
 
-// TestMintEmptyRepoSkipsCheck: the empty repo (workspace default) never
-// consults RepoKnown at all.
-func TestMintEmptyRepoSkipsCheck(t *testing.T) {
+// TestMintEmptyRepoWithNoChecker: a caller that wires no RequireRepo at
+// all has a single implicit repository and nothing to choose between, so
+// the unnamed card mints. (A caller that *does* wire one has it asked
+// about the unnamed card too — see
+// TestMintRejectsUnnamedRepoWhenThereIsNoDefault.)
+func TestMintEmptyRepoWithNoChecker(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	f, err := Mint(context.Background(), store, ws, Input{
 		Kind: domain.KindFeature, Description: "default repo", Envelope: 2400,

@@ -119,7 +119,7 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
-		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)"),
+		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)"),
 		acceptance: fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
 	}

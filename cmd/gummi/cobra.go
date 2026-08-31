@@ -328,7 +328,7 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
-	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)")
+	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)")
 	f.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
 }
@@ -347,7 +347,7 @@ func bindResearchFlags(cmd *cobra.Command) {
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
-	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; default: the workspace default repo)")
+	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)")
 	f.String("until", "", `stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)`)
 }
 
@@ -359,7 +359,7 @@ func bindIngestFlags(cmd *cobra.Command) {
 	f.String("profile", "", "profile the new features adopt (default: first configured)")
 	f.Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)")
 	f.Bool("yes", false, "materialize without the confirmation prompt")
-	f.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; default: the workspace default repo)")
+	f.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; required when `repos:` is configured)")
 }
 
 // bindResumeFlags mirrors registerResumeFlags.
@@ -383,7 +383,7 @@ func bindResumeFlags(cmd *cobra.Command) {
 func bindBugsIngestFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("repo", "", "owner/repo to import from (default: this repo's origin remote)")
-	f.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; default: the workspace default repo)")
+	f.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; required when `repos:` is configured)")
 	f.String("label", "bug", "issue label filter (\"\" imports all issues)")
 	f.String("state", "open", "issue state: open|closed|all")
 	f.String("profile", "", "profile the new bugs adopt (default: first configured)")
@@ -406,7 +406,7 @@ func bindBugsNewFlags(cmd *cobra.Command) {
 	f.String("desc", "", "summary of what's broken")
 	f.String("profile", "", "profile the bug adopts (default: first configured)")
 	f.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)")
-	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; default: the workspace default repo)")
+	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)")
 	f.Bool("yes", false, "create without the confirmation prompt")
 }
 

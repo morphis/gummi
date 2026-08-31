@@ -114,7 +114,7 @@ type bugIngestFlagValues struct {
 func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
 	return &bugIngestFlagValues{
 		repo:        fs.String("repo", "", "owner/repo to import from (default: this repo's origin remote)"),
-		targetRepo:  fs.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; default: the workspace default repo)"),
+		targetRepo:  fs.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; required when `repos:` is configured)"),
 		label:       fs.String("label", "bug", "issue label filter (\"\" imports all issues)"),
 		stateFilter: fs.String("state", "open", "issue state: open|closed|all"),
 		profile:     fs.String("profile", "", "profile the new bugs adopt (default: first configured)"),
@@ -253,7 +253,7 @@ func registerBugsNewFlags(fs *flag.FlagSet) *bugNewFlagValues {
 		desc:     fs.String("desc", "", "summary of what's broken"),
 		profile:  fs.String("profile", "", "profile the bug adopts (default: first configured)"),
 		envelope: fs.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)"),
-		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; default: the workspace default repo)"),
+		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)"),
 		yes:      fs.Bool("yes", false, "create without the confirmation prompt"),
 	}
 }

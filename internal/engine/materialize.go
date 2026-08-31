@@ -148,23 +148,28 @@ func resolveDeps(titles []string, byTitle map[string]domain.Feature) []string {
 	return out
 }
 
+// RequireRepo validates that name selects a configured repository, for the
+// creation surfaces that must reject an unselectable one before they mint
+// an id for it. See requireRepo.
+func (e *Engine) RequireRepo(name string) error { return e.requireRepo(name) }
+
 // requireRepo validates that the materialization target repo is selectable:
 // the empty name is the workspace default, valid only when a default exists.
 // In a repos:-only workspace there is no default, so materializing without
 // naming a repo fails here — at the point the card needs a repository —
 // rather than at startup for every command.
 func (e *Engine) requireRepo(repo string) error {
-	if e.pool == nil {
-		if repo == "" {
-			return fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
-		}
-		return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", repo)
-	}
-	if e.pool.Known(repo) {
+	if e.pool != nil && e.pool.Known(repo) {
 		return nil
 	}
 	if repo == "" {
 		return fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
 	}
-	return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", repo)
+	// Only suggest omitting --repo when omitting it would actually resolve;
+	// a `repos:` workspace has no default, so that advice would send the
+	// user straight into the error above.
+	if e.pool != nil && e.pool.Known("") {
+		return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", repo)
+	}
+	return fmt.Errorf("repository %q is not configured; name one of the configured `repos:` in .gummi/config.yaml with --repo", repo)
 }

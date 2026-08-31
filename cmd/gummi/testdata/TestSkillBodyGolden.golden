@@ -72,7 +72,7 @@ gummi run [flags] "<description>"
     --gate-approval string    who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
-    --repo string             managed repository to create the card in (a configured repos: name; default: the workspace default repo)
+    --repo string             managed repository to create the card in (a configured repos: name; required when repos: is configured)
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
     --until string            stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)
     --verbose                 add per-tool-call activity lines to the stream
@@ -83,7 +83,7 @@ gummi research [flags] "<brief>"
     --gate-approval string    who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
-    --repo string             managed repository to create the card in (a configured repos: name; default: the workspace default repo)
+    --repo string             managed repository to create the card in (a configured repos: name; required when repos: is configured)
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
     --until string            stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)
     --verbose                 add per-tool-call activity lines to the stream

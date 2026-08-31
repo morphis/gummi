@@ -22,10 +22,10 @@
 // Driver's Options or an Engine's tool arguments look like; it takes an
 // Input describing exactly the decisions a mint needs (kind, description,
 // profile, envelope, repo, external ref, route, gate approval) and a
-// RepoKnown callback, because "is this repo configured" is answered
-// differently by each caller (a driver asks its *engine.Engine; the
-// workspace endpoint asks its own *Engine directly) and cardmint has no
-// engine of its own to ask.
+// RequireRepo callback, because "can this card have this repository" is
+// answered differently by each caller (a driver asks its *engine.Engine;
+// the workspace endpoint asks its own *Engine directly) and cardmint has
+// no engine of its own to ask.
 package cardmint
 
 import (
@@ -76,14 +76,22 @@ type Input struct {
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
 	Repo string
-	// RepoKnown reports whether Repo is a configured managed repository.
-	// Required whenever Repo != ""; a nil RepoKnown with a non-empty Repo
-	// is treated as "not known" (fail closed) rather than skipping the
-	// check, since silently minting against an unvalidated repo name is
-	// exactly the bug this check exists to catch (see MaterializeBugs and
-	// (*driver.Driver).createFeature, which both reject before minting a
-	// sequence number so a typo'd repo never burns an id).
-	RepoKnown func(repo string) bool
+	// RequireRepo validates Repo, returning the error to fail the mint
+	// with. It is asked about EVERY card, the unnamed one included: a
+	// workspace configured with `repos:` has no default repository, so a
+	// card that names none is exactly as unmintable as one that names a
+	// repo that isn't there, and both must be refused before a sequence
+	// number is spent. Only the caller can tell the two apart — it owns
+	// the pool that knows whether the empty name resolves — which is why
+	// this is an error-returning callback rather than a bool: the message
+	// belongs to whoever knows what the workspace looks like.
+	//
+	// A nil RequireRepo with a non-empty Repo fails closed, since
+	// silently minting against an unvalidated repo name is exactly the
+	// bug this check exists to catch. A nil one with an empty Repo mints
+	// the card: a caller with no repo pool at all (cardmint's own tests)
+	// has a single implicit repository and nothing to choose between.
+	RequireRepo func(repo string) error
 	// ExternalRef is an optional external correlation id (e.g. a GitHub
 	// issue reference), persisted as Feature.ExternalRef and echoed by
 	// callers that track it.
@@ -120,8 +128,8 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	if in.Repo != "" && !repoKnown(in.RepoKnown, in.Repo) {
-		return domain.Feature{}, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or omit --repo to use the workspace default", in.Repo)
+	if err := requireRepo(in.RequireRepo, in.Repo); err != nil {
+		return domain.Feature{}, err
 	}
 	num, err := store.MintFeatureNum(ctx, ws.SeqFile())
 	if err != nil {
@@ -177,12 +185,16 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	return f, nil
 }
 
-// repoKnown calls check(repo) if non-nil, failing closed (not known) when
-// it isn't — see Input.RepoKnown's doc comment for why "no checker" must
-// never read as "any repo is fine".
-func repoKnown(check func(string) bool, repo string) bool {
-	if check == nil {
-		return false
+// requireRepo defers to check when the caller wired one — for every repo,
+// named or not — and otherwise fails closed on a named repo. See
+// Input.RequireRepo's doc comment for why "no checker" must never read as
+// "any repo is fine".
+func requireRepo(check func(string) error, repo string) error {
+	if check != nil {
+		return check(repo)
 	}
-	return check(repo)
+	if repo != "" {
+		return fmt.Errorf("repository %q cannot be validated: no repository checker was wired", repo)
+	}
+	return nil
 }

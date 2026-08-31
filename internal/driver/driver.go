@@ -1759,7 +1759,7 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
-		Full: d.opts.Full, Repo: d.opts.Repo, RepoKnown: d.eng.RepoKnown,
+		Full: d.opts.Full, Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 	})
 }

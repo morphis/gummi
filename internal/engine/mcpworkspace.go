@@ -627,7 +627,7 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 	}
 	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
 		Kind: kind, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
-		Repo: a.Repo, RepoKnown: e.RepoKnown, GateApproval: gate,
+		Repo: a.Repo, RequireRepo: e.RequireRepo, GateApproval: gate,
 	})
 	if err != nil {
 		return "", err
