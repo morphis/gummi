@@ -512,6 +512,31 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			return msg
 		}
+		// The switch is where a card changes hands in the TUI, so it is
+		// where the card's history records that it did — the resume path
+		// (quitresume.go) comes through here too, so both handovers a
+		// person can make leave the same row.
+		//
+		// off is the one mode that gives a card back rather than taking
+		// it, and it is written unconditionally: whether a period was
+		// actually open is the reader's question, not this one's, and a
+		// handback with nothing to close is ignored there.
+		//
+		// A takeover needs something to have actually happened. plan.to
+		// names a card the switch moves — a todo card started, a parked
+		// gate crossed — and a live session names one already working that
+		// autopilot now owns the gates of, which is the shape of setting a
+		// running card to full and going to bed. Neither holds for a card
+		// merely sitting at a gate autopilot may not cross on its own, and
+		// that is right: the mode changed, nothing was handed over, and
+		// claiming a period there would put a stretch around a card that
+		// sat still.
+		switch {
+		case mode == domain.GateOff:
+			m.logAutopilot(f.ID, state.AutopilotHandedBack, "you turned autopilot off", mode)
+		case plan.to != "" || m.sessionFor(f.ID) != nil:
+			m.logAutopilot(f.ID, state.AutopilotTookOver, "you handed it to autopilot", mode)
+		}
 		if mode == domain.GateOff || plan.to == "" {
 			// nothing to start: the plain "gate approval now …" notice
 			// already says the whole of what changed.

@@ -567,6 +567,28 @@ func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
 	_ = m.store.AppendPark(context.Background(), id, m.stageOf(id), reason, detail, "", time.Now())
 }
 
+// logAutopilot records the card changing hands: the machine starting to
+// drive it unattended (state.AutopilotTookOver) or giving it back
+// (state.AutopilotHandedBack). Best-effort and silent for the same
+// reason logPark above is — the user has already seen the switch move,
+// and a failed history write is not worth a second message contradicting
+// nothing.
+//
+// Only the two gestures that would otherwise leave no trace write a
+// handback here: turning the switch off, and parking a run by hand.
+// Every other way a card comes back to you already writes something the
+// reader treats as the end of the period — a park row, or a turn you
+// typed — so recording those again here would put two endings on one
+// ending. A handback with no period open is harmless: the reader has
+// nothing to close and ignores it.
+func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode string) {
+	if m.store == nil {
+		return
+	}
+	_ = m.store.AppendAutopilot(context.Background(), id, m.stageOf(id),
+		event, reason, mode, "", time.Now())
+}
+
 // stageOf reads the card's current stage from the loaded rows. A card
 // that is not on the board (deleted mid-flight) reports an empty stage,
 // which the log stores as-is rather than guessing.
@@ -2823,6 +2845,13 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
+		// Taking a running card back by hand is one of the two ways a
+		// period of autopilot ends without writing anything a reader could
+		// read as its end: a pause raises no attention, so it leaves no
+		// park row, and it is not a turn anyone typed. Without this the
+		// period would stay open until the next thing you happened to do
+		// on the card, dating the handback to whenever that was.
+		m.logAutopilot(f.ID, state.AutopilotHandedBack, "you parked it", f.GateApproval)
 		return noticeMsg{text: string(f.ID) + " paused", clearInbox: f.ID}
 	}
 }
