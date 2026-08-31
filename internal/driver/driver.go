@@ -642,6 +642,7 @@ func (d *Driver) OpenReviewThreads(ctx context.Context, id domain.FeatureID) (co
 // under --gate-approval=auto, so one call streams the whole tail and
 // returns only at done or an escalation.
 func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error) {
+	tookOver := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return d.fail(ctx, string(id), err)
@@ -652,6 +653,20 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 		}
 		if f.Stage == domain.StageDone || workflow.Terminal(f.Kind, f.Stage) {
 			return d.done(ctx, f)
+		}
+		if !tookOver && f.Stage != domain.StageTodo {
+			// Log the takeover once per call, and only once we're at the
+			// flow's first real stage — never at todo, which every call
+			// (fresh or resumed) passes through on its way there regardless
+			// of whether anything genuinely new is starting. Waiting for
+			// the real stage also keeps the row's dedupe key (logTookOver,
+			// below) stable across a resume that re-enters the exact stage
+			// the loop was already stuck at: logging at todo would record
+			// that transient hop's stage instead, which a resume never
+			// re-observes (todo has already been crossed), defeating the
+			// dedupe entirely.
+			d.logTookOver(f)
+			tookOver = true
 		}
 
 		var out Outcome
@@ -1612,6 +1627,51 @@ func (d *Driver) logPark(f domain.Feature, reason, detail string) {
 		return
 	}
 	_ = d.store.AppendPark(context.Background(), f.ID, f.Stage, reason, detail, "", time.Now())
+}
+
+// logTookOver records the unattended loop taking a card over, so a card
+// driven by `run`/`resume` leaves the same opening half of a thread
+// stretch that pressing the TUI's autopilot switch does — the closing
+// half is already covered: whenever this run parks the card (logPark,
+// above), the reader treats that park as the stretch's close, and this
+// package never writes a handed-back row itself.
+//
+// Gated on d.actor == "auto" and nothing else: that field is exactly the
+// "is a human or script waiting on every gate" distinction (driver.go's
+// setGate), and AutopilotPayload exists precisely so this history never
+// claims the machine acted on its own when a caller was really sitting
+// at each gate — see its doc comment in state/cardevents.go. A
+// --gate-approval=off run (d.actor == "caller") must never reach
+// AppendAutopilot from here.
+//
+// Best-effort and silent, like logPark beside it: the run's own output
+// stream and exit status already say what happened, so a failed history
+// write must not unwind or block the drive (internal/ui/shell.go's
+// logPark carries the same reasoning for the TUI side).
+//
+// No dedupe key, deliberately, and the asymmetry is the argument. The
+// caller's own tookOver flag already holds this to one row per call, so
+// the only rows a key could collapse are those of two separate calls —
+// and a key narrow enough to catch a crash-and-resume on one stage is
+// necessarily wide enough to swallow two genuinely separate runs that
+// begin at that same stage, which is the ordinary shape of a card
+// bounced back to implement twice.
+//
+// The two mistakes are not equally bad, because the reader is not
+// symmetric about them. A duplicate costs nothing: a took-over arriving
+// while a stretch is already open is ignored, since one uninterrupted
+// period of being driven is one stretch however many times the process
+// restarted inside it. A dropped row costs a whole stretch — with no
+// opening there is nothing to open one, and everything that period did
+// falls back to rendering as though no one had ever handed the card
+// over. So this writes every time and lets the reader collapse them.
+func (d *Driver) logTookOver(f domain.Feature) {
+	if d.store == nil || d.actor != "auto" {
+		return
+	}
+	reason := "the headless run is driving it unattended, with no caller waiting on its gates"
+	_ = d.store.AppendAutopilot(context.Background(), f.ID, f.Stage,
+		state.AutopilotTookOver, reason, d.opts.GateApproval, "", time.Now())
 }
 
 // escalationDecisionKind maps an escalation's stage to the decision kind
