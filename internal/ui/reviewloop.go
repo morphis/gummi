@@ -60,7 +60,7 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 	case domain.StageImplement, domain.StageFix:
 		// only auto-continue work stages that are part of a review loop
 		if m.round(id, domain.RoundKindReview) > 0 {
-			return true, m.autoStep(id, domain.StageReview, "re-reviewing")
+			return true, m.autoStep(id, domain.StageReview, "re-reviewing", "review")
 		}
 	case domain.StageInvestigate:
 		// research's work leg: mirrors Implement/Fix, but the forward edge
@@ -72,7 +72,7 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 		// review→investigate bounce burned a round); a fresh, loop-free
 		// investigate still raises the generic gate, matching Implement/Fix.
 		if m.round(id, domain.RoundKindReview) > 0 {
-			return true, m.autoStepStage(id, domain.StageShape, "re-shaping")
+			return true, m.autoStepStage(id, domain.StageShape, "re-shaping", "review")
 		}
 	}
 	return false, nil
@@ -101,7 +101,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, domain.RoundKindReview, 0)
-		return m.autoStep(id, out.Stage, "review passed → verify")
+		return m.autoStep(id, out.Stage, "review passed → verify", "review")
 	case gatepolicy.BounceToWork:
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.
@@ -110,7 +110,7 @@ func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
 		}
 		m.setRound(id, domain.RoundKindReview, m.round(id, domain.RoundKindReview)+1)
 		m.burnCorrective(id, out)
-		return m.autoStep(id, out.Stage, "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")")
+		return m.autoStep(id, out.Stage, "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")", "review")
 	default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
 			return m.writeHalt(id, err)
@@ -300,13 +300,23 @@ func (m *Shell) planStep(id domain.FeatureID, critique bool, note string) tea.Cm
 }
 
 // autoStep transitions a feature to the next loop stage and auto-runs
-// it, all in one command. The transition actor is "review" so the audit
-// trail shows the automatic loop.
-func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note string) tea.Cmd {
+// it, all in one command.
+//
+// actor names who is crossing, and it is a parameter rather than the
+// constant "review" it used to hardcode. The review→fix loop's own
+// continuations are genuinely the loop's, and still pass "review". But
+// startAutopilot (autopilot.go) reaches this same helper to run a card a
+// person has just handed over with `A`, and filing those crossings under
+// the review loop misattributed them twice over: the audit trail named a
+// loop that had nothing to do with it, and every reader of the actor —
+// the thread's own history line among them — repeated the mistake. Rows
+// written before this keep saying "review"; recorded history is not
+// rewritten to match a later correction.
+func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note, actor string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed session is stale
-		if _, err := m.store.Transition(ctx, id, to, "review"); err != nil {
+		if _, err := m.store.Transition(ctx, id, to, actor); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		nf, err := m.store.GetFeature(ctx, id)
@@ -326,11 +336,14 @@ func (m *Shell) autoStep(id domain.FeatureID, to domain.Stage, note string) tea.
 // a human's chat turn, so the loop only clears the way to it; opening it
 // (attachChat) happens on the same plain Enter as any other interactive
 // stage entry, exactly like a design-gate approval elsewhere in the TUI.
-func (m *Shell) autoStepStage(id domain.FeatureID, to domain.Stage, note string) tea.Cmd {
+//
+// actor carries the same meaning, and exists for the same reason, as
+// autoStep's above.
+func (m *Shell) autoStepStage(id domain.FeatureID, to domain.Stage, note, actor string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		m.dropSession(id) // the completed session is stale
-		if _, err := m.store.Transition(ctx, id, to, "review"); err != nil {
+		if _, err := m.store.Transition(ctx, id, to, actor); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return noticeMsg{text: string(id) + ": " + note, reload: true}

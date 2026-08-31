@@ -534,9 +534,9 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 		note := "autopilot: entering " + string(plan.to)
 		var cmd tea.Cmd
 		if autonomousStage(plan.to) {
-			cmd = m.autoStep(f.ID, plan.to, note)
+			cmd = m.autoStep(f.ID, plan.to, note, state.ActorAutopilot)
 		} else {
-			cmd = m.autoStepStage(f.ID, plan.to, note)
+			cmd = m.autoStepStage(f.ID, plan.to, note, state.ActorAutopilot)
 		}
 		return cmd()
 	}
