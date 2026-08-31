@@ -1016,7 +1016,16 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	// A period that opened inside this stage rather than before it — the
 	// switch pressed on a card already sitting here — gets its rule where
 	// it happened, above the first thing it did.
+	// A period that began before this stage did opens at the top, because
+	// there is nothing earlier here to place it against. One that began
+	// inside the stage opens inline, at its own event, further down —
+	// pressing the switch after working on a card by hand for a while is
+	// ordinary, and hoisting that rule to the top of the stage would put
+	// it above the turns you typed before you pressed it.
 	for _, st := range liveOpens {
+		if st.from >= last.enterIdx {
+			continue
+		}
 		lines = append(lines, stretchOpenLine(s, st, w), "")
 		// A period whose end also predates this stage — handed over and
 		// handed straight back before anything ran — closes here too. The
@@ -1041,6 +1050,11 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// closing event itself is not rendered as a line: for a park the
 		// rule already carries its sentence, and printing both would say
 		// one ending twice.
+		for _, st := range liveOpens {
+			if st.from == idx {
+				lines = append(lines, stretchOpenLine(s, st, w), "")
+			}
+		}
 		closed := false
 		for _, st := range stretches {
 			if st.running() || st.to != idx {

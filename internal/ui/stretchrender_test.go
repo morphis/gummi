@@ -226,3 +226,34 @@ func TestPeriodBeforeAnyStageDrawsBothRules(t *testing.T) {
 		})
 	}
 }
+
+// TestMidStageTakeoverOpensWhereItHappened: working a card by hand and
+// then handing it over partway through a stage is ordinary. The rule
+// saying so belongs after the turns you typed before pressing the
+// switch, not hoisted to the top of the stage above them — that is the
+// same misplacement the whole change exists to remove, one level down.
+func TestMidStageTakeoverOpensWhereItHappened(t *testing.T) {
+	base := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	enter, _ := json.Marshal(map[string]string{"role": "implementer"})
+
+	m := populatedShell(100, 30)
+	m.sel = 1
+	id := m.rows[m.sel].F.ID
+	m.cardEvents[id] = []state.CardEvent{
+		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base, Payload: string(enter)},
+		evMessage("implementer", "worked on this by hand first", base.Add(time.Minute)),
+		evTookOver(domain.GateFull, base.Add(2*time.Minute)),
+		evGate(domain.StageImplement, domain.StageReview, state.ActorAutopilot, base.Add(3*time.Minute)),
+	}
+	m.cardOpen = true
+	out := ansi.Strip(m.threadView(96, 30))
+
+	manual := strings.Index(out, "worked on this by hand first")
+	opened := strings.Index(out, "── autopilot took over")
+	if manual < 0 || opened < 0 {
+		t.Fatalf("thread is missing the manual turn or the period:\n%s", out)
+	}
+	if opened < manual {
+		t.Fatalf("the period opens above work that predates it:\n%s", out)
+	}
+}
