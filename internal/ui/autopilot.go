@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
@@ -107,6 +108,42 @@ func autopilotForward(f domain.Feature) (domain.Stage, bool) {
 	}
 }
 
+// autopilotHandoverEdge is the edge the `A` switch may cross when a
+// person picks it, and it is wider than autopilotForward because the
+// warrant is different.
+//
+// autopilotForward answers "may an unattended loop walk past this on its
+// own, because a turn ended". At a design stage the answer is no: an
+// architect falling silent is not a finished spec, and only you can say
+// it is. Choosing the handover IS that judgment — approving and
+// delegating in one act, with the dialog's own confirm as the deliberate
+// gesture, which is what §10.17 means by autopilot crossing its own
+// design gates.
+//
+// The card's own sequence supplies the edge rather than a hardcoded
+// table, so a quick-route spec leads to implement and a skip-flagged
+// card is never walked into a stage it does not have. Verify still
+// refuses — landing on main stays a keypress under every mode — and so
+// does review, where the loop has already given up and the choice
+// between bouncing and overruling is the one thing left that is yours.
+func autopilotHandoverEdge(f domain.Feature) (domain.Stage, bool) {
+	switch f.Stage {
+	case domain.StageReview, domain.StageVerify, domain.StageDone, domain.StageTodo:
+		return "", false
+	}
+	seq := stageSequence(f)
+	for i, st := range seq {
+		if st != f.Stage {
+			continue
+		}
+		if i+1 >= len(seq) || seq[i+1] == domain.StageDone {
+			return "", false
+		}
+		return seq[i+1], true
+	}
+	return "", false
+}
+
 // remainingStages is stageSequence's (thread.go) ordered stage list for
 // f's own workflow, truncated to start at `from` (inclusive) and to
 // exclude domain.StageDone — the one stop a non-off mode never carries a
@@ -148,12 +185,52 @@ func (m *Shell) planAutopilot(f domain.Feature) autopilotPlan {
 		}
 		return autopilotPlan{bucket: "todo"}
 	}
-	if it, ok := m.inbox.get(f.ID); ok && it.Kind == attnGate {
-		if to, ok2 := autopilotForward(f); ok2 {
-			return autopilotPlan{bucket: "gate", to: to, remaining: remainingStages(f, to)}
-		}
+	// A card sitting at a gate is one with a forward edge and nothing
+	// working on it — which is exactly the state the thread renders a
+	// decision in. It used to be read off an inbox item instead, and a
+	// design stage whose architect had simply stopped talking has no
+	// inbox item: the decision there comes from the card's own state, not
+	// the queue. So the switch read "already underway", wrote the mode
+	// and moved nothing, directly under a row promising that gates cross
+	// themselves from here.
+	if to, ok := autopilotHandoverEdge(f); ok && m.atGate(f.ID) {
+		return autopilotPlan{bucket: "gate", to: to, remaining: remainingStages(f, to)}
 	}
 	return autopilotPlan{bucket: "running"}
+}
+
+// atGate reports whether the card is sitting at a decision a person would
+// cross right now: its stage has run and has stopped.
+//
+// A parked inbox gate is the obvious case and the only one this used to
+// read. It misses the one the thread renders most: a design stage whose
+// architect has simply stopped talking leaves no inbox item at all,
+// because its decision comes from the card's own state rather than the
+// queue — so the switch called that card "already underway", wrote the
+// mode and moved nothing, under a row promising the opposite.
+//
+// A stage that has never started is deliberately not a gate. Nothing has
+// been done there yet, so handing over means running it, not walking
+// past it — crossing here would carry the card into review over an
+// implement stage that never ran.
+func (m *Shell) atGate(id domain.FeatureID) bool {
+	if it, ok := m.inbox.get(id); ok && it.Kind == attnGate {
+		return true
+	}
+	s := m.sessionFor(id)
+	if s == nil {
+		return false
+	}
+	if st := s.State(); st == engine.StateRunning || st == engine.StateQueued {
+		return false
+	}
+	if s.Snapshot().Busy {
+		return false // mid-turn: something is already going
+	}
+	// a finished autonomous run, or an interactive stage whose agent has
+	// stopped: either way the work happened and the next move is a
+	// person's. A paused one is neither — it is unfinished.
+	return s.State() == engine.StateDone || s.Interactive
 }
 
 // englishList joins stage names as "brainstorm, spec, plan, implement,
@@ -428,6 +505,17 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 		}
 		if autonomousStage(plan.to) && m.engine == nil {
 			return noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
+		}
+		if plan.bucket == "gate" {
+			// A gate is crossed through the engine's own advance floor, as
+			// autopilot's own crossing is, so every blocker a person would
+			// hit holds here too — an open %% thread, an unresolved diff
+			// comment, an unmet dependency. autoStep below transitions the
+			// card directly and would walk straight past all three.
+			// advanceStageAs also carries the continuation: crossing onto an
+			// autonomous stage starts it, which is what "let autopilot
+			// finish" is promising, and a blocked gate parks instead.
+			return m.advanceStageAs(f.ID, state.ActorAutopilot)()
 		}
 		note := "autopilot: entering " + string(plan.to)
 		var cmd tea.Cmd

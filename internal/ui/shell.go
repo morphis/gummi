@@ -1139,6 +1139,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.estimate {
 			cmds = append(cmds, m.scribeEstimate(msg.id))
 		}
+		if msg.continueTo != "" {
+			// autopilot's own crossing: the stage behind the gate is its to
+			// start, alongside the one-shot passes rather than after them —
+			// discovery and the estimate read the artifact the crossing
+			// just promoted, and neither is a precondition of running.
+			m.clearAutopilotAnswering(msg.id)
+			cmds = append(cmds, m.autopilotRun(msg.id, msg.continueTo))
+		}
 		return m, tea.Batch(cmds...)
 
 	case checksDiscoveredMsg:

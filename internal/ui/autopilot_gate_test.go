@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // gateEventsFor filters id's event log to gate events raised in stage.
@@ -408,5 +410,87 @@ func TestAutopilotAdvanceErrorParksTheCard(t *testing.T) {
 	// a human's own advance keeps the plain error notice it always had
 	if _, ok := blockedMsg("user", id, "boom").(noticeMsg); !ok {
 		t.Error("a human's advance error stopped being a plain notice")
+	}
+}
+
+// TestHandoverAtADesignGateCrossesAndStarts is the answer to "why is it
+// just a setting": picking "let autopilot finish" at a spec gate has to
+// cross that gate and start what is behind it. The switch used to read
+// such a card as already underway — a design stage leaves no inbox item,
+// which was the only thing its gate detection looked at — so it wrote
+// the mode, moved nothing, and said so in a dialog sitting under a row
+// promising that gates cross themselves from here.
+func TestHandoverAtADesignGateCrossesAndStarts(t *testing.T) {
+	m, eng := agentWorkspace(t, agent.NewFake("the approach is a token swap."))
+	m = advanceTo(t, m, domain.StageSpec)
+	m = pump(t, m, m.loadRows)
+
+	// attach the architect and let it finish a turn: the state the thread
+	// renders a spec gate in, with nothing in the inbox
+	m = openAndAttach(t, m)
+	settleChat(t, eng)
+	if hasInboxKind(m, attnGate) {
+		t.Fatal("fixture parked an inbox gate; this test is about the case with none")
+	}
+
+	f := m.rows[0].F
+	plan := m.planAutopilot(f)
+	if plan.bucket != "gate" {
+		t.Fatalf("a finished spec conversation read as %q, want a gate to cross", plan.bucket)
+	}
+	if plan.to != domain.StagePlan {
+		t.Errorf("plan.to = %s, want plan", plan.to)
+	}
+
+	msg := m.startAutopilot(f, domain.GateGates, plan)()
+	if nm, ok := msg.(noticeMsg); ok && nm.isErr {
+		t.Fatalf("handover failed: %s", nm.text)
+	}
+	model, next := m.update(msg)
+	m = model.(*Shell)
+	m = pump(t, m, next)
+
+	got, err := m.store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GateApproval != domain.GateGates {
+		t.Errorf("gate approval = %q, want gates", got.GateApproval)
+	}
+	if got.Stage == domain.StageSpec {
+		t.Fatal("the handover wrote the mode but never crossed the gate")
+	}
+	if eng.Get(f.ID) == nil {
+		t.Error("the handover crossed the gate but started nothing behind it")
+	}
+}
+
+// TestHandoverNeverWalksPastUnstartedWork: a stage that has not run is
+// not a gate. Handing over there means running it, and crossing would
+// carry the card into review over an implement stage that never
+// happened.
+func TestHandoverNeverWalksPastUnstartedWork(t *testing.T) {
+	ctx := context.Background()
+	ws, store, wt := uiRepo(t)
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.Attach(store, wt, ws)
+
+	f := domain.Feature{ID: "FD-001", Num: 1, Title: "unstarted", Slug: "unstarted", Stage: domain.StageImplement}
+	if err := store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	if plan := m.planAutopilot(f); plan.bucket == "gate" {
+		t.Errorf("an implement stage that never ran read as a gate to cross: %+v", plan)
+	}
+}
+
+// TestHandoverRefusesTheLandingGate: verify keeps its own rule under
+// every mode — landing on main stays a keypress, so handing over there
+// crosses nothing.
+func TestHandoverRefusesTheLandingGate(t *testing.T) {
+	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageReview} {
+		if _, ok := autopilotHandoverEdge(domain.Feature{Stage: stage}); ok {
+			t.Errorf("the handover offered to cross %s on its own", stage)
+		}
 	}
 }

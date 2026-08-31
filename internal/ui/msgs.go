@@ -558,11 +558,21 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 		note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
 		discover := res.EnteredWorktree
 		est := res.From == domain.StageSpec && m.envelope == 0
-		if discover || est {
-			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est}
-		}
+		continueTo := domain.Stage("")
 		if actor == state.ActorAutopilot && autonomousStage(res.To) {
-			return autopilotContinueMsg{id: id, to: res.To, note: note}
+			continueTo = res.To
+		}
+		if discover || est {
+			// the crossing entered a worktree, so the background one-shot
+			// passes go first — but the continuation rides along rather
+			// than being dropped here. Entering a worktree is exactly what
+			// a spec approval does, which made this the branch autopilot's
+			// own handover took, and it used to end the story: the gate
+			// crossed and nothing behind it ever started.
+			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est, continueTo: continueTo}
+		}
+		if continueTo != "" {
+			return autopilotContinueMsg{id: id, to: continueTo, note: note}
 		}
 		return noticeMsg{text: note, reload: true, clearInbox: id}
 	}
@@ -576,6 +586,13 @@ type worktreeEnteredMsg struct {
 	note     string
 	discover bool // run check auto-discovery
 	estimate bool // run the scribe envelope pass
+	// continueTo is the autonomous stage autopilot's own crossing opened
+	// and must now start, or "" for a crossing nobody is continuing. It
+	// rides this message because entering a worktree is what a spec
+	// approval does, so the handover's own crossing lands here rather
+	// than on autopilotContinueMsg — and dropping it here left the gate
+	// crossed with nothing behind it running.
+	continueTo domain.Stage
 }
 
 // checksDiscoveredMsg follows the check auto-discovery pass, whether or

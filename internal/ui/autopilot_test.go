@@ -365,6 +365,14 @@ func TestAutopilotCrossesParkedGateToAutonomousStage(t *testing.T) {
 	if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 		t.Fatalf("startAutopilot failed: %s", nm.text)
 	}
+	// the crossing itself happens inside the command, through the engine's
+	// advance floor; starting the stage behind the gate is what the Update
+	// loop does with the message it hands back (msgs.go's
+	// autopilotContinueMsg), so the message has to be routed to see it.
+	model, next := m.update(msg)
+	m = model.(*Shell)
+	m = pump(t, m, next)
+
 	got, err := m.store.GetFeature(context.Background(), f.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -376,8 +384,12 @@ func TestAutopilotCrossesParkedGateToAutonomousStage(t *testing.T) {
 	if s == nil {
 		t.Fatal("crossing the gate did not schedule a session for the new stage")
 	}
-	if st := s.State(); st != engine.StateRunning && st != engine.StateQueued {
-		t.Errorf("session state = %v, want running or queued", st)
+	// running, queued, or already finished: pump drains the started run to
+	// completion and the fake answers instantly, so what is being asserted
+	// is that a session for the new stage exists at all — the crossing
+	// started the work rather than only writing a mode.
+	if st := s.State(); st != engine.StateRunning && st != engine.StateQueued && st != engine.StateDone {
+		t.Errorf("session state = %v, want the new stage started", st)
 	}
 }
 
