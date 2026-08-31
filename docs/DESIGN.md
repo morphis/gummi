@@ -703,9 +703,31 @@ transcript, which holds only the live stage and is rewritten wholesale on
 every save. Guidance lives in one place, and that place is **the open
 decision** (§6.3): when the card is waiting on a human, the thread asks,
 inline, with the legal answers beside the question; when it is not, the
-foot of the page is a bare composer and nothing else. A finished
-autopilot run adds a decision receipt above it, reporting what the card
-chose while nobody was watching and carrying no actions of its own.
+foot of the page is a bare composer and nothing else.
+
+**What a card decided on its own is history, not status.** A period the
+card ran itself is drawn where it happened — an opening rule where
+autopilot took over, its own crossings and answers as ordinary lines
+among the folded receipts they fall between, and a closing rule naming
+how it ended: it parked, it finished, or you took it back. The tally of
+what it decided sits under the closing rule, and the whole stretch
+scrolls up as the conversation grows, because it is a record of a period
+that is over.
+
+This replaces a rollup pinned to the end of the body. That block was
+rebuilt from the card's whole event log on every frame and appended after
+the live stage, so every new line — the agent's output, and your own
+turns after you took the card back — was inserted above it and it stayed
+permanently the newest thing on the page. It was a status banner filed as
+history, and it outlived by hours the away period it described. The rule
+it broke is §6.3's own: a decision collapses into the body's history at
+the point in time where it happened.
+
+Only two autopilot facts stay pinned, and both are about *now*: the mode
+on the masthead, and — while a decision is open that autopilot is
+answering — whose that decision is. Both are read from live state every
+frame, so neither can outlive its truth. Nothing about the past is
+pinned, and nothing pinned has to be cleaned up afterwards.
 
 This replaces the earlier rule, which was that guidance lived in a
 persistent `next` card at the bottom of the page. That rule put a tray of
@@ -1263,8 +1285,8 @@ Decided in the design interview (2026-07-03):
     card's *stored* gate-approval mode, while the headless driver
     auto-answers off a flag of its own — so `resume --autonomous` on a
     card stored at `gates` filed the machine's own answers as a person's,
-    and the morning receipt, which is a filter over exactly that field,
-    dropped them. The answerer declares itself on the event instead of
+    and the record of what autopilot decided, which is a filter over
+    exactly that field, dropped them. The answerer declares itself on the event instead of
     the event guessing from state that was never about the answerer. That
     correction is the honest headline of this work: the durable open row
     is the larger idea, but this is the part that was wrong before.

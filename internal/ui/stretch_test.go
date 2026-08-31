@@ -305,3 +305,62 @@ func TestLandingGateIsPerCard(t *testing.T) {
 		t.Fatal("done is not a gate — it is the far side of one")
 	}
 }
+
+// withSeqs stamps a fixture's events with the seq numbers the store
+// would have given them, since the unread mark is a seq and a fixture
+// built in memory has none.
+func withSeqs(events []state.CardEvent) []state.CardEvent {
+	for i := range events {
+		events[i].Seq = int64(i + 1)
+	}
+	return events
+}
+
+// TestUnseenStretchIsTheNewestClosedOne: the thread opens on a period
+// that both ended and ended since the reader last looked. One still
+// running is never it — the card is moving, and the end of the
+// conversation is where a reader should land.
+func TestUnseenStretchIsTheNewestClosedOne(t *testing.T) {
+	events := withSeqs([]state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),                     // 1
+		evPark(domain.StageImplement, "first", at(10)),         // 2
+		evMessage(string(engine.AuthorUser), "looked", at(20)), // 3
+		evTookOver(domain.GateFull, at(30)),                    // 4
+		evPark(domain.StageImplement, "second", at(40)),        // 5
+		evTookOver(domain.GateFull, at(50)),                    // 6
+	})
+	sts := autopilotStretches(aFeature(), events)
+	if len(sts) != 3 {
+		t.Fatalf("stretches = %d, want 3: %+v", len(sts), sts)
+	}
+
+	got, ok := unseenStretch(sts, events, 0)
+	if !ok || got.reason != "second" {
+		t.Fatalf("unseen = %+v (ok=%v), want the newest CLOSED period, not the open one", got, ok)
+	}
+
+	// Having read to the end, nothing is unread — including the period
+	// still running, which never counts.
+	if _, ok := unseenStretch(sts, events, newestSeq(events)); ok {
+		t.Fatal("everything read, but a period still reported unread")
+	}
+
+	// Read only as far as the first park: the second period is unread.
+	got, ok = unseenStretch(sts, events, 2)
+	if !ok || got.reason != "second" {
+		t.Fatalf("unseen = %+v (ok=%v), want the second period", got, ok)
+	}
+}
+
+// TestNoUnseenStretchWithoutAPeriod: a card nobody handed over has
+// nothing to jump to, however much history it carries.
+func TestNoUnseenStretchWithoutAPeriod(t *testing.T) {
+	events := withSeqs([]state.CardEvent{
+		evGate(domain.StageReview, domain.StageFix, "review", at(0)),
+		evPark(domain.StageFix, "needs you", at(10)),
+	})
+	sts := autopilotStretches(aFeature(), events)
+	if _, ok := unseenStretch(sts, events, 0); ok {
+		t.Fatal("a card with no period reported one to jump to")
+	}
+}
