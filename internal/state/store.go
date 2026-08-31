@@ -222,6 +222,23 @@ CREATE INDEX IF NOT EXISTS card_events_feature ON card_events(feature_id, seq);
 CREATE INDEX IF NOT EXISTS card_events_kind ON card_events(kind, feature_id);
 CREATE UNIQUE INDEX IF NOT EXISTS card_events_dedupe
 	ON card_events(feature_id, dedupe) WHERE dedupe <> '';
+
+-- The high-water mark of a card's event log that this machine's viewer
+-- has already read: the card_events.seq up through which everything has
+-- been seen. One row per card that has ever been marked seen; a card
+-- with no row (every card, before the first mark) reads as 0, which is
+-- also below card_events' lowest real seq (an AUTOINCREMENT PK starts
+-- at 1) — so "no row" and "seen through seq 0" agree on the same
+-- meaning: never seen.
+--
+-- This is deliberately per-viewer, not part of a card's shared meaning:
+-- gummi has no notion of separate users, so "seen" means "seen on this
+-- machine's database," nothing more, and it is stored well away from
+-- the features table for that reason.
+CREATE TABLE IF NOT EXISTS card_last_seen (
+	feature_id TEXT    PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	seq        INTEGER NOT NULL DEFAULT 0
+);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.
