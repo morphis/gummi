@@ -156,10 +156,54 @@ type AskPayload struct {
 	Choice string `json:"choice,omitempty"` // option id, not free text
 }
 
+// AutopilotTookOver and AutopilotHandedBack are the two values
+// AutopilotPayload.Event can carry: the autonomous loop starting to
+// drive a card unattended, and it stopping. See AutopilotPayload for why
+// both get their own explicit row.
+const (
+	AutopilotTookOver   = "took-over"
+	AutopilotHandedBack = "handed-back"
+)
+
 // AutopilotPayload is the JSON shape of an EventAutopilot event's
-// Payload: the gate-approval mode a card was set to.
+// Payload.
+//
+// card_events needs no migration to carry this: kind and payload are
+// already generic TEXT columns (see the CREATE TABLE in store.go) shared
+// by every event kind, so a new payload shape for an already-declared
+// kind is purely additive at the Go layer.
+//
+// Why an explicit row rather than deriving the boundary from the first
+// machine-actored gate/ask event: every derivation mis-attributes the
+// case where a human drove a stage by hand and THEN pressed the
+// autopilot switch at its gate — walking backwards to the enclosing
+// stage would swallow that human-driven stage into the machine's
+// stretch. For a record whose entire job is saying honestly what the
+// machine did without you, a heuristic that quietly over-claims is the
+// worst available failure.
+//
+// Why both directions are written and not just the takeover: the close
+// can also be inferred from a park row or the next human-actored event,
+// but gestures like turning the switch off write nothing at all, so
+// those two get an explicit handed-back row. (Everything else here
+// deliberately closes late rather than not at all.)
+//
+// Mode records which stop (domain.GateGates or domain.GateFull) was in
+// force when it took over, because the same card can be handed over
+// twice under different modes and this row is the only place that
+// distinction survives.
+//
+// Event is additive, in the same sense as GatePayload.ID and
+// AskPayload.ID/Choice/By: appendAutopilotEvent (below) predates the
+// took-over/handed-back vocabulary and, on every SetGateApproval mode
+// change, writes a row with only Mode set and Event left as "". That row
+// records a different fact — the card's stored gate-approval mode
+// changed to X — not a takeover or a handback, so a reader must check
+// Event and not treat every EventAutopilot row as a boundary crossing.
 type AutopilotPayload struct {
-	Mode string `json:"mode"`
+	Event  string `json:"event"`
+	Reason string `json:"reason,omitempty"`
+	Mode   string `json:"mode,omitempty"`
 }
 
 // CardEvent is one row of a card's event log.
@@ -314,6 +358,9 @@ func (s *Store) QuitStopped(ctx context.Context) (map[domain.FeatureID]bool, err
 // SetGateApproval call within the same second can't double-write, while
 // a later, deliberate change back to the same mode still gets its own
 // event.
+//
+// This predates AppendAutopilot's took-over/handed-back vocabulary and
+// leaves Event unset on purpose — see the note on AutopilotPayload.Event.
 func (s *Store) appendAutopilotEvent(ctx context.Context, id domain.FeatureID, mode string) {
 	payload, err := json.Marshal(AutopilotPayload{Mode: mode})
 	if err != nil {
@@ -388,6 +435,27 @@ func (s *Store) AppendPark(ctx context.Context, id domain.FeatureID, stage domai
 	}
 	return s.AppendEvent(ctx, CardEvent{
 		Feature: id, Stage: stage, Kind: EventPark, At: at,
+		Payload: string(payload), Dedupe: dedupe,
+	})
+}
+
+// AppendAutopilot records the autonomous loop taking a card over (event
+// = AutopilotTookOver) or handing it back (event = AutopilotHandedBack),
+// with why and under which gate-approval mode. Best-effort by contract,
+// like AppendPark: the takeover or handback is something the caller has
+// already acted on, so a log failure must never unwind it — callers
+// discard the error.
+//
+// dedupe may be empty; pass a key only where the same boundary can
+// otherwise be recorded twice (e.g. a retried save re-observing the same
+// takeover).
+func (s *Store) AppendAutopilot(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, dedupe string, at time.Time) error {
+	payload, err := json.Marshal(AutopilotPayload{Event: event, Reason: reason, Mode: mode})
+	if err != nil {
+		return fmt.Errorf("encoding autopilot event for %s: %w", id, err)
+	}
+	return s.AppendEvent(ctx, CardEvent{
+		Feature: id, Stage: stage, Kind: EventAutopilot, At: at,
 		Payload: string(payload), Dedupe: dedupe,
 	})
 }

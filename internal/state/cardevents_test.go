@@ -318,6 +318,148 @@ func TestCardEventsSurviveRestart(t *testing.T) {
 	}
 }
 
+// TestAppendAutopilotRoundTrip appends a takeover and a handback through
+// AppendAutopilot and checks the payload comes back with every field
+// intact, decoded straight out of Store.Events — the same path a future
+// reader (a decision receipt, a card history view) will use.
+func TestAppendAutopilotRoundTrip(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Autopilot round trip")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	at1 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	at2 := at1.Add(time.Hour)
+
+	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
+		AutopilotTookOver, "", domain.GateFull, "", at1); err != nil {
+		t.Fatalf("AppendAutopilot (took-over): %v", err)
+	}
+	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
+		AutopilotHandedBack, "gate-approval switched off", domain.GateFull, "", at2); err != nil {
+		t.Fatalf("AppendAutopilot (handed-back): %v", err)
+	}
+
+	got, err := s.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Events = %+v, want 2 rows", got)
+	}
+
+	for i, ev := range got {
+		if ev.Kind != EventAutopilot {
+			t.Errorf("event %d: Kind = %q, want %q", i, ev.Kind, EventAutopilot)
+		}
+		if ev.Stage != domain.StageImplement {
+			t.Errorf("event %d: Stage = %q, want %q", i, ev.Stage, domain.StageImplement)
+		}
+	}
+
+	var took AutopilotPayload
+	if err := json.Unmarshal([]byte(got[0].Payload), &took); err != nil {
+		t.Fatal(err)
+	}
+	if took.Event != AutopilotTookOver || took.Reason != "" || took.Mode != domain.GateFull {
+		t.Errorf("took-over payload = %+v, want {Event:%q Reason:%q Mode:%q}",
+			took, AutopilotTookOver, "", domain.GateFull)
+	}
+	if !got[0].At.Equal(at1) {
+		t.Errorf("took-over At = %v, want %v", got[0].At, at1)
+	}
+
+	var back AutopilotPayload
+	if err := json.Unmarshal([]byte(got[1].Payload), &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Event != AutopilotHandedBack || back.Reason != "gate-approval switched off" || back.Mode != domain.GateFull {
+		t.Errorf("handed-back payload = %+v, want {Event:%q Reason:%q Mode:%q}",
+			back, AutopilotHandedBack, "gate-approval switched off", domain.GateFull)
+	}
+	if !got[1].At.Equal(at2) {
+		t.Errorf("handed-back At = %v, want %v", got[1].At, at2)
+	}
+	if got[0].Seq >= got[1].Seq {
+		t.Errorf("took-over seq %d not before handed-back seq %d", got[0].Seq, got[1].Seq)
+	}
+}
+
+// TestAppendAutopilotInterleavedSeqOrder checks autopilot rows come back
+// in the same global seq order as every other kind, interleaved rather
+// than grouped — the event log has one order, not one per kind.
+func TestAppendAutopilotInterleavedSeqOrder(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Interleaved")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	next := func() time.Time {
+		at = at.Add(time.Minute)
+		return at
+	}
+
+	if err := s.AppendEvent(ctx, CardEvent{
+		Feature: f.ID, Stage: domain.StageImplement, Kind: EventStageEnter, At: next(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
+		AutopilotTookOver, "resumed unattended", domain.GateGates, "", next()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendEvent(ctx, CardEvent{
+		Feature: f.ID, Stage: domain.StageImplement, Kind: EventMessage, At: next(), Payload: "hi",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
+		AutopilotHandedBack, "", domain.GateGates, "", next()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendEvent(ctx, CardEvent{
+		Feature: f.ID, Stage: domain.StageImplement, Kind: EventStageExit, At: next(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantKinds := []string{EventStageEnter, EventAutopilot, EventMessage, EventAutopilot, EventStageExit}
+	if len(got) != len(wantKinds) {
+		t.Fatalf("got %d events, want %d", len(got), len(wantKinds))
+	}
+	for i, w := range wantKinds {
+		if got[i].Kind != w {
+			t.Errorf("event %d: Kind = %q, want %q", i, got[i].Kind, w)
+		}
+		if i > 0 && got[i-1].Seq >= got[i].Seq {
+			t.Errorf("event %d: seq %d not ascending after %d", i, got[i].Seq, got[i-1].Seq)
+		}
+	}
+
+	var took, back AutopilotPayload
+	if err := json.Unmarshal([]byte(got[1].Payload), &took); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(got[3].Payload), &back); err != nil {
+		t.Fatal(err)
+	}
+	if took.Event != AutopilotTookOver {
+		t.Errorf("first autopilot row Event = %q, want %q", took.Event, AutopilotTookOver)
+	}
+	if back.Event != AutopilotHandedBack {
+		t.Errorf("second autopilot row Event = %q, want %q", back.Event, AutopilotHandedBack)
+	}
+}
+
 // TestSetGateApprovalRecordsAutopilotEvent: every caller funnels a
 // card's gate-approval mode change through SetGateApproval, so it's the
 // single place that write can be logged — the decision receipt (and any
