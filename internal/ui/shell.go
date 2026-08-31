@@ -267,8 +267,9 @@ func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 
 // NewShell builds a detached shell (splash + empty board).
 func NewShell(t theme.Theme, version string) *Shell {
+	styles := theme.New(t)
 	m := &Shell{
-		styles:         theme.New(t),
+		styles:         styles,
 		version:        version,
 		now:            time.Now,
 		checks:         map[domain.FeatureID][]verify.Result{},
@@ -277,7 +278,10 @@ func NewShell(t theme.Theme, version string) *Shell {
 		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
 		expandedStages: map[string]bool{},
 		copilotHint:    true,
-		threadInput:    newThreadInput(),
+		// the composer is themed from the same styles as everything else
+		// on the page; left on the widget's own defaults it renders in raw
+		// ANSI and reads as a foreign box (threadinput.go).
+		threadInput: newThreadInput(styles),
 	}
 	// indirected through m rather than passing m.now's current value: a
 	// test fixes m.now after this constructor returns (agentWorkspace,

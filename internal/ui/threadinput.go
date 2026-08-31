@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -49,15 +50,50 @@ type pendingChip struct {
 	remainder string
 }
 
-// newThreadInput builds the thread's persistent input, mirroring
-// chat.go's newChatInput for visual consistency with the pane it stands
-// in for.
-func newThreadInput() textarea.Model {
+// newThreadInput builds the composer, styled from the theme rather than
+// left on the widget's own defaults.
+//
+// Those defaults are raw ANSI palette indices — white on black for the
+// focused line, grey 240 for the placeholder — which is the one thing
+// §6.2 rules out outright ("no raw colors in components, ever"). Against
+// a truecolor charmtone surface they do not read as a quiet input; they
+// read as a foreign box someone pasted onto the page, because that is
+// literally what a 16-colour fill is next to everything around it.
+//
+// So: no fill at all. The composer is a line you type on, and the page
+// already separates it with a row of its own (thread.go's sep) and names
+// what enter does in the bar. What marks it is the ┃ down its left edge,
+// which takes the accent while the keyboard is here and goes faint when
+// it is not — the same question every other surface answers by colour,
+// answered the same way (§6.2: focus is answerable without moving).
+//
+// No rule above or below it either. In this thread ─── already means a
+// boundary in time: the stage rule and the folded receipts both use it
+// that way, and spending the same glyph on a fixed edge of the chrome
+// would make a spatial divider read as a temporal one.
+func newThreadInput(s *theme.Styles) textarea.Model {
 	in := textarea.New()
 	in.Placeholder = "message the agent, or a verb (approve, verify, diff…)"
 	in.CharLimit = 4000
 	in.ShowLineNumbers = false
 	in.SetHeight(1)
+
+	plain := lipgloss.NewStyle()
+	st := in.Styles()
+	st.Focused.Base = plain
+	st.Focused.CursorLine = plain // the fill this used to paint is the whole complaint
+	st.Focused.Text = s.Base
+	st.Focused.Placeholder = s.Faint
+	st.Focused.Prompt = s.KeyHint
+	st.Blurred.Base = plain
+	st.Blurred.CursorLine = plain
+	st.Blurred.Text = s.Subtle
+	st.Blurred.Placeholder = s.Faint
+	st.Blurred.Prompt = s.Faint
+	// the cursor is the accent: with no fill behind it, it is what says
+	// the keyboard is here and where the next character lands.
+	st.Cursor.Color = s.Theme.Accent
+	in.SetStyles(st)
 	return in
 }
 
