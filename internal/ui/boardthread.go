@@ -78,11 +78,40 @@ func (m *Shell) boardTabPlaceholder(w, h int) string {
 	return centeredNotice(w, h, msg)
 }
 
+// boardPageBlank is the board thread's share of cardPageChrome: the
+// blank row between the composer and the status bar, which stops two
+// chrome-coloured rows stacked with nothing between them from reading
+// as one control (cardPageChrome's own reason for it).
+//
+// The card thread gets that row from its page wrapper — cardPageView
+// spends it around threadView. The agent tab has no wrapper: mainView
+// hands boardThreadView the whole pane, so without this the board
+// composer sat flush against the status bar while the card composer,
+// the same widget, kept its row of air. It is the same budget
+// (composerBlankRows) minus the crumb the board thread has no analogue
+// for, so on any terminal tall enough to afford it the two composers
+// sit at the same distance from the bottom, and on one that is not,
+// both give the row up together.
+func boardPageBlank(h int) int {
+	if h >= composerBlankRows {
+		return 1
+	}
+	return 0
+}
+
 // boardThreadView renders the board session's conversation into the
 // agent tab's main pane — threadView's counterpart, minus the measure
 // split (maxBoardScroll below does that itself, the same way
-// maxThreadScroll does for the card thread).
-func (m *Shell) boardThreadView(w, h int) string { return m.boardThreadRender(w, h, false) }
+// maxThreadScroll does for the card thread), plus the composer's blank
+// row, which cardPageView spends on the card thread's behalf.
+func (m *Shell) boardThreadView(w, h int) string {
+	blank := boardPageBlank(h)
+	out := m.boardThreadRender(w, max(h-blank, 1), false)
+	if blank > 0 {
+		out += "\n"
+	}
+	return out
+}
 
 // boardThreadRender is boardThreadView with the measure pass split out,
 // mirroring threadRender's own doc comment: measuring lays the head and
@@ -241,7 +270,10 @@ func (m *Shell) boardInputBlock(w int) string {
 // stale height.
 func (m *Shell) boardThreadSize() (int, int) {
 	main := m.computeLayout().Main
-	return main.Dx(), max(main.Dy(), 1)
+	// less boardPageBlank's row, so the height the thread is rendered at
+	// and the height its scroll clamp is measured against cannot
+	// disagree — threadSize resolves cardPageChrome for the same reason.
+	return main.Dx(), max(main.Dy()-boardPageBlank(main.Dy()), 1)
 }
 
 // maxBoardScroll is maxThreadScroll's board-thread counterpart: how far

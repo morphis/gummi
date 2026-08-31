@@ -261,3 +261,79 @@ func TestAgentChoiceClearsBoardFailure(t *testing.T) {
 		t.Errorf("boardErr = %q, want it cleared so the next visit retries", m.boardErr)
 	}
 }
+
+// composerBottomGap reports how many rows sit between the composer's ┃
+// and the bottom of the rendered frame — the status bar plus whatever
+// air the surface keeps above it. It reads the glyph rather than the
+// placeholder text because the two surfaces word their placeholders
+// differently (boardPlaceholderText vs placeholderText) while sharing
+// the one marker newThreadInput draws down the composer's left edge.
+func composerBottomGap(t *testing.T, view string) int {
+	t.Helper()
+	rows := strings.Split(ansi.Strip(view), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.Contains(rows[i], "┃") {
+			return len(rows) - 1 - i
+		}
+	}
+	t.Fatalf("no composer found in:\n%s", view)
+	return 0
+}
+
+// TestBoardComposerKeepsTheCardThreadsBottomGap: the two surfaces render
+// the same composer widget, so it must sit the same distance above the
+// status bar on both. The card thread gets its blank row from its page
+// wrapper (cardPageView spends cardPageChrome's `blank` around
+// threadView); the agent tab has no wrapper, so before boardPageBlank
+// the board composer sat flush against the status bar and the two
+// chrome-coloured rows read as one control — exactly what that row
+// exists to prevent.
+func TestBoardComposerKeepsTheCardThreadsBottomGap(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+
+	card := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !card.cardOpen {
+		t.Fatal("precondition: enter should open the card page")
+	}
+	want := composerBottomGap(t, card.View().Content)
+
+	board := openBoardTab(t, m)
+	if got := composerBottomGap(t, board.View().Content); got != want {
+		t.Errorf("board composer sits %d rows above the bottom, card thread %d — the same widget on two surfaces must keep the same air", got, want)
+	}
+	if want < 2 {
+		t.Fatalf("precondition: at this height the card thread should keep a blank row under its composer, got a gap of %d", want)
+	}
+}
+
+// TestBoardComposerGivesUpItsBlankRowWhenShort: the blank is chrome, and
+// chrome yields to the control on a short terminal — the same trade
+// cardPageChrome makes. Both surfaces have to make it at the same
+// height, or the "same air" guarantee above just moves the mismatch to
+// small windows.
+func TestBoardComposerGivesUpItsBlankRowWhenShort(t *testing.T) {
+	if got := boardPageBlank(composerBlankRows); got != 1 {
+		t.Errorf("boardPageBlank(%d) = %d, want 1 — the row is affordable at its own budget", composerBlankRows, got)
+	}
+	if got := boardPageBlank(composerBlankRows - 1); got != 0 {
+		t.Errorf("boardPageBlank(%d) = %d, want 0 — below the budget the composer sits flush", composerBlankRows-1, got)
+	}
+}
+
+// TestBoardScrollClampMatchesTheRenderedHeight: boardThreadSize feeds
+// both the page step and maxBoardScroll, so it has to subtract the same
+// row boardThreadView spends — a clamp measured against a taller window
+// than the one drawn stops paging one row short of the oldest line.
+func TestBoardScrollClampMatchesTheRenderedHeight(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+	m = openBoardTab(t, m)
+
+	main := m.computeLayout().Main
+	if main.Dy() < composerBlankRows {
+		t.Skipf("pane too short (%d rows) for the blank row to be in play", main.Dy())
+	}
+	_, h := m.boardThreadSize()
+	if want := main.Dy() - 1; h != want {
+		t.Errorf("boardThreadSize height = %d, want %d — the pane less boardPageBlank's row", h, want)
+	}
+}
