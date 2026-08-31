@@ -74,6 +74,11 @@ func (d *rsForm) ID() string { return "new-research" }
 // any other field exactly — the button row's Create button is just another
 // way to reach the same action.
 func (d *rsForm) submit() (bool, tea.Cmd) {
+	if d.repo.needsChoice() {
+		d.errText = repoUnchosenErr
+		d.setFocus(rsFieldRepo)
+		return false, nil
+	}
 	brief := strings.TrimSpace(d.brief.Value())
 	if brief == "" {
 		d.errText = "brief required"
@@ -143,6 +148,8 @@ func (d *rsForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case rsFieldRepo:
 		if delta, ok := selectCycleDelta(key.String()); ok {
 			d.repo.cycle(delta)
+			// clear a pending "choose a repo" refusal the moment they do
+			d.errText = ""
 		}
 	case rsFieldProfile:
 		if delta, ok := selectCycleDelta(key.String()); ok {

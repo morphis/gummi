@@ -18,6 +18,13 @@ func TestRepoPickerCycles(t *testing.T) {
 		return nil
 	})
 
+	// the candidates are the configured names and nothing else — a
+	// workspace with `repos:` has no default to offer, so a card carrying
+	// the empty name starts on the first configured repo, not on a
+	// "default" entry that could never resolve.
+	if len(d.candidates) != 2 || d.candidates[0] != "a" {
+		t.Fatalf("candidates = %q, want [a b] with no default entry", d.candidates)
+	}
 	if d.idx != 0 {
 		t.Fatalf("initial idx = %d, want 0 for empty repo", d.idx)
 	}
@@ -25,17 +32,23 @@ func TestRepoPickerCycles(t *testing.T) {
 		t.Fatalf("forward idx = %d, want 1", d.idx)
 	}
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !closed || !called || submitted != "a" {
-		t.Fatalf("submit: closed=%v called=%v submitted=%q, want true/true/%q", closed, called, submitted, "a")
+	if !closed || !called || submitted != "b" {
+		t.Fatalf("submit: closed=%v called=%v submitted=%q, want true/true/%q", closed, called, submitted, "b")
 	}
 
 	// backward from idx 0 wraps to the last candidate
 	d = newRepoPickerDialog(f, []string{"a", "b"}, func(string) tea.Cmd { return nil })
-	if _, _ = d.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft}); d.idx != 2 {
-		t.Fatalf("backward wrap idx = %d, want 2", d.idx)
+	if _, _ = d.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft}); d.idx != 1 {
+		t.Fatalf("backward wrap idx = %d, want 1", d.idx)
 	}
 	if d.candidates[d.idx] != "b" {
 		t.Fatalf("backward wrap candidate = %q, want %q", d.candidates[d.idx], "b")
+	}
+
+	// a card already on a named repo opens on that repo
+	d = newRepoPickerDialog(domain.Feature{ID: "FD-002", Repo: "b"}, []string{"a", "b"}, func(string) tea.Cmd { return nil })
+	if d.idx != 1 {
+		t.Fatalf("idx for a card on repo b = %d, want 1", d.idx)
 	}
 
 	// esc cancels without calling onSubmit

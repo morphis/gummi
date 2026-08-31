@@ -103,16 +103,18 @@ func TestBoardKeyOChangesRepo(t *testing.T) {
 	if _, ok := m.Overlay.Top().(*repoPickerDialog); !ok {
 		t.Fatalf("o did not open repo picker, got %T", m.Overlay.Top())
 	}
+	// the picker opens on the first configured repo (there is no "default"
+	// candidate), so one step right selects the second.
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(m.rows) != 1 {
 		t.Fatalf("reload dropped rows: %d", len(m.rows))
 	}
-	if m.rows[0].F.Repo != "a" {
-		t.Errorf("repo after o→right→enter = %q, want %q", m.rows[0].F.Repo, "a")
+	if m.rows[0].F.Repo != "b" {
+		t.Errorf("repo after o→right→enter = %q, want %q", m.rows[0].F.Repo, "b")
 	}
-	if m.notice.text != "FD-001: repo set to a" {
+	if m.notice.text != "FD-001: repo set to b" {
 		t.Errorf("notice = %q, want success message", m.notice.text)
 	}
 }

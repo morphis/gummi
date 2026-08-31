@@ -91,14 +91,37 @@ func fieldRow(s *theme.Styles, focused bool, label string) string {
 	return "  " + s.Faint.Render(label)
 }
 
+// repoUnset is repoPicker.idx while no repository has been chosen. A
+// picker with a real choice to make starts here and can never return:
+// choosing is one-way, because there is nothing sensible to go back to.
+const repoUnset = -1
+
+// repoUnsetLabel is what the field reads before a choice is made. It is
+// deliberately not the name of any repository — a label that named one
+// would look like a selection that had already happened.
+const repoUnsetLabel = "choose one"
+
+// repoUnchosenErr is the refusal every creation dialog shows when it has a
+// repository choice to make and none has been made.
+const repoUnchosenErr = "select a repository — a workspace with `repos:` has no default"
+
 // repoPicker is the repo-selector field shared by every managed-repo
-// creation dialog (feature, bug, research, ingest): index 0 selects the
-// workspace default when one actually resolves, the rest are the
-// configured `repos:` names in display order. hasDefault marks whether
-// the empty name resolves (worktree.Pool.Known("")) — a repos:-only
-// workspace with no `repo:` root never offers "default", so a dialog can
-// never submit a choice that would only fail later at worktree creation
-// (worktree/pool.go ManagerForName).
+// creation dialog (feature, bug, research, ingest). It offers exactly one
+// of two things, never a mix:
+//
+//   - the configured `repos:` names, when there are any. Such a workspace
+//     has no default repository at all (config.ResolveRepos leaves the
+//     default root empty whenever `repos:` is set, and setting `repo:`
+//     alongside it is a config error), so "default" is not among the
+//     options — offering it would submit a choice that only fails later
+//     at worktree creation (worktree/pool.go ManagerForName).
+//   - the lone workspace default, when no names are configured. It is not
+//     a choice, so the dialogs skip the field entirely.
+//
+// hasDefault (worktree.Pool.Known("")) therefore only matters in the
+// second case. With more than one option the picker starts unselected and
+// the dialogs refuse to submit until the user picks one: a card must name
+// its repository outright rather than inherit a silent default.
 type repoPicker struct {
 	names      []string
 	hasDefault bool
@@ -106,34 +129,47 @@ type repoPicker struct {
 }
 
 func newRepoPicker(names []string, hasDefault bool) repoPicker {
-	return repoPicker{names: names, hasDefault: hasDefault}
+	p := repoPicker{names: names, hasDefault: hasDefault}
+	if len(p.options()) > 1 {
+		p.idx = repoUnset
+	}
+	return p
 }
 
-// options are the labels offered, in cycle order.
+// options are the labels offered, in cycle order: the configured names
+// when there are any, else the lone default when one resolves.
 func (p *repoPicker) options() []string {
-	opts := make([]string, 0, len(p.names)+1)
-	if p.hasDefault {
-		opts = append(opts, "default")
+	if len(p.names) > 0 {
+		return p.names
 	}
-	return append(opts, p.names...)
+	if p.hasDefault {
+		return []string{"default"}
+	}
+	return nil
 }
 
 // multi reports whether there's an actual choice to make; dialogs render
 // and tab into the field only then.
 func (p *repoPicker) multi() bool { return len(p.options()) > 1 }
 
+// chosen reports whether a repository has actually been selected. It is
+// false only while a multi-option picker sits at its initial unset state.
+func (p *repoPicker) chosen() bool { return p.idx != repoUnset }
+
+// needsChoice reports that this dialog cannot submit yet: there is a
+// repository to choose and the user has not chosen one.
+func (p *repoPicker) needsChoice() bool { return p.multi() && !p.chosen() }
+
 // name returns the currently selected repository name: "" for the
-// workspace default, else the configured name.
+// workspace default (and while nothing is selected), else the configured
+// name. Callers that could act on an unselected picker must check
+// needsChoice first — "" would otherwise read as the default.
 func (p *repoPicker) name() string {
 	opts := p.options()
-	if len(opts) == 0 {
+	if len(opts) == 0 || !p.chosen() || len(p.names) == 0 {
 		return ""
 	}
-	i := p.idx % len(opts)
-	if p.hasDefault && i == 0 {
-		return ""
-	}
-	return opts[i]
+	return opts[p.idx%len(opts)]
 }
 
 // label is the display label for the selected repository.
@@ -142,15 +178,29 @@ func (p *repoPicker) label() string {
 	if len(opts) == 0 {
 		return "default"
 	}
+	if !p.chosen() {
+		return repoUnsetLabel
+	}
 	return opts[p.idx%len(opts)]
 }
 
-// cycle steps the selection by delta (wrapping in either direction).
+// cycle steps the selection by delta (wrapping in either direction). The
+// first step off the unset state lands on an end of the list, so → picks
+// the first repository and ← the last.
 func (p *repoPicker) cycle(delta int) {
 	total := len(p.options())
-	if total > 1 {
-		p.idx = ((p.idx+delta)%total + total) % total
+	if total <= 1 {
+		return
 	}
+	if !p.chosen() {
+		if delta > 0 {
+			p.idx = 0
+		} else {
+			p.idx = total - 1
+		}
+		return
+	}
+	p.idx = ((p.idx+delta)%total + total) % total
 }
 
 // featureRoute is one state of the workflow-route field: a display label
@@ -241,6 +291,14 @@ func (d *featureForm) ID() string { return "new-feature" }
 // any other field exactly — the button row's Create button is just another
 // way to reach the same action.
 func (d *featureForm) submit() (bool, tea.Cmd) {
+	// the repository is the first field and the one choice with no
+	// default, so it is the first thing refused — and focus moves there,
+	// since the field is what the message is asking about.
+	if d.repo.needsChoice() {
+		d.errText = repoUnchosenErr
+		d.setFocus(featureFieldRepo)
+		return false, nil
+	}
 	desc := strings.TrimSpace(d.desc.Value())
 	if desc == "" {
 		d.errText = "description must not be empty"
@@ -315,6 +373,8 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case featureFieldRepo:
 		if delta, ok := selectCycleDelta(key.String()); ok {
 			d.repo.cycle(delta)
+			// clear a pending "choose a repo" refusal the moment they do
+			d.errText = ""
 		}
 	case featureFieldProfile:
 		if delta, ok := selectCycleDelta(key.String()); ok {

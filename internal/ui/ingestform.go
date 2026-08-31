@@ -127,6 +127,11 @@ func (d *ingestForm) ID() string { return "ingest-spec" }
 // any other field exactly — the button row's Decompose button is just
 // another way to reach the same action.
 func (d *ingestForm) submit() (bool, tea.Cmd) {
+	if d.repo.needsChoice() {
+		d.errText = repoUnchosenErr
+		d.setFocus(ingestFieldRepo)
+		return false, nil
+	}
 	path := strings.TrimSpace(d.path.Value())
 	if path == "" {
 		d.errText = "give a path to a spec file"
@@ -174,6 +179,8 @@ func (d *ingestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case ingestFieldRepo:
 		if delta, ok := selectCycleDelta(key.String()); ok {
 			d.repo.cycle(delta)
+			// clear a pending "choose a repo" refusal the moment they do
+			d.errText = ""
 		}
 	case ingestFieldProfile:
 		if delta, ok := selectCycleDelta(key.String()); ok {

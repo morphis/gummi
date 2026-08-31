@@ -96,6 +96,11 @@ func (d *bugForm) ID() string { return "new-bug" }
 // any other field exactly — the button row's Create button is just another
 // way to reach the same action.
 func (d *bugForm) submit() (bool, tea.Cmd) {
+	if d.repo.needsChoice() {
+		d.errText = repoUnchosenErr
+		d.setFocus(bugFieldRepo)
+		return false, nil
+	}
 	desc := strings.TrimSpace(d.desc.Value())
 	if desc == "" {
 		d.errText = "description must not be empty"
@@ -170,6 +175,8 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case bugFieldRepo:
 		if delta, ok := selectCycleDelta(key.String()); ok {
 			d.repo.cycle(delta)
+			// clear a pending "choose a repo" refusal the moment they do
+			d.errText = ""
 		}
 	case bugFieldProfile:
 		if delta, ok := selectCycleDelta(key.String()); ok {

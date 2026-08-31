@@ -11,18 +11,22 @@ import (
 
 // repoPickerDialog is the inline popover that retargets a card's managed
 // repository before it cuts a worktree. It cycles through the workspace's
-// selectable repos: the empty default name plus every configured named repo.
+// configured repos and nothing else: the board only opens it when there
+// are named repos to choose from, and such a workspace has no default
+// repository to fall back to (see repoPicker in form.go), so the empty
+// name is not among the candidates. A card still carrying the empty name
+// — minted before `repos:` was configured — is exactly what this dialog
+// exists to repair, and offering "default" would only re-select the
+// unresolvable value it already has.
 type repoPickerDialog struct {
 	feature    domain.Feature
-	candidates []string // candidates[0] == "" (default); rest are sorted names
+	candidates []string // the configured names, sorted
 	idx        int
 	onSubmit   func(repo string) tea.Cmd
 }
 
 func newRepoPickerDialog(f domain.Feature, names []string, onSubmit func(string) tea.Cmd) *repoPickerDialog {
-	candidates := make([]string, 0, len(names)+1)
-	candidates = append(candidates, "")
-	candidates = append(candidates, names...)
+	candidates := append([]string(nil), names...)
 	idx := 0
 	for i, n := range candidates {
 		if n == f.Repo {
@@ -42,6 +46,9 @@ func (d *repoPickerDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "esc":
 		return true, nil
 	case "enter":
+		if len(d.candidates) == 0 {
+			return true, nil
+		}
 		return true, d.onSubmit(d.candidates[d.idx])
 	case "left", "h":
 		d.idx--
@@ -63,9 +70,11 @@ func (d *repoPickerDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 func (d *repoPickerDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("repo · "+string(d.feature.ID)) + "\n\n")
+	// an empty repo here is an unset one, not a default: this dialog only
+	// opens in a workspace whose repos are all named.
 	now := d.feature.Repo
 	if now == "" {
-		now = "default"
+		now = "unset"
 	}
 	b.WriteString(s.Faint.Render("now "+now) + "\n\n")
 	b.WriteString(repoPickerOptions(s, d.candidates, d.idx) + "\n")
@@ -76,14 +85,10 @@ func (d *repoPickerDialog) View(s *theme.Styles, w, h int) string {
 func repoPickerOptions(s *theme.Styles, candidates []string, idx int) string {
 	parts := make([]string, len(candidates))
 	for i, c := range candidates {
-		label := c
-		if label == "" {
-			label = "default"
-		}
 		if i == idx {
-			parts[i] = s.Selection.Render("▸ " + label)
+			parts[i] = s.Selection.Render("▸ " + c)
 		} else {
-			parts[i] = s.Faint.Render("  " + label)
+			parts[i] = s.Faint.Render("  " + c)
 		}
 	}
 	return strings.Join(parts, "   ")

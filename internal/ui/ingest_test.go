@@ -307,7 +307,8 @@ func TestIngestFormRepo(t *testing.T) {
 		f.path.SetValue(prd)
 		// tab order is repo -> path -> profile -> buttons; from the initial
 		// path focus, three forward tabs (profile -> buttons -> repo) reach
-		// it, then ←/→ cycles: default -> a -> b
+		// it, then ←/→ cycles: the first → leaves the unset state on a,
+		// the second moves to b
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -324,12 +325,23 @@ func TestIngestFormRepo(t *testing.T) {
 		}
 	})
 
-	t.Run("field shown when repos configured", func(t *testing.T) {
-		f := newIngestForm(nil, []string{"b"}, true, func(string, string, string) tea.Cmd { return nil })
+	t.Run("field shown unset when repos configured", func(t *testing.T) {
+		f := newIngestForm(nil, []string{"a", "b"}, false, func(string, string, string) tea.Cmd { return nil })
 		s := theme.New(theme.GummiDark())
 		view := f.View(s, 60, 12)
-		if !strings.Contains(view, "repo: default") {
-			t.Errorf("repo field missing when repos configured:\n%s", view)
+		if !strings.Contains(view, "repo: "+repoUnsetLabel) {
+			t.Errorf("repo field missing or pre-selected when repos configured:\n%s", view)
+		}
+	})
+
+	t.Run("one configured repo is not a choice", func(t *testing.T) {
+		f := newIngestForm(nil, []string{"b"}, false, func(string, string, string) tea.Cmd { return nil })
+		s := theme.New(theme.GummiDark())
+		if view := f.View(s, 60, 12); strings.Contains(view, "repo:") {
+			t.Errorf("repo field should be hidden with a single repo:\n%s", view)
+		}
+		if got := f.repo.name(); got != "b" {
+			t.Errorf("sole repo name = %q, want b", got)
 		}
 	})
 
