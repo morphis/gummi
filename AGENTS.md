@@ -8,11 +8,15 @@ Guidance for AI agents working on **gummi**. Read this first, then
 gummi is a **meta-harness for coding agents**: a single binary that
 drives a fleet of coding agents through a fixed, spec-driven workflow,
 each work item on its own git worktree and branch. It orchestrates other
-agents — it is not itself a coding agent. There are two entry points onto
-the same engine and quality floor: an interactive TUI (a human at the
-keyboard) and a headless CLI driver (`gummi run`/`resume`, for scripts,
-CI, or a calling agent) — see `internal/driver` and README's "Running
-headlessly".
+agents — it is not itself a coding agent. Three ways drive the same
+engine and quality floor: a human at the keyboard in the TUI; an agent
+hosted *inside* that same TUI, in its agent tab, acting on the running
+board through a board-level tool contract; and an agent, script, or CI
+driving a *fresh* gummi from *outside*, via the headless CLI driver
+(`gummi run`/`resume`). The axis that matters for an agent is
+inside-vs-outside, not human-vs-agent — see `docs/DESIGN.md` §16, plus
+`internal/driver` and README's "Running headlessly" for the outside
+path.
 
 - **Language:** Go 1.26, single module `github.com/morphis/gummi`.
 - **Binary:** `cmd/gummi` → `bin/gummi`. Run with no args inside a git repo.
@@ -61,7 +65,7 @@ leaf services.
 | `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `verdict` | Shared stage-verdict grammar the TUI and headless driver both parse, per DESIGN §13. |
-| `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to the engine's live stage tools over the session socket. |
+| `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to either a live stage session's tools (`--feature`) or the process-lifetime workspace scope's board-level tools (`--workspace`) a hosted agent uses to drive the gummi it lives inside. |
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
 (spec decomposition), `bugs` (GitHub issue import / manual add), and the

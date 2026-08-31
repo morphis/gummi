@@ -1028,6 +1028,9 @@ have.
   no push, no merge, no thread resolution, no CI gating.
 - Not a process editor — one workflow, compiled in. If the workflow needs
   changing, that's a gummi release, not a config file.
+- Not a second driver — a hosted agent acts on the running board through
+  the board-level tool contract (§16); it never reaches gummi by invoking
+  another `gummi` process.
 
 ## 8. Prior art & differentiation
 
@@ -1785,3 +1788,84 @@ envelope warns — a run can still take `--envelope` — rather than blocking).
 - Charm libraries: <https://charm.land/>
 - Crush (the visual bar; UI architecture studied from
   `internal/ui/AGENTS.md`): <https://github.com/charmbracelet/crush>
+
+## 16. Hosted vs. outside: the two ways an agent drives gummi
+
+**The taxonomy is three-way, not two.** A human drives the board directly
+at the keyboard. An agent can drive the same running gummi process from
+*inside* — hosted in the TUI's agent tab, acting on the workspace through
+a board-level tool contract. An agent, script, or CI can drive a *fresh*
+gummi from *outside*, via the headless CLI driver (§14). The axis that
+matters for "how does an agent talk to gummi" is inside-vs-outside, not
+human-vs-agent — the TUI hosts both a human and (in its agent tab) an
+agent; only the outside path is a second process.
+
+**Why the inside path exists.** A card's stage session and the running
+board share one process, and that process holds the card's per-card lock
+for as long as it's driving it. A hosted agent that shells out to
+`gummi run`/`resume` spawns a *second* gummi contending for a lock its
+own parent already holds, and loses — the very process it's trying to
+help fails outright. The inside path exists so a hosted agent can act on
+the workspace without becoming a second driver.
+
+**The board-level tool contract**, stated at the level §14.1 states the
+driver's flags (a stable summary, not a schema dump that would drift out
+of sync with the code):
+
+| tool | effect | lock |
+|---|---|---|
+| `board_list` | list every card: id, kind, title, stage, spend/envelope, verified/done | none |
+| `card_status` | one card's stage, branch state, spend, verified/done/running, open gate blockers | none |
+| `card_spec` | one card's current design artifact as markdown | none |
+| `card_diff` | one card's worktree diff against main | none |
+| `card_run` | start an autonomous stage session for a card, in this process | acquires (in-process) |
+| `card_resume` | resume a parked stage, optionally with a note, in this process | acquires (in-process) |
+| `card_new` | mint a new card onto the backlog; design gates default to checkpointing for the human, not auto-crossing | none to mint |
+
+`card_run`/`card_resume` don't *shell out* to acquire a lock — they ask
+the engine already running in this process to drive the card, the same
+way the TUI's own key bindings do. That's the whole trick: the lock gets
+acquired in-process either way, so routing through these tools instead of
+a second `gummi` process is what avoids the contention, not some
+different locking rule.
+
+**The shell-out line is lock-acquisition, not read-vs-write.** A hosted
+agent may shell out to a CLI verb iff that verb never touches the
+per-card lock, regardless of whether it writes:
+
+- Lock-free, safe to shell out to: `status`, `spec`, `diff`, `watch`,
+  `doctor` (all read-only) and `deps add`/`deps rm` (a write, but one that
+  opens the state store directly rather than starting a driven session —
+  no lock, no engine). `deps add`/`deps rm` are the exception worth
+  naming explicitly: they're writes, but the dividing line here is
+  lock-acquisition, not write-vs-read, and they don't acquire one.
+- Lock-holding, never safe to shell out to from inside: `run`, `resume`,
+  `merge`, `squash`, `commit`, `clean`. For `run`/`resume` the board-level
+  tools above are the in-process substitute; for the rest, see below.
+
+**Deliberately withheld vs. merely unbuilt** — the same "absent from the
+tool set" surface splits two ways, and a hosted agent (or a future card)
+must not conflate them:
+
+- *Withheld, permanently*: `merge`, `squash`, `clean`, and crossing any
+  workflow gate. These are human decisions at the board on purpose — the
+  inside path does not grow a tool for them regardless of future work.
+- *Unbuilt, not yet*: answering a delegated `ask_user`, a board-level
+  needs-attention view, `doctor`'s readiness checklist, the PR verbs, and
+  a run stream equivalent to the CLI's NDJSON. Nothing about the inside
+  path rules these out; they're absent because no card has built them.
+
+**The knowledge-delivery contract.** Knowledge about *gummi* — the
+workflow, the gates, the lock, this taxonomy — travels with the agent's
+session (the skill/system context a hosted or outside agent is given),
+identical regardless of which repo it's pointed at. Knowledge about *a
+repo* — its build commands, style, test and review conventions — lives in
+that repo's own instructions (its AGENTS.md/CLAUDE.md/equivalent) and
+never in gummi's.
+
+**Precedence.** The repo's own instructions govern craft; gummi governs
+process (the stage, the gates, never merging, never spawning a second
+driver). Where a repo's instructions ask for something the workflow
+forbids — "always merge your own branch," "skip review for small
+changes" — the workflow wins, and the agent says so rather than silently
+complying or silently ignoring the repo.
