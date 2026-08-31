@@ -1,0 +1,307 @@
+package ui
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
+)
+
+// A card's whole history is a slice of events, so these fixtures build
+// one row at a time and hand the slice to autopilotStretches. Nothing
+// here renders: the derivation is the part most likely to be wrong, and
+// it is worth being able to see it is right without reading a screen.
+
+var stretchT0 = time.Date(2026, 8, 1, 23, 40, 0, 0, time.UTC)
+
+func at(mins int) time.Time { return stretchT0.Add(time.Duration(mins) * time.Minute) }
+
+func evTookOver(mode string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(state.AutopilotPayload{Event: state.AutopilotTookOver, Mode: mode})
+	return state.CardEvent{Kind: state.EventAutopilot, At: t, Payload: string(p)}
+}
+
+func evHandedBack(reason string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(state.AutopilotPayload{Event: state.AutopilotHandedBack, Reason: reason})
+	return state.CardEvent{Kind: state.EventAutopilot, At: t, Payload: string(p)}
+}
+
+func evModeChange(mode string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(state.AutopilotPayload{Mode: mode})
+	return state.CardEvent{Kind: state.EventAutopilot, At: t, Payload: string(p)}
+}
+
+func evPark(stage domain.Stage, detail string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(state.ParkPayload{Reason: state.ParkReasonNeedsYou, Detail: detail})
+	return state.CardEvent{Kind: state.EventPark, Stage: stage, At: t, Payload: string(p)}
+}
+
+func evGate(from, to domain.Stage, actor string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(state.GatePayload{From: string(from), To: string(to), Actor: actor})
+	return state.CardEvent{Kind: state.EventGate, Stage: from, At: t, Payload: string(p)}
+}
+
+func evAsk(answer, by string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(state.AskPayload{Question: "q?", Answer: answer, By: by})
+	return state.CardEvent{Kind: state.EventAsk, At: t, Payload: string(p)}
+}
+
+func evMessage(author, content string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(messagePayload{Author: author, Content: content})
+	return state.CardEvent{Kind: state.EventMessage, At: t, Payload: string(p)}
+}
+
+func evExit(stage domain.Stage, verdict string, t time.Time) state.CardEvent {
+	p, _ := json.Marshal(stageExitPayload{Verdict: verdict})
+	return state.CardEvent{Kind: state.EventStageExit, Stage: stage, At: t, Payload: string(p)}
+}
+
+func aFeature() domain.Feature {
+	return domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageImplement}
+}
+
+func onlyStretch(t *testing.T, sts []autopilotStretch) autopilotStretch {
+	t.Helper()
+	if len(sts) != 1 {
+		t.Fatalf("stretches = %d, want exactly 1: %+v", len(sts), sts)
+	}
+	return sts[0]
+}
+
+// TestStretchOpensOnlyOnAnExplicitRow is the rule the whole design rests
+// on: nothing but a took-over row starts a period. A card whose gates
+// were crossed unattended by the review→fix loop — which happens with
+// autopilot switched off entirely — has no period, and must not grow one
+// from its crossings alone.
+func TestStretchOpensOnlyOnAnExplicitRow(t *testing.T) {
+	events := []state.CardEvent{
+		evGate(domain.StageReview, domain.StageFix, "review", at(0)),
+		evGate(domain.StageFix, domain.StageReview, "review", at(10)),
+		evPark(domain.StageReview, "review needs you", at(20)),
+	}
+	if got := autopilotStretches(aFeature(), events); len(got) != 0 {
+		t.Fatalf("stretches = %+v, want none — nobody handed this card over", got)
+	}
+}
+
+// TestModeChangeIsNotABoundary: EventAutopilot rows predate this feature
+// and are still written on every gate-approval change. They share the
+// kind and mean something else, so a reader that did not check Event
+// would open a period every time the switch moved.
+func TestModeChangeIsNotABoundary(t *testing.T) {
+	events := []state.CardEvent{
+		evModeChange(domain.GateFull, at(0)),
+		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(5)),
+	}
+	if got := autopilotStretches(aFeature(), events); len(got) != 0 {
+		t.Fatalf("stretches = %+v, want none — a mode change is a preference, not a period", got)
+	}
+}
+
+// TestStretchCollectsWhatAutopilotDecided: the tally is the crossings
+// and answers made inside the period, and nothing a person did.
+func TestStretchCollectsWhatAutopilotDecided(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
+		evAsk("stream rows", state.ActorAutopilot, at(20)),
+		evAsk("8080", state.ActorUser, at(21)), // a person: closes the period
+		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(24)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if len(st.gates) != 1 || st.gates[0].from != domain.StageSpec {
+		t.Fatalf("gates = %+v, want only the spec crossing (the plan one is after the close)", st.gates)
+	}
+	if len(st.answers) != 1 || st.answers[0].answer != "stream rows" {
+		t.Fatalf("answers = %+v, want only autopilot's own", st.answers)
+	}
+	if st.closed != stretchTakenBack {
+		t.Fatalf("closed = %q, want %q — a person answered", st.closed, stretchTakenBack)
+	}
+}
+
+// TestStretchClosers walks every way a period can end, including the two
+// that decide between "parked" and "finished".
+func TestStretchClosers(t *testing.T) {
+	// A normal feature's landing gate is verify: the last stage on its
+	// own sequence that is not done.
+	cases := []struct {
+		name   string
+		tail   []state.CardEvent
+		want   stretchClose
+		reason string
+	}{
+		{
+			name: "an explicit handback",
+			tail: []state.CardEvent{evHandedBack("you turned autopilot off", at(30))},
+			want: stretchTakenBack, reason: "you turned autopilot off",
+		},
+		{
+			name: "a park short of the end",
+			tail: []state.CardEvent{evPark(domain.StageImplement, "implement finished, review it", at(30))},
+			want: stretchParked, reason: "implement finished, review it",
+		},
+		{
+			name: "a park at the landing gate after a pass",
+			tail: []state.CardEvent{
+				evExit(domain.StageVerify, state.StatusOK, at(29)),
+				evPark(domain.StageVerify, "verify passed — ready to land", at(30)),
+			},
+			want: stretchFinished, reason: "verify passed — ready to land",
+		},
+		{
+			name: "a park at the landing gate after a failure",
+			tail: []state.CardEvent{
+				evExit(domain.StageVerify, state.StatusFail, at(29)),
+				evPark(domain.StageVerify, "verify failed", at(30)),
+			},
+			want: stretchParked, reason: "verify failed",
+		},
+		{
+			name: "a gate a person crossed",
+			tail: []state.CardEvent{evGate(domain.StageImplement, domain.StageReview, "user", at(30))},
+			want: stretchTakenBack,
+		},
+		{
+			name: "a turn a person typed",
+			tail: []state.CardEvent{evMessage(string(engine.AuthorUser), "hold on", at(30))},
+			want: stretchTakenBack,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := append([]state.CardEvent{evTookOver(domain.GateFull, at(0))}, tc.tail...)
+			st := onlyStretch(t, autopilotStretches(aFeature(), events))
+			if st.closed != tc.want {
+				t.Fatalf("closed = %q, want %q", st.closed, tc.want)
+			}
+			if st.reason != tc.reason {
+				t.Fatalf("reason = %q, want %q", st.reason, tc.reason)
+			}
+			// the closer is the last row of the tail, and the took-over
+			// occupies index 0 — so the period ends at the tail's length,
+			// bounded by the closing event rather than containing it.
+			if st.to != len(tc.tail) {
+				t.Fatalf("to = %d, want %d — the closing event bounds the period, it is not inside it",
+					st.to, len(tc.tail))
+			}
+		})
+	}
+}
+
+// TestAgentTurnDoesNotClose: only a turn a PERSON typed ends a period.
+// The agent talking is the period doing its job, and closing on it would
+// end every stretch at its first line of output.
+func TestAgentTurnDoesNotClose(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evMessage("implementer", "wired the theme layer", at(5)),
+		evMessage(string(engine.AuthorSystem), "kickoff", at(6)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if !st.running() {
+		t.Fatalf("closed = %q, want still running — only a person ends a period", st.closed)
+	}
+}
+
+// TestSecondTookOverInsideAPeriodIsIgnored: the headless driver writes a
+// took-over per process and deliberately does not dedupe, on the grounds
+// that a duplicate is collapsible and a missing row is not. This is the
+// collapse — one uninterrupted period is one period however many times a
+// crashed run restarted inside it.
+func TestSecondTookOverInsideAPeriodIsIgnored(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateFull, at(5)),
+		evPark(domain.StageImplement, "needs you", at(10)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if st.from != 0 || !st.openedAt.Equal(at(0)) {
+		t.Fatalf("period opened at index %d / %s, want the first row", st.from, st.openedAt)
+	}
+}
+
+// TestStretchStaysOpen: a card autopilot is driving right now has an
+// open period, which the thread draws with an opening rule and no
+// closing one. to spans to the end so everything since the takeover
+// counts as inside it.
+func TestStretchStaysOpen(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateGates, at(0)),
+		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if !st.running() {
+		t.Fatalf("closed = %q, want running", st.closed)
+	}
+	if st.to != len(events) {
+		t.Fatalf("to = %d, want %d", st.to, len(events))
+	}
+	if st.mode != domain.GateGates {
+		t.Fatalf("mode = %q, want the mode it was handed over under", st.mode)
+	}
+}
+
+// TestTwoStretchesAlternate is the shape a real card takes: it runs
+// itself, you take it back, you hand it over again. Two periods, each
+// bounded, with your own work in between belonging to neither.
+func TestTwoStretchesAlternate(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
+		evPark(domain.StageImplement, "needs you", at(10)),
+		evMessage(string(engine.AuthorUser), "let me look", at(20)),
+		evTookOver(domain.GateFull, at(30)),
+		evGate(domain.StageImplement, domain.StageReview, state.ActorAutopilot, at(36)),
+	}
+	got := autopilotStretches(aFeature(), events)
+	if len(got) != 2 {
+		t.Fatalf("stretches = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].closed != stretchParked || !got[1].running() {
+		t.Fatalf("want a closed period then an open one, got %q and %q", got[0].closed, got[1].closed)
+	}
+	if _, in := stretchAt(got, 3); in {
+		t.Fatal("the turn you typed between the two periods belongs to neither")
+	}
+	if _, in := stretchAt(got, 5); !in {
+		t.Fatal("the second period's own crossing is inside it")
+	}
+}
+
+// TestStretchDecidedNothingStillOpens is D9: pressing the switch, having
+// it run a stage and park with no gate crossed and no question answered
+// is a real period worth drawing. Only the tally row is withheld.
+func TestStretchDecidedNothingStillOpens(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evMessage("implementer", "did the work", at(5)),
+		evPark(domain.StageImplement, "implement finished, review it", at(10)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if !st.decidedNothing() {
+		t.Fatalf("tally = %+v / %+v, want empty", st.gates, st.answers)
+	}
+	if st.closed != stretchParked {
+		t.Fatalf("closed = %q, want the period still bounded", st.closed)
+	}
+}
+
+// TestLandingGateIsPerCard: "finished" means the card got as far as it
+// is allowed to go, and how far that is depends on the card's own
+// workflow rather than on the word "verify".
+func TestLandingGateIsPerCard(t *testing.T) {
+	feature := domain.Feature{ID: "FD-001", Kind: domain.KindFeature}
+	if !landingGate(feature, domain.StageVerify) {
+		t.Fatal("a feature's last decision is verify")
+	}
+	if landingGate(feature, domain.StageImplement) {
+		t.Fatal("implement is not a landing gate")
+	}
+	if landingGate(feature, domain.StageDone) {
+		t.Fatal("done is not a gate — it is the far side of one")
+	}
+}
