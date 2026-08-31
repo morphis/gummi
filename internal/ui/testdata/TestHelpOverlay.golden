@@ -8,7 +8,7 @@
 [38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mpgup/pgdn[39m  [38;2;191;188;200mjump to the first/last card[39m                                       [m
 [38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200m1..9     [39m  [38;2;191;188;200mjump to feature[39m                                                   [m
 [38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mp        [39m  [38;2;191;188;200mpause the running agent; else open the dependency picker[39m          [m
-[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mt        [39m  [38;2;191;188;200mopen the thread's transcript view — events and tool outputs[39m       [m
+[38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mt        [39m  [38;2;191;188;200mopen the card's thread without starting or attaching anything[39m     [m
 [38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200ms        [39m  [38;2;191;188;200mspec — comment, resolve and approve in place[39m                      [m
 [38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200md        [39m  [38;2;191;188;200mdiff — comment, resolve and approve in place[39m                      [m
 [38;2;107;80;255;48;2;32;31;38m│[39m  [38;2;191;188;200mg        [39m  [38;2;191;188;200madvance stage (gate; from verify it lands the branch on main)[39m     [m

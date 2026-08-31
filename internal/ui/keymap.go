@@ -15,6 +15,16 @@ type binding struct {
 	label string // short action name for the status-bar hint row
 	help  string // fuller phrasing for the help overlay; label when empty
 	bar   bool   // curated into the status bar (the row fits ~6 hints)
+	// sticky marks a bar row that names something consequential enough
+	// that dropping it silently would mislead rather than merely
+	// declutter — statusbar.Render sheds every other hint before it ever
+	// touches one of these (F15: a pinned decision's "enter <option>" row
+	// can attach an agent and spend credits, so the width squeeze must
+	// never quietly leave "choose · esc" with no sign enter does anything
+	// at all). Use sparingly — a bar where everything is sticky is a bar
+	// that never sheds, which is exactly what the fits-most-terminals
+	// contract depends on NOT happening for the ordinary rows.
+	sticky bool
 }
 
 // barHints filters a table down to the status-bar subset.
@@ -22,7 +32,7 @@ func barHints(bs []binding) []statusbar.Hint {
 	var hs []statusbar.Hint
 	for _, b := range bs {
 		if b.bar {
-			hs = append(hs, statusbar.Hint{Key: b.key, Label: b.label})
+			hs = append(hs, statusbar.Hint{Key: b.key, Label: b.label, Sticky: b.sticky})
 		}
 	}
 	return hs
@@ -127,7 +137,7 @@ func (m *Shell) helpOverlay() *helpDialog {
 func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
 	pause := binding{key: "p", label: "pause", help: "pause the running agent; else open the dependency picker"}
-	transcript := binding{key: "t", label: "transcript", help: "open the thread's transcript view — events and tool outputs"}
+	peek := binding{key: "t", label: "open", help: "open the card's thread without starting or attaching anything"}
 	advance := binding{key: "g", label: "advance", help: "advance stage (gate; from verify it lands the branch on main)", bar: true}
 	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
 		// FD-081: a done RS card has nothing left to advance — g re-runs
@@ -145,7 +155,7 @@ func (m *Shell) boardBindings() []binding {
 			case engine.StateDone, engine.StatePaused:
 				// a finished/paused run: reading what happened is the
 				// draw, so surface it (enter would re-run the stage)
-				transcript.bar = true
+				peek.bar = true
 			}
 			pause.bar = true
 		}
@@ -157,7 +167,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "1..9", label: "jump", help: "jump to feature"},
 		enter,
 		pause,
-		transcript,
+		peek,
 		// s and d are off the bar: the action list reaches both without a
 		// key, so the bar can spend its width on the two ways in instead.
 		{key: "s", label: "spec", help: "spec — comment, resolve and approve in place"},

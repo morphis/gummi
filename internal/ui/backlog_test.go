@@ -72,6 +72,59 @@ func TestSwitchingTabKeepsTheCardPage(t *testing.T) {
 	}
 }
 
+// TestThreadDraftScopedPerCard is F5: a line typed on one card must not
+// show up on another's, whichever way the two cards were reached —
+// stepCard (alt+j/alt+k), closeCard+openCard (esc, then re-selecting a
+// different row), and the tab round-trip TestSwitchingTabKeepsTheCardPage
+// already covers for a single card. Each card keeps its own unsent line;
+// leaving hides it (like the page itself), never discards it.
+func TestThreadDraftScopedPerCard(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	a := m.rows[m.sel].F.ID
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open card A
+	m = typeString(t, m, "kickoff note for A")
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt}) // step to B
+	b := m.rows[m.sel].F.ID
+	if b == a {
+		t.Fatal("precondition: alt+j should have moved to a different card")
+	}
+	if got := m.threadInput.Value(); got != "" {
+		t.Fatalf("card B opened with A's draft still in the box: %q", got)
+	}
+	m = typeString(t, m, "a different note for B")
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModAlt}) // step back to A
+	if m.rows[m.sel].F.ID != a {
+		t.Fatalf("alt+k landed on %s, want %s", m.rows[m.sel].F.ID, a)
+	}
+	if got := m.threadInput.Value(); got != "kickoff note for A" {
+		t.Fatalf("A's draft was not restored by stepping back: %q", got)
+	}
+
+	// leave the page entirely (closeCard) and come back through the
+	// backlog list rather than stepCard, landing on B this time
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.cardOpen {
+		t.Fatal("esc should have closed the card page")
+	}
+	selectRow(t, m, b)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // openCard on B
+	if got := m.threadInput.Value(); got != "a different note for B" {
+		t.Fatalf("openCard on B did not restore B's draft: %q", got)
+	}
+
+	// and A's own draft is still there, untouched, when reopened the
+	// same way
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	selectRow(t, m, a)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.threadInput.Value(); got != "kickoff note for A" {
+		t.Fatalf("A's draft did not survive the round trip through B: %q", got)
+	}
+}
+
 // TestBacklogEnterOpensAndEscCloses is the board tab's whole navigation
 // contract: one keystroke in, one keystroke out.
 func TestBacklogEnterOpensAndEscCloses(t *testing.T) {

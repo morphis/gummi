@@ -184,18 +184,17 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	segs := stageSegments(r.Events)
 	if len(segs) > 1 {
 		spend := stageSpendByStage(r.StageSpend)
-		for _, seg := range segs[:len(segs)-1] {
-			add(foldedReceiptLine(s, seg, spend, inner))
-			// Expansion is real: a receipt unfolds either through
-			// Shell.expandedStages or, wholesale, through the transcript
-			// view (t) — every stage's events laid out in the body.
-			if m.expandedStages[stageSegmentKey(f.ID, seg)] || m.threadTranscript {
-				for _, ev := range seg.events {
-					for _, l := range stageEventLines(s, ev, inner, m.threadOutputs) {
-						add("    " + l)
-					}
-				}
-			}
+		// how many segments each stage folds to a receipt for — the review
+		// →fix loop can bounce a card through fix four times, and a stage
+		// with more than one segment can only trust its own stage_exit
+		// payload for its spend (foldedReceiptLine's comment on why).
+		folded := segs[:len(segs)-1]
+		counts := make(map[domain.Stage]int, len(folded))
+		for _, seg := range folded {
+			counts[seg.stage]++
+		}
+		for _, seg := range folded {
+			add(foldedReceiptLine(s, seg, spend, counts[seg.stage], inner))
 		}
 		blank()
 	}
@@ -233,6 +232,14 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 			add(l)
 		}
 		blank()
+	}
+	// todo and done are the two stages currentSpecSection has no anchor
+	// for, and todo is exactly the stage where "what is this card about"
+	// is the whole question — with nothing run yet there is no receipt,
+	// live stage or decision to fill the body either, so without this it
+	// was ~25 blank rows between the stage strip and the composer.
+	if len(body) == 0 {
+		add(threadEmptyLine(s, f))
 	}
 	body = trimTrailingBlanks(body)
 
@@ -281,11 +288,15 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 
 	// the measure wants every row there is, so it composes at zero — the
 	// unwindowed branch — having laid the regions out at the real height.
+	// That branch never scrolls, so it never spends a row on the markers
+	// composeThread's windowed branch adds below; maxThreadScroll adds
+	// their cost back in rather than leaving the clamp two rows short of
+	// the oldest line.
 	composeH := h
 	if measure {
 		composeH = 0
 	}
-	return strings.Join(composeThread(head, body, decision, foot, composeH, m.threadScroll), "\n")
+	return strings.Join(composeThread(s, head, body, decision, foot, composeH, m.threadScroll, inner), "\n")
 }
 
 // composeThread lays the four regions into h rows: head at the top, foot
@@ -298,7 +309,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 // is foot, decision, head, body. The decision arrives already windowed
 // to what the foot leaves it (windowDecisionBlock), so the trim below is
 // only a safety net for a caller that skipped that step.
-func composeThread(head, body, decision, foot []string, h, up int) []string {
+func composeThread(s *theme.Styles, head, body, decision, foot []string, h, up, w int) []string {
 	if h <= 0 {
 		out := append(append(append([]string{}, head...), body...), decision...)
 		return append(out, foot...)
@@ -326,8 +337,29 @@ func composeThread(head, body, decision, foot []string, h, up int) []string {
 	}
 
 	window := body
-	if len(body) > remaining {
-		up = min(max(up, 0), len(body)-remaining)
+	if len(body) > remaining && remaining >= 2 {
+		// the body is clipped in one direction or both, and gives no other
+		// sign of it — no position, no "more below the fold" — so a reader
+		// paging up cannot tell a short conversation from one cut off
+		// mid-scroll. Both marker slots come out of the body's own budget,
+		// spent together the way scrollNote (backlog.go) spends the
+		// backlog's: text on the side that is actually hidden, a blank row
+		// on the other, so the row count — and with it what maxThreadScroll
+		// has to clamp against — does not change with scroll position.
+		budget := remaining - 2
+		up = clamp(up, 0, len(body)-budget)
+		end := len(body) - up
+		start := end - budget
+		mark := func(arrow string, n int) string {
+			return ansi.Truncate(scrollNote(s.Faint.Render, arrow, n), w, "…")
+		}
+		window = append([]string{mark("↑", start)}, body[start:end]...)
+		window = append(window, mark("↓", len(body)-end))
+	} else if len(body) > remaining {
+		// too little room to spend two of it on markers (an extreme-short
+		// terminal): fall back to a plain, unmarked window rather than
+		// letting the reservation eat the only row or two the body has.
+		up = clamp(up, 0, len(body)-remaining)
 		end := len(body) - up
 		window = body[end-remaining : end]
 	}
@@ -353,7 +385,26 @@ func (m *Shell) maxThreadScroll(w, h int) int {
 	// rendering is the only honest measure of how tall the body is: it
 	// depends on wrapping, fold state and whether a session is live.
 	full := len(strings.Split(m.threadRender(w, h, true), "\n"))
-	return max(full-h, 0)
+	if full <= h {
+		return 0
+	}
+	// the measure pass renders unwindowed, so it never draws the two rows
+	// composeThread spends on the scroll markers once anything scrolls;
+	// without adding them back here, paging to this clamp would leave the
+	// window still short of the two rows the markers themselves occupy,
+	// stopping short of the oldest line rather than reaching it.
+	//
+	// The +2 is a flat add even on the rare terminal too short for
+	// composeThread to afford both marker rows (its own remaining>=2
+	// fallback): that only makes this clamp too generous there, never too
+	// stingy, because composeThread reclamps up to whatever the real
+	// remaining allows on every render regardless of what this function
+	// suggested. A too-generous ceiling just makes a few extra pgup
+	// presses no-ops once the true oldest line is already on screen; a
+	// too-stingy one is the actual bug this function exists to prevent
+	// (the oldest line staying forever out of reach), so generous is the
+	// side to err on.
+	return full - h + 2
 }
 
 func trimTrailingBlanks(lines []string) []string {
@@ -542,6 +593,19 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	return out + s.KeyHint.Render("s")
 }
 
+// threadEmptyLine is the body's one line when nothing else fills it: a
+// card's own one-liner from the creation form, or a plain admission that
+// no session has run yet. It only ever shows up alongside an absent
+// pinned spec line (todo has no natural section to pin), which is why
+// the body cannot just stay empty — todo is the one stage where a
+// reader has nothing else on the page telling them what the card is.
+func threadEmptyLine(s *theme.Styles, f domain.Feature) string {
+	if f.OneLiner != "" {
+		return s.Base.Render(f.OneLiner)
+	}
+	return s.Faint.Render("nothing has run yet")
+}
+
 // stageEnterPayload/stageExitPayload/messagePayload/toolPayload mirror
 // the JSON shapes the engine writes into card_events (see
 // internal/engine/persist.go's mirrorEvents) — kept local because they
@@ -564,14 +628,6 @@ type (
 		Label string `json:"label"`
 	}
 )
-
-// stageSegmentKey identifies one stage segment for Shell.expandedStages
-// lookups, stable across renders of the same segment — its enter time
-// disambiguates two generations of the same stage (a bounce back and a
-// second run of it).
-func stageSegmentKey(id domain.FeatureID, seg stageSegment) string {
-	return string(id) + "|" + string(seg.stage) + "|" + seg.enterAt.Format(time.RFC3339Nano)
-}
 
 // stageSegment is one generation of a stage session, reconstructed from
 // its stage_enter/stage_exit event pair. An unclosed segment (exited ==
@@ -629,14 +685,19 @@ func stageSegments(events []state.CardEvent) []stageSegment {
 // foldedReceiptLine renders one finished stage session as the single
 // line folding really means: stage, role, turn count, spend, and the
 // outcome marker with the time it closed.
-func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage]float64, w int) string {
+func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage]float64, stageSegs int, w int) string {
 	turns := 0
 	for _, ev := range seg.events {
 		if ev.Kind == state.EventMessage {
 			turns++
 		}
 	}
-	head := "⌄ " + string(seg.stage)
+	// no chevron: a folded receipt used to unfold either through
+	// Shell.expandedStages or the transcript view (t), and neither exists
+	// any more — the thread is the only view there is, so the glyph would
+	// promise an expansion this line can no longer deliver. pinnedSpecLine
+	// keeps its own chevron; that one still opens something (s).
+	head := string(seg.stage)
 	if seg.role != "" {
 		head += " · " + seg.role
 	}
@@ -650,13 +711,20 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 			head += "s"
 		}
 	}
-	// Spend is metered into stage_spend already; reading it back from the
-	// event payload would be a second source of truth for the same number,
-	// free to drift from the first. The payload is only the fallback for a
-	// stage whose rollup has not been loaded.
-	credits := spend[seg.stage]
-	if credits == 0 {
-		credits = seg.credits
+	// stage_spend's primary key is (feature, stage, model, role): it rolls
+	// every session of a stage into one number, so it can answer "what did
+	// fix cost this card" but not "what did this fix session cost" — a
+	// card that bounced through review→fix four times has four segments
+	// and one rollup between them, and printing that rollup on each of
+	// their receipts is how a ~172-credit card reads as 53.5 (all four
+	// print the same total). The stage_exit event payload is the only
+	// per-session record there is, so it wins whenever there is more than
+	// one segment to tell apart; the rollup is kept as a fallback for a
+	// stage that only ran once, in case its payload predates the credits
+	// field.
+	credits := seg.credits
+	if credits == 0 && stageSegs == 1 {
+		credits = spend[seg.stage]
 	}
 	if credits > 0 {
 		head += fmt.Sprintf(" · %g credits", roundSpend(credits))
@@ -753,14 +821,12 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	}
 	last := segs[len(segs)-1]
 	lines := []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
-	shown := last.events
-	// the transcript view (t) reads a finished stage in full; otherwise
-	// the block keeps its recent-events summary and the receipts above
-	// stay folded.
-	if !m.threadTranscript && len(shown) > 6 {
-		shown = shown[len(shown)-6:]
-	}
-	for _, ev := range shown {
+	// the whole session, not the last few events: capping this to a recent
+	// tail was how the (now-gone) transcript view earned its keep, and
+	// without it the cap just hid history with no way back to it. The body
+	// region scrolls (pgup/pgdn, maxThreadScroll), so a long session is
+	// still reachable — it just does not require a second view to see.
+	for _, ev := range last.events {
 		for _, l := range stageEventLines(s, ev, w, m.threadOutputs) {
 			lines = append(lines, "  "+l)
 		}

@@ -35,6 +35,6 @@ what it decided while you were away
 
 
 gummi  nothing is running — choose what happens next.
-▸ 1. run implement — no active run — start (or restart) the stage  enter
+▸ 1. run implement — no active run — start (or restart) the stage
 
-┃ message the agent, or a verb (approve, verify, diff…)                                                         
+┃ message the agent, a verb (approve, verify, diff…), or ↑ for actions                                          

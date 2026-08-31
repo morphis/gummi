@@ -33,6 +33,15 @@ type Pill struct {
 type Hint struct {
 	Key   string
 	Label string
+	// Sticky marks a hint Render must not drop while shedding for width —
+	// every non-sticky hint (besides the trailing escape hatch, which was
+	// already exempt) goes first. Set by a surface that has something
+	// consequential enough riding on one row that silently dropping it
+	// would mislead rather than merely declutter (keymap.go's binding.sticky
+	// is where a caller declares this; F15 is the row that motivated it —
+	// a pinned decision's "enter <option>" hint, which can attach an agent
+	// and spend credits).
+	Sticky bool
 }
 
 // Render draws the bar at exactly the given width.
@@ -56,11 +65,6 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 	}
 	leftStr := strings.Join(left, " ")
 
-	var hs []string
-	for _, h := range hints {
-		hs = append(hs, s.KeyHint.Render(h.Key)+" "+s.KeyLabel.Render(h.Label))
-	}
-
 	lw := ansi.StringWidth(leftStr)
 	if lw+1 > width {
 		return s.StatusBase.Render(ansi.Truncate(leftStr, width, "…"))
@@ -68,15 +72,77 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 	// keep the pills; when the hints don't fit, drop whole hints rather
 	// than truncating mid-word. Hints arrive most-important-first except
 	// the last (help / the surface's escape hatch), which survives
-	// longest — so drop from the second-to-last backwards.
-	rightStr := strings.Join(hs, s.Faint.Render(" · "))
-	for len(hs) > 1 && lw+ansi.StringWidth(rightStr)+1 > width {
-		hs = append(hs[:len(hs)-2], hs[len(hs)-1])
-		rightStr = strings.Join(hs, s.Faint.Render(" · "))
+	// longest — so drop from the second-to-last backwards. A hint marked
+	// Sticky is excluded from that pool entirely: everything else sheds
+	// before a sticky row is even considered (lastSheddable), the same
+	// protection the trailing escape hatch always had, generalized to
+	// whichever row a surface declared load-bearing.
+	hs := append([]Hint(nil), hints...)
+	rightStr := joinHints(s, hs)
+	for lw+ansi.StringWidth(rightStr)+1 > width {
+		i := lastSheddable(hs)
+		if i < 0 {
+			break // nothing left we're allowed to drop
+		}
+		hs = append(hs[:i], hs[i+1:]...)
+		rightStr = joinHints(s, hs)
 	}
 	if lw+ansi.StringWidth(rightStr)+1 > width {
-		rightStr = ""
+		if hasSticky(hs) {
+			// Only sticky hints (and maybe the escape hatch) are left, and
+			// even those don't fit: truncating keeps SOME sign of what a
+			// sticky row promises rather than erasing it outright, which is
+			// exactly the silent failure Sticky exists to prevent. This is
+			// the deep edge — the concrete case that motivated Sticky (a
+			// 120-column decision bar) never reaches it, since shedding
+			// pgup/pgdn and outputs is already enough room.
+			rightStr = ansi.Truncate(rightStr, max(width-lw-1, 0), "…")
+		} else {
+			// unchanged from before Sticky existed: a plain hint row that
+			// still doesn't fit with nothing left to drop just goes blank.
+			rightStr = ""
+		}
 	}
 	gap := max(width-lw-ansi.StringWidth(rightStr), 1)
 	return s.StatusBase.Render(leftStr + strings.Repeat(" ", gap) + rightStr)
+}
+
+// joinHints renders a hint list exactly as Render always has: "key label"
+// per hint, "·" between them.
+func joinHints(s *theme.Styles, hs []Hint) string {
+	if len(hs) == 0 {
+		return ""
+	}
+	parts := make([]string, len(hs))
+	for i, h := range hs {
+		parts[i] = s.KeyHint.Render(h.Key) + " " + s.KeyLabel.Render(h.Label)
+	}
+	return strings.Join(parts, s.Faint.Render(" · "))
+}
+
+// lastSheddable finds the rightmost hint Render is allowed to drop next:
+// the same "second-to-last backwards" scan the shedding loop always used,
+// skipping the trailing escape hatch (index len-1, never a candidate) and
+// now also skipping any hint marked Sticky. -1 means nothing is left to
+// drop — either only the escape hatch remains (the original contract) or
+// every remaining hint besides it is sticky (the new one).
+func lastSheddable(hs []Hint) int {
+	for i := len(hs) - 2; i >= 0; i-- {
+		if !hs[i].Sticky {
+			return i
+		}
+	}
+	return -1
+}
+
+// hasSticky reports whether any hint in the (already-shed-down) list is
+// marked Sticky — Render's signal to truncate rather than blank when even
+// the survivors don't fit.
+func hasSticky(hs []Hint) bool {
+	for _, h := range hs {
+		if h.Sticky {
+			return true
+		}
+	}
+	return false
 }

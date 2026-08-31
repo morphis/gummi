@@ -129,10 +129,9 @@ func (m *Shell) applyFollow(msg followRecordMsg) tea.Cmd {
 
 // watchForeign opens the read-only view of a card another process is
 // driving: the card's page, with its live stream tailed into the
-// thread's live stage block. It is what enter and the transcript key
-// both land on for such a card — this board cannot drive it, and
-// pretending otherwise would either fight the other process or fail at
-// the last moment.
+// thread's live stage block. It is what enter and t both land on for
+// such a card — this board cannot drive it, and pretending otherwise
+// would either fight the other process or fail at the last moment.
 func (m *Shell) watchForeign(f domain.Feature) tea.Cmd {
 	var open tea.Cmd
 	if !m.cardOpen {

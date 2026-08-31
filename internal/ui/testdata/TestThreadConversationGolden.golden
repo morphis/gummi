@@ -8,8 +8,7 @@
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;96;95;107m⌄ [38;2;133;131;146mspec[38;2;96;95;107m · Problem[39m [38;2;58;57;67m────────────────────────────────────────────────────────────────────────────[39m [38;2;191;188;200ms[39m   [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m    [38;2;191;188;200mstate the problem as you understand it in a sentence or two and ask the single[39m                  [m
-[48;2;32;31;38m    [38;2;191;188;200mhighest-leverage question, with your recommended answer. Keep it short.[39m                         [m
+[48;2;32;31;38m    [38;2;96;95;107m↑ 6 more[39m                                                                                        [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;255;96;255;1marchitect[39;22m                                                                                         [m
 [48;2;32;31;38m    [38;2;191;188;200mPersist per-device via localStorage; account sync is a follow-up.[39m                               [m
@@ -22,9 +21,10 @@
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m    [38;2;96;95;107mfake · fake-model · 2 credits[39m                                                                   [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mthe agent is waiting — keep talking, or choose what happens next.[39m                          [m
-[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. advance[38;2;96;95;107m — converged? move on to the spec[39m  [38;2;191;188;200mg[39m                                                  [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m  [38;2;191;188;200m┃ [38;2;107;80;255;7mm[38;2;96;95;107;27message the agent, or a verb (approve, verify, diff…)[39m                                           [m
+[48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mthe agent is waiting — keep talking, or choose what happens next.[39m                          [m
+[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. advance[38;2;96;95;107m — converged? move on to the spec[39m                                                     [m
+[48;2;32;31;38m                                                                                                    [m
+[48;2;32;31;38m  [38;2;191;188;200m┃ [38;2;107;80;255;7mm[38;2;96;95;107;27message the agent, a verb (approve, verify, diff…), or ↑ for actions[39m                            [m
 [48;2;32;31;38m                                                                                                    [m
 [38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [48;2;32;31;38m [48;2;77;76;87m [38;2;191;188;200m1 active[39m [48;2;32;31;38m        [38;2;191;188;200m↑↓[39m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[39m [38;2;133;131;146madvance[38;2;96;95;107m · [38;2;191;188;200mpgup/pgdn[39m [38;2;133;131;146mscroll[38;2;96;95;107m · [38;2;191;188;200malt+o[39m [38;2;133;131;146moutputs[38;2;96;95;107m · [38;2;191;188;200mesc[39m [38;2;133;131;146mbacklog[m

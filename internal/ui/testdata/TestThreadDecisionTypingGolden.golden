@@ -8,7 +8,7 @@
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m  [38;2;96;95;107m⌄ [38;2;133;131;146mspec[38;2;96;95;107m · Review[39m [38;2;58;57;67m─────────────────────────────────────────────────────────────────────────────────────────────────[39m [38;2;191;188;200ms[39m   [m
 [48;2;32;31;38m                                                                                                                        [m
-[48;2;32;31;38m                                                                                                                        [m
+[48;2;32;31;38m  [38;2;96;95;107mnothing has run yet[39m                                                                                                   [m
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m                                                                                                                        [m
@@ -22,10 +22,10 @@
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mreview is ready for your decision.[39m                                                                             [m
-[48;2;32;31;38m  [38;2;247;246;251m  1. read the findings[38;2;96;95;107m — the review loop gave up — read its findings in the spec[39m  [38;2;191;188;200ms[39m                                   [m
-[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m2. bounce to implement with your words[38;2;96;95;107m — send the findings back for another round[39m  [38;2;191;188;200mb[39m                                [m
-[48;2;32;31;38m  [38;2;247;246;251m  3. advance to verify[38;2;96;95;107m — overrule the reviewer if the findings don't hold[39m  [38;2;191;188;200mg[39m                                          [m
-[48;2;32;31;38m  [38;2;247;246;251m  4. let autopilot finish[38;2;96;95;107m — it takes the remaining correction rounds alone[39m  [38;2;191;188;200mA[39m                                         [m
+[48;2;32;31;38m  [38;2;247;246;251m  1. read the findings[38;2;96;95;107m — the review loop gave up — read its findings in the spec[39m                                      [m
+[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m2. bounce to implement with your words[38;2;96;95;107m — send the findings back for another round[39m                                   [m
+[48;2;32;31;38m  [38;2;247;246;251m  3. advance to verify[38;2;96;95;107m — overrule the reviewer if the findings don't hold[39m                                             [m
+[48;2;32;31;38m  [38;2;247;246;251m  4. let autopilot finish[38;2;96;95;107m — it takes the remaining correction rounds alone[39m                                            [m
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m  [38;2;191;188;200m┃ [39mthe contrast is off in dark mode[38;2;107;80;255;7m [39;27m                                                                                   [m
 [48;2;32;31;38m                                                                                                                        [m

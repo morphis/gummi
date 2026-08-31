@@ -113,13 +113,22 @@ type Shell struct {
 	// (thread.go, threadinput.go): a Shell field rather than one rebuilt
 	// per render so an unsent draft survives leaving and returning to the
 	// tab, same as the chat pane's own m.chat. threadChip is the inline
-	// confirm chip pending in its place, or nil. threadSkipParse makes
-	// exactly the next submit send as a message unconditionally — the
-	// "esc no, send as a message" half of the chip contract
-	// (threadinput.go's doc comments own the full story).
+	// confirm chip pending in its place, or nil. threadSkipParse holds the
+	// exact line the chip's esc promised to send as a message — not just
+	// whether one was promised — so a submit only honours it when the text
+	// still matches; any submit spends it either way, matched or not
+	// (threadinput.go's doc comments own the full story; F2).
 	threadInput     textarea.Model
 	threadChip      *pendingChip
-	threadSkipParse bool
+	threadSkipParse string
+	// threadDrafts holds every card's unsent line except the one currently
+	// live in threadInput, keyed by feature — the same per-card scoping
+	// threadChip already had via pendingChip.feature. openCard/stepCard
+	// swap the composer's buffer to the newly selected card's entry (empty
+	// if it has none) after stashing the outgoing card's own text here;
+	// closeCard stashes on the way out. Without this a line typed on one
+	// card was still sitting in the box on the next one (F5).
+	threadDrafts map[domain.FeatureID]string
 
 	// bounceNotes holds the line the composer aimed at a decision's
 	// bounce answer: the card is rewound now, but its reborn work stage
@@ -172,10 +181,6 @@ type Shell struct {
 	// (alt+o); failures always show their tail either way. Sticky, like
 	// the chat pane's toggle was.
 	threadOutputs bool
-	// threadTranscript is the transcript view (t): every stage segment
-	// renders its events instead of one collapsed line, so the whole run
-	// reads in the body. Scoped to the visit (openCard/stepCard reset it).
-	threadTranscript bool
 	// threadFreeForm arms the composer as the open ask's free-form answer
 	// channel — the chat pane's 'o' channel, inherited now that the pane
 	// is gone. While armed, the decision's picker keys stand down so a
@@ -212,12 +217,6 @@ type Shell struct {
 	// open card page — loading every card's log on each board refresh
 	// would be unbounded IO.
 	cardEvents map[domain.FeatureID][]state.CardEvent
-	// expandedStages is the thread's fold state: which stage segments (see
-	// thread.go's stageSegments) render their events instead of one
-	// collapsed line. Keyed by a per-card, per-segment string so two
-	// cards' fold state never collides. Nothing sets a key yet — this is
-	// the seam a key binds to, not a live toggle yet.
-	expandedStages map[string]bool
 	// threadScroll is how many lines back from the newest the card
 	// thread's body is scrolled. Zero is the bottom, which is where a
 	// card opens and where it stays as a live stage streams — counting
@@ -270,15 +269,15 @@ func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 func NewShell(t theme.Theme, version string) *Shell {
 	styles := theme.New(t)
 	m := &Shell{
-		styles:         styles,
-		version:        version,
-		now:            time.Now,
-		checks:         map[domain.FeatureID][]verify.Result{},
-		baselining:     map[domain.FeatureID]bool{},
-		rounds:         map[roundKey]int{},
-		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
-		expandedStages: map[string]bool{},
-		copilotHint:    true,
+		styles:       styles,
+		version:      version,
+		now:          time.Now,
+		checks:       map[domain.FeatureID][]verify.Result{},
+		baselining:   map[domain.FeatureID]bool{},
+		rounds:       map[roundKey]int{},
+		cardEvents:   map[domain.FeatureID][]state.CardEvent{},
+		threadDrafts: map[domain.FeatureID]string{},
+		copilotHint:  true,
 		// the composer is themed from the same styles as everything else
 		// on the page; left on the widget's own defaults it renders in raw
 		// ANSI and reads as a foreign box (threadinput.go).
@@ -700,6 +699,24 @@ type (
 	engineClosedMsg struct{}
 )
 
+// threadShowsFailure reports whether the card page is open on id with its
+// thread already rendering that card's live session error inline
+// (liveStageBlock's snap.Err branch, thread.go) — the same "is the card
+// page open on this feature" test EventQuestion uses just below to decide
+// whether a question needs queuing, borrowed here so a failure the thread
+// already prints does not also get a second, multi-row copy in the notice
+// band above the status bar (F9). It must not go the other way: a failure
+// on a card the thread is NOT currently showing (a different card open, or
+// none) still needs the notice, since nothing else on screen says it
+// happened.
+func (m *Shell) threadShowsFailure(id domain.FeatureID) bool {
+	if !m.cardOpen || m.sel < 0 || m.sel >= len(m.rows) || m.rows[m.sel].F.ID != id {
+		return false
+	}
+	r := m.rows[m.sel]
+	return !r.DrivenAbroad && m.sessionFor(id) != nil
+}
+
 // handleEngineEvent folds an engine event into the notice line, the
 // needs-attention queue, and the automatic review loop. It returns a
 // command for any automatic follow-up (review→fix→review), or nil.
@@ -709,7 +726,17 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		if ev.Err != nil {
 			// engine/provider errors may embed model-controlled bytes
 			text := sanitize(ev.Err.Error())
-			m.notice = noticeMsg{text: text, isErr: true}
+			// the thread's own live-stage block already prints this
+			// error inline when its card page is open (thread.go's
+			// snap.Err branch) — the notice band would be the same
+			// message twice, once under the status bar and once inside
+			// the conversation it is about (F9). raiseAttention still
+			// runs unconditionally: the inbox item is what turns
+			// openDecision's pinned question into the failure kind, and
+			// nothing else feeds that.
+			if !m.threadShowsFailure(ev.Feature) {
+				m.notice = noticeMsg{text: text, isErr: true}
+			}
 			// a one-shot pass not bound to a feature (ingest) has no card
 			// to queue behind; the notice alone carries it
 			if ev.Feature != "" {
@@ -1916,7 +1943,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "t":
 		if r, ok := m.selected(); ok {
 			m.clearTransientNotice()
-			return m.openTranscript(r.F)
+			return m.openThread(r.F)
 		}
 	case "s":
 		if r, ok := m.selected(); ok {
@@ -2625,32 +2652,19 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	}
 }
 
-// openTranscript opens the card thread's transcript view: every stage
-// segment renders its events instead of one folded line, and the whole
-// run reads in the body — tool calls with their captured outputs
-// included. It never starts or re-runs anything; on a card page it
-// toggles back to the folded view. A card another process is driving
-// opens the read-only live view instead — the store's transcript for
-// such a card is a turn behind, when it exists at all.
-func (m *Shell) openTranscript(f domain.Feature) tea.Cmd {
+// openThread opens the card's page. It used to be openTranscript, which
+// toggled a separate transcript view on top of the page — the product
+// call was that the thread already is the conversation, so a second mode
+// showing the same events a different way was redundant, and it is gone.
+// What is left, and what still earns t its own key rather than folding
+// into enter, is the routing: a card another process is driving has no
+// session this board can attach, so it opens the read-only watch instead
+// of trying (and failing) to run it the way enter would.
+func (m *Shell) openThread(f domain.Feature) tea.Cmd {
 	if _, ok := m.foreignFor(f.ID); ok {
-		// the live file is the only transcript of a run this process does
-		// not own; the store's copy lags a whole turn behind.
 		return m.watchForeign(f)
 	}
-	if m.cardOpen {
-		if r, ok := m.selected(); ok && r.F.ID == f.ID {
-			// already on the page: the key toggles the transcript view
-			m.threadTranscript = !m.threadTranscript
-			return nil
-		}
-	}
-	// from the list (or from another card's page) t opens the page with
-	// the view already on — openCard resets it to folded, so the flag is
-	// set after, and its event-log load is the command that carries.
-	cmd := m.openCard()
-	m.threadTranscript = true
-	return cmd
+	return m.openCard()
 }
 
 // pauseRun stops a feature's autonomous session, freeing its slot.
@@ -2666,6 +2680,27 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		}
 		return noticeMsg{text: string(f.ID) + " paused", clearInbox: f.ID}
 	}
+}
+
+// parkVerb is fireVerb's landing spot for the composer's "park" verb
+// (threadinput.go): pausing the card's own autonomous session, the exact
+// action boardVerb's "p" case takes when one is live and non-interactive
+// (pauseRun, right above). It never falls through to the dependency
+// picker the way "p" does off a live session — verbKeys' doc comment has
+// the why, in short: "p" is a reused board key with two board-only
+// meanings, but a word typed on purpose only ever means the one thing. On
+// a card with nothing to pause, this says so instead of opening something
+// the user never asked for.
+func (m *Shell) parkVerb() tea.Cmd {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
+		return m.pauseRun(r.F)
+	}
+	m.notice = noticeMsg{text: string(r.F.ID) + ": nothing running to park"}
+	return nil
 }
 
 // sessionFor returns the engine session bound to a feature, or nil.

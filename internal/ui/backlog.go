@@ -24,10 +24,6 @@ func (m *Shell) openCard() tea.Cmd {
 	m.cardOpen = true
 	m.actionCursor = 0
 	m.actionsExpanded = false
-	// the transcript view (t) is scoped to the visit, like the action
-	// list's own fold: a card opens on its newest event with the receipts
-	// folded, the way a chat opens on the latest.
-	m.threadTranscript = false
 	// moving between cards stops a tail a previous card's watch left
 	// behind — an uncanceled follow would keep polling a file nobody
 	// reads.
@@ -38,16 +34,44 @@ func (m *Shell) openCard() tea.Cmd {
 	// chat does — focusThreadInput still refuses a card another process
 	// is driving
 	m.threadScroll = 0
+	m.loadThreadDraft(r.F.ID)
 	m.focusThreadInput()
 	return m.loadCardEvents(r.F.ID)
 }
 
 // closeCard returns to the backlog list, stopping a live watch tail —
 // the followed stream renders on the page, so its lifetime is the page's.
+// It stashes the composer's line under the card it was typed on first
+// (F5) — "leaving hides, never discards" applies to the draft too, just
+// scoped to the card that owns it rather than to the shared widget.
 func (m *Shell) closeCard() {
+	if r, ok := m.selected(); ok {
+		m.saveThreadDraft(r.F.ID)
+	}
 	m.cardOpen = false
 	m.blurActions()
 	m.stopFollow()
+}
+
+// saveThreadDraft stashes the composer's current text under id, so
+// switching to a different card (or leaving the page) does not leave one
+// card's unsent line sitting in another's box afterwards (F5). An empty
+// line deletes rather than storing "", so the map only ever grows with
+// cards that actually have something unsent.
+func (m *Shell) saveThreadDraft(id domain.FeatureID) {
+	if v := m.threadInput.Value(); v != "" {
+		m.threadDrafts[id] = v
+	} else {
+		delete(m.threadDrafts, id)
+	}
+}
+
+// loadThreadDraft swaps the composer's buffer to whatever id last had in
+// it — empty if nothing was ever typed there — the per-card counterpart
+// of threadChip's own feature key (inputBlock). Callers still stash the
+// outgoing card first (saveThreadDraft); this only ever loads.
+func (m *Shell) loadThreadDraft(id domain.FeatureID) {
+	m.threadInput.SetValue(m.threadDrafts[id])
 }
 
 // stepCard moves to the previous/next card without leaving the page —
@@ -56,15 +80,22 @@ func (m *Shell) closeCard() {
 // openCard: the thread's folded receipts belong to whichever card is on
 // screen now.
 func (m *Shell) stepCard(delta int) tea.Cmd {
+	if from, ok := m.selected(); ok {
+		m.saveThreadDraft(from.F.ID)
+	}
 	m.moveSel(delta)
 	m.actionCursor = 0
 	m.actionsExpanded = false
 	// the next card is a different conversation; it opens at its own end
-	// rather than inheriting how far back this one was scrolled, and any
-	// transcript view is scoped to the card that asked for it.
+	// rather than inheriting how far back this one was scrolled.
 	m.threadScroll = 0
-	m.threadTranscript = false
 	r, ok := m.selected()
+	if ok {
+		// the chip stays put (its own feature key already keeps it off a
+		// different card's inputBlock — F5), but the buffer under it has
+		// to become this card's own line before anything renders
+		m.loadThreadDraft(r.F.ID)
+	}
 	// stepping cards is not a mode change: someone scanning with J/K from
 	// the accelerator layer stays there, and someone mid-draft keeps the
 	// keyboard. The one exception is a card another process drives, which

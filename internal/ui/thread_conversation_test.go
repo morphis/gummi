@@ -291,6 +291,25 @@ func askingFake() *agent.Fake {
 	return f
 }
 
+// structuredAskFake is askingFake without allow_free_form — a live ask
+// whose terms the composer's prose can never answer (DESIGN §6.3), the
+// shape F4 is about: typed prose in front of it has nowhere to go but out
+// as an ordinary turn.
+func structuredAskFake() *agent.Fake {
+	f := agent.NewFake("")
+	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}
+	args := []byte(`{"question":"Which rig?","options":[{"label":"rig-a","detail":"the staging box"},{"label":"rig-b","detail":"the prod mirror"}]}`)
+	first := true
+	f.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		if first {
+			first = false
+			return []agent.Event{{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: args}}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ack: " + msg}, {Kind: agent.EventIdle}}
+	}
+	return f
+}
+
 // waitAsk blocks until FD-001 has an open ask (the picker is showing).
 func waitAsk(t *testing.T, eng *engine.Engine) {
 	t.Helper()
@@ -308,21 +327,40 @@ func waitAsk(t *testing.T, eng *engine.Engine) {
 }
 
 // TestThreadDecisionDigitJumpsAndAnswers: the thread's inherited picker
-// keys answer a live ask — a digit on an empty line jumps to (and, for a
-// single-pick question, answers) the option, the pane's own contract on
-// the thread's pinned decision.
+// keys answer a live ask — a digit on an empty line jumps the highlight to
+// the option, and enter answers it. F14 dropped the old "a digit commits
+// immediately" contract: that was a real hazard on a live ask (one stray
+// keystroke sent an answer to the agent with no confirm and no undo), so a
+// digit now only ever selects, the same as ↑↓ — nothing commits until
+// enter.
 func TestThreadDecisionDigitJumpsAndAnswers(t *testing.T) {
 	m, eng := agentWorkspace(t, askingFake())
 	m = openAndAttach(t, m) // attach; kickoff triggers the ask
 	waitAsk(t, eng)
 
-	// selecting option 1 (per-device) answers the question
-	press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
+	// pressing 2 only selects — the ask stays open, nothing sent yet
+	m = press(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
+	if m.decisionCursor != 1 {
+		t.Fatalf("digit 2 left the cursor at %d, want 1 (selects, does not commit)", m.decisionCursor)
+	}
+	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
+		t.Fatal("the digit alone answered the ask — F14 requires enter to commit")
+	}
+
+	// selecting option 1 (per-device), then enter, answers the question
+	m = press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
+	if m.decisionCursor != 0 {
+		t.Fatalf("digit 1 left the cursor at %d, want 0", m.decisionCursor)
+	}
+	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
+		t.Fatal("digit 1 alone answered the ask before enter")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
 	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
 		select {
 		case <-deadline:
-			t.Fatal("answer did not clear the pending ask")
+			t.Fatal("enter did not clear the pending ask")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -722,10 +760,12 @@ func TestThreadEscDisarmsFreeFormBeforeLeaving(t *testing.T) {
 	}
 }
 
-// TestTranscriptViewExpandsEveryStage: t opens the thread's transcript
-// view — every stage segment renders its events in the body, so a card's
-// whole log reads end to end; t again folds it back to the receipts.
-func TestTranscriptViewExpandsEveryStage(t *testing.T) {
+// TestOpenThreadNeverExpandsAFoldedReceipt: t used to toggle a transcript
+// view that laid every stage segment's events out in the body; that view
+// is gone (the thread is the conversation), so a finished stage stays
+// folded to its one receipt line no matter how many times t is pressed —
+// all that is left of openTranscript's old job is opening the page.
+func TestOpenThreadNeverExpandsAFoldedReceipt(t *testing.T) {
 	m := populatedShell(100, 30)
 	id := m.rows[m.sel].F.ID
 	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -742,26 +782,17 @@ func TestTranscriptViewExpandsEveryStage(t *testing.T) {
 		{Kind: state.EventStageExit, Stage: domain.StageBrainstorm, At: at, Payload: string(exit)},
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: at, Payload: string(enter)},
 	}
-	if !m.cardOpen {
-		m.cardOpen = true // the page is open, as a real openCard leaves it
-	}
-	m.openTranscript(m.rows[m.sel].F)
-	if !m.threadTranscript {
-		t.Fatal("t did not open the transcript view")
-	}
-	// the finished stage's own conversation is laid out, not one folded
-	// line — the part only the transcript view can reach
-	view := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(view, "persist per-device, sync later") {
-		t.Errorf("transcript view missing the expanded brainstorm conversation:\n%s", view)
-	}
-
-	// t folds it back
-	m.openTranscript(m.rows[m.sel].F)
-	if m.threadTranscript {
-		t.Fatal("t did not fold the transcript view back")
-	}
-	if v := ansi.Strip(m.threadView(100, 30)); strings.Contains(v, "persist per-device, sync later") {
-		t.Errorf("folded view still shows the expanded conversation:\n%s", v)
+	for i := 0; i < 2; i++ {
+		m.openThread(m.rows[m.sel].F)
+		if !m.cardOpen {
+			t.Fatal("t did not open the card page")
+		}
+		view := ansi.Strip(m.threadView(100, 30))
+		if strings.Contains(view, "persist per-device, sync later") {
+			t.Errorf("folded receipt exposed its conversation with no expanded view left to reach it:\n%s", view)
+		}
+		if !strings.Contains(view, "brainstorm ·") {
+			t.Errorf("thread view missing the folded brainstorm receipt:\n%s", view)
+		}
 	}
 }

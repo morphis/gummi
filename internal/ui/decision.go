@@ -17,11 +17,12 @@ import (
 type decisionKind string
 
 const (
-	decisionAsk    decisionKind = "ask"
-	decisionGate   decisionKind = "gate"
-	decisionVerify decisionKind = "verify"
-	decisionBudget decisionKind = "budget"
-	decisionIdle   decisionKind = "idle"
+	decisionAsk     decisionKind = "ask"
+	decisionGate    decisionKind = "gate"
+	decisionVerify  decisionKind = "verify"
+	decisionBudget  decisionKind = "budget"
+	decisionFailure decisionKind = "failure"
+	decisionIdle    decisionKind = "idle"
 )
 
 // threadDecision is a render-time projection, not a second stored model.
@@ -71,6 +72,8 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	}
 	kind := decisionIdle
 	switch {
+	case in.attn == attnFailure:
+		kind = decisionFailure
 	case in.attn == attnBudget:
 		kind = decisionBudget
 	case in.stage == domain.StageVerify && (in.attn == attnGate || in.sess == engine.StateDone):
@@ -109,10 +112,18 @@ func (d *threadDecision) wordConsumer() int {
 
 // pickerOption is one row in the decision's picker: what the choice is,
 // and the detail that says what it does.
+//
+// There is no key field. There used to be — nextAction.key, the board
+// accelerator (g, s, A, b, d, v…) — rendered in a right-hand column, but
+// that accelerator only fires from the backlog list, where this picker
+// never shows: on the card page the same letter reaches the composer and
+// types (F12). A control that prints a key which does something else
+// entirely one keystroke later is worse than one that names no key at
+// all, so the column is gone rather than fixed — the row's number is
+// still there for the digit that does work (F14).
 type pickerOption struct {
 	label  string
 	detail string
-	key    string
 	danger bool
 }
 
@@ -166,33 +177,76 @@ func pickerView(s *theme.Styles, title, question string, options []pickerOption,
 		b.WriteString(l + "\n")
 	}
 	for i, option := range options {
-		marker := "  "
-		label := s.Base
-		if i == selected {
-			marker = s.KeyHint.Render("▸ ")
-			label = s.Title
+		// maxExtra 0: pickerView renders every option at once with no
+		// notion of the vertical budget the caller actually has, so it
+		// can only ever afford the one truncated line it always has
+		// (F20's wrap is openDecisionBlock's own call to make, once it
+		// knows what's left over — expandHighlighted, below).
+		for _, l := range pickerOptionLines(s, option, i, selected, picked, multi, width, 0) {
+			b.WriteString(l + "\n")
 		}
-		tick := ""
-		if multi {
-			box := "○ "
-			if picked[i] {
-				box = "● "
-			}
-			tick = s.Faint.Render(box)
-		}
-		line := fmt.Sprintf("%s%s%d. %s", marker, tick, i+1, sanitize(option.label))
-		if option.detail != "" {
-			line += s.Faint.Render(" — " + sanitize(option.detail))
-		}
-		if option.key != "" {
-			line += "  " + s.KeyHint.Render(option.key)
-		}
-		if option.danger && i != selected {
-			label = s.Error
-		}
-		b.WriteString(ansi.Truncate(label.Render(line), width, "…") + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// pickerOptionLines renders one option's row. With maxExtra 0 (every
+// caller but expandHighlighted) it is exactly one line, truncated — the
+// marker, the multi-pick box, the number, the label and its detail, cut
+// off mid-word if they don't fit, the way this whole row has always
+// rendered.
+//
+// With maxExtra > 0 — asked only of the highlighted option, and only when
+// windowDecisionBlock found the block genuinely had rows to spare (F20) —
+// a row too long for one line spills its detail onto up to maxExtra
+// continuation lines instead of losing the tail to "…". The label and the
+// row's own furniture stay on the first line unchanged; only the detail,
+// the part that actually runs long ("please point me at the rig…"),
+// wraps.
+func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, picked map[int]bool, multi bool, width, maxExtra int) []string {
+	marker := "  "
+	label := s.Base
+	if i == selected {
+		marker = s.KeyHint.Render("▸ ")
+		label = s.Title
+	}
+	tick := ""
+	if multi {
+		box := "○ "
+		if picked[i] {
+			box = "● "
+		}
+		tick = s.Faint.Render(box)
+	}
+	head := fmt.Sprintf("%s%s%d. %s", marker, tick, i+1, sanitize(option.label))
+	if option.danger && i != selected {
+		label = s.Error
+	}
+	full := head
+	if option.detail != "" {
+		full += s.Faint.Render(" — " + sanitize(option.detail))
+	}
+	rendered := label.Render(full)
+	if maxExtra <= 0 || option.detail == "" || ansi.StringWidth(ansi.Strip(rendered)) <= width {
+		return []string{ansi.Truncate(rendered, width, "…")}
+	}
+	wrapWidth := max(width-2, 8)
+	wrapped := strings.Split(wrapText(sanitize(option.detail), wrapWidth), "\n")
+	// maxExtra is the rows this option may GROW by, and the head row it
+	// grows from is already spent — so the detail gets maxExtra rows, not
+	// maxExtra+1. Budgeting the wrap as if the head were free let a
+	// one-row allowance turn one row into three, which at 36×9 pushed the
+	// masthead off the page and left the card being decided about unnamed
+	// — the exact trade thread.go reserves a head row to prevent.
+	if len(wrapped) > maxExtra {
+		wrapped = wrapped[:maxExtra]
+		last := maxExtra - 1
+		wrapped[last] = ansi.Truncate(wrapped[last], wrapWidth, "") + "…"
+	}
+	out := []string{ansi.Truncate(label.Render(head), width, "…")}
+	for _, l := range wrapped {
+		out = append(out, ansi.Truncate("  "+s.Faint.Render(l), width, "…"))
+	}
+	return out
 }
 
 func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
@@ -206,6 +260,13 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		return "verification stopped here — choose what happens next."
 	case decisionGate:
 		return string(r.F.Stage) + " is ready for your decision."
+	case decisionFailure:
+		// names what happened rather than reusing the idle sentence
+		// (F9): this prints directly under the failure block the thread
+		// already rendered, and offers that failure's own options
+		// (re-run, attach the agent CLI) — "nothing is running" would be
+		// a lie one line above an explanation of why nothing is.
+		return string(r.F.Stage) + " failed — choose what happens next."
 	default:
 		if in.sess == engine.StateInteractive {
 			// a live conversation between turns. Something is very much
@@ -312,7 +373,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 				label += " with your words"
 			}
 			options = append(options, pickerOption{
-				label: label, detail: action.detail, key: action.key, danger: action.danger,
+				label: label, detail: action.detail, danger: action.danger,
 			})
 		}
 	}
@@ -323,13 +384,53 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 		// owns the answer is said on the title.
 		title += " · autopilot is taking this one"
 	}
+	width := max(w-2, 10)
 	lines := strings.Split(pickerView(s, title, d.question, options,
 		m.decisionCursor, m.decisionPicked, multi, w), "\n")
 	// the head is however many rows the question needed (pickerHead wraps
 	// it onto its own when it will not sit beside the title), so the
 	// window has to be told rather than assuming one.
-	head := len(pickerHead(s, title, d.question, max(w-2, 10)))
-	return windowDecisionBlock(s, lines, head, len(options), m.decisionCursor, maxRows)
+	head := len(pickerHead(s, title, d.question, width))
+	windowed := windowDecisionBlock(s, lines, head, len(options), m.decisionCursor, maxRows)
+	return expandHighlighted(s, windowed, lines, head, options, m.decisionCursor, m.decisionPicked, multi, width, maxRows)
+}
+
+// expandHighlighted spends any vertical budget windowDecisionBlock left
+// unused on wrapping the highlighted option's detail instead of leaving
+// the rows blank (F20): the answers get one line each however
+// consequential today, which is what cuts a live ask's detail off mid-word
+// ("please point me at the rig…") even on a page tall enough to spare the
+// row.
+//
+// It only ever fires when windowDecisionBlock returned every line
+// untouched — the moment it had to shrink or mark options hidden,
+// len(windowed) already equals the budget exactly and there is nothing
+// left over to spend (the F21 drop-the-block case returns nil here too,
+// short-circuited by the length check below). So the wrap only ever grows
+// into rows the block's own budget already owned and was not going to use
+// for anything else — never the foot's, and never another option's.
+func expandHighlighted(s *theme.Styles, windowed, lines []string, headRows int, options []pickerOption, cursor int, picked map[int]bool, multi bool, width, maxRows int) []string {
+	if maxRows <= 0 || len(windowed) == 0 || len(windowed) != len(lines) {
+		return windowed
+	}
+	leftover := maxRows - len(windowed)
+	if leftover <= 0 || cursor < 0 || cursor >= len(options) {
+		return windowed
+	}
+	i := headRows + cursor
+	if i < 0 || i >= len(windowed) {
+		return windowed
+	}
+	wrapped := pickerOptionLines(s, options[cursor], cursor, cursor, picked, multi, width, leftover)
+	if len(wrapped) <= 1 {
+		// the row already said everything on one line — nothing to gain
+		return windowed
+	}
+	out := make([]string, 0, len(windowed)+len(wrapped)-1)
+	out = append(out, windowed[:i]...)
+	out = append(out, wrapped...)
+	out = append(out, windowed[i+1:]...)
+	return out
 }
 
 // windowDecisionBlock keeps a decision taller than its row budget usable:
@@ -348,10 +449,15 @@ func windowDecisionBlock(s *theme.Styles, lines []string, headRows, nOptions, cu
 	// lines[headRows:] are one row per option.
 	rows := maxRows - headRows
 	if rows <= 0 {
-		// no room for both the question and an answer to it: the question
-		// wins, and as much of it as the budget holds — a control whose
-		// question you cannot read is not one you can answer.
-		return lines[:min(maxRows, headRows)]
+		// no room for even the highlighted answer: a title nobody can act
+		// on is worse than no decision block at all (F21) — the row goes
+		// back to conversation (or stays blank) instead. This used to keep
+		// the question (and as much of it as fit) on its own, which is how
+		// 20×5 degraded to the bare word "gummi" with no option row, and
+		// 18×4 to that word being the whole block — a control whose
+		// highlighted answer you cannot see is not one you can answer
+		// either, so there is nothing honest left to render.
+		return nil
 	}
 	marker := nOptions > rows
 	if marker {
@@ -371,6 +477,12 @@ func windowDecisionBlock(s *theme.Styles, lines []string, headRows, nOptions, cu
 	return out
 }
 
+// moveDecision steps the highlight through the decision's options. It does
+// not wrap: ↑ escaping off the top is handleThreadInputKey's route into the
+// action inventory (F11), which only makes sense if the top is really the
+// top, and ↓ on the last option has nowhere honest to go either — wrapping
+// there would suggest a fourth option cycling back into a three-option
+// gate.
 func (m *Shell) moveDecision(d *threadDecision, delta int) {
 	n := len(d.actions)
 	if d.ask != nil {
@@ -379,19 +491,30 @@ func (m *Shell) moveDecision(d *threadDecision, delta int) {
 	if n == 0 {
 		return
 	}
-	m.decisionCursor = (m.decisionCursor + delta + n) % n
+	m.decisionCursor = clamp(m.decisionCursor+delta, 0, n-1)
 }
 
 // answerAskWith delivers free-form prose as the answer to the open ask —
 // the chat pane's 'o' channel, which the composer makes always-on: the
 // question declared allow_free_form, so the line is the answer the ask
 // invited (DESIGN §6.3; a structured ask keeps its terms and prose
-// routes as a turn instead). Same live-session guard as the picker path.
+// routes as a turn instead). Same live-session guard as the picker path,
+// and the same F8 shape as sendThreadMessage: the nil check that used to
+// run only once the returned command executed is done up front instead,
+// so the composer (and the free-form arming) clears only once a session
+// is confirmed live — a line typed with nothing to answer stays put
+// rather than vanishing under the notice explaining why it wasn't sent.
 func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 	sess := m.sessionFor(r.F.ID)
+	if sess == nil {
+		m.notice = noticeMsg{text: string(r.F.ID) + ": no live session to answer — attach first (enter)"}
+		return nil
+	}
+	m.threadInput.Reset()
+	m.threadFreeForm = false
 	eng := m.engine
 	return func() tea.Msg {
-		if sess == nil || eng.Get(r.F.ID) != sess {
+		if eng.Get(r.F.ID) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
 		if err := eng.Answer(context.Background(), r.F.ID, text); err != nil {
@@ -408,15 +531,22 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 // riding the reborn work stage's kickoff, the same delivery the headless
 // --bounce note takes. Both are actions the screen is already offering,
 // highlighted and named, which is what makes answering unambiguous
-// (DESIGN §6.3) rather than a guess.
+// (DESIGN §6.3) rather than a guess. Both clear the composer immediately:
+// neither has a live-session precondition to fail against synchronously
+// the way a message does, so there is nothing here for F8 to protect.
+// changes is different — it is a plain message under the covers — so it
+// defers to sendThreadMessage, composer clear included, rather than
+// resetting ahead of a send that might not have anywhere to go.
 func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, text string) tea.Cmd {
 	switch d.actions[i].id {
 	case "run":
+		m.threadInput.Reset()
 		if workflow.Interactive(r.F.Stage) {
 			return m.attachChatWith(r.F, text)
 		}
 		return m.runStageWithNote(r.F, text)
 	case "bounce":
+		m.threadInput.Reset()
 		return m.bounceStage(r.F.ID, text)
 	case "changes":
 		// a design stage sends its changes back as the turn that asks for

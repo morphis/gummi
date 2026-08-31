@@ -65,16 +65,30 @@ func (m *Shell) syncActionFocus() {
 	m.blurActions()
 }
 
-// globalCommands is the space menu's contents on the board: the actions
-// that belong to no particular card. Per-card actions are already on
-// screen in the dashboard's list, so repeating them here would only make
-// the menu longer without making anything more reachable.
+// globalCommands is the space menu's contents: the board-level actions
+// that belong to no particular card, plus — when a card page is open —
+// that same card's own action inventory (cardactions.go), via
+// cardCommands below.
+//
+// On the plain board dashboard the card actions stay left out: they are
+// already on screen in the dashboard's list there, so repeating them
+// would only make the menu longer without making anything more
+// reachable. The card's thread page is a different surface — nothing of
+// the inventory is visible there until ↑ opens it as a modal
+// (openCardActions), which "/" cannot reach — so that is where this menu
+// and the inventory actually diverge, and merging them is what makes
+// "/park", "/diff" and "/envelope" alike find something instead of "no
+// commands match" (verbs already short-circuit the menu entirely before
+// this ever runs — see submitThreadInput's routeVerb — so this merge is
+// only what carries the words verbs.go never covered: envelope,
+// duplicate, delete, dependencies, gate, and the rest of the inventory).
 //
 // A command's id is the board key it stands for, so onRun is boardKey
-// itself and there is no second mapping to drift.
+// itself and there is no second mapping to drift — except the handful of
+// card actions with no key of their own (cardCommands' doc has why).
 func (m *Shell) globalCommands() []command {
 	attached := m.attached()
-	return []command{
+	cmds := []command{
 		{id: "n", label: "New feature", key: "n", available: attached},
 		{id: "B", label: "New bug", key: "B", available: attached},
 		{id: "R", label: "New research card", key: "R", available: attached},
@@ -86,17 +100,71 @@ func (m *Shell) globalCommands() []command {
 		{id: "?", label: "Show the keys for this surface", key: "?", available: true},
 		{id: "q", label: "Quit gummi", key: "q", available: true},
 	}
+	if m.cardOpen {
+		cmds = append(cmds, m.cardCommands(cmds)...)
+	}
+	return cmds
+}
+
+// cardCommands converts the selected card's action inventory — the exact
+// list ↑ opens as a modal (cardActionsFor) — into command-menu entries.
+// cardActionsFor already filters to what is valid for this card right
+// now, so every entry is available.
+//
+// A keyed action reuses its own key as the command id, the same "id is
+// the board key" contract globalCommands' entries carry, so runCommand
+// needs no new dispatch for it — it lands on the identical boardVerb case
+// its accelerator does. An entry whose key already belongs to a global
+// command (only "i", the inbox, both ways) is skipped rather than shown
+// twice for one keystroke. The few genuinely keyless actions (envelope's
+// gate toggle, duplicate) keep their own id, since there is no key to
+// borrow — runCommand answers those two by id, the same functions
+// runCardAction already calls for them, so there is still exactly one
+// place each performs its action.
+func (m *Shell) cardCommands(existing []command) []command {
+	r, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	taken := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		if c.key != "" {
+			taken[c.key] = true
+		}
+	}
+	var out []command
+	for _, a := range cardActionsFor(m.nextInputFor(r), r) {
+		id := a.id
+		if a.key != "" {
+			if taken[a.key] {
+				continue
+			}
+			id = a.key
+		}
+		out = append(out, command{id: id, label: a.label, key: a.key, available: true})
+	}
+	return out
 }
 
 // runCommand is the space menu's invoke path. q and ? are answered by
 // handleKey above the attached check, so they never reach boardKey and
-// have to be routed here explicitly — everything else is a board key.
+// have to be routed here explicitly. duplicate and gate are cardCommands'
+// two keyless entries (cardCommands' doc has why) and route to the same
+// functions runCardAction calls for them, rather than a second copy of
+// that dispatch. Everything else is a board key.
 func (m *Shell) runCommand(id string) tea.Cmd {
 	switch id {
 	case "q":
 		return m.quitCmd()
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
+		return nil
+	case "duplicate":
+		return m.confirmDuplicate()
+	case "gate":
+		if r, ok := m.selected(); ok {
+			return m.openAutopilot(r.F)
+		}
 		return nil
 	}
 	return m.boardVerb(id)

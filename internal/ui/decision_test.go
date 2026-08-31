@@ -184,6 +184,72 @@ func TestThreadDecisionWindowsAroundTheCursor(t *testing.T) {
 	}
 }
 
+// TestThreadDecisionDropsBelowTheHighlightedAnswer is F21:
+// windowDecisionBlock's comment promises the question and the highlighted
+// answer never yield, but at a small enough budget it used to keep the
+// question (and only the question) — a title with no way to act on it,
+// which at 20×5 read as the bare word "gummi" with no option row, and at
+// 18×4 as that word being the whole block. When the budget cannot hold
+// even the highlighted answer, the whole decision block drops instead —
+// the row is more honestly spent on conversation or left blank.
+func TestThreadDecisionDropsBelowTheHighlightedAnswer(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m.sel = 3 // FD-049, spec — an idle workflow decision
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	r := m.rows[m.sel]
+	d := m.openDecision(r)
+	if d == nil {
+		t.Fatal("precondition: FD-049 has an open decision")
+	}
+
+	s := m0Styles()
+	// maxRows 1: less than the question alone needs (headRows is at
+	// least 1) — no room left for even the highlighted answer.
+	if got := m.openDecisionBlock(s, r, 60, 1); len(got) != 0 {
+		t.Errorf("openDecisionBlock at maxRows=1 = %q, want no block at all", got)
+	}
+	// a plainly generous budget still renders the question and the
+	// highlighted answer, so the drop is specific to the tiny budget
+	// above rather than something broken in general.
+	if got := m.openDecisionBlock(s, r, 60, 8); len(got) < 2 {
+		t.Errorf("openDecisionBlock at maxRows=8 = %q, want the question and at least one answer", got)
+	}
+}
+
+// TestThreadDecisionSmallFrameDropsRatherThanBareTitle exercises F21 end
+// to end through composeThread at the exact terminal sizes the finding
+// names: 20×5 used to degrade to the bare word "gummi" with no option
+// row, and 18×4 to that word being the whole block. Both must now show no
+// decision block at all, and 36×9 — the design's own frame — must be
+// unaffected (TestThreadDecisionVisibleAt36x9 already covers that in
+// full; this only reconfirms it stays intact alongside the two drops).
+func TestThreadDecisionSmallFrameDropsRatherThanBareTitle(t *testing.T) {
+	// the decision's own question text — unique to the block, unlike its
+	// "gummi" title, which the masthead's own logo pill also prints, so
+	// checking for the title alone would pass even with the block gone.
+	const question = "nothing is running"
+	for _, sz := range []struct{ w, h int }{{20, 5}, {18, 4}} {
+		m := attachedBoard(t, sz.w, sz.h)
+		m.sel = 3 // FD-049, spec — an idle workflow decision
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		out := ansi.Strip(m.View().Content)
+		if strings.Contains(out, question) {
+			t.Errorf("%dx%d still rendered a decision block nobody can act on:\n%s", sz.w, sz.h, out)
+		}
+	}
+
+	m36 := attachedBoard(t, 36, 9)
+	m36.sel = 3
+	m36 = press(t, m36, tea.KeyPressMsg{Code: tea.KeyEnter})
+	out := ansi.Strip(m36.View().Content)
+	if !strings.Contains(out, question) {
+		t.Errorf("36x9 lost the decision's question:\n%s", out)
+	}
+	if !strings.Contains(out, "┃") {
+		t.Errorf("36x9 lost the composer under the decision:\n%s", out)
+	}
+}
+
 // reviewGateWorkspace walks a fresh feature to review and raises the gate
 // attention, so its card page carries a gate decision — read the findings,
 // bounce to implement, advance to verify — with the bounce as the option
@@ -359,6 +425,58 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 	}
 }
 
+// TestThreadDecisionStructuredAskLabelsEnterSend is F4: with a structured
+// (non-free-form) ask pinned and prose typed in front of it, the bar used
+// to keep the label "answer" — but submitThreadLine only ever routes
+// prose to the ask when it declared allow_free_form (DESIGN §6.3), so a
+// structured ask's typed line falls through and goes out as an ordinary
+// turn while the question stays open. Confirmed against a live agent: the
+// ask never got a reply and the spinner ran forever. The fix is the
+// label, not the routing — enter has to say "send" here, the same as any
+// other prose the decision has nowhere to spend.
+func TestThreadDecisionStructuredAskLabelsEnterSend(t *testing.T) {
+	m, eng := chatWorkspace(t, structuredAskFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	ask := eng.Get("FD-001").Snapshot().PendingAsk
+	if ask == nil || ask.FreeForm {
+		t.Fatalf("precondition: a structured (non-free-form) ask is pending, got %+v", ask)
+	}
+
+	m = typeString(t, m, "please point me at the rig")
+	for _, b := range m.threadInputBindings() {
+		if b.key != "enter" {
+			continue
+		}
+		if b.label != "send" {
+			t.Errorf("enter labeled %q while pinned to a structured ask with typed prose, want \"send\"", b.label)
+		}
+		if !strings.Contains(b.help, "message") {
+			t.Errorf("enter help %q does not say the line becomes a message", b.help)
+		}
+	}
+
+	// confirm the routing itself is untouched (DESIGN §6.3): enter really
+	// does send a turn, and the ask is still open behind it
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	deadline := time.After(testWaitTimeout)
+	for {
+		snap := eng.Get("FD-001").Snapshot()
+		if len(snap.Transcript) > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("enter never sent the line as a turn")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
+		t.Error("the structured ask closed on its own — it should still be open")
+	}
+}
+
 // TestThreadDecisionACommandKeepsTheParser: the collision the composer
 // coupling settles — verb-words are commands the parser owns (the chip is
 // their confirmation), so typing one leaves the highlight where it was,
@@ -388,6 +506,41 @@ func TestThreadDecisionACommandKeepsTheParser(t *testing.T) {
 	}
 	if m.rows[m.sel].F.Stage != domain.StageReview {
 		t.Fatalf("the bounced card moved to %s", m.rows[m.sel].F.Stage)
+	}
+}
+
+// TestThreadDecisionDigitSelectsWorkflowOption is F14's other half: on a
+// workflow decision a digit used to type into the composer and, because
+// the line was then non-empty, wordAim yanked the highlight onto the
+// word-consuming option instead — on a four-option gate, pressing 2
+// selected 1. A digit now selects the option it names directly, on an
+// empty composer, the same as ↑↓, and leaves it to enter to commit. The
+// review gate is the reproduction case in the finding: four options,
+// bounce (a word-eater) sitting at index 1.
+func TestThreadDecisionDigitSelectsWorkflowOption(t *testing.T) {
+	m := reviewGateWorkspace(t)
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || len(d.actions) < 4 || d.actions[1].id != "bounce" {
+		t.Fatalf("precondition: a four-option review gate with bounce at 1, got %+v", d)
+	}
+
+	// digit 2 selects option index 1 — it must not land in the composer,
+	// and it must not commit on its own
+	m = press(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
+	if got := m.threadInput.Value(); got != "" {
+		t.Fatalf("the digit typed into the composer instead of selecting: %q", got)
+	}
+	if m.decisionCursor != 1 {
+		t.Fatalf("digit 2 left the cursor at %d, want 1", m.decisionCursor)
+	}
+	if m.rows[m.sel].F.Stage != domain.StageReview {
+		t.Fatalf("the digit alone committed the option — stage moved to %s", m.rows[m.sel].F.Stage)
+	}
+
+	// only enter commits it
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.rows[m.sel].F.Stage != domain.StageImplement {
+		t.Fatalf("enter did not commit the selected (bounce) option: stage = %s", m.rows[m.sel].F.Stage)
 	}
 }
 
