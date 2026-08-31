@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
 )
 
 // waitBoardIdle polls the board session until it's no longer busy — the
@@ -535,5 +536,80 @@ func TestBoardSurfacesBackendBudgetExhausted(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no note about the backend's cap in the transcript: %+v", snap.Transcript)
+	}
+}
+
+// TestBoardRolePairsModelAndBackend reproduces the failure this fix
+// exists for, in the shape a real workspace produced it: profiles.yaml
+// declaring the four stage roles and no board role, a default model of
+// "gpt-5" left over from the single-model config, and claude as the
+// default agent. resolveRole's fallback answered with the model from one
+// source and, via agentFor(""), the backend from another, so the agent
+// tab opened onto "claude backend cannot drive model \"gpt-5\"".
+//
+// The assertion is on the pairing, not on any particular model: whatever
+// the board session ends up asking for, the backend chosen alongside it
+// has to be one that can drive it.
+func TestBoardRolePairsModelAndBackend(t *testing.T) {
+	e := newEngine(t, agent.NewFake("hi"))
+	// the single-model default, as a workspace that predates profiles
+	// carries it — deliberately a model the profile's backend cannot run.
+	e.cfg.Model = "gpt-5"
+	e.cfg.Profiles = config.Profiles{
+		Default: "claude",
+		Profiles: map[string]config.Profile{
+			"claude": {
+				"architect":   {Backend: "claude", Model: "claude-sonnet-5"},
+				"implementer": {Backend: "claude", Model: "claude-sonnet-5"},
+			},
+		},
+	}
+
+	rc, backend := e.resolveBoardRole("")
+	if backend != "claude" {
+		t.Errorf("backend = %q, want claude (borrowed from the architect role)", backend)
+	}
+	if rc.Model != "claude-sonnet-5" {
+		t.Errorf("model = %q, want claude-sonnet-5 — the architect's, paired with its backend; "+
+			"the bare default model would be gpt-5, which that backend refuses", rc.Model)
+	}
+}
+
+// TestBoardRoleWithNoProfileNamesNoModel: with nothing declared at all,
+// the board session must name no model rather than the engine's default
+// one. An empty Model lets the backend's own CLI pick something it can
+// actually drive; naming e.cfg.Model here is what produced the mismatch
+// TestBoardRolePairsModelAndBackend covers.
+func TestBoardRoleWithNoProfileNamesNoModel(t *testing.T) {
+	e := newEngine(t, agent.NewFake("hi"))
+	e.cfg.Model = "gpt-5"
+	e.cfg.Profiles = config.Profiles{}
+
+	rc, backend := e.resolveBoardRole("")
+	if rc.Model != "" {
+		t.Errorf("model = %q, want empty so the backend picks its own", rc.Model)
+	}
+	if backend != "" {
+		t.Errorf("backend = %q, want empty (the engine's default)", backend)
+	}
+}
+
+// TestBoardRolePrefersADeclaredBoardRole: a profile that does declare
+// one wins over the architect fallback, so an operator can point the
+// board tab at a cheaper model than the one that plans cards.
+func TestBoardRolePrefersADeclaredBoardRole(t *testing.T) {
+	e := newEngine(t, agent.NewFake("hi"))
+	e.cfg.Profiles = config.Profiles{
+		Default: "p",
+		Profiles: map[string]config.Profile{
+			"p": {
+				"architect": {Backend: "claude", Model: "claude-sonnet-5"},
+				"board":     {Backend: "claude", Model: "claude-haiku-4-5-20251001"},
+			},
+		},
+	}
+	rc, backend := e.resolveBoardRole("")
+	if rc.Model != "claude-haiku-4-5-20251001" || backend != "claude" {
+		t.Errorf("got %q/%q, want the declared board role", backend, rc.Model)
 	}
 }

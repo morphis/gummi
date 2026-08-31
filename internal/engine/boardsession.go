@@ -78,7 +78,7 @@ func (e *Engine) OpenBoard(ctx context.Context, opts BoardOpts) (*BoardSession, 
 	}
 	e.mu.Unlock()
 
-	rc, backend := e.resolveRole(opts.Profile, agent.RoleBoard)
+	rc, backend := e.resolveBoardRole(opts.Profile)
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return nil, errors.New("no agent configured for the board role")
