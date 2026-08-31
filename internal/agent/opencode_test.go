@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -198,6 +199,42 @@ func TestOpencodeNewSessionMaterializesConfig(t *testing.T) {
 	env := gummi["environment"].(map[string]any)
 	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/FD-011.sock" {
 		t.Errorf("GUMMI_MCP_SOCK = %v, want /tmp/mcp/FD-011.sock", env["GUMMI_MCP_SOCK"])
+	}
+}
+
+// A board-level session (Workspace set, no FeatureID) must still get an
+// mcp.gummi block, wired to --workspace rather than --feature — the one
+// thing SessionOpts.Workspace changes, exercised here through NewSession
+// (not just buildOpencodeConfig directly) so opts.Workspace threading
+// through the adapter is pinned too.
+func TestOpencodeNewSessionMaterializesConfigWorkspace(t *testing.T) {
+	o := &Opencode{bin: "opencode"}
+	wt := t.TempDir()
+	sess, err := o.NewSession(context.Background(), SessionOpts{
+		WorkDir: wt, Model: "x", MCPSockPath: "/tmp/mcp/ws.sock", Workspace: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	oc := sess.(*opencodeSession)
+	raw, err := os.ReadFile(oc.configPath)
+	if err != nil {
+		t.Fatalf("config file not readable: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("config not valid JSON: %v\n%s", err, raw)
+	}
+	gummi := m["mcp"].(map[string]any)["gummi"].(map[string]any)
+	cmd := gummi["command"].([]any)
+	exe, _ := os.Executable()
+	if !reflect.DeepEqual(cmd, []any{exe, "__mcp", "--workspace"}) {
+		t.Errorf("mcp.gummi.command = %v, want [%s __mcp --workspace]", cmd, exe)
+	}
+	env := gummi["environment"].(map[string]any)
+	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/ws.sock" {
+		t.Errorf("GUMMI_MCP_SOCK = %v, want /tmp/mcp/ws.sock", env["GUMMI_MCP_SOCK"])
 	}
 }
 

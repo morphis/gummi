@@ -290,7 +290,23 @@ func TestZZBuildArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(strings.Join(args, " "), "--mcp") {
-		t.Errorf("mcp emitted without a feature id: %v", args)
+		t.Errorf("mcp emitted without a feature id or workspace: %v", args)
+	}
+
+	// A workspace session (no feature id, workspace set) gets --mcp wired
+	// to --workspace instead of --feature: the one thing SessionOpts.Workspace
+	// changes about the __mcp child's argv.
+	ws := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", mcpSock: "/tmp/mcp.sock", workspace: true, maxTurns: zzMaxTurnsDefault}
+	args, err = ws.buildArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = strings.Join(args, " ")
+	if !strings.Contains(got, "--mcp /opt/gummi-stub __mcp --workspace") {
+		t.Errorf("workspace mcp argv wrong: %v", args)
+	}
+	if strings.Contains(got, "--feature") {
+		t.Errorf("workspace mcp argv unexpectedly names --feature: %v", args)
 	}
 
 	suppressed := &zzSession{model: "m", sessionPath: "/tmp/sess.json", workdir: "/work", cwdSuppressed: true, maxTurns: zzMaxTurnsDefault}
@@ -539,6 +555,48 @@ func TestZZSendSetsMCPSockEnv(t *testing.T) {
 	got := string(raw)
 	if !strings.Contains(got, "MCP_SOCK="+sock) {
 		t.Fatalf("child env missing GUMMI_MCP_SOCK=%s:\n%s", sock, got)
+	}
+}
+
+// TestZZSendSetsMCPSockEnvWorkspace mirrors TestZZSendSetsMCPSockEnv for a
+// board-level session: NewSession with Workspace set and no FeatureID must
+// still thread MCPSockPath into the child's env and --mcp, exercising the
+// gate end to end (opts.Workspace -> zzSession.workspace -> buildArgs/Send),
+// not just the unit-level buildArgs case above.
+func TestZZSendSetsMCPSockEnvWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "zz")
+	writeZZEchoBin(t, bin, log)
+	z, err := NewZZ(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+	sock := filepath.Join(dir, "mcp.sock")
+	sess, err := z.NewSession(context.Background(), SessionOpts{
+		WorkDir: dir, Model: "m", Workspace: true, MCPSockPath: sock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitZZIdle(t, sess)
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "MCP_SOCK="+sock) {
+		t.Fatalf("child env missing GUMMI_MCP_SOCK=%s:\n%s", sock, got)
+	}
+	if !strings.Contains(got, "__mcp --workspace") {
+		t.Fatalf("child argv missing --workspace:\n%s", got)
+	}
+	if strings.Contains(got, "--feature") {
+		t.Fatalf("child argv unexpectedly names --feature:\n%s", got)
 	}
 }
 

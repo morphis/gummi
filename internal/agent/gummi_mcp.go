@@ -20,12 +20,26 @@ import (
 // subcommand parses positionally), and the socket path travels in env so
 // the __mcp child can reach the server without the parent process scraping
 // its own environment.
-func buildGummiMCPServerConfig(execPath, featureID, sockPath string) []byte {
+//
+// workspace selects which scope the child binds to: false emits
+// ["__mcp","--feature",featureID] (the per-card stage session, the
+// original mode); true emits ["__mcp","--workspace"] instead and
+// featureID is not consulted, mirroring cmd/gummi/mcp.go's own gate,
+// which treats --feature and --workspace as mutually exclusive rather
+// than accepting a sentinel feature id that means "workspace". Keeping
+// that choice a caller-supplied bool (instead of, say, inferring it from
+// an empty featureID) means a caller can never silently slide from one
+// scope to the other just because a feature id happened to be blank.
+func buildGummiMCPServerConfig(execPath, featureID, sockPath string, workspace bool) []byte {
+	args := []string{"__mcp", "--feature", featureID}
+	if workspace {
+		args = []string{"__mcp", "--workspace"}
+	}
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"gummi": map[string]any{
 				"command": execPath,
-				"args":    []string{"__mcp", "--feature", featureID},
+				"args":    args,
 				"env":     map[string]string{"GUMMI_MCP_SOCK": sockPath},
 			},
 		},
@@ -45,12 +59,15 @@ func buildGummiMCPServerConfig(execPath, featureID, sockPath string) []byte {
 // per-invocation config override whose value is an inline TOML table. This
 // function is the single locus for TOML basic-string value escaping and is
 // exercised in isolation by re-parsing its output with a real TOML parser.
-func buildCodexGummiOverride(execPath, featureID, sockPath string) (string, error) {
+//
+// workspace mirrors buildGummiMCPServerConfig's flag of the same name:
+// false renders args=["__mcp","--feature",featureID] (and featureID must
+// quote cleanly, same as always); true renders args=["__mcp","--workspace"]
+// and featureID is never even passed through tomlQuote, so a stray control
+// character in an unused featureID can't fail a workspace session that
+// never needed it.
+func buildCodexGummiOverride(execPath, featureID, sockPath string, workspace bool) (string, error) {
 	cmd, err := tomlQuote(execPath)
-	if err != nil {
-		return "", err
-	}
-	fid, err := tomlQuote(featureID)
 	if err != nil {
 		return "", err
 	}
@@ -58,9 +75,17 @@ func buildCodexGummiOverride(execPath, featureID, sockPath string) (string, erro
 	if err != nil {
 		return "", err
 	}
+	argsTOML := `["__mcp","--workspace"]`
+	if !workspace {
+		fid, err := tomlQuote(featureID)
+		if err != nil {
+			return "", err
+		}
+		argsTOML = "[\"__mcp\",\"--feature\"," + fid + "]"
+	}
 	return "mcp_servers.gummi=" + "{" +
 		"command=" + cmd + "," +
-		"args=[\"__mcp\",\"--feature\"," + fid + "]," +
+		"args=" + argsTOML + "," +
 		"env={GUMMI_MCP_SOCK=" + sock + "}" +
 		"}", nil
 }

@@ -745,6 +745,77 @@ func TestClaudeCodeArgsMCPWiring(t *testing.T) {
 	}
 }
 
+// TestClaudeCodeArgsMCPWiringWorkspace proves a board-level session (no
+// feature id, Workspace set) gets the same --mcp-config wiring as a feature
+// session, but with args=["__mcp","--workspace"] and no "--feature" token —
+// the one thing Workspace is supposed to change (see SessionOpts.Workspace).
+func TestClaudeCodeArgsMCPWiringWorkspace(t *testing.T) {
+	prev := claudeExecPath
+	claudeExecPath = func() (string, error) { return "/opt/gummi-stub", nil }
+	t.Cleanup(func() { claudeExecPath = prev })
+
+	ag, err := NewClaudeCode(writeFakeClaude(t, claudeArgvEchoScript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	sess, err := ag.NewSession(context.Background(), SessionOpts{
+		WorkDir:     t.TempDir(),
+		Workspace:   true,
+		MCPSockPath: "/tmp/mcp/ws.sock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	var msg string
+	for _, e := range collect(t, sess) {
+		if e.Kind == EventMessage {
+			msg = e.Text
+		}
+	}
+
+	start := strings.Index(msg, "argv=")
+	end := strings.Index(msg, " cwd=")
+	if start < 0 || end <= start {
+		t.Fatalf("bad argv echo: %s", msg)
+	}
+	fields := strings.Fields(msg[start+len("argv=") : end])
+
+	var cfg string
+	for i, f := range fields {
+		if f == "--mcp-config" {
+			if i+1 >= len(fields) {
+				t.Fatalf("--mcp-config has no value: %s", msg)
+			}
+			cfg = fields[i+1]
+		}
+	}
+	if cfg == "" {
+		t.Fatalf("argv missing --mcp-config for a workspace session: %s", msg)
+	}
+	if !slicesContains(fields, "--strict-mcp-config") {
+		t.Errorf("argv missing --strict-mcp-config: %s", msg)
+	}
+
+	var parsed struct {
+		MCP struct {
+			Gummi struct {
+				Args []string `json:"args"`
+			} `json:"gummi"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(cfg), &parsed); err != nil {
+		t.Fatalf("--mcp-config not valid JSON: %v\n%s", err, cfg)
+	}
+	if !reflect.DeepEqual(parsed.MCP.Gummi.Args, []string{"__mcp", "--workspace"}) {
+		t.Errorf("mcp.gummi.args = %v, want [__mcp --workspace]", parsed.MCP.Gummi.Args)
+	}
+}
+
 // A ReadOnly research session runs in the main checkout with no worktree:
 // --permission-mode acceptEdits is dropped and the allowlist is replaced
 // with the read-only set (read/nav + read-only git subcommands), so no

@@ -4,10 +4,21 @@ import "encoding/json"
 
 // buildOpencodeConfig renders the per-session OPENCODE_CONFIG file content
 // for an opencode-driven session. It emits exactly two blocks: opencode's
-// `permission` (always) and `mcp.gummi` (only when a feature id and MCP
-// socket are both present). Anything else opencode reads — models, keybinds,
-// bash tool policies — stays under operator control in the global
-// opencode.jsonc, which this file merges on top of.
+// `permission` (always) and `mcp.gummi` (only when an MCP socket is present
+// alongside a feature id or workspace is set — the same "socket plus
+// something to bind it to" gate every other adapter uses). Anything else
+// opencode reads — models, keybinds, bash tool policies — stays under
+// operator control in the global opencode.jsonc, which this file merges on
+// top of.
+//
+// workspace mirrors SessionOpts.Workspace: it swaps the emitted
+// mcp.gummi.command's trailing args from ["__mcp","--feature",featureID]
+// to ["__mcp","--workspace"], so the spawned child binds the board-level
+// endpoint instead of naming a card. featureID is otherwise unused when
+// workspace is true — same convention as the claudecode/codex builders in
+// gummi_mcp.go, kept here even though this file's config shape (a JSON
+// blob wrapping opencode's own schema, not gummi's) is otherwise unrelated
+// to theirs.
 //
 // The permission block cages opencode's file tools to the worktree: edit
 // (which gates both opencode's edit and write tools) is pinned to a
@@ -23,7 +34,7 @@ import "encoding/json"
 // requires process-level confinement, which is out of scope for this feature
 // (see FD-014 sandbox mode). opencode strips // comments from its JSON config,
 // so this note lives in the Go source only.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly, workspace bool) ([]byte, error) {
 	worktreeOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
 
 	permission := map[string]any{
@@ -49,11 +60,15 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	}
 
 	out := map[string]any{"permission": permission}
-	if featureID != "" && mcpSock != "" {
+	if mcpSock != "" && (featureID != "" || workspace) {
+		command := []string{execPath, "__mcp", "--feature", featureID}
+		if workspace {
+			command = []string{execPath, "__mcp", "--workspace"}
+		}
 		out["mcp"] = map[string]any{
 			"gummi": map[string]any{
 				"type":        "local",
-				"command":     []string{execPath, "__mcp", "--feature", featureID},
+				"command":     command,
 				"environment": map[string]string{"GUMMI_MCP_SOCK": mcpSock},
 			},
 		}

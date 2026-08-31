@@ -171,14 +171,17 @@ func TestCodexArgvShapes(t *testing.T) {
 	t.Cleanup(func() { codexExecPath = prev })
 
 	cases := []struct {
-		name    string
-		feature string
-		sock    string
-		wantMCP bool
+		name      string
+		feature   string
+		sock      string
+		workspace bool
+		wantMCP   bool
 	}{
 		{name: "on", feature: "FD-013", sock: "/tmp/mcp/FD-013.sock", wantMCP: true},
 		{name: "off-nofeature", feature: "", sock: "/tmp/mcp/x.sock", wantMCP: false},
 		{name: "off-nosock", feature: "FD-013", sock: "", wantMCP: false},
+		{name: "workspace-on", sock: "/tmp/mcp/ws.sock", workspace: true, wantMCP: true},
+		{name: "workspace-off-nosock", sock: "", workspace: true, wantMCP: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -191,7 +194,9 @@ func TestCodexArgvShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer c.Close()
-			sess, err := c.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "gpt-x", FeatureID: tc.feature, MCPSockPath: tc.sock})
+			sess, err := c.NewSession(context.Background(), SessionOpts{
+				WorkDir: dir, Model: "gpt-x", FeatureID: tc.feature, MCPSockPath: tc.sock, Workspace: tc.workspace,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,6 +221,21 @@ func TestCodexArgvShapes(t *testing.T) {
 			case true:
 				if !strings.Contains(got, "-c mcp_servers.gummi=") {
 					t.Errorf("MCP-on argv missing -c override:\n%s", got)
+				}
+				if tc.workspace {
+					if !strings.Contains(got, `args=["__mcp","--workspace"]`) {
+						t.Errorf("workspace override missing --workspace args:\n%s", got)
+					}
+					if strings.Contains(got, `"--feature"`) {
+						t.Errorf("workspace override unexpectedly names --feature:\n%s", got)
+					}
+				} else {
+					if !strings.Contains(got, `args=["__mcp","--feature","`+tc.feature+`"]`) {
+						t.Errorf("feature override missing --feature args:\n%s", got)
+					}
+					if strings.Contains(got, "--workspace") {
+						t.Errorf("feature override unexpectedly names --workspace:\n%s", got)
+					}
 				}
 			case false:
 				if strings.Contains(got, "-c mcp_servers.gummi=") {

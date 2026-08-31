@@ -148,19 +148,22 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	if len(opts.SystemHints) > 0 {
 		args = append(args, "--append-system-prompt", strings.Join(opts.SystemHints, "\n\n"))
 	}
-	// With a feature id and MCP socket both present, hand claude the full
-	// MCP server config inline so its tool calls reach gummi's tools over
-	// stdio. --strict-mcp-config is unconditional when we do: it shadows
-	// operator-side servers in ~/.claude.json or a project .mcp.json for
-	// the session, so a broken user-side server can't crash a stage.
-	// Missing either field → no MCP flags, so a session without a feature
-	// id starts without MCP rather than failing (mirrors opencode).
-	if opts.FeatureID != "" && opts.MCPSockPath != "" {
+	// With an MCP socket and something to bind it to — a feature id (the
+	// per-card stage session) or the Workspace flag (the board-level
+	// session) — hand claude the full MCP server config inline so its tool
+	// calls reach gummi's tools over stdio. --strict-mcp-config is
+	// unconditional when we do: it shadows operator-side servers in
+	// ~/.claude.json or a project .mcp.json for the session, so a broken
+	// user-side server can't crash a stage. A socket with neither a
+	// feature id nor Workspace set still gets no MCP flags at all — that
+	// is the one case this gate must not change, since it's what a
+	// transient/unbound session has always gotten (mirrors opencode).
+	if opts.MCPSockPath != "" && (opts.FeatureID != "" || opts.Workspace) {
 		exe, err := claudeExecPath()
 		if err != nil {
 			return nil, fmt.Errorf("claude adapter: locating own executable: %w", err)
 		}
-		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath)
+		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath, opts.Workspace)
 		args = append(args, "--strict-mcp-config", "--mcp-config", string(cfg))
 	}
 	// Static allowlist: pre-approving a tool skips its permission checks

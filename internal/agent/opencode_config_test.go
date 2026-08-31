@@ -8,7 +8,7 @@ import (
 
 func buildConfig(t *testing.T, extra []string) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, false)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false)
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,6 +81,32 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 				t.Errorf("permission block missing")
 			}
 		})
+	}
+}
+
+// TestBuildOpencodeConfigWorkspace pins the workspace-scoped mcp.gummi
+// command shape: ["execPath","__mcp","--workspace"], no "--feature", and
+// featureID (passed as junk here) is not consulted.
+func TestBuildOpencodeConfigWorkspace(t *testing.T) {
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/ws.sock", "should-be-ignored", "/opt/gummi", nil, false, true)
+	if err != nil {
+		t.Fatalf("buildOpencodeConfig: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
+	}
+	mcp, ok := m["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp block missing: %v", m["mcp"])
+	}
+	gummi := mcp["gummi"].(map[string]any)
+	if !reflect.DeepEqual(gummi["command"], []any{"/opt/gummi", "__mcp", "--workspace"}) {
+		t.Errorf("mcp.gummi.command = %v, want [/opt/gummi __mcp --workspace]", gummi["command"])
+	}
+	env := gummi["environment"].(map[string]any)
+	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/ws.sock" {
+		t.Errorf("mcp.gummi.environment.GUMMI_MCP_SOCK = %v, want /tmp/mcp/ws.sock", env["GUMMI_MCP_SOCK"])
 	}
 }
 
@@ -120,7 +146,7 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 // pattern map), while read stays open — the deny is structural, so
 // enforce/warn/off sandbox modes cannot re-arm the write tools.
 func TestBuildOpencodeConfigReadOnly(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, false)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}

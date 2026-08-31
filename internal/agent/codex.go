@@ -68,7 +68,7 @@ func (c *Codex) NewSession(_ context.Context, opts SessionOpts) (Session, error)
 	}
 	s := &codexSession{
 		c: c, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
-		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath,
+		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, workspace: opts.Workspace,
 		raw: make(chan Event, 32), events: make(chan Event), stop: make(chan struct{}),
 	}
 	go s.forward()
@@ -89,7 +89,8 @@ func (c *Codex) Close() error {
 type codexSession struct {
 	c                           *Codex
 	workdir, model              string
-	featureID, mcpSock          string // opts.FeatureID, opts.MCPSockPath (feature gates the -c override)
+	featureID, mcpSock          string // opts.FeatureID, opts.MCPSockPath (feature or workspace gates the -c override)
+	workspace                   bool   // opts.Workspace: bind the -c override to --workspace instead of --feature
 	hints                       []string
 	raw                         chan Event
 	events                      chan Event
@@ -186,17 +187,19 @@ func (s *codexSession) buildArgs() ([]string, error) {
 		"-s", "workspace-write", "-c", `approval_policy="never"`,
 		"--skip-git-repo-check", "--ignore-user-config",
 	}
-	// With a feature id and MCP socket both present, register gummi's tool
-	// server via an inline TOML config override (`-c`), codex's only
-	// per-invocation MCP injection point. Missing either field -> no MCP
-	// flags, so a session without a feature id starts without MCP rather
-	// than failing (mirrors claudecode/opencode).
-	if s.featureID != "" && s.mcpSock != "" {
+	// With an MCP socket and something to bind it to — a feature id (the
+	// per-card stage session) or the workspace flag (the board-level
+	// session) — register gummi's tool server via an inline TOML config
+	// override (`-c`), codex's only per-invocation MCP injection point. A
+	// socket with neither a feature id nor workspace set still gets no
+	// MCP flags at all, so a transient/unbound session starts without MCP
+	// rather than failing (mirrors claudecode/opencode).
+	if s.mcpSock != "" && (s.featureID != "" || s.workspace) {
 		exe, err := codexExecPath()
 		if err != nil {
 			return nil, fmt.Errorf("codex adapter: locating own executable: %w", err)
 		}
-		override, err := buildCodexGummiOverride(exe, s.featureID, s.mcpSock)
+		override, err := buildCodexGummiOverride(exe, s.featureID, s.mcpSock, s.workspace)
 		if err != nil {
 			return nil, fmt.Errorf("codex adapter: building gummi override: %w", err)
 		}

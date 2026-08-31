@@ -20,7 +20,8 @@ import (
 )
 
 // zzExecPath locates gummi's own executable when materializing the
-// per-turn `--mcp "<exe> __mcp --feature <FID>"` value, so zz's MCP child
+// per-turn `--mcp "<exe> __mcp --feature <FID>"` (or, for a workspace
+// session, `--mcp "<exe> __mcp --workspace"`) value, so zz's MCP child
 // is a real `gummi __mcp` process rather than whatever shadows "gummi" on
 // $PATH. Production uses the real os.Executable; tests rebind it.
 var zzExecPath = os.Executable
@@ -142,7 +143,7 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	// zz splits --mcp on whitespace with no quoting, so a gummi executable
 	// path containing whitespace cannot be represented on that flag.
 	var mcpLabel string
-	if opts.FeatureID != "" && opts.MCPSockPath != "" {
+	if opts.MCPSockPath != "" && (opts.FeatureID != "" || opts.Workspace) {
 		exe, err := zzExecPath()
 		if err != nil {
 			return nil, fmt.Errorf("zz adapter: locating own executable: %w", err)
@@ -177,7 +178,7 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	}
 	s := &zzSession{
 		z: z, workdir: opts.WorkDir, model: opts.Model, provider: opts.Provider, think: opts.Think, hints: opts.SystemHints,
-		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, mcpLabel: mcpLabel,
+		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, mcpLabel: mcpLabel, workspace: opts.Workspace,
 		sessionPath: sessionPath, tempRoot: tempRoot, maxTurns: zzMaxTurns(),
 		// zz's cage is a single --cwd root with no per-file allowlist; a
 		// transient session with ExtraReadAllows must read outside
@@ -207,6 +208,7 @@ type zzSession struct {
 	think              string
 	maxTurns           int // frozen at NewSession from zzMaxTurns(); argv and the max_turns error both read this, never the env directly
 	featureID, mcpSock string
+	workspace          bool   // opts.Workspace: bind --mcp's __mcp child to --workspace instead of --feature
 	mcpLabel           string // filepath.Base of the resolved gummi exe; "" when the session was not started with --mcp
 	hints              []string
 	sessionPath        string // --session value; stable for the session's lifetime
@@ -293,7 +295,7 @@ func (s *zzSession) Send(_ context.Context, msg string) error {
 	// os.Environ() unchanged, plus the MCP socket path when --mcp is
 	// emitted (zz's --mcp has no env table of its own).
 	env := os.Environ()
-	if s.featureID != "" && s.mcpSock != "" {
+	if s.mcpSock != "" && (s.featureID != "" || s.workspace) {
 		env = append(env, "GUMMI_MCP_SOCK="+s.mcpSock)
 	}
 	procCtx, cancel := context.WithCancel(context.Background())
@@ -340,12 +342,16 @@ func (s *zzSession) buildArgs() ([]string, error) {
 	if s.primed || fileExists(s.sessionPath) {
 		args = append(args, "--continue")
 	}
-	if s.featureID != "" && s.mcpSock != "" {
+	if s.mcpSock != "" && (s.featureID != "" || s.workspace) {
 		exe, err := zzExecPath()
 		if err != nil {
 			return nil, fmt.Errorf("zz adapter: locating own executable: %w", err)
 		}
-		args = append(args, "--mcp", exe+" __mcp --feature "+s.featureID)
+		mcpArg := exe + " __mcp --feature " + s.featureID
+		if s.workspace {
+			mcpArg = exe + " __mcp --workspace"
+		}
+		args = append(args, "--mcp", mcpArg)
 	}
 	if !s.cwdSuppressed {
 		args = append(args, "--cwd", s.workdir)
@@ -499,7 +505,7 @@ func (s *zzSession) mapLine(line []byte) ([]Event, bool, error) {
 		// MCP registration is asserted only for a session configured with
 		// --mcp (the same condition buildArgs uses to emit the flag); a
 		// builtin-only roster on a non-MCP session is expected and silent.
-		if s.mcpSock != "" && s.featureID != "" {
+		if s.mcpSock != "" && (s.featureID != "" || s.workspace) {
 			var tools []struct {
 				Name   string `json:"name"`
 				Source string `json:"source"`
