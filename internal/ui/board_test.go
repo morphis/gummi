@@ -422,3 +422,64 @@ func TestClearTransientNoticeOnViewChange(t *testing.T) {
 		t.Error("an error notice must survive a view change")
 	}
 }
+
+// TestBoardOpensAtTheTopOfTheList: the cursor starts on the first card in
+// the order the board paints, not on m.rows[0]. Those are different rows
+// and were never meant to be the same one — rows arrive ORDER BY num, so
+// row zero is the oldest card, and on any board with history the oldest
+// card is finished. The board opened parked on done work.
+func TestBoardOpensAtTheTopOfTheList(t *testing.T) {
+	m := populatedShell(120, 34)
+	// arrange the fixture the way a real board ages: the lowest-numbered
+	// card is long done, and it is the one the store returns first.
+	m.rows = []featureRow{
+		row(1, "the first thing we ever shipped", domain.StageDone, "thrifty", false),
+		row(7, "dark mode", domain.StageImplement, "thrifty", true),
+		row(9, "rate limits", domain.StageTodo, "thrifty", false),
+	}
+	m.selectFirstDisplayed()
+
+	got := m.rows[m.sel].F
+	if got.Stage == domain.StageDone {
+		t.Fatalf("the board opened on a done card (%s)", got.ID)
+	}
+	// todo leads the display order, so that is where the cursor belongs
+	if got.Stage != domain.StageTodo {
+		t.Errorf("opened on %s at %s, want the first card in display order (todo)", got.ID, got.Stage)
+	}
+}
+
+// TestSelectionSurvivesAReload: the cursor is kept on its card by id. It
+// used to be an index clamped to the new length, so a reload that added
+// or removed a row sliding underneath it moved the cursor onto a
+// different card with no keypress — while the user was reading it.
+func TestSelectionSurvivesAReload(t *testing.T) {
+	m := populatedShell(120, 34)
+	m.rows = []featureRow{
+		row(7, "dark mode", domain.StageImplement, "thrifty", true),
+		row(9, "rate limits", domain.StageTodo, "thrifty", false),
+	}
+	m.selectFirstDisplayed()
+	watching := m.rows[m.sel].F.ID
+
+	// a card lands ahead of it in the store's order, as a fresh one does
+	was := m.selectedID()
+	m.rows = []featureRow{
+		row(2, "brand new", domain.StageTodo, "thrifty", false),
+		row(7, "dark mode", domain.StageImplement, "thrifty", true),
+		row(9, "rate limits", domain.StageTodo, "thrifty", false),
+	}
+	m.restoreSel(was)
+
+	if got := m.rows[m.sel].F.ID; got != watching {
+		t.Errorf("the reload moved the cursor from %s to %s", watching, got)
+	}
+
+	// and when the card really is gone, it falls to the top of the list
+	was = m.selectedID()
+	m.rows = []featureRow{row(2, "brand new", domain.StageTodo, "thrifty", false)}
+	m.restoreSel(was)
+	if m.sel != 0 || m.rows[m.sel].F.ID != "FD-002" {
+		t.Errorf("a deleted selection did not fall to the top: sel=%d", m.sel)
+	}
+}

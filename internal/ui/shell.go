@@ -924,11 +924,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
 			return m, nil
 		}
+		// the cursor is kept on the card it was on, by id: the rows about
+		// to replace these can be a different length and a different order,
+		// and an index alone would quietly point somewhere else.
+		was := m.selectedID()
 		m.rows = msg.rows
-		m.clampSel()
-		// a reload can move the selection onto a different card with no
-		// keypress (a card was deleted, or the sort reordered), which would
-		// leave the action cursor pointing into another card's list.
+		m.restoreSel(was)
+		// the action cursor belongs to whichever card is selected, so it
+		// resyncs whether or not the selection survived.
 		m.syncActionFocus()
 		return m, nil
 
@@ -2241,17 +2244,54 @@ func severityRank(sev domain.Severity) int {
 	}
 }
 
-func (m *Shell) clampSel() {
-	if len(m.rows) == 0 {
+// selectedID names the card the cursor is on, or "" when the board has
+// no rows yet.
+func (m *Shell) selectedID() domain.FeatureID {
+	if m.sel >= 0 && m.sel < len(m.rows) {
+		return m.rows[m.sel].F.ID
+	}
+	return ""
+}
+
+// restoreSel puts the cursor back on the card it was on before a reload,
+// by identity rather than by position.
+//
+// m.sel indexes m.rows, and a reload can insert, remove or reorder rows
+// underneath it — a card created, one deleted, a headless run moving one
+// between groups — which slid the cursor onto a different card with no
+// keypress. Clamping the index to the new length, which is all this used
+// to do, keeps it in range and says nothing about whether it still points
+// at what the user was looking at.
+//
+// When the card really is gone the cursor falls to the top of the list.
+func (m *Shell) restoreSel(id domain.FeatureID) {
+	if id != "" {
+		for i, r := range m.rows {
+			if r.F.ID == id {
+				m.sel = i
+				return
+			}
+		}
+	}
+	m.selectFirstDisplayed()
+}
+
+// selectFirstDisplayed puts the cursor on the first card in the order the
+// board paints (displayOrder: todo, then in progress, research, review
+// and verify, with done last) rather than on m.rows[0].
+//
+// Those are not the same row and were never meant to be. m.rows arrives
+// ORDER BY num, so row zero is the lowest-numbered card — the oldest one
+// — and on any board with a bit of history the oldest card is finished.
+// So the board opened with the cursor parked on done work, at the bottom
+// of a list it had scrolled past everything to reach.
+func (m *Shell) selectFirstDisplayed() {
+	order := m.displayOrder(m.sortMode)
+	if len(order) == 0 {
 		m.sel = 0
 		return
 	}
-	if m.sel >= len(m.rows) {
-		m.sel = len(m.rows) - 1
-	}
-	if m.sel < 0 {
-		m.sel = 0
-	}
+	m.sel = order[0]
 }
 
 // computeLayout carves the terminal into the tab bar, the main pane, and

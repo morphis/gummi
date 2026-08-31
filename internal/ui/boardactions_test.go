@@ -25,9 +25,12 @@ func TestActionFocusResetsOnSilentSelectionChange(t *testing.T) {
 	m.actionFocused = true
 	m.actionCursor = 3
 
-	// drop the selected row without touching m.sel, the way a reload can
+	// drop the selected card, the way a reload can: the id it was on is
+	// gone, so restoreSel falls to the top of the list and the cursor is
+	// on a different card than it was.
+	was := m.selectedID()
 	m.rows = append(m.rows[:m.sel], m.rows[m.sel+1:]...)
-	m.clampSel()
+	m.restoreSel(was)
 	m.syncActionFocus()
 
 	if m.actionFocused || m.actionCursor != 0 {
