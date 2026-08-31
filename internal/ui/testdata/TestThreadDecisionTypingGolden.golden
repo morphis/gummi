@@ -22,11 +22,11 @@
 
 
 
-
   [38;2;133;131;146mgummi[m  [38;2;247;246;251mreview is ready for your decision.[m
   [38;2;247;246;251m  1. read the findings[38;2;96;95;107m — the review loop gave up — read its findings in the spec[m  [38;2;191;188;200ms[m
   [38;2;191;188;200;1m▸ [m2. bounce to implement with your words[38;2;96;95;107m — send the findings back for another round[m  [38;2;191;188;200mb[m
   [38;2;247;246;251m  3. advance to verify[38;2;96;95;107m — overrule the reviewer if the findings don't hold[m  [38;2;191;188;200mg[m
+  [38;2;247;246;251m  4. let autopilot finish[38;2;96;95;107m — it takes the remaining correction rounds alone[m  [38;2;191;188;200mA[m
   [37;40m┃ [39mthe contrast is off in dark mode[7m [27m                                                                              [m
 
 [38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [m [48;2;77;76;87m [38;2;191;188;200m1 in review[39m [m [48;2;232;254;150m [38;2;32;31;38;1m✉ 1 need you[39;22m [m [48;2;77;76;87m [38;2;191;188;200mFD-001 → review[39m [m                  [38;2;191;188;200m↑↓[m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[m [38;2;133;131;146mbounce to implement[38;2;96;95;107m · [38;2;191;188;200mesc[m [38;2;133;131;146mkeys[m

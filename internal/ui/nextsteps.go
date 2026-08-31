@@ -140,6 +140,17 @@ func blockedGate(in nextInput) *nextAction {
 // looking at, costing a row of the one block that exists to tell you
 // something you did not know. It appears only when there is nobody to
 // talk to yet, and then it says what enter actually does: start them.
+// autopilotAction is the "hand the rest to autopilot" row the design
+// puts at the foot of a gate: the same `A` overlay the accelerator opens,
+// offered where handing over is a real answer to the decision on screen
+// rather than a key you have to already know about. why says what
+// handing over means at this particular stop, since that is the part
+// that differs — gates crossing themselves is not the same promise as
+// taking the remaining correction rounds alone.
+func autopilotAction(why string) nextAction {
+	return nextStep("gate", "A", "let autopilot finish", why)
+}
+
 func talkAction(in nextInput, who, why string) []nextAction {
 	if in.sess == engine.StateInteractive {
 		return nil
@@ -235,13 +246,25 @@ func nextActions(in nextInput) []nextAction {
 			gate.why = "creates the worktree and starts implementing — P first if it outgrew quick"
 		}
 		acts = append(acts, gate)
+		// Sending it back is an answer in its own right, not just
+		// something typing happens to do. It is the option that consumes
+		// the composer's words (decision.go's wordConsumer), so typing
+		// aims at it and enter delivers the line as the turn that asks
+		// for the changes. Only worth offering while the architect is
+		// here to receive it — with no session the "start" row above is
+		// the way in.
+		if in.sess == engine.StateInteractive {
+			acts = append(acts, nextStep("changes", "", "request changes",
+				"send it back with what's wrong — your line goes with it"))
+		}
 		// reading the thing you are about to approve is an option in its
 		// own right, the same way the plan stage offers reading the plan.
 		// It goes after the gate rather than before it: the recommendation
 		// leads, and this is what you reach for when you are not ready to
 		// take it yet.
-		return append(acts, nextStep("spec", "s", "read the "+artifactNoun(in.kind)+" first",
+		acts = append(acts, nextStep("spec", "s", "read the "+artifactNoun(in.kind)+" first",
 			"it is what approving signs off on"))
+		return append(acts, autopilotAction("gates cross themselves from here"))
 
 	case domain.StagePlan:
 		if !finished {
@@ -283,7 +306,11 @@ func nextActions(in nextInput) []nextAction {
 		}
 		return append(acts,
 			nextStep("bounce", "b", "bounce to "+string(work), "send the findings back for another round"),
-			nextStep("advance", "g", "advance to verify", "overrule the reviewer if the findings don't hold"))
+			nextStep("advance", "g", "advance to verify", "overrule the reviewer if the findings don't hold"),
+			// no round count here: nextInput carries the review loop's own
+			// counter, not the corrective budget this would be spending,
+			// and the overlay the row opens states that budget exactly.
+			autopilotAction("it takes the remaining correction rounds alone"))
 
 	case domain.StageVerify:
 		if !finished {

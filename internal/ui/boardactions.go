@@ -140,6 +140,15 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		return nil
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "changes":
+		// this option IS the composer's words: typing aims at it and enter
+		// delivers the line as the turn asking for the changes
+		// (decision.go's deliverDecisionWords). Reached with nothing typed
+		// there is nothing to send, so it says what it wants rather than
+		// answering with silence — the bar named it, so enter owes a
+		// response.
+		m.notice = noticeMsg{text: "type what should change — your line goes back with it"}
+		return nil
 	case "gate":
 		// the two-state toggle (tighten applies immediately, loosen
 		// confirms first) is superseded by the autopilot overlay

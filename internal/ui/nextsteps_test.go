@@ -42,13 +42,13 @@ func TestNextActionsByState(t *testing.T) {
 		{"brainstorm chats first", nextInput{stage: domain.StageBrainstorm, kind: feat}, "enter g"},
 		// s reads the spec you are about to sign off on, the way the plan
 		// stage already offers reading the plan
-		{"spec clean offers approve", nextInput{stage: domain.StageSpec, kind: feat}, "enter g s"},
+		{"spec clean offers approve", nextInput{stage: domain.StageSpec, kind: feat}, "enter g s A"},
 		{"spec with open questions blocks approve", nextInput{stage: domain.StageSpec, kind: feat, openSpecQs: 2}, "s enter"},
 		{"plan idle runs the planner", nextInput{stage: domain.StagePlan, kind: feat}, "enter"},
 		{"plan gate reads then approves", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "s g"},
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
 		{"implement gate diffs then advances", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g"},
-		{"review gate reads findings", nextInput{stage: domain.StageReview, kind: feat, attn: attnGate, escalated: true}, "s b g"},
+		{"review gate reads findings", nextInput{stage: domain.StageReview, kind: feat, attn: attnGate, escalated: true}, "s b g A"},
 		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
 		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g d b"},
 		{"verify fail verdict reads evidence first", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true, verdict: verdictFail}, "s b g"},
@@ -73,8 +73,10 @@ func TestNextActionsCapAndRanking(t *testing.T) {
 		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "lint"},
 	} {
 		acts := nextActions(in)
-		if len(acts) > 3 {
-			t.Errorf("stage %s: %d suggestions, cap is 3", in.stage, len(acts))
+		// four is the design's own gate: the recommendation, the way back,
+		// the thing to read first, and handing the rest to autopilot.
+		if len(acts) > 4 {
+			t.Errorf("stage %s: %d suggestions, cap is 4", in.stage, len(acts))
 		}
 		for _, a := range acts {
 			if a.id == "" || a.label == "" || a.why == "" || a.detail == "" {

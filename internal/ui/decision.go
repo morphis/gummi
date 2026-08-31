@@ -100,7 +100,7 @@ func (d *threadDecision) wordConsumer() int {
 		return -1
 	}
 	for i, action := range d.actions {
-		if action.id == "run" || action.id == "bounce" {
+		if action.id == "run" || action.id == "bounce" || action.id == "changes" {
 			return i
 		}
 	}
@@ -418,6 +418,12 @@ func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, tex
 		return m.runStageWithNote(r.F, text)
 	case "bounce":
 		return m.bounceStage(r.F.ID, text)
+	case "changes":
+		// a design stage sends its changes back as the turn that asks for
+		// them: the architect is live in this thread, so what is wrong
+		// with the artifact goes to it directly rather than through a
+		// stage rewind, which is what bounce is for.
+		return m.sendThreadMessage(r.F.ID, text)
 	}
 	return nil
 }
