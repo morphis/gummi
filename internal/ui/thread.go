@@ -214,6 +214,14 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// first one: max(_, 0). Its rule cannot be drawn earlier than the
 	// history it brackets.
 	openSeg := func(st autopilotStretch) int { return max(segOf(st.from), 0) }
+	// closeSeg clamps the same way openSeg does, and for the same reason.
+	// A period can both open and close before any stage ever started —
+	// hand a card in todo to autopilot with no agent configured, then
+	// switch it straight back off — and without the clamp its opening
+	// rule would be drawn against the first segment while its closing
+	// rule matched no segment at all, leaving a period on screen that
+	// never ends.
+	closeSeg := func(st autopilotStretch) int { return max(segOf(st.to), 0) }
 	live := len(segs) - 1
 	// The period this card should open on rather than on its newest line,
 	// and where its opening rule ends up in the body. anchorIdx stays -1
@@ -277,7 +285,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 				}
 			}
 			for _, st := range stretches {
-				if !st.running() && segOf(st.to) == i && i != live {
+				if !st.running() && closeSeg(st) == i {
 					for _, l := range stretchCloseLines(s, st, inner) {
 						add(l)
 					}
@@ -1010,6 +1018,15 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	// it happened, above the first thing it did.
 	for _, st := range liveOpens {
 		lines = append(lines, stretchOpenLine(s, st, w), "")
+		// A period whose end also predates this stage — handed over and
+		// handed straight back before anything ran — closes here too. The
+		// inline loop below can only close periods whose closing event is
+		// one of this stage's own, so without this its rule would have no
+		// end anywhere on the page.
+		if !st.running() && st.to < last.enterIdx {
+			lines = append(lines, stretchCloseLines(s, st, w)...)
+			lines = append(lines, "")
+		}
 	}
 	// the whole session, not the last few events: capping this to a recent
 	// tail was how the (now-gone) transcript view earned its keep, and

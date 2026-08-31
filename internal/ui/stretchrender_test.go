@@ -179,3 +179,50 @@ func TestCorrectiveBadgeOnTheMasthead(t *testing.T) {
 		t.Fatalf("masthead is missing the corrective badge:\n%s", out)
 	}
 }
+
+// TestPeriodBeforeAnyStageDrawsBothRules is an edge the first cut of the
+// placement got wrong. Handing a card in todo to autopilot writes the
+// takeover before anything has entered a stage, and switching straight
+// back off writes the handback there too — so both boundaries predate
+// the first stage_enter. The opening rule was clamped forward onto the
+// first stage and drawn; the closing rule matched no stage at all and
+// was not, leaving a period on screen that never ended.
+func TestPeriodBeforeAnyStageDrawsBothRules(t *testing.T) {
+	base := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	enter, _ := json.Marshal(map[string]string{"role": "architect"})
+
+	for _, tc := range []struct {
+		name  string
+		after []state.CardEvent
+	}{
+		{name: "one stage", after: nil},
+		{name: "two stages", after: []state.CardEvent{
+			{Kind: state.EventStageExit, Stage: domain.StageSpec, At: base.Add(20 * time.Minute),
+				Payload: `{"verdict":"pass"}`},
+			{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: base.Add(21 * time.Minute),
+				Payload: string(enter)},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := populatedShell(100, 30)
+			m.sel = 1
+			id := m.rows[m.sel].F.ID
+			events := []state.CardEvent{
+				evTookOver(domain.GateFull, base),
+				evHandedBack("you turned autopilot off", base.Add(time.Minute)),
+				{Kind: state.EventStageEnter, Stage: domain.StageSpec, At: base.Add(10 * time.Minute),
+					Payload: string(enter)},
+			}
+			m.cardEvents[id] = append(events, tc.after...)
+			m.cardOpen = true
+			out := ansi.Strip(m.threadView(96, 30))
+
+			if !strings.Contains(out, "── autopilot took over") {
+				t.Fatalf("the period never opened:\n%s", out)
+			}
+			if !strings.Contains(out, "── you took back control") {
+				t.Fatalf("the period opened and never closed:\n%s", out)
+			}
+		})
+	}
+}
