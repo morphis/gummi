@@ -1585,14 +1585,14 @@ func TestAutopilotEventLine(t *testing.T) {
 			t.Errorf("autopilot line = %q, want to contain %q", got, "autopilot set to full")
 		}
 	})
-	t.Run("took-over boundary renders nothing, for now", func(t *testing.T) {
+	t.Run("took-over boundary is drawn as a rule, not a line", func(t *testing.T) {
 		ev := state.CardEvent{Kind: state.EventAutopilot,
 			Payload: `{"event":"took-over","reason":"idle","mode":"full"}`}
 		if got := stageEventLine(s, ev, 80, answered); got != "" {
 			t.Errorf("took-over boundary rendered %q, want empty (later phase's job)", got)
 		}
 	})
-	t.Run("handed-back boundary renders nothing, for now", func(t *testing.T) {
+	t.Run("handed-back boundary is drawn as a rule, not a line", func(t *testing.T) {
 		ev := state.CardEvent{Kind: state.EventAutopilot,
 			Payload: `{"event":"handed-back","mode":"full"}`}
 		if got := stageEventLine(s, ev, 80, answered); got != "" {

@@ -364,3 +364,39 @@ func TestNoUnseenStretchWithoutAPeriod(t *testing.T) {
 		t.Fatal("a card with no period reported one to jump to")
 	}
 }
+
+// TestInterruptedLandingGateIsNotFinished: quitting the board stops a
+// running session where it stands and parks it without ever writing a
+// stage_exit. Asking for "the newest exit anywhere in the log" then
+// borrows some earlier stage's pass and closes the period as though the
+// card had got all the way there — the closing rule congratulating
+// itself over a verify that never produced a verdict at all.
+func TestInterruptedLandingGateIsNotFinished(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evExit(domain.StageReview, state.StatusOK, at(10)), // an earlier stage passed
+		{Kind: state.EventStageEnter, Stage: domain.StageVerify, At: at(11)},
+		// verify itself never exits: the board quit mid-run
+		evPark(domain.StageVerify, "stopped when the board quit", at(20)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if st.closed != stretchParked {
+		t.Fatalf("closed = %q, want %q — verify never finished, it was interrupted",
+			st.closed, stretchParked)
+	}
+}
+
+// TestLandingGateFinishesOnItsOwnVerdict is the other side: the stage
+// that parked must be the stage whose exit is read.
+func TestLandingGateFinishesOnItsOwnVerdict(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateFull, at(0)),
+		evExit(domain.StageReview, state.StatusFail, at(10)), // an earlier failure
+		evExit(domain.StageVerify, state.StatusOK, at(19)),   // verify's own pass
+		evPark(domain.StageVerify, "verify passed — ready to land", at(20)),
+	}
+	st := onlyStretch(t, autopilotStretches(aFeature(), events))
+	if st.closed != stretchFinished {
+		t.Fatalf("closed = %q, want %q — verify passed on its own exit", st.closed, stretchFinished)
+	}
+}

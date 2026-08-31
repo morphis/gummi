@@ -265,8 +265,17 @@ type Shell struct {
 	// place that knows how many rows the period's opening rule ended up
 	// being from the bottom. Everything about the body's height — folding,
 	// wrapping, whether a session is live — is decided there.
-	lastSeen     map[domain.FeatureID]int64
-	anchorTo     domain.FeatureID
+	lastSeen map[domain.FeatureID]int64
+	anchorTo domain.FeatureID
+	// anchorFrom is the event index the anchored period opens at. The
+	// period is resolved once, by markSeen, and carried here rather than
+	// asked again at render time — markSeen advances the read mark in the
+	// same breath as it sets the anchor, so putting the question a second
+	// time afterwards puts it to a card that has just been marked read,
+	// and the answer is always "nothing unread". Carrying the decision is
+	// what stops the two halves disagreeing about a question only one of
+	// them is still in a position to answer.
+	anchorFrom   int
 	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
 	profileNames []string         // profile names for the new-feature form
 	repoNames    []string         // configured managed-repo names for the new-card forms
@@ -597,8 +606,8 @@ func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd 
 	}
 	if m.cardOpen {
 		if r, ok := m.selected(); ok && r.F.ID == id {
-			if _, unread := unseenStretch(autopilotStretches(r.F, events), events, m.lastSeen[id]); unread {
-				m.anchorTo = id
+			if st, unread := unseenStretch(autopilotStretches(r.F, events), events, m.lastSeen[id]); unread {
+				m.anchorTo, m.anchorFrom = id, st.from
 			}
 		}
 	}

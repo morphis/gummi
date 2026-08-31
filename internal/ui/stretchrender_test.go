@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -255,5 +256,168 @@ func TestMidStageTakeoverOpensWhereItHappened(t *testing.T) {
 	}
 	if opened < manual {
 		t.Fatalf("the period opens above work that predates it:\n%s", out)
+	}
+}
+
+// TestPeriodWithNoStagesStillDraws: a card can be handed to autopilot
+// and taken back without any stage ever starting — the advance fails, or
+// no agent is configured. Both placement paths key off stage segments,
+// so with none the record of the card changing hands was dropped
+// entirely and the body fell through to "nothing has run yet".
+func TestPeriodWithNoStagesStillDraws(t *testing.T) {
+	base := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	m := populatedShell(100, 30)
+	m.sel = 1
+	id := m.rows[m.sel].F.ID
+	m.cardEvents[id] = []state.CardEvent{
+		evTookOver(domain.GateFull, base),
+		evHandedBack("you turned autopilot off", base.Add(time.Minute)),
+	}
+	m.cardOpen = true
+	out := ansi.Strip(m.threadView(96, 30))
+
+	if !strings.Contains(out, "── autopilot took over") {
+		t.Fatalf("a card with no stages lost the record of being handed over:\n%s", out)
+	}
+	if !strings.Contains(out, "── you took back control") {
+		t.Fatalf("a card with no stages lost the record of being handed back:\n%s", out)
+	}
+}
+
+// TestUnreadPeriodScrollsTheThreadToIt is the test whose absence let the
+// whole open-at-the-period feature ship as a no-op, twice over: the
+// render re-asked "what is unread" after the mark had already been
+// advanced, and the live stage — where a period usually both opens and
+// parks — had no way to report where it had drawn the rule. Nothing
+// exercised markSeen and threadScroll together, so neither showed up.
+//
+// It asserts the observable thing: arriving at a card with unread
+// autopilot history does not leave you at the bottom.
+func TestUnreadPeriodScrollsTheThreadToIt(t *testing.T) {
+	m := stretchThread(t)
+	id := m.rows[m.sel].F.ID
+	events := withSeqs(m.cardEvents[id])
+	m.cardEvents[id] = events
+
+	if cmd := m.markSeen(id, events); cmd != nil {
+		cmd() // the store write; irrelevant here, but drain it
+	}
+	if m.anchorTo != id {
+		t.Fatalf("anchorTo = %q, want %q — the card has an unread period", m.anchorTo, id)
+	}
+
+	_ = m.threadView(96, 20)
+
+	if m.threadScroll == 0 {
+		t.Fatal("the thread stayed at the bottom: the period was drawn but never anchored to")
+	}
+	if m.anchorTo != "" {
+		t.Fatalf("anchorTo = %q, want cleared — the jump happens once, on arrival", m.anchorTo)
+	}
+}
+
+// TestSecondVisitDoesNotJump: the mark is what stops the jump repeating.
+// Having read the card once, opening it again lands at the newest line
+// like any other card.
+func TestSecondVisitDoesNotJump(t *testing.T) {
+	m := stretchThread(t)
+	id := m.rows[m.sel].F.ID
+	events := withSeqs(m.cardEvents[id])
+	m.cardEvents[id] = events
+
+	if cmd := m.markSeen(id, events); cmd != nil {
+		cmd()
+	}
+	_ = m.threadView(96, 20)
+	m.threadScroll = 0
+
+	if cmd := m.markSeen(id, events); cmd != nil {
+		cmd()
+	}
+	if m.anchorTo != "" {
+		t.Fatalf("anchorTo = %q, want none — this card has been read", m.anchorTo)
+	}
+	_ = m.threadView(96, 20)
+	if m.threadScroll != 0 {
+		t.Fatalf("threadScroll = %d, want 0 — a card already read opens at its newest line", m.threadScroll)
+	}
+}
+
+// TestStretchThreadGolden is the review surface for this whole change.
+// The substring assertions above pin the facts that matter one at a
+// time; this pins the frame — spacing, indentation, where each rule sits
+// relative to the receipts and the conversation, and the column the
+// stamps align in. AGENTS.md is explicit that goldens are how a UI diff
+// is reviewed, and a change about where things sit on a page cannot be
+// reviewed by grep.
+func TestStretchThreadGolden(t *testing.T) {
+	m := stretchThread(t)
+	golden.RequireEqual(t, []byte(ansi.Strip(m.threadView(96, 34))))
+}
+
+// TestStretchNarrowGolden is the same card at 56 columns. The rules
+// dash-fill to the width they are given and the stamped decision lines
+// choose between padding to the right margin and dropping the stamp
+// entirely; neither branch was exercised anywhere until this.
+func TestStretchNarrowGolden(t *testing.T) {
+	m := stretchThread(t)
+	golden.RequireEqual(t, []byte(ansi.Strip(m.threadView(56, 34))))
+}
+
+// TestPeriodThatDecidedNothingWithholdsOnlyTheTally is D9 at the render
+// layer. The derivation test beside it only checks the struct; this
+// checks the screen, which is where the rule actually has to hold: the
+// rules and the reason still draw, and only the row that would have read
+// as a count of nothing is missing.
+func TestPeriodThatDecidedNothingWithholdsOnlyTheTally(t *testing.T) {
+	base := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	enter, _ := json.Marshal(map[string]string{"role": "implementer"})
+	m := populatedShell(100, 30)
+	m.sel = 1
+	id := m.rows[m.sel].F.ID
+	m.cardEvents[id] = []state.CardEvent{
+		evTookOver(domain.GateFull, base),
+		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base.Add(time.Minute), Payload: string(enter)},
+		evMessage("implementer", "did the work", base.Add(2*time.Minute)),
+		evPark(domain.StageImplement, "implement finished, review it", base.Add(3*time.Minute)),
+	}
+	m.cardOpen = true
+	out := ansi.Strip(m.threadView(96, 30))
+
+	if !strings.Contains(out, "── autopilot took over") || !strings.Contains(out, "── autopilot parked it") {
+		t.Fatalf("a period that decided nothing still draws its rules:\n%s", out)
+	}
+	if !strings.Contains(out, "implement finished, review it") {
+		t.Fatalf("the reason is not a tally and is not withheld with it:\n%s", out)
+	}
+	for _, notWant := range []string{"0 gates", "0 answers", "gate ·", "· 0"} {
+		if strings.Contains(out, notWant) {
+			t.Fatalf("a row of zeroes was drawn (%q):\n%s", notWant, out)
+		}
+	}
+}
+
+// TestMastheadSaysWhenAutopilotIsRunning is P6, and it is the only
+// autopilot fact that stays pinned — because it is the only one about
+// now. It has to be read from live session state every frame, so that it
+// cannot outlive its own truth the way the deleted rollup did.
+func TestMastheadSaysWhenAutopilotIsRunning(t *testing.T) {
+	s := m0Styles()
+	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, GateApproval: domain.GateFull}
+	m := populatedShell(120, 30)
+
+	// no session: the mode alone, no claim about now
+	if got := ansi.Strip(autopilotField(s, m, f)); strings.Contains(got, "running") {
+		t.Fatalf("autopilotField = %q, want no claim that a card with no session is running", got)
+	}
+	if !strings.Contains(ansi.Strip(autopilotField(s, m, f)), "autopilot: full") {
+		t.Fatalf("autopilotField = %q, want the stored mode", ansi.Strip(autopilotField(s, m, f)))
+	}
+
+	// off never claims it either, whatever is running
+	off := f
+	off.GateApproval = domain.GateOff
+	if got := ansi.Strip(autopilotField(s, m, off)); strings.Contains(got, "running") {
+		t.Fatalf("autopilotField(off) = %q, want no running claim", got)
 	}
 }

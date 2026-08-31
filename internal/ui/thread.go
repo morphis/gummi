@@ -20,8 +20,15 @@ import (
 // Top to bottom it renders identity + the stage strip, the pinned spec
 // line, one folded line per finished stage session, the live stage (a
 // session boundary naming the fresh context it started, its events, and
-// the streaming activity line while one is running), the decision-receipt
-// slot, a pinned open decision when the card needs one, and the input.
+// the streaming activity line while one is running), a pinned open
+// decision when the card needs one, and the input.
+//
+// What a card decided while running itself is not a region of its own.
+// It used to be — a rollup pinned below the live stage — and that was
+// the bug: appended last, it took every arriving line above itself and
+// stayed permanently newer than the conversation it described. Those
+// periods are drawn among the history instead, bracketed by rules where
+// they actually began and ended (stretch.go).
 //
 // The thread never blocks a frame on IO: its per-stage history comes
 // from featureRow.Events, populated lazily and only for the selected
@@ -228,13 +235,16 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// unless that rule is actually drawn, so a period whose rule the
 	// render never reaches cannot move the scroll to a row that is not
 	// there.
-	anchor, anchoring := autopilotStretch{}, false
-	if !measure && m.anchorTo == f.ID {
-		anchor, anchoring = unseenStretch(stretches, r.Events, m.lastSeen[f.ID])
-	}
+	// markSeen (shell.go) already resolved which period this is and left
+	// its opening index behind; the render only has to notice when it
+	// draws that period's rule. It must not put the question again here:
+	// markSeen advances the read mark at the same moment it sets the
+	// anchor, so by the time this runs the honest answer to "what is
+	// unread" is always "nothing".
+	anchoring := !measure && m.anchorTo == f.ID
 	anchorIdx := -1
 	markAnchor := func(st autopilotStretch) {
-		if anchoring && st.from == anchor.from {
+		if anchoring && st.from == m.anchorFrom {
 			anchorIdx = len(body)
 		}
 	}
@@ -295,9 +305,23 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
-	if ls := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens); len(ls) > 0 {
+	// The live stage draws the rules for periods that reach into it, so it
+	// is the only one that knows where inside its own block the anchored
+	// one landed — and that is the ordinary case, since a period usually
+	// opens and parks inside the stage still on screen. It reports the
+	// offset back rather than the caller guessing, and the offset is
+	// translated into a body index here, where the body's length is known.
+	anchorWant := -1
+	if anchoring {
+		anchorWant = m.anchorFrom
+	}
+	if ls, at := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens, anchorWant); len(ls) > 0 {
+		base := len(body)
 		for _, l := range ls {
 			add(l)
+		}
+		if at >= 0 && anchorIdx < 0 {
+			anchorIdx = base + at
 		}
 		blank()
 	}
@@ -324,6 +348,24 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// newest thing on the page, so it sat under your own turns describing
 	// a period that had ended hours earlier.
 	//
+	// A card that never entered a stage has no segment for a rule to be
+	// placed against, and both placement paths above bail out on that —
+	// so a card handed to autopilot and taken straight back, with the
+	// advance never producing a stage, would silently lose the record
+	// that it changed hands at all. There is no position to resolve here,
+	// only an order, so the rules go down in the order they happened.
+	if len(segs) == 0 && len(stretches) > 0 {
+		for _, st := range stretches {
+			add(stretchOpenLine(s, st, inner))
+			if !st.running() {
+				for _, l := range stretchCloseLines(s, st, inner) {
+					add(l)
+				}
+			}
+		}
+		blank()
+	}
+
 	// todo and done are the two stages currentSpecSection has no anchor
 	// for, and todo is exactly the stage where "what is this card about"
 	// is the whole question — with nothing run yet there is no receipt,
@@ -940,7 +982,7 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // autopilot works, parks, and you come back and start typing — all
 // inside one stage. Bracketing the block as a whole would put the turns
 // you typed after the handback above the rule announcing it.
-func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens []autopilotStretch) []string {
+func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens []autopilotStretch, anchorFrom int) (lines []string, anchorAt int) {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
@@ -951,16 +993,30 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// the rule names a context reset; the blank line under it is what
 		// makes it read as a boundary rather than a heading glued to the
 		// first thing that happened after it
-		lines := []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
+		anchorAt = -1
+		lines = []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
 		// A live session renders from its own snapshot rather than the
 		// event log, so there are no indices here to place a rule against.
 		// There is only ever one period to draw in that case — a card with
 		// something running now is a card whose period, if it has one, has
 		// not closed — so its opening rule goes at the top and nothing
 		// else is claimed.
-		for _, st := range liveOpens {
-			if st.running() {
-				lines = append(lines, stretchOpenLine(s, st, w), "")
+		// Only a period that began before this session can be placed
+		// here. A live session renders from its own snapshot, which has no
+		// event indices to hang a rule off, so a switch pressed part-way
+		// through one has no honest position: drawing it at the top would
+		// put it above the turns that preceded it, which is the error this
+		// change exists to remove. It is left undrawn until the session
+		// ends and the log renders it in its own place — and meanwhile the
+		// masthead already says the card is running under autopilot.
+		if len(segs) > 0 {
+			for _, st := range liveOpens {
+				if st.running() && st.from < segs[len(segs)-1].enterIdx {
+					if st.from == anchorFrom {
+						anchorAt = len(lines)
+					}
+					lines = append(lines, stretchOpenLine(s, st, w), "")
+				}
 			}
 		}
 		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
@@ -980,7 +1036,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		case len(lines) == 1:
 			lines = append(lines, "  "+s.Faint.Render("starting…"))
 		}
-		return lines
+		return lines, anchorAt
 	}
 
 	// an open tail is the freshest thing this board has for this card, so
@@ -998,21 +1054,23 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		if stage == "" {
 			stage = r.F.Stage
 		}
-		lines := []string{boundaryRule(s, string(stage), string(snap.Role), runModel(snap), at, w), ""}
+		anchorAt = -1
+		lines = []string{boundaryRule(s, string(stage), string(snap.Role), runModel(snap), at, w), ""}
 		lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 		if meta := sessionMeta(snap); meta != "" {
 			lines = append(lines, "  "+s.Faint.Render(meta))
 		}
 		lines = append(lines, "  "+s.Warning.Render(m.follow.marker())+
 			s.Faint.Render(" — "+m.follow.footer(snap)))
-		return lines
+		return lines, anchorAt
 	}
 
 	if len(segs) == 0 {
-		return nil
+		return nil, -1
 	}
 	last := segs[len(segs)-1]
-	lines := []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
+	anchorAt = -1
+	lines = []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
 	// A period that opened inside this stage rather than before it — the
 	// switch pressed on a card already sitting here — gets its rule where
 	// it happened, above the first thing it did.
@@ -1025,6 +1083,9 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	for _, st := range liveOpens {
 		if st.from >= last.enterIdx {
 			continue
+		}
+		if st.from == anchorFrom {
+			anchorAt = len(lines)
 		}
 		lines = append(lines, stretchOpenLine(s, st, w), "")
 		// A period whose end also predates this stage — handed over and
@@ -1052,6 +1113,9 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// one ending twice.
 		for _, st := range liveOpens {
 			if st.from == idx {
+				if st.from == anchorFrom {
+					anchorAt = len(lines)
+				}
 				lines = append(lines, stretchOpenLine(s, st, w), "")
 			}
 		}
@@ -1085,7 +1149,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 	}
-	return lines
+	return lines, anchorAt
 }
 
 // boundaryRule is the live stage's session-boundary line: stage, role,
@@ -1297,13 +1361,13 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, answered map[str
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		if p.Event != "" {
 			// A took-over/handed-back boundary (AutopilotPayload.Event is
-			// AutopilotTookOver or AutopilotHandedBack) is a stretch of the
-			// card's history running unattended, not a single fact about a
-			// mode — it wants a rule marking where the stretch starts and
-			// ends, the way boundaryRule marks a fresh session, not a line
-			// among the tool calls and messages inside one. That rendering
-			// belongs to a later phase; for now the boundary renders as
-			// nothing rather than as a line that undersells what it means.
+			// AutopilotTookOver or AutopilotHandedBack) is the edge of a
+			// period the card ran unattended, not a single fact about a
+			// mode. It is drawn as a rule bracketing that period, the way
+			// boundaryRule marks a fresh session — stretch.go owns that,
+			// and thread.go places it. Returning nothing here is what
+			// stops the same boundary being said twice, once as a rule and
+			// once as a line among the tool calls inside it.
 			return ""
 		}
 		// Event == "" is appendAutopilotEvent's shape (state/cardevents.go):

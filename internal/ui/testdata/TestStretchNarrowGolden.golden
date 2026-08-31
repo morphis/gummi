@@ -1,0 +1,34 @@
+
+FD-042 · dark mode   [thrifty]   autopilot: gates
+
+todo ─ brainstorm ─ spec ─ plan ─  implement  ─ revie…
+
+⌄ spec · Implementation notes ────────────────────── s
+
+── autopilot took over ────────────────────── 23:40 ──
+spec · architect · 1 turn · 180 credits ────── ✓ 23:46
+  ✓ autopilot crossed spec → plan               23:46
+plan · architect · 180 credits ─────────────── ✓ 00:04
+  ✓ autopilot answered “q?” — stream rows, don't buff…
+  ✓ autopilot crossed plan → implement          00:04
+
+── implement · implementer · claude-sonnet · fresh co…
+
+  implementer wired the theme layer through the pane.
+── autopilot parked it ────────────────────── 00:11 ──
+  implement finished, review it
+  2 gates · 1 answer
+
+  you hold on, I want to look at the diff first
+  implementer sure — nothing else is running.
+
+
+
+
+
+gummi
+ nothing is running — choose what happens next.
+▸ 1. run implement
+  no active run — start (or restart) the stage
+
+┃ message the agent, a verb (approve, verify,       

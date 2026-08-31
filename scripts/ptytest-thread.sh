@@ -162,6 +162,24 @@ seg() {
     VALUES ('BG-001','$stage','sonnet','$role',$credits,'$AT')
     ON CONFLICT(feature_id,stage,model,role) DO UPDATE SET credits = credits + $credits;"
 }
+# BG-003 carries a period it ran itself: handed over, one gate crossed
+# and one question answered without anyone watching, parked, and then a
+# turn typed by a person after it stopped. That last turn is the point —
+# the record of the period has to sit ABOVE it, because that is when it
+# happened. The block this replaced was appended after the live stage and
+# so was permanently below everything, including turns typed hours later.
+a=0
+atick() { local m=$((a*2)); AP=$(printf '2026-08-30T%02d:%02d:00Z' $((7+m/60)) $((m%60))); a=$((a+1)); }
+apins() { atick; sqlite3 "$DB" "INSERT INTO card_events (feature_id,stage,kind,status,at,payload,output,dedupe)
+          VALUES ('BG-003','$1','$2','','$AP',json('$3'),'','');"; }
+apins diagnose autopilot   '{"event":"took-over","mode":"full"}'
+apins diagnose stage_enter '{"role":"diagnoser","model":"sonnet","flavor":"sonnet"}'
+apins triage   gate        '{"from":"triage","to":"diagnose","actor":"autopilot"}'
+apins diagnose ask         '{"question":"buffer or stream?","answer":"stream rows","by":"autopilot"}'
+apins diagnose message     '{"author":"diagnoser","content":"root cause is the theme layer"}'
+apins diagnose park        '{"reason":"needs-you","detail":"diagnose finished, review it"}'
+apins diagnose message     '{"author":"user","content":"hold on, let me read that"}'
+
 sqlite3 "$DB" "UPDATE features SET stage='review', spend_credits=53.5 WHERE id='BG-001';
                UPDATE features SET stage='done'   WHERE id='BG-002';
                UPDATE features SET stage='diagnose' WHERE id='BG-003';"
@@ -373,7 +391,27 @@ expect "a failed session is marked ✗"          'review · reviewer .* ✗'
 expect "four fix receipts show different spend" 'fix · implementer'
 refute "receipt chevrons do not render"        '⌄ triage · triager|⌄ diagnose|⌄ fix|⌄ review'
 
-section "12. the layout under pressure"
+section "12. a period the card ran itself"
+reopen BG-003
+expect "the period opens where it began"        '── autopilot took over'
+expect "its crossing keeps its position"        'autopilot crossed triage → diagnose'
+expect "its answer keeps its position"          'autopilot answered'
+expect "the period closes where it stopped"     '── autopilot parked it'
+expect "the close carries the park's own words" 'diagnose finished, review it'
+expect "the tally counts what it decided"       '1 gate · 1 answer'
+refute "no rollup pinned below the thread"      'while you were away'
+refute "no raw event kinds leak through"        '^ *(park|decision_open|autopilot)$'
+# the whole point: the record sits above the turn typed after it
+ap_close=$(pane | grep -n 'autopilot parked it' | head -1 | cut -d: -f1)
+ap_turn=$(pane  | grep -n 'hold on, let me read that' | head -1 | cut -d: -f1)
+if [ -n "$ap_close" ] && [ -n "$ap_turn" ] && [ "$ap_close" -lt "$ap_turn" ]; then
+  PASS=$((PASS+1)); printf '  ok    %s\n' "the period sits above the turn that followed it"
+else
+  FAIL=$((FAIL+1)); FAILED_NAMES+=("the period sits above the turn that followed it")
+  printf '  FAIL  %s   (close=%s turn=%s)\n' "the period sits above the turn that followed it" "$ap_close" "$ap_turn"; dump
+fi
+
+section "13. the layout under pressure"
 for dim in "120 40" "100 30" "80 24" "60 16" "36 9" "24 6" "20 5" "18 4" "120 3"; do
   set -- $dim
   size "$1" "$2"

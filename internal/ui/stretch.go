@@ -152,7 +152,8 @@ func autopilotStretches(f domain.Feature, events []state.CardEvent) []autopilotS
 			var p state.ParkPayload
 			_ = json.Unmarshal([]byte(ev.Payload), &p)
 			how := stretchParked
-			if landingGate(f, ev.Stage) && newestExitVerdict(events[:i]) != state.StatusFail {
+			verdict, ran := stageExitVerdict(events[:i], ev.Stage)
+			if landingGate(f, ev.Stage) && ran && verdict != state.StatusFail {
 				// It got the card as far as a card is allowed to go on its
 				// own. The verdict guard matters: autopilot parks at the
 				// landing gate whether verification passed or failed, and
@@ -234,18 +235,29 @@ func landingGate(f domain.Feature, stage domain.Stage) bool {
 	return len(seq) > 0 && seq[len(seq)-1] == stage
 }
 
-// newestExitVerdict is the verdict on the most recent stage_exit in
-// events, or "" when nothing has finished yet.
-func newestExitVerdict(events []state.CardEvent) string {
+// stageExitVerdict is the verdict the given stage finished on, and
+// whether it finished at all.
+//
+// Both halves are load-bearing, and the second one is the subtle one. A
+// stage can park without ever exiting — quitting the board stops a
+// running session where it stands and records the park with no
+// stage_exit behind it — so "the newest exit anywhere in the log" is not
+// the same question as "how did this stage end". Asking the looser
+// question let an interrupted verify borrow the pass of some earlier
+// stage and close its period as "autopilot finished", which is the
+// closing rule congratulating itself over a card that never got a
+// verdict at all. A stage with no exit of its own has not finished, and
+// says so.
+func stageExitVerdict(events []state.CardEvent, stage domain.Stage) (string, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind != state.EventStageExit {
+		if events[i].Kind != state.EventStageExit || events[i].Stage != stage {
 			continue
 		}
 		var p stageExitPayload
 		_ = json.Unmarshal([]byte(events[i].Payload), &p)
-		return p.Verdict
+		return p.Verdict, true
 	}
-	return ""
+	return "", false
 }
 
 // stretchAt reports the period covering event index i, and whether there
