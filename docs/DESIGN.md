@@ -673,8 +673,20 @@ card, and a card belongs to the board. Leaving the tab hides them and
 returning restores them — never discards, since a card's thread holds an
 unsent composer draft the same way. The inbox tab promotes the
 needs-attention queue out of its modal overlay; the agent tab hosts a
-pty running the user's own coding CLI. Both are later work — this pass
-lands the tab shell and the backlog as the board's only shape.
+pty running the user's own coding CLI.
+
+**The needs-you queue is a query, not a second list.** It is read from
+the open decision rows (§6.3) rather than kept as a queue of its own, so
+a stop raised by a headless run in another process is in it, and a
+restart no longer has to guess the queue back from whatever sessions
+happen to be restorable. One row per card, oldest first, carrying the
+question in the words it was recorded with. The rows navigate and do not
+act — you decide in the thread, where the evidence is — with one
+exception that earns itself: `u` tops up an exhausted envelope, and it
+is the only way to un-strand a card parked for lack of one. The session
+inference behind it survives as the fallback for cards whose stop
+predates the record, and for a failed session, which is the one stop
+nobody decided anything about.
 
 **The card page is a thread.** Opening a card does not show a detail
 pane describing it; it shows one conversation running the card's whole
@@ -910,11 +922,60 @@ Rules that make the control safe:
   the thread's body is the first region to yield, and at 36×9 it yields
   entirely. The moment it is answered it collapses into the body's
   history at the point in time where it happened.
+
+  The page yields in a fixed order, and the order is the argument. The
+  blank rows that separate its regions go first — the row above the
+  crumb, the row between the card's title and its stage strip, the one
+  under the composer that stops it reading as part of the status bar —
+  because on a page you are operating rather than reading, an option you
+  can see is worth more than air. Then the crumb, since `esc` answers
+  the way out whether or not a row says so. Then the strip and the spec
+  line. What never yields is the card's own identity, the question, the
+  highlighted answer and the line to type on: one row is reserved for
+  the head before the decision takes the rest, because you can answer a
+  question on a card you cannot name and should not have to. Unfocused
+  options window around the cursor rather than the block being trimmed
+  from the bottom, so the answer the cursor is on is never the row that
+  went missing.
 - **Answering is never ambiguous.** `enter` sends the composer's line
   when there is one, and answers the highlighted option when there is
   not. Typing moves the highlight onto the option that consumes words and
   relabels it to say what it will do with them, so the screen always
-  states what `enter` is about to do before it does it.
+  states what `enter` is about to do before it does it. A line whose
+  first word is a verb is a command the parser owns (§6) and never aims:
+  the confirm chip keeps verb-words, the decision keeps prose, and the
+  chip's own "no — send it as a message" hands the line back untouched
+  rather than to the highlighted option. One classification, made the
+  same way whether or not anything is open.
+- **More than one can be open, and each surface names one.** A card can
+  genuinely be waiting on two things at once — a verify gate raised
+  beside an exhausted envelope — so `Store.OpenDecisions` reports a list
+  rather than a value. Enforcing a single open row was considered and
+  rejected: it would mean a closing write on every path that resolves
+  one, in every process that can resolve one, and a missed write would
+  leave a card reading "needs you" forever. The two surfaces rank
+  instead, and rank identically — the thread's pinned control and the
+  needs-you queue both name the decision that stops you first (an agent's
+  question, then the envelope, then a failed verify, then a design gate)
+  — so they cannot disagree about what a card is waiting on. The headless
+  driver resolves the same list by recency rather than by rank (§14.1),
+  because a caller answering over a wire has no screen to have read a
+  ranking off; the two orders agree on every stop raised today, and if a
+  future kind makes them diverge the driver's own rule is the one to
+  revisit.
+- **A decision closes without anyone writing that it did.** The
+  append-only log has no delete, so "still open" is a question asked of
+  the log rather than a flag maintained in it: a decision is open while
+  no later `gate`/`ask` event carries its id *and* the card still sits at
+  the stage that raised it. That second clause is what makes closure
+  self-healing — a gate crossed by `g`, by `gummi run`, or by the
+  workspace MCP all move the card, and moving the card abandons what the
+  stage before it was waiting on, whether or not the crossing remembered
+  to say so. The one stop that resolves without moving is an exhausted
+  envelope, which is answered by the stage simply running again on a
+  raised one; a plain re-run of that same stage closes it, and the
+  borrowed-stage runs (a plan critique, a rebase resolution) deliberately
+  do not count, since neither raises anybody's envelope.
 - **There is no *other* option.** Every answer offered comes from the
   legal set — `workflow.Next` and the stage's own guidance. Prose is
   always accepted and always safe: it becomes a turn, never an action
@@ -1142,6 +1203,17 @@ Decided in the design interview (2026-07-03):
     *who approves*, never *what must happen* — no implementation without
     an approved spec, no merge without review and verify, at every stop.
 
+    A decision autopilot has taken renders open, with its options,
+    marked as autopilot's — and collapses when the answer event lands,
+    never on a timer. A countdown was proposed and cut: it would make the
+    same decision resolve differently depending on whether a human
+    happened to be looking at that card, and it would diverge the TUI
+    from the driver, which answers immediately and has nobody to count
+    down for. What the mark says is that an answer is already on its way,
+    which is true for as long as the command carrying it is in flight;
+    `esc` keeps its two meanings rather than gaining a third gated on a
+    window that no longer exists.
+
     Stated mechanically against §6.3: autopilot may answer decisions of
     kind `gate`, `verify`, `conflict`, `ask` and `idle`, and may not
     answer one of kind `budget` — topping up an exhausted envelope is
@@ -1166,6 +1238,17 @@ Decided in the design interview (2026-07-03):
     an unanswered question could previously vanish with the process, and
     the reason the needs-you queue had to be re-derived by inference at
     every startup.
+
+    The answer half gains one more field, and it fixes a live bug rather
+    than serving the new record. Who answered was inferred from the
+    card's *stored* gate-approval mode, while the headless driver
+    auto-answers off a flag of its own — so `resume --autonomous` on a
+    card stored at `gates` filed the machine's own answers as a person's,
+    and the morning receipt, which is a filter over exactly that field,
+    dropped them. The answerer declares itself on the event instead of
+    the event guessing from state that was never about the answerer. That
+    correction is the honest headline of this work: the durable open row
+    is the larger idea, but this is the part that was wrong before.
 19. **`enter` means send.** In the card thread `enter` sends the
     composer's line when there is one and answers the open decision's
     highlighted option when there is not; it never runs an action the
