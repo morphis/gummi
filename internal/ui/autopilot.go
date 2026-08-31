@@ -459,14 +459,28 @@ const autopilotDialogWidth = 62
 // cursor pre-set to the card's current mode, and a confirm button worded
 // to this card's live state.
 type autopilotDialog struct {
-	feature  domain.Feature
-	plan     autopilotPlan
-	cursor   int
+	feature domain.Feature
+	plan    autopilotPlan
+	cursor  int
+	// buttons is the dialog's own row, held rather than rebuilt each
+	// frame. It used to be constructed inside View with its cursor forced
+	// to the confirm every time, so Cancel was drawn as a control you
+	// could reach and no key could ever reach it — while enter submitted
+	// regardless of which button looked focused.
+	buttons  *buttonRow
 	onSubmit func(mode string) tea.Cmd
 }
 
 func newAutopilotDialog(f domain.Feature, plan autopilotPlan, onSubmit func(string) tea.Cmd) *autopilotDialog {
-	return &autopilotDialog{feature: f, plan: plan, cursor: autopilotCursorFor(f.GateApproval), onSubmit: onSubmit}
+	// the confirm leads: opening this switch is already the intent to
+	// change something, so the row starts on the doing button and ←→ is
+	// the way back out of it.
+	buttons := newButtonRow(button{label: "Cancel"}, button{label: plan.confirmLabel()})
+	buttons.SetCursor(1)
+	return &autopilotDialog{
+		feature: f, plan: plan, cursor: autopilotCursorFor(f.GateApproval),
+		buttons: buttons, onSubmit: onSubmit,
+	}
 }
 
 // openAutopilot pushes the overlay for f, computing its plan once so the
@@ -542,7 +556,19 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "down", "j":
 		d.cursor = min(d.cursor+1, len(autopilotStops)-1)
 		return false, nil
+	case "left", "h", "shift+tab":
+		d.buttons.Move(-1)
+		return false, nil
+	case "right", "l", "tab":
+		d.buttons.Move(1)
+		return false, nil
 	case "enter":
+		// enter activates the focused control, with no exceptions
+		// (buttonRow's own contract). The stop list is what the confirm
+		// acts on; it is not itself what enter reads.
+		if d.buttons.Cursor() == 0 {
+			return true, nil
+		}
 		return true, d.onSubmit(autopilotStops[d.cursor].mode)
 	}
 	return false, nil
@@ -608,9 +634,7 @@ func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString("\n")
 
-	buttons := newButtonRow(button{label: "Cancel"}, button{label: d.plan.confirmLabel()})
-	buttons.SetCursor(1)
-	b.WriteString(buttons.View(s, true) + "\n")
-	b.WriteString("\n" + s.Faint.Render("↑↓ choose · enter set · esc cancel"))
+	b.WriteString(d.buttons.View(s, true) + "\n")
+	b.WriteString("\n" + s.Faint.Render("↑↓ choose · ←/→ move · enter select · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }

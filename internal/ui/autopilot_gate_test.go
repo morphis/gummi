@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -492,5 +494,78 @@ func TestHandoverRefusesTheLandingGate(t *testing.T) {
 		if _, ok := autopilotHandoverEdge(domain.Feature{Stage: stage}); ok {
 			t.Errorf("the handover offered to cross %s on its own", stage)
 		}
+	}
+}
+
+// TestAutopilotDialogButtonsAreReachable: the dialog draws a Cancel
+// button beside its confirm, and no key could ever reach it — the row was
+// rebuilt inside View every frame with its cursor forced onto the
+// confirm, so ←→ moved nothing and enter submitted whichever button
+// looked focused. A control drawn as focusable has to be focusable.
+func TestAutopilotDialogButtonsAreReachable(t *testing.T) {
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, GateApproval: domain.GateOff}
+	plan := autopilotPlan{bucket: "gate", to: domain.StageImplement}
+
+	submitted := ""
+	newDialog := func() *autopilotDialog {
+		submitted = ""
+		return newAutopilotDialog(f, plan, func(mode string) tea.Cmd {
+			submitted = mode
+			return nil
+		})
+	}
+
+	// it opens on the doing button, so enter confirms
+	d := newDialog()
+	if d.buttons.Cursor() != 1 {
+		t.Fatalf("dialog opened on button %d, want the confirm", d.buttons.Cursor())
+	}
+	if closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !closed {
+		t.Error("enter on the confirm did not close the dialog")
+	}
+	if submitted == "" {
+		t.Error("enter on the confirm submitted nothing")
+	}
+
+	// ←  reaches Cancel, and enter there changes nothing
+	d = newDialog()
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if d.buttons.Cursor() != 0 {
+		t.Fatalf("← left the cursor on button %d, want Cancel", d.buttons.Cursor())
+	}
+	// and it survives a render: the row is the dialog's own state, not
+	// something View builds fresh each frame. Rebuilding it there — with
+	// the cursor forced back onto the confirm — is what made every move
+	// look like it had done nothing.
+	_ = d.View(theme.New(theme.GummiDark()), 100, 30)
+	if d.buttons.Cursor() != 0 {
+		t.Fatalf("rendering reset the button cursor to %d", d.buttons.Cursor())
+	}
+	if closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !closed {
+		t.Error("enter on Cancel did not close the dialog")
+	}
+	if submitted != "" {
+		t.Errorf("enter on Cancel submitted %q — Cancel must change nothing", submitted)
+	}
+
+	// ↑↓ still drive the stop list, independently of the buttons
+	d = newDialog()
+	before := d.cursor
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	if d.cursor == before {
+		t.Error("↓ did not move through the stops")
+	}
+	if d.buttons.Cursor() != 1 {
+		t.Error("moving through the stops moved the button focus with it")
+	}
+
+	// and the mode submitted is the stop the list is on, not the one it
+	// opened with
+	d = newDialog()
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	want := autopilotStops[d.cursor].mode
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if submitted != want {
+		t.Errorf("submitted %q, want the highlighted stop %q", submitted, want)
 	}
 }
