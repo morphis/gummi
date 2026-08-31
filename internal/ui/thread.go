@@ -50,6 +50,20 @@ const (
 	cardCrumbRows     = 10
 )
 
+// headerGap separates the masthead's fields. Two spaces was not enough to
+// read them as separate facts — the id, the profile, the mode, the spend
+// and the round badge ran together as one long line, which is the one
+// place on the page where five unrelated things sit side by side. Three
+// is the design's own spacing, and it is what "generous padding" (§6.2)
+// buys here.
+const headerGap = "   "
+
+// stageJoin separates the stages in the strip. The bare rule the strip
+// used ran the names into each other, so it read as one hyphenated word
+// rather than a row of stops with the current one lit; padding the rule
+// gives each name air without spending a glyph on it.
+const stageJoin = " ─ "
+
 // cardPageChrome reports how many of the card page's rows go to chrome
 // rather than to the thread: the crumb above it, and below it the blank
 // row that stops the composer from reading as part of the status bar —
@@ -342,19 +356,19 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow) []string {
 	f := r.F
 	head := s.Title.Render(string(f.ID)) + " " + s.Base.Render("· "+f.Title)
 	if f.Profile != "" {
-		head += "  " + s.ProfileTag.Render("["+f.Profile+"]")
+		head += headerGap + s.ProfileTag.Render("["+f.Profile+"]")
 	}
-	head += "  " + s.Faint.Render("autopilot: "+autopilotLabel(f.GateApproval))
+	head += headerGap + s.Faint.Render("autopilot: "+autopilotLabel(f.GateApproval))
 	if f.Budget.Envelope > 0 {
-		head += "  " + s.Faint.Render(budgetSummary(f))
+		head += headerGap + s.Faint.Render(budgetSummary(f))
 	} else if !f.Spend.Zero() {
-		head += "  " + s.Faint.Render(featureSpend(f.Spend))
+		head += headerGap + s.Faint.Render(featureSpend(f.Spend))
 	}
 	if sk := skipSummary(f); sk != "" {
-		head += "  " + s.Faint.Render("skips "+sk)
+		head += headerGap + s.Faint.Render("skips "+sk)
 	}
 	if rl := roundLabel(m, f); rl != "" {
-		head += "  " + s.Faint.Render(rl)
+		head += headerGap + s.Faint.Render(rl)
 	}
 	return []string{head, stageStrip(s, f)}
 }
@@ -397,7 +411,7 @@ func stageStrip(s *theme.Styles, f domain.Feature) string {
 			parts[i] = s.Faint.Render(string(st))
 		}
 	}
-	return strings.Join(parts, s.Faint.Render("─"))
+	return strings.Join(parts, s.Faint.Render(stageJoin))
 }
 
 // stageSequence derives the ordered list of stages this exact card's
