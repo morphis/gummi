@@ -310,26 +310,46 @@ func (ep *workspaceEndpoint) callTool(req *mcp.Request) (json.RawMessage, error)
 	return json.Marshal(map[string]any{"result": result})
 }
 
-// dispatchTool routes one board-level tool call by name. Every handler
-// returns exactly one of (text result, nil) or ("", error) — never a nil
-// error with an empty success, matching DispatchClientTool's contract on
-// the per-feature side.
+// dispatchTool routes one board-level tool call by name to the engine's
+// shared dispatcher (dispatchBoardTool) — factored out of this type so
+// BoardSession's client-tool path (boardsession.go, the copilot-style
+// SessionOpts.Tools route rather than this socket) can answer the same
+// calls without standing up a workspaceEndpoint of its own. See
+// dispatchBoardTool's own comment for why the split landed here.
 func (ep *workspaceEndpoint) dispatchTool(name string, args json.RawMessage) (string, error) {
+	return ep.engine.dispatchBoardTool(ep.ctx, name, args)
+}
+
+// dispatchBoardTool routes one board-level tool call by name. Every
+// handler returns exactly one of (text result, nil) or ("", error) —
+// never a nil error with an empty success, matching DispatchClientTool's
+// contract on the per-feature side.
+//
+// It lives on *Engine, not *workspaceEndpoint, so both tool-call routes
+// into gummi's board-level surface share one implementation: the
+// workspace MCP endpoint above (a hosted agent dialing in over the
+// socket) and BoardSession's own client-tool handling (an in-process
+// board session on a ClientTools backend, which has no socket and no
+// endpoint — see boardsession.go). Each caller supplies its own ctx —
+// the endpoint's, canceled at its teardown; the board session's, canceled
+// when that session stops — so a dispatch outlives neither caller's
+// lifecycle.
+func (e *Engine) dispatchBoardTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	switch name {
 	case boardListToolName:
-		return ep.boardList()
+		return e.boardList(ctx)
 	case cardStatusToolName:
-		return ep.cardStatus(args)
+		return e.cardStatus(ctx, args)
 	case cardSpecToolName:
-		return ep.cardSpec(args)
+		return e.cardSpec(ctx, args)
 	case cardDiffToolName:
-		return ep.cardDiff(args)
+		return e.cardDiff(ctx, args)
 	case cardRunToolName:
-		return ep.cardRun(args)
+		return e.cardRun(ctx, args)
 	case cardResumeToolName:
-		return ep.cardResume(args)
+		return e.cardResume(ctx, args)
 	case cardNewToolName:
-		return ep.cardNew(args)
+		return e.cardNew(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -343,12 +363,12 @@ func (ep *workspaceEndpoint) dispatchTool(name string, args json.RawMessage) (st
 // import would cycle) — replicated here rather than factored out because
 // it is six lines wrapping two Store methods, not a design worth a new
 // shared package for.
-func (ep *workspaceEndpoint) resolveFeature(idOrRef string) (domain.Feature, error) {
-	store := ep.engine.cfg.Store
+func (e *Engine) resolveFeature(ctx context.Context, idOrRef string) (domain.Feature, error) {
+	store := e.cfg.Store
 	if id, err := domain.ParseFeatureID(idOrRef); err == nil {
-		return store.GetFeature(ep.ctx, id)
+		return store.GetFeature(ctx, id)
 	}
-	f, err := store.FeatureByExternalRef(ep.ctx, idOrRef)
+	f, err := store.FeatureByExternalRef(ctx, idOrRef)
 	if err != nil {
 		return domain.Feature{}, fmt.Errorf("no card %q (not an FD-NNN/BG-NNN/RS-NNN id, and no card carries it as an external ref): %w", idOrRef, err)
 	}
@@ -392,8 +412,8 @@ type boardListItem struct {
 
 // boardList answers board_list: every card in the workspace, ordered by
 // number (state.Store.ListFeatures's own order).
-func (ep *workspaceEndpoint) boardList() (string, error) {
-	feats, err := ep.engine.cfg.Store.ListFeatures(ep.ctx)
+func (e *Engine) boardList(ctx context.Context) (string, error) {
+	feats, err := e.cfg.Store.ListFeatures(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -439,16 +459,16 @@ type cardStatusItem struct {
 // cardStatus answers card_status: the same snapshot `gummi status`
 // prints, minus the pull-request line (a hosted agent has no use for it,
 // and PullRequestRef.StatusPayload lives behind cmd/gummi's JSON view).
-func (ep *workspaceEndpoint) cardStatus(args json.RawMessage) (string, error) {
+func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardIDArgs
 	if err := json.Unmarshal(args, &a); err != nil || a.ID == "" {
 		return "", fmt.Errorf("card_status: id is required")
 	}
-	f, err := ep.resolveFeature(a.ID)
+	f, err := e.resolveFeature(ctx, a.ID)
 	if err != nil {
 		return "", err
 	}
-	specOpen, diffOpen, _, err := ep.engine.GateBlockers(ep.ctx, f.ID)
+	specOpen, diffOpen, _, err := e.GateBlockers(ctx, f.ID)
 	if err != nil {
 		return "", err
 	}
@@ -458,10 +478,10 @@ func (ep *workspaceEndpoint) cardStatus(args json.RawMessage) (string, error) {
 	}
 	item := cardStatusItem{
 		ID: string(f.ID), Kind: string(kind), Title: f.Title, Stage: string(f.Stage),
-		Branch: f.BranchName(), BranchState: workspaceBranchState(ep.ctx, ep.engine.pool, &f),
+		Branch: f.BranchName(), BranchState: workspaceBranchState(ctx, e.pool, &f),
 		SpendCredits: f.Spend.Credits, Envelope: f.Budget.Envelope,
 		Verified: !f.VerifiedAt.IsZero(), Done: f.Stage == domain.StageDone,
-		Running:          state.ProcessAlive(state.ReadPIDFile(ep.engine.cfg.Workspace.PIDFile(f.ID))),
+		Running:          state.ProcessAlive(state.ReadPIDFile(e.cfg.Workspace.PIDFile(f.ID))),
 		OpenQuestions:    specOpen,
 		OpenDiffComments: diffOpen,
 	}
@@ -473,16 +493,16 @@ func (ep *workspaceEndpoint) cardStatus(args json.RawMessage) (string, error) {
 // wherever it lives right now. Mirrors cmd/gummi/spec.go, but resolves the
 // path through the engine's own artifactFile instead of cmd/gummi's
 // unreachable artifactPath.
-func (ep *workspaceEndpoint) cardSpec(args json.RawMessage) (string, error) {
+func (e *Engine) cardSpec(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardIDArgs
 	if err := json.Unmarshal(args, &a); err != nil || a.ID == "" {
 		return "", fmt.Errorf("card_spec: id is required")
 	}
-	f, err := ep.resolveFeature(a.ID)
+	f, err := e.resolveFeature(ctx, a.ID)
 	if err != nil {
 		return "", err
 	}
-	path := ep.engine.artifactFile(&f)
+	path := e.artifactFile(&f)
 	if path == "" {
 		return "", fmt.Errorf("%s has no spec yet — it is created when the spec/brainstorm stage first runs", f.ID)
 	}
@@ -495,19 +515,19 @@ func (ep *workspaceEndpoint) cardSpec(args json.RawMessage) (string, error) {
 
 // cardDiff answers card_diff: the card's worktree diff against main.
 // Mirrors cmd/gummi/diff.go.
-func (ep *workspaceEndpoint) cardDiff(args json.RawMessage) (string, error) {
+func (e *Engine) cardDiff(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardIDArgs
 	if err := json.Unmarshal(args, &a); err != nil || a.ID == "" {
 		return "", fmt.Errorf("card_diff: id is required")
 	}
-	f, err := ep.resolveFeature(a.ID)
+	f, err := e.resolveFeature(ctx, a.ID)
 	if err != nil {
 		return "", err
 	}
-	if ep.engine.pool == nil {
+	if e.pool == nil {
 		return "", fmt.Errorf("card_diff: this engine has no worktree pool configured")
 	}
-	out, err := ep.engine.pool.Diff(ep.ctx, &f)
+	out, err := e.pool.Diff(ctx, &f)
 	if err != nil {
 		return "", err
 	}
@@ -517,16 +537,16 @@ func (ep *workspaceEndpoint) cardDiff(args json.RawMessage) (string, error) {
 // cardRun answers card_run: kick off (or, for a queued/running session,
 // no-op) an autonomous stage session for the card, in this process — see
 // cardRunTool's description for why this exists instead of a shell-out.
-func (ep *workspaceEndpoint) cardRun(args json.RawMessage) (string, error) {
+func (e *Engine) cardRun(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardIDArgs
 	if err := json.Unmarshal(args, &a); err != nil || a.ID == "" {
 		return "", fmt.Errorf("card_run: id is required")
 	}
-	f, err := ep.resolveFeature(a.ID)
+	f, err := e.resolveFeature(ctx, a.ID)
 	if err != nil {
 		return "", err
 	}
-	if err := ep.engine.Run(f); err != nil {
+	if err := e.Run(f); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%s: run requested for stage %s", f.ID, f.Stage), nil
@@ -536,7 +556,7 @@ func (ep *workspaceEndpoint) cardRun(args json.RawMessage) (string, error) {
 // but with a note appended to the fresh session's kickoff — for
 // re-running a parked stage after a top-up, timeout, or with review
 // comments attached.
-func (ep *workspaceEndpoint) cardResume(args json.RawMessage) (string, error) {
+func (e *Engine) cardResume(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		ID   string `json:"id"`
 		Note string `json:"note"`
@@ -544,11 +564,11 @@ func (ep *workspaceEndpoint) cardResume(args json.RawMessage) (string, error) {
 	if err := json.Unmarshal(args, &a); err != nil || a.ID == "" {
 		return "", fmt.Errorf("card_resume: id is required")
 	}
-	f, err := ep.resolveFeature(a.ID)
+	f, err := e.resolveFeature(ctx, a.ID)
 	if err != nil {
 		return "", err
 	}
-	if err := ep.engine.RunWith(f, a.Note); err != nil {
+	if err := e.RunWith(f, a.Note); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%s: resume requested for stage %s", f.ID, f.Stage), nil
@@ -585,7 +605,7 @@ type cardNewArgs struct {
 // agent that has an explicit mandate to run unattended (the human said
 // "and don't wait on me for the follow-up cards either") can still pass
 // gate_approval: "auto" to opt out.
-func (ep *workspaceEndpoint) cardNew(args json.RawMessage) (string, error) {
+func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, error) {
 	var a cardNewArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("card_new: %w", err)
@@ -605,9 +625,9 @@ func (ep *workspaceEndpoint) cardNew(args json.RawMessage) (string, error) {
 	} else {
 		gate = norm
 	}
-	f, err := cardmint.Mint(ep.ctx, ep.engine.cfg.Store, ep.engine.cfg.Workspace, cardmint.Input{
+	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
 		Kind: kind, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
-		Repo: a.Repo, RepoKnown: ep.engine.RepoKnown, GateApproval: gate,
+		Repo: a.Repo, RepoKnown: e.RepoKnown, GateApproval: gate,
 	})
 	if err != nil {
 		return "", err

@@ -251,10 +251,27 @@ type Engine struct {
 	events  chan Event
 	stopped chan struct{}
 
-	mu     sync.Mutex
-	live   map[domain.FeatureID]*Session
-	lanes  [numLanePools]laneState // per-pool cap/running/queue — see laneState
+	mu    sync.Mutex
+	live  map[domain.FeatureID]*Session
+	lanes [numLanePools]laneState // per-pool cap/running/queue — see laneState
+	// board is the engine's single workspace-scoped agent session (see
+	// boardsession.go), or nil until OpenBoard is first called. Unlike a
+	// card's session it takes no attention slot and needs no lane
+	// bookkeeping, so it lives beside e.live rather than inside it.
+	board  *BoardSession
 	closed bool
+
+	// boardMu serializes OpenBoard end to end. e.mu cannot do that job:
+	// opening spawns a real backend process (and possibly binds an MCP
+	// endpoint), which is far too slow to hold the engine's main lock
+	// across, so OpenBoard has to drop e.mu before the spawn — and a
+	// check-then-act around a released lock is exactly how two callers
+	// both see "no board yet" and both spawn one. The card path avoids
+	// this by taking the per-card lock before any expensive work
+	// (Attach); a board session has no card and therefore no such lock,
+	// so this stands in for it. Held only by OpenBoard, and never while
+	// e.mu is also held.
+	boardMu sync.Mutex
 
 	// wg tracks the pump and kickoff goroutines so Close can join them
 	// before returning: a barrier for any filesystem touch (git subprocess
@@ -1655,6 +1672,8 @@ func (e *Engine) Close() error {
 		sessions = append(sessions, s)
 	}
 	e.live = map[domain.FeatureID]*Session{}
+	board := e.board
+	e.board = nil
 	for p := range e.lanes {
 		e.lanes[p].queue = nil
 	}
@@ -1662,6 +1681,9 @@ func (e *Engine) Close() error {
 
 	for _, s := range sessions {
 		s.stop()
+	}
+	if board != nil {
+		board.sess.stop()
 	}
 	// Join the pump and kickoff goroutines so no git subprocess or persist
 	// write is still in flight against the workspace when Close returns.

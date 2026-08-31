@@ -49,10 +49,22 @@ const (
 	// reason other than ErrNoWorktree (Err populated). It is non-terminal:
 	// the session and stage keep running.
 	EventCheckpointFailed EventKind = "checkpoint_failed"
+	// EventBoard signals the board session changed and its surface should
+	// re-render from BoardSession.Snapshot. It is the one kind that
+	// carries no Feature, because a board session is bound to the
+	// workspace rather than to any card — see the note on Event.Feature.
+	EventBoard EventKind = "board"
 )
 
 // Event is one item in the engine's UI-facing stream.
 type Event struct {
+	// Feature is the card the event belongs to, and MAY BE EMPTY. Two
+	// sources send featureless events: a one-shot pass not bound to a
+	// card (ingest, which sends EventError), and the board session
+	// (EventBoard), which is bound to the workspace instead. A consumer
+	// that looks a Feature up — Engine.Get, a row lookup, the attention
+	// queue — must therefore establish it has one first. The empty case
+	// is a normal value on this channel, not a bug upstream.
 	Feature    domain.FeatureID
 	Stage      domain.Stage
 	Kind       EventKind
