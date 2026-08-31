@@ -1432,3 +1432,228 @@ func TestVerbKeysLandOnMatchingHandler(t *testing.T) {
 		}
 	})
 }
+
+// TestStageEventLineClosedVocabulary is P1: before this fix,
+// stageEventLine's default branch — the fallback for a kind it does not
+// recognize — caught both park and decision_open, because neither had a
+// case of its own, and printed the literal words "park" and
+// "decision_open" as lines in a card's conversation. Store.Events
+// returns every kind ever recorded (its own doc comment,
+// state/cardevents.go), so any card whose log held either row rendered
+// its bare kind word to a person reading the thread.
+//
+// This guards the fix and the vocabulary both: every kind
+// stageEventLine can actually be asked to render — every constant
+// declared in state/cardevents.go except EventStageEnter/EventStageExit,
+// which stageSegments consumes before stageEventLine ever sees them (see
+// TestStageSegmentsConsumesEnterExit) — is exercised here with a
+// representative payload, and none of them may render as its own bare
+// kind word. The next kind added to cardevents.go without a case here
+// fails this test the same way park and decision_open did, instead of
+// silently printing itself in production.
+func TestStageEventLineClosedVocabulary(t *testing.T) {
+	s := m0Styles()
+	answered := map[string]bool{} // decision_open below is the unanswered case
+	cases := []struct {
+		kind    string
+		payload string
+	}{
+		{state.EventMessage, `{"author":"user","content":"hello"}`},
+		{state.EventTool, `{"label":"running tests"}`},
+		{state.EventGate, `{"from":"spec","to":"plan","actor":"user"}`},
+		{state.EventAsk, `{"question":"Persist where?","answer":"per-device","actor":"user"}`},
+		// EventAutopilot with Event == "" is appendAutopilotEvent's shape
+		// (state/cardevents.go): every SetGateApproval mode change writes
+		// one of these, from both the TUI and the headless driver, so
+		// real card logs already carry rows exactly this shape — this is
+		// a third instance of the bug this test guards, not a
+		// hypothetical one.
+		{state.EventAutopilot, `{"mode":"full"}`},
+		{state.EventPark, `{"reason":"needs-you","detail":"the run failed twice"}`},
+		{state.EventDecisionOpen, `{"id":"d1","kind":"gate","question":"advance to plan?"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.kind, func(t *testing.T) {
+			ev := state.CardEvent{Kind: c.kind, Payload: c.payload}
+			got := ansi.Strip(stageEventLine(s, ev, 80, answered))
+			if got == c.kind {
+				t.Errorf("stageEventLine(%s) rendered its own bare kind word %q; give it a case", c.kind, got)
+			}
+		})
+	}
+}
+
+// TestStageSegmentsConsumesEnterExit documents why EventStageEnter and
+// EventStageExit are excluded from TestStageEventLineClosedVocabulary
+// above rather than exercised there like every other kind:
+// stageSegments consumes both itself, opening and closing a segment on
+// them, and only forwards every other kind of event into that segment's
+// own events slice (its own switch, thread.go). stageEventLine's default
+// branch therefore can never actually be handed either kind in real use
+// — there is no line it renders for them to get wrong — and what a
+// stage_enter/stage_exit pair said is carried by the segment's own
+// fields (boundaryRule, foldedReceiptLine), not by a line stageEventLine
+// produces.
+func TestStageSegmentsConsumesEnterExit(t *testing.T) {
+	events := []state.CardEvent{
+		{Kind: state.EventStageEnter, Stage: domain.StageSpec, Payload: `{"role":"architect"}`},
+		{Kind: state.EventMessage, Stage: domain.StageSpec, Payload: `{"author":"user","content":"hi"}`},
+		{Kind: state.EventStageExit, Stage: domain.StageSpec, Payload: `{"verdict":"ok"}`},
+	}
+	segs := stageSegments(events)
+	if len(segs) != 1 {
+		t.Fatalf("stageSegments() = %d segments, want 1", len(segs))
+	}
+	if len(segs[0].events) != 1 || segs[0].events[0].Kind != state.EventMessage {
+		t.Fatalf("segment events = %v, want exactly the one message", segs[0].events)
+	}
+	for _, ev := range segs[0].events {
+		if ev.Kind == state.EventStageEnter || ev.Kind == state.EventStageExit {
+			t.Errorf("segment retained a %s event; stageSegments should have consumed it", ev.Kind)
+		}
+	}
+}
+
+// TestParkEventLine is P1's fix for EventPark: the line must carry the
+// sentence the user was actually shown (ParkPayload.Detail), kept
+// verbatim, not the bare word "park" the old default branch produced.
+// Only an old row written before ParkPayload carried Detail at all — an
+// empty string here — falls back to a sentence derived from Reason.
+func TestParkEventLine(t *testing.T) {
+	s := m0Styles()
+	answered := map[string]bool{}
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			"detail kept verbatim",
+			`{"reason":"needs-you","detail":"verify failed twice in a row"}`,
+			"parked — verify failed twice in a row",
+		},
+		{
+			"quit, no detail",
+			`{"reason":"quit"}`,
+			"parked — the board quit",
+		},
+		{
+			"gave up, no detail",
+			`{"reason":"gave-up"}`,
+			"parked — it gave up",
+		},
+		{
+			"needs you, no detail",
+			`{"reason":"needs-you"}`,
+			"parked — it needs you",
+		},
+		{
+			"unrecognized reason, no detail, reads as needs-you",
+			`{"reason":"something-new-later"}`,
+			"parked — it needs you",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ev := state.CardEvent{Kind: state.EventPark, Payload: c.payload}
+			got := ansi.Strip(stageEventLine(s, ev, 80, answered))
+			if !strings.Contains(got, c.want) {
+				t.Errorf("park line = %q, want to contain %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestAutopilotEventLine is P1's fix for EventAutopilot. Store.
+// SetGateApproval (internal/state/store.go) writes one of these, with
+// AutopilotPayload.Event left "", on every gate-approval mode change
+// from either the TUI or the headless driver (appendAutopilotEvent,
+// state/cardevents.go), so real card logs already carry this row —
+// before this fix, stageEventLine's default branch rendered it as the
+// bare word "autopilot", the same bug this whole task is about, just a
+// third instance of it. A row with Event set to a took-over/handed-back
+// boundary is a different fact — a stretch of unattended driving, not a
+// single mode change — and gets its own rendering from a later phase;
+// for now it renders as nothing, same as the closed-vocabulary case.
+func TestAutopilotEventLine(t *testing.T) {
+	s := m0Styles()
+	answered := map[string]bool{}
+	t.Run("plain mode change", func(t *testing.T) {
+		ev := state.CardEvent{Kind: state.EventAutopilot, Payload: `{"mode":"full"}`}
+		got := ansi.Strip(stageEventLine(s, ev, 80, answered))
+		if !strings.Contains(got, "autopilot set to full") {
+			t.Errorf("autopilot line = %q, want to contain %q", got, "autopilot set to full")
+		}
+	})
+	t.Run("took-over boundary renders nothing, for now", func(t *testing.T) {
+		ev := state.CardEvent{Kind: state.EventAutopilot,
+			Payload: `{"event":"took-over","reason":"idle","mode":"full"}`}
+		if got := stageEventLine(s, ev, 80, answered); got != "" {
+			t.Errorf("took-over boundary rendered %q, want empty (later phase's job)", got)
+		}
+	})
+	t.Run("handed-back boundary renders nothing, for now", func(t *testing.T) {
+		ev := state.CardEvent{Kind: state.EventAutopilot,
+			Payload: `{"event":"handed-back","mode":"full"}`}
+		if got := stageEventLine(s, ev, 80, answered); got != "" {
+			t.Errorf("handed-back boundary rendered %q, want empty (later phase's job)", got)
+		}
+	})
+}
+
+// TestDecisionOpenEventLine is P1's fix for EventDecisionOpen, and the
+// two DESIGN sections it has to satisfy at the same time. §6.3: once a
+// decision is answered it collapses into that answer — the gate or ask
+// row already rendered beside it — so the decision_open row that opened
+// it renders nothing, or the same stop would say itself twice. §10.18:
+// nothing may block a card without leaving a row, so a decision that was
+// opened and then superseded WITHOUT ever being answered (a later run
+// raised a different decision before a human reached this one) must
+// still leave a visible trace, because the pinned open-decision control
+// only ever shows the current decision — an unanswered, superseded one
+// has nowhere else in the card's history to appear.
+func TestDecisionOpenEventLine(t *testing.T) {
+	s := m0Styles()
+	open := state.CardEvent{
+		Kind:    state.EventDecisionOpen,
+		Payload: `{"id":"d1","kind":"gate","question":"advance to plan?"}`,
+	}
+	t.Run("answered collapses into its answer's row, not its own", func(t *testing.T) {
+		answered := map[string]bool{"d1": true}
+		if got := stageEventLine(s, open, 80, answered); got != "" {
+			t.Errorf("answered decision_open rendered %q, want empty", got)
+		}
+	})
+	t.Run("unanswered leaves a trace", func(t *testing.T) {
+		answered := map[string]bool{} // d1 never answered
+		got := ansi.Strip(stageEventLine(s, open, 80, answered))
+		for _, want := range []string{"advance to plan?", "unanswered", "superseded"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("unanswered decision_open line %q missing %q", got, want)
+			}
+		}
+	})
+}
+
+// TestAnsweredDecisions checks the id set threadRender builds once per
+// render and hands down to stageEventLine's decision_open case: every
+// GatePayload.ID and AskPayload.ID appearing anywhere in a card's event
+// log, per the correlation EventDecisionOpen's own doc comment describes
+// (state/cardevents.go) — and nothing else, so a decision that opened
+// but whose id never shows up on a later gate/ask stays unanswered.
+func TestAnsweredDecisions(t *testing.T) {
+	events := []state.CardEvent{
+		{Kind: state.EventDecisionOpen, Payload: `{"id":"d1","kind":"gate"}`},
+		{Kind: state.EventGate, Payload: `{"from":"spec","to":"plan","actor":"user","id":"d1"}`},
+		{Kind: state.EventDecisionOpen, Payload: `{"id":"d2","kind":"ask"}`},
+		{Kind: state.EventAsk, Payload: `{"question":"q","answer":"a","actor":"user","id":"d2"}`},
+		{Kind: state.EventDecisionOpen, Payload: `{"id":"d3","kind":"gate"}`}, // never answered
+	}
+	got := answeredDecisions(events)
+	if !got["d1"] || !got["d2"] {
+		t.Errorf("answeredDecisions() = %v, want d1 and d2 answered", got)
+	}
+	if got["d3"] {
+		t.Error("answeredDecisions() marked d3 answered, but nothing in the log ever answered it")
+	}
+}

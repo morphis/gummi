@@ -182,6 +182,15 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	blank := func() { body = append(body, "") }
 
 	segs := stageSegments(r.Events)
+	// Computed once from the card's whole event log rather than once per
+	// line: stageEventLine only ever sees the one event it is asked to
+	// render, and it needs this set to tell an answered decision_open
+	// (render nothing — DESIGN §6.3) from one superseded before anyone
+	// answered it (render a trace — DESIGN §10.18). A card's history can
+	// hold many decision_open rows, so re-deriving the set inside the
+	// per-line renderer would redo the same scan of r.Events once per
+	// line for no reason.
+	answered := answeredDecisions(r.Events)
 	if len(segs) > 1 {
 		spend := stageSpendByStage(r.StageSpend)
 		// how many segments each stage folds to a receipt for — the review
@@ -199,7 +208,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
-	if ls := m.liveStageBlock(s, r, segs, inner); len(ls) > 0 {
+	if ls := m.liveStageBlock(s, r, segs, inner, answered); len(ls) > 0 {
 		for _, l := range ls {
 			add(l)
 		}
@@ -759,7 +768,7 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // last session did. A card another process drives without an open tail
 // has only that fallback either way — watching it is what opens the tail
 // (follow.go's watchForeign, via enter).
-func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int) []string {
+func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool) []string {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
@@ -827,7 +836,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	// region scrolls (pgup/pgdn, maxThreadScroll), so a long session is
 	// still reachable — it just does not require a second view to see.
 	for _, ev := range last.events {
-		for _, l := range stageEventLines(s, ev, w, m.threadOutputs) {
+		for _, l := range stageEventLines(s, ev, w, m.threadOutputs, answered) {
 			lines = append(lines, "  "+l)
 		}
 	}
@@ -871,8 +880,20 @@ func boundaryRule(s *theme.Styles, stage, role, model string, at time.Time, w in
 // failure's tail always, everything with alt+o. The single-line
 // stageEventLine stays for the collapse-into-history ask/gate lines,
 // which are one row by contract (DESIGN §6.3).
-func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool) []string {
-	lines := []string{stageEventLine(s, ev, w)}
+//
+// A blank line from stageEventLine means the event is deliberately
+// invisible here — an answered decision_open, which has already
+// collapsed into the gate/ask row that answers it (DESIGN §6.3) — and
+// that must cost the body no row at all, not a blank one: this is what
+// tells the caller to drop the event entirely rather than forwarding a
+// one-element slice holding an empty string, which liveStageBlock would
+// otherwise indent into a visible blank line.
+func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool, answered map[string]bool) []string {
+	line := stageEventLine(s, ev, w, answered)
+	if line == "" {
+		return nil
+	}
+	lines := []string{line}
 	if ev.Kind != state.EventTool || ev.Output == "" {
 		return lines
 	}
@@ -886,10 +907,54 @@ func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool
 	return append(lines, toolOutputLines(s, status, ev.Output, w, showOutput)...)
 }
 
+// answeredDecisions returns the set of decision ids this card's event
+// log has already answered: every GatePayload.ID and AskPayload.ID that
+// shows up on a gate or ask event anywhere in events. Those two fields
+// are the correlation EventDecisionOpen's own doc comment describes
+// (state/cardevents.go) — a decision_open row and the gate/ask row that
+// answers it share one id — so a decision whose id appears here has
+// collapsed into that answer's row per DESIGN §6.3, and stageEventLine's
+// EventDecisionOpen case uses this set to render nothing for it rather
+// than saying the same stop twice.
+//
+// Callers compute this once per render (threadRender) rather than once
+// per line: stageEventLine only ever sees the single event it is asked
+// to render, and a card's history can carry many decision_open rows, so
+// re-scanning the whole event log inside the per-line renderer would
+// redo the same work once per line for nothing.
+func answeredDecisions(events []state.CardEvent) map[string]bool {
+	answered := map[string]bool{}
+	for _, ev := range events {
+		var id string
+		switch ev.Kind {
+		case state.EventGate:
+			var p state.GatePayload
+			_ = json.Unmarshal([]byte(ev.Payload), &p)
+			id = p.ID
+		case state.EventAsk:
+			var p state.AskPayload
+			_ = json.Unmarshal([]byte(ev.Payload), &p)
+			id = p.ID
+		default:
+			continue
+		}
+		if id != "" {
+			answered[id] = true
+		}
+	}
+	return answered
+}
+
 // stageEventLine renders one logged card event as a single line, the
 // event-log counterpart to a live session's tool ticker (transcript.go's
 // transcriptLines).
-func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
+//
+// answered is the set of decision ids this card's log has already
+// answered (answeredDecisions, computed once per render in threadRender
+// and threaded down through liveStageBlock/stageEventLines) — it is what
+// the EventDecisionOpen case below needs to tell an answered decision
+// from a superseded one.
+func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, answered map[string]bool) string {
 	switch ev.Kind {
 	case state.EventTool:
 		var p toolPayload
@@ -938,6 +1003,80 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int) string {
 			line += " " + p.From + " → " + p.To
 		}
 		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+	case state.EventPark:
+		var p state.ParkPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		// Detail is kept verbatim (ParkPayload's own doc comment,
+		// state/cardevents.go) precisely so history explains itself
+		// without the reader reconstructing it from the reason code, so it
+		// wins whenever a row has one. Only an old row, written before
+		// ParkPayload carried Detail at all, falls back to a sentence
+		// derived from Reason — the same three-way split QuitStopped
+		// already treats ParkReasonQuit as load-bearing and everything
+		// else as "a human should look at this," here spelled out as
+		// prose instead of a boolean.
+		sentence := p.Detail
+		if sentence == "" {
+			switch p.Reason {
+			case state.ParkReasonQuit:
+				sentence = "the board quit"
+			case state.ParkReasonGaveUp:
+				sentence = "it gave up"
+			default: // ParkReasonNeedsYou, and any reason not yet named
+				sentence = "it needs you"
+			}
+		}
+		line := "parked — " + sanitize(sentence)
+		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+	case state.EventDecisionOpen:
+		var p state.DecisionPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		if answered[p.ID] {
+			// DESIGN §6.3: an answered decision collapses into its answer,
+			// and that answer is the gate or ask event already rendered
+			// beside this one, correlated by DecisionPayload.ID (see the
+			// doc comments on GatePayload.ID and AskPayload.ID in
+			// state/cardevents.go). A row for the question and a row for
+			// its answer would say one stop twice, so the question's own
+			// row renders nothing at all once it has one.
+			return ""
+		}
+		// DESIGN §10.18: nothing may block a card without leaving a row.
+		// A decision that was opened and then superseded — a later run
+		// raised a different decision before a human got to this one —
+		// was never answered, so it has no gate/ask row to collapse into.
+		// The pinned open-decision control only ever shows the *current*
+		// decision, so without this line a superseded-but-unanswered
+		// decision would have no trace anywhere in the card's history.
+		line := sanitize(p.Question) + " — unanswered, superseded"
+		return s.Faint.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+	case state.EventAutopilot:
+		var p state.AutopilotPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		if p.Event != "" {
+			// A took-over/handed-back boundary (AutopilotPayload.Event is
+			// AutopilotTookOver or AutopilotHandedBack) is a stretch of the
+			// card's history running unattended, not a single fact about a
+			// mode — it wants a rule marking where the stretch starts and
+			// ends, the way boundaryRule marks a fresh session, not a line
+			// among the tool calls and messages inside one. That rendering
+			// belongs to a later phase; for now the boundary renders as
+			// nothing rather than as a line that undersells what it means.
+			return ""
+		}
+		// Event == "" is appendAutopilotEvent's shape (state/cardevents.go):
+		// every SetGateApproval mode change, human or driver, gets a row
+		// here regardless of whether the card is under autopilot at all —
+		// this is not a boundary crossing, just the stored mode changing to
+		// p.Mode, and it renders as exactly that one fact.
+		//
+		// autopilotLabel, not p.Mode: the empty string is a legal stored
+		// mode (domain.ValidGateApproval accepts it) that everywhere else
+		// in this package reads as gates, and printing it raw would leave
+		// the row trailing off after "set to" as though the value had gone
+		// missing.
+		line := "autopilot set to " + sanitize(autopilotLabel(p.Mode))
+		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)
 	}
