@@ -192,13 +192,34 @@ func TestThreadAttachAndSend(t *testing.T) {
 		}
 	}
 
-	// re-attach reuses the same session (transcript preserved). With the
-	// conversation already live the decision is gone, so the inventory is
-	// the door: ↑ selects its highlighted "chat" action, enter attaches.
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	// Talking again reuses the same session rather than starting a second
+	// one: the transcript grows, it does not restart. The composer is the
+	// whole door — there is nothing to re-attach to, because the card
+	// never stopped being the conversation.
+	m = press(t, m, tea.KeyPressMsg{Code: '/'}) // back into the line after the esc above
+	m = typeString(t, m, "synced, then")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.sessionFor("FD-001") == nil || len(m.sessionFor("FD-001").Snapshot().Transcript) != 4 {
-		t.Fatal("re-attach lost the transcript")
+	settleChat(t, eng)
+	if s := m.sessionFor("FD-001"); s == nil || len(s.Snapshot().Transcript) != 6 {
+		t.Fatalf("talking again did not continue the same session: %+v", m.sessionFor("FD-001"))
+	}
+
+	// and now that the architect has stopped, the thread offers the way
+	// on: a decision with the stage's own legal set (DESIGN §10.19 — a
+	// bare composer means an agent is working, so an idle one must not be
+	// bare). It offers no "start the architect" row, because the
+	// architect is already here.
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil {
+		t.Fatal("a finished interactive stage offered nothing to continue with")
+	}
+	for _, a := range d.actions {
+		if a.id == "run" {
+			t.Errorf("offered to start a conversation that is already live: %+v", d.actions)
+		}
+	}
+	if len(d.actions) == 0 {
+		t.Error("the decision carried no options")
 	}
 }
 

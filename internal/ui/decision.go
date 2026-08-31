@@ -44,15 +44,22 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		return nil
 	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {
-		if ask := sess.Snapshot().PendingAsk; ask != nil {
+		snap := sess.Snapshot()
+		if ask := snap.PendingAsk; ask != nil {
 			key := "ask|" + string(r.F.ID) + "|" + ask.CallID + "|" + ask.Question
 			return &threadDecision{key: key, kind: decisionAsk, question: ask.Question, ask: ask}
 		}
-		if sess.Interactive {
-			// the conversation is live in this thread — the composer below
-			// is its input, so there is nothing to decide: enter sends the
-			// line, and ↑ opens the action inventory (DESIGN §10.19: a bare
-			// composer means an agent is working)
+		if sess.Interactive && snap.Busy {
+			// the architect is mid-turn in this very thread: the composer
+			// below is the input to a conversation still going, and there
+			// is nothing to decide about work that has not finished. This
+			// is §10.19's rule and it reads in one direction only — a bare
+			// composer means an agent is working, so the moment one stops
+			// working the composer must stop being bare. Suppressing the
+			// decision for the whole life of an interactive session, as
+			// this did, left a finished spec with no way to approve it on
+			// the surface that is supposed to be the way through the
+			// workflow.
 			return nil
 		}
 	}
@@ -200,6 +207,13 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	case decisionGate:
 		return string(r.F.Stage) + " is ready for your decision."
 	default:
+		if in.sess == engine.StateInteractive {
+			// a live conversation between turns. Something is very much
+			// running — it is just waiting on you — so the idle card's own
+			// sentence would be false here, printed as it is directly under
+			// the session's spend line.
+			return "the agent is waiting — keep talking, or choose what happens next."
+		}
 		return "nothing is running — choose what happens next."
 	}
 }

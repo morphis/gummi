@@ -92,7 +92,12 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
 	}
-	if sess := m.sessionFor(r.F.ID); sess != nil && !sess.Interactive {
+	// An attached interactive session counts too. It used to be excluded,
+	// which left talkAction's own engine.StateInteractive branch — "the
+	// architect is already here, do not offer to start it" — unreachable,
+	// so a spec you were in the middle of still advertised starting the
+	// conversation you were having.
+	if sess := m.sessionFor(r.F.ID); sess != nil {
 		in.sess = sess.State()
 		snap := sess.Snapshot()
 		in.busy = snap.Busy
@@ -229,7 +234,14 @@ func nextActions(in nextInput) []nextAction {
 		if in.quick {
 			gate.why = "creates the worktree and starts implementing — P first if it outgrew quick"
 		}
-		return append(acts, gate)
+		acts = append(acts, gate)
+		// reading the thing you are about to approve is an option in its
+		// own right, the same way the plan stage offers reading the plan.
+		// It goes after the gate rather than before it: the recommendation
+		// leads, and this is what you reach for when you are not ready to
+		// take it yet.
+		return append(acts, nextStep("spec", "s", "read the "+artifactNoun(in.kind)+" first",
+			"it is what approving signs off on"))
 
 	case domain.StagePlan:
 		if !finished {

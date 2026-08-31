@@ -117,8 +117,8 @@ func TestRouteViaPlan(t *testing.T) {
 // pass, and the gate mentions P as the way out of quick.
 func TestNextActionsQuickSpec(t *testing.T) {
 	acts := nextActions(nextInput{stage: domain.StageSpec, kind: domain.KindFeature, quick: true})
-	if got := keysOf(acts); got != "enter g" {
-		t.Fatalf("quick spec keys = %q, want \"enter g\"", got)
+	if got := keysOf(acts); got != "enter g s" {
+		t.Fatalf("quick spec keys = %q, want \"enter g s\"", got)
 	}
 	if !strings.Contains(acts[0].why, "one pass") {
 		t.Errorf("chat guidance = %q, want it to name the one-pass draft", acts[0].why)

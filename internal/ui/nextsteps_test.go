@@ -40,7 +40,9 @@ func TestNextActionsByState(t *testing.T) {
 		{"question routes to attach", nextInput{stage: domain.StageSpec, kind: feat, attn: attnQuestion}, "enter"},
 		{"todo starts the flow", nextInput{stage: domain.StageTodo, kind: feat}, "g"},
 		{"brainstorm chats first", nextInput{stage: domain.StageBrainstorm, kind: feat}, "enter g"},
-		{"spec clean offers approve", nextInput{stage: domain.StageSpec, kind: feat}, "enter g"},
+		// s reads the spec you are about to sign off on, the way the plan
+		// stage already offers reading the plan
+		{"spec clean offers approve", nextInput{stage: domain.StageSpec, kind: feat}, "enter g s"},
 		{"spec with open questions blocks approve", nextInput{stage: domain.StageSpec, kind: feat, openSpecQs: 2}, "s enter"},
 		{"plan idle runs the planner", nextInput{stage: domain.StagePlan, kind: feat}, "enter"},
 		{"plan gate reads then approves", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "s g"},
