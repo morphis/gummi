@@ -90,15 +90,12 @@ func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
 		t.Errorf("card page has no way back in its breadcrumb:\n%s", view)
 	}
 
-	// the composer owns the keyboard on arrival, so leaving is two steps:
-	// esc hands the keys back, esc again leaves the page
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if !m.cardOpen {
-		t.Fatal("the first esc should only blur the composer, not leave the page")
-	}
+	// the composer owns the keyboard on arrival and keeps it, so leaving
+	// is one press: esc no longer blurs into an accelerator layer that
+	// has nothing on screen to show for itself
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.cardOpen {
-		t.Fatal("esc on the card page should return to the backlog")
+		t.Fatal("esc on the card page should return to the backlog in one press")
 	}
 	if !strings.Contains(ansi.Strip(m.View().Content), "BACKLOG") {
 		t.Error("esc did not land back on the backlog list")
@@ -240,9 +237,13 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "↑↓", "choose")
 	assertLabel(t, bs, "enter", "run implement")
-	assertLabel(t, bs, "esc", "keys")
+	// esc leaves the page from the line — there is no accelerator layer
+	// between the composer and the backlog any more
+	assertLabel(t, bs, "esc", "backlog")
+	assertLabel(t, bs, "alt+j/k", "prev/next")
 
-	// esc hands the keys back, and the page's own table returns with them
+	// that layer still exists for a card another process drives, which
+	// withholds the composer; blurring is how such a card arrives
 	m.blurThreadInput()
 	_, bs = m.activeSurface()
 	assertNoKey(t, bs, "→")

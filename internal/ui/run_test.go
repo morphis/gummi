@@ -189,13 +189,14 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 		t.Errorf("tool call not interleaved after its message: %+v", snap.Transcript)
 	}
 
-	// esc blurs the composer; the run keeps going
+	// esc leaves the page; the run keeps going — watching is not what
+	// keeps it alive
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.threadInput.Focused() {
-		t.Fatal("esc did not blur the composer")
+	if m.cardOpen {
+		t.Fatal("esc did not leave the card page")
 	}
 	if s := eng.Get("FD-001"); s == nil || s.State() != engine.StateRunning {
-		t.Error("blurring stopped the run")
+		t.Error("leaving the page stopped the run")
 	}
 }
 

@@ -23,14 +23,30 @@ import (
 // to unlock before you can answer it is a worse conversation. Typing
 // goes straight in.
 //
-// That leaves the page's single-letter accelerators reachable two ways
-// rather than one, which is the trade this makes deliberately:
+// It also never gives the keyboard back on esc. That was the original
+// trade — esc blurred to the card's single-letter accelerators, esc again
+// left the page — and it stopped paying: the accelerator layer it landed
+// in has no surface of its own since the action list became an overlay,
+// so the first esc appeared to open a mode rather than back out of
+// anything, and the status bar swapping wholesale was the only sign it
+// had happened. esc leaves the page now, in one press. What the layer
+// uniquely offered was J/K; that is alt+j/alt+k here.
+//
+// The accelerators stay reachable from the line itself, which is where
+// the two-way trade actually lives:
 //
 //   - as words. The closed verb vocabulary (verbs.go) covers what the
-//     letters cover — "diff", "approve", "verify" — and the next card
-//     lists them beside their keys.
-//   - as keys, after esc. Blurring hands the keyboard back to the
-//     accelerator table with the draft intact; esc again leaves the page.
+//     letters cover — "diff", "approve", "verify" — and the action
+//     inventory lists them beside their keys.
+//   - as the inventory. Up on an empty line opens it (the placeholder
+//     says so), and it carries the keyless actions too — gate, duplicate
+//     — which no accelerator ever reached.
+//   - as globals. "/" opens the command menu; tab and alt+1/2/3 are
+//     answered above every surface.
+//
+// The blurred accelerator layer still exists (backlog.go's backlogKey),
+// but only a card another process drives can be in it: that card
+// withholds the composer, so there is nothing for esc to leave from.
 //
 // While a decision is open the composer and the decision are one control
 // (DESIGN §6.3): the composer's emptiness drives the highlight — an empty
@@ -49,6 +65,20 @@ type pendingChip struct {
 	verb      string
 	remainder string
 }
+
+// The composer's placeholder is the one place the action inventory can
+// be advertised, because it occupies exactly the state that opens it: an
+// empty line. It is not decoration — with esc no longer blurring, up is
+// how the card's actions are reached by key at all, and a route with no
+// visible sign of itself is the thing this whole change is undoing.
+//
+// It says less while a decision is pinned above the line, because there
+// up belongs to the decision (handleThreadInputKey) and promising
+// otherwise would be a lie one keystroke from being found out.
+const (
+	placeholderActions = "message the agent, a verb (approve, verify, diff…), or ↑ for actions"
+	placeholderPlain   = "message the agent, or a verb (approve, verify, diff…)"
+)
 
 // newThreadInput builds the composer, styled from the theme rather than
 // left on the widget's own defaults.
@@ -73,7 +103,7 @@ type pendingChip struct {
 // would make a spatial divider read as a temporal one.
 func newThreadInput(s *theme.Styles) textarea.Model {
 	in := textarea.New()
-	in.Placeholder = "message the agent, or a verb (approve, verify, diff…)"
+	in.Placeholder = placeholderActions
 	in.CharLimit = 4000
 	in.ShowLineNumbers = false
 	in.SetHeight(1)
@@ -114,6 +144,11 @@ func (m *Shell) focusThreadInput() {
 // within the page too, not just across a tab switch. Arming ends with
 // the blur: refocusing returns to the picker contract (threadinput.go's
 // doc comment owns the full story).
+//
+// esc is no longer a caller. The accelerator layer is now reached only by
+// landing on a card another process drives, which withholds the composer
+// outright — so this runs when the card changes under the keyboard, not
+// when the user asks to leave.
 func (m *Shell) blurThreadInput() {
 	m.threadInput.Blur()
 	m.threadChip = nil
@@ -150,10 +185,31 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.threadOutputs = !m.threadOutputs
 		return nil
 	}
+	// alt+j/alt+k are the board's J/K, which type here: stepping to the
+	// previous or next card is the one thing the retired blur layer
+	// offered that nothing else does, so it needs a key a focused
+	// composer can't swallow. Alt for the same reason alt+o takes it.
+	switch msg.String() {
+	case "alt+k":
+		return m.stepCard(-1)
+	case "alt+j":
+		return m.stepCard(1)
+	}
 	switch msg.String() {
 	case "esc":
-		m.threadInput.Blur()
-		m.threadFreeForm = false
+		if m.threadFreeForm {
+			// armed by 'o', and visibly so — the decision names the
+			// free-form option and the bar names the key. esc backs out of
+			// that, and the decision's own picker keys come back; the draft
+			// stays, since disarming is not discarding.
+			m.threadFreeForm = false
+			return nil
+		}
+		// nothing pending: esc leaves the page. The composer keeps both
+		// its focus and its draft — the card page hides, it is never
+		// discarded (backlog.go's closeCard), so coming back finds the
+		// line exactly as it was.
+		m.closeCard()
 		return nil
 	case "enter":
 		text := strings.TrimSpace(m.threadInput.Value())
@@ -529,6 +585,12 @@ func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 	if m.threadChip != nil && m.threadChip.feature == r.F.ID {
 		return ansi.Truncate(m.threadChip.view(s), w, "…")
 	}
+	m.threadInput.Placeholder = placeholderPlain
+	if d := m.openDecision(r); d == nil {
+		// up is the inventory's only key, and only with nothing pinned
+		// above the line to claim it
+		m.threadInput.Placeholder = placeholderActions
+	}
 	m.threadInput.SetWidth(max(w-2, 10))
 	// The chat pane gives the composer three rows because it is the whole
 	// surface there. Here it sits under the thread, which owns the height,
@@ -563,7 +625,8 @@ func (m *Shell) threadInputBindings() []binding {
 					{key: "enter", label: "answer", help: "your line is the answer — empty sends nothing", bar: true},
 					{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
 					m.threadOutputsBinding(),
-					{key: "esc", label: "keys", help: "drop the free-form channel and hand the keyboard back (the draft is kept)", bar: true},
+					{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
+					{key: "esc", label: "picker", help: "drop the free-form channel — the decision's own keys come back (the draft is kept)", bar: true},
 				}
 			}
 			label, help := "answer", "answer the highlighted option"
@@ -599,22 +662,24 @@ func (m *Shell) threadInputBindings() []binding {
 			if freeForm {
 				bs = append(bs, binding{key: "o", label: "own answer", help: "type your own answer — the digits stop picking while it's armed", bar: true})
 			}
-			bs = append(bs, m.threadOutputsBinding())
+			bs = append(bs, m.threadOutputsBinding(),
+				binding{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"})
 			// esc stays last: the status bar drops hints from the
 			// second-to-last backwards precisely so the surface's escape
 			// hatch outlives every other row (statusbar.Render).
-			return append(bs, binding{key: "esc", label: "keys", help: "hand the keyboard back to the card accelerators", bar: true})
+			return append(bs, binding{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true})
 		}
 	}
 	return []binding{
 		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; does nothing when the line is empty", bar: true},
+		{key: "↑", label: "actions", help: "open the action inventory while the line is empty (the placeholder says so too)", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
 		m.threadOutputsBinding(),
+		{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
 		// esc last, for the reason the decision table gives above: the
 		// bar sheds the second-to-last hint first, so the way out is the
 		// last thing to go.
-		{key: "esc", label: "keys", help: "hand the keyboard back to the card's single-letter accelerators (the draft is kept)", bar: true},
-		{key: "↑", label: "actions", help: "open the action inventory while the line is empty"},
+		{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true},
 	}
 }
 

@@ -75,11 +75,9 @@ func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // detach; the ask stays pending
-
 	ask := eng.Get("FD-001").Snapshot().PendingAsk
 	if ask == nil {
-		t.Fatal("precondition: the ask is still pending after detach")
+		t.Fatal("precondition: the ask is pending")
 	}
 	out := ansi.Strip(m.threadView(100, 30))
 	want := pickerView(m0Styles(), "FD-001 asks", ask.Question,
@@ -95,15 +93,13 @@ func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
 }
 
 // TestThreadDecisionAnswersLiveAsk: the thread itself can answer a
-// blocking ask_user — the pane's esc only detaches, and the pinned
-// decision keeps the question answerable on the card page. This is the
-// capability the chat pane's retirement depends on.
+// blocking ask_user — the pinned decision keeps the question answerable
+// on the card page, from the composer that is already focused. This is
+// the capability the chat pane's retirement depends on.
 func TestThreadDecisionAnswersLiveAsk(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // the composer blurs; the ask stays pending
-	m = press(t, m, tea.KeyPressMsg{Code: '/'})           // back into the line
 
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // answer the pinned decision
 	deadline := time.After(testWaitTimeout)
@@ -336,8 +332,6 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // the composer blurs; the ask stays pending
-	m = press(t, m, tea.KeyPressMsg{Code: '/'})           // back into the line
 
 	// The line starts with a word on purpose: on an empty line a digit is
 	// a picker key that answers an option (the pane's own contract), so

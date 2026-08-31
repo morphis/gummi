@@ -161,7 +161,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
 | `enter` | open the selected card's page (full width); in its composer, deliver the typed line — to the card's open decision, when an option takes prose (the words ride the bounce, or open the run they're aimed at) — and to the agent otherwise; an empty line answers the highlighted option, and does nothing when none is open |
 | `↑` | on a card page with an empty composer and no decision open, open the action pop-over (`↑↓` moves, `enter` runs); while a decision is open, `↑↓` choose its options instead |
-| `esc` / `J`/`K` | back to the backlog list / step to the previous or next card without leaving the page |
+| `esc` | back to the backlog list, in one press — the composer keeps the keyboard for as long as the card page is open, and the unsent draft survives leaving it. It cancels whatever is visibly pending first: a confirm chip, or a free-form answer armed with `o` |
+| `J`/`K`, `alt+j`/`alt+k` | step to the previous or next card without leaving the page — the alt pair from inside the composer, where `J`/`K` are letters you are typing |
 | `space` | open the command menu (everything that belongs to no card); type to filter |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / toggle the thread's transcript view — every stage's events laid out inline instead of one folded receipt each (from the backlog it opens the card page with the view on) |
 | `alt+o` | expand the captured tool outputs in the thread — a failed call always shows its tail without it; not text, so it works mid-draft as well as from the accelerators |
@@ -189,14 +190,16 @@ Key surfaces on the board (press `?` anywhere for the full table):
 The board is a single full-width backlog, grouped by super-state; `enter`
 opens the selected card on a page of its own, with roughly twice the width
 to spend on its detail. There is only ever one list on screen, so `↑↓`
-never have to be aimed. `esc` returns to the list; `J`/`K` step to the
-previous/next card without going back. Every card verb (`g`, `v`, `m`,
-`d`, …) works from either level.
+never have to be aimed. `esc` returns to the list in one press;
+`alt+j`/`alt+k` step to the previous/next card without going back. Every
+card verb (`g`, `v`, `m`, `d`, …) works from either level.
 
 That card page is a thread. When the card needs a decision, the question
 and its regenerated legal answers stay pinned directly above the composer;
 once answered, the result becomes ordinary chronological history. When no
-decision is open, the composer stands alone.
+decision is open, the composer stands alone — and says so, its placeholder
+pointing at `↑` for the card's actions, which is where the single-letter
+verbs live now that the composer never gives the keyboard back.
 
 The board sits behind gummi's own tab bar alongside the needs-attention
 inbox and a hosted agent pane — `tab` cycles all three, `alt+1/2/3` jumps

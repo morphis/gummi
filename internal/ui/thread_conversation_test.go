@@ -109,15 +109,18 @@ func settleChat(t *testing.T, eng *engine.Engine) {
 }
 
 // toKeys hands the keyboard from the card page's composer back to its
-// single-letter accelerators. The composer is focused whenever a card is
-// open, so a test driving the page with bare keys (p, q, J, g) has to
-// step out of the line first — exactly as a user does.
+// single-letter accelerators, so a test can drive the page with bare keys
+// (p, q, J, g) the way boardVerb sees them.
+//
+// It blurs directly rather than pressing esc. esc leaves the page now —
+// the accelerator layer has no surface of its own and is reached only by
+// a card another process drives (threadinput.go) — so a keypress is no
+// longer the honest way in, and a helper that pretended otherwise would
+// have every one of these tests asserting a route that does not exist.
 func toKeys(t *testing.T, m *Shell) *Shell {
 	t.Helper()
-	if !m.threadInput.Focused() {
-		return m
-	}
-	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.blurThreadInput()
+	return m
 }
 
 // openAndAttach opens the selected card and starts its conversation.
@@ -140,8 +143,8 @@ func openAndAttach(t *testing.T, m *Shell) *Shell {
 // TestThreadAttachAndSend is the retirement's core contract: the card
 // page is the conversation. Attach starts the architect, the composer
 // sends a turn, the thread shows the whole exchange, and esc — which
-// used to detach a separate pane — now just hands the keyboard back to
-// the accelerators while the session keeps running.
+// used to detach a separate pane — now just leaves the page while the
+// session keeps running, with the conversation waiting where it was.
 func TestThreadAttachAndSend(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("Two options: localStorage or synced account."))
 
@@ -174,14 +177,15 @@ func TestThreadAttachAndSend(t *testing.T) {
 		t.Errorf("assistant turn wrong: %+v", snap.Transcript[3])
 	}
 
-	// esc blurs the composer; the session stays alive
+	// esc leaves the page; the session stays alive and the draft with it
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.threadInput.Focused() {
-		t.Fatal("esc did not blur the composer")
+	if m.cardOpen {
+		t.Fatal("esc did not leave the card page")
 	}
 	if eng.Get("FD-001") == nil {
-		t.Fatal("blurring killed the engine session")
+		t.Fatal("leaving the page killed the engine session")
 	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // back onto the card
 
 	// the thread holds the whole conversation: every one of the four
 	// turns is in the body, not just the last assistant message
@@ -196,7 +200,7 @@ func TestThreadAttachAndSend(t *testing.T) {
 	// one: the transcript grows, it does not restart. The composer is the
 	// whole door — there is nothing to re-attach to, because the card
 	// never stopped being the conversation.
-	m = press(t, m, tea.KeyPressMsg{Code: '/'}) // back into the line after the esc above
+	// reopening the card found the composer focused, as it always is
 	m = typeString(t, m, "synced, then")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	settleChat(t, eng)
@@ -678,6 +682,43 @@ func TestThreadOArmsFreeForm(t *testing.T) {
 	}
 	if got != "2.4 to 1 is the floor" {
 		t.Errorf("ask answered with %q, want the whole armed line", got)
+	}
+}
+
+// TestThreadEscDisarmsFreeFormBeforeLeaving: esc leaves the card page in
+// one press, with one exception — an armed free-form channel is a state
+// the user just entered deliberately, and the decision above the line
+// shows it, so esc backs out of that first. It is not the old blur: the
+// keyboard stays on the composer and the draft stays with it. A second
+// esc leaves, because by then there is nothing pending to cancel.
+func TestThreadEscDisarmsFreeFormBeforeLeaving(t *testing.T) {
+	m, eng := agentWorkspace(t, askingFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'o', Text: "o"})
+	if !m.threadFreeForm {
+		t.Fatal("'o' did not arm the free-form channel")
+	}
+	m = typeString(t, m, "2.4 to 1")
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.threadFreeForm {
+		t.Fatal("esc did not disarm the free-form channel")
+	}
+	if !m.cardOpen {
+		t.Fatal("esc left the page instead of disarming the pending channel first")
+	}
+	if !m.threadInput.Focused() {
+		t.Fatal("disarming blurred the composer — it should keep the keyboard")
+	}
+	if got := m.threadInput.Value(); got != "2.4 to 1" {
+		t.Fatalf("disarming discarded the draft: %q", got)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.cardOpen {
+		t.Fatal("esc with nothing pending should leave the card page")
 	}
 }
 

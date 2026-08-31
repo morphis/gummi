@@ -311,9 +311,17 @@ func (m *Shell) cardPageView(w, h int) string {
 	if crumbRows == 0 {
 		return out
 	}
+	// the step key follows the keyboard: J/K types into a focused
+	// composer, so there it is alt+j/k (threadinput.go). The crumb names
+	// whichever one actually works right now — a breadcrumb that lies
+	// about its own keys is worse than no breadcrumb.
+	step := "J/K"
+	if m.threadInput.Focused() {
+		step = "alt+j/k"
+	}
 	crumb := " " + s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
-		"  " + s.KeyHint.Render("J/K") + s.Faint.Render(" prev/next card")
+		"  " + s.KeyHint.Render(step) + s.Faint.Render(" prev/next card")
 	line := ansi.Truncate(crumb, w, "…")
 	if crumbRows > 1 {
 		// the row above it, when the page can spare one
@@ -356,6 +364,12 @@ func (m *Shell) backlogBindings() []binding {
 // single-letter accelerators are not what's live, so the table shown here
 // switches to threadInputBindings() instead of listing keys that
 // currently just type.
+//
+// That focused branch is the ordinary case now: esc leaves the page
+// rather than blurring, so the table below describes a card another
+// process is driving — the one card that withholds the composer. "/" is
+// kept in it deliberately, as the way back into the line if that process
+// exits while the page is open.
 func (m *Shell) cardPageBindings() []binding {
 	if m.threadInput.Focused() {
 		return withHelpKey(m.threadInputBindings())

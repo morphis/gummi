@@ -312,9 +312,11 @@ func TestFoldedReceiptPrefersMeteredSpend(t *testing.T) {
 
 // The composer owns the keyboard the moment a card opens, the way a
 // coding agent's does: you type your reply, you do not unlock a field
-// first. The accelerators are still there, one esc away, with the draft
-// kept — and the keys that are not text (enter on an empty line, the
-// arrows, the page keys) keep working without leaving the line at all.
+// first — and it keeps the keyboard for as long as the page is open. The
+// accelerators are reached by word, by the ↑ inventory or by the / menu,
+// never by blurring, and the keys that are not text (enter on an empty
+// line, the arrows, the page keys, alt+j/k) work without leaving the line.
+// esc is the way off the page, in one press, with the draft kept.
 func TestThreadInputOwnsTheKeyboardOnOpen(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
@@ -331,23 +333,58 @@ func TestThreadInputOwnsTheKeyboardOnOpen(t *testing.T) {
 		t.Fatalf("composer = %q, want the typed text verbatim", got)
 	}
 
-	// esc hands the keyboard back without eating the draft
+	// alt+j/alt+k step cards without leaving the line: J and K are text
+	// here, so the pair the blurred layer used to own moved to alt
+	before := m.sel
+	m = press(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
+	if m.sel == before {
+		t.Fatal("alt+j did not step to the next card")
+	}
+	if got := m.threadInput.Value(); got != "g and v are just letters here" {
+		t.Fatalf("alt+j leaked into the composer: %q", got)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModAlt})
+	if m.sel != before {
+		t.Fatalf("alt+k did not step back: sel = %d, want %d", m.sel, before)
+	}
+
+	// esc leaves the page in one press, without eating the draft — the
+	// page hides, it is never discarded
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.threadInput.Focused() {
-		t.Fatal("esc did not blur the composer")
+	if m.cardOpen {
+		t.Fatal("esc did not leave the card page")
 	}
 	if got := m.threadInput.Value(); got != "g and v are just letters here" {
 		t.Fatalf("esc discarded the draft: %q", got)
 	}
-	if !m.cardOpen {
-		t.Fatal("esc left the card page instead of only blurring")
+	if !strings.Contains(ansi.Strip(m.View().Content), "BACKLOG") {
+		t.Error("esc did not land back on the backlog list")
+	}
+}
+
+// TestThreadInputPlaceholderAdvertisesTheActions: ↑ is the only key that
+// reaches the card's actions now that esc leaves the page instead of
+// blurring, so the composer has to say so — in the placeholder, which
+// occupies exactly the state that opens them (an empty line). While a
+// decision is pinned above the line ↑ belongs to the decision, and the
+// placeholder must not promise otherwise.
+func TestThreadInputPlaceholderAdvertisesTheActions(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	m.sel = 5 // FD-039, done — nothing to decide, so ↑ is the inventory's door
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if v := ansi.Strip(m.View().Content); !strings.Contains(v, "↑ for actions") {
+		t.Errorf("the composer does not advertise the action inventory:\n%s", v)
 	}
 
-	// blurred, the accelerators answer again and do not leak into the line
-	before := m.threadInput.Value()
-	m = press(t, m, tea.KeyPressMsg{Code: 'J', Text: "J"})
-	if m.threadInput.Value() != before {
-		t.Fatalf("accelerator leaked into the composer: %q", m.threadInput.Value())
+	// FD-042 (implement, nothing running) has an open decision, which owns ↑
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.sel = 1
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if d := m.openDecision(m.rows[m.sel]); d == nil {
+		t.Fatal("precondition: FD-042 should have an open decision")
+	}
+	if v := ansi.Strip(m.View().Content); strings.Contains(v, "↑ for actions") {
+		t.Errorf("the placeholder promises ↑ while a decision owns it:\n%s", v)
 	}
 }
 
@@ -683,14 +720,16 @@ func TestThreadInputSendsToLiveSession(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("sure, got it"))
 	m = openAndAttach(t, m) // opens the card page, attaches the conversation, kicks off a turn
 	settleChat(t, eng)
-	m = toKeys(t, m) // esc blurs the composer; the session and the card page stay
+	m = toKeys(t, m) // the accelerator layer; the session and the card page stay
 	if m.threadInput.Focused() {
-		t.Fatal("esc did not blur the thread input")
+		t.Fatal("toKeys did not blur the thread input")
 	}
 	if !m.cardOpen {
 		t.Fatal("blurring the composer should not close the card page")
 	}
-	// '/' refocuses the composer, which is where a message is typed
+	// '/' refocuses the composer, which is where a message is typed —
+	// the layer's only way back into the line (backlog.go keeps it for
+	// exactly this reason)
 	m = press(t, m, tea.KeyPressMsg{Code: '/'})
 	if !m.threadInput.Focused() {
 		t.Fatal("/ did not focus the thread input")

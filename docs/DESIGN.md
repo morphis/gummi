@@ -577,11 +577,11 @@ column beside the dashboard, with `→`/`←` moving the arrow keys between
 them) is retired, and so is the *Chat/attach* mode it lists: an
 interactive stage no longer has an attach/detach state of its own to
 switch a pane into (§6.3, §10 decision 5) — opening the card is opening
-its thread, and `esc` blurs the composer rather than leaving a pane to
-return to. The board is the **backlog**: no column, the full width
-is the same super-state-grouped list, and `enter` opens the selected card
-on a page of its own (`esc` back, `J`/`K` to the previous/next card
-without leaving it). Card titles, badges and the card's own detail get
+its thread, and there is no pane to return to. The board is the
+**backlog**: no column, the full width is the same super-state-grouped
+list, and `enter` opens the selected card on a page of its own (`esc`
+back in one press, `alt+j`/`alt+k` to the previous/next card without
+leaving it). Card titles, badges and the card's own detail get
 the whole terminal, and there is only ever one list on screen at a time
 — so the arrow keys never have to be aimed and the focus band never has
 to disambiguate which pane owns them. Every card verb (`g`, `v`, `m`,
@@ -713,6 +713,22 @@ ranked suggestions on screen whether or not anything needed deciding, and
 it answered "what could I do" at a moment when the honest answer was
 usually "nothing — watch". The decision answers "what does this card need
 from me", and it is absent exactly when the card needs nothing.
+
+**`esc` leaves, in one press.** It used to blur the composer first, on
+the reasoning that the card's single-letter accelerators deserved a
+keyboard state of their own. They no longer have a surface: the action
+list that state drove became an overlay, so blurring landed the user in a
+level with nothing on screen but a swapped status bar — `esc` looked like
+it *opened* a mode rather than backing out of one, and `j`/`k`/`enter`
+there moved and fired an action cursor nothing was drawing. The one thing
+the level uniquely reached was `J`/`K`, which is `alt+j`/`alt+k` from the
+line now. `esc` cancels whatever is visibly pending — a confirm chip, an
+armed free-form answer — and otherwise returns to the backlog with the
+draft intact. The accelerators are reached by word, by the `↑` inventory
+(which the placeholder advertises, and which carries the keyless actions
+no letter ever reached), or by the `/` menu. The blurred level still
+exists for a card another process drives, because that card withholds the
+composer and there is nothing for `esc` to leave from.
 
 Typing into it is first-class: a line whose first word is one of a closed
 vocabulary is a command, and every other line is a message to the agent.
