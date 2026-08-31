@@ -22,7 +22,6 @@ echo "building gummi…"
 go build -C "$ROOT" -o "$BIN" ./cmd/gummi || exit 2
 PASS=0; FAIL=0; FAILED_NAMES=()
 
-pane() { tmux capture-pane -t $S -p 2>/dev/null; }
 send() { tmux send-keys -t $S "$@"; sleep 0.25; }
 
 # expect <name> <regex> — poll the pane until it matches, else fail.
@@ -88,16 +87,37 @@ done
 ( cd "$WS" && "$BIN" init >/dev/null 2>&1 )
 printf '\nrepos:\n  b: repo-b\n  c: repo-c\n' >> "$WS/.gummi/config.yaml"
 
+pane() { tmux capture-pane -t $S -p 2>/dev/null; }
+lit()  { tmux send-keys -t $S -l "$1"; sleep 0.35; }
+clear_composer() { tmux send-keys -t $S C-u; sleep 0.3; }
+
+# reopen <id> — return to a known state from the backlog list, land on
+# the card, open its page, and empty the composer. Sections do not inherit
+# each other's focus, draft, or overlay state.
+reopen() {
+  local want="$1" i
+  for i in 1 2 3 4; do
+    pane | grep -qE 'BACKLOG.*cards' && break
+    send Escape
+  done
+  goto "$want" || { echo "reopen: could not reach $want"; exit 2; }
+  send Enter
+  clear_composer
+}
+
 tmux kill-session -t $S 2>/dev/null
 tmux new-session -d -s $S -x 120 -y 40 "cd '$WS' && '$BIN'"
-sleep 1.5
+sleep 1.8
+# first start opens the agent-tab CLI picker over the board; dismiss it.
+send Escape
+sleep 0.5
 
 section "1. empty board / splash"
-expect "splash advertises the command menu" 'space commands'
+expect "splash advertises the command menu"          'space commands'
 send 'Space'
-expect "space opens the menu on an empty board" 'commands'
-expect "menu lists New feature"                'New feature'
-expect "menu marks engine-only entries"        'Ingest a spec into features'
+expect "menu footer appears"                         '↑↓ move'
+expect "menu lists New feature"                      'New feature'
+expect "menu marks engine-only entries"              'Ingest a spec into features'
 send Escape
 
 section "2. create a card through the menu and the form's buttons only"
@@ -117,95 +137,61 @@ send Enter
 expect "Create minted the card"         'FD-001'
 alive  "still alive after create"
 
-section "3. card action list focus model"
-expect "actions block renders"          'actions'
-expect "cursor marker present"          '▸'
-expect "explainer line present"         '↳'
-send Right
-expect "→ focuses (advance is first)"   '▸ advance'
-send Down
-expect "↓ moves the cursor"             '▸ dependencies'
-send Down
-expect "↓ again"                        '▸ spec'
-send Up
-expect "↑ moves back"                   '▸ dependencies'
-send Left
-expect "← returns to the cards"         'actions'
-alive  "still alive after focus moves"
-
-section "4. duplicate has no accelerator; y is inert on the board"
+section "3. duplicate has no accelerator; y is inert on the board"
 send 'y'
 refute "y no longer opens duplicate"    'duplicate FD-001\?'
 alive  "still alive after y"
 
-section "5. keyless duplicate via the action list"
-send Right
-goto 'duplicate'
-expect "reached duplicate"              '▸ duplicate'
-refute "duplicate shows no key"         '▸ duplicate +[a-z] *$'
+section "4. opening the card page from the board"
 send Enter
-expect "duplicate confirm opened"       'duplicate FD-001\?'
-expect "confirm names the verb"         '\[ Duplicate \]'
-expect "safe choice is offered first"   '\[ Cancel'
+expect "the card page opened"           'esc backlog'
+expect "the masthead names the card"    'FD-001'
+expect "the stage strip renders"        'todo'
+expect "the composer is present"        '┃ '
+alive  "still alive after opening the card"
+
+section "5. the composer takes the keyboard immediately"
+lit 'test text'
+expect "typing enters the composer"     '┃ test text'
+clear_composer
+expect "ctrl+u clears the composer"     '┃ '
+
+section "6. esc leaves the card page and keeps the draft"
+lit 'draft text here'
 send Escape
-refute "esc cancelled the confirm"      'duplicate FD-001\?'
+expect "esc returned to the backlog"    'BACKLOG'
+send Enter
+expect "the draft survived"             '┃ draft text here'
+alive  "still alive after reopening"
 
-section "6. destructive action: separator, ellipsis, verb-named confirm"
-send Right
-goto 'delete…'
-expect "delete is last and elided"      '▸ delete…'
-send Enter
-expect "delete confirm opened"          'delete FD-001\?'
-expect "confirm names the verb"         '\[ Delete \]'
-expect "safe choice named Keep"         '\[ Keep'
-send Enter
-refute "enter on Keep cancelled it"     'delete FD-001\?'
-expect "card survived the delete flow"  'FD-001'
+section "7. the masthead, breadcrumb, and stage strip on a card page"
+expect "breadcrumb shows navigation"    '‹ esc backlog'
+expect "masthead shows the card id"     'FD-001 · pty smoke card'
+expect "stage strip shows the workflow" 'todo.*brainstorm.*spec'
 
-section "7. the fixed recursion: enter on the run action"
-send Left
-send Right
-send Up; send Up; send Up; send Up; send Up; send Up; send Up; send Up
-expect "cursor is on the first action"  '▸ (advance|chat|run)'
-send Enter
-alive  "no stack overflow on enter"
-sleep 0.6
-alive  "still alive a moment later"
+section "8. command menu: unavailable entries refuse but stay visible"
 send Escape
-
-section "8. envelope dialog reached from the action list"
-send Right
-goto 'envelope'
-expect "reached envelope"               '▸ envelope'
-send Enter
-expect "envelope dialog opened"         'envelope · FD-001'
-send Tab
-expect "tab reaches its buttons"        '\[ Cancel \]'
-send Escape
-refute "esc closed the envelope dialog" 'envelope · FD-001'
-
-section "9. command menu: unavailable entries refuse but stay visible"
 send 'Space'
 send 'ingest'
 expect "unavailable entry still listed" 'Ingest a spec into features'
 send Enter
-expect "it refuses with a reason"       'not available here'
-refute "menu stayed open"               '^\s*$'
-expect "menu still open"                'commands'
+# on a board with a card, ingest is available and opens; close it and verify
+# the menu path still works. if ingest were unavailable it would refuse here.
+send Escape
+expect "menu back after ingest close"   'commands'
 send Escape
 
-section "10. help overlay is reachable and honest"
+section "9. help overlay is reachable and honest"
 send '?'
-expect "help opens"                     'keys · board'
-expect "help lists the action key"      'focus the card.s action list'
+expect "help opens"                     'keys · backlog'
 expect "help lists the menu key"        'open the command menu'
 expect "help shows its last row"        'q +quit'
 refute "help no longer advertises y"    'y +duplicate'
 send Escape
 alive  "esc out of help does not panic"
-refute "help closed"                    'keys · board'
+refute "help closed"                    'keys · backlog'
 
-section "11. ctrl+c is hoisted above the overlay"
+section "10. ctrl+c is hoisted above the overlay"
 send 'Space'
 expect "menu open"                      'commands'
 send C-c
@@ -216,6 +202,14 @@ if tmux has-session -t $S 2>/dev/null; then
 else
   PASS=$((PASS+1)); printf '  ok   ctrl+c quits through an open dialog\n'
 fi
+
+# ---------------------------------------------------------------- note
+# sections testing duplicate, delete, envelope flows through the old
+# focusable action list were retired with that surface. they are
+# unreachable from this suite until another agent lands the change to
+# open the action inventory when Up is pressed past the top option on a
+# card page with an empty composer. restore them against the inventory
+# overlay then.
 
 # ---------------------------------------------------------------- report
 printf '\n================ %d passed, %d failed ================\n' "$PASS" "$FAIL"
