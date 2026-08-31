@@ -255,6 +255,18 @@ type Shell struct {
 	// back from the end rather than forward from the start is what keeps
 	// arriving output from shoving the view out from under a reader.
 	threadScroll int
+	// lastSeen is how far through each card's event log this machine has
+	// already read (state's card_last_seen), and anchorTo names the one
+	// card whose thread should open on its newest unread period instead
+	// of on its newest line.
+	//
+	// The anchor is a one-shot: it is set when a card's events land and
+	// consumed by the next real render, because that render is the only
+	// place that knows how many rows the period's opening rule ended up
+	// being from the bottom. Everything about the body's height — folding,
+	// wrapping, whether a session is live — is decided there.
+	lastSeen     map[domain.FeatureID]int64
+	anchorTo     domain.FeatureID
 	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
 	profileNames []string         // profile names for the new-feature form
 	repoNames    []string         // configured managed-repo names for the new-card forms
@@ -567,6 +579,62 @@ func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
 	_ = m.store.AppendPark(context.Background(), id, m.stageOf(id), reason, detail, "", time.Now())
 }
 
+// markSeen decides whether this card has unread autopilot history worth
+// opening on, and records that it has now been read.
+//
+// The order matters and is the whole of the subtlety here: the anchor is
+// computed against the mark as it was *before* this look, and the mark
+// is moved afterwards. Reading them the other way round would mean a
+// card was always already seen by the time anything asked, and the
+// divider would never fire once.
+//
+// Only the card actually on screen anchors. Events load for the selected
+// card alone, but a card can be selected without its page being open,
+// and moving the board's cursor past a card is not reading it.
+func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd {
+	if m.lastSeen == nil {
+		m.lastSeen = map[domain.FeatureID]int64{}
+	}
+	if m.cardOpen {
+		if r, ok := m.selected(); ok && r.F.ID == id {
+			if _, unread := unseenStretch(autopilotStretches(r.F, events), events, m.lastSeen[id]); unread {
+				m.anchorTo = id
+			}
+		}
+	}
+	seq := newestSeq(events)
+	if seq <= m.lastSeen[id] {
+		return nil
+	}
+	m.lastSeen[id] = seq
+	if m.store == nil {
+		return nil
+	}
+	// Best-effort and silent, like the history writes above: failing to
+	// remember where the reader got to costs them one redundant jump next
+	// time, which is not worth a message.
+	return func() tea.Msg {
+		_ = m.store.SetLastSeen(context.Background(), id, seq)
+		return nil
+	}
+}
+
+// lastSeenMsg carries the per-card read marks loaded at startup.
+type lastSeenMsg struct {
+	seqs map[domain.FeatureID]int64
+	err  error
+}
+
+// fetchLastSeen reads every card's read mark in one query, at startup —
+// the same shape and the same reason as fetchOpenDecisions (inboxseed.go).
+// A failure is silent: the marks are a convenience, and a board that
+// cannot read them simply opens every card at its newest line, which is
+// what it did before they existed.
+func (m *Shell) fetchLastSeen() tea.Msg {
+	seqs, err := m.store.LastSeenSeqs(context.Background())
+	return lastSeenMsg{seqs: seqs, err: err}
+}
+
 // logAutopilot records the card changing hands: the machine starting to
 // drive it unattended (state.AutopilotTookOver) or giving it back
 // (state.AutopilotHandedBack). Best-effort and silent for the same
@@ -709,6 +777,14 @@ func (m *Shell) Init() tea.Cmd {
 		// inference behind it is the part that needs an engine, and it
 		// no-ops without one.
 		cmds = append(cmds, m.fetchOpenDecisions)
+		// How far through each card the reader already got. Loaded once,
+		// in bulk, for the same reason the decision records are: the board
+		// renders every card and a per-card query here would be one round
+		// trip per row on screen. Without it the map starts empty on every
+		// launch and the first card opened after a restart would look
+		// entirely unread — which is precisely the jump this mark exists to
+		// stop happening twice.
+		cmds = append(cmds, m.fetchLastSeen)
 	}
 	if m.engine != nil {
 		if !m.attached() {
@@ -1504,6 +1580,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusThreadInput()
 		return m, open
 
+	case lastSeenMsg:
+		if msg.err == nil && msg.seqs != nil {
+			m.lastSeen = msg.seqs
+		}
+		return m, nil
+
 	case cardEventsMsg:
 		// a late reply for a card the page has since moved off (esc, or a
 		// second J/K before the first load landed) is dropped: the cache
@@ -1512,6 +1594,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// racing behind the current selection.
 		if msg.err == nil {
 			m.cardEvents[msg.id] = msg.events
+			return m, m.markSeen(msg.id, msg.events)
 		}
 		return m, nil
 
