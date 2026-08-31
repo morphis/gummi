@@ -141,3 +141,39 @@ func TestWideKeepsTheQuestionBesideTheTitle(t *testing.T) {
 		t.Errorf("narrow head ran to %d rows, want the title plus at most %d", len(narrow), pickerQuestionLines)
 	}
 }
+
+// TestCardPageChromeYieldsInOrder pins the page's row arithmetic, which
+// every added decoration has had to extend: the crumb, the row above it,
+// the row under the composer. Two properties matter more than the exact
+// thresholds, and neither is obvious by reading the conditions.
+//
+// It must be monotonic — a taller terminal can never give the thread
+// fewer rows than a shorter one, which is the bug shape a new threshold
+// introduces most easily. And the chrome must fit inside the page it is
+// measured against, since threadSize hands the remainder to the render
+// and a clamp measured against a different budget pages to the wrong
+// place (the reason threadRender takes the real height even when
+// measuring).
+func TestCardPageChromeYieldsInOrder(t *testing.T) {
+	prev := -1
+	for h := range 60 {
+		crumb, blank := cardPageChrome(h)
+		if crumb < 0 || crumb > 2 || blank < 0 || blank > 1 {
+			t.Fatalf("h=%d: crumb=%d blank=%d, outside the rows either can take", h, crumb, blank)
+		}
+		thread := h - crumb - blank
+		if thread < 0 {
+			t.Fatalf("h=%d: chrome took %d rows the page does not have", h, crumb+blank)
+		}
+		if thread < prev {
+			t.Errorf("h=%d gives the thread %d rows, fewer than h=%d's %d", h, thread, h-1, prev)
+		}
+		prev = thread
+	}
+
+	// the frame the design says the thread is driven at spends nothing on
+	// chrome: at 36×9 the page gets seven rows and keeps all of them
+	if crumb, blank := cardPageChrome(9 - 2); crumb != 0 || blank != 0 {
+		t.Errorf("the 36×9 page spent rows on chrome: crumb=%d blank=%d", crumb, blank)
+	}
+}

@@ -1,4 +1,5 @@
 [48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [38;2;58;57;67;49m │ [39;48;2;90;78;127m [38;2;247;246;251mboard[39m [38;2;58;57;67;49m │ [m [38;2;133;131;146minbox[m [38;2;58;57;67m │ [m [38;2;133;131;146magent[m                        [38;2;133;131;146mtab[38;2;96;95;107m cycle · [38;2;133;131;146malt+1/2/3[38;2;96;95;107m board/inbox/agent[m
+
    [38;2;96;95;107m‹ [38;2;191;188;200mesc[38;2;96;95;107m backlog  ·  1 of 1[m  [38;2;191;188;200mJ/K[38;2;96;95;107m prev/next card[m
 
   [38;2;255;96;255;1mFD-001[m [38;2;247;246;251m· Dark mode[m   [38;2;96;95;107m[thrifty][m   [38;2;96;95;107mautopilot: gates[m
@@ -7,7 +8,6 @@
 
   [38;2;96;95;107m⌄ [38;2;133;131;146mspec[38;2;96;95;107m · Problem[m [38;2;58;57;67m────────────────────────────────────────────────────────────────────────────[m [38;2;191;188;200ms[m
 
-    [38;2;191;188;200mThe user just opened the brainstorm chat. Read the spec draft, then open the interview:[m
     [38;2;191;188;200mstate the problem as you understand it in a sentence or two and ask the single[m
     [38;2;191;188;200mhighest-leverage question, with your recommended answer. Keep it short.[m
 

@@ -314,7 +314,12 @@ func (m *Shell) cardPageView(w, h int) string {
 	crumb := " " + s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
 		"  " + s.KeyHint.Render("J/K") + s.Faint.Render(" prev/next card")
-	return ansi.Truncate(crumb, w, "…") + "\n" + out
+	line := ansi.Truncate(crumb, w, "…")
+	if crumbRows > 1 {
+		// the row above it, when the page can spare one
+		line = "\n" + line
+	}
+	return line + "\n" + out
 }
 
 // backlogBindings is the list level's key table: the board's own table
