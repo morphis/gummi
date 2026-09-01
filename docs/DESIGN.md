@@ -1753,8 +1753,11 @@ caller must decide, then exits.
   `pr comments --ingest` writes review threads as diff annotations so
   `resume --bounce` rewinds review-round work exactly as it does for
   gummi's own reviewer findings.
-- **Envelope required** — a run refuses to start without one (`--envelope N` or
-  `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
+- **Envelope required** — a headless run refuses to start without one
+  (`--envelope N` or `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
+  The board's creation dialogs prefill `ui.DefaultEnvelopeCredits` (2000) when
+  `GUMMI_ENVELOPE` is unset — a number in a field someone is looking at and can
+  edit, which is a different thing from a number an unattended run assumes.
 - **Design questions are delegated** — an interactive stage's `ask_user`
   becomes a `question` checkpoint (answerable by option or free-form), unless
   `--autonomous` auto-takes the recommended answer.

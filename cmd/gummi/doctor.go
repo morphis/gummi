@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -483,8 +484,9 @@ func envelopeCheck() doctorCheck {
 	v := strings.TrimSpace(os.Getenv("GUMMI_ENVELOPE"))
 	if v == "" {
 		return doctorCheck{
-			Name: "envelope", Status: statusWarn, Detail: "GUMMI_ENVELOPE is unset",
-			Remediation: "pass --envelope N per run, or export GUMMI_ENVELOPE=<credits> (runs refuse to start without one)",
+			Name: "envelope", Status: statusWarn,
+			Detail:      fmt.Sprintf("GUMMI_ENVELOPE is unset (the board prefills %d credits; headless runs have no default)", ui.DefaultEnvelopeCredits),
+			Remediation: "pass --envelope N per run, or export GUMMI_ENVELOPE=<credits> (headless runs refuse to start without one)",
 		}
 	}
 	n, err := strconv.Atoi(v)

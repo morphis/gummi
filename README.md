@@ -295,7 +295,10 @@ gummi run --envelope 500 "Add a --format=json flag to the export command"
 ```
 
 An envelope is required (`--envelope N`, or `GUMMI_ENVELOPE`) and an agent
-backend must be configured — both fail loud before any work begins. By
+backend must be configured — both fail loud before any work begins. The
+requirement is a headless one: the board's creation dialogs open on a
+prefilled 2000 credits you can edit, so only unattended runs must name a
+number nobody is there to read. By
 default a run takes the quick route (spec → implement → review → verify) and
 auto-crosses design gates; `--full` adds brainstorm + plan, and
 `--gate-approval=caller` hands the design gates back to you via `resume`.
@@ -590,7 +593,7 @@ Environment variables:
 | `GUMMI_ZZ_MAX_TURNS` | zz adapter's runaway-turn backstop (default 200); a session that hits the cap ends with an actionable error |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_MAX_ACTIVE` | cap on the **attended** lane pool (default 1) — a card whose autopilot mode is `off`. The autopilot pool (default 2 lanes) is sized by `autopilot_lanes` in `config.yaml`, not this variable |
-| `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it |
+| `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it. Unset, the board's creation dialogs prefill 2000 credits (editable per card); headless runs have no default and refuse to start |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_TURN_RESERVE` | one turn's credits — the floor under envelope-derived stage budgets (default `domain.TurnReserveCredits`; override for unusual models) |
 | `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (on by default; needs an authenticated `gh` CLI to show anything) |

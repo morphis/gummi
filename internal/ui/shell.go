@@ -429,10 +429,34 @@ func (m *Shell) repoHasDefault() bool {
 	return m.wt.Known(m.wt.DefaultName())
 }
 
+// DefaultEnvelopeCredits is what the creation dialogs prefill when the
+// workspace has not set GUMMI_ENVELOPE. A card needs *some* budget to be
+// worth creating, and an empty-handed board that opened on 0 (uncapped)
+// made the unbudgeted answer the one nobody had to type. It is a prefill
+// and nothing more: it is editable in the dialog, GUMMI_ENVELOPE
+// overrides it, and the headless verbs still refuse to start without an
+// explicit envelope — no unattended run spends against a number the
+// operator never chose.
+const DefaultEnvelopeCredits = 2000
+
 // SetEnvelope sets the default spend-plan envelope (credits) stamped on
 // new features, enabling layer-3 per-stage budgets. 0 leaves features
 // unbudgeted (or governed by a flat per-stage budget).
 func (m *Shell) SetEnvelope(credits int) { m.envelope = credits }
+
+// envelopePrefill is the number the creation dialogs open on. It is
+// deliberately not m.envelope itself: m.envelope stays the *operator's*
+// envelope (0 when GUMMI_ENVELOPE is unset), which is the sentinel that
+// puts spec approval into scribe-estimation mode and floors the blend
+// (see estimateEnvelope). Folding the prefill into that field would read
+// as an explicit choice nobody made, and would silently switch off
+// estimation for every workspace that never set the variable.
+func (m *Shell) envelopePrefill() int {
+	if m.envelope > 0 {
+		return m.envelope
+	}
+	return DefaultEnvelopeCredits
+}
 
 // SetNotifier wires the needs-attention notification hook (bell/desktop).
 func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
@@ -2301,11 +2325,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.syncActionFocus()
 		}
 	case "n":
-		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createFeature))
+		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createFeature))
 	case "B":
-		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createBug))
+		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createBug))
 	case "R":
-		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelope, m.createResearch))
+		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createResearch))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
