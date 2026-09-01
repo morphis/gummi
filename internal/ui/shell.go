@@ -110,6 +110,15 @@ type Shell struct {
 	boardInput   textarea.Model
 	boardScroll  int
 	boardOutputs bool
+	// boardComplete is the slash-completion popup over boardInput
+	// (complete.go, boardcomplete.go), or nil when the line under it is
+	// not a command line. It is rebuilt from the composer's text after
+	// every key that can change it rather than being mutated in step
+	// with one, so there is exactly one rule for when it exists — see
+	// syncBoardCompletion — and no way for a paste, a ctrl+u or a cursor
+	// move to leave a popup standing over a line that no longer starts
+	// with "/".
+	boardComplete *completion
 	// locked is the input lock over a foreign tab (tabs.go's
 	// tabDef.foreign), modelled on zellij's ctrl+g: locked, gummi keeps
 	// nothing at all but ctrl+g itself, so tab, alt+1/2/3 and ? all reach
@@ -1089,10 +1098,31 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// so this is where the result actually lands.
 		m.boardOpening = false
 		if msg.err != nil {
+			// Two different failures land here and they need two different
+			// voices. An INITIAL open failing leaves m.board nil, so the tab
+			// renders boardTabPlaceholder and boardErr is both the right
+			// place to say so and the only one that would be seen. A REOPEN
+			// failing (/profile, /model) does not: spawnBoardLocked only
+			// replaces the live session once the new one is up, so the old
+			// conversation is still installed and still rendering — which
+			// means boardErr is never drawn at all, and the user who pressed
+			// Switch would watch nothing happen and be told nothing. That
+			// one has to speak through the status bar instead.
+			if m.board != nil {
+				m.notice = noticeMsg{text: "switching the board session: " + sanitize(msg.err.Error()), isErr: true}
+				return m, nil
+			}
 			m.boardErr = sanitize(msg.err.Error())
 			return m, nil
 		}
 		m.board = msg.session
+		// A reopen (reopenBoard, for /profile and /model) can land here
+		// after an EARLIER open failed and left boardErr set — reopenBoard
+		// clears it up front for the placeholder's sake, but ensureBoardSession
+		// reads boardErr as "this tab is broken, don't retry" (its own
+		// guard), so it has to come back clean here too or a successful
+		// respawn would still be treated as a dead tab forever after.
+		m.boardErr = ""
 		return m, nil
 
 	case agentPickerLoadedMsg:
@@ -1679,6 +1709,11 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	if m.tab == TabAgent && m.boardInput.Focused() {
 		var cmd tea.Cmd
 		m.boardInput, cmd = m.boardInput.Update(msg)
+		// A paste changes the line as surely as a keystroke does, so the
+		// completion popup is re-derived from it too — which is also what
+		// closes one over a pasted block that merely happens to start
+		// with "/" (completeSlash refuses anything holding a newline).
+		m.syncBoardCompletion()
 		return cmd
 	}
 	if bv := m.bugIngest; bv != nil && bv.filtering {
@@ -1879,6 +1914,15 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	if key == "tab" {
+		// The board thread's completion popup claims tab while it is
+		// open — that is the whole point of the key there, and this is
+		// the only tier that sees it, since tab is answered here well
+		// above the composer's own handler. The exception is as narrow as
+		// it can be: no popup, no claim, and tab goes back to cycling the
+		// tabs on the very next keystroke.
+		if m.tab == TabAgent && m.boardComplete != nil {
+			return m.handleBoardInputKey(msg)
+		}
 		return m.nextTab()
 	}
 	// An unlocked foreign tab keeps everything gummi did not just claim.

@@ -269,8 +269,13 @@ type Engine struct {
 	// both see "no board yet" and both spawn one. The card path avoids
 	// this by taking the per-card lock before any expensive work
 	// (Attach); a board session has no card and therefore no such lock,
-	// so this stands in for it. Held only by OpenBoard, and never while
-	// e.mu is also held.
+	// so this stands in for it.
+	//
+	// Held by OpenBoard, ReopenBoard and Close — every path that can
+	// create or destroy the board session, which is what makes "is there
+	// a board, and is it going to still be there a moment from now" a
+	// question with one answer. Always taken BEFORE e.mu, never while
+	// e.mu is already held.
 	boardMu sync.Mutex
 
 	// wg tracks the pump and kickoff goroutines so Close can join them
@@ -1660,7 +1665,22 @@ func (e *Engine) stageWorkCommitted(s *Session) bool {
 }
 
 // Close stops every session and closes the event stream.
+//
+// It takes boardMu first, and holds it throughout, because a board spawn
+// deliberately releases e.mu across the slow backend start (boardMu's own
+// comment on why). Without this, Close can flip closed, stop what it can
+// see and reach e.wg.Wait() while a spawn that already got past
+// replaceBoard is still on its way to the e.wg.Add(1) for its pump — an
+// Add racing a Wait, which is a WaitGroup misuse panic rather than merely
+// a goroutine left running. That was latent while a board was opened once
+// at startup and never again; ReopenBoard makes a mid-life spawn something
+// a user triggers by typing, so a quit landing on one is ordinary rather
+// than exotic. Taking it here is safe from deadlock because no goroutine
+// e.wg tracks ever reaches for boardMu — nothing inside this package calls
+// OpenBoard or ReopenBoard.
 func (e *Engine) Close() error {
+	e.boardMu.Lock()
+	defer e.boardMu.Unlock()
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()

@@ -65,6 +65,57 @@ func (m *Shell) ensureBoardSession() tea.Cmd {
 	}
 }
 
+// reopenBoard ends the live board session (if any) and starts a fresh
+// one under opts — the board's /profile and /model commands
+// (boardcomplete.go) reaching for engine.ReopenBoard rather than
+// OpenBoard, whose whole point is the opposite: OpenBoard reuses a live
+// session (its own doc comment), and a picker exists precisely to
+// override that reuse, not race it.
+//
+// eng is read off m.engine before the returned command runs, on the
+// Update goroutine — never inside the closure below — the same
+// discipline chooseAgentCLI (agentpicker.go) keeps its own field read
+// under for the identical reason: once a command is running on its own
+// goroutine, a Shell field it touches can be read by Update on the very
+// next frame, and nothing serializes the two.
+//
+// The four fields reset here are every piece of state a stale board
+// session left behind that a fresh one must not inherit: boardOpening so
+// ensureBoardSession doesn't also fire a second spawn while this one is
+// in flight, boardErr so a prior failure doesn't linger once the retry
+// that just started succeeds (the boardOpenedMsg handler in shell.go
+// clears it again on that success, but this clears it up front so the
+// placeholder reads "starting…" rather than the old error while the
+// respawn is still running), and boardScroll/boardComplete because both
+// describe a conversation and a composer line that are about to stop
+// existing.
+func (m *Shell) reopenBoard(opts engine.BoardOpts) tea.Cmd {
+	eng := m.engine
+	if eng == nil {
+		return nil
+	}
+	if m.boardOpening {
+		// ensureBoardSession refuses to dispatch a second spawn while one
+		// is in flight, and this has to refuse for the same reason: the
+		// engine serializes the two on boardMu, so nothing races, but the
+		// loser spawns a whole backend process only to have it torn down
+		// by the winner a moment later. It is also the window where
+		// m.board is still nil, which is what let a /profile issued here
+		// skip the confirm as "nothing to lose" while an open was already
+		// on its way.
+		m.notice = noticeMsg{text: "the board session is still opening — try again in a moment"}
+		return nil
+	}
+	m.boardOpening = true
+	m.boardErr = ""
+	m.boardScroll = 0
+	m.boardComplete = nil
+	return func() tea.Msg {
+		b, err := eng.ReopenBoard(context.Background(), opts)
+		return boardOpenedMsg{session: b, err: err}
+	}
+}
+
 // boardTabPlaceholder is what the agent tab shows before the board
 // session has opened, or instead of one that failed to — the board
 // thread's counterpart to agenttab.go's agentTabPlaceholder, kept
@@ -247,21 +298,30 @@ func boardEmptyLine(s *theme.Styles) string {
 // vocabulary and action inventory, neither of which the board thread
 // has (handleBoardInputKey's own doc comment on why); this says what a
 // message here can actually do instead.
-const boardPlaceholderText = "message the board — it can read and act on every card"
+const boardPlaceholderText = "message the board — it can read and act on every card, or / for commands"
 
 // boardInputBlock is the board thread's bottom input slot — inputBlock's
 // counterpart, minus everything that does not apply here: no
 // DrivenAbroad (a board session belongs to no other process to withhold
-// it from), no confirm chip, no verb vocabulary. Just the composer,
-// which carries its own styling already (newThreadInput) — unlike
-// inputBlock, this needs no *theme.Styles of its own.
+// it from), no confirm chip, no verb vocabulary. The composer carries
+// its own styling already (newThreadInput); what this adds on top of it
+// is the completion popup.
+//
+// The popup goes ABOVE the line, growing upward into the conversation,
+// because the composer is already the bottom of the pane and a list
+// hung below it would be off-screen. It is part of the foot rather than
+// a layer over the body on purpose: the foot is what composeThread
+// protects on a short terminal, so the rows the user is choosing between
+// can never be the thing that gets scrolled away, and the transcript
+// gives up height for them instead.
 func (m *Shell) boardInputBlock(w int) string {
 	m.boardInput.Placeholder = boardPlaceholderText
 	// SetWidth reruns the widget's own recalculateHeight (DynamicHeight,
 	// newThreadInput), so a resize rewraps the content and reflows the
 	// composer's height along with it, exactly as inputBlock relies on.
 	m.boardInput.SetWidth(max(w-2, 10))
-	return m.boardInput.View()
+	out := m.boardComplete.view(m.styles, w)
+	return strings.Join(append(out, m.boardInput.View()), "\n")
 }
 
 // boardThreadSize is threadSize's board-thread counterpart: the main
@@ -333,6 +393,15 @@ func (m *Shell) boardOutputsBinding() binding {
 // reached by the model deciding to call them, never by gummi parsing the
 // user's words for a verb the way the card thread does.
 func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
+	// The completion popup is answered first, and only for the keys it
+	// actually claims (boardcomplete.go). It sits above this switch
+	// rather than inside it because two of those keys — esc and enter —
+	// already mean something here, and the popup has to be able to take
+	// them back for as long as it is open without either meaning being
+	// rewritten for the case where it is not.
+	if cmd, took := m.handleBoardCompletionKey(msg); took {
+		return cmd
+	}
 	switch msg.String() {
 	case "alt+o":
 		// mid-draft, like the card thread's own toggle — expanding a
@@ -351,15 +420,31 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// itself, before this surface replaced it.
 		return m.interruptBoardSession()
 	case "enter":
-		text := strings.TrimSpace(m.boardInput.Value())
-		if text == "" {
+		text := m.boardInput.Value()
+		if strings.TrimSpace(text) == "" {
 			return nil
 		}
+		// The popup is already closed here (handleBoardCompletionKey above
+		// claims enter for as long as one is open), which is exactly the
+		// hole a completed-but-dismissed command line falls into: "/inbox "
+		// or a tab-completed "/inbox " has no popup left to run it, so
+		// without this check enter would send the literal text as a
+		// sentence instead of opening the inbox. runTypedBoardCommand
+		// answers that by the command word alone — matching prose that
+		// starts with "/" is still routed as a message below, unchanged.
+		if cmd, ok := m.runTypedBoardCommand(text); ok {
+			return cmd
+		}
 		m.boardScroll = 0 // jump to the latest on send, as the card thread does
-		return m.sendBoardMessage(text)
+		return m.sendBoardMessage(strings.TrimSpace(text))
 	}
 	var cmd tea.Cmd
 	m.boardInput, cmd = m.boardInput.Update(msg)
+	// Every key that reaches the widget can have changed the line, so the
+	// popup is re-derived from the new text rather than from the key that
+	// produced it — including the backspace that unwrites the "/" and the
+	// ctrl+u that clears the line, both of which have to close it.
+	m.syncBoardCompletion()
 	return cmd
 }
 
@@ -381,13 +466,18 @@ func (m *Shell) interruptBoardSession() tea.Cmd {
 
 // sendBoardMessage delivers a line typed into the board composer as a
 // turn to the board session — sendThreadMessage's board counterpart,
-// minus the swapped-out-session guard that name carries (its own
-// comment: eng.Get(id) != sess catches a card's session being replaced
-// out from under a stale closure). There is nothing analogous to race
-// here: engine.OpenBoard only ever replaces e.board on a fresh open, and
-// m.board is refreshed by boardOpenedMsg every time that happens, so a
-// captured *BoardSession never goes stale behind this closure the way a
-// captured *Session could.
+// including the swapped-out-session guard that one carries.
+//
+// This file used to argue that guard was unnecessary here, on the
+// grounds that OpenBoard only ever installs a board when there isn't one,
+// so a captured *BoardSession could never go stale behind the closure the
+// way a captured *Session can. ReopenBoard ended that: /profile and
+// /model stop the live session and install a new one, and commands run on
+// their own goroutines, so the window is real. Press enter and confirm a
+// switch close enough together and the closure below would reach a
+// stopped session — the composer already cleared, the turn landing
+// nowhere, and nothing said about it. eng.Board() != b is the same
+// question eng.Get(id) != sess asks for a card, answered the same way.
 func (m *Shell) sendBoardMessage(text string) tea.Cmd {
 	b := m.board
 	if b == nil {
@@ -395,7 +485,13 @@ func (m *Shell) sendBoardMessage(text string) tea.Cmd {
 		return nil
 	}
 	m.boardInput.Reset()
+	// Read on the Update goroutine, not inside the closure — this
+	// package's rule for every command that needs a Shell field.
+	eng := m.engine
 	return func() tea.Msg {
+		if eng != nil && eng.Board() != b {
+			return noticeMsg{text: "the board session was replaced — that line was not sent", isErr: true}
+		}
 		if err := b.Send(context.Background(), text); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

@@ -103,8 +103,24 @@ func (m *Shell) activeSurface() (string, []binding) {
 // unconditionally — a literal question mark typed into a board message
 // must not open the help overlay instead.
 func (m *Shell) agentBindings() []binding {
+	// With the completion popup open the bar describes the popup, because
+	// that is what the next keystroke will act on: enter runs a command
+	// rather than sending a sentence, tab completes a word rather than
+	// leaving the tab, and esc closes the list rather than interrupting
+	// the board. Naming the other set here would be the bar promising a
+	// key the surface is not going to honour — the same rule
+	// threadInputBindings follows for its own confirm chip.
+	if m.boardComplete != nil {
+		return withHelpKey([]binding{
+			{key: "enter", label: "run", help: "run the highlighted command", bar: true},
+			{key: "tab", label: "complete", help: "finish the word without running it", bar: true},
+			{key: "↑↓", label: "move", help: "move through the matching commands", bar: true},
+			{key: "esc", label: "dismiss", help: "close the list and keep the line as typed", bar: true},
+		})
+	}
 	return withHelpKey([]binding{
 		{key: "enter", label: "send", help: "send the line to the board — it can read and act on every card through the same tools a hosted agent reaches", bar: true},
+		{key: "/", label: "commands", help: "on an empty line, open the command list and complete as you type", bar: true},
 		{key: "esc", label: "interrupt", help: "interrupt the board's in-flight turn", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the conversation without leaving the line", bar: true},
 		m.boardOutputsBinding(),

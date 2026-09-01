@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"sort"
+
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 )
@@ -91,3 +93,95 @@ func (e *Engine) agentFor(backend string) agent.Agent {
 // (discovery, ingest, estimate) don't run under a profile role and use
 // the default directly.
 func (e *Engine) defaultAgent() agent.Agent { return e.agentFor("") }
+
+// BoardProfile is one profile entry in the board's inline profile
+// picker: the name a user picks, and the backend/model resolveBoardRole
+// actually resolves it to — not the raw role config, since a profile
+// that never declared a board role at all borrows the architect's (see
+// resolveBoardRole's doc comment), and the picker needs to show what
+// will really run when it's picked, not what the yaml literally says
+// under "board:".
+type BoardProfile struct {
+	Name    string
+	Backend string
+	Model   string
+}
+
+// BoardProfiles lists every declared profile for the board's picker, in
+// config.Profiles.Names order (the declared default first, the rest
+// sorted). It reuses Names rather than re-deriving that ordering here —
+// a duplicate sort is a second place for the new-feature form's ordering
+// rule and the board picker's to quietly disagree the next time one of
+// them changes. Each entry's Backend/Model comes from resolveBoardRole,
+// not the profile map directly, for the reason BoardProfile's own
+// comment gives. An empty Backend coming back from resolveBoardRole is
+// reported empty, not papered over with a placeholder string — wording
+// "use the engine's default" is a UI decision, not this package's to
+// make.
+//
+// Nil-safe: an engine with no profiles.yaml has an empty
+// cfg.Profiles.Profiles; Names() then returns nil and so does this.
+func (e *Engine) BoardProfiles() []BoardProfile {
+	names := e.cfg.Profiles.Names()
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]BoardProfile, 0, len(names))
+	for _, name := range names {
+		rc, backend := e.resolveBoardRole(name)
+		out = append(out, BoardProfile{Name: name, Backend: backend, Model: rc.Model})
+	}
+	return out
+}
+
+// KnownModel is one model value found somewhere in profiles.yaml, plus
+// every "<profile> · <role>" pairing that named it — a memory aid for
+// the board's model picker, not a registry. Uses is what lets the picker
+// explain WHY a value is offered instead of presenting it out of
+// nowhere.
+type KnownModel struct {
+	Model string
+	Uses  []string
+}
+
+// KnownModels harvests every distinct model named anywhere in
+// cfg.Profiles.Profiles, sorted, each paired with its (also sorted)
+// uses — deterministic order twice over, so the picker's list doesn't
+// reshuffle between opens on nothing but Go's map iteration order.
+//
+// There is deliberately no hardcoded model registry behind this. gummi
+// has no fixed notion of which model names are valid for any backend —
+// RoleConfig.Model is an opaque string forwarded verbatim everywhere
+// else in this codebase — and a baked-in list would go stale the week a
+// provider ships something, leaving a picker that offers only names
+// nobody wants. The only models worth surfacing are the ones this
+// workspace has already asked a backend to run.
+//
+// Nil-safe: an engine with no profiles.yaml has an empty
+// cfg.Profiles.Profiles and this returns nil.
+func (e *Engine) KnownModels() []KnownModel {
+	uses := map[string][]string{}
+	for profile, roles := range e.cfg.Profiles.Profiles {
+		for role, rc := range roles {
+			if rc.Model == "" {
+				continue
+			}
+			uses[rc.Model] = append(uses[rc.Model], profile+" · "+role)
+		}
+	}
+	if len(uses) == 0 {
+		return nil
+	}
+	models := make([]string, 0, len(uses))
+	for m := range uses {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	out := make([]KnownModel, 0, len(models))
+	for _, m := range models {
+		u := uses[m]
+		sort.Strings(u)
+		out = append(out, KnownModel{Model: m, Uses: u})
+	}
+	return out
+}

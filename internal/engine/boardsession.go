@@ -30,6 +30,16 @@ const boardPermission = agent.PermissionAllowAll
 // unchanged.
 type BoardOpts struct {
 	Profile string
+	// Model, when set, overrides the model resolveBoardRole resolved for
+	// Profile. This is deliberately a caller-side override rather than a
+	// third argument threaded into resolveBoardRole itself: that function
+	// exists to keep model and backend paired as ONE decision (see its
+	// doc comment), and a picker letting a user swap the model alone,
+	// independent of the profile's backend, is a different decision made
+	// by a different party. Folding it in there would make a pure
+	// profile→role lookup depend on a UI-only knob. Empty means "use the
+	// profile's".
+	Model string
 }
 
 // BoardSession is a workspace-scoped agent conversation: bound to the
@@ -48,6 +58,25 @@ type BoardOpts struct {
 type BoardSession struct {
 	engine *Engine
 	sess   *Session
+	// profile is the profile name this session was spawned under (may be
+	// "", the workspace default). Set once in spawnBoardLocked and never
+	// mutated after — like engine and sess, it is safe to read from any
+	// goroutine without a lock because the struct isn't reachable outside
+	// this package until after that write happened (published through
+	// e.mu in replaceBoard), not because of any lock taken here. The UI
+	// needs it to mark which profile's picker entry is the live one; it
+	// has no other way to ask, since Snapshot's Model comes from the
+	// resolved RoleConfig and can't be walked back to a profile name once
+	// BoardOpts.Model has overridden it.
+	profile string
+}
+
+// Profile returns the profile name this session was opened with. It is
+// read-only and has nothing to synchronize against: the field is written
+// exactly once, before the BoardSession is ever handed to a caller (see
+// spawnBoardLocked), and never again.
+func (b *BoardSession) Profile() string {
+	return b.profile
 }
 
 // OpenBoard starts (or reuses) the engine's board session. Only one
@@ -78,7 +107,76 @@ func (e *Engine) OpenBoard(ctx context.Context, opts BoardOpts) (*BoardSession, 
 	}
 	e.mu.Unlock()
 
+	return e.spawnBoardLocked(ctx, opts)
+}
+
+// Board returns the engine's current board session, or nil when none is
+// open.
+//
+// It exists for one question, asked by one caller: a UI that captured a
+// *BoardSession before dispatching a command needs to know whether that
+// handle is still THE board before it sends a turn down it. ReopenBoard
+// is what made that a live question — /profile and /model replace the
+// session out from under a composer that may already be holding the old
+// one — and the card path has always answered the identical question with
+// Engine.Get (see sendThreadMessage's eng.Get(id) != sess guard). Without
+// an accessor there is simply no way to write that guard for a board.
+func (e *Engine) Board() *BoardSession {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.board
+}
+
+// ReopenBoard closes the live board session (if any) and spawns a fresh
+// one under opts. It exists for the one caller OpenBoard's reuse rule
+// gets in the way of: a UI-driven profile/model switch, which wants
+// exactly a new session under new opts, never the one already running.
+// Unlike OpenBoard it never hands back the prior session.
+//
+// It shares spawnBoardLocked with OpenBoard rather than doing its own
+// Close-then-OpenBoard: that would split "stop the old one" and "install
+// the new one" into two separately-locked steps, reopening the exact
+// check-then-act window boardMu exists to close (see OpenBoard's doc
+// comment above) — a concurrent OpenBoard could see the gap between them
+// and either reuse the just-closed session or spawn a second backend of
+// its own. Held end to end under boardMu, replaceBoard's stop-the-old-one
+// (inside spawnBoardLocked) is the only place the swap happens, so no
+// other caller ever observes an in-between state.
+func (e *Engine) ReopenBoard(ctx context.Context, opts BoardOpts) (*BoardSession, error) {
+	e.boardMu.Lock()
+	defer e.boardMu.Unlock()
+	return e.spawnBoardLocked(ctx, opts)
+}
+
+// spawnBoardLocked does the actual spawn — resolve the role, pick an
+// agent, wire its tools, start the backend session, and install the
+// result as e.board — shared by OpenBoard (after its own "already live"
+// check finds nothing) and ReopenBoard (unconditionally). Splitting it
+// out is what keeps there being exactly one copy of this sequence: two
+// independent copies are two places the next change to it — a new
+// capability switch, a new SessionOpts field — has to be remembered and
+// so, eventually, one that drifts.
+//
+// Callers must already hold e.boardMu; this only takes e.mu itself, and
+// only briefly (the closed check, and inside replaceBoard), the same
+// discipline OpenBoard always followed.
+func (e *Engine) spawnBoardLocked(ctx context.Context, opts BoardOpts) (*BoardSession, error) {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil, errors.New("engine is closed")
+	}
+	e.mu.Unlock()
+
 	rc, backend := e.resolveBoardRole(opts.Profile)
+	// A caller-side override, not resolveBoardRole's business: that
+	// function's whole point is pairing model and backend as ONE decision
+	// resolved from the profile (see its doc comment) — folding a UI-only
+	// override in there would make a pure profile→role lookup depend on
+	// who's asking. Empty leaves the profile's own choice alone.
+	if opts.Model != "" {
+		rc.Model = opts.Model
+	}
 	ag := e.agentFor(backend)
 	if ag == nil {
 		return nil, errors.New("no agent configured for the board role")
@@ -176,7 +274,7 @@ func (e *Engine) OpenBoard(ctx context.Context, opts BoardOpts) (*BoardSession, 
 	// its own attachAgent call.
 	sess.setState(StateInteractive)
 
-	b := &BoardSession{engine: e, sess: sess}
+	b := &BoardSession{engine: e, sess: sess, profile: opts.Profile}
 	if !e.replaceBoard(b) {
 		sess.stop() // engine closed during startup: don't leave the agent live
 		return nil, errors.New("engine is closed")

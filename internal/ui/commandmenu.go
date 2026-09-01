@@ -16,10 +16,16 @@ import (
 // opening the inbox — rather than a card-scoped verb the board already
 // binds to a letter.
 type command struct {
-	id        string // stable identifier the Shell switches on to run it
-	label     string // imperative, user-facing; the interface
-	key       string // accelerator shown right-aligned; "" when there is none
-	available bool   // false renders dimmed and cannot be run — visible but not offered
+	id    string // stable identifier the Shell switches on to run it
+	label string // imperative, user-facing; the interface
+	key   string // accelerator shown right-aligned; "" when there is none
+	// name is the word this command answers to after a "/" in a thread
+	// composer (complete.go). Empty means it has none, and an unnamed
+	// command is simply not part of the slash vocabulary — which is how
+	// the card-scoped entries cardCommands appends stay out of the board
+	// thread's popup without a second list to keep in step.
+	name      string
+	available bool // false renders dimmed and cannot be run — visible but not offered
 }
 
 // commandMenu is the space-key menu: a filter line over a list of

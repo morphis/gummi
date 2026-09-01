@@ -89,16 +89,18 @@ func (m *Shell) syncActionFocus() {
 func (m *Shell) globalCommands() []command {
 	attached := m.attached()
 	cmds := []command{
-		{id: "n", label: "New feature", key: "n", available: attached},
-		{id: "B", label: "New bug", key: "B", available: attached},
-		{id: "R", label: "New research card", key: "R", available: attached},
-		{id: "I", label: "Ingest a spec into features", key: "I", available: attached && m.engine != nil},
-		{id: "G", label: "Import bugs from GitHub", key: "G", available: attached && m.engine != nil},
-		{id: "i", label: "Open the needs-you inbox", key: "i", available: attached},
-		{id: "S", label: "Sort todo by severity", key: "S", available: attached},
-		{id: "agent-cli", label: agentChooseCommandLabel, key: "", available: attached},
-		{id: "?", label: "Show the keys for this surface", key: "?", available: true},
-		{id: "q", label: "Quit gummi", key: "q", available: true},
+		{id: "n", name: "new", label: "New feature", key: "n", available: attached},
+		{id: "B", name: "bug", label: "New bug", key: "B", available: attached},
+		{id: "R", name: "research", label: "New research card", key: "R", available: attached},
+		{id: "I", name: "ingest", label: "Ingest a spec into features", key: "I", available: attached && m.engine != nil},
+		{id: "G", name: "import", label: "Import bugs from GitHub", key: "G", available: attached && m.engine != nil},
+		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
+		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
+		{id: "agent-cli", name: "agent", label: agentChooseCommandLabel, key: "", available: attached},
+		{id: "board-profile", name: "profile", label: "Switch the board's profile", key: "", available: attached && m.engine != nil},
+		{id: "board-model", name: "model", label: "Switch the board's model", key: "", available: attached && m.engine != nil},
+		{id: "?", name: "keys", label: "Show the keys for this surface", key: "?", available: true},
+		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},
 	}
 	if m.cardOpen {
 		cmds = append(cmds, m.cardCommands(cmds)...)
@@ -166,6 +168,8 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 			return m.openAutopilot(r.F)
 		}
 		return nil
+	case "board-profile", "board-model":
+		return m.openBoardValuePicker(id)
 	}
 	return m.boardVerb(id)
 }

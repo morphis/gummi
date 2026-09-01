@@ -229,9 +229,8 @@ func TestBoardEventReachesEngineEventsWithEmptyFeature(t *testing.T) {
 // carries: Get returns nil (a plain "no session", not a panic), and
 // Sessions never lists it, since a board session is deliberately never
 // installed into e.live. Whether every UI surface that keys off
-// Event.Feature also tolerates an empty one is a question for
-// internal/ui, which this task must not touch (a concurrent change owns
-// it) — this is the part of that question that lives in this package.
+// Event.Feature also tolerates an empty one is internal/ui's own
+// question — this is the part of it that lives in this package.
 func TestBoardEventFeatureLookupToleratesEmpty(t *testing.T) {
 	ag := agent.NewFake("hi")
 	e := newEngine(t, ag)
@@ -594,6 +593,123 @@ func TestBoardRoleWithNoProfileNamesNoModel(t *testing.T) {
 	}
 }
 
+// TestBoardOpenAppliesModelOverride: BoardOpts.Model overrides the
+// resolved role's model in the spawn path, applied right after
+// resolveBoardRole returns — resolveBoardRole itself must stay a pure
+// profile→role lookup (see spawnBoardLocked's comment on why), so the
+// override has to be visible on the SessionOpts the adapter actually
+// received, not just on some intermediate value this test can't reach.
+func TestBoardOpenAppliesModelOverride(t *testing.T) {
+	r := &recorder{Fake: agent.NewFake("hi")}
+	e := newEngine(t, r)
+	e.cfg.Profiles = config.Profiles{
+		Default: "p",
+		Profiles: map[string]config.Profile{
+			"p": {"architect": {Model: "profile-model"}},
+		},
+	}
+
+	if _, err := e.OpenBoard(context.Background(), BoardOpts{Model: "override-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.opts().Model; got != "override-model" {
+		t.Errorf("Model = %q, want the override", got)
+	}
+}
+
+// TestBoardOpenEmptyModelLeavesProfileAlone: an empty BoardOpts.Model is
+// "use the profile's", not "use nothing" — the zero value must not
+// stomp a model the profile actually named.
+func TestBoardOpenEmptyModelLeavesProfileAlone(t *testing.T) {
+	r := &recorder{Fake: agent.NewFake("hi")}
+	e := newEngine(t, r)
+	e.cfg.Profiles = config.Profiles{
+		Default: "p",
+		Profiles: map[string]config.Profile{
+			"p": {"architect": {Model: "profile-model"}},
+		},
+	}
+
+	if _, err := e.OpenBoard(context.Background(), BoardOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.opts().Model; got != "profile-model" {
+		t.Errorf("Model = %q, want the profile's own model, unmodified", got)
+	}
+}
+
+// TestBoardSessionProfileRecordsSpawnOpts pins BoardSession.Profile() to
+// the name it was actually opened with, so the UI's picker can mark the
+// live entry.
+func TestBoardSessionProfileRecordsSpawnOpts(t *testing.T) {
+	e := newEngine(t, agent.NewFake("hi"))
+	b, err := e.OpenBoard(context.Background(), BoardOpts{Profile: "premium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Profile(); got != "premium" {
+		t.Errorf("Profile() = %q, want premium", got)
+	}
+}
+
+// TestReopenBoardReplacesLiveSession: ReopenBoard on a live board session
+// returns a different *BoardSession (never the prior one, unlike
+// OpenBoard) and the prior session is stopped — a further Send on it
+// fails rather than quietly reaching an orphaned backend.
+func TestReopenBoardReplacesLiveSession(t *testing.T) {
+	r := &recorder{Fake: agent.NewFake("hi")}
+	e := newEngine(t, r)
+	ctx := context.Background()
+
+	b1, err := e.OpenBoard(ctx, BoardOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := e.ReopenBoard(ctx, BoardOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b2 == b1 {
+		t.Error("ReopenBoard returned the prior session; it must always spawn fresh")
+	}
+	if !b1.sess.finalizedState() {
+		t.Error("the prior board session was not stopped by ReopenBoard")
+	}
+	if err := b1.Send(ctx, "still there?"); err == nil {
+		t.Error("Send on the replaced session succeeded; its backend should be closed")
+	}
+	if n := r.count(); n != 2 {
+		t.Errorf("agent NewSession called %d times, want 2 (one per spawn)", n)
+	}
+	// the new session is the one the engine now hands out.
+	b3, err := e.OpenBoard(ctx, BoardOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b3 != b2 {
+		t.Error("OpenBoard after ReopenBoard did not reuse the fresh session")
+	}
+}
+
+// TestReopenBoardWithNoPriorSessionJustOpens: ReopenBoard on an engine
+// with no board session yet behaves like a plain OpenBoard rather than
+// erroring on "nothing to close".
+func TestReopenBoardWithNoPriorSessionJustOpens(t *testing.T) {
+	r := &recorder{Fake: agent.NewFake("hi")}
+	e := newEngine(t, r)
+
+	b, err := e.ReopenBoard(context.Background(), BoardOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b == nil {
+		t.Fatal("nil board session")
+	}
+	if n := r.count(); n != 1 {
+		t.Errorf("agent NewSession called %d times, want 1", n)
+	}
+}
+
 // TestBoardRolePrefersADeclaredBoardRole: a profile that does declare
 // one wins over the architect fallback, so an operator can point the
 // board tab at a cheaper model than the one that plans cards.
@@ -611,5 +727,37 @@ func TestBoardRolePrefersADeclaredBoardRole(t *testing.T) {
 	rc, backend := e.resolveBoardRole("")
 	if rc.Model != "claude-haiku-4-5-20251001" || backend != "claude" {
 		t.Errorf("got %q/%q, want the declared board role", backend, rc.Model)
+	}
+}
+
+// TestEngineBoardTracksTheLiveSession pins the accessor the UI's
+// stale-handle guard is built on (sendBoardMessage): it must report the
+// session the engine would actually deliver to right now, so a handle
+// captured before a ReopenBoard can be recognised as no longer current.
+// A guard reading anything staler than this would pass exactly when it
+// most needs to fail.
+func TestEngineBoardTracksTheLiveSession(t *testing.T) {
+	e := newEngine(t, agent.NewFake("hi"))
+	ctx := context.Background()
+
+	if got := e.Board(); got != nil {
+		t.Errorf("Board() = %v before any open, want nil", got)
+	}
+	b1, err := e.OpenBoard(ctx, BoardOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Board() != b1 {
+		t.Error("Board() did not report the session OpenBoard installed")
+	}
+	b2, err := e.ReopenBoard(ctx, BoardOpts{Profile: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Board() != b2 {
+		t.Error("Board() still reports the replaced session after a reopen")
+	}
+	if e.Board() == b1 {
+		t.Error("the stale handle is indistinguishable from the live one; the UI guard cannot work")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -26,6 +27,17 @@ import (
 // agentWorkspace builds a shell wired to a real workspace and a
 // Fake-backed engine, with one brainstorm feature created.
 func agentWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
+	t.Helper()
+	return agentWorkspaceProfiles(t, ag, config.Profiles{})
+}
+
+// agentWorkspaceProfiles is agentWorkspace with profiles wired into the
+// engine, for the board's /profile and /model pickers (boardcomplete_test
+// .go): both read engine.Config.Profiles directly (BoardProfiles,
+// KnownModels), so the fixture builds the config.Profiles value in
+// memory rather than writing and loading a profiles.yaml file nothing
+// else in this package's tests needs.
+func agentWorkspaceProfiles(t *testing.T, ag agent.Agent, profiles config.Profiles) (*Shell, *engine.Engine) {
 	t.Helper()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
@@ -62,7 +74,7 @@ func agentWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 		t.Fatal(err)
 	}
 	pool := worktree.WrapSingle(wt)
-	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model"})
+	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model", Profiles: profiles})
 	t.Cleanup(func() { eng.Close() })
 
 	m := NewShell(theme.GummiDark(), "v0-test")
