@@ -124,6 +124,11 @@ func (m *Shell) agentBindings() []binding {
 		{key: "esc", label: "interrupt", help: "interrupt the board's in-flight turn", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the conversation without leaving the line", bar: true},
 		m.boardOutputsBinding(),
+		// Typed, not pressed — the same shape the card thread's own table
+		// gives its verb row ({key: "verb"}): the key column names what
+		// you enter on the line, because the composer takes every
+		// printable key and there is no chord to name instead.
+		{key: boardClearCommand, label: "clear", help: "start a fresh conversation — the transcript, its context and the running spend all go with the old session"},
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 	})

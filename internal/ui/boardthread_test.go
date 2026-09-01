@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -335,5 +336,85 @@ func TestBoardScrollClampMatchesTheRenderedHeight(t *testing.T) {
 	_, h := m.boardThreadSize()
 	if want := main.Dy() - 1; h != want {
 		t.Errorf("boardThreadSize height = %d, want %d — the pane less boardPageBlank's row", h, want)
+	}
+}
+
+// TestBoardClearStartsAFreshSession: "/clear" typed into the board
+// composer is answered by the composer itself — the old session is
+// closed, a new one opens in its place, and the transcript it had
+// accumulated is gone from the tab. The line must not reach the board as
+// a message: a person typing it is asking gummi to start over, not
+// asking the agent to.
+func TestBoardClearStartsAFreshSession(t *testing.T) {
+	ag := agent.NewFake("hello from the board")
+	// a Responder rather than the bare Reply, so the test can say what
+	// the backend was actually asked — "the command was not sent" is the
+	// half of this that the transcript alone cannot show.
+	var mu sync.Mutex
+	var sent []string
+	ag.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		sent = append(sent, msg)
+		mu.Unlock()
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "hello from the board"},
+			{Kind: agent.EventIdle},
+		}
+	}
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+	first := m.board
+
+	m = typeString(t, m, "what's on the board?")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+
+	m = typeString(t, m, boardClearCommand)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.board == nil {
+		t.Fatalf("clear left no session open: boardErr = %q", m.boardErr)
+	}
+	if m.board == first {
+		t.Fatal("clear kept the same session — its context and spend would have survived")
+	}
+	if n := len(m.board.Snapshot().Transcript); n != 0 {
+		t.Fatalf("the fresh session already carries %d transcript entries", n)
+	}
+	if got := m.boardInput.Value(); got != "" {
+		t.Errorf("composer not cleared after the command: %q", got)
+	}
+	view := ansi.Strip(m.View().Content)
+	if strings.Contains(view, "hello from the board") {
+		t.Errorf("the cleared transcript is still on screen:\n%s", view)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 || sent[0] != "what's on the board?" {
+		t.Errorf("the backend was sent %q, want only the one real turn", sent)
+	}
+}
+
+// TestBoardSlashLineWithMoreWordsIsAMessage: only the whole line matches
+// the command. A message can open with a slash — a path, or the very
+// word "clear" aimed at the board's own tools — and swallowing those as
+// a mistyped command would make the composer unusable for exactly the
+// lines a board conversation is for.
+func TestBoardSlashLineWithMoreWordsIsAMessage(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("on it"))
+	m = openBoardTab(t, m)
+	first := m.board
+
+	const line = "/clear the verify backlog"
+	m = typeString(t, m, line)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+
+	if m.board != first {
+		t.Fatal("a message that merely starts with a slash closed the session")
+	}
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, line) {
+		t.Errorf("the line never reached the board as a message:\n%s", view)
 	}
 }

@@ -392,6 +392,16 @@ func (m *Shell) boardOutputsBinding() binding {
 // (workspaceTools, engine/boardsession.go) are how it acts on a card,
 // reached by the model deciding to call them, never by gummi parsing the
 // user's words for a verb the way the card thread does.
+//
+// The one line it answers itself is "/clear", and that is not the verb
+// vocabulary coming back through a side door: a verb acts on a card,
+// while /clear acts on the conversation the composer is standing in —
+// the same category as esc's interrupt above, which this surface
+// already takes for itself. Nothing else beginning with a slash is
+// claimed. A message can honestly open with a path ("/etc/hosts is
+// stale, fix it"), and a board conversation is exactly where such a
+// line gets typed, so an unrecognised slash line is sent rather than
+// refused as a mistyped command.
 func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	// The completion popup is answered first, and only for the keys it
 	// actually claims (boardcomplete.go). It sits above this switch
@@ -423,6 +433,12 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		text := m.boardInput.Value()
 		if strings.TrimSpace(text) == "" {
 			return nil
+		}
+		// /clear is not one of globalCommands, so runTypedBoardCommand
+		// below never claims it — it has to be matched literally, before
+		// the command dispatcher gets a look.
+		if isBoardClear(text) {
+			return m.clearBoardConversation()
 		}
 		// The popup is already closed here (handleBoardCompletionKey above
 		// claims enter for as long as one is open), which is exactly the
@@ -462,6 +478,61 @@ func (m *Shell) interruptBoardSession() tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// boardClearCommand is the whole of the board composer's command
+// vocabulary: one line, typed rather than bound to a key, because it is
+// the line a person arriving from a hosted CLI already has in their
+// fingers — the agent tab used to BE that CLI (agenttab.go), and /clear
+// is what it answered there.
+const boardClearCommand = "/clear"
+
+// isBoardClear reports whether a composed line is that command. The
+// match is against the whole trimmed line, so "/clear the verify
+// backlog" stays an ordinary message aimed at the board's tools rather
+// than being read as a command with an argument it has no use for;
+// EqualFold, because a command typed from muscle memory is not a place
+// to be strict about a shift key.
+func isBoardClear(line string) bool {
+	return strings.EqualFold(strings.TrimSpace(line), boardClearCommand)
+}
+
+// clearBoardConversation drops the board conversation and starts a fresh
+// one: the transcript, the context window it accumulated and the spend
+// it ran up all belong to the session, so the honest way to clear them
+// is to close it and open another — engine.OpenBoard reuses a live
+// session (its own doc comment), and only ever starts a new backend once
+// the old one is gone. It is the same close-and-reopen the agent picker
+// already does when the chosen CLI changes (shell.go, agentChosenMsg),
+// asked for directly instead of as a side effect of picking.
+//
+// A turn in flight is ended by it. That is the point rather than a
+// wrinkle — a person clearing a conversation is saying they are done
+// with what is in it, including whatever it is still saying — and
+// Close's own teardown is what stops the agent, so nothing is left
+// talking to a session the UI has dropped.
+func (m *Shell) clearBoardConversation() tea.Cmd {
+	if m.board == nil && m.boardOpening {
+		// ensureBoardSession's open is still in flight; its result lands
+		// in boardOpenedMsg and would install the very session this just
+		// closed. There is also nothing yet to clear — the tab is still
+		// showing the placeholder.
+		m.notice = noticeMsg{text: "the board session is still opening"}
+		return nil
+	}
+	if m.board != nil {
+		_ = m.board.Close()
+		m.board = nil
+	}
+	// A failed open is cleared along with a live session: ensureBoardSession
+	// refuses to retry past boardErr, so leaving it set here would turn
+	// "start over" into "stay broken" for the one user who most wants a
+	// retry (agentChosenMsg clears it for the same reason).
+	m.boardErr = ""
+	m.boardScroll = 0
+	m.boardInput.Reset()
+	m.notice = noticeMsg{text: "board conversation cleared"}
+	return m.ensureBoardSession()
 }
 
 // sendBoardMessage delivers a line typed into the board composer as a
