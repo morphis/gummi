@@ -44,8 +44,16 @@ drive="$root/scripts/demo-drive.sh"
 env_line="GUMMI_BIN='$bin' DEMO_SPEED='${DEMO_SPEED:-0.85}'"
 [ "$smoke" = 1 ] && { target="$out/smoke.mp4"; env_line="$env_line DEMO_SMOKE=1"; }
 
+# The take is retimed after capture rather than driven faster, because the
+# slowest stretches are the agent working -- real seconds the driver cannot
+# shorten. DEMO_RATE compresses those too. Above ~1.5 the captions stop
+# being readable, so that is the default rather than the ceiling.
+rate="${DEMO_RATE:-1.5}"
+raw="$(mktemp "${TMPDIR:-/tmp}/gummi-raw.XXXXXX.mp4")"
+trap 'rm -f "$tape" "$raw"' EXIT
+
 cat > "$tape" <<TAPE
-Output "$target"
+Output "$raw"
 
 Set Shell bash
 Set FontFamily "DejaVu Sans Mono"
@@ -70,14 +78,22 @@ TAPE
 
 echo "recording → $target"
 ( cd "$root" && vhs "$tape" )
-echo "wrote $target"
+
+if [ "$rate" = "1" ] || [ "$rate" = "1.0" ]; then
+    mv "$raw" "$target"
+else
+    echo "retiming ${rate}x → $target"
+    ffmpeg -y -loglevel error -i "$raw" -vf "setpts=PTS/$rate" -r 30 -an "$target"
+fi
+echo "wrote $target ($(ffprobe -v error -show_entries format=duration \
+    -of default=nw=1:nk=1 "$target" | cut -d. -f1)s)"
 
 # The README wants a short silent loop, not the whole film.
 if [ "$smoke" = 0 ]; then
     gif="$out/demo.gif"
     [ -f "$gif" ] && cp "$gif" "$gif.bak"
     echo "rendering README gif → $gif"
-    ffmpeg -y -loglevel error -t 65 -i "$target" \
+    ffmpeg -y -loglevel error -t 45 -i "$target" \
         -vf "fps=10,scale=1000:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" \
         -loop 0 "$gif"
     echo "wrote $gif ($(du -h "$gif" | cut -f1))"
