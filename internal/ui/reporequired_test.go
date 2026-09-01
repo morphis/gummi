@@ -63,8 +63,9 @@ func TestRepoPickerStartsUnset(t *testing.T) {
 }
 
 // TestRepoPickerSingleRepoNeedsNoChoice: one repository — named or the
-// lone workspace default — is not a choice, so the field stays hidden and
-// the one repo is what the card gets.
+// lone workspace default — is not a choice, so there is no tab stop and
+// the one repo is what the card gets. A configured name is still shown
+// (see TestSingleNamedRepoStillRenders); the anonymous default is not.
 func TestRepoPickerSingleRepoNeedsNoChoice(t *testing.T) {
 	sole := newRepoPicker([]string{"only"}, false)
 	if sole.multi() || sole.needsChoice() {
@@ -157,5 +158,58 @@ func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 	f.desc.SetValue("a card in the only repo there is")
 	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
 		t.Fatalf("single-repo form did not submit: done=%v created=%v err=%q", done, created, f.errText)
+	}
+}
+
+// TestSingleNamedRepoStillRenders: a `repos:` workspace with exactly one
+// entry has nothing to pick, but every creation dialog still prints the
+// repository row. Hiding it left the dialog silent about where the card
+// was about to be created, which reads as "repos: was ignored" rather
+// than "there is only one".
+func TestSingleNamedRepoStillRenders(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	views := map[string]string{
+		"feature":  newFeatureForm(nil, []string{"lxd"}, false, 0, nil).View(s, 80, 24),
+		"bug":      newBugForm(nil, []string{"lxd"}, false, 0, nil).View(s, 80, 24),
+		"research": newRSForm(nil, []string{"lxd"}, false, 0, nil).View(s, 80, 24),
+		"ingest":   newIngestForm(nil, []string{"lxd"}, false, nil).View(s, 80, 24),
+	}
+	for name, view := range views {
+		if !strings.Contains(view, "repo: lxd") {
+			t.Errorf("%s dialog does not name its sole repository:\n%s", name, view)
+		}
+	}
+}
+
+// TestLoneWorkspaceDefaultRendersNoRepoRow: the unconfigured single-repo
+// workspace has no repository name to report — "default" is not one — so
+// the row stays absent and the dialog keeps its space for real fields.
+func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	views := map[string]string{
+		"feature":  newFeatureForm(nil, nil, true, 0, nil).View(s, 80, 24),
+		"bug":      newBugForm(nil, nil, true, 0, nil).View(s, 80, 24),
+		"research": newRSForm(nil, nil, true, 0, nil).View(s, 80, 24),
+		"ingest":   newIngestForm(nil, nil, true, nil).View(s, 80, 24),
+	}
+	for name, view := range views {
+		if strings.Contains(view, "repo: ") {
+			t.Errorf("%s dialog renders a repo row for the anonymous default:\n%s", name, view)
+		}
+	}
+}
+
+// TestSingleNamedRepoIsNotATabStop: the row a single-repo workspace shows
+// is read-only. Tabbing through the dialog must never land on it, because
+// ←/→ there would do nothing.
+func TestSingleNamedRepoIsNotATabStop(t *testing.T) {
+	f := newFeatureForm(nil, []string{"lxd"}, false, 0, nil)
+	seen := map[int]bool{}
+	for i := 0; i < featureFieldCount*2; i++ {
+		f.advanceFocus(1)
+		seen[f.focus] = true
+	}
+	if seen[featureFieldRepo] {
+		t.Error("focus landed on the read-only repo row")
 	}
 }

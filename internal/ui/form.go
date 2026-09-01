@@ -115,13 +115,19 @@ const repoUnchosenErr = "select a repository — a workspace with `repos:` has n
 //     alongside it is a config error), so "default" is not among the
 //     options — offering it would submit a choice that only fails later
 //     at worktree creation (worktree/pool.go ManagerForName).
-//   - the lone workspace default, when no names are configured. It is not
-//     a choice, so the dialogs skip the field entirely.
+//   - the lone workspace default, when no names are configured. There is
+//     no name to report and nothing to choose, so the dialogs skip the
+//     field entirely.
 //
 // hasDefault (worktree.Pool.Known("")) therefore only matters in the
 // second case. With more than one option the picker starts unselected and
 // the dialogs refuse to submit until the user picks one: a card must name
 // its repository outright rather than inherit a silent default.
+//
+// A single configured name is not a choice either, but it is still a
+// name the card is about to be created under, so the dialogs render it
+// (shown) as a read-only row rather than hiding where the work lands.
+// Only multi decides what is interactive: the tab stop and ←/→.
 type repoPicker struct {
 	names      []string
 	hasDefault bool
@@ -148,9 +154,16 @@ func (p *repoPicker) options() []string {
 	return nil
 }
 
-// multi reports whether there's an actual choice to make; dialogs render
-// and tab into the field only then.
+// multi reports whether there's an actual choice to make; dialogs give
+// the field a tab stop and ←/→ only then.
 func (p *repoPicker) multi() bool { return len(p.options()) > 1 }
+
+// shown reports whether the dialogs render the field at all. Any
+// configured `repos:` name qualifies, a lone one included: with one
+// repository configured there is nothing to pick, but the row is the
+// only place the dialog says which repository the card will be created
+// in. The unconfigured workspace default has no name worth a row.
+func (p *repoPicker) shown() bool { return len(p.names) > 0 }
 
 // chosen reports whether a repository has actually been selected. It is
 // false only while a multi-option picker sits at its initial unset state.
@@ -222,7 +235,8 @@ var featureRoutes = []featureRoute{
 }
 
 // feature form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// picker has nothing to choose (see advanceFocus) — the row itself may
+// still render read-only there, see repoPicker.shown; fieldButtons is the
 // last stop, so tab from it wraps back to the first field.
 const (
 	featureFieldRepo = iota
@@ -437,7 +451,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	// envelope+blank(2), profile+route(2), blank+buttons(2), blank+hint(2);
 	// +2 more when the repo field renders (repo+blank).
 	staticRows := 11
-	if d.repo.multi() {
+	if d.repo.shown() {
 		staticRows += 2
 	}
 	descW, descH := dialogDescSize(w, h, staticRows)
@@ -446,7 +460,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new feature") + "\n\n")
-	if d.repo.multi() {
+	if d.repo.shown() {
 		b.WriteString(fieldRow(s, d.focus == featureFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.desc.View() + "\n\n")

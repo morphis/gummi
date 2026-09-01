@@ -13,7 +13,8 @@ import (
 )
 
 // research form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// picker has nothing to choose (see advanceFocus) — the row itself may
+// still render read-only there, see repoPicker.shown; fieldButtons is the
 // last stop, so tab from it wraps back to the first field.
 const (
 	rsFieldRepo = iota
@@ -207,7 +208,7 @@ func (d *rsForm) View(s *theme.Styles, w, h int) string {
 	// envelope+blank(2), profile(1), blank+buttons(2), blank+hint(2); +2
 	// more when the repo field renders (repo+blank).
 	staticRows := 10
-	if d.repo.multi() {
+	if d.repo.shown() {
 		staticRows += 2
 	}
 	briefW, briefH := dialogDescSize(w, h, staticRows)
@@ -216,7 +217,7 @@ func (d *rsForm) View(s *theme.Styles, w, h int) string {
 
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new research") + "\n\n")
-	if d.repo.multi() {
+	if d.repo.shown() {
 		b.WriteString(fieldRow(s, d.focus == rsFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.brief.View() + "\n\n")

@@ -490,8 +490,9 @@ permissions: allow-all
 # repo: git/lxd
 #
 # repos: — several selectable repositories instead of one, each a path
-# relative to the workspace root. A workspace with repos: has NO default
-# repository: every card names one of these, and the workspace root itself
+# relative to the workspace root. A single entry is allowed: the creation
+# dialogs then name it rather than asking. A workspace with repos: has NO
+# default repository: every card names one of these, and the workspace root
 # is never managed (in this layout it is just the parent of the checkouts).
 # The creation dialogs make you pick before they will create a card, the
 # board's o key retargets a card that has no worktree yet, and

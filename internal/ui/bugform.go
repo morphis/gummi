@@ -32,7 +32,8 @@ var bugRoutes = []bugRoute{
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
 // bug form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// picker has nothing to choose (see advanceFocus) — the row itself may
+// still render read-only there, see repoPicker.shown; fieldButtons is the
 // last stop, so tab from it wraps back to the first field.
 const (
 	bugFieldRepo = iota
@@ -251,7 +252,7 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	// envelope+blank(2), profile+severity+route(3), blank+buttons(2),
 	// blank+hint(2); +2 more when the repo field renders (repo+blank).
 	staticRows := 12
-	if d.repo.multi() {
+	if d.repo.shown() {
 		staticRows += 2
 	}
 	descW, descH := dialogDescSize(w, h, staticRows)
@@ -260,7 +261,7 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("new bug") + "\n\n")
-	if d.repo.multi() {
+	if d.repo.shown() {
 		b.WriteString(fieldRow(s, d.focus == bugFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.desc.View() + "\n\n")

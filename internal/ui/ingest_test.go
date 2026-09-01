@@ -334,11 +334,17 @@ func TestIngestFormRepo(t *testing.T) {
 		}
 	})
 
-	t.Run("one configured repo is not a choice", func(t *testing.T) {
+	t.Run("one configured repo is shown but is not a choice", func(t *testing.T) {
 		f := newIngestForm(nil, []string{"b"}, false, func(string, string, string) tea.Cmd { return nil })
 		s := theme.New(theme.GummiDark())
-		if view := f.View(s, 60, 12); strings.Contains(view, "repo:") {
-			t.Errorf("repo field should be hidden with a single repo:\n%s", view)
+		// the row still reports where the spec lands — it just cannot be
+		// tabbed to, since there is nothing else to cycle to
+		if view := f.View(s, 60, 12); !strings.Contains(view, "repo: b") {
+			t.Errorf("sole configured repo should still be named:\n%s", view)
+		}
+		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+		if f.focus == ingestFieldRepo {
+			t.Error("focus should skip the read-only repo row")
 		}
 		if got := f.repo.name(); got != "b" {
 			t.Errorf("sole repo name = %q, want b", got)

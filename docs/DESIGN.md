@@ -1188,7 +1188,11 @@ Decided in the design interview (2026-07-03):
       refuse to create a card until you pick (no pre-selected repo, no
       "default" option), `run`/`bugs new`/`ingest` take `--repo <name>`
       and reject an omitted one before minting an id, and the board's `o`
-      key retargets a card that has not cut a worktree yet.
+      key retargets a card that has not cut a worktree yet. A `repos:`
+      map with a *single* entry is not a choice, so the dialogs select
+      it and skip the tab stop — but they still render the row, because
+      naming the repository is the only way the dialog says where the
+      card lands. Silence there reads as `repos:` having been ignored.
 
     `worktree.Pool` caches one `Manager` per repo root and resolves a card
     through `ManagerFor`; worktrees still live under the *workspace* root,

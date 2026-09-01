@@ -77,7 +77,8 @@ func (d *textPromptDialog) View(s *theme.Styles, w, h int) string {
 }
 
 // ingest form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus); fieldButtons is the
+// picker has nothing to choose (see advanceFocus) — the row itself may
+// still render read-only there, see repoPicker.shown; fieldButtons is the
 // last stop, so tab from it wraps back to the first field.
 const (
 	ingestFieldRepo = iota
@@ -230,7 +231,7 @@ func (d *ingestForm) setFocus(f int) {
 func (d *ingestForm) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("ingest spec") + "\n\n")
-	if d.repo.multi() {
+	if d.repo.shown() {
 		b.WriteString(fieldRow(s, d.focus == ingestFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.path.View() + "\n\n")
