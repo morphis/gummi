@@ -4,7 +4,14 @@
 > spec-driven workflow across git worktrees — from one TUI, or headlessly
 > from your own agents and CI.
 
-![the gummi board: features at different stages, a spec, a diff, and a new feature advancing](docs/assets/demo.gif)
+![the gummi board: cards at four stages, a new feature created from one form, and the architect interviewing you about it](docs/assets/demo.gif)
+
+That clip opens a longer captioned walkthrough — one feature carried from
+an empty form to a verified branch against a clone of
+[canonical/lxd](https://github.com/canonical/lxd), with the key being
+pressed labelled as it happens. `make record-demo` records the whole
+thing to `docs/assets/lxd-demo.mp4` (kept out of git) and refreshes this
+gif from it.
 
 **The bottleneck in agentic coding isn't the agents anymore. It's you.**
 

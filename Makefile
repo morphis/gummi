@@ -1,7 +1,7 @@
 GOBIN := $(shell go env GOPATH)/bin
 export PATH := $(PATH):$(GOBIN)
 
-.PHONY: build test lint golden-update vet ci clean demo e2e
+.PHONY: build test lint golden-update vet ci clean demo e2e record-demo
 
 build:
 	go build -o bin/gummi ./cmd/gummi
@@ -32,6 +32,12 @@ demo: build
 # Drive the real TUI end-to-end in a tmux PTY (needs tmux).
 e2e: build
 	./scripts/e2e.sh
+
+# Record the narrated demo against a clone of canonical/lxd.
+# Needs tmux, vhs, ttyd and ffmpeg; writes docs/assets/lxd-demo.mp4
+# and refreshes docs/assets/demo.gif.
+record-demo: build
+	./scripts/record-lxd-demo.sh
 
 clean:
 	rm -rf bin

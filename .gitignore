@@ -24,3 +24,8 @@
 
 # snapcraft results
 /results/
+
+# the recorded walkthrough: too big for history, and `make record-demo`
+# rebuilds it (and the README gif, which IS tracked) from scratch
+/docs/assets/*.mp4
+/docs/assets/*.bak
