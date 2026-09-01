@@ -29,6 +29,18 @@ type ForeignDrive struct {
 	Updated time.Time
 }
 
+// stopGrace is how long a file's terminal record still counts as "mid
+// advance" rather than "done". A stage advance stops the old session —
+// writing that terminal record — and only afterward creates the
+// successor's file (Engine.startAutonomous's replace path: old.stop()
+// then bindLiveLog), so the file reads Stopped for that gap even though
+// the owning process is about to keep driving the card. Past this
+// window, a still-alive pid on a stopped file just means that pid is
+// doing something else now (or was recycled) — Updated stops advancing
+// the moment nothing more replaces the file, so recency is what tells
+// the two cases apart.
+const stopGrace = 5 * time.Second
+
 // ForeignDriver reports the live session another process is running on
 // card id, if there is one. It is a cheap read of the card's live-file
 // header plus a kill -0 on the pid it names, so a board can call it per
@@ -36,16 +48,19 @@ type ForeignDrive struct {
 //
 // It reports nothing for three cases that all mean "not being driven from
 // outside": no live file, a session this very process owns (a board
-// driving its own card), and a file whose session already ended or whose
-// owner has exited. A stale file left by a crash therefore reads as
-// not-driven the moment anyone checks — the same "the next read reads it
-// as dead" property the pid files rely on.
+// driving its own card), and a file whose owner has exited or whose
+// session ended more than stopGrace ago. A stale file left by a crash
+// therefore reads as not-driven soon after anyone checks — the same "the
+// next read reads it as dead" property the pid files rely on.
 func ForeignDriver(ws Workspace, id domain.FeatureID) (ForeignDrive, bool) {
 	st, err := livelog.Stat(ws.LiveFile(id))
-	if err != nil || st.Stopped {
+	if err != nil {
 		return ForeignDrive{}, false
 	}
 	if st.PID == 0 || st.PID == os.Getpid() || !ProcessAlive(st.PID) {
+		return ForeignDrive{}, false
+	}
+	if st.Stopped && time.Since(st.Updated) > stopGrace {
 		return ForeignDrive{}, false
 	}
 	return ForeignDrive{
