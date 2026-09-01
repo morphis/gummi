@@ -1751,7 +1751,7 @@ func (e *Engine) pump(s *Session) {
 				// pauses or advances it.
 				s.releaseCard()
 				if s.State() == StateRunning {
-					e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: errSessionDied})
+					e.failRun(s, errSessionDied)
 				}
 				e.emitStopped(s)
 				return

@@ -1045,6 +1045,7 @@ func (s *Session) stop() {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		s.finalized = true
+		s.busy = false
 		teardown := s.mcpTeardown
 		s.mcpTeardown = nil
 		s.mu.Unlock()
