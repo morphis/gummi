@@ -18,6 +18,32 @@ func planFeature() domain.Feature {
 	return domain.Feature{ID: "FD-001", Stage: domain.StagePlan}
 }
 
+// TestCardBusyBaselineWithNoSession covers the two busy sources cardBusy
+// can decide with no live engine at all: a running baseline (the board's
+// only signal for it — engine.go has no session for a baseline pass) and
+// the idle case. The StateRunning/StateInteractive session cases need a
+// real engine.Session (Busy() is unexported), so they're covered as
+// integration tests in run_test.go instead.
+func TestCardBusyBaselineWithNoSession(t *testing.T) {
+	m := loopShell()
+	r := featureRow{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}
+
+	if m.cardBusy(r) {
+		t.Error("cardBusy true with no session and no baseline running")
+	}
+	if word := m.cardBusyWord(r); word != "" {
+		t.Errorf("cardBusyWord = %q, want empty when not busy", word)
+	}
+
+	m.baselining[r.F.ID] = true
+	if !m.cardBusy(r) {
+		t.Error("cardBusy false while the baseline is running")
+	}
+	if word := m.cardBusyWord(r); word != "checking" {
+		t.Errorf("cardBusyWord = %q, want \"checking\" for a running baseline", word)
+	}
+}
+
 func TestPlanLoopLegQuietWithoutActivity(t *testing.T) {
 	m := loopShell()
 	if _, _, ok := m.planLoopLeg("FD-001"); ok {

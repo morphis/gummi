@@ -252,3 +252,158 @@ func TestThreadActivityGolden(t *testing.T) {
 	m = drainEngineLoop(t, m)
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
+
+// waitForBusy polls until FD-001's session reports Busy — used for a
+// session with no tool-call activity to wait on (an interactive chat
+// turn that only ever emits a message).
+func waitForBusy(t *testing.T, eng *engine.Engine) {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for {
+		if s := eng.Get("FD-001"); s != nil && s.Snapshot().Busy {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("session never went busy")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// TestCardBusyStateRunning is FD-029's StateRunning half: a card whose
+// autonomous run is mid-turn shows the busy marker without losing its
+// stage glyph. This half already worked under the old inline switch —
+// the point here is pinning the new cardBusy/cardLine contract so a
+// future change can't silently regress the case that used to work while
+// fixing the ones that didn't.
+func TestCardBusyStateRunning(t *testing.T) {
+	// no trailing idle event on the architect's turn: the session stays
+	// busy/running so the test can inspect it mid-turn (mirrors
+	// TestParkVerbPausesRatherThanOpeningDeps). Scribe/discovery calls
+	// made while advancing to Implement must still settle normally.
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
+			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+		}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = openAndAttach(t, m)
+	waitForActivity(t, eng)
+
+	r := m.rows[0]
+	if r.F.ID != "FD-001" || r.F.Stage != domain.StageImplement {
+		t.Fatalf("setup: rows[0] = %+v, want FD-001 at implement", r.F)
+	}
+	if s := m.sessionFor(r.F.ID); s == nil || s.State() != engine.StateRunning || !s.Busy() {
+		t.Fatalf("setup: want a busy StateRunning session, got %+v", s)
+	}
+	if !m.cardBusy(r) {
+		t.Fatal("cardBusy false for a StateRunning session mid-turn")
+	}
+	if word := m.cardBusyWord(r); word != "running" {
+		t.Errorf("cardBusyWord = %q, want \"running\"", word)
+	}
+	line := m.cardLine(r, 1, false, true, 100)
+	if !strings.Contains(line, stageGlyph(r.F.Stage)) {
+		t.Errorf("busy card line dropped the stage glyph: %q", line)
+	}
+	if strings.Contains(line, "◔") {
+		t.Errorf("busy running card must not also show the queued marker: %q", line)
+	}
+	if !strings.Contains(line, "running") {
+		t.Errorf("busy card line missing the running word: %q", line)
+	}
+}
+
+// TestCardBusyStateInteractive is FD-029's core repro for the chat-session
+// half: a StateInteractive session mid-reply never satisfied the old
+// inline switch (it only matched StateRunning), so a busy chat card sat
+// dead on the board while its own thread view spun for it.
+func TestCardBusyStateInteractive(t *testing.T) {
+	// no trailing idle event: the architect stays busy mid-reply.
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventMessage, Text: "thinking out loud"}}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = openAndAttach(t, m)
+	waitForBusy(t, eng)
+
+	r := m.rows[0]
+	s := m.sessionFor(r.F.ID)
+	if r.F.ID != "FD-001" || s == nil || s.State() != engine.StateInteractive || !s.Busy() {
+		t.Fatalf("setup: want a busy StateInteractive session, got row=%+v sess=%+v", r.F, s)
+	}
+	if !m.cardBusy(r) {
+		t.Fatal("cardBusy false for a StateInteractive session mid-reply — this is the bug FD-029 fixes")
+	}
+	if word := m.cardBusyWord(r); word != "running" {
+		t.Errorf("cardBusyWord = %q, want \"running\"", word)
+	}
+	line := m.cardLine(r, 1, false, true, 100)
+	if !strings.Contains(line, stageGlyph(r.F.Stage)) {
+		t.Errorf("busy interactive card line dropped the stage glyph: %q", line)
+	}
+	if strings.Contains(line, "◔") {
+		t.Errorf("busy interactive card must not show the queued marker: %q", line)
+	}
+	if !strings.Contains(line, "running") {
+		t.Errorf("busy interactive card line missing the running word: %q", line)
+	}
+
+	// a running baseline on the same card takes priority over the live
+	// session's own word — it's the more specific foreground action.
+	m.baselining[r.F.ID] = true
+	if word := m.cardBusyWord(r); word != "checking" {
+		t.Errorf("cardBusyWord = %q, want baseline priority \"checking\" over a busy session", word)
+	}
+}
+
+// TestCardBusyPlanCritique is FD-029's plan-critique busy case: a card
+// whose fresh-context reviewer is mid-critique shows the busy marker
+// with the same "critiquing plan" word thread.go's own spinner uses
+// for the same session (runningLabel), not the generic "running".
+func TestCardBusyPlanCritique(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if isReview(opts) {
+			// no idle event: the critique session stays busy mid-turn
+			return []agent.Event{{Kind: agent.EventMessage, Text: "reviewing the plan"}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "plan written"}, {Kind: agent.EventIdle}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StagePlan)
+	m = openAndAttach(t, m) // run the architect's write leg
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m) // auto-launches the critique session
+	waitForBusy(t, eng)
+
+	r := m.rows[0]
+	s := m.sessionFor(r.F.ID)
+	if r.F.ID != "FD-001" || s == nil || !s.Busy() || !s.Critique {
+		t.Fatalf("setup: want a busy critique session, got row=%+v sess=%+v", r.F, s)
+	}
+	if !m.cardBusy(r) {
+		t.Fatal("cardBusy false for a busy plan-critique session")
+	}
+	if word := m.cardBusyWord(r); word != "critiquing plan" {
+		t.Errorf("cardBusyWord = %q, want \"critiquing plan\"", word)
+	}
+	line := m.cardLine(r, 1, false, true, 100)
+	if !strings.Contains(line, stageGlyph(r.F.Stage)) {
+		t.Errorf("busy critique card line dropped the stage glyph: %q", line)
+	}
+	if strings.Contains(line, "◔") {
+		t.Errorf("busy critique card must not show the queued marker: %q", line)
+	}
+	if !strings.Contains(line, "critiquing plan") {
+		t.Errorf("busy critique card line missing the critiquing-plan word: %q", line)
+	}
+}

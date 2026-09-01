@@ -26,6 +26,25 @@ func stageGlyph(s domain.Stage) string {
 	return "?"
 }
 
+// cardBusy reports whether a card has a real busy source: its
+// gummi-checks baseline is running, or its live engine session is
+// mid-turn. Busy() alone decides the session side, regardless of
+// scheduling state — a StateInteractive chat session mid-reply is just
+// as busy as a StateRunning autonomous one, matching thread.go's own
+// gate (snap.Busy, no state filter) so a card's board row and its own
+// thread view never disagree about whether it's working.
+//
+// It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining)
+// — no other mutable state feeds it — so it renders identically whenever
+// called twice within one frame.
+func (m *Shell) cardBusy(r featureRow) bool {
+	if m.baselining[r.F.ID] {
+		return true
+	}
+	sess := m.sessionFor(r.F.ID)
+	return sess != nil && sess.Busy()
+}
+
 // boardView renders the kanban column: features grouped by super-state
 // with stage-colored glyphs, IDs, titles, and profile tags.
 //
@@ -83,21 +102,16 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		faint = s.BandTextDim
 	}
 	glyph := s.Stage(r.F.Stage).Render(stageGlyph(r.F.Stage))
-	// a live agent session marks the card by scheduling state; a plan-loop
-	// session also names its leg (the stage alone can't distinguish them)
+	// the stage glyph is never overwritten — busy or not, it stays the
+	// card's shape-plus-colour stage marker (board.go's own promise). A
+	// queued session gets its own distinct marker instead; a busy card
+	// gets a trailing spinner+word in the loop slot, checked after (so a
+	// session that is somehow both queued and busy still reads queued).
 	loop := ""
-	if sess := m.sessionFor(r.F.ID); sess != nil {
-		switch sess.State() {
-		case engine.StateRunning:
-			if sess.Busy() {
-				glyph = s.Info.Render(m.spinner())
-			}
-			if word := m.planLoopWord(sess); word != "" {
-				loop = " " + faint.Render(word)
-			}
-		case engine.StateQueued:
-			glyph = s.Warning.Render("◔")
-		}
+	if sess := m.sessionFor(r.F.ID); sess != nil && sess.State() == engine.StateQueued {
+		glyph = s.Warning.Render("◔")
+	} else if m.cardBusy(r) {
+		loop = " " + s.Info.Render(m.spinner()) + " " + faint.Render(m.cardBusyWord(r))
 	}
 	// the marker sits flush against the shortcut number, so it can't use
 	// BandMarker's padded form — same two styles, one column.

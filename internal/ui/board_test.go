@@ -183,6 +183,34 @@ func TestCardLineGateMarker(t *testing.T) {
 	}
 }
 
+// TestCardLineBaselineBusyWithNoSession is FD-029's other core repro: a
+// card running its gummi-checks baseline has no engine session at all —
+// m.baselining is the only signal — but the board row must still spin
+// with a "checking" word, and the stage glyph must survive rather than
+// being overwritten by the spinner.
+func TestCardLineBaselineBusyWithNoSession(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	idle := row(1, "idle card", domain.StageSpec, "", false)
+	baselining := row(2, "checking card", domain.StageSpec, "", false)
+	m.baselining[baselining.F.ID] = true
+
+	idleLine := m.cardLine(idle, 1, false, true, 80)
+	if strings.Contains(idleLine, "checking") {
+		t.Errorf("idle card line should not show a busy word: %q", idleLine)
+	}
+
+	line := m.cardLine(baselining, 2, false, true, 80)
+	if !strings.Contains(line, stageGlyph(baselining.F.Stage)) {
+		t.Errorf("baselining card line dropped the stage glyph: %q", line)
+	}
+	if strings.Contains(line, "◔") {
+		t.Errorf("baselining card must not show the queued marker: %q", line)
+	}
+	if !strings.Contains(line, "checking") {
+		t.Errorf("baselining card line missing the checking word: %q", line)
+	}
+}
+
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
 	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
@@ -313,6 +341,26 @@ func TestBoardCardLineSeverity(t *testing.T) {
 		r := bugRow(1, c.name, c.sev)
 		b.WriteString(m.cardLine(r, 1, false, true, 80) + "\n\n")
 	}
+	golden.RequireEqual(t, []byte(b.String()))
+}
+
+// TestBoardBusyMarkersGolden golden-captures cardLine's busy rendering:
+// the stage glyph is kept (never swapped for the spinner) and the busy
+// word trails it in the loop slot. A live engine session is exercised as
+// a plain assertion test (run_test.go's TestCardBusyStateRunning /
+// TestCardBusyStateInteractive) rather than here — an in-flight fake
+// agent turn is inherently async and would make a byte-diffed golden
+// flaky. This golden instead pins the deterministic busy source
+// (m.baselining) and the two non-busy cases (idle, queued) side by side.
+func TestBoardBusyMarkersGolden(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	idle := row(1, "idle card", domain.StageSpec, "", false)
+	checking := row(2, "checking card", domain.StageSpec, "", false)
+	m.baselining[checking.F.ID] = true
+
+	var b strings.Builder
+	b.WriteString("idle\n" + m.cardLine(idle, 1, false, true, 80) + "\n\n")
+	b.WriteString("checking (baseline, no session)\n" + m.cardLine(checking, 2, false, true, 80) + "\n\n")
 	golden.RequireEqual(t, []byte(b.String()))
 }
 

@@ -86,20 +86,21 @@ func (m *Shell) planLoopLine(f domain.Feature) string {
 	return line
 }
 
-// planLoopWord is the board-card hint while a plan-loop session runs:
-// the stage glyph can't distinguish the legs, so the card says which.
-func (m *Shell) planLoopWord(sess *engine.Session) string {
-	if sess.Feature.Stage != domain.StagePlan || sess.Interactive {
-		return ""
+// cardBusyWord names the work behind a busy board row's spinner, only
+// meaningful when cardBusy(r) is true. A running baseline takes
+// priority over a live session — it's a foreground blocking action on
+// the card, more specific than a generic running session — and
+// otherwise it reuses runningLabel, the exact word thread.go's own
+// spinner shows for the same session, so a card's board-row word and
+// its thread-detail word can never disagree.
+func (m *Shell) cardBusyWord(r featureRow) string {
+	if m.baselining[r.F.ID] {
+		return "checking"
 	}
-	switch {
-	case sess.Critique:
-		return "critiquing"
-	case m.round(sess.Feature.ID, domain.RoundKindPlan) > 0:
-		return "replanning"
-	default:
-		return "planning"
+	if sess := m.sessionFor(r.F.ID); sess != nil {
+		return m.runningLabel(sess.Snapshot())
 	}
+	return ""
 }
 
 // runningLabel names what a busy session is doing next to the activity
