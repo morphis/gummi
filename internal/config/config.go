@@ -478,14 +478,25 @@ permissions: allow-all
 # when set.
 # agent: claude
 
-# repo: <path> — the git repository root gummi manages. Omit when .gummi
-# and .git share the same directory (the default); name a nested repo
-# relative to the workspace root (e.g. git/lxd). Must be the workspace
-# root or a subdirectory of it.
+# Which git repository (or repositories) gummi manages. Set AT MOST ONE of
+# repo: and repos: — setting both is a config error, because each defines
+# the managed set and composing them would leave the default ambiguous.
 #
+# repo: <path> — the single repository gummi manages, when .gummi does not
+# sit at its root. A path relative to the workspace root (e.g. git/lxd),
+# which must be the workspace root or a subdirectory of it. Omit it when
+# .gummi and .git share a directory — that is the default, and a
+# single-repo workspace needs no repo config at all.
+# repo: git/lxd
+#
+# repos: — several selectable repositories instead of one, each a path
+# relative to the workspace root. A workspace with repos: has NO default
+# repository: every card names one of these, and the workspace root itself
+# is never managed (in this layout it is just the parent of the checkouts).
+# The creation dialogs make you pick before they will create a card, the
+# board's o key retargets a card that has no worktree yet, and
+# run/bugs new/ingest take --repo <name>.
 # repos:
-#   lxd:   git/lxd   — additional selectable managed repositories, each a
-#   incus: git/incus   path relative to the workspace root. Cards may name
-#                      any of these; omitting the name selects the default
-#                      repo above.
+#   lxd: git/lxd
+#   incus: git/incus
 `

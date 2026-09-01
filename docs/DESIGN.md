@@ -1172,8 +1172,29 @@ Decided in the design interview (2026-07-03):
 9. **Attention slots are uncapped by default** — as many concurrent
    autonomous sessions as you start. A cap is configurable for anyone who
    wants one.
-10. **One repo per gummi instance, permanently** — multi-repo is out of
-    scope by design, not deferred.
+10. **One repo per gummi instance** — *reversed 2026-08-19* (FD-070..073).
+    One workspace can now manage several repositories, and the repository
+    is a per-card choice. `.gummi/config.yaml` takes **at most one** of two
+    keys, never both (setting both is a config error, since each defines
+    the managed set):
+    - `repo: <path>` — the single managed repository, when `.gummi` does
+      not sit at its root. It may be the workspace root or any
+      subdirectory of it, so `.gummi` at `/project` can drive
+      `/project/git/lxd`. Omitting it entirely — the ordinary case — makes
+      the workspace root itself the sole repository.
+    - `repos: {name: path}` — several selectable repositories. Such a
+      workspace has **no default repository at all**: the root is a mere
+      parent of checkouts, so every card names one. The creation dialogs
+      refuse to create a card until you pick (no pre-selected repo, no
+      "default" option), `run`/`bugs new`/`ingest` take `--repo <name>`
+      and reject an omitted one before minting an id, and the board's `o`
+      key retargets a card that has not cut a worktree yet.
+
+    `worktree.Pool` caches one `Manager` per repo root and resolves a card
+    through `ManagerFor`; worktrees still live under the *workspace* root,
+    so a multi-repo board keeps one `.gummi`. Dependency edges cross repos
+    freely — `feature_deps` references `features(id)` with no repo
+    awareness.
 11. **Spec drafts** live in `.gummi/state/drafts/` during Brainstorm/Spec
     (no worktree exists yet); at spec approval the worktree + branch are
     created and the spec is promoted to `.gummi/specs/FD-NNN-slug.md` in
