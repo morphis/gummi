@@ -191,6 +191,16 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if r.DrivenAbroad {
 		badge += " " + s.Info.Render("◉ elsewhere")
 	}
+	// autopilot currently has this card between stages — an open period on
+	// the same event log the card thread draws, never the cursor glyph
+	// (reserved as the focus marker) and never the Info tier (already
+	// carrying the spinner, the elsewhere badge, the gates badge and the PR
+	// badge on this line). It sits next to the elsewhere badge because the
+	// two are closest in meaning: both say a machine, not the person
+	// reading, currently has the card.
+	if r.AutopilotDriving {
+		badge += " " + s.Subtle.Render("◐ autopilot")
+	}
 	// an explicit "gates" gate-approval mode crosses this card's design
 	// gates unattended, worth flagging at a glance. Only the explicit
 	// value badges: empty reads as domain.GateGates too everywhere else in

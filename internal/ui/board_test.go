@@ -39,7 +39,9 @@ func populatedShell(w, h int) *Shell {
 		row(49, "auth fix", domain.StageSpec, "thrifty", false),
 		row(44, "search", domain.StageReview, "local-heavy", true),
 		row(39, "onboarding", domain.StageDone, "premium", false),
+		row(46, "billing sync", domain.StageFix, "thrifty", false),
 	}
+	m.rows[6].AutopilotDriving = true
 	m.rows[1].History = []state.TransitionRecord{
 		{FeatureID: "FD-042", From: domain.StageTodo, To: domain.StageBrainstorm, Actor: "user", At: fixedTime},
 		{FeatureID: "FD-042", From: domain.StageBrainstorm, To: domain.StageSpec, Actor: "user", At: fixedTime},
@@ -63,14 +65,14 @@ func TestBoardView120(t *testing.T) {
 func TestBoardGroupsAndOrder(t *testing.T) {
 	m := populatedShell(120, 34)
 	order := m.displayOrder(m.sortMode)
-	// grouped: todo(51), in-progress(42,47,49), review(44), done(39)
-	want := []int{0, 1, 2, 3, 4, 5}
+	// grouped: todo(51), in-progress(42,47,49,46), review(44), done(39)
+	want := []int{0, 1, 2, 3, 6, 4, 5}
 	if len(order) != len(want) {
 		t.Fatalf("order len = %d", len(order))
 	}
 	stages := []domain.SuperState{
 		domain.SuperTodo, domain.SuperInProgress, domain.SuperInProgress,
-		domain.SuperInProgress, domain.SuperReviewVerify, domain.SuperDone,
+		domain.SuperInProgress, domain.SuperInProgress, domain.SuperReviewVerify, domain.SuperDone,
 	}
 	for i, idx := range order {
 		if got := m.rows[idx].F.Stage.SuperState(); got != stages[i] {
@@ -356,6 +358,36 @@ func TestCardLineForeignRows(t *testing.T) {
 
 	m.frame = 3 // pin the spinner frame so the golden below is deterministic
 	golden.RequireEqual(t, []byte(m.cardLine(busy, 1, false, true, 80)+"\n"+m.cardLine(idle, 2, false, true, 80)))
+}
+
+// TestCardLineAutopilotBadge: a card with AutopilotDriving true wears the
+// "◐ autopilot" badge, a card with it false does not, and on a card that
+// is both foreign-driven and autopilot-driving the elsewhere badge comes
+// first — the two read closest in meaning and sit next to each other by
+// construction, not by accident of append order.
+func TestCardLineAutopilotBadge(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	driving := row(1, "driven card", domain.StageImplement, "", false)
+	driving.AutopilotDriving = true
+	idle := row(2, "idle card", domain.StageImplement, "", false)
+	idle.AutopilotDriving = false
+
+	if !strings.Contains(m.cardLine(driving, 1, false, true, 80), "◐ autopilot") {
+		t.Error("AutopilotDriving=true should show the ◐ autopilot badge")
+	}
+	if strings.Contains(m.cardLine(idle, 2, false, true, 80), "◐ autopilot") {
+		t.Error("AutopilotDriving=false must not show the ◐ autopilot badge")
+	}
+
+	both := row(3, "both card", domain.StageImplement, "", false)
+	both.DrivenAbroad = true
+	both.AutopilotDriving = true
+	line := m.cardLine(both, 3, false, true, 100)
+	elsewhereAt := strings.Index(line, "◉ elsewhere")
+	autopilotAt := strings.Index(line, "◐ autopilot")
+	if elsewhereAt < 0 || autopilotAt < 0 || elsewhereAt > autopilotAt {
+		t.Errorf("card line = %q, want elsewhere badge before autopilot badge", line)
+	}
 }
 
 func TestFormOverlay(t *testing.T) {

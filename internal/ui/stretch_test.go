@@ -400,3 +400,48 @@ func TestLandingGateFinishesOnItsOwnVerdict(t *testing.T) {
 		t.Fatalf("closed = %q, want %q — verify passed on its own exit", st.closed, stretchFinished)
 	}
 }
+
+// TestAutopilotDriving pins the board's version of running(): only the
+// last stretch matters, and only while it is still open.
+func TestAutopilotDriving(t *testing.T) {
+	cases := []struct {
+		name   string
+		events []state.CardEvent
+		want   bool
+	}{
+		{
+			name: "no periods",
+			want: false,
+		},
+		{
+			name:   "one still-open period",
+			events: []state.CardEvent{evTookOver(domain.GateFull, at(0))},
+			want:   true,
+		},
+		{
+			name: "one period opened then closed",
+			events: []state.CardEvent{
+				evTookOver(domain.GateFull, at(0)),
+				evHandedBack("", at(10)),
+			},
+			want: false,
+		},
+		{
+			name: "a closed period followed by a second still-open one",
+			events: []state.CardEvent{
+				evTookOver(domain.GateFull, at(0)),
+				evHandedBack("", at(10)),
+				evTookOver(domain.GateFull, at(20)),
+			},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := autopilotDriving(autopilotStretches(aFeature(), tc.events))
+			if got != tc.want {
+				t.Fatalf("autopilotDriving = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

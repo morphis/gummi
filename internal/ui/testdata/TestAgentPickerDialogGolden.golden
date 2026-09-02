@@ -1,5 +1,5 @@
 [38;2;96;95;107;48;2;32;31;38m gummi  │  board  │  inbox  │  agent                        tab cycle · alt+1/2/3 board/inbox/agent [m
-[38;2;96;95;107;48;2;32;31;38m   BACKLOG  6 cards  ·  sort: creation order                                                        [m
+[38;2;96;95;107;48;2;32;31;38m   BACKLOG  7 cards  ·  sort: creation order                                                        [m
 [38;2;96;95;107;48;2;32;31;38m                                                                                                    [m
 [38;2;96;95;107;48;2;32;31;38m   TODO                                                                                             [m
 [38;2;96;95;107;48;2;32;31;38m   1 ○ FD-051 rate limits [thrifty]                                                                 [m
@@ -27,4 +27,4 @@
 [38;2;96;95;107;48;2;32;31;38m                                                                                                    [m
 [38;2;96;95;107;48;2;32;31;38m                                                                                                    [m
 [38;2;96;95;107;48;2;32;31;38m                                                                                                    [m
-[38;2;96;95;107;48;2;32;31;38m gummi   1 todo · 3 active · 1 in review · 1 done          enter open card · space commands · ? help[m
+[38;2;96;95;107;48;2;32;31;38m gummi   1 todo · 4 active · 1 in review · 1 done          enter open card · space commands · ? help[m

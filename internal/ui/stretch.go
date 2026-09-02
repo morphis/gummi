@@ -260,6 +260,15 @@ func stageExitVerdict(events []state.CardEvent, stage domain.Stage) (string, boo
 	return "", false
 }
 
+// autopilotDriving reports whether the card is inside an open period right
+// now — the board's version of the question running() answers for the
+// thread. At most one period is ever open at a time (autopilotStretches
+// closes the previous one before opening the next), so checking the last
+// element is equivalent to scanning the whole slice for an open one.
+func autopilotDriving(stretches []autopilotStretch) bool {
+	return len(stretches) > 0 && stretches[len(stretches)-1].running()
+}
+
 // stretchAt reports the period covering event index i, and whether there
 // is one. The rendering side asks this per event to decide whether a
 // machine crossing is autopilot's — inside a period it is, and says so;

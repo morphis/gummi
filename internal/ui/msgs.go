@@ -45,6 +45,10 @@ type featureRow struct {
 	// that would fight the other process — it can still be watched.
 	Foreign      state.ForeignDrive
 	DrivenAbroad bool
+	// AutopilotDriving is whether an autopilot period is open on this card
+	// right now — a load-time snapshot, recomputed every load from the
+	// event log via autopilotStretches, never persisted.
+	AutopilotDriving bool
 	// Events is the card's event log (state.CardEvent, card_events table),
 	// populated for the SELECTED card only, lazily, once the card page
 	// opens or the selection changes on it (Shell.loadCardEvents). Every
@@ -130,6 +134,9 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 		row.DepBlocked = len(m.dependencyBlockers(ctx, f.ID)) > 0
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
+		if events, err := m.store.Events(ctx, f.ID); err == nil {
+			row.AutopilotDriving = autopilotDriving(autopilotStretches(f, events))
+		}
 		rows = append(rows, row)
 	}
 	return rowsMsg{rows: rows}

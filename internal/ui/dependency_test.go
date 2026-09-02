@@ -12,6 +12,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // TestLoadRowsDerivesBlockedFromStore: the board badge snapshot derives
@@ -144,5 +145,53 @@ func TestAdvanceBlockedByDocument(t *testing.T) {
 	}
 	if !m.notice.isErr {
 		t.Error("blocked notice should be styled as an error")
+	}
+}
+
+// TestLoadRowsDerivesAutopilotDrivingFromStore: the board badge snapshot
+// derives from the same event log the card thread renders — a card with an
+// open took-over row loads AutopilotDriving:true, and once the matching
+// handed-back row lands the same card reloads AutopilotDriving:false. The
+// flag is recomputed, never persisted.
+func TestLoadRowsDerivesAutopilotDrivingFromStore(t *testing.T) {
+	m, _ := newWorkspace(t)
+	m.now = func() time.Time { return fixedTime }
+	ctx := context.Background()
+	f := &domain.Feature{
+		ID: "FD-001", Num: 1, Title: "driven", Slug: "driven",
+		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
+	if err := m.store.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	drivingOf := func(msg tea.Msg) *featureRow {
+		rm, ok := msg.(rowsMsg)
+		if !ok {
+			t.Fatalf("loadRows returned %T", msg)
+		}
+		for i := range rm.rows {
+			if rm.rows[i].F.ID == f.ID {
+				return &rm.rows[i]
+			}
+		}
+		t.Fatal("row missing from load")
+		return nil
+	}
+
+	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
+		state.AutopilotTookOver, "", domain.GateFull, "", fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	if row := drivingOf(m.loadRows()); !row.AutopilotDriving {
+		t.Fatal("open period loaded AutopilotDriving=false, want true")
+	}
+
+	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
+		state.AutopilotHandedBack, "", domain.GateFull, "", fixedTime.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if row := drivingOf(m.loadRows()); row.AutopilotDriving {
+		t.Fatal("card still AutopilotDriving after handback")
 	}
 }
