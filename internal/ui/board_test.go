@@ -390,6 +390,25 @@ func TestCardLineAutopilotBadge(t *testing.T) {
 	}
 }
 
+// TestCardLineNarrowWidthGolden locks in BG-037's shed order: as the row
+// runs out of room, cost goes first, then the profile tag, then the
+// worktree mark, then the PR badge — landed survives longest because it
+// and the PR badge are what change what the user should DO with the
+// card. The title gives up columns before any badge does.
+func TestCardLineNarrowWidthGolden(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(3, "Warn when a profile is applied across projects", domain.StageImplement, "thrifty", true)
+	r.Landed = true
+	r.F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 72, URL: "https://github.com/o/r/pull/72"}
+	r.F.Spend.Credits = 1.23
+
+	var b strings.Builder
+	for _, w := range []int{62, 50, 40} {
+		b.WriteString(m.cardLine(r, 3, false, true, w) + "\n")
+	}
+	golden.RequireEqual(t, []byte(b.String()))
+}
+
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
 	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })

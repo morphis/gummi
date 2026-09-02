@@ -215,7 +215,22 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if !r.F.Spend.Zero() {
 		cost = " " + faint.Render(spendTick(r.F.Spend))
 	}
-	line := ansi.Truncate(cursor+num+" "+glyph+" "+id+badge+" "+title+loop+paused+tag+wtMark+landed+pr+cost, w, "…")
+	// The row used to be assembled title-first and cut from the right by a
+	// single ansi.Truncate: at narrow widths the title (the one field the
+	// user can always re-read on the card page) kept every column it asked
+	// for, while the operational-status tail lost badges in append order —
+	// landed and the PR link, the two that change what the user should DO
+	// with the card, went first. Budget instead: give the non-negotiable
+	// prefix and the title what they need, then shed the tail
+	// least-important-first until the row fits, landed surviving longest.
+	prefix := cursor + num + " " + glyph + " " + id + badge + " "
+	tail := func() string { return loop + paused + tag + wtMark + landed + pr + cost }
+	dropOrder := []*string{&cost, &tag, &wtMark, &pr, &landed}
+	for i := 0; i < len(dropOrder) && ansi.StringWidth(prefix+tail()) > w-8; i++ {
+		*dropOrder[i] = ""
+	}
+	title = ansi.Truncate(title, max(w-ansi.StringWidth(prefix+tail()), 0), "…")
+	line := ansi.Truncate(prefix+title+tail(), w, "…")
 	if selected {
 		return s.Band(line, w, paneFocused)
 	}
