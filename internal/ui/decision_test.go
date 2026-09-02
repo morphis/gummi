@@ -45,6 +45,27 @@ func TestThreadDecisionVisibleAt36x9(t *testing.T) {
 	}
 }
 
+// TestDecisionQuestionRehydratedSessionIsNotClaimedLive: nextInputFor sets
+// in.sess from the persisted state, which a rehydrated row (a
+// state=interactive DB row surviving a restart, no backend attached) also
+// reports as StateInteractive. decisionQuestion must distinguish that from
+// a genuinely attached session via in.live (sess.Live()), or it renders "the
+// agent is waiting" for a session nothing is waiting in (BG-043).
+func TestDecisionQuestionRehydratedSessionIsNotClaimedLive(t *testing.T) {
+	rehydrated := nextInput{sess: engine.StateInteractive, live: false}
+	got := decisionQuestion(decisionIdle, featureRow{}, rehydrated)
+	if strings.Contains(got, "the agent is waiting") {
+		t.Fatalf("claimed a live wait for a detached/rehydrated session: got %q", got)
+	}
+
+	live := nextInput{sess: engine.StateInteractive, live: true}
+	got = decisionQuestion(decisionIdle, featureRow{}, live)
+	want := "the agent is waiting — keep talking, or choose what happens next."
+	if got != want {
+		t.Fatalf("decisionQuestion for a genuinely live session = %q, want %q", got, want)
+	}
+}
+
 // TestThreadDecisionAdvancesIdleTodo: a card in todo has no key at all
 // now that empty-composer enter runs nothing — the idle decision is what
 // keeps it reachable. Enter answers the highlighted option ("start"),

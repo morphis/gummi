@@ -39,6 +39,7 @@ type nextInput struct {
 	quick  bool // the quick route: one-pass spec, approval goes straight to implement
 
 	sess   engine.SessionState // "" when the feature has no live session
+	live   bool                // sess.Live(): a backend is genuinely attached, not just persisted as interactive
 	busy   bool                // agent mid-turn
 	hasAsk bool                // agent blocked on a structured ask
 
@@ -99,6 +100,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	// conversation you were having.
 	if sess := m.sessionFor(r.F.ID); sess != nil {
 		in.sess = sess.State()
+		in.live = sess.Live()
 		snap := sess.Snapshot()
 		in.busy = snap.Busy
 		in.hasAsk = snap.PendingAsk != nil
@@ -284,7 +286,7 @@ func stageActions(in nextInput) []nextAction {
 		// for the changes. Only worth offering while the architect is
 		// here to receive it — with no session the "start" row above is
 		// the way in.
-		if in.sess == engine.StateInteractive {
+		if in.live {
 			acts = append(acts, nextStep("changes", "", "request changes",
 				"send it back with what's wrong — your line goes with it"))
 		}

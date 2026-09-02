@@ -268,12 +268,18 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// a lie one line above an explanation of why nothing is.
 		return string(r.F.Stage) + " failed — choose what happens next."
 	default:
-		if in.sess == engine.StateInteractive {
+		if in.live {
 			// a live conversation between turns. Something is very much
 			// running — it is just waiting on you — so the idle card's own
 			// sentence would be false here, printed as it is directly under
 			// the session's spend line.
 			return "the agent is waiting — keep talking, or choose what happens next."
+		}
+		if in.sess == engine.StateInteractive {
+			// state persisted as interactive, but no backend is attached: a
+			// rehydrated row, not a live wait. sendThreadMessage already
+			// routes this case to sendConsultMessage instead of a live turn.
+			return "no agent attached — press enter to attach and resend."
 		}
 		return "nothing is running — choose what happens next."
 	}
