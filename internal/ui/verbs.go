@@ -28,6 +28,7 @@ var verbs = map[string]bool{
 	"rebase":    true,
 	"squash":    true,
 	"clean":     true,
+	"ask":       true,
 }
 
 // parsedInput is parseInput's result.

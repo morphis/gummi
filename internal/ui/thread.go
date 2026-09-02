@@ -326,6 +326,18 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
+	// The card's consult exchange, if any — appended after the live
+	// stage block, not interleaved with it: the two are logically
+	// separate conversations a line addresses one at a time (arming
+	// decides which), so this always renders last regardless of which
+	// side started more recently (History, Chosen approach).
+	if cl := m.consultBlock(s, r, inner); len(cl) > 0 {
+		for _, l := range cl {
+			add(l)
+		}
+		blank()
+	}
+
 	// A finished `v` run's results have nowhere else to surface: with no
 	// live session there is no stage block to carry them, and they are
 	// not events on the card. The detail pane showed them in exactly this
@@ -1150,6 +1162,53 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 	}
 	return lines, anchorAt
+}
+
+// consultBlock renders the card's consult exchange, if any, as its own
+// visually distinct, captioned segment — the same idea boardHeader/
+// boardThreadRender use to keep the board's own conversation
+// recognizably not a card's, applied here to keep a consult exchange
+// recognizably not the stage's. It never spawns a session by being
+// drawn: m.consultFor is a lookup only, so a card nobody has asked
+// anything renders nothing here at all.
+func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
+	c := m.consultFor(r.F.ID)
+	if c == nil {
+		return nil
+	}
+	snap := c.Snapshot()
+	if len(snap.Transcript) == 0 {
+		return nil
+	}
+	lines := []string{consultCaption(s, snap, w), ""}
+	lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
+	if snap.Err != nil {
+		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
+			lines = append(lines, "  "+s.Error.Render(l))
+		}
+	}
+	if snap.Busy {
+		lines = append(lines, "  "+s.Info.Render(m.spinner()+" thinking…"))
+	}
+	return lines
+}
+
+// consultCaption is the consult block's own boundary line: dash-dot
+// filled (┄, never boundaryRule's solid ──) so it reads as a different
+// KIND of divider on sight, not just a differently-worded one — a stage
+// boundary marks a fresh context in the same conversation; this marks a
+// second, entirely separate one.
+func consultCaption(s *theme.Styles, snap engine.Snapshot, w int) string {
+	label := "asked · read-only"
+	if mdl := runModel(snap); mdl != "" {
+		label += " · " + mdl
+	}
+	if sp := spendSummary(snap); sp != "" {
+		label += " · " + sp
+	}
+	head := "┄┄ " + label + " "
+	fill := max(w-ansi.StringWidth(head)-2, 0)
+	return s.Warning.Render(head) + s.Separator.Render(strings.Repeat("┄", fill))
 }
 
 // boundaryRule is the live stage's session-boundary line: stage, role,

@@ -176,7 +176,7 @@ var promotedActions = map[string]bool{}
 // listed — they never touch the driven card.
 var foreignSafeActions = map[string]bool{
 	"run": true, "transcript": true, "spec": true, "diff": true,
-	"inbox": true, "duplicate": true,
+	"inbox": true, "duplicate": true, "ask": true,
 }
 
 var foreignBlockedKeys = map[string]bool{
@@ -292,6 +292,18 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// of its stage or kind.
 		{
 			"gate", "", gateLabel, gateWhy, false,
+			true,
+		},
+		// no accelerator: `ask` is a word you type on the composer, the
+		// same way `park`'s own accelerator collision is avoided (see
+		// verbKeys' doc comment) — this entry exists so the inventory
+		// still advertises it for someone who never learns the verb.
+		// Always valid, on every card in every state, including one
+		// Live() reports false for and a foreign-driven one — asking is
+		// exactly the one thing that never needs a live session or a
+		// lock to do.
+		{
+			"ask", "", "ask", "ask the card's agent a question — read-only, never steers", false,
 			true,
 		},
 		// the inbox is global, but it is also the recommended action for a

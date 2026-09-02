@@ -261,6 +261,27 @@ type Engine struct {
 	board  *BoardSession
 	closed bool
 
+	// consult holds every card's consult session, keyed by feature —
+	// engine.ConsultSession's own map, mirroring board's single-entry
+	// field but per card: OpenConsult is idempotent per card for the
+	// engine's whole lifetime (see consultsession.go), so once a card's
+	// entry exists here it is reused, never replaced, until Close.
+	consult map[domain.FeatureID]*ConsultSession
+	// consultMu serializes OpenConsult end to end, the same job boardMu
+	// does for OpenBoard and for the same reason: spawning a backend is
+	// too slow to do under e.mu, so the check-then-act around a released
+	// lock needs a lock of its own or two concurrent callers for the same
+	// card both see "not open yet" and both spawn one. Held only by
+	// OpenConsult, and never while e.mu is also held.
+	consultMu sync.Mutex
+	// consultIdleTimeout bounds how long a ConsultSession's backend stays
+	// spawned with no turns sent (Implementation notes: 20 minutes,
+	// closing only the backend, never the transcript). A field rather
+	// than a bare constant so a test can shrink it and observe the real
+	// timer fire deterministically instead of waiting out the golden
+	// value.
+	consultIdleTimeout time.Duration
+
 	// boardMu serializes OpenBoard end to end. e.mu cannot do that job:
 	// opening spawns a real backend process (and possibly binds an MCP
 	// endpoint), which is far too slow to hold the engine's main lock
@@ -355,9 +376,11 @@ func New(cfg Config) *Engine {
 		events:       make(chan Event),
 		stopped:      make(chan struct{}),
 		live:         map[domain.FeatureID]*Session{},
+		consult:      map[domain.FeatureID]*ConsultSession{},
 		pool:         pool,
 		dirtyPathsFn: dirtyPathsFn,
 	}
+	e.consultIdleTimeout = consultIdleTimeout
 	e.lanes[poolAttended].max = attendedMax
 	e.lanes[poolAutopilot].max = autopilotMax
 	e.envWarn = func(msg string) {
@@ -1694,6 +1717,11 @@ func (e *Engine) Close() error {
 	e.live = map[domain.FeatureID]*Session{}
 	board := e.board
 	e.board = nil
+	consults := make([]*ConsultSession, 0, len(e.consult))
+	for _, c := range e.consult {
+		consults = append(consults, c)
+	}
+	e.consult = map[domain.FeatureID]*ConsultSession{}
 	for p := range e.lanes {
 		e.lanes[p].queue = nil
 	}
@@ -1704,6 +1732,9 @@ func (e *Engine) Close() error {
 	}
 	if board != nil {
 		board.sess.stop()
+	}
+	for _, c := range consults {
+		c.stopBackend()
 	}
 	// Join the pump and kickoff goroutines so no git subprocess or persist
 	// write is still in flight against the workspace when Close returns.
@@ -1801,60 +1832,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.setContext(ev.Context)
 	case agent.EventUsage:
 		s.addSpend(ev.Usage)
-		// accumulate the feature's running total across all stages. Persist
-		// the credit-equivalent (not raw credits): a token-only stage reports
-		// tokens with zero credits, and storing that raw would make its spend
-		// invisible to the credits-denominated envelope once any credits-
-		// metered stage contributed credits. Metered events already carry
-		// credits, so this leaves them unchanged and never double-counts.
-		if e.cfg.Persist && e.cfg.Store != nil {
-			credits := s.creditEquivalent(ev.Usage)
-			// estimated is the token/rate-derived portion of credits, kept as
-			// its own accumulator so displays can label live figures instead
-			// of presenting them as real. A settle event retires the model's
-			// outstanding estimates: the adapter's own mid-turn estimates are
-			// already inside its signed correction, while the engine's
-			// token-priced fallback (recorded before the adapter knew a rate)
-			// is not — so that portion comes off the credit total here too,
-			// leaving exactly the provider-metered figure.
-			var estimated float64
-			switch {
-			case ev.Usage.Settled:
-				credits = ev.Usage.Credits // signed correction; never token-priced
-				tokenEst, adapterEst := s.takePendingEst(ev.Usage.Model)
-				credits -= tokenEst
-				estimated = -(tokenEst + adapterEst)
-			case ev.Usage.Metered:
-				// the provider's metered figure, authoritative even at zero:
-				// token-pricing it would invent spend the provider never
-				// charged (and a later settle delta would then double-count
-				// it), so it passes through signed with no estimate booked.
-				credits = ev.Usage.Credits
-			case ev.Usage.Credits <= 0:
-				estimated = credits
-				s.notePendingEst(ev.Usage.Model, credits, 0)
-			case ev.Usage.Estimate:
-				estimated = credits
-				s.notePendingEst(ev.Usage.Model, 0, credits)
-			}
-			if credits != 0 || estimated != 0 || ev.Usage.InputTokens != 0 || ev.Usage.OutputTokens != 0 {
-				_ = e.cfg.Store.AddSpend(context.Background(), s.Feature.ID,
-					credits, estimated, ev.Usage.InputTokens, ev.Usage.OutputTokens)
-				// the same sample attributed to (stage, model, role) for the
-				// breakdown; same credit-equivalent, so stage_spend sums to
-				// spend_credits. A backend's internal side-model call is booked
-				// to the helper role, not the stage role it ran under — else a
-				// token-less title/summary call inflates and mis-attributes the
-				// working role's row.
-				role := s.Role
-				if ev.Usage.Helper {
-					role = agent.RoleHelper
-				}
-				_ = e.cfg.Store.RecordStageSpend(context.Background(), s.Feature.ID,
-					s.Feature.Stage, string(role), ev.Usage.Model,
-					credits, estimated, ev.Usage.InputTokens, ev.Usage.CachedTokens, ev.Usage.OutputTokens)
-			}
-		}
+		e.recordUsage(s, s.Feature.ID, s.Feature.Stage, s.Role, ev.Usage)
 		// budget awareness: on crossing a threshold, record a nudge, queue
 		// it for the next turn sent to the model, and signal the UI
 		// (DESIGN §5.1 layer 2).
@@ -1932,6 +1910,74 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		e.persist(s)
 	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: kind})
+}
+
+// recordUsage folds one usage sample into the store's running totals —
+// the feature's overall spend and its per-(stage, role, model) breakdown
+// — shared by the stage pump (handle's EventUsage case) and a card's
+// consult session (handleConsult), so a question answered outside a
+// stage still lands in the same figures a stage's own spend does. It
+// persists the credit-equivalent (not raw credits): a token-only stage
+// reports tokens with zero credits, and storing that raw would make its
+// spend invisible to the credits-denominated envelope once any credits-
+// metered stage contributed credits. Metered events already carry
+// credits, so this leaves them unchanged and never double-counts.
+//
+// s is the session the sample belongs to — its credit rate and
+// pending-estimate bookkeeping (creditEquivalent, take/notePendingEst)
+// live there, regardless of whether s backs a stage session or a
+// ConsultSession (both are *Session underneath). id/stage/role name what
+// to attribute the sample to: a stage session passes its own
+// Feature.ID/Feature.Stage/Role; handleConsult passes the bound card's
+// id, its stage, and agent.RoleConsult.
+func (e *Engine) recordUsage(s *Session, id domain.FeatureID, stage domain.Stage, role agent.Role, u agent.Usage) {
+	if !e.cfg.Persist || e.cfg.Store == nil {
+		return
+	}
+	credits := s.creditEquivalent(u)
+	// estimated is the token/rate-derived portion of credits, kept as its
+	// own accumulator so displays can label live figures instead of
+	// presenting them as real. A settle event retires the model's
+	// outstanding estimates: the adapter's own mid-turn estimates are
+	// already inside its signed correction, while the engine's
+	// token-priced fallback (recorded before the adapter knew a rate) is
+	// not — so that portion comes off the credit total here too, leaving
+	// exactly the provider-metered figure.
+	var estimated float64
+	switch {
+	case u.Settled:
+		credits = u.Credits // signed correction; never token-priced
+		tokenEst, adapterEst := s.takePendingEst(u.Model)
+		credits -= tokenEst
+		estimated = -(tokenEst + adapterEst)
+	case u.Metered:
+		// the provider's metered figure, authoritative even at zero:
+		// token-pricing it would invent spend the provider never charged
+		// (and a later settle delta would then double-count it), so it
+		// passes through signed with no estimate booked.
+		credits = u.Credits
+	case u.Credits <= 0:
+		estimated = credits
+		s.notePendingEst(u.Model, credits, 0)
+	case u.Estimate:
+		estimated = credits
+		s.notePendingEst(u.Model, 0, credits)
+	}
+	if credits == 0 && estimated == 0 && u.InputTokens == 0 && u.OutputTokens == 0 {
+		return
+	}
+	_ = e.cfg.Store.AddSpend(context.Background(), id, credits, estimated, u.InputTokens, u.OutputTokens)
+	// the same sample attributed to (stage, model, role) for the
+	// breakdown; same credit-equivalent, so stage_spend sums to
+	// spend_credits. A backend's internal side-model call is booked to
+	// the helper role, not the working role it ran under — else a
+	// token-less title/summary call inflates and mis-attributes the
+	// working role's row.
+	if u.Helper {
+		role = agent.RoleHelper
+	}
+	_ = e.cfg.Store.RecordStageSpend(context.Background(), id, stage, string(role), u.Model,
+		credits, estimated, u.InputTokens, u.CachedTokens, u.OutputTokens)
 }
 
 // checkpointTimeout bounds the checkpoint's git work; a commit is local

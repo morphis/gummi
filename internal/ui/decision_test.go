@@ -502,8 +502,13 @@ func TestThreadDecisionACommandKeepsTheParser(t *testing.T) {
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // no — send as a message
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !strings.Contains(m.notice.text, "no live session") {
-		t.Errorf("chip esc did not send the line as a message: %+v", m.notice)
+	// with no stage session live at review's decision gate, FD-024 routes
+	// the "send as a message" line to the card's consult session rather
+	// than letting the review decision consume it — reviewGateWorkspace's
+	// shell carries no engine, so the consult channel itself has nowhere
+	// to go either, and says so instead of the old blanket refusal.
+	if !strings.Contains(m.notice.text, "no agent configured") {
+		t.Errorf("chip esc did not route the line to the consult channel: %+v", m.notice)
 	}
 	if m.rows[m.sel].F.Stage != domain.StageReview {
 		t.Fatalf("the bounced card moved to %s", m.rows[m.sel].F.Stage)
@@ -568,10 +573,25 @@ func TestThreadDecisionProseNothingConsumesSends(t *testing.T) {
 		}
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !strings.Contains(m.notice.text, "no live session") {
-		t.Errorf("prose with no consumer did not send as a message: %+v", m.notice)
+	if m.notice.isErr {
+		t.Errorf("prose with no consumer failed to send as a message: %+v", m.notice)
 	}
 	if m.rows[m.sel].F.Stage != domain.StagePlan {
 		t.Fatalf("the card moved to %s", m.rows[m.sel].F.Stage)
+	}
+	// the plan stage parked on its budget has no live session either — the
+	// same FD-024 consult routing as the chip-esc case above.
+	c := m.engine.Consult("FD-001")
+	if c == nil {
+		t.Fatal("prose with no consumer did not reach the card's consult session")
+	}
+	var saw bool
+	for _, msg := range c.Snapshot().Transcript {
+		if msg.Content == "top it up to 400" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Errorf("consult transcript = %+v, missing the sent-as-message line", c.Snapshot().Transcript)
 	}
 }

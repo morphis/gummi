@@ -212,6 +212,14 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		return nil
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "ask":
+		// arms the same channel typing `ask` on the composer does
+		// (threadinput.go's routeVerb) — this is just the inventory's own
+		// route to it for someone who reaches for the list instead of the
+		// word.
+		m.threadAsk = true
+		m.focusThreadInput()
+		return nil
 	case "changes":
 		// this option IS the composer's words: typing aims at it and enter
 		// delivers the line as the turn asking for the changes

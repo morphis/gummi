@@ -31,8 +31,8 @@ func (m *Shell) openCard() tea.Cmd {
 		m.stopFollow()
 	}
 	// a card opens on its newest event with the composer ready, the way a
-	// chat does — focusThreadInput still refuses a card another process
-	// is driving
+	// chat does — including a card another process is driving
+	// (focusThreadInput's own doc comment owns the full story)
 	m.threadScroll = 0
 	m.loadThreadDraft(r.F.ID)
 	m.focusThreadInput()
@@ -98,11 +98,9 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 	}
 	// stepping cards is not a mode change: someone scanning with J/K from
 	// the accelerator layer stays there, and someone mid-draft keeps the
-	// keyboard. The one exception is a card another process drives, which
-	// has no input to hold.
-	if ok && r.DrivenAbroad {
-		m.blurThreadInput()
-	}
+	// keyboard — a card another process drives holds the composer too now
+	// (focusThreadInput's own doc comment owns the full story), so there
+	// is no longer an exception here.
 	if ok && m.follow != nil && m.follow.feature != r.F.ID {
 		m.stopFollow()
 	}

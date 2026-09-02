@@ -229,6 +229,13 @@ type Shell struct {
 	// line verbatim as the answer. Disarmed by blur, by an answer, or by
 	// the decision changing.
 	threadFreeForm bool
+	// threadAsk arms the composer against the card's consult session
+	// instead of whatever stage session is (or isn't) live — the `ask`
+	// verb's doing (verbs.go, threadinput.go's routeVerb). Sticky, like
+	// threadFreeForm: it stays armed across multiple turns until esc, so
+	// a follow-up question doesn't need retyping `ask`. Reset by blur,
+	// the same as threadFreeForm.
+	threadAsk bool
 	// autopilotAnswering names the cards whose open decision autopilot has
 	// already taken and is in the middle of delivering — the interval
 	// between dispatching the answer and the answer event landing. It is
@@ -3043,6 +3050,17 @@ func (m *Shell) sessionFor(id domain.FeatureID) *engine.Session {
 		return nil
 	}
 	return m.engine.Get(id)
+}
+
+// consultFor returns the feature's consult session if one has ever been
+// opened, or nil — a lookup, never a spawn (engine.Engine.Consult's own
+// contract), so rendering a card's thread never opens a consult backend
+// just by being drawn.
+func (m *Shell) consultFor(id domain.FeatureID) *engine.ConsultSession {
+	if m.engine == nil {
+		return nil
+	}
+	return m.engine.Consult(id)
 }
 
 // cardEventsMsg delivers one card's event log (state.CardEvent), loaded

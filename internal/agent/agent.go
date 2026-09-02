@@ -29,6 +29,13 @@ const (
 	// RoleArchitect, a board conversation would print "architect" over
 	// each reply, which names a job nobody asked it to do.
 	RoleBoard Role = "board"
+	// RoleConsult is a card-scoped, read-only conversation held alongside
+	// (never instead of) a card's stage sessions — engine.ConsultSession.
+	// Like RoleBoard it is not a stage role: no workflow stage resolves to
+	// it, but the transcript renderer still needs a name to label a
+	// consult reply with instead of borrowing whatever role the card's
+	// last stage session happened to run under.
+	RoleConsult Role = "consult"
 )
 
 // Permission is the policy a session applies to tool calls. gummi's

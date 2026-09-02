@@ -553,7 +553,7 @@ func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, tex
 		// them: the architect is live in this thread, so what is wrong
 		// with the artifact goes to it directly rather than through a
 		// stage rewind, which is what bounce is for.
-		return m.sendThreadMessage(r.F.ID, text)
+		return m.sendThreadMessage(r.F, text)
 	}
 	return nil
 }

@@ -54,11 +54,11 @@ func TestCardActionsForOrdering(t *testing.T) {
 	// in there because attn is set: it is the surface the gate
 	// recommendation (keyed i) lands on.
 	want := "verify run bounce " +
-		"deps spec diff advance envelope gate inbox attach rebase merge duplicate delete"
+		"deps spec diff advance envelope gate ask inbox attach rebase merge duplicate delete"
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
 	}
-	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps spec diff advance envelope gate inbox attach rebase merge duplicate delete" {
+	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps spec diff advance envelope gate ask inbox attach rebase merge duplicate delete" {
 		t.Fatalf("unexpected folded tail: %q", gotFolded)
 	}
 }

@@ -91,6 +91,14 @@ type pendingChip struct {
 // composer is empty — so the two placeholders collapsed back into one.
 const placeholderText = "message the agent, a verb (approve, verify, diff…), or ↑ for actions"
 
+// drivenAbroadPlaceholderText is the composer's placeholder on a card
+// another gummi process is driving: no verb vocabulary reaches it (this
+// is the one row where every line is consult prose, implicitly and
+// permanently, per the Chosen approach), so the placeholder says that
+// rather than advertising verbs and an inventory that would silently
+// do nothing here.
+const drivenAbroadPlaceholderText = "ask a question — read-only while another process drives this card"
+
 // threadInputMaxHeight caps how many rows the composer (newThreadInput's
 // DynamicHeight) can grow to before it scrolls internally instead of
 // taking more of the page (F18). composeThread's priority is foot >
@@ -163,12 +171,13 @@ func newThreadInput(s *theme.Styles) textarea.Model {
 }
 
 // focusThreadInput gives the thread's input the keyboard. A card driven
-// by another process withholds it entirely — the same guard inputBlock
-// applies when rendering a read-only line for it (thread.go) — which is
-// why opening a card calls this rather than focusing unconditionally.
+// by another process gets it too now — its lines go straight to that
+// card's consult session (submitThreadLine's own DrivenAbroad branch),
+// never through the verb parser or anything that would touch a lock this
+// process does not hold — so there is nothing left here to withhold the
+// composer for.
 func (m *Shell) focusThreadInput() {
-	r, ok := m.selected()
-	if !ok || r.DrivenAbroad {
+	if _, ok := m.selected(); !ok {
 		return
 	}
 	m.threadInput.Focus()
@@ -180,14 +189,14 @@ func (m *Shell) focusThreadInput() {
 // the blur: refocusing returns to the picker contract (threadinput.go's
 // doc comment owns the full story).
 //
-// esc is no longer a caller. The accelerator layer is now reached only by
-// landing on a card another process drives, which withholds the composer
-// outright — so this runs when the card changes under the keyboard, not
-// when the user asks to leave.
+// esc is no longer a caller — leaving the page keeps the composer focused
+// (closeCard). This now runs only for the no-selected-card guard below,
+// which is not reachable in practice.
 func (m *Shell) blurThreadInput() {
 	m.threadInput.Blur()
 	m.threadChip = nil
 	m.threadFreeForm = false
+	m.threadAsk = false
 }
 
 // handleThreadInputKey routes a key while the thread input has the
@@ -202,10 +211,9 @@ func (m *Shell) blurThreadInput() {
 // the draft kept — refocusing disarms.
 func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	r, ok := m.selected()
-	if !ok || r.DrivenAbroad {
-		// Not reachable in practice — focusThreadInput already refuses
-		// both — but never leave a focused input feeding a card that
-		// should be withholding it.
+	if !ok {
+		// Not reachable in practice — focusThreadInput already refuses —
+		// but never leave a focused input feeding no selected card.
 		m.blurThreadInput()
 		return nil
 	}
@@ -264,6 +272,13 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.threadFreeForm = false
 			return nil
 		}
+		if m.threadAsk {
+			// armed by `ask` — esc drops the consult channel and restores
+			// steering, the draft kept (arming is not discarding, same as
+			// threadFreeForm's own esc).
+			m.threadAsk = false
+			return nil
+		}
 		// nothing pending: esc leaves the page. The composer keeps both
 		// its focus and its draft — the card page hides, it is never
 		// discarded (backlog.go's closeCard), so coming back finds the
@@ -273,7 +288,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		text := strings.TrimSpace(m.threadInput.Value())
 		if text == "" {
-			if m.threadFreeForm {
+			if m.threadFreeForm || m.threadAsk {
 				// armed, an empty line sends nothing — the pane's own
 				// free-form contract, inherited
 				return nil
@@ -286,11 +301,17 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.threadScroll = 0 // jump to the latest on send, as the pane did
+		if m.threadAsk {
+			// armed: every key already types unmolested (the branch just
+			// below), so enter delivers straight to consult — never the
+			// decision/verb machinery submitThreadLine would otherwise run.
+			return m.sendConsultMessage(r.F, text)
+		}
 		return m.submitThreadLine(r, text)
 	}
-	if m.threadFreeForm {
-		// armed: the line is the answer, not a picker — everything else
-		// is text
+	if m.threadFreeForm || m.threadAsk {
+		// armed: the line is the answer (or the next consult question),
+		// not a picker — everything else is text
 		var cmd tea.Cmd
 		m.threadInput, cmd = m.threadInput.Update(msg)
 		m.clearSkipParseIfEmptied()
@@ -435,11 +456,21 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 // is the whole bug F2 fixes — and it is spent either way, matched or not:
 // a promise is good for one submit of the line it was made about, never
 // carried past it.
+//
+// A card driven by another process outranks all of it: it has no verb
+// vocabulary here at all (Chosen approach) — every submitted line is
+// consult prose, verbatim, so this never even reaches parseInput for
+// such a row. That is what keeps a foreign card's composer from ever
+// reaching fireVerb/engine.Send against a lock this process does not
+// hold.
 func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
+	if r.DrivenAbroad {
+		return m.sendConsultMessage(r.F, text)
+	}
 	skip := m.threadSkipParse != "" && m.threadSkipParse == text
 	m.threadSkipParse = ""
 	if skip {
-		return m.sendThreadMessage(r.F.ID, text)
+		return m.sendThreadMessage(r.F, text)
 	}
 	if d := m.openDecision(r); d != nil {
 		m.syncDecision(d)
@@ -513,7 +544,7 @@ func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
 	case verbCommand:
 		return m.routeVerb(f, parsed.Verb, parsed.Remainder, text)
 	default: // verbNone
-		return m.sendThreadMessage(f.ID, text)
+		return m.sendThreadMessage(f, text)
 	}
 }
 
@@ -527,6 +558,20 @@ func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
 // included, when this came from "/verb") that the chip's esc hands back
 // as a message — pendingChip.line's own contract.
 func (m *Shell) routeVerb(f domain.Feature, verb, remainder, line string) tea.Cmd {
+	if verb == "ask" {
+		// ask is never a chip: asking is never destructive, and unlike
+		// diff/spec (which chip the moment a remainder has nowhere to
+		// spend) ask DOES have somewhere to spend one — arm the composer
+		// against the consult session and, when the line carried a
+		// question already, deliver it as the first consult turn in the
+		// same motion (Chosen approach's own wording).
+		m.threadAsk = true
+		if remainder == "" {
+			m.threadInput.Reset()
+			return nil
+		}
+		return m.sendConsultMessage(f, remainder)
+	}
 	if !chipVerbs[verb] && remainder == "" {
 		m.threadInput.Reset()
 		return m.fireVerb(verb, remainder)
@@ -655,30 +700,60 @@ func (m *Shell) notWiredVerb(verb, remainder string) tea.Cmd {
 	return nil
 }
 
-// sendThreadMessage delivers a line typed into the thread as a turn to
-// the card's own live session — the thread's counterpart to
-// shell.go's sendChat, keyed off the selected card rather than an open
-// chat pane. Mirrors sendChat's capture-then-check-then-send shape so a
-// swapped-out session can't receive a stray turn.
+// sendThreadMessage delivers a line typed into the thread as a turn — to
+// the card's own live stage session when one is genuinely steerable
+// (Session.Live()), or to its consult session otherwise. This is the fix
+// for every non-live row in the Problem table at once: a session that is
+// merely absent, not-yet-attached, paused, restored, or done all read
+// Live()==false the same way, so all of them fall through to consult
+// instead of the old blanket "no live session to message" refusal.
 //
-// The composer is cleared here, not by the caller, and only once a
-// session is confirmed live: with no session to hand the text to, the
-// line stays exactly where it was typed instead of vanishing along with
-// the notice explaining why it wasn't sent (F8) — attach (enter) and
-// resend, rather than retype from memory.
-func (m *Shell) sendThreadMessage(id domain.FeatureID, text string) tea.Cmd {
-	sess := m.sessionFor(id)
-	if sess == nil {
-		m.notice = noticeMsg{text: string(id) + ": no live session to message — attach first (enter)"}
-		return nil
+// The composer is cleared here, not by the caller, and only once a live
+// session is confirmed for the steer path: with no session to hand the
+// text to, the line stays exactly where it was typed instead of
+// vanishing along with the notice explaining why it wasn't sent (F8) —
+// attach (enter) and resend, rather than retype from memory. The consult
+// path (sendConsultMessage) has no such precondition to fail against
+// synchronously, so it always clears.
+func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
+	sess := m.sessionFor(f.ID)
+	if !sess.Live() {
+		return m.sendConsultMessage(f, text)
 	}
 	m.threadInput.Reset()
 	eng := m.engine
+	id := f.ID
 	return func() tea.Msg {
 		if eng.Get(id) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
 		if err := eng.Send(context.Background(), id, text); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return nil
+	}
+}
+
+// sendConsultMessage delivers a line to the card's consult session,
+// opening one first if this is the first question asked about this card
+// (engine.Engine.OpenConsult is idempotent, so every later call just
+// reuses it). Unlike sendThreadMessage's steer path, there is no
+// live-session precondition to fail against synchronously — a consult
+// session takes no lock and competes for no attention slot — so the
+// composer always clears here.
+func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
+	if m.engine == nil {
+		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)"}
+		return nil
+	}
+	m.threadInput.Reset()
+	eng := m.engine
+	return func() tea.Msg {
+		c, err := eng.OpenConsult(context.Background(), f)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		if err := c.Send(context.Background(), text); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return nil
@@ -713,21 +788,25 @@ func (c *pendingChip) view(s *theme.Styles) string {
 }
 
 // inputBlock is the thread's bottom input slot (thread.go's threadView).
-// A card owned by another process withholds it — featureRow.DrivenAbroad
-// — rather than rendering a box that would fail at send time. Otherwise
-// it renders the pending confirm chip in place of the box, or the
-// persistent textarea itself.
+// A card owned by another process gets the composer too now, ask-only —
+// every line it accepts goes straight to that card's consult session
+// (submitThreadLine's DrivenAbroad branch), never through the verb
+// vocabulary, so there is nothing here left to withhold. It renders the
+// pending confirm chip in place of the box when one is standing (never
+// true for a DrivenAbroad row, since routeVerb is never reached for one),
+// or the persistent textarea itself.
 func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
-	if r.DrivenAbroad {
-		return s.Faint.Render(ansi.Truncate("read-only — driven by "+foreignSummary(r.Foreign), w, "…"))
-	}
 	if m.threadChip != nil && m.threadChip.feature == r.F.ID {
 		return ansi.Truncate(m.threadChip.view(s), w, "…")
 	}
-	// up reaches the inventory whether or not a decision is pinned above
-	// the line (F11), so the placeholder no longer has to pick between two
-	// versions of that promise.
-	m.threadInput.Placeholder = placeholderText
+	if r.DrivenAbroad {
+		m.threadInput.Placeholder = drivenAbroadPlaceholderText
+	} else {
+		// up reaches the inventory whether or not a decision is pinned
+		// above the line (F11), so the placeholder no longer has to pick
+		// between two versions of that promise.
+		m.threadInput.Placeholder = placeholderText
+	}
 	// SetWidth reruns the widget's own recalculateHeight (DynamicHeight,
 	// newThreadInput), so a resize rewraps the content and reflows the
 	// composer's height along with it, not just its rows' width.
@@ -759,6 +838,19 @@ func (m *Shell) threadInputBindings() []binding {
 		return []binding{
 			{key: "enter", label: "confirm", help: "run " + m.threadChip.verb, bar: true},
 			{key: "esc", label: "cancel", help: "back out — the line goes back in the input as a message", bar: true},
+		}
+	}
+	if m.threadAsk {
+		// armed by `ask`: the composer owns the keyboard the way the
+		// free-form answer channel does, but every line goes to the
+		// card's consult session instead of a decision — sticky, so it
+		// stays armed across a follow-up question without retyping `ask`.
+		return []binding{
+			{key: "enter", label: "ask", help: "your line is the next consult question — empty sends nothing", bar: true, sticky: true},
+			{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
+			m.threadOutputsBinding(),
+			{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
+			{key: "esc", label: "steer", help: "drop the consult channel — a plain line steers again (the draft is kept)", bar: true},
 		}
 	}
 	if r, ok := m.selected(); ok {
@@ -891,6 +983,16 @@ func threadEnterLabel(text string) (label, help string) {
 // "/verb" line whose remainder resolved to the same verb) so the bar's
 // preview can never drift from routeVerb's own fire-or-chip decision.
 func verbEnterLabel(verb, remainder string) (label, help string) {
+	if verb == "ask" {
+		// never a chip, and a remainder here is not dropped — it is
+		// delivered as the first consult turn in the same motion
+		// (routeVerb's own "ask" branch), so the preview never promises a
+		// confirm this verb will never raise.
+		if remainder == "" {
+			return "ask", "arm the composer against the card's consult session"
+		}
+		return "ask", "arm and ask this question"
+	}
 	if !chipVerbs[verb] && remainder == "" {
 		return verb, "run " + verb
 	}

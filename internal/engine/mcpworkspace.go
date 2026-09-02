@@ -645,6 +645,70 @@ const (
 	cardNewToolName    = "card_new"
 )
 
+// consultTools is the fixed, read-only tool set a card's ConsultSession
+// advertises: the same three answers card_status/card_spec/card_diff give
+// a board-level caller, but with no "id" parameter at all — the schema
+// itself is what keeps a consult session from ever answering about a
+// different card than the one it is bound to (Out of scope: cross-card
+// consult), rather than a runtime check that could be gotten around by an
+// argument the model is never even offered.
+func consultTools() []agent.ToolDef {
+	return []agent.ToolDef{consultStatusTool(), consultSpecTool(), consultDiffTool()}
+}
+
+func consultStatusTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: cardStatusToolName,
+		Description: "Read-only snapshot of this card: stage, branch state, spend/envelope, " +
+			"verified/done/running flags, and open gate blockers (unanswered spec questions, " +
+			"unresolved diff comments). Returns a JSON object. Always answers for the one card " +
+			"this conversation is bound to — there is no id to name a different one.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+	}
+}
+
+func consultSpecTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: cardSpecToolName,
+		Description: "Read-only dump of this card's current design artifact (spec or report) as " +
+			"markdown, wherever it lives right now. Always answers for the one card this " +
+			"conversation is bound to.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+	}
+}
+
+func consultDiffTool() agent.ToolDef {
+	return agent.ToolDef{
+		Name: cardDiffToolName,
+		Description: "Read-only dump of this card's worktree diff against main. Before a " +
+			"worktree exists (a card still in a design stage), this errors clearly. Always " +
+			"answers for the one card this conversation is bound to.",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
+	}
+}
+
+// dispatchConsultTool routes one of a ConsultSession's three read-only
+// tool calls, forcing id in as the argument the zero-parameter schema
+// never lets the model supply — the same handlers card_status/card_spec/
+// card_diff already use, called with the bound card no matter what (or
+// nothing) the model's own args carried.
+func (e *Engine) dispatchConsultTool(ctx context.Context, id domain.FeatureID, name string, _ json.RawMessage) (string, error) {
+	forced, err := json.Marshal(cardIDArgs{ID: string(id)})
+	if err != nil {
+		return "", err
+	}
+	switch name {
+	case cardStatusToolName:
+		return e.cardStatus(ctx, forced)
+	case cardSpecToolName:
+		return e.cardSpec(ctx, forced)
+	case cardDiffToolName:
+		return e.cardDiff(ctx, forced)
+	default:
+		return "", fmt.Errorf("unknown tool %q", name)
+	}
+}
+
 // workspaceTools is the fixed board-level tool set the workspace endpoint
 // advertises — unlike stageTools, it never depends on a stage or flavor,
 // because it isn't scoped to a single card's session.

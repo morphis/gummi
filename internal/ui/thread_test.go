@@ -193,11 +193,11 @@ func TestAutopilotLabel(t *testing.T) {
 	}
 }
 
-// TestInputBlockWithholdsForForeignCard: carry-over #2 — a card another
-// gummi process drives has no session this board can send to, so the
-// thread must withhold the input the same way newFollowPane does,
-// rather than rendering a box that would fail at send time.
-func TestInputBlockWithholdsForForeignCard(t *testing.T) {
+// TestInputBlockAskOnlyForForeignCard: FD-024 — a card another gummi
+// process drives gets its composer back, ask-only: the box itself
+// renders (never withheld), but its placeholder says the line goes to
+// consult, not the live-message placeholder a locally-driven card gets.
+func TestInputBlockAskOnlyForForeignCard(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	r := featureRow{
 		F:            domain.Feature{ID: "FD-001"},
@@ -205,11 +205,11 @@ func TestInputBlockWithholdsForForeignCard(t *testing.T) {
 		Foreign:      state.ForeignDrive{PID: 4242},
 	}
 	out := ansi.Strip(m.inputBlock(m0Styles(), r, 60))
-	if !strings.Contains(out, "read-only") || !strings.Contains(out, "4242") {
-		t.Errorf("withheld input block = %q, want it to name the read-only reason and the owning pid", out)
+	if !strings.Contains(out, "ask a question") {
+		t.Errorf("driven-abroad input block = %q, want the ask-only placeholder", out)
 	}
-	if strings.Contains(out, "message the agent") {
-		t.Errorf("withheld input block = %q, should not render the live message box", out)
+	if strings.Contains(out, placeholderText) {
+		t.Errorf("driven-abroad input block = %q, should not advertise the verb vocabulary", out)
 	}
 }
 
@@ -571,16 +571,18 @@ func TestThreadInputSurvivesTabSwitch(t *testing.T) {
 	}
 }
 
-// TestFocusThreadInputWithholdsForDrivenAbroad: a card another gummi
-// process drives withholds the input entirely — "/" must refuse to focus
-// it, matching the read-only line inputBlock renders for such a card.
-func TestFocusThreadInputWithholdsForDrivenAbroad(t *testing.T) {
-	m := populatedShell(120, 34)
+// TestFocusThreadInputGrantedForDrivenAbroad: FD-024 — a card another
+// gummi process drives gets the composer's keyboard focus too now, since
+// every line it accepts goes straight to that card's consult session
+// rather than through anything that would touch the other process's
+// lock.
+func TestFocusThreadInputGrantedForDrivenAbroad(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
 	m.rows[m.sel].DrivenAbroad = true
 	m.rows[m.sel].Foreign = state.ForeignDrive{PID: 99}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.threadInput.Focused() {
-		t.Fatal("/ focused the input on a card driven by another process")
+	if !m.threadInput.Focused() {
+		t.Fatal("enter did not focus the input on a card driven by another process")
 	}
 }
 
@@ -696,16 +698,21 @@ func TestChipEscRestoresLineAndSendsAsMessageNext(t *testing.T) {
 	}
 
 	// resubmitting the exact same line now sends it as a message instead
-	// of raising the same chip a second time.
+	// of raising the same chip a second time. With no live stage session
+	// (Live()==false — there is none at all here), sendThreadMessage
+	// (FD-024) now routes it to the consult channel instead of refusing
+	// outright; with no engine wired in this test harness, that channel
+	// itself has nowhere to go, so the notice names that instead.
 	m.submitThreadLine(r, "verify the csv path")
 	if m.threadChip != nil {
 		t.Fatal("the deliberate 'send as a message' resubmit re-raised the chip")
 	}
-	if !strings.Contains(m.notice.text, "no live session") {
-		t.Fatalf("expected the no-live-session notice from sendThreadMessage, got %q", m.notice.text)
+	if !strings.Contains(m.notice.text, "no agent configured") {
+		t.Fatalf("expected the no-agent notice from sendConsultMessage, got %q", m.notice.text)
 	}
-	// F8: sendThreadMessage found no session to hand the text to, so the
-	// line stays exactly where it was rather than vanishing with it.
+	// no engine to hand the text to, so the line stays exactly where it
+	// was rather than vanishing with it (F8's reasoning, now covering the
+	// consult path too).
 	if m.threadInput.Value() != "verify the csv path" {
 		t.Fatalf("a failed send should not have cleared the input: %q", m.threadInput.Value())
 	}
@@ -1058,14 +1065,15 @@ func TestSlashMenuOmitsCardActionsOffTheCardPage(t *testing.T) {
 	}
 }
 
-// TestPlainMessageRoutesToSendWithNoLiveSession: prose with no matching
-// verb (verbNone) routes to sendThreadMessage exactly like a chat send —
-// with nothing live to send to (a detached shell in this test), it says
-// so instead of silently doing nothing, and — F8 — the line the user
-// typed is still there afterwards rather than vanishing along with the
-// notice explaining why it wasn't sent: attach (enter) and resend beats
-// retyping it from memory.
-func TestPlainMessageRoutesToSendWithNoLiveSession(t *testing.T) {
+// TestPlainMessageRoutesToConsultWithNoLiveSession: prose with no
+// matching verb (verbNone) routes to sendThreadMessage exactly like a
+// chat send — with nothing live to send to (a detached shell in this
+// test), FD-024 routes it to the card's consult channel instead of
+// refusing outright; with no engine wired in this test harness, that
+// channel has nowhere to go either, so the notice names that instead,
+// and — F8's reasoning, carried over — the line the user typed is still
+// there afterwards rather than vanishing along with the notice.
+func TestPlainMessageRoutesToConsultWithNoLiveSession(t *testing.T) {
 	m := populatedShell(120, 34)
 	f := m.rows[m.sel].F
 	m.threadInput.SetValue("looks good, but verify the padding")
@@ -1073,8 +1081,8 @@ func TestPlainMessageRoutesToSendWithNoLiveSession(t *testing.T) {
 	if m.threadChip != nil {
 		t.Fatal("prose starting with a non-verb word must not raise a chip")
 	}
-	if !strings.Contains(m.notice.text, "no live session") {
-		t.Fatalf("notice = %q, want the no-live-session notice", m.notice.text)
+	if !strings.Contains(m.notice.text, "no agent configured") {
+		t.Fatalf("notice = %q, want the no-agent-configured notice from sendConsultMessage", m.notice.text)
 	}
 	if m.threadInput.Value() != "looks good, but verify the padding" {
 		t.Fatalf("a failed send should not have cleared the input: %q", m.threadInput.Value())

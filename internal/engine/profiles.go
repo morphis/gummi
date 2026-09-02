@@ -74,6 +74,23 @@ func (e *Engine) resolveBoardRole(profileName string) (config.RoleConfig, string
 	return config.RoleConfig{}, ""
 }
 
+// resolveConsultRole picks a consult session's model and backend as one
+// decision, exactly the reasoning resolveBoardRole's own doc comment
+// gives for RoleBoard: no profile declares RoleConsult (it did not exist
+// when profiles.yaml was written), so the fallback — the architect's role,
+// the closest analogue for reasoning about a card's work rather than
+// editing it — is the normal path here, not the edge. Failing that,
+// nothing at all: an empty model lets the card's own profile-resolved
+// backend pick whatever it normally would.
+func (e *Engine) resolveConsultRole(profileName string) (config.RoleConfig, string) {
+	for _, role := range []agent.Role{agent.RoleConsult, agent.RoleArchitect} {
+		if rc, ok := e.lookupRole(profileName, role); ok {
+			return rc, rc.Backend
+		}
+	}
+	return config.RoleConfig{}, ""
+}
+
 // agentFor returns the Agent for the given backend name. An empty name,
 // or an unknown backend, resolves to the engine's default agent (the
 // entry stored under the "" key in cfg.Agents). Returns nil when the

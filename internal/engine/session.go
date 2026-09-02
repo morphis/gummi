@@ -354,6 +354,31 @@ func (s *Session) State() SessionState {
 	return s.state
 }
 
+// Live reports whether this session has a backend genuinely attached and
+// answering — the single predicate the thread composer uses to decide
+// whether a plain line steers this session or is instead answered by the
+// card's consult session. State alone is not enough: a session restored
+// after a restart reports StateInteractive with no agent handle yet. A
+// stale agent handle alone is not enough either: Pause leaves agentSess
+// non-nil after closing the backend (stop closes the agent but never nils
+// the field). Both together are what a genuinely steerable session needs,
+// and checking both here — rather than at each call site — is what lets
+// every non-live row in the Problem table (not-yet-attached, paused,
+// restored, never-started, done) collapse onto one rule instead of being
+// enumerated. A nil receiver (no session at all) reports false, so a
+// caller can ask sessionFor(id).Live() without a separate nil check.
+func (s *Session) Live() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateRunning && s.state != StateInteractive {
+		return false
+	}
+	return s.agentSess != nil
+}
+
 func (s *Session) setState(st SessionState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
