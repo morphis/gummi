@@ -73,6 +73,12 @@ type noticeMsg struct {
 	text   string
 	isErr  bool
 	reload bool
+	// id names the feature an error notice is about, so clearTransientNotice
+	// can scope its keep-on-error exemption to "still on that feature's
+	// surface" instead of keeping it for the rest of the process. Only
+	// meaningful when isErr is set; a non-error notice is always transient
+	// regardless of id.
+	id domain.FeatureID
 	// clearInbox, when non-empty, names a feature whose needs-attention
 	// entry is removed on receipt of this notice — the outcome-driven
 	// counterpart to pre-dispatch removal (see the key handler). It is

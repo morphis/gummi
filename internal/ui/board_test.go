@@ -695,19 +695,72 @@ func TestLongErrorNoticeUsesBand(t *testing.T) {
 	}
 }
 
-// TestClearTransientNoticeOnViewChange: a routine status notice clears
-// when the user opens another surface; an error notice is kept.
-func TestClearTransientNoticeOnViewChange(t *testing.T) {
+// TestBG038ClearTransientNoticeScopesErrorToFeature: a routine status
+// notice clears when the user opens another surface; an error notice
+// stamped with the selected feature's id is kept while that feature stays
+// selected, but has no standing once the selection moves elsewhere. Before
+// the fix, clearTransientNotice exempted every error unconditionally, so an
+// error raised about one card rode forward across every later view change,
+// including onto an unrelated card's surface.
+func TestBG038ClearTransientNoticeScopesErrorToFeature(t *testing.T) {
 	m := populatedShell(120, 34)
 	m.notice = noticeMsg{text: "critiquing"}
 	m.clearTransientNotice()
 	if m.notice.text != "" {
 		t.Errorf("transient status not cleared: %q", m.notice.text)
 	}
-	m.notice = noticeMsg{text: "merge failed", isErr: true}
+	selected := m.rows[m.sel].F.ID
+	m.notice = noticeMsg{text: "merge failed", isErr: true, id: selected}
 	m.clearTransientNotice()
 	if m.notice.text == "" {
-		t.Error("an error notice must survive a view change")
+		t.Error("an error notice about the selected feature must survive a view change on that feature")
+	}
+	m.sel = 0
+	if m.rows[m.sel].F.ID == selected {
+		t.Fatalf("test fixture assumption broken: row 0 is still %s", selected)
+	}
+	m.clearTransientNotice()
+	if m.notice.text != "" {
+		t.Errorf("error notice about %s must not survive moving selection to %s, got %q", selected, m.rows[0].F.ID, m.notice.text)
+	}
+}
+
+// TestBG038QueuedNoticeNotLeftBehind: dispatching a run must not leave a
+// free-text "queued" notice on the status bar — the ◔ queued / ⬤ running
+// pills already say it live from engine state, so a stale copy of the same
+// fact can't survive the run leaving the queue the way the free text did.
+// The fake agent settles instantly, so by the time the engine's events are
+// drained the session has reached done, not merely running — the notice
+// must already be clear well before that.
+func TestBG038QueuedNoticeNotLeftBehind(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("setup: want FD-001 at implement, got %s", m.rows[0].F.Stage)
+	}
+
+	m = openAndAttach(t, m) // opens the card, then answers its pinned decision: start the run
+	if strings.Contains(m.notice.text, "queued") {
+		t.Errorf("BUG BG-038(2): notice %q still names the queue right after dispatch", m.notice.text)
+	}
+
+	m = drainEngineLoop(t, m)
+	if s := eng.Get("FD-001"); s == nil || s.State() != engine.StateDone {
+		t.Fatalf("setup: want FD-001 done, got %+v", s)
+	}
+	if strings.Contains(m.notice.text, "queued") {
+		t.Errorf("BUG BG-038(2): notice still says %q while the session state is done (left Queued)", m.notice.text)
 	}
 }
 

@@ -992,7 +992,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// openDecision's pinned question into the failure kind, and
 			// nothing else feeds that.
 			if !m.threadShowsFailure(ev.Feature) {
-				m.notice = noticeMsg{text: text, isErr: true}
+				m.notice = noticeMsg{text: text, isErr: true, id: ev.Feature}
 			}
 			// a one-shot pass not bound to a feature (ingest) has no card
 			// to queue behind; the notice alone carries it
@@ -1007,7 +1007,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// not re-grant budget on resume (the next entry rehydrates the
 		// persisted, nonzero value).
 		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindPlan); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
 			m.setRound(ev.Feature, domain.RoundKindPlan, 0)
@@ -1015,7 +1015,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// same write-through for the review-loop counter: a failed write
 		// must not lose the burned rounds recorded in the store.
 		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindReview); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
+			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
 			m.setRound(ev.Feature, domain.RoundKindReview, 0)
@@ -1028,7 +1028,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
 		} else {
 			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up or x park")
-			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true}
+			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
 		}
 	case engine.EventQuestion:
 		// A card whose stored mode answers its own questions (§10.17: full
@@ -1078,7 +1078,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// top-up path, so it shares the failure attention lane.
 		text := "wrote to main checkout — " + strings.Join(ev.DirtyPaths, ", ") + " (resolve then re-run)"
 		m.raiseAttention(ev.Feature, attnFailure, text)
-		m.notice = noticeMsg{text: text, isErr: true}
+		m.notice = noticeMsg{text: text, isErr: true, id: ev.Feature}
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
 		if s == nil || s.Interactive || s.State() != engine.StateDone {
@@ -2331,6 +2331,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		m.notice = noticeMsg{
 			text:  fmt.Sprintf("%s is being driven by pid %d — read-only here (enter watches it)", r.F.ID, r.Foreign.PID),
 			isErr: true,
+			id:    r.F.ID,
 		}
 		return nil
 	}
@@ -2596,12 +2597,19 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 
 // clearTransientNotice drops a routine status notice on a view change so
 // stale text (a lingering "critiquing", a "queued") doesn't follow the
-// user into an unrelated surface. Error notices are kept — they carry
-// something the user still needs to read (and long ones show in the band).
+// user into an unrelated surface. An error notice is kept only while the
+// selection still names the same feature it was raised about — it carries
+// something the user still needs to read on that surface, but has no
+// standing once the user has moved to an unrelated card. An error with no
+// feature stamped on it (id == "") is not scoped to any surface and is
+// cleared like any other transient notice.
 func (m *Shell) clearTransientNotice() {
-	if !m.notice.isErr {
-		m.notice = noticeMsg{}
+	if m.notice.isErr && m.notice.id != "" {
+		if r, ok := m.selected(); ok && r.F.ID == m.notice.id {
+			return
+		}
 	}
+	m.notice = noticeMsg{}
 }
 
 // selected returns the selected row, if any.
@@ -3014,7 +3022,9 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 			}
 			return nil
 		case engine.StateQueued:
-			m.notice = noticeMsg{text: string(f.ID) + " is queued"}
+			// the ◔ queued pill (runCounts) already says this, computed
+			// live from engine state every render — a free-text echo here
+			// would just be one more copy nothing retracts once it starts.
 			return nil
 		case engine.StateDone:
 			// A finished plan session resumes the loop at its position
@@ -3060,13 +3070,17 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	// so a slow agent launch can't freeze the TUI.
 	return func() tea.Msg {
 		if err := m.engine.RunWith(f, note); err != nil {
-			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
+			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true, id: f.ID}
 		}
-		text := string(f.ID) + " queued"
+		// no bare "queued" text: the ◔ queued / ⬤ running pills
+		// (runCounts) already say it, computed live from engine state on
+		// every render, so they can't go stale the way this free-text
+		// notice did once the run left the queue. A note riding the
+		// kickoff still gets its own line — nothing else says that.
 		if note != "" {
-			text += " — your line rides the kickoff"
+			return noticeMsg{text: string(f.ID) + " — your line rides the kickoff", clearInbox: f.ID}
 		}
-		return noticeMsg{text: text, clearInbox: f.ID}
+		return noticeMsg{clearInbox: f.ID}
 	}
 }
 
