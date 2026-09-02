@@ -1094,6 +1094,78 @@ func TestProbeCacheExpired(t *testing.T) {
 	}
 }
 
+// A plain second TUI — no GUMMI_MCP_SOCK in its environment — still gets
+// told to close the other TUI. This is the pre-fix behavior and must not
+// regress.
+func TestLockCheckSecondTUI(t *testing.T) {
+	t.Setenv("GUMMI_MCP_SOCK", "")
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir}
+
+	release, err := state.AcquireLock(ws.LockFile())
+	if err != nil {
+		t.Fatalf("AcquireLock: %v", err)
+	}
+	defer release()
+
+	c := lockCheck(ws)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "another TUI holds it") {
+		t.Fatalf("lockCheck = %+v, want the second-TUI warning", c)
+	}
+	if !strings.Contains(c.Remediation, "close the other TUI") {
+		t.Fatalf("lockCheck remediation = %q, want it to name closing the other TUI", c.Remediation)
+	}
+}
+
+// The regression this bug is about: a caller whose GUMMI_MCP_SOCK points
+// inside this workspace's own StateDir()/mcp/ is the agent tab's hosted
+// CLI, a descendant of the very TUI holding the lock. It must not be told
+// to close its own host.
+func TestLockCheckHostedAgentOwnWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir}
+
+	release, err := state.AcquireLock(ws.LockFile())
+	if err != nil {
+		t.Fatalf("AcquireLock: %v", err)
+	}
+	defer release()
+
+	sock := filepath.Join(ws.StateDir(), "mcp", "ws-12345-abcd.sock")
+	t.Setenv("GUMMI_MCP_SOCK", sock)
+
+	c := lockCheck(ws)
+	if c.Status != statusOK {
+		t.Fatalf("lockCheck = %+v, want ok for the hosted-agent case", c)
+	}
+	if strings.Contains(c.Remediation, "close") {
+		t.Fatalf("lockCheck remediation = %q, must not tell the hosted agent to close anything", c.Remediation)
+	}
+}
+
+// A GUMMI_MCP_SOCK pointing into a *different* workspace's mcp dir names a
+// real second board relative to ws — it must still get the close-the-
+// other-TUI remediation, not the hosted-agent pass.
+func TestLockCheckHostedAgentOtherWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir}
+	other := state.Workspace{Root: t.TempDir()}
+
+	release, err := state.AcquireLock(ws.LockFile())
+	if err != nil {
+		t.Fatalf("AcquireLock: %v", err)
+	}
+	defer release()
+
+	sock := filepath.Join(other.StateDir(), "mcp", "ws-12345-abcd.sock")
+	t.Setenv("GUMMI_MCP_SOCK", sock)
+
+	c := lockCheck(ws)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "another TUI holds it") {
+		t.Fatalf("lockCheck = %+v, want the second-TUI warning for a foreign workspace socket", c)
+	}
+}
+
 // The default (non-deep) doctor reports every reach:* as unknown ("not
 // probed"), stays ready, and never creates the probe-cache sidecar — the
 // offline invariant.

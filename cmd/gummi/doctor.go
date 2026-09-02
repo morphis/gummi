@@ -510,10 +510,24 @@ func envelopeCheck() doctorCheck {
 // immediately — reporting "busy" when another TUI holds it, so a caller
 // learns a second board would refuse before opening one. Headless drives
 // hold per-card locks (not this one), so a live run does not show up here.
+//
+// A locked workspace has two very different callers, though: a genuinely
+// separate second TUI, and the agent tab's hosted CLI — a descendant of
+// the very TUI holding the lock, whose entire purpose is to drive it. The
+// two report ErrLocked identically, so hostedInThisWorkspace tells them
+// apart via GUMMI_MCP_SOCK (see its doc comment) rather than telling a
+// hosted agent to close its own host.
 func lockCheck(ws state.Workspace) doctorCheck {
 	release, err := state.AcquireLock(ws.LockFile())
 	switch {
 	case errors.Is(err, state.ErrLocked):
+		if hostedInThisWorkspace(ws) {
+			return doctorCheck{
+				Name: "lock", Status: statusOK,
+				Detail:      "running inside this board's hosted agent — the lock is held by your own host",
+				Remediation: "drive it with the workspace MCP tools instead of a second gummi process; status/spec/diff/watch/doctor take no lock and stay available either way",
+			}
+		}
 		return doctorCheck{
 			Name: "lock", Status: statusWarn, Detail: "workspace busy — another TUI holds it",
 			Remediation: "close the other TUI before opening the board",
@@ -524,6 +538,31 @@ func lockCheck(ws state.Workspace) doctorCheck {
 		release()
 		return doctorCheck{Name: "lock", Status: statusOK, Detail: "workspace is free"}
 	}
+}
+
+// hostedInThisWorkspace reports whether the calling process is the agent
+// tab's hosted CLI for ws's own TUI. ensureAgent injects GUMMI_MCP_SOCK
+// into every hosted agent's environment, and that path always lives under
+// this workspace's own StateDir()/mcp/ (workspaceMCPSockPath, bound by the
+// TUI process itself). Env vars are inherited at fork, not derived from a
+// live ppid chain, so this signal survives reparenting or double-forking
+// in a way a ppid walk would not.
+//
+// A GUMMI_MCP_SOCK pointing outside this workspace's state dir names a
+// hosted agent for a *different* board — that case must still fall
+// through to the "close the other TUI" remediation, since it names a real
+// second board relative to ws.
+func hostedInThisWorkspace(ws state.Workspace) bool {
+	sock := strings.TrimSpace(os.Getenv("GUMMI_MCP_SOCK"))
+	if sock == "" {
+		return false
+	}
+	mcpDir := filepath.Clean(filepath.Join(ws.StateDir(), "mcp"))
+	rel, err := filepath.Rel(mcpDir, filepath.Clean(sock))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // backendInfo describes the selected agent backend without starting it — the
