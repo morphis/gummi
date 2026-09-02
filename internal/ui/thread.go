@@ -1293,7 +1293,13 @@ func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool
 	if line == "" {
 		return nil
 	}
-	lines := []string{line}
+	// EventMessage's arm above returns several newline-joined rows (a
+	// label row plus one per wrapped body line); splitting here, rather
+	// than forwarding it as one slice element, is what lets the caller's
+	// per-event indent (thread.go's stretchRender) land on every row
+	// instead of only the first. Every other kind renders a single line
+	// with no embedded newline, so this is a no-op for them.
+	lines := strings.Split(line, "\n")
 	if ev.Kind != state.EventTool || ev.Output == "" {
 		return lines
 	}
@@ -1374,8 +1380,21 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, answered map[str
 		case string(engine.AuthorSystem):
 			body = s.Subtle
 		}
-		return s.Faint.Render(messageAuthorLabel(p.Author)+" ") +
-			body.Render(ansi.Truncate(sanitize(p.Content), max(w-6, 8), "…"))
+		// Full match to live (transcriptLines, transcript.go): the label
+		// gets its own row and every wrapped line of the body is
+		// indented under it, newline-joined so stageEventLines can split
+		// it back into rows the caller indents individually. wrapText
+		// only breaks long lines into more rows — it never truncates —
+		// so a message that needs more rows than fit in one still shows
+		// every line instead of losing whatever crossed a single width
+		// budget.
+		rows := strings.Split(wrapText(sanitize(p.Content), max(w-6, 8)), "\n")
+		out := make([]string, 0, len(rows)+1)
+		out = append(out, s.Faint.Render(messageAuthorLabel(p.Author)))
+		for _, l := range rows {
+			out = append(out, "  "+body.Render(l))
+		}
+		return strings.Join(out, "\n")
 	case state.EventAsk:
 		var p state.AskPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
