@@ -356,7 +356,6 @@ func TestCardLineForeignRows(t *testing.T) {
 		t.Errorf("elsewhere-idle card line must not show a spinner: %q", idleLine)
 	}
 
-	m.frame = 3 // pin the spinner frame so the golden below is deterministic
 	golden.RequireEqual(t, []byte(m.cardLine(busy, 1, false, true, 80)+"\n"+m.cardLine(idle, 2, false, true, 80)))
 }
 
