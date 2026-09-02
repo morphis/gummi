@@ -37,6 +37,12 @@ type Status struct {
 	// stopped file is history: its owner may still be alive (a board that
 	// finished a stage), but nothing further will arrive.
 	Stopped bool
+	// Busy is true iff the last busy signal seen in the scanned tail was
+	// true and no stopped record followed it. It defaults false when the
+	// tail holds no busy record at all — a parked, un-stopped session
+	// must read as not-busy, never busy, or a follower would spin
+	// forever on silence. Never true when Stopped is true.
+	Busy bool
 }
 
 // Stat summarizes the live file at path without following it. It returns
@@ -72,37 +78,44 @@ func Stat(path string) (Status, error) {
 	st.PID, st.Feature, st.Stage = hdr.PID, hdr.Feature, hdr.Stage
 	st.Role, st.Agent, st.Model, st.Started = hdr.Role, hdr.Agent, hdr.Model, hdr.Time
 
-	if last, ok := lastRecord(f, fi.Size()); ok {
+	if last, busy, ok := lastRecord(f, fi.Size()); ok {
 		st.Stopped = last.Kind == KindStopped
+		st.Busy = busy
 	}
 	return st, nil
 }
 
 // lastRecord returns the final complete record in f, reading only the
-// file's tail. A seek lands mid-line, so everything before the first
-// newline is discarded — the rest are whole records, and the last one
-// wins.
-func lastRecord(f *os.File, size int64) (Record, bool) {
+// file's tail, along with the busy state folded across every record it
+// passes on the way there. A seek lands mid-line, so everything before
+// the first newline is discarded — the rest are whole records, and the
+// last one wins.
+//
+// busy is order-sensitive, not just "last busy-kind record seen": a
+// KindBusy record sets it to that record's own flag, a KindStopped
+// record forces it false regardless of what came before, and every
+// other kind leaves it untouched. So a later stopped record dominates
+// an earlier busy one, and a tail with no busy record at all leaves
+// busy at its zero value, false — never a positive default for silence.
+func lastRecord(f *os.File, size int64) (rec Record, busy bool, found bool) {
 	start := size - tailBytes
 	if start < 0 {
 		start = 0
 	}
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return Record{}, false
+		return Record{}, false, false
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return Record{}, false
+		return Record{}, false, false
 	}
 	if start > 0 {
 		if i := bytes.IndexByte(data, '\n'); i >= 0 {
 			data = data[i+1:]
 		} else {
-			return Record{}, false // one record spans the whole tail
+			return Record{}, false, false // one record spans the whole tail
 		}
 	}
-	var last Record
-	found := false
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -112,7 +125,13 @@ func lastRecord(f *os.File, size int64) (Record, bool) {
 		if err := json.Unmarshal(line, &r); err != nil {
 			continue
 		}
-		last, found = r, true
+		rec, found = r, true
+		switch r.Kind {
+		case KindBusy:
+			busy = r.Busy
+		case KindStopped:
+			busy = false
+		}
 	}
-	return last, found
+	return rec, busy, found
 }

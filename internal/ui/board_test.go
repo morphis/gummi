@@ -211,6 +211,52 @@ func TestCardLineBaselineBusyWithNoSession(t *testing.T) {
 	}
 }
 
+// TestCardLineForeignRows goldens the two foreign-driven card states this
+// feature adds: a foreign-busy row (elsewhere badge + spinner + the
+// fixed "running" word) and elsewhere-idle (elsewhere badge + a plain,
+// still stage glyph — owned by another process but not currently
+// moving). Pinning both keeps elsewhere-idle from later being mistaken
+// for a missing or broken marker: it renders identically to a card that
+// never spun, which is correct, but is a distinct case worth keeping a
+// test on.
+func TestCardLineForeignRows(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	busy := row(4, "foreign busy card", domain.StageImplement, "", false)
+	busy.DrivenAbroad = true
+	busy.Foreign = state.ForeignDrive{Busy: true}
+	idle := row(5, "foreign idle card", domain.StageImplement, "", false)
+	idle.DrivenAbroad = true
+	idle.Foreign = state.ForeignDrive{Busy: false}
+
+	busyLine := m.cardLine(busy, 1, false, true, 80)
+	if !strings.Contains(busyLine, "◉ elsewhere") {
+		t.Errorf("foreign-busy card line missing the elsewhere badge: %q", busyLine)
+	}
+	if !strings.Contains(busyLine, "running") {
+		t.Errorf("foreign-busy card line missing the running word: %q", busyLine)
+	}
+	if !strings.Contains(busyLine, m.spinner()) {
+		t.Errorf("foreign-busy card line missing the spinner frame: %q", busyLine)
+	}
+
+	idleLine := m.cardLine(idle, 2, false, true, 80)
+	if !strings.Contains(idleLine, "◉ elsewhere") {
+		t.Errorf("elsewhere-idle card line missing the elsewhere badge: %q", idleLine)
+	}
+	if !strings.Contains(idleLine, stageGlyph(idle.F.Stage)) {
+		t.Errorf("elsewhere-idle card line dropped the still stage glyph: %q", idleLine)
+	}
+	if strings.Contains(idleLine, "running") {
+		t.Errorf("elsewhere-idle card line must not show a busy word: %q", idleLine)
+	}
+	if strings.Contains(idleLine, m.spinner()) {
+		t.Errorf("elsewhere-idle card line must not show a spinner: %q", idleLine)
+	}
+
+	m.frame = 3 // pin the spinner frame so the golden below is deterministic
+	golden.RequireEqual(t, []byte(m.cardLine(busy, 1, false, true, 80)+"\n"+m.cardLine(idle, 2, false, true, 80)))
+}
+
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
 	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })

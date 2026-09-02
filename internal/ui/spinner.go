@@ -45,6 +45,15 @@ func (m *Shell) spinnerActive() bool {
 	if m.board != nil && m.board.Snapshot().Busy {
 		return true
 	}
+	// a foreign-driven card's busy state lives only in its row snapshot —
+	// unlike the local sources above, no live engine session covers
+	// another process's session, so this is the one place that state can
+	// be read from.
+	for _, r := range m.rows {
+		if r.DrivenAbroad && r.Foreign.Busy {
+			return true
+		}
+	}
 	if m.engine == nil {
 		return false
 	}

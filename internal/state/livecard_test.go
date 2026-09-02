@@ -80,3 +80,61 @@ func TestForeignDriver_StoppedPastGrace(t *testing.T) {
 		t.Fatalf("ForeignDriver = (%+v, true), want ok=false: the session ended an hour ago, well past the stage-advance window", drive)
 	}
 }
+
+// TestForeignDriver_Busy pins FD-031: the tail scan's busy signal rides
+// straight through ForeignDriver, and a stopped drive never reports one
+// — a foreign row's busy marker must never fire past the point the drive
+// itself says it is done.
+func TestForeignDriver_Busy(t *testing.T) {
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir, RepoRoot: dir}
+
+	owner := exec.CommandContext(context.Background(), "sleep", "30")
+	if err := owner.Start(); err != nil {
+		t.Fatalf("start stand-in owner: %v", err)
+	}
+	defer owner.Process.Kill()
+
+	path := ws.LiveFile("FD-031")
+	w, err := livelog.Create(path, livelog.Record{
+		Feature: "FD-031", Stage: "implement", PID: owner.Process.Pid,
+	})
+	if err != nil {
+		t.Fatalf("create live file: %v", err)
+	}
+	w.Emit(livelog.Record{Kind: livelog.KindBusy, Busy: true})
+	w.Close()
+
+	drive, ok := state.ForeignDriver(ws, domain.FeatureID("FD-031"))
+	if !ok {
+		t.Fatalf("ForeignDriver = (%+v, false), want ok=true", drive)
+	}
+	if !drive.Busy {
+		t.Errorf("drive.Busy = false, want true: the live file's last record is a busy one")
+	}
+
+	w2, err := livelog.Create(path, livelog.Record{
+		Feature: "FD-031", Stage: "implement", PID: owner.Process.Pid,
+	})
+	if err != nil {
+		t.Fatalf("re-create live file: %v", err)
+	}
+	w2.Emit(livelog.Record{Kind: livelog.KindBusy, Busy: true})
+	w2.Emit(livelog.Record{Kind: livelog.KindStopped})
+	w2.Close()
+
+	// Still inside the stage-advance grace window: ForeignDriver reports
+	// the drive as live (the pid may be about to keep driving the card),
+	// but the terminal record must dominate the busy one that preceded it.
+	if drive, ok := state.ForeignDriver(ws, domain.FeatureID("FD-031")); !ok || drive.Busy {
+		t.Fatalf("ForeignDriver = (%+v, %v), want ok=true, Busy=false: the stopped record must dominate the busy one before it", drive, ok)
+	}
+
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("backdate live file: %v", err)
+	}
+	if drive, ok := state.ForeignDriver(ws, domain.FeatureID("FD-031")); ok {
+		t.Fatalf("ForeignDriver = (%+v, true), want ok=false: the session stopped well past the stage-advance window", drive)
+	}
+}

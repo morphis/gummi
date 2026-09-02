@@ -3,6 +3,8 @@ package ui
 import (
 	"testing"
 
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -82,5 +84,25 @@ func TestSpinnerActiveScribing(t *testing.T) {
 	delete(m.scribing, "FD-001")
 	if m.spinnerActive() {
 		t.Error("spinnerActive true after the scribe count settled")
+	}
+}
+
+// TestSpinnerActiveForeignRow: a foreign-driven, busy row is the one
+// source of activity spinnerActive can only read from m.rows — no local
+// engine session covers another process's session — so without its own
+// OR arm a board whose only busy thing is a foreign card would never
+// start the frame-advance loop at all.
+func TestSpinnerActiveForeignRow(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+	r := featureRow{F: domain.Feature{ID: "FD-001"}, DrivenAbroad: true, Foreign: state.ForeignDrive{Busy: true}}
+	m.rows = []featureRow{r}
+
+	if !m.spinnerActive() {
+		t.Error("spinnerActive false with a driven-abroad, busy row and no other activity")
+	}
+
+	m.rows[0].Foreign.Busy = false
+	if m.spinnerActive() {
+		t.Error("spinnerActive true for a driven-abroad row that is not busy")
 	}
 }

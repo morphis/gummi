@@ -93,7 +93,10 @@ func (m *Shell) planLoopLine(f domain.Feature) string {
 // pass in turn takes priority over a live session, and otherwise it
 // reuses runningLabel, the exact word thread.go's own spinner shows for
 // the same session, so a card's board-row word and its thread-detail
-// word can never disagree.
+// word can never disagree. A foreign-driven card has no local session to
+// read a leg out of — its live file's header carries no plan-loop detail
+// — so it always says "running", checked last since a row with a local
+// session, a baseline or a scribe pass never also reaches here.
 func (m *Shell) cardBusyWord(r featureRow) string {
 	if m.baselining[r.F.ID] {
 		return "checking"
@@ -103,6 +106,9 @@ func (m *Shell) cardBusyWord(r featureRow) string {
 	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {
 		return m.runningLabel(sess.Snapshot())
+	}
+	if r.DrivenAbroad && r.Foreign.Busy {
+		return "running"
 	}
 	return ""
 }

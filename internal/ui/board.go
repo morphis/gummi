@@ -28,12 +28,17 @@ func stageGlyph(s domain.Stage) string {
 
 // cardBusy reports whether a card has a real busy source: its
 // gummi-checks baseline is running, a one-shot scribe pass (check
-// discovery or the envelope estimate) is in flight, or its live engine
-// session is mid-turn. Busy() alone decides the session side, regardless
-// of scheduling state — a StateInteractive chat session mid-reply is just
-// as busy as a StateRunning autonomous one, matching thread.go's own
-// gate (snap.Busy, no state filter) so a card's board row and its own
-// thread view never disagree about whether it's working.
+// discovery or the envelope estimate) is in flight, its live engine
+// session is mid-turn, or another gummi process is driving it mid-turn.
+// Busy() alone decides the local-session side, regardless of scheduling
+// state — a StateInteractive chat session mid-reply is just as busy as a
+// StateRunning autonomous one, matching thread.go's own gate (snap.Busy,
+// no state filter) so a card's board row and its own thread view never
+// disagree about whether it's working.
+//
+// A row driven abroad is, by ForeignDriver's own pid exclusion, never
+// also backed by a local session, and baselining and scribing are local,
+// in-process actions.
 //
 // It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining,
 // m.scribing) — no other mutable state feeds it — so it renders
@@ -46,7 +51,7 @@ func (m *Shell) cardBusy(r featureRow) bool {
 		return true
 	}
 	sess := m.sessionFor(r.F.ID)
-	return sess != nil && sess.Busy()
+	return (sess != nil && sess.Busy()) || (r.DrivenAbroad && r.Foreign.Busy)
 }
 
 // scribeSettled decrements a card's in-flight scribe-pass count by one,

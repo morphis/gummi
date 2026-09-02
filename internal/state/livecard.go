@@ -27,6 +27,11 @@ type ForeignDrive struct {
 	// Updated is the live file's last write: a run that has gone quiet
 	// shows here before it shows anywhere else.
 	Updated time.Time
+	// Busy mirrors the live file's own busy signal — true iff the last
+	// busy record seen in the tail scan was true and no stopped record
+	// followed it. Only meaningful here at all, since a stopped drive
+	// never reaches this struct (ForeignDriver reports ok=false for it).
+	Busy bool
 }
 
 // stopGrace is how long a file's terminal record still counts as "mid
@@ -67,5 +72,6 @@ func ForeignDriver(ws Workspace, id domain.FeatureID) (ForeignDrive, bool) {
 		PID: st.PID, Stage: st.Stage, Role: st.Role,
 		Agent: st.Agent, Model: st.Model,
 		Since: st.Started, Updated: st.Updated,
+		Busy: st.Busy,
 	}, true
 }

@@ -346,6 +346,72 @@ func TestStatLongFile(t *testing.T) {
 	}
 }
 
+// TestStatBusy pins the tail-scan's busy fold: a later stopped record
+// dominates an earlier busy one, and the absence of any busy record in
+// the window must read as not-busy rather than a positive default —
+// the rule that keeps a headless drive parked at a gate from spinning
+// forever.
+func TestStatBusy(t *testing.T) {
+	cases := []struct {
+		name     string
+		records  []Record
+		wantBusy bool
+		wantStop bool
+	}{
+		{
+			name:     "busy record with nothing after",
+			records:  []Record{{Kind: KindBusy, Busy: true}},
+			wantBusy: true,
+		},
+		{
+			name:     "busy then stopped",
+			records:  []Record{{Kind: KindBusy, Busy: true}, {Kind: KindStopped}},
+			wantBusy: false,
+			wantStop: true,
+		},
+		{
+			name:     "stopped with no busy record ever written",
+			records:  []Record{{Kind: KindTool, Text: "read spec.md"}, {Kind: KindStopped}},
+			wantBusy: false,
+			wantStop: true,
+		},
+		{
+			name:     "no busy record in the window at all",
+			records:  []Record{{Kind: KindTool, Text: "read spec.md"}},
+			wantBusy: false,
+		},
+		{
+			name:     "busy false: turn ended, session still open",
+			records:  []Record{{Kind: KindBusy, Busy: true}, {Kind: KindBusy, Busy: false}},
+			wantBusy: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "FD-031.jsonl")
+			w, err := Create(path, Record{Feature: "FD-031", Stage: "implement"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			for _, r := range tc.records {
+				w.Emit(r)
+			}
+			w.Close()
+
+			st, err := Stat(path)
+			if err != nil {
+				t.Fatalf("Stat: %v", err)
+			}
+			if st.Busy != tc.wantBusy {
+				t.Errorf("Busy = %v, want %v", st.Busy, tc.wantBusy)
+			}
+			if st.Stopped != tc.wantStop {
+				t.Errorf("Stopped = %v, want %v", st.Stopped, tc.wantStop)
+			}
+		})
+	}
+}
+
 // next takes the follower's next record or fails the test on timeout.
 func next(t *testing.T, ch <-chan Record) Record {
 	t.Helper()
