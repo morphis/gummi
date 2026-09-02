@@ -331,6 +331,30 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"clean", "c", "clean up", "branch landed on main — remove the worktree and branch", true,
 			needsWT && r.Landed,
 		},
+		// no accelerator, same reasoning as duplicate/gate below: the
+		// board's lowercase letters are nearly exhausted, and linking is a
+		// rare, deliberate action the list and command menu reach without
+		// spending one. Only offered before a PR exists, on a card that
+		// could otherwise merge locally (m already refuses once linked).
+		{
+			"prlink", "", "link PR…", "link this card to a GitHub pull request", false,
+			needsWT && r.HasWorktree && !r.Landed && r.F.PullRequest.Empty(),
+		},
+		// unlinking destroys one row (PullRequestRef), not any diff
+		// annotations already pulled from it — so it is not danger:true;
+		// the confirm names what changes instead.
+		{
+			"prunlink", "", "unlink PR", "clear the linked PR — the card becomes locally landable again", false,
+			!r.F.PullRequest.Empty(),
+		},
+		// prpull is the point of the card: it rises out of the fold via
+		// nextActions' ranking (see nextsteps.go) in the states where
+		// pulling the review is the move, without spending a letter that
+		// has to be right forever.
+		{
+			"prpull", "", "pull PR review", "read the PR's review comments back onto the diff", false,
+			!r.F.PullRequest.Empty() && needsWT,
+		},
 		// no accelerator: y is "yes" in the confirm this very action raises,
 		// so binding it here made one letter mean two things one keystroke
 		// apart. The list and the command menu are how you reach it now.

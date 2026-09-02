@@ -166,6 +166,37 @@ func talkAction(in nextInput, who, why string) []nextAction {
 // the recommendation, at most three entries total. Empty means the
 // state speaks for itself (an agent mid-run, a done feature).
 func nextActions(in nextInput) []nextAction {
+	return appendPullReviewSuggestion(stageActions(in), in)
+}
+
+// appendPullReviewSuggestion adds the "pull PR review" nudge whenever the
+// card is linked and sitting in review or verify — the loop this feature
+// exists to keep on the board. It applies uniformly across every sub-state
+// of those two stages (mid-run, blocked, gated, failed) rather than only
+// the "everything finished cleanly" path, since pulling fresh PR comments
+// is a legitimate move throughout review and verify, not just at the end
+// of them. cardActionsFor promotes any action whose key nextActions ranks
+// (folded = false), so this is what lets prpull rise out of the fold
+// without spending an accelerator on it.
+//
+// It is deliberately exempt from stageActions' own four-suggestion cap
+// (TestNextActionsCapAndRanking): that cap bounds the base recommendation
+// table, and a linked PR is a per-card fact on top of it, not another
+// stage-derived option competing for the same four slots.
+func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
+	if in.pullRequest.Empty() {
+		return acts
+	}
+	if in.stage != domain.StageReview && in.stage != domain.StageVerify {
+		return acts
+	}
+	return append(acts, nextStep("prpull", "", "pull PR review", "read the PR's review comments back onto the diff"))
+}
+
+// stageActions is nextActions' own stage-by-stage derivation, factored out
+// so the PR-pull nudge above can post-process its result uniformly instead
+// of being threaded into every one of its early returns.
+func stageActions(in nextInput) []nextAction {
 	if in.landed {
 		a := nextStep("clean", "c", "clean up", "branch landed on main — remove the worktree and branch")
 		a.danger = true

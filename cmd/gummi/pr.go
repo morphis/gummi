@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
@@ -401,38 +400,14 @@ func runPRCommentsIngest(ctx context.Context, pe *prEnv, f *domain.Feature, thre
 		worktreeLines = strings.Split(strings.TrimRight(diff, "\n"), "\n")
 	}
 
-	existing, err := pe.store.ListDiffAnnotations(ctx, f.ID)
+	res, err := pr.Ingest(ctx, pe.store, f.ID, worktreeLines, threads)
 	if err != nil {
 		return err
-	}
-	seen := map[string]bool{}
-	for _, a := range existing {
-		if a.SourceRef != "" {
-			seen[a.SourceRef] = true
-		}
-	}
-
-	var written, alreadyExisting, orphaned int
-	now := time.Now()
-	for _, t := range threads {
-		if seen[t.Id] {
-			alreadyExisting++
-		} else {
-			written++
-			seen[t.Id] = true
-		}
-		ann := pr.AnnotationFor(f.ID, t, worktreeLines)
-		if ann.Anchor == "" {
-			orphaned++
-		}
-		if _, err := pe.store.AddDiffAnnotation(ctx, ann, now); err != nil {
-			return err
-		}
 	}
 
 	if jsonOut {
 		b, err := json.MarshalIndent(prIngestSummary{
-			Written: written, Existing: alreadyExisting, TopLevelSkipped: len(topLevel), Orphaned: orphaned,
+			Written: res.Written, Existing: res.AlreadyExisting, TopLevelSkipped: len(topLevel), Orphaned: res.Orphaned,
 		}, "", "  ")
 		if err != nil {
 			return err
@@ -440,6 +415,6 @@ func runPRCommentsIngest(ctx context.Context, pe *prEnv, f *domain.Feature, thre
 		fmt.Println(string(b))
 		return nil
 	}
-	fmt.Printf("wrote %d (existing %d, top-level %d, orphaned %d)\n", written, alreadyExisting, len(topLevel), orphaned)
+	fmt.Printf("wrote %d (existing %d, top-level %d, orphaned %d)\n", res.Written, res.AlreadyExisting, len(topLevel), res.Orphaned)
 	return nil
 }

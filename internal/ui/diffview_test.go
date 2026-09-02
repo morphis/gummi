@@ -426,3 +426,47 @@ func TestDiffApproveFromSurface(t *testing.T) {
 		t.Errorf("blocked notice = %q, want a diff blocking message", m2.notice.text)
 	}
 }
+
+// TestDiffAnnotationTagsPRSource proves the render path reads
+// DiffAnnotation.SourceRef (diffrender.go's annBlock): an annotation
+// ingested from a PR review thread carries a non-empty SourceRef and gets
+// a faint "PR" tag; one gummi's own reviewer or a person wrote locally
+// carries none and renders untagged.
+func TestDiffAnnotationTagsPRSource(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	local := domain.DiffAnnotation{Feature: "FD-001", File: "README.md", Anchor: "second line", Comment: "local note here"}
+	if _, err := m.store.AddDiffAnnotation(ctx, local, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	fromPR := domain.DiffAnnotation{
+		Feature: "FD-001", File: "README.md", Anchor: "second line",
+		SourceRef: "PRRT_kwDOAbc", Comment: "please add a test",
+	}
+	if _, err := m.store.AddDiffAnnotation(ctx, fromPR, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+
+	m = openDiffFor(t, m)
+	out := m.diff.render(m, 80, 40)
+
+	lines := strings.Split(out, "\n")
+	var localLine, prLine string
+	for _, l := range lines {
+		if strings.Contains(l, "local note here") {
+			localLine = l
+		}
+		if strings.Contains(l, "please add a test") {
+			prLine = l
+		}
+	}
+	if localLine == "" || prLine == "" {
+		t.Fatalf("both annotations should render:\n%s", out)
+	}
+	if strings.Contains(localLine, "PR") {
+		t.Errorf("locally authored annotation got a PR tag: %q", localLine)
+	}
+	if !strings.Contains(prLine, "PR") {
+		t.Errorf("PR-origin annotation missing its tag: %q", prLine)
+	}
+}

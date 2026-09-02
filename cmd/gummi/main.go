@@ -21,6 +21,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
+	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -166,6 +167,19 @@ func runBoard() error {
 		notifyMode = notify.ParseMode(v)
 	}
 	shell.SetNotifier(notify.New(notifyMode, os.Stderr))
+	// prlink/prpull need a real answer from GitHub, not the local
+	// approximation openReviewThreads' nil fallback uses for the
+	// warn-before-squash check — wire them to the same internal/pr
+	// functions cmd/gummi/pr.go's link/comments verbs already call.
+	shell.SetPRResolver(func(ctx context.Context, spec, repoDir, branch string) (domain.PullRequestRef, error) {
+		return pr.Resolve(ctx, pr.GHBinary(), spec, repoDir, branch)
+	})
+	shell.SetPRThreadFetcher(func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error) {
+		return pr.FetchReviewThreads(ctx, pr.GHBinary(), ref)
+	})
+	shell.SetPRSquashMergeChecker(func(ctx context.Context, repo string) (bool, error) {
+		return pr.RepoAllowsSquashMerge(ctx, pr.GHBinary(), repo)
+	})
 	// GUMMI_COPILOT_HINT=off hides the status-bar Copilot quota pill
 	// (on by default; it needs an authenticated gh CLI to show anything).
 	if strings.EqualFold(os.Getenv("GUMMI_COPILOT_HINT"), "off") {

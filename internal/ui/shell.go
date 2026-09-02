@@ -17,6 +17,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
+	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -315,6 +316,23 @@ type Shell struct {
 	// Tests stub it; nil uses the engine path.
 	openReviewThreads func(context.Context, domain.Feature) (int, string, error)
 
+	// resolvePR and fetchPRReviewThreads back prlink and prpull: a real gh
+	// call, unlike openReviewThreads' local-approximation default above —
+	// prlink/prpull need a real answer from GitHub or the feature does
+	// nothing new. Both are nil in a test scaffold and stubbed directly
+	// (squash_test.go's pattern for openReviewThreads); cmd/gummi/main.go
+	// wires them to pr.Resolve/pr.FetchReviewThreads alongside pr.GHBinary(),
+	// next to the other shell.Set* calls. resolvePR takes repoDir so gh can
+	// auto-detect owner/repo from the card's own configured repo, matching
+	// pr.Resolve's own contract.
+	resolvePR            func(ctx context.Context, spec, repoDir, branch string) (domain.PullRequestRef, error)
+	fetchPRReviewThreads func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error)
+	// prSquashMergeAllowed backs prlink's non-blocking squash-method
+	// caution (the same one `gummi pr link` prints). Best-effort like
+	// prepareMerge's own provenance warn: nil or a failing lookup just
+	// skips the caution, never blocks the link.
+	prSquashMergeAllowed func(ctx context.Context, repo string) (bool, error)
+
 	// shared activity spinner (spinner.go): frame is the current cycle
 	// position; spinning guards the single live tick loop; motionEnabled
 	// gates whether the clock is allowed to run at all.
@@ -478,6 +496,28 @@ func (m *Shell) envelopePrefill() int {
 
 // SetNotifier wires the needs-attention notification hook (bell/desktop).
 func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
+
+// SetPRResolver wires prlink's head-branch-resolution and submit path to a
+// real gh lookup. Without it (a test scaffold, or a shell nobody has wired
+// yet) prlink's probe and submit both report that linking is unavailable
+// rather than silently doing nothing.
+func (m *Shell) SetPRResolver(fn func(ctx context.Context, spec, repoDir, branch string) (domain.PullRequestRef, error)) {
+	m.resolvePR = fn
+}
+
+// SetPRThreadFetcher wires prpull's review-thread fetch to a real gh call.
+// Without it prpull reports that pulling is unavailable rather than
+// silently ingesting nothing.
+func (m *Shell) SetPRThreadFetcher(fn func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error)) {
+	m.fetchPRReviewThreads = fn
+}
+
+// SetPRSquashMergeChecker wires prlink's non-blocking squash-method
+// caution to a real gh lookup. Optional: nil leaves linking silent about
+// the repo's merge-method setting.
+func (m *Shell) SetPRSquashMergeChecker(fn func(ctx context.Context, repo string) (bool, error)) {
+	m.prSquashMergeAllowed = fn
+}
 
 // SetCopilotHint toggles the status-bar Copilot quota pill (on by
 // default; it hides itself anyway when gh or a quota is absent).
@@ -1336,6 +1376,19 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case squashOpenDialogMsg:
 		return m, m.openSquashDialog(msg.f)
+
+	case prLinkProbeMsg:
+		m.handlePRLinkProbe(msg)
+		return m, nil
+
+	case prPullDoneMsg:
+		m.notice = msg.notice
+		cmds := []tea.Cmd{m.loadRows}
+		if msg.newlyWritten {
+			// the comments just pulled land on screen, not merely counted.
+			cmds = append(cmds, m.openDiff(msg.f))
+		}
+		return m, tea.Batch(cmds...)
 
 	case commitDraftMsg:
 		// a late reply from a closed dialog (esc) or a stale pass (ctrl+r

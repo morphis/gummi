@@ -54,11 +54,11 @@ func TestCardActionsForOrdering(t *testing.T) {
 	// in there because attn is set: it is the surface the gate
 	// recommendation (keyed i) lands on.
 	want := "verify run bounce " +
-		"deps spec diff advance envelope gate ask inbox attach rebase merge duplicate delete"
+		"deps spec diff advance envelope gate ask inbox attach rebase merge prlink duplicate delete"
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
 	}
-	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps spec diff advance envelope gate ask inbox attach rebase merge duplicate delete" {
+	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps spec diff advance envelope gate ask inbox attach rebase merge prlink duplicate delete" {
 		t.Fatalf("unexpected folded tail: %q", gotFolded)
 	}
 }
@@ -523,5 +523,74 @@ func TestCardActionsForDoneStageExcludesAdvanceExceptResearch(t *testing.T) {
 	}
 	if !found {
 		t.Error("a done research card should still offer advance (decompose)")
+	}
+}
+
+// TestCardActionsForPRLinkUnlinkPullGating spans DrivenAbroad, Landed,
+// HasWorktree, and PullRequest.Empty() combinations, asserting the offered
+// set matches the Chosen approach table exactly: prlink only before a link
+// exists, on a card that could otherwise merge locally; prunlink and
+// prpull only once linked; and none of the three on a card another gummi
+// process is driving.
+func TestCardActionsForPRLinkUnlinkPullGating(t *testing.T) {
+	linked := domain.PullRequestRef{Repo: "o/r", Number: 1, URL: "https://github.com/o/r/pull/1"}
+
+	has := func(acts []cardAction, id string) bool {
+		for _, a := range acts {
+			if a.id == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	cases := []struct {
+		name                           string
+		landed, hasWT, linked, abroad  bool
+		wantLink, wantUnlink, wantPull bool
+	}{
+		{"unlinked, worktree, not landed: link only", false, true, false, false, true, false, false},
+		{"linked, worktree, not landed: unlink+pull, not link", false, true, true, false, false, true, true},
+		{"linked, landed: unlink+pull still offered (m is what refuses, not these)", true, true, true, false, false, true, true},
+		{"unlinked, landed: none — prlink needs !Landed", true, true, false, false, false, false, false},
+		{"unlinked, no worktree row: none — prlink also needs r.HasWorktree", false, false, false, false, false, false, false},
+		// prpull's own gate is `!Empty() && needsWT` — needsWT comes from
+		// workflow.NeedsWorktree(kind, stage), not r.HasWorktree (whether a
+		// worktree actually got created), so it stays offered here.
+		{"linked, no worktree row: unlink+pull — prpull doesn't gate on r.HasWorktree", false, false, true, false, false, true, true},
+		{"driven abroad, unlinked, worktree: none of the three", false, true, false, true, false, false, false},
+		{"driven abroad, linked, worktree: none of the three", false, true, true, true, false, false, false},
+	}
+	for _, c := range cases {
+		r := cardRow(domain.KindFeature, domain.StageImplement, c.landed, c.hasWT)
+		if c.linked {
+			r.F.PullRequest = linked
+		}
+		r.DrivenAbroad = c.abroad
+		in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, landed: c.landed, pullRequest: r.F.PullRequest}
+
+		acts := cardActionsFor(in, r)
+		if got := has(acts, "prlink"); got != c.wantLink {
+			t.Errorf("%s: prlink offered = %v, want %v (%s)", c.name, got, c.wantLink, idsOf(acts))
+		}
+		if got := has(acts, "prunlink"); got != c.wantUnlink {
+			t.Errorf("%s: prunlink offered = %v, want %v (%s)", c.name, got, c.wantUnlink, idsOf(acts))
+		}
+		if got := has(acts, "prpull"); got != c.wantPull {
+			t.Errorf("%s: prpull offered = %v, want %v (%s)", c.name, got, c.wantPull, idsOf(acts))
+		}
+	}
+}
+
+// TestCardActionsForPRActionsExcludedFromForeignSafe proves the omission
+// from foreignSafeActions (not a special-cased id check) is what withholds
+// all three on a driven-abroad card — each writes to the card, so a card
+// another gummi process is driving withholds them like every other write
+// verb.
+func TestCardActionsForPRActionsExcludedFromForeignSafe(t *testing.T) {
+	for _, id := range []string{"prlink", "prunlink", "prpull"} {
+		if foreignSafeActions[id] {
+			t.Errorf("%q must not be in foreignSafeActions — it writes to the card", id)
+		}
 	}
 }

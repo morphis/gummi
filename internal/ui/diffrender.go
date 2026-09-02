@@ -165,10 +165,17 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) stri
 	rows := make([]string, 0, len(segs))
 	for j, seg := range segs {
 		lead := prefix + "  "
+		content := style.Render(seg)
 		if j == 0 {
 			lead = prefix + mark + " "
+			if a.SourceRef != "" {
+				// a non-empty SourceRef is the GitHub thread id pr.AnnotationFor
+				// stamps on an ingested comment — tag it so it reads as
+				// "someone on GitHub said this", not "the reviewer agent did".
+				content = s.Faint.Render("PR") + " " + content
+			}
 		}
-		rows = append(rows, lead+style.Render(seg))
+		rows = append(rows, lead+content)
 	}
 	return strings.Join(rows, "\n")
 }

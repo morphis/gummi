@@ -238,6 +238,22 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.openAutopilot(r.F)
 		}
+	case "prlink":
+		if r, ok := m.selected(); ok {
+			return m.openPRLinkDialog(r.F)
+		}
+	case "prunlink":
+		if r, ok := m.selected(); ok {
+			return m.confirmPRUnlink(r.F)
+		}
+	case "prpull":
+		if r, ok := m.selected(); ok {
+			if r.F.PullRequest.Empty() {
+				m.notice = noticeMsg{text: string(r.F.ID) + " has no linked PR", isErr: true}
+				return nil
+			}
+			return m.pullPRReview(r.F)
+		}
 	}
 	return nil
 }

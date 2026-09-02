@@ -57,7 +57,7 @@ func TestNextActionsByState(t *testing.T) {
 		{"verify gate with open comments resolves", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, openDiffComments: 1}, "d b"},
 		{"cleared inbox still reads as finished", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StateDone}, "g d b"},
 		{"bug verify bounces to fix", nextInput{stage: domain.StageVerify, kind: bug, attn: attnGate}, "g d b"},
-		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g d b"},
+		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g d b "},
 	}
 	for _, c := range cases {
 		if got := keysOf(nextActions(c.in)); got != c.want {
@@ -175,5 +175,71 @@ func TestNextCardDropsTheChatActionWhenTheChatIsLive(t *testing.T) {
 		if !found {
 			t.Errorf("%s with no session offers no way to start one", stage)
 		}
+	}
+}
+
+// idsOf flattens a suggestion list to its id sequence, mirroring
+// cardactions_test.go's idsOf for []cardAction.
+func nextActionIDs(acts []nextAction) string {
+	ids := make([]string, len(acts))
+	for i, a := range acts {
+		ids[i] = a.id
+	}
+	return strings.Join(ids, " ")
+}
+
+// TestNextActionsRanksPullReview covers the "pull PR review" nudge
+// (nextsteps.go's appendPullReviewSuggestion): it appears in review and
+// verify once the card is linked, in no other stage, and never on an
+// unlinked card — matching cardActionsFor's rank map, which is what lifts
+// prpull out of the fold onto the screen.
+func TestNextActionsRanksPullReview(t *testing.T) {
+	linked := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
+
+	for _, stage := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+		acts := nextActions(nextInput{stage: stage, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
+		if !strings.Contains(nextActionIDs(acts), "prpull") {
+			t.Errorf("%s linked: ids = %q, want prpull ranked", stage, nextActionIDs(acts))
+		}
+	}
+
+	// unlinked: never ranked, in either stage.
+	for _, stage := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+		acts := nextActions(nextInput{stage: stage, kind: domain.KindFeature, attn: attnGate})
+		if strings.Contains(nextActionIDs(acts), "prpull") {
+			t.Errorf("%s unlinked: ids = %q, want no prpull", stage, nextActionIDs(acts))
+		}
+	}
+
+	// linked but outside review/verify: still not ranked — the loop this
+	// nudges toward only exists once there is something to review.
+	acts := nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
+	if strings.Contains(nextActionIDs(acts), "prpull") {
+		t.Errorf("implement linked: ids = %q, want no prpull outside review/verify", nextActionIDs(acts))
+	}
+}
+
+// TestCardActionsForPromotesPullReview proves the id lands where the board
+// actually shows it: cardActionsFor promotes any ranked id out of the
+// fold, so a linked card in review shows "pull PR review" on screen rather
+// than one keystroke away.
+func TestCardActionsForPromotesPullReview(t *testing.T) {
+	linked := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
+	in := nextInput{stage: domain.StageReview, kind: domain.KindFeature, attn: attnGate, escalated: true, pullRequest: linked}
+	r := cardRow(domain.KindFeature, domain.StageReview, false, true)
+	r.F.PullRequest = linked
+
+	acts := cardActionsFor(in, r)
+	var found *cardAction
+	for i := range acts {
+		if acts[i].id == "prpull" {
+			found = &acts[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("prpull missing from %v", idsOf(acts))
+	}
+	if found.folded {
+		t.Error("prpull should be promoted (unfolded) once nextActions ranks it")
 	}
 }
