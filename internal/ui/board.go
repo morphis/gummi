@@ -81,48 +81,6 @@ func (m *Shell) needsAttention(r featureRow) (icon string, ok bool) {
 	return attnIcon(m.styles, it.Kind), true
 }
 
-// boardView renders the kanban column: features grouped by super-state
-// with stage-colored glyphs, IDs, titles, and profile tags.
-//
-// focused says whether the column owns the arrow keys right now. The
-// board never loses its selection — moving into the card's action list
-// or opening the spec leaves the card selected — so without this the
-// column looked exactly as live as it does when j/k actually move it.
-// Focused, the selected card wears the bright band and the group headers
-// take the accent; unfocused, both go quiet.
-func (m *Shell) boardView(w int, focused bool) string {
-	s := m.styles
-	paneTitle := s.PaneTitle
-	if focused {
-		paneTitle = s.PaneTitleActive
-	}
-	if len(m.rows) == 0 {
-		var b strings.Builder
-		b.WriteString("\n " + paneTitle.Render("BOARD") + "\n\n")
-		b.WriteString(" " + s.Faint.Render("nothing on the board yet") + "\n")
-		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" new feature · ") + s.KeyHint.Render("B") + s.Muted.Render(" new bug · ") + s.KeyHint.Render("R") + s.Muted.Render(" new research") + "\n")
-		return b.String()
-	}
-
-	// Render from displayOrder so the printed 1..9 shortcuts are, by
-	// construction, the indices jumpSel selects.
-	var b strings.Builder
-	b.WriteString("\n")
-	var lastSuper domain.SuperState
-	for shortcut, i := range m.displayOrder(m.sortMode) {
-		r := m.rows[i]
-		if super := r.F.Stage.SuperState(); shortcut == 0 || super != lastSuper {
-			if shortcut > 0 {
-				b.WriteString("\n")
-			}
-			b.WriteString(" " + paneTitle.Render(strings.ToUpper(string(super))) + "\n")
-			lastSuper = super
-		}
-		b.WriteString(m.cardLine(r, shortcut+1, i == m.sel, focused, w) + "\n")
-	}
-	return b.String()
-}
-
 // cardLine renders one feature card row, truncated to w. A selected row
 // is painted as a full-width band (theme.Band) rather than marked by the
 // ▸ alone: paneFocused picks the bright band or the quiet one.

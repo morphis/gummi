@@ -277,7 +277,7 @@ func (m *Shell) backlogView(w, h int) string {
 			line(" " + s.PaneTitleActive.Render(e.header))
 			continue
 		}
-		b.WriteString(m.cardLine(m.rows[e.row], e.shortcut, e.row == m.sel, true, w) + "\n")
+		b.WriteString(m.cardLine(m.rows[e.row], e.shortcut, e.row == m.sel, m.boardPaneFocused(), w) + "\n")
 	}
 	if scrolls {
 		line(scrollNote(s.Faint.Render, "↓", len(entries)-end))

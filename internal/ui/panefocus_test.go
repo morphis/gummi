@@ -37,7 +37,7 @@ func bandedRows(view, bg string) []string {
 func TestSelectedCardWearsFocusedBand(t *testing.T) {
 	m := populatedShell(120, 34)
 	s := m.styles
-	view := m.boardView(36, true)
+	view := m.backlogView(36, 34)
 
 	rows := bandedRows(view, bandBG(t, s, true))
 	if len(rows) != 1 {
@@ -57,19 +57,23 @@ func TestSelectedCardWearsFocusedBand(t *testing.T) {
 
 // TestBoardBandDimsWhenFocusMovesRight: both panes keep a selection, so
 // the band's strength — not its presence — is what says which one the
-// arrow keys are driving.
+// arrow keys are driving. Opening the spec surface is what moves focus
+// off the board (boardPaneFocused's own precedence), the same trigger
+// TestMainPaneSurfaceTakesFocusFromTheBoard exercises below.
 func TestBoardBandDimsWhenFocusMovesRight(t *testing.T) {
 	m := populatedShell(120, 34)
 	s := m.styles
 
-	unfocused := m.boardView(36, false)
+	m.spec = &specView{}
+	unfocused := m.backlogView(36, 34)
 	if got := len(bandedRows(unfocused, bandBG(t, s, true))); got != 0 {
 		t.Errorf("unfocused board painted %d focused bands, want 0", got)
 	}
 	if got := len(bandedRows(unfocused, bandBG(t, s, false))); got != 1 {
 		t.Errorf("unfocused board painted %d dim bands, want 1", got)
 	}
-	if m.boardView(36, true) == unfocused {
+	m.spec = nil
+	if m.backlogView(36, 34) == unfocused {
 		t.Error("the board renders identically focused and unfocused")
 	}
 }

@@ -483,7 +483,7 @@ func TestRS_R_CreatesResearchCard(t *testing.T) {
 
 func TestRS_EmptyBoard_HintR(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
-	out := m.boardView(80, true)
+	out := m.backlogView(80, 24)
 	if !strings.Contains(out, "new research") {
 		t.Errorf("empty-board hint does not mention research: %s", out)
 	}
