@@ -960,10 +960,29 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 	}
 	mark := eventMarker(s, "")
 	if seg.exited {
-		if seg.verdict == state.StatusFail {
-			mark = eventMarker(s, state.StatusFail)
-		} else {
-			mark = eventMarker(s, state.StatusOK)
+		switch seg.stage {
+		case domain.StageReview, domain.StageVerify:
+			// review/verify sessions carry a real pass/changes/fail/blocked
+			// verdict (internal/verdict); only a resolved "pass" earns ✓, and
+			// only "fail" earns ✗ — anything else (including "", the shape
+			// left behind by a session that exited without ever calling
+			// submit_verdict) stays the neutral · rather than defaulting to
+			// a pass that was never recorded.
+			switch seg.verdict {
+			case verdict.Pass.String():
+				mark = eventMarker(s, state.StatusOK)
+			case verdict.Fail.String():
+				mark = eventMarker(s, state.StatusFail)
+			}
+		default:
+			// every other stage never calls submit_verdict, so verdict=="" is
+			// its only possible value and isn't itself a negative signal —
+			// exited and not failed still reads ✓.
+			if seg.verdict == state.StatusFail {
+				mark = eventMarker(s, state.StatusFail)
+			} else {
+				mark = eventMarker(s, state.StatusOK)
+			}
 		}
 	}
 	ts := ""

@@ -359,6 +359,54 @@ func TestFoldedReceiptPerSessionSpendDiffers(t *testing.T) {
 	}
 }
 
+// TestFoldedReceiptVerdictMarker is BG-045: a review/verify stage that
+// exited without a resolved "pass" must not draw the same ✓ as one that
+// actually passed. verdict=="" is the shape left behind by a session that
+// exited before calling submit_verdict (FD-002's verify run); "changes"
+// and "blocked" are real non-pass outcomes from submit_verdict that the
+// old two-way switch (only special-cased "fail") swallowed into ✓ too.
+// Non-review/verify stages never carry a verdict at all and keep reading
+// ✓ on exit, since verdict=="" is their only possible value there.
+func TestFoldedReceiptVerdictMarker(t *testing.T) {
+	tests := []struct {
+		name    string
+		stage   domain.Stage
+		verdict string
+		want    string // "check", "cross", or "neutral"
+	}{
+		{"verify empty verdict is neutral, not a pass", domain.StageVerify, "", "neutral"},
+		{"review empty verdict is neutral, not a pass", domain.StageReview, "", "neutral"},
+		{"verify changes is neutral, not a pass", domain.StageVerify, "changes", "neutral"},
+		{"verify blocked is neutral, not a pass", domain.StageVerify, "blocked", "neutral"},
+		{"verify pass is a check", domain.StageVerify, "pass", "check"},
+		{"verify fail is a cross", domain.StageVerify, "fail", "cross"},
+		{"review pass is a check", domain.StageReview, "pass", "check"},
+		{"implement stage still checks on exit despite empty verdict", domain.StageImplement, "", "check"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seg := stageSegment{stage: tt.stage, role: "reviewer", exited: true, verdict: tt.verdict, credits: 18}
+			line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 80))
+			hasCheck := strings.Contains(line, "✓")
+			hasCross := strings.Contains(line, "✗")
+			switch tt.want {
+			case "check":
+				if !hasCheck {
+					t.Errorf("receipt %q: wanted a pass check, got none", line)
+				}
+			case "cross":
+				if !hasCross {
+					t.Errorf("receipt %q: wanted a fail cross, got none", line)
+				}
+			case "neutral":
+				if hasCheck || hasCross {
+					t.Errorf("receipt %q: wanted the neutral marker, got a resolved one", line)
+				}
+			}
+		})
+	}
+}
+
 // The composer owns the keyboard the moment a card opens, the way a
 // coding agent's does: you type your reply, you do not unlock a field
 // first — and it keeps the keyboard for as long as the page is open. The
