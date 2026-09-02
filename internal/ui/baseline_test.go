@@ -28,6 +28,9 @@ func TestApprovalRunsBaselineAndFlagsFailure(t *testing.T) {
 	if len(m.baselining) != 0 {
 		t.Errorf("baseline still marked in flight: %+v", m.baselining)
 	}
+	if len(m.scribing) != 0 {
+		t.Errorf("scribe passes still marked in flight: %+v", m.scribing)
+	}
 	if !m.notice.isErr {
 		t.Errorf("failing baseline did not raise an error notice: %+v", m.notice)
 	}

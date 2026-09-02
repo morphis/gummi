@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -37,6 +38,9 @@ func TestScribeEstimateBlendsAndPersists(t *testing.T) {
 	}
 	if !strings.Contains(m.notice.text, "scribe sized") {
 		t.Errorf("notice = %q, want a scribe refinement", m.notice.text)
+	}
+	if len(m.scribing) != 0 {
+		t.Errorf("scribing still marked in flight: %+v", m.scribing)
 	}
 }
 
@@ -91,5 +95,55 @@ func TestScribeEstimateNoEngineIsNoop(t *testing.T) {
 	m, _ := newWorkspace(t)
 	if cmd := m.scribeEstimate("FD-001"); cmd != nil {
 		t.Error("scribeEstimate without an engine should be a no-op")
+	}
+}
+
+// The plan calls out the decrement, not the increment, as the subtle
+// part: scribeEstimate's early-out branches used to return a bare nil
+// message, silently dropping the settle and leaving the card spinning
+// forever. Each of these drives one branch and asserts m.scribing comes
+// back empty.
+func TestScribeEstimateSettlesOnStoreLookupFailure(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	scribeEngine(t, m, "Sizeable.\nESTIMATE: 200")
+
+	m = pump(t, m, m.scribeEstimate("FD-999")) // no such feature in the store
+	if len(m.scribing) != 0 {
+		t.Errorf("scribing still marked in flight after a store lookup failure: %+v", m.scribing)
+	}
+}
+
+func TestScribeEstimateSettlesOnEngineError(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	eng := engine.New(engine.Config{
+		Agents: singleAgent(&agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+			return []agent.Event{{Kind: agent.EventError, Err: errors.New("boom")}}
+		}}),
+		Store: m.store, Pool: m.wt, Workspace: m.ws, MaxActive: 1,
+	})
+	t.Cleanup(func() { eng.Close() })
+	m.AttachEngine(eng)
+
+	m = pump(t, m, m.scribeEstimate("FD-001"))
+	if len(m.scribing) != 0 {
+		t.Errorf("scribing still marked in flight after an engine error: %+v", m.scribing)
+	}
+}
+
+func TestScribeEstimateSettlesOnUnchangedBlend(t *testing.T) {
+	// a scribe estimate that blends back to the same envelope already on
+	// the feature: the persist is skipped, but the count must still settle.
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	f.Budget.Envelope = 150
+	if err := m.store.UpdateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	scribeEngine(t, m, "Sizeable.\nESTIMATE: 150")
+
+	m = pump(t, m, m.scribeEstimate("FD-001"))
+	if len(m.scribing) != 0 {
+		t.Errorf("scribing still marked in flight after an unchanged blend: %+v", m.scribing)
 	}
 }

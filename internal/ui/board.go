@@ -27,22 +27,37 @@ func stageGlyph(s domain.Stage) string {
 }
 
 // cardBusy reports whether a card has a real busy source: its
-// gummi-checks baseline is running, or its live engine session is
-// mid-turn. Busy() alone decides the session side, regardless of
-// scheduling state — a StateInteractive chat session mid-reply is just
+// gummi-checks baseline is running, a one-shot scribe pass (check
+// discovery or the envelope estimate) is in flight, or its live engine
+// session is mid-turn. Busy() alone decides the session side, regardless
+// of scheduling state — a StateInteractive chat session mid-reply is just
 // as busy as a StateRunning autonomous one, matching thread.go's own
 // gate (snap.Busy, no state filter) so a card's board row and its own
 // thread view never disagree about whether it's working.
 //
-// It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining)
-// — no other mutable state feeds it — so it renders identically whenever
-// called twice within one frame.
+// It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining,
+// m.scribing) — no other mutable state feeds it — so it renders
+// identically whenever called twice within one frame.
 func (m *Shell) cardBusy(r featureRow) bool {
 	if m.baselining[r.F.ID] {
 		return true
 	}
+	if m.scribing[r.F.ID] > 0 {
+		return true
+	}
 	sess := m.sessionFor(r.F.ID)
 	return sess != nil && sess.Busy()
+}
+
+// scribeSettled decrements a card's in-flight scribe-pass count by one,
+// removing the entry entirely once it reaches zero so "in flight" stays
+// testable as key-presence (m.baselining's own idiom).
+func (m *Shell) scribeSettled(id domain.FeatureID) {
+	if m.scribing[id] <= 1 {
+		delete(m.scribing, id)
+		return
+	}
+	m.scribing[id]--
 }
 
 // boardView renders the kanban column: features grouped by super-state

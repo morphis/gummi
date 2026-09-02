@@ -44,6 +44,37 @@ func TestCardBusyBaselineWithNoSession(t *testing.T) {
 	}
 }
 
+// TestCardBusyScribing covers the count-based scribe-pass busy source:
+// a card with a discovery or estimate pass in flight (no session, no
+// baseline) reads busy with the "scribing" word, and a baseline in
+// flight alongside it still wins the word (more specific, foreground
+// blocking per cardBusyWord's own priority order).
+func TestCardBusyScribing(t *testing.T) {
+	m := loopShell()
+	r := featureRow{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}
+
+	m.scribing[r.F.ID] = 1
+	if !m.cardBusy(r) {
+		t.Error("cardBusy false while a scribe pass is running")
+	}
+	if word := m.cardBusyWord(r); word != "scribing" {
+		t.Errorf("cardBusyWord = %q, want \"scribing\"", word)
+	}
+
+	m.scribing[r.F.ID] = 2 // both passes in flight at once
+	if !m.cardBusy(r) {
+		t.Error("cardBusy false with both scribe passes in flight")
+	}
+	if word := m.cardBusyWord(r); word != "scribing" {
+		t.Errorf("cardBusyWord = %q, want \"scribing\" with both passes in flight", word)
+	}
+
+	m.baselining[r.F.ID] = true
+	if word := m.cardBusyWord(r); word != "checking" {
+		t.Errorf("cardBusyWord = %q, want baseline priority \"checking\" over a busy scribe pass", word)
+	}
+}
+
 func TestPlanLoopLegQuietWithoutActivity(t *testing.T) {
 	m := loopShell()
 	if _, _, ok := m.planLoopLeg("FD-001"); ok {

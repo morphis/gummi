@@ -257,7 +257,14 @@ type Shell struct {
 	inbox      *inbox // needs-attention queue
 	checks     map[domain.FeatureID][]verify.Result
 	baselining map[domain.FeatureID]bool // a baseline check run is in flight
-	rounds     map[roundKey]int          // automatic loop round counters, keyed by (id, round_kind)
+	// scribing counts the one-shot scribe passes (check discovery, envelope
+	// estimate) currently in flight against a card. A count, not a flag,
+	// because the shell dispatches both together and either can outlive the
+	// other. A settled card is removed from the map, not left at zero, so
+	// "in flight" is testable as key-presence — cardBusy/spinnerActive rely
+	// on that.
+	scribing map[domain.FeatureID]int
+	rounds   map[roundKey]int // automatic loop round counters, keyed by (id, round_kind)
 	// cardEvents caches the card-event log (state.CardEvent, card_events
 	// table) per feature, loaded lazily by loadCardEvents and applied to
 	// the selected row's featureRow.Events at render time (msgs.go). It is
@@ -343,6 +350,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		now:          time.Now,
 		checks:       map[domain.FeatureID][]verify.Result{},
 		baselining:   map[domain.FeatureID]bool{},
+		scribing:     map[domain.FeatureID]int{},
 		rounds:       map[roundKey]int{},
 		cardEvents:   map[domain.FeatureID][]state.CardEvent{},
 		threadDrafts: map[domain.FeatureID]string{},
@@ -1431,12 +1439,21 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case checksDiscoveredMsg:
 		// discovery settled (wrote a block, found one already there, or
 		// failed): baseline whatever block the artifact now carries.
+		m.scribeSettled(msg.id)
 		if msg.n > 0 {
 			m.notice = noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check(s) into the %s",
 				msg.id, msg.n, artifactNoun(msg.id.Kind()))}
 		}
 		m.baselining[msg.id] = true
 		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
+
+	case scribeEstimateDoneMsg:
+		m.scribeSettled(msg.id)
+		if msg.blended == 0 {
+			return m, nil
+		}
+		m.notice = noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", msg.id, msg.blended), reload: true}
+		return m, m.loadRows
 
 	case baselineDoneMsg:
 		delete(m.baselining, msg.id)

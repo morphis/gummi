@@ -619,6 +619,18 @@ type baselineDoneMsg struct {
 	err     error // malformed block or run/persist failure
 }
 
+// scribeEstimateDoneMsg follows the envelope-estimate pass, whether or
+// not it changed anything: the shell needs to hear back on every exit
+// path, not just the success one, so the card's in-flight scribe count
+// always settles. blended is the new envelope value on success, 0 on
+// every early-out (store lookup failure, engine error or non-positive
+// estimate, an unchanged blend, or a persist failure) — none of those
+// distinguish from each other, only from a real change.
+type scribeEstimateDoneMsg struct {
+	id      domain.FeatureID
+	blended int
+}
+
 // discoverChecks runs a one-shot scribe pass that surveys the fresh
 // worktree and records the repo's build/test/lint commands in the
 // artifact's Verification section as a gummi-checks block (skipped when
@@ -629,6 +641,7 @@ func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
+	m.scribing[id]++
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
@@ -671,15 +684,16 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
+	m.scribing[id]++
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
-			return nil
+			return scribeEstimateDoneMsg{id: id}
 		}
 		scribe, err := m.engine.Estimate(ctx, f)
 		if err != nil || scribe <= 0 {
-			return nil
+			return scribeEstimateDoneMsg{id: id}
 		}
 		blended := int(domain.BlendEstimate(float64(f.Budget.Envelope), scribe))
 		// a user-chosen GUMMI_ENVELOPE is a floor: the blend may raise it
@@ -688,13 +702,13 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 			blended = m.envelope
 		}
 		if blended == f.Budget.Envelope {
-			return nil
+			return scribeEstimateDoneMsg{id: id}
 		}
 		f.Budget.Envelope = blended
 		if err := m.store.UpdateFeature(ctx, &f); err != nil {
-			return nil
+			return scribeEstimateDoneMsg{id: id}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", id, blended), reload: true}
+		return scribeEstimateDoneMsg{id: id, blended: blended}
 	}
 }
 

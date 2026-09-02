@@ -88,14 +88,18 @@ func (m *Shell) planLoopLine(f domain.Feature) string {
 
 // cardBusyWord names the work behind a busy board row's spinner, only
 // meaningful when cardBusy(r) is true. A running baseline takes
-// priority over a live session — it's a foreground blocking action on
-// the card, more specific than a generic running session — and
-// otherwise it reuses runningLabel, the exact word thread.go's own
-// spinner shows for the same session, so a card's board-row word and
-// its thread-detail word can never disagree.
+// priority over a scribe pass or a live session — it's a foreground
+// blocking action on the card, more specific than either — a scribe
+// pass in turn takes priority over a live session, and otherwise it
+// reuses runningLabel, the exact word thread.go's own spinner shows for
+// the same session, so a card's board-row word and its thread-detail
+// word can never disagree.
 func (m *Shell) cardBusyWord(r featureRow) string {
 	if m.baselining[r.F.ID] {
 		return "checking"
+	}
+	if m.scribing[r.F.ID] > 0 {
+		return "scribing"
 	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {
 		return m.runningLabel(sess.Snapshot())

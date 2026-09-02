@@ -58,3 +58,29 @@ func TestSpinnerLifecycle(t *testing.T) {
 		t.Fatal("spinner did not restart on new activity")
 	}
 }
+
+// TestSpinnerActiveScribing covers the scribe-count OR arm: a card with
+// no session and no baseline still keeps the shared tick loop alive
+// while a one-shot scribe pass is in flight against it, and the loop
+// goes quiet again once the map empties out.
+func TestSpinnerActiveScribing(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+	if m.spinnerActive() {
+		t.Fatal("spinnerActive true with nothing in flight")
+	}
+
+	m.scribing["FD-001"] = 1
+	if !m.spinnerActive() {
+		t.Error("spinnerActive false with a scribe pass in flight")
+	}
+
+	m.scribing["FD-001"] = 2
+	if !m.spinnerActive() {
+		t.Error("spinnerActive false with both scribe passes in flight")
+	}
+
+	delete(m.scribing, "FD-001")
+	if m.spinnerActive() {
+		t.Error("spinnerActive true after the scribe count settled")
+	}
+}
