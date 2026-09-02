@@ -368,6 +368,15 @@ func TestContractHintStatesBoundary(t *testing.T) {
 		if strings.Contains(h, "is at "+path) {
 			t.Errorf("%s: bare unscoped artifact path leaked", role)
 		}
+		if !strings.Contains(h, "AGENTS.md") {
+			t.Errorf("%s: missing repo-instructions precedence paragraph (AGENTS.md)", role)
+		}
+		if !strings.Contains(h, "gummi governs process") {
+			t.Errorf("%s: missing repo-instructions precedence paragraph (gummi governs process)", role)
+		}
+		if !strings.Contains(h, "the workflow wins") {
+			t.Errorf("%s: missing repo-instructions precedence paragraph (the workflow wins)", role)
+		}
 	}
 }
 

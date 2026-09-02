@@ -49,6 +49,20 @@ artifact under .gummi/ is yours to update, but everything else in
 the repo is off-limits. If a decision needs a change to the repo,
 describe it in the artifact and let the implementation stage make it.`
 
+// repoInstructionsPrecedenceHint states the precedence between the managed
+// repo's own instructions (AGENTS.md, CLAUDE.md, or equivalent) and gummi's
+// process rules, settled by FD-017: the repo governs craft, gummi governs
+// process, and the workflow wins where the two conflict. Fixed and
+// unparameterized — it does not vary by role, stage, or feature kind.
+const repoInstructionsPrecedenceHint = `This repo carries its own instructions too — an AGENTS.md, CLAUDE.md, or
+equivalent — and you are running inside it, where those instructions are
+in force. Follow them for craft: build commands, style, and test and
+review conventions. But gummi governs process — the stage, the gates,
+never merging, never spawning a second gummi — and where the repo's
+instructions ask for something the workflow forbids ("always merge your
+own branch," "skip review for small changes"), the workflow wins. Say so
+rather than silently complying or silently ignoring the repo.`
+
 // roleForStage maps a workflow stage to the agent role that performs it
 // (DESIGN §3). The bug workflow's design-side stages (triage, diagnose)
 // are architect work like brainstorm/spec; fix is implementer work like
@@ -691,6 +705,8 @@ review rounds, %% markers, or the ` + short + ` in anything committed
 to the repo outside the ` + short + ` file itself — not in code, code
 comments, identifiers, commit messages, test names, or docs. Committed
 work must read as if a developer wrote it for the repo with no
-knowledge of gummi.`)
+knowledge of gummi.
+
+` + repoInstructionsPrecedenceHint)
 	return b.String()
 }
