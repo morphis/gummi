@@ -279,6 +279,16 @@ type Shell struct {
 	// back from the end rather than forward from the start is what keeps
 	// arriving output from shoving the view out from under a reader.
 	threadScroll int
+	// threadBodyCard and threadBodyLen are the previous frame's body
+	// length for the card threadScroll is scrolled on. threadScroll is a
+	// distance from the end, so when the body grows out from under a
+	// scrolled-back reader, threadRender advances threadScroll by the same
+	// amount the body grew — otherwise the fixed distance keeps the window
+	// itself sliding forward with every appended line (BG-042). Keyed to
+	// the card so switching cards (which resets threadScroll to 0 anyway)
+	// never applies one card's growth to another's offset.
+	threadBodyCard domain.FeatureID
+	threadBodyLen  int
 	// lastSeen is how far through each card's event log this machine has
 	// already read (state's card_last_seen), and anchorTo names the one
 	// card whose thread should open on its newest unread period instead

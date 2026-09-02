@@ -388,6 +388,22 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	}
 	body = trimTrailingBlanks(body)
 
+	// threadScroll is a distance from the end of body, so an appended line
+	// would otherwise slide the window forward by one for every line that
+	// arrives, even though the reader pressed nothing (BG-042). Advancing
+	// threadScroll by the same amount the body grew keeps the window's
+	// absolute position instead — the fix only applies while scrolled back
+	// (up == 0 already tail-follows correctly) and only against the same
+	// card's own previous frame, so switching cards or the measure pass
+	// never perturbs it.
+	if !measure {
+		if m.threadBodyCard == f.ID && m.threadScroll > 0 && len(body) > m.threadBodyLen {
+			m.threadScroll += len(body) - m.threadBodyLen
+		}
+		m.threadBodyCard = f.ID
+		m.threadBodyLen = len(body)
+	}
+
 	// Consume the anchor. threadScroll counts rows back from the end of
 	// the body, so landing the period's opening rule at the top of the
 	// window means scrolling back by everything below it. It is clamped

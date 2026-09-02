@@ -1321,6 +1321,56 @@ func TestThreadScrollsWithPageKeys(t *testing.T) {
 	}
 }
 
+// TestThreadHoldsPositionWhileOutputArrivesScrolledBack is BG-042's
+// regression test. threadScroll counts lines back from the end of the
+// body (thread.go:113-117's own doc comment), so when the live stage
+// appends new events while the reader is scrolled up, a body that grows
+// out from under a fixed offset used to slide the window forward by
+// exactly the number of lines that arrived — with no key pressed. The fix
+// advances threadScroll by the same amount the body grows, so the window
+// holds its ground and only the down-scroll count (how much history now
+// sits below it) changes.
+func TestThreadHoldsPositionWhileOutputArrivesScrolledBack(t *testing.T) {
+	m := threadWithHistory(t)
+	id := m.rows[m.sel].F.ID
+	m.width, m.height = 80, 25
+	w, h := m.threadSize()
+
+	for range 3 {
+		m.scrollThread(true)
+	}
+	if m.threadScroll == 0 {
+		t.Fatal("precondition: the thread did not scroll")
+	}
+	scrollBefore := m.threadScroll
+	before := strings.Split(ansi.Strip(m.threadView(w, h)), "\n")
+
+	const arriving = 4
+	for range arriving { // simulate output arriving; no key pressed
+		m.cardEvents[id] = append(m.cardEvents[id], state.CardEvent{
+			Stage: domain.StageImplement, Kind: state.EventTool, Status: state.StatusOK,
+			At:      time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+			Payload: `{"label":"edit internal/theme/palette.go"}`,
+		})
+	}
+
+	after := strings.Split(ansi.Strip(m.threadView(w, h)), "\n")
+	if want := scrollBefore + arriving; m.threadScroll != want {
+		t.Errorf("threadScroll = %d after %d lines arrived, want %d (the offset should grow with the body)", m.threadScroll, arriving, want)
+	}
+	if len(before) != len(after) {
+		t.Fatalf("frame height changed from %d to %d rows", len(before), len(after))
+	}
+	for i := range before {
+		if downScrollMarker.MatchString(before[i]) || downScrollMarker.MatchString(after[i]) {
+			continue // more history below is the expected, correct change
+		}
+		if before[i] != after[i] {
+			t.Errorf("row %d moved as output arrived with no key pressed:\nbefore: %q\nafter:  %q", i, before[i], after[i])
+		}
+	}
+}
+
 // Stepping to another card is a different conversation: it opens at its
 // own end rather than inheriting how far back the last one was scrolled.
 func TestSteppingCardsResetsTheScroll(t *testing.T) {
