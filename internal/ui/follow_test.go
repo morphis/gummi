@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/livelog"
@@ -242,6 +244,39 @@ func TestFollowerEmptyBeforeRecords(t *testing.T) {
 	}
 	if snap.Feature.Title != "not started" {
 		t.Errorf("title = %q, want the seeded card's", snap.Feature.Title)
+	}
+}
+
+// BG-023: a card minted while this process's own board is running (the
+// workspace MCP endpoint's card_new, which mints via cardmint.Mint the
+// same way this test does) must reach the board without a restart.
+// cardmint itself can't announce the mint — it sits below engine to avoid
+// an import cycle — so card_new sends an engine.EventCardCreated after a
+// successful Mint; this drives that event the way Shell's own engine
+// listener would and confirms it reloads rows to pick up the new card.
+func TestEventCardCreatedReloadsRows(t *testing.T) {
+	m, _ := newWorkspace(t)
+
+	msg := m.loadRows().(rowsMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	m.rows = msg.rows
+	if len(m.rows) != 0 {
+		t.Fatalf("rows = %d, want an empty board before the mint", len(m.rows))
+	}
+
+	f, err := cardmint.Mint(context.Background(), m.store, m.ws, cardmint.Input{
+		Kind: domain.KindBug, Description: "a card minted over the workspace MCP endpoint",
+	})
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventCardCreated, Feature: f.ID, Stage: f.Stage}))
+
+	if len(m.rows) != 1 || m.rows[0].F.ID != f.ID {
+		t.Fatalf("rows after EventCardCreated = %+v, want the minted card %s reloaded", m.rows, f.ID)
 	}
 }
 

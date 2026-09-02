@@ -419,6 +419,41 @@ func TestWorkspaceMCPCardNewDefaultsGateCaller(t *testing.T) {
 	}
 }
 
+// BG-023: a card minted over the workspace MCP endpoint's card_new must
+// announce itself on the engine's event stream, since cardmint.Mint (which
+// card_new calls) writes straight to the store and cannot signal anyone —
+// it has no *Engine to send through by design. Without this event, the
+// hosting board's UI has no way to learn the new row exists short of a
+// restart (see follow.go's reload gate, which only ever covers a row the
+// board already knows about).
+func TestWorkspaceMCPCardNewEmitsCardCreatedEvent(t *testing.T) {
+	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
+	path, teardown, err := e.StartWorkspaceMCPEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teardown()
+
+	result, errMsg := callWorkspaceTool(t, path, "card_new", map[string]any{
+		"kind":        "feature",
+		"description": "a card minted over the workspace MCP endpoint",
+	})
+	if errMsg != "" {
+		t.Fatalf("card_new error: %s", errMsg)
+	}
+	if !strings.Contains(result, "FD-001") {
+		t.Fatalf("card_new result = %q, want it to name the new card", result)
+	}
+
+	ev := waitFor(t, e, EventCardCreated)
+	if ev.Feature != "FD-001" {
+		t.Errorf("EventCardCreated.Feature = %q, want FD-001", ev.Feature)
+	}
+	if ev.Stage != domain.StageTodo {
+		t.Errorf("EventCardCreated.Stage = %q, want %q", ev.Stage, domain.StageTodo)
+	}
+}
+
 // card_new accepts an explicit gate_approval "auto" to opt out of the
 // checkpoint default, and rejects an unrecognized kind or mode before
 // minting anything.

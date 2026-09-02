@@ -933,6 +933,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// re-renders on every engine event regardless of what this
 		// returns, so a plain nil is the whole handler.
 		return nil
+	case engine.EventCardCreated:
+		// a card was minted by card_new, running inside this board's own
+		// process — the only announcement it gets, since cardmint writes
+		// straight to the store with no event of its own. Reload rows the
+		// same way EventIdle does for a finished stage.
+		return m.loadRows
 	case engine.EventError:
 		if ev.Err != nil {
 			// engine/provider errors may embed model-controlled bytes

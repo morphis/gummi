@@ -54,6 +54,11 @@ const (
 	// carries no Feature, because a board session is bound to the
 	// workspace rather than to any card — see the note on Event.Feature.
 	EventBoard EventKind = "board"
+	// EventCardCreated fires when a card is minted by a caller that holds
+	// an *Engine but doesn't otherwise touch the session machinery — the
+	// workspace MCP endpoint's card_new — so no other Event would ever
+	// cover it. A UI surface should reload rows.
+	EventCardCreated EventKind = "card_created"
 )
 
 // Event is one item in the engine's UI-facing stream.

@@ -632,6 +632,14 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 	if err != nil {
 		return "", err
 	}
+	// cardmint writes straight to the store and cannot signal anyone — it
+	// sits below engine to avoid an import cycle (see its package doc) —
+	// so this is the one place that can announce a mint made inside a
+	// live board's own process. Every other caller either isn't running
+	// alongside a board (headless run/bulk ingest) or drives an existing
+	// feature through session machinery that already emits events
+	// (card_run/card_resume via e.Run/e.RunWith).
+	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventCardCreated})
 	return fmt.Sprintf("%s: created, stage %s, gate approval %s", f.ID, f.Stage, f.GateApproval), nil
 }
 
