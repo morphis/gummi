@@ -1189,7 +1189,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 			lines = append(lines, "  "+dl)
 			continue
 		}
-		for _, l := range stageEventLines(s, ev, w, m.threadOutputs, answered) {
+		for _, l := range stageEventLines(s, ev, w, m.threadOutputs, last.role, answered) {
 			lines = append(lines, "  "+l)
 		}
 	}
@@ -1288,8 +1288,8 @@ func boundaryRule(s *theme.Styles, stage, role, model string, at time.Time, w in
 // tells the caller to drop the event entirely rather than forwarding a
 // one-element slice holding an empty string, which liveStageBlock would
 // otherwise indent into a visible blank line.
-func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool, answered map[string]bool) []string {
-	line := stageEventLine(s, ev, w, answered)
+func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool, role string, answered map[string]bool) []string {
+	line := stageEventLine(s, ev, w, role, answered)
 	if line == "" {
 		return nil
 	}
@@ -1360,7 +1360,7 @@ func answeredDecisions(events []state.CardEvent) map[string]bool {
 // and threaded down through liveStageBlock/stageEventLines) — it is what
 // the EventDecisionOpen case below needs to tell an answered decision
 // from a superseded one.
-func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, answered map[string]bool) string {
+func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, answered map[string]bool) string {
 	switch ev.Kind {
 	case state.EventTool:
 		var p toolPayload
@@ -1390,7 +1390,7 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, answered map[str
 		// budget.
 		rows := strings.Split(wrapText(sanitize(p.Content), max(w-6, 8)), "\n")
 		out := make([]string, 0, len(rows)+1)
-		out = append(out, s.Faint.Render(messageAuthorLabel(p.Author)))
+		out = append(out, s.Faint.Render(messageAuthorLabel(p.Author, role)))
 		for _, l := range rows {
 			out = append(out, "  "+body.Render(l))
 		}
@@ -1531,13 +1531,16 @@ func stageSpendByStage(rows []state.StageSpend) map[domain.Stage]float64 {
 // messageAuthorLabel names a logged turn's author the way the live pane
 // labels the same turn: the user by name, gummi's own kickoffs as gummi,
 // and the agent by whichever role was speaking.
-func messageAuthorLabel(author string) string {
+func messageAuthorLabel(author, role string) string {
 	switch author {
 	case string(engine.AuthorUser):
 		return "you"
 	case string(engine.AuthorSystem):
 		return "gummi"
 	default:
+		if role != "" {
+			return role
+		}
 		if author == "" {
 			return "agent"
 		}

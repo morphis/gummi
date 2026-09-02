@@ -1581,7 +1581,7 @@ func TestStageEventLineClosedVocabulary(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
 			ev := state.CardEvent{Kind: c.kind, Payload: c.payload}
-			got := ansi.Strip(stageEventLine(s, ev, 80, answered))
+			got := ansi.Strip(stageEventLine(s, ev, 80, "", answered))
 			if got == c.kind {
 				t.Errorf("stageEventLine(%s) rendered its own bare kind word %q; give it a case", c.kind, got)
 			}
@@ -1662,7 +1662,7 @@ func TestParkEventLine(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ev := state.CardEvent{Kind: state.EventPark, Payload: c.payload}
-			got := ansi.Strip(stageEventLine(s, ev, 80, answered))
+			got := ansi.Strip(stageEventLine(s, ev, 80, "", answered))
 			if !strings.Contains(got, c.want) {
 				t.Errorf("park line = %q, want to contain %q", got, c.want)
 			}
@@ -1686,7 +1686,7 @@ func TestAutopilotEventLine(t *testing.T) {
 	answered := map[string]bool{}
 	t.Run("plain mode change", func(t *testing.T) {
 		ev := state.CardEvent{Kind: state.EventAutopilot, Payload: `{"mode":"full"}`}
-		got := ansi.Strip(stageEventLine(s, ev, 80, answered))
+		got := ansi.Strip(stageEventLine(s, ev, 80, "", answered))
 		if !strings.Contains(got, "autopilot set to full") {
 			t.Errorf("autopilot line = %q, want to contain %q", got, "autopilot set to full")
 		}
@@ -1694,14 +1694,14 @@ func TestAutopilotEventLine(t *testing.T) {
 	t.Run("took-over boundary is drawn as a rule, not a line", func(t *testing.T) {
 		ev := state.CardEvent{Kind: state.EventAutopilot,
 			Payload: `{"event":"took-over","reason":"idle","mode":"full"}`}
-		if got := stageEventLine(s, ev, 80, answered); got != "" {
+		if got := stageEventLine(s, ev, 80, "", answered); got != "" {
 			t.Errorf("took-over boundary rendered %q, want empty (later phase's job)", got)
 		}
 	})
 	t.Run("handed-back boundary is drawn as a rule, not a line", func(t *testing.T) {
 		ev := state.CardEvent{Kind: state.EventAutopilot,
 			Payload: `{"event":"handed-back","mode":"full"}`}
-		if got := stageEventLine(s, ev, 80, answered); got != "" {
+		if got := stageEventLine(s, ev, 80, "", answered); got != "" {
 			t.Errorf("handed-back boundary rendered %q, want empty (later phase's job)", got)
 		}
 	})
@@ -1726,13 +1726,13 @@ func TestDecisionOpenEventLine(t *testing.T) {
 	}
 	t.Run("answered collapses into its answer's row, not its own", func(t *testing.T) {
 		answered := map[string]bool{"d1": true}
-		if got := stageEventLine(s, open, 80, answered); got != "" {
+		if got := stageEventLine(s, open, 80, "", answered); got != "" {
 			t.Errorf("answered decision_open rendered %q, want empty", got)
 		}
 	})
 	t.Run("unanswered leaves a trace", func(t *testing.T) {
 		answered := map[string]bool{} // d1 never answered
-		got := ansi.Strip(stageEventLine(s, open, 80, answered))
+		got := ansi.Strip(stageEventLine(s, open, 80, "", answered))
 		for _, want := range []string{"advance to plan?", "unanswered", "superseded"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("unanswered decision_open line %q missing %q", got, want)

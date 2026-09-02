@@ -136,13 +136,13 @@ func TestAnsweredAskCollapsesIntoHistory(t *testing.T) {
 		Payload: `{"from":"spec","to":"plan","actor":"user"}`,
 	}
 	answered := map[string]bool{}
-	askLine := ansi.Strip(stageEventLine(s, ask, 80, answered))
+	askLine := ansi.Strip(stageEventLine(s, ask, 80, "", answered))
 	for _, want := range []string{"you answered", "Persist where?", "per-device"} {
 		if !strings.Contains(askLine, want) {
 			t.Errorf("answered ask line %q missing %q", askLine, want)
 		}
 	}
-	gateLine := ansi.Strip(stageEventLine(s, gate, 80, answered))
+	gateLine := ansi.Strip(stageEventLine(s, gate, 80, "", answered))
 	for _, want := range []string{"you advanced", "spec", "plan"} {
 		if !strings.Contains(gateLine, want) {
 			t.Errorf("crossed gate line %q missing %q", gateLine, want)

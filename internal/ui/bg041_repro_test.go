@@ -23,7 +23,7 @@ func TestBG041ReproMultiLineMessageDropped(t *testing.T) {
 	ev := state.CardEvent{Kind: state.EventMessage, Payload: string(payload)}
 
 	for _, w := range []int{60, 56, 52, 48, 44, 40} {
-		got := ansi.Strip(stageEventLine(s, ev, w, answered))
+		got := ansi.Strip(stageEventLine(s, ev, w, "", answered))
 		t.Logf("w=%d got=%q", w, got)
 		if !strings.Contains(got, "VERDICT: pass") {
 			t.Errorf("w=%d: VERDICT: pass missing from rendered history line: %q", w, got)
