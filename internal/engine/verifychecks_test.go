@@ -166,6 +166,69 @@ func TestVerifyKickoffChangedCmdIgnoresBaseline(t *testing.T) {
 	}
 }
 
+// A live (non-pre-existing) gummi-check failure must floor the verdict to
+// blocked, even when the verify agent's own reply claims a pass — gummi's
+// machine judgement must outrank the agent's prose (BG-040).
+func TestVerifyLiveCheckFailureFloorsVerdict(t *testing.T) {
+	ws, store, wt := newRepo(t)
+
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventMessage, Text: "Repo checks clean; verification plan satisfied. VERDICT: pass"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify me", domain.StageVerify)
+	withWorktree(t, wt, f)
+	writeSpecChecks(t, wt, f, "- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	snap := e.Get("FD-001").Snapshot()
+	if snap.VerdictFloor != "blocked" {
+		t.Errorf("VerdictFloor = %q, want %q: a live check failure (fail-check: FAIL) never floored the verdict", snap.VerdictFloor, "blocked")
+	}
+	if !strings.Contains(snap.VerdictFloorReason, "fail-check") {
+		t.Errorf("VerdictFloorReason = %q, want it to name the failed check", snap.VerdictFloorReason)
+	}
+}
+
+// A check that already failed at baseline is pre-existing, not a
+// regression this feature caused — it must not floor the verdict.
+func TestVerifyPreexistingCheckFailureDoesNotFloorVerdict(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventMessage, Text: "Pre-existing failure only. VERDICT: pass"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "verify me", domain.StageVerify)
+	if err := store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCheckBaseline(ctx, f.ID, []state.CheckResult{
+		{Name: "fail-check", Cmd: "echo boom; exit 3", OK: false, ExitCode: 3, RanAt: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	writeSpecChecks(t, wt, f, "- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+
+	snap := e.Get("FD-001").Snapshot()
+	if snap.VerdictFloor == "blocked" {
+		t.Errorf("VerdictFloor = %q, want unset: a pre-existing check failure must not floor the verdict", snap.VerdictFloor)
+	}
+}
+
 func TestVerifyStageGuardedSkipsGummiSide(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	var mu sync.Mutex

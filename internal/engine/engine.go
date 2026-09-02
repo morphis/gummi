@@ -1006,6 +1006,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 
 	var b strings.Builder
 	preexisting := false
+	var liveFailures []string
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		var status string
@@ -1014,14 +1015,17 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			status = "pass"
 		case verify.StatusTimeout:
 			status = "TIMEOUT (killed by deadline)"
+			liveFailures = append(liveFailures, r.Name)
 		case verify.StatusNotRun:
 			status = "NOT RUN (check budget exhausted)"
+			liveFailures = append(liveFailures, r.Name)
 		default:
 			if base, ok := baseline[r.Name]; ok && base.Cmd == r.Cmd && !base.OK {
 				status = fmt.Sprintf("FAIL (pre-existing, exit %d)", r.ExitCode)
 				preexisting = true
 			} else {
 				status = fmt.Sprintf("FAIL (exit %d)", r.ExitCode)
+				liveFailures = append(liveFailures, r.Name)
 			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
@@ -1034,6 +1038,13 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		b.WriteString("\nChecks marked pre-existing already failed on the freshly created " +
 			"branch before this feature changed anything: report them, but do not fail " +
 			"verification because of them — only regressions count against this feature.\n")
+	}
+	// A live (non-pre-existing) check failure floors the verdict so a
+	// model's self-reported pass can never outrank gummi's own machine
+	// judgement — mirrors the floor gateVerifyVerdict already stamps for
+	// the env-omission condition.
+	if len(liveFailures) > 0 {
+		s.setVerdictFloor("blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
 	}
 	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +
 		"checks), record all results in the spec's Verification plan and a summary " +
