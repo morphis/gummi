@@ -536,12 +536,14 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 }
 
 // decisionIDFor mints the ask's durable identity: the tool-call id on the
-// tool path, or a generation-scoped stand-in on the convention path — a
-// natural key (the question alone) would no-op the same question re-asked
-// after a bounce.
+// tool path, scoped to the session generation so a fresh headless process
+// minting the same call id (mcpSeq always restarts at 1) never collides
+// with a prior generation's already-answered decision, or a
+// generation-scoped stand-in on the convention path — a natural key (the
+// question alone) would no-op the same question re-asked after a bounce.
 func decisionIDFor(s *Session, ask *Ask) string {
 	if ask.CallID != "" {
-		return ask.CallID
+		return "call:" + strconv.FormatInt(s.startedAt.UnixNano(), 10) + ":" + ask.CallID
 	}
 	return askDecisionID(s, ask.Question)
 }
