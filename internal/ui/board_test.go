@@ -8,7 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -180,6 +182,105 @@ func TestCardLineGateMarker(t *testing.T) {
 	}
 	if strings.Contains(m.cardLine(caller, 3, false, true, 80), "⚡") {
 		t.Error("caller gate mode should not show the marker")
+	}
+}
+
+// TestNeedsAttention: the board's lookup agrees with attnIcon's own
+// per-kind glyph for every attention kind, and reports ok=false for a
+// feature with no pending item.
+func TestNeedsAttention(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	cases := []attnKind{attnGate, attnFailure, attnQuestion, attnBudget}
+	for _, kind := range cases {
+		t.Run(string(kind), func(t *testing.T) {
+			r := row(1, "gated card", domain.StageImplement, "", false)
+			m.inbox.add(r.F.ID, kind, "needs a look")
+			icon, ok := m.needsAttention(r)
+			if !ok {
+				t.Fatalf("needsAttention ok = false, want true for kind %s", kind)
+			}
+			if want := attnIcon(m.styles, kind); icon != want {
+				t.Errorf("needsAttention icon = %q, want %q (attnIcon's own output)", icon, want)
+			}
+			m.inbox.remove(r.F.ID)
+		})
+	}
+	t.Run("no item", func(t *testing.T) {
+		r := row(2, "quiet card", domain.StageImplement, "", false)
+		if _, ok := m.needsAttention(r); ok {
+			t.Error("needsAttention ok = true for a feature with no pending item")
+		}
+	})
+}
+
+// TestCardLineAttentionOutranksBusy is the precedence rule's own repro: a
+// card whose gate is raised while its baseline check is still going must
+// show the needs-you icon, not the busy spinner/word — the user can act
+// on the gate, not on a check run.
+func TestCardLineAttentionOutranksBusy(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(1, "gated card", domain.StageImplement, "", false)
+	m.inbox.add(r.F.ID, attnGate, "implement finished — review & advance")
+	m.baselining[r.F.ID] = true
+	if !m.cardBusy(r) {
+		t.Fatal("setup: want cardBusy true (baseline running)")
+	}
+
+	line := m.cardLine(r, 1, false, true, 100)
+	want := attnIcon(m.styles, attnGate)
+	if !strings.Contains(line, want) {
+		t.Errorf("card line = %q, want it to contain the attention icon %q", line, want)
+	}
+	if strings.Contains(line, "checking") {
+		t.Errorf("card line = %q, want no busy word once attention wins the loop slot", line)
+	}
+	if strings.Contains(line, m.spinner()) {
+		t.Errorf("card line = %q, want no spinner frame once attention wins the loop slot", line)
+	}
+}
+
+// TestCardLinePausedMarker: a card whose live session the user explicitly
+// paused (StatePaused) carries the ⏸ mark; a same-stage card that was
+// simply never started (no session at all) renders none — the concrete
+// "paused reads distinct from parked" symptom this card fixes.
+func TestCardLinePausedMarker(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
+			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+		}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = openAndAttach(t, m)
+	waitForActivity(t, eng)
+
+	pausedRow := m.rows[0]
+	if pausedRow.F.ID != "FD-001" || pausedRow.F.Stage != domain.StageImplement {
+		t.Fatalf("setup: rows[0] = %+v, want FD-001 at implement", pausedRow.F)
+	}
+	m = pump(t, m, m.fireVerb("park", ""))
+	if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
+		t.Fatalf("setup: want FD-001 paused, got %+v", got)
+	}
+
+	line := m.cardLine(pausedRow, 1, false, true, 100)
+	if !strings.Contains(line, "⏸") {
+		t.Errorf("paused card line = %q, want the ⏸ mark", line)
+	}
+	if !strings.Contains(line, stageGlyph(pausedRow.F.Stage)) {
+		t.Errorf("paused card line dropped the stage glyph: %q", line)
+	}
+
+	parked := row(2, "parked card", domain.StageImplement, "", false)
+	parkedLine := m.cardLine(parked, 2, false, true, 100)
+	if strings.Contains(parkedLine, "⏸") {
+		t.Errorf("parked (no-session) card line = %q, must not show the paused mark", parkedLine)
 	}
 }
 
@@ -407,6 +508,48 @@ func TestBoardBusyMarkersGolden(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("idle\n" + m.cardLine(idle, 1, false, true, 80) + "\n\n")
 	b.WriteString("checking (baseline, no session)\n" + m.cardLine(checking, 2, false, true, 80) + "\n\n")
+	golden.RequireEqual(t, []byte(b.String()))
+}
+
+// TestBoardAttentionAndPausedGolden golden-captures the three scenarios
+// this card adds to the card line: a pending attention item winning the
+// loop slot over a busy baseline, an explicitly paused session's own
+// trailing mark, and a card with neither signal.
+func TestBoardAttentionAndPausedGolden(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
+			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+		}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = openAndAttach(t, m)
+	waitForActivity(t, eng)
+	pausedRow := m.rows[0]
+	m = pump(t, m, m.fireVerb("park", ""))
+	if got := eng.Get("FD-001"); got == nil || got.State() != engine.StatePaused {
+		t.Fatalf("setup: want FD-001 paused, got %+v", got)
+	}
+
+	attnBusy := row(2, "gated and busy", domain.StageImplement, "", false)
+	m.inbox.add(attnBusy.F.ID, attnGate, "implement finished — review & advance")
+	m.baselining[attnBusy.F.ID] = true
+
+	neither := row(3, "quiet card", domain.StageImplement, "", false)
+
+	var b strings.Builder
+	b.WriteString("attention-plus-busy\n")
+	b.WriteString(m.cardLine(attnBusy, 1, false, true, 80) + "\n\n")
+	b.WriteString("paused\n")
+	b.WriteString(m.cardLine(pausedRow, 2, false, true, 80) + "\n\n")
+	b.WriteString("neither\n")
+	b.WriteString(m.cardLine(neither, 3, false, true, 80) + "\n")
 	golden.RequireEqual(t, []byte(b.String()))
 }
 

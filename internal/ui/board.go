@@ -65,6 +65,22 @@ func (m *Shell) scribeSettled(id domain.FeatureID) {
 	m.scribing[id]--
 }
 
+// needsAttention reports whether a card has a pending item in the
+// needs-attention queue and, if so, the kind-specific glyph attnIcon
+// already draws for it in the inbox tab — the same lookup planLoopLeg
+// (loopline.go) uses for the dashboard's plan-loop breadcrumb, reached
+// here for the board row itself.
+//
+// It is a pure function of (m.inbox, r.F.ID): calling it twice in the
+// same frame for the same row returns the same result.
+func (m *Shell) needsAttention(r featureRow) (icon string, ok bool) {
+	it, ok := m.inbox.get(r.F.ID)
+	if !ok {
+		return "", false
+	}
+	return attnIcon(m.styles, it.Kind), true
+}
+
 // boardView renders the kanban column: features grouped by super-state
 // with stage-colored glyphs, IDs, titles, and profile tags.
 //
@@ -128,8 +144,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	// gets a trailing spinner+word in the loop slot, checked after (so a
 	// session that is somehow both queued and busy still reads queued).
 	loop := ""
-	if sess := m.sessionFor(r.F.ID); sess != nil && sess.State() == engine.StateQueued {
+	sess := m.sessionFor(r.F.ID)
+	if sess != nil && sess.State() == engine.StateQueued {
 		glyph = s.Warning.Render("◔")
+	} else if icon, ok := m.needsAttention(r); ok {
+		// needs-you outranks busy: the user can act on a raised gate, not
+		// on a check run still going underneath it — showing the spinner
+		// here would tell them to wait when they should instead look.
+		loop = " " + icon
 	} else if m.cardBusy(r) {
 		// only the selected card's glyph advances — the rest freeze to the
 		// spinner's first frame so a board with several busy cards reads as
@@ -189,6 +211,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		badge += " " + s.RepoBadge.Render("["+r.F.Repo+"]")
 	}
 	title := s.CardTitle.Render(r.F.Title)
+	// the user's own explicit "stop for now" — independent of needsAttention
+	// and cardBusy, since a paused card can still sit on an unresolved gate
+	// from before it was paused. A parked card (never started) has no
+	// session at all and renders no mark, so the two read distinctly.
+	paused := ""
+	if sess != nil && sess.State() == engine.StatePaused {
+		paused = " " + s.Warning.Render("⏸")
+	}
 	tag := ""
 	if r.F.Profile != "" {
 		profile := s.ProfileTag
@@ -217,7 +247,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if !r.F.Spend.Zero() {
 		cost = " " + faint.Render(spendTick(r.F.Spend))
 	}
-	line := ansi.Truncate(cursor+num+" "+glyph+" "+id+badge+" "+title+loop+tag+wtMark+landed+pr+cost, w, "…")
+	line := ansi.Truncate(cursor+num+" "+glyph+" "+id+badge+" "+title+loop+paused+tag+wtMark+landed+pr+cost, w, "…")
 	if selected {
 		return s.Band(line, w, paneFocused)
 	}
