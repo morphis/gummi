@@ -1882,19 +1882,24 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		// an autonomous turn completing frees the slot (atomically, so a
 		// racing Pause isn't overwritten)
 		if !s.Interactive && s.finishRunning() {
+			// the slot frees the moment the agent itself stops, not after
+			// its git/bookkeeping epilogue below — settle's checkpoint
+			// commit can run up to checkpointTimeout, and the footer must
+			// not claim an occupied slot for a card whose agent has
+			// already gone idle. freeSlot's own held-latch makes this
+			// safe to call again from failRun's path below: the second
+			// call is simply a no-op.
+			e.freeSlot(s)
 			// a fatal settle (the worktree itself is gone, not just dirty or
 			// uncommitted) must fail the run instead of reading as a clean
 			// finish — otherwise the caller advances the stage with no
-			// worktree left to review it against. failRun already frees the
-			// slot and sends its own terminal event, so return here rather
-			// than fall into the idle-finish send below.
+			// worktree left to review it against.
 			if err := e.settle(s); err != nil {
 				e.failRun(s, err)
 				return
 			}
 			e.stageReceipt(s)
 			e.gateVerifyVerdict(s)
-			e.freeSlot(s)
 		}
 	case agent.EventError:
 		// a terminal error ends the turn with no trailing idle (the

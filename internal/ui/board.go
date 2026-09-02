@@ -281,17 +281,24 @@ func (m *Shell) boardCounts() string {
 }
 
 // laneCountsText renders the two attention pools in the board's compact
-// count shape: "attended 1/1 · autopilot 2/2". Empty when neither pool
+// count shape: "attended 1/1 · unattended 2/2". Empty when neither pool
 // has a cap to report or anything running in it — an uncapped, idle
-// engine has nothing to say here, and "attended 0 · autopilot 0" beside
+// engine has nothing to say here, and "attended 0 · unattended 0" beside
 // a card count reads like a contradiction rather than an absence.
+//
+// The second pool is labeled "unattended", not "autopilot": lanePoolFor
+// pools every card whose GateApproval isn't GateOff here (including the
+// empty default every TUI-created card stores), but the card line's own
+// autopilot badge (below) lights up only for the explicit GateGates
+// value. Reusing "autopilot" for this wider count would name a
+// population the board itself refuses to badge as such.
 func laneCountsText(lc engine.LaneCounts) string {
 	if lc.AttendedMax <= 0 && lc.AutopilotMax <= 0 &&
 		lc.AttendedRunning == 0 && lc.AutopilotRunning == 0 {
 		return ""
 	}
 	return laneCountText("attended", lc.AttendedRunning, lc.AttendedMax) + " · " +
-		laneCountText("autopilot", lc.AutopilotRunning, lc.AutopilotMax)
+		laneCountText("unattended", lc.AutopilotRunning, lc.AutopilotMax)
 }
 
 // laneCountText renders one pool's running/cap pair. An uncapped pool
