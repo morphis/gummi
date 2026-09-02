@@ -254,6 +254,47 @@ func TestAgentViewCloseIsIdempotentAndSuppressesTheKillItCaused(t *testing.T) {
 	}
 }
 
+// TestAgentViewCloseKillsTheWholeProcessGroup proves Close reaps a
+// descendant the hosted process forked, not just the process it started
+// directly. The hosted shell script ignores SIGHUP, then backgrounds
+// sleep and waits on it — a real fork (not something the shell can
+// tail-call away) whose child also survives the SIGHUP that killing a
+// session leader's controlling terminal normally sends to its
+// foreground process group.
+// a.cmd.Process is the shell; sleep is its child, holding the pty's
+// slave fd open. Killing only a.cmd.Process.Pid leaves that sleep
+// running — immune to the implicit hangup — so pumpOutput's Read never
+// unblocks and Close hangs on doneCh until sleep's own 5s elapses.
+// pty.StartWithSize sets Setsid, making the shell a process-group
+// leader, so Close must signal -pid to take the whole group down
+// together, the same way every other subprocess owner in this repo
+// (envprobe, verify, the agent adapters) already does.
+func TestAgentViewCloseKillsTheWholeProcessGroup(t *testing.T) {
+	sh := requireUnixShell(t)
+	dir := t.TempDir()
+
+	a, err := newAgentView([]string{sh, "-c", "trap '' HUP; sleep 5 & wait"}, dir, 20, 5)
+	if err != nil {
+		t.Fatalf("newAgentView: %v", err)
+	}
+
+	// Give the shell a moment to actually fork and background sleep
+	// before Close races it.
+	time.Sleep(200 * time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { done <- a.Close() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close on a deliberate teardown should report nil, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not return within 3s — a descendant of the hosted process outlived it and kept the pty open")
+	}
+}
+
 // TestAgentViewSurfacesANaturalNonZeroExit proves the other half of the
 // same fix: Close suppresses only the exit error it itself causes. A
 // child that dies on its own, with nothing calling Close, still reports

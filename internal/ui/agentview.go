@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -290,7 +291,18 @@ func (a *agentView) Close() error {
 
 	if !alreadyClosing {
 		if a.cmd.Process != nil {
-			_ = a.cmd.Process.Kill() // best-effort: a race with natural exit just errors here, harmlessly
+			// pty.StartWithSize sets Setsid, making the child a session
+			// (and process group) leader with pgid == pid, so signaling
+			// -pid reaches it and everything it forked — a hosted CLI's
+			// own subprocesses, or (in tests) a shell script's un-exec'd
+			// child. Killing only cmd.Process.Pid leaves such descendants
+			// running and still holding the pty's slave fd open, which
+			// keeps pumpOutput's Read blocked — and this Close call
+			// waiting on doneCh below — until they exit on their own.
+			// Every other subprocess owner in this repo (envprobe,
+			// verify, the agent adapters) kills by process group for the
+			// same reason.
+			_ = syscall.Kill(-a.cmd.Process.Pid, syscall.SIGKILL) // best-effort: a race with natural exit just errors here, harmlessly
 		}
 		_ = a.ptmx.Close()
 		// Deliberately NOT a.emu.Close(). x/vt's SafeEmulator guards

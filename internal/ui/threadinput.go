@@ -312,8 +312,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.threadFreeForm || m.threadAsk {
 		// armed: the line is the answer (or the next consult question),
 		// not a picker — everything else is text
-		var cmd tea.Cmd
-		m.threadInput, cmd = m.threadInput.Update(msg)
+		cmd := m.updateThreadInput(msg)
 		m.clearSkipParseIfEmptied()
 		return cmd
 	}
@@ -396,9 +395,30 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 	}
+	cmd := m.updateThreadInput(msg)
+	m.clearSkipParseIfEmptied()
+	return cmd
+}
+
+// updateThreadInput runs msg through the composer textarea and tags the
+// result as a subscription (subscription.go) when there is one. The only
+// commands textarea.Update produces for a plain key are its own — a
+// viewport scroll and, on every cursor move, bubbles' cursor.Blink
+// restarting the on-screen caret's blink timer — and Blink is exactly the
+// re-arming, indefinite-lived timer subscription() exists to flag: nothing
+// in this package ever wants to observe cursor.BlinkMsg, but flow_test.go's
+// pump doesn't know that unless told, so left unmarked it ran that 530ms
+// timer to completion on every single keystroke a test typed into this
+// composer — real work in the live TUI, since Bubble Tea's own runtime
+// executes commands off the update loop, but a serial 530ms tax per
+// character in a test harness that runs commands to find out what they
+// say next.
+func (m *Shell) updateThreadInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	m.threadInput, cmd = m.threadInput.Update(msg)
-	m.clearSkipParseIfEmptied()
+	if cmd != nil {
+		cmd = subscription(cmd)
+	}
 	return cmd
 }
 
@@ -433,9 +453,7 @@ func (m *Shell) openCardActions(r featureRow) {
 // as any other key reaching handleChipKey's default case.
 func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 	m.threadChip = nil
-	var cmd tea.Cmd
-	m.threadInput, cmd = m.threadInput.Update(msg)
-	return cmd
+	return m.updateThreadInput(msg)
 }
 
 // submitThreadLine routes a non-empty line from the composer, deciding
@@ -606,9 +624,7 @@ func (m *Shell) handleChipKey(msg tea.KeyPressMsg) tea.Cmd {
 	// the original line is untouched, so this keystroke just continues
 	// where the user left off (a correction, more text, a delete).
 	m.threadChip = nil
-	var cmd tea.Cmd
-	m.threadInput, cmd = m.threadInput.Update(msg)
-	return cmd
+	return m.updateThreadInput(msg)
 }
 
 // verbKeys maps a parsed verb to the board accelerator that performs the
