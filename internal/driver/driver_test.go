@@ -120,6 +120,21 @@ func TestSpecQuestionThenResume(t *testing.T) {
 		t.Fatalf("recommended = %v, want the marked option", q["recommended"])
 	}
 
+	// The design-stage question checkpoint is the driver stepping back to
+	// wait on a person, same as an escalation — without a park row here
+	// the took-over period this run opened never closes (BG-044), the
+	// single most common non-escalation stop in the product.
+	parks := parkRows(t, h, domain.FeatureID(out.ID))
+	if len(parks) != 1 {
+		t.Fatalf("park rows = %d, want 1 — the question checkpoint must close the took-over period: %+v", len(parks), parks)
+	}
+	if parks[0].Reason != state.ParkReasonNeedsYou {
+		t.Fatalf("park reason = %q, want %q", parks[0].Reason, state.ParkReasonNeedsYou)
+	}
+	if parks[0].Detail == "" {
+		t.Fatal("park row carries no detail")
+	}
+
 	ans := "no"
 	out2, err := h.driver(Options{}).Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{Answer: &ans})
 	if err != nil {

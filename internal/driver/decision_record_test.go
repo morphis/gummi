@@ -254,4 +254,21 @@ func TestBareResumeRePresentsAnOpenAsk(t *testing.T) {
 	if q == nil || q["decision"] == "" {
 		t.Fatalf("re-presented checkpoint carries no decision id: %v; stream=%v", q, h.eventKinds())
 	}
+
+	// Re-presenting the open ask on this bare resume is itself the driver
+	// stepping back to wait on a person again: the resume's own took-over
+	// row needs its own closing park, or this second period never closes
+	// either (BG-044).
+	parks := parkRows(t, h, domain.FeatureID(out.ID))
+	if len(parks) != 2 {
+		t.Fatalf("park rows = %d, want 2 (initial question checkpoint + bare-resume re-presentation): %+v", len(parks), parks)
+	}
+	for _, p := range parks {
+		if p.Reason != state.ParkReasonNeedsYou {
+			t.Fatalf("park reason = %q, want %q", p.Reason, state.ParkReasonNeedsYou)
+		}
+		if p.Detail == "" {
+			t.Fatal("park row carries no detail")
+		}
+	}
 }

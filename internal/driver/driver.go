@@ -736,6 +736,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 				Resume: string(f.ID),
 				Next:   resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 			})
+			d.logPark(f, state.ParkReasonNeedsYou, open.Question)
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 		} else if d.reattachSilent(f) {
 			return d.crossGate(ctx, f)
@@ -808,6 +809,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 				Next:     resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 				Decision: decisionID,
 			})
+			d.logPark(f, state.ParkReasonNeedsYou, ask.Question)
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 		case endIdle:
 			// a finished turn with no open question: the design gate.
@@ -1236,8 +1238,9 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		next := forwardEdge(f)
-		decisionID := d.openDecision(f, state.DecisionKindGate,
-			string(f.Stage)+" is ready for your decision.")
+		question := string(f.Stage) + " is ready for your decision."
+		d.logPark(f, state.ParkReasonNeedsYou, question)
+		decisionID := d.openDecision(f, state.DecisionKindGate, question)
 		d.out.emit(gatePendingEvent{
 			Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(next), Resume: string(f.ID),
 			Decision: decisionID,
@@ -1313,8 +1316,12 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 
 // recordBlocked records a blocked-gate decision (the threads, dependency
 // or floor holding a gate open are a stop a person resolves), then hands
-// back nothing — the caller's NDJSON emit already carried the detail.
+// back nothing — the caller's NDJSON emit already carried the detail. It
+// also parks the card (ParkReasonNeedsYou): this is a terminal outcome
+// for the run, not an escalation, but it still stops and waits on a
+// person, so it must close the autopilot period the same as one does.
 func (d *Driver) recordBlocked(f domain.Feature, question string) {
+	d.logPark(f, state.ParkReasonNeedsYou, question)
 	d.openDecision(f, state.DecisionKindGate, question)
 }
 
@@ -1363,6 +1370,7 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
 		f = got
 	}
+	d.logPark(f, state.ParkReasonNeedsYou, "reached the landing gate — the branch is ready to merge.")
 	d.out.emit(doneEvent{
 		Event: "done", ID: string(f.ID), Branch: f.BranchName(),
 		Spec: f.ArtifactPath(), Spent: f.Spend.Credits, ReviewRounds: d.reviewsRun,
@@ -1406,6 +1414,7 @@ func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note strin
 		})
 		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
 	}
+	d.logPark(f, state.ParkReasonNeedsYou, fmt.Sprintf("decompose — %d proposal(s) ready for your review.", len(res.Proposals)))
 	d.out.emit(decomposeQuestionEvent{
 		Event: "question", ID: string(f.ID),
 		Decision:  d.openDecision(f, state.DecisionKindGate, "decompose — review the proposals and mint them, or send the pass back with a note."),
@@ -1493,6 +1502,7 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	if bySpend := int(math.Ceil(f.Spend.Credits * 1.2)); bySpend > suggested {
 		suggested = bySpend
 	}
+	d.logPark(f, state.ParkReasonNeedsYou, fmt.Sprintf("exhausted its %d-credit envelope at %s.", f.Budget.Envelope, f.Stage))
 	d.out.emit(exhaustedEvent{
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),
@@ -1544,6 +1554,7 @@ func (d *Driver) timeout(f domain.Feature) Outcome {
 	if d.opts.StageTimeout > 0 {
 		used = d.opts.StageTimeout.String()
 	}
+	d.logPark(f, state.ParkReasonNeedsYou, hint)
 	d.out.emit(timeoutEvent{
 		Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: hint,
 		StageTimeoutUsed: used,
@@ -1610,6 +1621,7 @@ func resumeCmd(id string, args ...string) string {
 // 0 — not an escalation — so a caller distinguishes it from `done` by the
 // event name, not the exit code.
 func (d *Driver) stopped(f domain.Feature) Outcome {
+	d.logPark(f, state.ParkReasonNeedsYou, "stopped early at --until "+string(f.Stage)+", as requested.")
 	d.out.emit(stoppedEvent{
 		Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID),
 		Next: resumeCmd(string(f.ID), "--approve"),

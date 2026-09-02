@@ -37,6 +37,27 @@ func tookOverEvents(t *testing.T, h *harness, id domain.FeatureID) []state.Autop
 	return out
 }
 
+// parkRows filters id's event log down to state.EventPark rows, decoded.
+func parkRows(t *testing.T, h *harness, id domain.FeatureID) []state.ParkPayload {
+	t.Helper()
+	evs, err := h.store.Events(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []state.ParkPayload
+	for _, ev := range evs {
+		if ev.Kind != state.EventPark {
+			continue
+		}
+		var p state.ParkPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			t.Fatalf("undecodable park payload %q: %v", ev.Payload, err)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // An unattended run (the default --gate-approval=gates, d.actor == "auto")
 // writes exactly one took-over row, naming the card's stored gate-approval
 // mode and the stage the loop actually started driving (its first real
@@ -71,6 +92,23 @@ func TestUnattendedRunLogsTookOver(t *testing.T) {
 	}
 	if rows[0].Reason == "" {
 		t.Fatal("took-over row carries no reason")
+	}
+
+	// The run reached done the ordinary way — no escalation — but it is
+	// still the driver stepping back and handing the card to a person to
+	// merge. Without a matching park row here, the took-over row above
+	// opens a period that nothing ever closes (BG-044): the thread reads
+	// as still driving forever, and every gate/answer autopilot recorded
+	// this run never renders.
+	parks := parkRows(t, h, domain.FeatureID(out.ID))
+	if len(parks) != 1 {
+		t.Fatalf("park rows = %d, want 1 — the took-over period must close on an ordinary done: %+v", len(parks), parks)
+	}
+	if parks[0].Reason != state.ParkReasonNeedsYou {
+		t.Fatalf("park reason = %q, want %q", parks[0].Reason, state.ParkReasonNeedsYou)
+	}
+	if parks[0].Detail == "" {
+		t.Fatal("park row carries no detail")
 	}
 
 	evs, err := h.store.Events(context.Background(), domain.FeatureID(out.ID))
@@ -118,12 +156,11 @@ func TestAttendedRunLogsNoTookOver(t *testing.T) {
 }
 
 // Re-entering the same card while it is still stuck at the stage the
-// unattended loop was already driving — a resume after a crash, a
-// stage-timeout, or an exhausted envelope, none of which ever park the
-// card (driver.go's logPark is only reached from escalation/
-// bounceEscalation) — must not accumulate a second took-over row for
-// what is, from the thread's point of view, one continuous unattended
-// stretch that merely survived a process restart.
+// unattended loop was already driving — a resume after a crash (a
+// process killed mid-run parks nothing; a stage-timeout or an exhausted
+// envelope now do, via logPark) — must not accumulate a second
+// took-over row for what is, from the thread's point of view, one
+// continuous unattended stretch that merely survived a process restart.
 //
 // This drives logTookOver directly, the way TestDriverEscalationRecordsAPark
 // drives escalation directly, rather than through a full stage-timeout +

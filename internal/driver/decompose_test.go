@@ -11,6 +11,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // researchCardInVerify builds RS-001 at the verify stage, ready for the
@@ -129,6 +130,63 @@ func TestVerifyToDoneEmitsQuestion(t *testing.T) {
 	}
 	if _, ok, err := h.eng.LoadPendingDecompose(f.ID); err != nil || !ok {
 		t.Fatalf("LoadPendingDecompose = ok=%v err=%v, want a pending file", ok, err)
+	}
+}
+
+// TestDecomposeCheckpointParksTheCard covers the decompose gate's own
+// StatusQuestion exit (BG-044 review finding): a Research card's ordinary
+// verify→done crossing auto-triggers decomposeGate, which — like every
+// other terminal exit the driver can return on an uninterrupted headless
+// run — steps back to wait on a person, without ever having escalated.
+// That must close the took-over period exactly like the plain FD-card
+// `done` path does, via a ParkReasonNeedsYou row with a non-empty detail.
+func TestDecomposeCheckpointParksTheCard(t *testing.T) {
+	var prompts []string
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StageDone: decomposeArchitectFn([]json.RawMessage{decomposeProposalsWire("Row one", "Row two")}, &prompts),
+	})
+	f := researchCardInVerify()
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	putPromotedArtifact(t, h, &f, decomposeTwoRows)
+
+	d := h.driver(Options{})
+	loaded, err := h.store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.autoAdvance(context.Background(), loaded)
+	if err != nil {
+		t.Fatalf("autoAdvance: %v", err)
+	}
+	if out.Status != StatusQuestion {
+		t.Fatalf("status = %q, want question; stream=%v", out.Status, h.eventKinds())
+	}
+
+	evs, err := h.store.Events(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parks int
+	for _, ev := range evs {
+		if ev.Kind != state.EventPark {
+			continue
+		}
+		var p state.ParkPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			t.Fatalf("undecodable park payload %q: %v", ev.Payload, err)
+		}
+		if p.Reason != state.ParkReasonNeedsYou {
+			t.Fatalf("park reason = %q, want %q", p.Reason, state.ParkReasonNeedsYou)
+		}
+		if p.Detail == "" {
+			t.Fatal("park row carries no detail")
+		}
+		parks++
+	}
+	if parks != 1 {
+		t.Fatalf("park rows = %d, want 1 — the decompose checkpoint must close the took-over period same as any other terminal exit", parks)
 	}
 }
 
