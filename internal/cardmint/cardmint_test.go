@@ -87,6 +87,41 @@ func TestMintFeatureQuickRoute(t *testing.T) {
 	}
 }
 
+// TestMintBugSeedsBugTemplate: a bug description with overflow text seeds
+// the bug report template (## Summary), not the feature spec template
+// (## Problem) — cardmint.Mint's seeded-draft branch used to call
+// spec.SeededTemplate unconditionally for every non-research kind, so a
+// card_new-minted bug came out feature-shaped.
+func TestMintBugSeedsBugTemplate(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{
+		Kind:        domain.KindBug,
+		Description: "Repro bug\n\nThis is a multi-line description used to trigger the seeded draft path.",
+		Envelope:    2400,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Kind != domain.KindBug {
+		t.Errorf("kind = %q", f.Kind)
+	}
+	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	raw, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatalf("expected a seeded draft: %v", err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "## Summary") {
+		t.Errorf("draft missing bug template's Summary section:\n%s", content)
+	}
+	if strings.Contains(content, "## Problem") {
+		t.Errorf("draft has feature template's Problem section, want bug shape:\n%s", content)
+	}
+	if !strings.Contains(content, "This is a multi-line description used to trigger the seeded draft path.") {
+		t.Errorf("draft missing seeded summary text:\n%s", content)
+	}
+}
+
 // TestMintFeatureFullRoute: Full opts a feature into brainstorm+plan
 // (empty SkipFlags) instead of the quick route.
 func TestMintFeatureFullRoute(t *testing.T) {

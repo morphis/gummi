@@ -170,8 +170,20 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		// there), and Acceptance fills the Verification plan (D10). Either
 		// input alone is enough to warrant a draft; both are just a pre-fill
 		// the spec agent still owns and approves.
+		//
+		// KindBug gets the bug report shape instead: the overflow fills
+		// Summary, the same bucket bugingest.go and the TUI's new-bug form
+		// already seed from free-form text. Acceptance has no destination
+		// for a bug (SeededBugTemplate never pre-seeds Root cause/Fix/
+		// Verification) and is silently unused here, matching that
+		// template's existing contract.
 		draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-		content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed, Acceptance: in.Acceptance}, domain.DraftProvenance{})
+		var content string
+		if in.Kind == domain.KindBug {
+			content = spec.SeededBugTemplate(&f, domain.BugReport{Description: seed}, domain.BugProvenance{}, "")
+		} else {
+			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed, Acceptance: in.Acceptance}, domain.DraftProvenance{})
+		}
 		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
 			return domain.Feature{}, err
 		}
