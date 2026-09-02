@@ -100,7 +100,7 @@ func TestSquashNoOpAlreadyCollapsed(t *testing.T) {
 
 func TestSquashRefusedWhenLanded(t *testing.T) {
 	m, root, wt := rebaseFeatureFixture(t)
-	landFeature(t, root, wt)
+	landFeature(t, m, root, wt)
 	branchHead := gitOut(t, wt, "rev-parse", "HEAD")
 	m = pump(t, m, m.loadRows)
 

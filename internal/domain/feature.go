@@ -239,6 +239,14 @@ type Feature struct {
 	// the worktree is created (or, for pre-existing worktrees, until the
 	// first diff-based access lazily backfills it).
 	ForkPoint string
+	// LandedSHA is the squash commit SquashMerge created when this
+	// feature's branch actually landed on main, persisted at merge time.
+	// Empty until gummi performs that merge. It is the lineage record
+	// Landed's squash route tests ancestry against, so a branch whose
+	// content merely coincides with main by some other route (a sibling
+	// card, a cherry-pick, an independently identical fix) is never
+	// misread as landed.
+	LandedSHA string
 	// CommitDraftFail is the durable reason a squash-merge scribe pass last
 	// failed to produce a draft (a backend/config fault, a guard rejection,
 	// or a timeout), persisted so the failure survives the dialog and later

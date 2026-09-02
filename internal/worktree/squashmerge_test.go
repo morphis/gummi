@@ -192,10 +192,12 @@ func TestDeleteLandedBranch(t *testing.T) {
 		t.Fatal("unmerged branch deleted")
 	}
 
-	// squash-merge it: commits aren't ancestors, so plain -d would
-	// refuse, but the content check clears the force-delete
-	mustGit(t, root, "merge", "--squash", f.BranchName())
-	mustGit(t, root, "commit", "-q", "-m", "squash "+string(f.ID))
+	// squash-merge it through the real path: commits aren't ancestors, so
+	// plain -d would refuse, but the recorded landed sha clears the
+	// force-delete.
+	if _, err := m.SquashMerge(ctx, f, "FD-009: land me"); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.DeleteLandedBranch(ctx, f); err != nil {
 		t.Fatalf("landed squash-merged branch not deleted: %v", err)
 	}

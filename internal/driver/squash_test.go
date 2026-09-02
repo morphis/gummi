@@ -85,25 +85,26 @@ func TestDriverSquashRefusesDoneCard(t *testing.T) {
 	}
 }
 
-// TestDriverSquashRefusesLandedCard refuses a card whose branch's content is
-// already in main, even if its card record has not yet transitioned to
-// done (e.g. it landed by some route outside gummi's own Merge).
+// TestDriverSquashRefusesLandedCard refuses a card whose branch actually
+// landed on main, even if its card record has not yet transitioned to done
+// (e.g. a TUI merge with thenDone unset leaves a card at verify with its
+// content landed).
 func TestDriverSquashRefusesLandedCard(t *testing.T) {
 	h, d, id := driveVerified(t)
 	f, err := h.store.GetFeature(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// land the branch's content into main directly, without going through
+	// land the branch through the real squash-merge path (which records the
+	// landed sha Landed checks ancestry against), without going through
 	// Driver.Merge, so the card stays parked at StageVerify.
-	run := func(args ...string) {
-		t.Helper()
-		if out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", h.root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	wt, err := d.eng.WorktreesFor(context.Background(), &f)
+	if err != nil {
+		t.Fatal(err)
 	}
-	run("merge", "--squash", f.BranchName())
-	run("commit", "-q", "-m", "squash "+string(id))
+	if _, err := wt.SquashMerge(context.Background(), &f, "feat(export): land it directly"); err != nil {
+		t.Fatal(err)
+	}
 	before := gitHead(t, h.root)
 
 	out, err := d.Squash(context.Background(), id, "feat(export): collapsed")

@@ -294,7 +294,7 @@ func TestSquashMergeRefusedWhenLinkedToPR(t *testing.T) {
 
 func TestSquashMergeRefusedWhenLanded(t *testing.T) {
 	m, root, wt := rebaseFeatureFixture(t)
-	landFeature(t, root, wt) // commits + merges --no-ff into main
+	landFeature(t, m, root, wt) // commits + merges --no-ff into main
 	m = pump(t, m, m.loadRows)
 	m = pressMerge(t, m)
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "already landed") {
@@ -407,7 +407,7 @@ func TestAdvanceToDoneCancelledStaysAtVerify(t *testing.T) {
 
 func TestAdvanceToDoneLandedBranchSkipsMerge(t *testing.T) {
 	m, root, wt := rebaseFeatureFixture(t)
-	landFeature(t, root, wt) // commits + merges --no-ff into main
+	landFeature(t, m, root, wt) // commits + merges --no-ff into main
 	m = atVerify(t, m)
 	m.sel = 0
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})

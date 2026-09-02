@@ -12,8 +12,11 @@ import (
 
 // landFeature commits work on the feature branch and squash-merges it into
 // main — the way gummi actually lands (a squash merge keeps the branch's
-// own commits, so it stays non-ancestor and reads as landed).
-func landFeature(t *testing.T, root, wt string) {
+// own commits, so it stays non-ancestor and reads as landed). It also
+// stamps the landed sha the real merge flow records: Landed reads that
+// recorded lineage, not tree content, so a fixture built from raw git
+// commands has to record it too or it would read as not-landed.
+func landFeature(t *testing.T, m *Shell, root, wt string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -22,11 +25,15 @@ func landFeature(t *testing.T, root, wt string) {
 	git(t, wt, "commit", "-qm", "feature work")
 	git(t, root, "merge", "--squash", "gummi/FD-001-rebase-me")
 	git(t, root, "commit", "-qm", "land FD-001")
+	sha := gitOut(t, root, "rev-parse", "HEAD")
+	if err := m.store.SetLandedSHA(context.Background(), "FD-001", sha); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLandedDetectionAndCleanup(t *testing.T) {
 	m, root, wt := rebaseFeatureFixture(t)
-	landFeature(t, root, wt)
+	landFeature(t, m, root, wt)
 	// a landed worktree commonly has untracked build artifacts; cleanup
 	// must still succeed (force removal), not abort on them.
 	if err := os.WriteFile(filepath.Join(wt, "build.out"), []byte("artifact\n"), 0o600); err != nil {

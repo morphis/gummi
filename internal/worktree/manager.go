@@ -37,6 +37,15 @@ type ForkPointStore interface {
 	// backfill sentinel, so the next Create on the row re-anchors the fork to
 	// main's then-current head.
 	ClearForkPoint(ctx context.Context, id domain.FeatureID) error
+	// LandedSHA reads a feature's recorded landed-commit SHA — the squash
+	// commit SquashMerge created when the branch actually landed on main.
+	// Empty when gummi has never squash-merged this feature's branch.
+	LandedSHA(ctx context.Context, id domain.FeatureID) (string, error)
+	// SetLandedSHA stamps the landed-commit SHA. SquashMerge calls it
+	// itself right after creating the commit, so every caller gets the
+	// record for free instead of having to remember to persist the sha
+	// it returns.
+	SetLandedSHA(ctx context.Context, id domain.FeatureID, sha string) error
 }
 
 // Manager creates and tends the per-feature git worktrees nested under
@@ -413,9 +422,9 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 // on main. It tries git's own -d safety first; when git refuses ("not
 // fully merged" — the squash-merge case, where the branch's commits are
 // not ancestors of main even though their content is in) it re-verifies
-// via the merge-tree content check and only then force-deletes. That
-// content check is stronger than git's ancestor test, so nothing
-// unlanded can slip through the -D.
+// via the recorded landed-sha lineage check and only then force-deletes.
+// That check only ever passes for a branch gummi itself squash-merged, so
+// nothing unlanded can slip through the -D.
 func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) error {
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
@@ -430,7 +439,7 @@ func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) err
 	if derr == nil {
 		return nil
 	}
-	landed, err := m.squashLanded(ctx, branch)
+	landed, err := m.squashLanded(ctx, f)
 	if err != nil || !landed {
 		return derr
 	}
@@ -605,40 +614,26 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	if anc {
 		return branchTip != head, nil
 	}
-	return m.squashLanded(ctx, branch)
+	return m.squashLanded(ctx, f)
 }
 
-// squashLanded reports whether branch has its own commits whose changes
-// are all already in main — i.e. a squash-merge landed it. It merges the
-// branch against main in memory (no working-tree touch) and checks the
-// result tree is identical to main's: if merging adds nothing, the work
-// is in. Any merge-tree failure (conflict, or a git too old for
-// --write-tree) reads as not-landed, the safe default.
-func (m *Manager) squashLanded(ctx context.Context, branch string) (bool, error) {
-	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
+// squashLanded reports whether f's branch landed on main via a
+// gummi-performed squash merge: the commit SquashMerge recorded for it
+// (LandedSHA) is reachable from main's current HEAD. A feature with no
+// recorded landed sha reads as not-landed — without a recorded merge
+// commit there is no lineage to test, and content equivalence alone
+// cannot distinguish "this branch's squash landed" from "main
+// independently carries the identical diff by some other route" (a
+// sibling card, a cherry-pick, a hand-applied identical fix).
+func (m *Manager) squashLanded(ctx context.Context, f *domain.Feature) (bool, error) {
+	sha, err := m.forkStore.LandedSHA(ctx, f.ID)
 	if err != nil {
 		return false, err
 	}
-	n, err := runGit(ctx, m.repo, "rev-list", "--count", base+".."+branch)
-	if err != nil {
-		return false, err
-	}
-	if n == "0" { // no commits of its own — a fresh/empty branch, not landed
+	if sha == "" {
 		return false, nil
 	}
-	merged, err := runGit(ctx, m.repo, "merge-tree", "--write-tree", "HEAD", branch)
-	if err != nil {
-		return false, nil // conflict or unsupported: treat as not landed
-	}
-	mainTree, err := runGit(ctx, m.repo, "rev-parse", "HEAD^{tree}")
-	if err != nil {
-		return false, err
-	}
-	// --write-tree prints the merged tree oid on the first line.
-	if i := strings.IndexByte(merged, '\n'); i >= 0 {
-		merged = merged[:i]
-	}
-	return merged == mainTree, nil
+	return gitOK(ctx, m.repo, "merge-base", "--is-ancestor", sha, "HEAD")
 }
 
 // RebaseConflictError reports that a rebase stopped on conflicts and was
@@ -883,7 +878,19 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	}
 	// the mainMu lock serializes main mutations, so HEAD is still the
 	// squash commit we just created — its sha is the landed commit.
-	return runGit(ctx, m.repo, "rev-parse", "HEAD")
+	sha, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	// Record the landed commit here, inside the operation that created it,
+	// rather than leaving every caller to remember to persist the sha this
+	// function returns — that's the gap BG-036 fell through: a discarded
+	// return value left Landed with no lineage to check and only a
+	// content-equality guess to fall back on.
+	if err := m.forkStore.SetLandedSHA(ctx, f.ID, sha); err != nil {
+		return "", fmt.Errorf("recording landed commit for %s: %w", f.ID, err)
+	}
+	return sha, nil
 }
 
 // ForkDriftRemedy is the single recovery phrase quoted verbatim by both

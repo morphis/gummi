@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS features (
 	gate_approval   TEXT NOT NULL DEFAULT '',
 	severity        TEXT NOT NULL DEFAULT '',
 	fork_point      TEXT NOT NULL DEFAULT '',
+	landed_sha      TEXT NOT NULL DEFAULT '',
 	commit_draft_fail TEXT NOT NULL DEFAULT '',
 	repo            TEXT NOT NULL DEFAULT '',
 	pr_repo         TEXT NOT NULL DEFAULT '',
@@ -375,6 +376,7 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			gate_approval   TEXT NOT NULL DEFAULT '',
 			severity        TEXT NOT NULL DEFAULT '',
 			fork_point      TEXT NOT NULL DEFAULT '',
+			landed_sha      TEXT NOT NULL DEFAULT '',
 			commit_draft_fail TEXT NOT NULL DEFAULT '',
 			repo            TEXT NOT NULL DEFAULT '',
 			pr_repo         TEXT NOT NULL DEFAULT '',
@@ -389,14 +391,14 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
 			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
-			 severity, fork_point, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha)
+			 severity, fork_point, landed_sha, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha)
 		 SELECT id, num, title, one_liner, slug, stage,
 			 skip_brainstorm, skip_plan, profile,
 			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
 			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
-			 severity, fork_point, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha
+			 severity, fork_point, landed_sha, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha
 		 FROM features`,
 		`DROP TABLE features`,
 		`ALTER TABLE features_new RENAME TO features`,
@@ -520,6 +522,7 @@ var migrations = []string{
 	// never error — they just affect zero rows when there is nothing to do.
 	`UPDATE features SET gate_approval = 'gates' WHERE gate_approval = 'auto'`,
 	`UPDATE features SET gate_approval = 'off'   WHERE gate_approval = 'caller'`,
+	`ALTER TABLE features ADD COLUMN landed_sha TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -552,14 +555,14 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, commit_draft_fail, repo,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
 			pr_repo, pr_number, pr_url, pr_head_sha)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.CommitDraftFail, f.Repo,
+		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
@@ -572,7 +575,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, commit_draft_fail, repo,
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha`
 
 // writtenFeatureColumns returns the set of feature columns the store
@@ -602,7 +605,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.CommitDraftFail, &f.Repo,
+		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA)
 	if err != nil {
 		return f, err
@@ -798,6 +801,42 @@ func (s *Store) ClearForkPoint(ctx context.Context, id domain.FeatureID) error {
 		return fmt.Errorf("clearing fork-point for %s: %w", id, err)
 	}
 	return nil
+}
+
+// SetLandedSHA stamps the commit SquashMerge created when a feature's
+// branch actually landed on main — the lineage record the worktree
+// manager's squash-landed test checks ancestry against, instead of the
+// tree-content-equality guess it used before. SquashMerge calls this
+// itself right after creating the commit, so every caller gets the
+// record for free rather than having to remember to persist the sha it
+// returns. Like SetCommitDraftFail it is a side-channel write: no
+// updated_at touch, no stage move.
+func (s *Store) SetLandedSHA(ctx context.Context, id domain.FeatureID, sha string) error {
+	if sha == "" {
+		return fmt.Errorf("setting landed sha for %s: refusing an empty SHA", id)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET landed_sha = ? WHERE id = ?`, sha, string(id))
+	if err != nil {
+		return fmt.Errorf("setting landed sha for %s: %w", id, err)
+	}
+	return nil
+}
+
+// LandedSHA reads a feature's recorded landed-commit SHA — the empty
+// string when gummi has never squash-merged this feature's branch. A
+// feature without a row reads the same way.
+func (s *Store) LandedSHA(ctx context.Context, id domain.FeatureID) (string, error) {
+	var sha string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT landed_sha FROM features WHERE id = ?`, string(id)).Scan(&sha)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading landed sha for %s: %w", id, err)
+	}
+	return sha, nil
 }
 
 // SetPullRequest persists a feature's linked outbound PR (or clears it, when

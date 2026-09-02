@@ -20,10 +20,13 @@ var ctx = context.Background()
 // memForkStore is an in-memory ForkPointStore for worktree tests: a map
 // keyed by feature ID. SetForkPoint refuses to overwrite a non-empty value,
 // mirroring the real store's stamped-once contract, so the package's own
-// tests exercise drift semantics without gaining a state dependency.
+// tests exercise drift semantics without gaining a state dependency. It
+// also backs the landed-sha record (a separate map: the two SHAs are
+// unrelated and each stamped independently).
 type memForkStore struct {
-	mu sync.Mutex
-	m  map[domain.FeatureID]string
+	mu     sync.Mutex
+	m      map[domain.FeatureID]string
+	landed map[domain.FeatureID]string
 }
 
 func (s *memForkStore) ForkPoint(_ context.Context, id domain.FeatureID) (string, error) {
@@ -68,6 +71,25 @@ func (s *memForkStore) ClearForkPoint(_ context.Context, id domain.FeatureID) er
 		s.m = map[domain.FeatureID]string{}
 	}
 	delete(s.m, id)
+	return nil
+}
+
+func (s *memForkStore) LandedSHA(_ context.Context, id domain.FeatureID) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.landed[id], nil
+}
+
+func (s *memForkStore) SetLandedSHA(_ context.Context, id domain.FeatureID, sha string) error {
+	if sha == "" {
+		return fmt.Errorf("setting landed sha for %s: refusing an empty SHA", id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.landed == nil {
+		s.landed = map[domain.FeatureID]string{}
+	}
+	s.landed[id] = sha
 	return nil
 }
 
@@ -485,7 +507,15 @@ func TestBranchAhead(t *testing.T) {
 	}
 }
 
-func TestLandedSquashMerge(t *testing.T) {
+// TestLandedFalseForUnrecordedSquashMerge is BG-036's mechanism laid bare:
+// content reaching main by any squash-shaped route used to read as landed,
+// because squashLanded tested tree equality instead of lineage. A squash
+// merge performed by hand (git merge --squash, bypassing m.SquashMerge)
+// never stamps a LandedSHA, so Landed must read it as not landed even
+// though main's tree now matches what merging the branch would produce —
+// see TestSquashMerge (squashmerge_test.go) for the positive case, where
+// landing through m.SquashMerge does record the sha and does read landed.
+func TestLandedFalseForUnrecordedSquashMerge(t *testing.T) {
 	root := newRepo(t)
 	m := newManager(t, root)
 	f := feature(8, "Squash me")
@@ -501,15 +531,16 @@ func TestLandedSquashMerge(t *testing.T) {
 		t.Fatalf("unmerged branch landed=%v err=%v, want false", landed, err)
 	}
 
-	// squash-merge into main: main gains the changes as a fresh commit, so
-	// the branch's own commit is NOT an ancestor of main's HEAD.
+	// squash-merge into main by hand: main gains the changes as a fresh
+	// commit, so the branch's own commit is NOT an ancestor of main's HEAD,
+	// and no LandedSHA was ever stamped for it.
 	mustGit(t, root, "merge", "--squash", f.BranchName())
 	mustGit(t, root, "commit", "-q", "-m", "squash "+string(f.ID))
 	if anc, _ := gitOK(ctx, root, "merge-base", "--is-ancestor", f.BranchName(), "HEAD"); anc {
 		t.Fatal("setup: a squash-merge should not make the branch an ancestor")
 	}
-	if landed, err := m.Landed(ctx, f); !landed || err != nil {
-		t.Errorf("squash-merged branch landed=%v err=%v, want true", landed, err)
+	if landed, err := m.Landed(ctx, f); landed || err != nil {
+		t.Errorf("hand squash-merged branch (no recorded landed sha) landed=%v err=%v, want false", landed, err)
 	}
 }
 
