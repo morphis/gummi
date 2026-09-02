@@ -310,11 +310,16 @@ func skillInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, repoRoot, err := resolveRoots(cwd)
+	ws, _, err := resolveRoots(cwd)
 	if err != nil {
 		return err
 	}
-	targets, err := resolveTargets(scope, *agentFlag, repoRoot)
+	if scope == "project" {
+		if _, ok := findGummiRoot(cwd); !ok {
+			return fmt.Errorf("skill install --scope project: no gummi workspace found at or above %s; run `gummi init` first, or pass --scope user", cwd)
+		}
+	}
+	targets, err := resolveTargets(scope, *agentFlag, ws)
 	if err != nil {
 		return err
 	}
@@ -401,14 +406,14 @@ func skillList(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, repoRoot, err := resolveRoots(cwd)
+	ws, _, err := resolveRoots(cwd)
 	if err != nil {
 		return err
 	}
 	curHash := skillBodyHash()
 	rows := []installTarget{
-		{path: projectSkillPath(repoRoot), label: "project (claude/copilot/opencode)"},
-		{path: codexProjectSkillPath(repoRoot), label: "project (codex/zz)"},
+		{path: projectSkillPath(ws), label: "project (claude/copilot/opencode)"},
+		{path: codexProjectSkillPath(ws), label: "project (codex/zz)"},
 		{path: userSkillPath(agentClaude), label: "user (claude/opencode)"},
 		{path: userSkillPath(agentCopilot), label: "user (copilot)"},
 		{path: userSkillPath(agentCodex), label: "user (codex)"},
@@ -508,15 +513,17 @@ func resolveScope(flagVal string) (string, error) {
 }
 
 // resolveTargets maps a scope (+ optional --agent) to concrete SKILL.md
-// paths. Project scope uses the shared .claude path plus Codex's .agents path;
-// user scope diverges per agent (claude+opencode share the claude home).
-func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
+// paths. Project scope uses the shared .claude path plus Codex's .agents
+// path, both rooted at the gummi workspace (beside .gummi) rather than
+// whatever repo the caller happens to be standing in; user scope diverges
+// per agent (claude+opencode share the claude home).
+func resolveTargets(scope, agentFlag, ws string) ([]installTarget, error) {
 	if scope == "project" {
 		shared := installTarget{
-			path:  projectSkillPath(cwd),
+			path:  projectSkillPath(ws),
 			label: "project (read by claude, copilot, opencode)",
 		}
-		codex := installTarget{path: codexProjectSkillPath(cwd), label: "project (read by codex/zz)"}
+		codex := installTarget{path: codexProjectSkillPath(ws), label: "project (read by codex/zz)"}
 		switch agentFlag {
 		case "":
 			return []installTarget{shared, codex}, nil
@@ -553,14 +560,15 @@ func resolveTargets(scope, agentFlag, cwd string) ([]installTarget, error) {
 }
 
 // projectSkillPath is the shared project-scope install Claude, Copilot, and
-// opencode read.
-func projectSkillPath(cwd string) string {
-	return filepath.Join(cwd, ".claude", "skills", "gummi", "SKILL.md")
+// opencode read, rooted at the gummi workspace (beside .gummi).
+func projectSkillPath(ws string) string {
+	return filepath.Join(ws, ".claude", "skills", "gummi", "SKILL.md")
 }
 
-// codexProjectSkillPath is Codex's repository-scoped skill location.
-func codexProjectSkillPath(cwd string) string {
-	return filepath.Join(cwd, ".agents", "skills", "gummi", "SKILL.md")
+// codexProjectSkillPath is Codex's workspace-scoped skill location, rooted
+// the same way as projectSkillPath.
+func codexProjectSkillPath(ws string) string {
+	return filepath.Join(ws, ".agents", "skills", "gummi", "SKILL.md")
 }
 
 // userSkillPath is an agent's user-scope home. Claude and opencode share the

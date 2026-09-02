@@ -528,14 +528,40 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 	return w, nil
 }
 
+// findGummiRoot searches upward from dir (dir included) for the nearest
+// ancestor holding a real .gummi directory — never a symlink, matching the
+// anti-symlink-smuggle convention used elsewhere for the same directory
+// (state.enclosingWorkspace). ok is false when no ancestor up to the
+// filesystem root has one.
+func findGummiRoot(dir string) (root string, ok bool) {
+	dir = filepath.Clean(dir)
+	for {
+		fi, err := os.Lstat(filepath.Join(dir, ".gummi"))
+		if err == nil && fi.IsDir() && fi.Mode()&os.ModeSymlink == 0 {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
 // resolveAllRoots resolves the workspace root (where .gummi lives), the
 // default managed repo root, and the ordered list of named repositories from
-// cwd. The workspace root is cwd; the repo roots come from config.yaml's
-// `repo:` and `repos:` keys, defaulting to the workspace root. A configured
-// root that escapes the workspace, or that is not a git toplevel, is a
-// resolution-time config error naming the offending repo.
+// cwd. The workspace root is the nearest ancestor of cwd (cwd included) that
+// already has a .gummi directory, falling back to cwd itself when none
+// exists yet — the pre-init state that `gummi init` and other callers that
+// tolerate an absent workspace rely on. The repo roots come from
+// config.yaml's `repo:` and `repos:` keys, defaulting to the workspace root.
+// A configured root that escapes the workspace, or that is not a git
+// toplevel, is a resolution-time config error naming the offending repo.
 func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.NamedRepo, err error) {
 	ws = cwd
+	if found, ok := findGummiRoot(cwd); ok {
+		ws = found
+	}
 	userPath, err := config.UserConfigPath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)

@@ -273,6 +273,69 @@ func TestUserSkillPathZZ(t *testing.T) {
 	}
 }
 
+// A repo gummi has no workspace relationship with at all (no .gummi
+// anywhere on or above cwd) must never receive a project-scope install: the
+// old resolveRoots(cwd) treated any directory as its own workspace root, so
+// `skill install --scope project` from inside a bystander repo seeded
+// SKILL.md straight into that repo's working tree (BG-020).
+func TestSkillInstallProjectScopeRefusesUnmanagedRepo(t *testing.T) {
+	dir := gitRepo(t)
+	t.Chdir(dir)
+
+	err := skillInstall([]string{"--scope", "project", "--agent", "claude"})
+	if err == nil {
+		t.Fatal("skillInstall in a repo with no gummi workspace = nil error, want a refusal")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".claude", "skills", "gummi", "SKILL.md")); statErr == nil {
+		t.Error("skillInstall wrote SKILL.md into the unmanaged repo despite returning an error")
+	}
+}
+
+// When cwd is a repo managed by a workspace whose .gummi sits above it (the
+// FD-070/071/072 layout), project scope must land beside .gummi at the
+// workspace root, not inside the repo gummi happens to be driving from.
+func TestSkillInstallProjectScopeAnchorsToWorkspaceRoot(t *testing.T) {
+	ws := t.TempDir()
+	repo := filepath.Join(ws, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, ws, "repo: repo\n")
+	t.Chdir(repo)
+
+	if err := skillInstall([]string{"--scope", "project", "--agent", "claude"}); err != nil {
+		t.Fatalf("skillInstall: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".claude", "skills", "gummi", "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not written beside .gummi at the workspace root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".claude", "skills", "gummi", "SKILL.md")); err == nil {
+		t.Error("SKILL.md was written into the managed repo instead of beside .gummi")
+	}
+}
+
+// A symlinked .gummi at cwd must not be trusted as a real workspace: the
+// refusal guard has to agree with findGummiRoot's anti-symlink-smuggle rule
+// (also used to resolve ws itself), not re-derive "does a workspace exist"
+// from a plain Lstat that a symlink satisfies just as well as a real
+// directory (BG-020 review finding).
+func TestSkillInstallProjectScopeRefusesSymlinkedGummi(t *testing.T) {
+	dir := gitRepo(t)
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(dir, ".gummi")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	err := skillInstall([]string{"--scope", "project", "--agent", "claude"})
+	if err == nil {
+		t.Fatal("skillInstall with a symlinked .gummi = nil error, want a refusal")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".claude", "skills", "gummi", "SKILL.md")); statErr == nil {
+		t.Error("skillInstall wrote SKILL.md into the bystander repo despite the untrusted symlinked .gummi")
+	}
+}
+
 func TestDetectAgentsIncludesZZOnPath(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "zz"), []byte("#!/bin/sh\n"), 0o755); err != nil {
