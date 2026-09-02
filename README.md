@@ -599,6 +599,7 @@ Environment variables:
 | `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (on by default; needs an authenticated `gh` CLI to show anything) |
 | `GUMMI_THEME` | `dark` (default) · `light` · `neon` |
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default) · `desktop` · `off` |
+| `GUMMI_MOTION` | `off` freezes every activity glyph to a static mark and stops the shared clock's tick loop (on by default) |
 | `GUMMI_ATTACH_CMD` | command for raw-attach (default: selected backend's CLI); also the agent tab's top-priority override, ahead of `GUMMI_AGENT` and the picker's `agent:` choice |
 
 ## Try it without your repo

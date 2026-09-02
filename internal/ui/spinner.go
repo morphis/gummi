@@ -28,12 +28,25 @@ func (m *Shell) spinner() string {
 	return spinnerFrames[m.frame%len(spinnerFrames)]
 }
 
+// spinnerGlyph returns the advancing frame when animate is true, and the
+// spinner's fixed first frame otherwise — a busy marker that isn't the
+// board's selected card, or any marker at all with motion disabled.
+func (m *Shell) spinnerGlyph(animate bool) string {
+	if animate {
+		return m.spinner()
+	}
+	return spinnerFrames[0]
+}
+
 // spinnerActive reports whether anything on screen animates: a busy
 // agent session (chat header, board card, dashboard activity) or a
 // running ingest pass (feed header, status pill). While true, Update
 // keeps exactly one tick loop alive; when it goes false the loop stops
 // so an idle board schedules no wake-ups.
 func (m *Shell) spinnerActive() bool {
+	if !m.motionEnabled {
+		return false
+	}
 	if m.ingestRun != nil || m.mergePrep || m.squashPrep || len(m.baselining) > 0 || len(m.scribing) > 0 {
 		return true
 	}

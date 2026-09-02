@@ -171,6 +171,12 @@ func runBoard() error {
 	if strings.EqualFold(os.Getenv("GUMMI_COPILOT_HINT"), "off") {
 		shell.SetCopilotHint(false)
 	}
+	// GUMMI_MOTION=off freezes every activity glyph in the UI to its
+	// static first frame and stops the shared clock's tick loop from
+	// ever starting (on by default).
+	if strings.EqualFold(os.Getenv("GUMMI_MOTION"), "off") {
+		shell.SetMotion(false)
+	}
 	// First-run ask for the agent tab's hosted CLI: a no-op once
 	// GUMMI_ATTACH_CMD/GUMMI_AGENT is set or a prior choice is recorded in
 	// config.yaml's `agent:` key. Must run before Run() starts (see

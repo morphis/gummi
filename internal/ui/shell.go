@@ -316,9 +316,11 @@ type Shell struct {
 	openReviewThreads func(context.Context, domain.Feature) (int, string, error)
 
 	// shared activity spinner (spinner.go): frame is the current cycle
-	// position; spinning guards the single live tick loop.
-	frame    int
-	spinning bool
+	// position; spinning guards the single live tick loop; motionEnabled
+	// gates whether the clock is allowed to run at all.
+	frame         int
+	spinning      bool
+	motionEnabled bool
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
@@ -345,16 +347,17 @@ func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 func NewShell(t theme.Theme, version string) *Shell {
 	styles := theme.New(t)
 	m := &Shell{
-		styles:       styles,
-		version:      version,
-		now:          time.Now,
-		checks:       map[domain.FeatureID][]verify.Result{},
-		baselining:   map[domain.FeatureID]bool{},
-		scribing:     map[domain.FeatureID]int{},
-		rounds:       map[roundKey]int{},
-		cardEvents:   map[domain.FeatureID][]state.CardEvent{},
-		threadDrafts: map[domain.FeatureID]string{},
-		copilotHint:  true,
+		styles:        styles,
+		version:       version,
+		now:           time.Now,
+		checks:        map[domain.FeatureID][]verify.Result{},
+		baselining:    map[domain.FeatureID]bool{},
+		scribing:      map[domain.FeatureID]int{},
+		rounds:        map[roundKey]int{},
+		cardEvents:    map[domain.FeatureID][]state.CardEvent{},
+		threadDrafts:  map[domain.FeatureID]string{},
+		copilotHint:   true,
+		motionEnabled: true,
 		// the composer is themed from the same styles as everything else
 		// on the page; left on the widget's own defaults it renders in raw
 		// ANSI and reads as a foreign box (threadinput.go).
@@ -479,6 +482,11 @@ func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
 // SetCopilotHint toggles the status-bar Copilot quota pill (on by
 // default; it hides itself anyway when gh or a quota is absent).
 func (m *Shell) SetCopilotHint(on bool) { m.copilotHint = on }
+
+// SetMotion toggles the shared activity spinner (on by default). Off
+// freezes every glyph in the UI to its static first frame and stops the
+// clock's tick loop from ever starting.
+func (m *Shell) SetMotion(enabled bool) { m.motionEnabled = enabled }
 
 // probeOpenReviewThreads returns the count of open review threads and the
 // PR URL for a linked PR, or (0, "", nil) when there is no linked PR. A

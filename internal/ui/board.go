@@ -131,7 +131,11 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if sess := m.sessionFor(r.F.ID); sess != nil && sess.State() == engine.StateQueued {
 		glyph = s.Warning.Render("◔")
 	} else if m.cardBusy(r) {
-		loop = " " + s.Info.Render(m.spinner()) + " " + faint.Render(m.cardBusyWord(r))
+		// only the selected card's glyph advances — the rest freeze to the
+		// spinner's first frame so a board with several busy cards reads as
+		// busy (mark plus word on every row) without every glyph moving in
+		// lockstep off the shared clock.
+		loop = " " + s.Info.Render(m.spinnerGlyph(selected)) + " " + faint.Render(m.cardBusyWord(r))
 	}
 	// the marker sits flush against the shortcut number, so it can't use
 	// BandMarker's padded form — same two styles, one column.

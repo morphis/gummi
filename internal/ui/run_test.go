@@ -323,6 +323,47 @@ func TestCardBusyStateRunning(t *testing.T) {
 	}
 }
 
+// TestCardLineGlyphSelectionGate proves only the selected card's glyph
+// tracks the shared clock: a busy non-selected row freezes to the
+// spinner's first frame regardless of m.frame, while the selected row's
+// glyph advances with it.
+func TestCardLineGlyphSelectionGate(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Wiring the toggle."},
+			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+		}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = openAndAttach(t, m)
+	waitForActivity(t, eng)
+
+	r := m.rows[0]
+	if !m.cardBusy(r) {
+		t.Fatal("setup: want a busy card")
+	}
+	m.frame = 3 // a non-zero, non-first frame
+
+	notSelected := m.cardLine(r, 1, false, true, 100)
+	if !strings.Contains(notSelected, spinnerFrames[0]) {
+		t.Errorf("non-selected busy card line = %q, want the frozen first frame %q", notSelected, spinnerFrames[0])
+	}
+	if strings.Contains(notSelected, m.spinner()) && m.spinner() != spinnerFrames[0] {
+		t.Errorf("non-selected busy card line = %q, must not show the live frame %q", notSelected, m.spinner())
+	}
+
+	selected := m.cardLine(r, 1, true, true, 100)
+	if !strings.Contains(selected, m.spinner()) {
+		t.Errorf("selected busy card line = %q, want the live frame %q", selected, m.spinner())
+	}
+}
+
 // TestCardBusyStateInteractive is FD-029's core repro for the chat-session
 // half: a StateInteractive session mid-reply never satisfied the old
 // inline switch (it only matched StateRunning), so a busy chat card sat

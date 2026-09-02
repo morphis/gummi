@@ -106,3 +106,42 @@ func TestSpinnerActiveForeignRow(t *testing.T) {
 		t.Error("spinnerActive true for a driven-abroad row that is not busy")
 	}
 }
+
+// TestSpinnerMotionOff proves the global motion switch stops the clock
+// even while a real busy source is present: an otherwise-idle board must
+// schedule no repeating wake-up when motion is disabled.
+func TestSpinnerMotionOff(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.SetMotion(false)
+	m.ingestRun = newIngestRunView("spec.md")
+
+	_, cmd := m.Update(noticeMsg{text: "ingesting"})
+	if m.spinning || cmd != nil {
+		t.Fatal("spinner started with motion disabled")
+	}
+	if m.spinnerActive() {
+		t.Fatal("spinnerActive true with motion disabled")
+	}
+}
+
+// TestSpinnerGlyph proves spinnerGlyph(false) is pinned to the spinner's
+// first frame regardless of m.frame, while spinnerGlyph(true) tracks the
+// live, advancing frame.
+func TestSpinnerGlyph(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+
+	if got := m.spinnerGlyph(false); got != spinnerFrames[0] {
+		t.Errorf("spinnerGlyph(false) = %q, want %q", got, spinnerFrames[0])
+	}
+	if got := m.spinnerGlyph(true); got != m.spinner() {
+		t.Errorf("spinnerGlyph(true) = %q, want %q", got, m.spinner())
+	}
+
+	m.frame = 3
+	if got := m.spinnerGlyph(false); got != spinnerFrames[0] {
+		t.Errorf("spinnerGlyph(false) = %q after frame advance, want constant %q", got, spinnerFrames[0])
+	}
+	if got := m.spinnerGlyph(true); got != m.spinner() {
+		t.Errorf("spinnerGlyph(true) = %q, want %q to track m.spinner()", got, m.spinner())
+	}
+}
