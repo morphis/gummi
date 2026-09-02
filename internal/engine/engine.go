@@ -1657,6 +1657,7 @@ func (e *Engine) exhaust(s *Session) {
 			}, e.now())
 	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted, Committed: committed})
+	s.stop() // finalizes the session, closing the underlying agent and MCP teardown
 	e.freeSlot(s)
 }
 

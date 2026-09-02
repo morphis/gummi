@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/livelog"
 )
 
 func TestBudgetHintAndCap(t *testing.T) {
@@ -503,6 +504,35 @@ func TestBudgetExhaustionIsIdempotent(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+func TestBudgetExhaustionStopsSession(t *testing.T) {
+	// exhaust() must tear down the session like every other terminal
+	// path (Pause/Drop/replace/trip): closing the agent, running MCP
+	// teardown, and emitting the live file's terminal record. Stopped
+	// only flips true once Session.stop() writes that record, so this
+	// is a direct proxy for "did stop() run".
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventBudgetExhausted, Usage: agent.Usage{Credits: 90}}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventExhausted)
+
+	st, err := livelog.Stat(ws.LiveFile(f.ID))
+	if err != nil {
+		t.Fatalf("livelog.Stat: %v", err)
+	}
+	if !st.Stopped {
+		t.Fatalf("live file Stopped = false after exhaustion, want true (session.stop() never ran)")
 	}
 }
 
