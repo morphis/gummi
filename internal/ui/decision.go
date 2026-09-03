@@ -90,6 +90,67 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	return &threadDecision{key: key, kind: kind, question: question, actions: actions}
 }
 
+// visibleDecision is openDecision narrowed to a decision that is also
+// currently on screen: nil both when there is no open decision and when
+// there is one but windowDecisionBlock dropped it for lack of room (F21).
+// The bar and every key handler that acts on a decision must gate on this
+// rather than the bare openDecision(r) != nil check, or they act on a
+// picker the reader cannot see (BG-058).
+//
+// It force-refreshes m.decisionDrawn with a real (non-measure) render
+// before answering, rather than trusting whatever the last View() call
+// left behind: Update() can be, and in gummi's own headless driving
+// paths routinely is, called several times between renders, so a cache
+// only threadRender writes to would answer against a stale height or a
+// stale row. threadRender is already idempotent to repeat calls with
+// unchanged state (it exists to be the single honest measure of the
+// layout — maxThreadScroll relies on the same property), so paying for
+// an extra render here costs nothing beyond the CPU cycles.
+//
+// The render is forced at cardThreadSize, not the raw m.width/m.height:
+// the frame threadView actually paints is narrower and shorter than the
+// bare shell dimensions by the main pane's own gutter and the card
+// page's crumb/blank chrome (cardPageView), and checking against the
+// wrong box answers "would this draw" for a frame the reader never
+// sees (BG-058 review).
+func (m *Shell) visibleDecision(r featureRow) *threadDecision {
+	d := m.openDecision(r)
+	if d == nil {
+		return nil
+	}
+	if m.width <= 0 || m.height <= 0 {
+		// nothing has rendered at all yet (pre-WindowSizeMsg) — View()
+		// itself refuses to draw at this size, so nothing is on screen.
+		return nil
+	}
+	w, h := m.cardThreadSize()
+	m.threadRender(w, h, false)
+	if !m.decisionDrawn {
+		return nil
+	}
+	return d
+}
+
+// cardThreadSize is the width and height threadView is actually given
+// when it paints the open card's page: the main pane less the -3
+// column gutter and any notice band Draw reserves before ever calling
+// mainView, then cardPageView's own crumb/blank rows on top. It exists
+// so visibleDecision's forced re-render measures the same box as the
+// one on screen, rather than the raw shell size (BG-058 review) —
+// threadSize (shell.go) answers a related but distinct question (the
+// scroll step) and does not subtract the gutter, so it is not reused
+// here.
+func (m *Shell) cardThreadSize() (int, int) {
+	l := m.computeLayout()
+	w := max(l.Main.Dx()-3, 0)
+	h := l.Main.Dy()
+	if band := m.noticeBand(w); len(band) > 0 {
+		h = max(h-len(band)-1, 0)
+	}
+	crumb, blank := cardPageChrome(h)
+	return w, max(h-crumb-blank, 1)
+}
+
 // wordConsumer is the index of the option that consumes the composer's
 // line, or -1 when none does: the first action in the decision's order
 // whose delivery takes prose — the run that opens (or re-runs) a stage,

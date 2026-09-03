@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -269,6 +270,85 @@ func TestThreadDecisionSmallFrameDropsRatherThanBareTitle(t *testing.T) {
 	}
 	if !strings.Contains(out, "┃") {
 		t.Errorf("36x9 lost the composer under the decision:\n%s", out)
+	}
+}
+
+// TestBG058InputAgreesWithDroppedDecisionBlock is BG-058: on a frame short
+// enough that windowDecisionBlock drops the pinned block (F21), the bar and
+// every key handler that acts on a decision used to keep gating on
+// m.openDecision(r) != nil alone, with no idea the block never made it onto
+// the screen. That let the bar advertise "↑↓ choose" and "1-9 choose" for a
+// picker that was not drawn, let a digit or an arrow key move the highlight
+// through options nobody could see, and let enter on an empty composer
+// commit an answer (answerDecision, which on a gate can start the agent
+// stages) to a choice the user never saw. visibleDecision (decision.go) is
+// now the single gate both the bar and handleThreadInputKey read instead of
+// the bare openDecision(r) != nil check — it force-refreshes m.decisionDrawn
+// from a real render before answering, so this must hold at any height and
+// regardless of whether a render happened to run between the keys below: a
+// key that only makes sense against a visible decision has no effect on one
+// that is not.
+//
+// Two sizes are pinned, not one: 20x5 is small enough that both the raw
+// shell dimensions and the actual on-screen box (main pane minus the -3
+// gutter and cardPageView's crumb/blank chrome) collapse to a drop, so it
+// alone can't catch a version of visibleDecision that measures the wrong
+// box. 44x6 sits in the band the review caught live — the block still fits
+// against the raw shell size but the chrome drops it on the real frame —
+// which is exactly where visibleDecision forcing its re-render at
+// m.width/m.height (instead of cardThreadSize) answered "drawn" for a
+// picker the reader could not see.
+func TestBG058InputAgreesWithDroppedDecisionBlock(t *testing.T) {
+	for _, size := range []struct{ w, h int }{{20, 5}, {44, 6}} {
+		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
+			m := attachedBoard(t, size.w, size.h)
+			m.sel = 3 // FD-049, spec — an idle workflow decision
+			m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			r := m.rows[m.sel]
+			if d := m.openDecision(r); d == nil {
+				t.Fatal("precondition: FD-049 has an open decision")
+			}
+
+			out := ansi.Strip(m.View().Content)
+			if strings.Contains(out, "nothing is running") {
+				t.Fatalf("precondition: decision block still rendered at %dx%d, expected it dropped", size.w, size.h)
+			}
+			if m.decisionDrawn {
+				t.Fatal("precondition: m.decisionDrawn true after a render that dropped the block")
+			}
+
+			for _, b := range m.threadInputBindings() {
+				if b.key == "↑↓" || b.key == "1-9" {
+					t.Errorf("bar still advertises picker key %q/%q while the decision block is not on screen", b.key, b.label)
+				}
+			}
+
+			// enter on the still-empty composer must not answer a decision it
+			// cannot show — checked before anything is typed, since a non-empty
+			// composer routes enter through submitThreadLine instead.
+			model, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			m = model.(*Shell)
+			if cmd != nil {
+				t.Error("enter on an empty composer fired a command (answerDecision) against a decision the render dropped")
+			}
+
+			// cmd is not checked here: once the digit falls through to ordinary
+			// composer input (updateThreadInput), it is wrapped in subscription(...)
+			// (threadinput.go) which is routinely non-nil for an untouched
+			// keystroke (a cursor-blink tick, say) — that is not evidence the
+			// decision was acted on. decisionCursor staying put and the digit
+			// landing in the composer's own value are what actually distinguish
+			// "typed as text" from "selected an option".
+			cursorBefore := m.decisionCursor
+			model, _ = m.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+			m = model.(*Shell)
+			if m.decisionCursor != cursorBefore {
+				t.Errorf("decisionCursor moved to %d off a digit press against an undrawn decision, want unchanged %d", m.decisionCursor, cursorBefore)
+			}
+			if m.threadInput.Value() != "2" {
+				t.Errorf("composer = %q, want the digit typed as ordinary text once the decision is not on screen to claim it", m.threadInput.Value())
+			}
+		})
 	}
 }
 

@@ -492,6 +492,13 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// blank given up — headMin's and footMin's treatment, applied here too
 	// (BG-050).
 	decisionMin := m.openDecisionBlock(s, r, inner, budget)
+	if !measure {
+		// the measure pass forces budget to 0, which openDecisionBlock
+		// (via windowDecisionBlock) reads as "unbounded" rather than
+		// "dropped" — it is not a real render of this row at this height,
+		// so it must never overwrite what the last real one found (BG-058).
+		m.decisionDrawn = len(decisionMin) > 0
+	}
 	for i := range decisionMin {
 		decisionMin[i] = clip(decisionMin[i])
 	}

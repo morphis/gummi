@@ -293,7 +293,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 				// free-form contract, inherited
 				return nil
 			}
-			if d := m.openDecision(r); d != nil {
+			if d := m.visibleDecision(r); d != nil {
 				m.syncDecision(d)
 				m.threadScroll = 0 // jump to the newest, where the answer lands
 				return m.answerDecision(r, d)
@@ -319,7 +319,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "up", "down":
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
-			if d := m.openDecision(r); d != nil {
+			if d := m.visibleDecision(r); d != nil {
 				m.syncDecision(d)
 				if msg.String() == "up" && m.decisionCursor == 0 {
 					// ↑ off the top of the decision is the one route to
@@ -350,7 +350,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "space":
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
-			if d := m.openDecision(r); d != nil && d.ask != nil && d.ask.MultiPick && len(d.ask.Options) > 0 {
+			if d := m.visibleDecision(r); d != nil && d.ask != nil && d.ask.MultiPick && len(d.ask.Options) > 0 {
 				m.syncDecision(d)
 				m.decisionPicked[m.decisionCursor] = !m.decisionPicked[m.decisionCursor]
 				return nil
@@ -362,7 +362,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// words type unmolested, digit-leading included (the pane's own
 		// 'o', inherited when the pane retired).
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
-			if d := m.openDecision(r); d != nil && d.ask != nil && d.ask.FreeForm {
+			if d := m.visibleDecision(r); d != nil && d.ask != nil && d.ask.FreeForm {
 				m.syncDecision(d)
 				m.threadFreeForm = true
 				return nil
@@ -380,7 +380,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	// one the digit named (the four-option-gate bug: pressing 2 used to
 	// select 1). Multi-pick keeps space as its own toggle, unchanged.
 	if strings.TrimSpace(m.threadInput.Value()) == "" {
-		if d := m.openDecision(r); d != nil {
+		if d := m.visibleDecision(r); d != nil {
 			if key := msg.String(); len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
 				i := int(key[0] - '1')
 				n := len(d.actions)
@@ -491,7 +491,7 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	if skip {
 		return m.sendThreadMessage(r.F, text)
 	}
-	if d := m.openDecision(r); d != nil {
+	if d := m.visibleDecision(r); d != nil {
 		m.syncDecision(d)
 		if m.threadFreeForm && d.ask != nil && d.ask.FreeForm {
 			return m.answerAskWith(r, text)
@@ -871,7 +871,7 @@ func (m *Shell) threadInputBindings() []binding {
 		}
 	}
 	if r, ok := m.selected(); ok {
-		if d := m.openDecision(r); d != nil {
+		if d := m.visibleDecision(r); d != nil {
 			aim := m.wordAim(d)
 			text := strings.TrimSpace(m.threadInput.Value())
 			typed := text != ""

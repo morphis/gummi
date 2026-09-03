@@ -216,6 +216,18 @@ type Shell struct {
 	// syncDecision.
 	decisionAimed   bool
 	decisionAimBase int
+	// decisionDrawn is whether the open decision's block actually made it
+	// onto the last real render (openDecisionBlock, via threadRender) or
+	// was dropped for lack of room (windowDecisionBlock's F21 case). It is
+	// written only by threadRender, so it is only ever current immediately
+	// after one — nothing else may read it directly. visibleDecision
+	// (decision.go) is the single place that does: it forces a fresh
+	// render before reading this field, which is what keeps the bar and
+	// every key handler that acts on a decision from acting as though a
+	// picker were on screen when the render actually dropped it — a
+	// decision can exist in domain state while its block is off screen on
+	// a short terminal (BG-058).
+	decisionDrawn bool
 
 	// agent orchestration (nil engine means no agent wired)
 	engine *engine.Engine
