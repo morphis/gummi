@@ -357,7 +357,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// not events on the card. The detail pane showed them in exactly this
 	// slot, so the thread does too.
 	if m.sessionFor(f.ID) == nil {
-		if res := m.checks[f.ID]; len(res) > 0 {
+		if res := m.checksFor(f); len(res) > 0 {
 			for _, l := range strings.Split(verifySummary(s, res), "\n") {
 				if l != "" {
 					add(l)

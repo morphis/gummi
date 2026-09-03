@@ -26,7 +26,6 @@ import (
 	"github.com/morphis/gummi/internal/ui/overlay"
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -260,9 +259,14 @@ type Shell struct {
 	foreignTicks int
 	// locks is the board's per-card lock registry, shared with the engine
 	// (AttachCardLocks). Nil leaves the board's git verbs unlocked.
-	locks      *state.CardLocks
-	inbox      *inbox // needs-attention queue
-	checks     map[domain.FeatureID][]verify.Result
+	locks *state.CardLocks
+	inbox *inbox // needs-attention queue
+	// checks is keyed by feature and scoped to the stage the run happened
+	// on: a manual `v` run is only ever "the current result" for the stage
+	// it ran against, so an entry from a stage the card has since moved
+	// off of must stop counting as current rather than being cleared from
+	// every one of the several call sites a stage can change at.
+	checks     map[domain.FeatureID]stagedChecks
 	baselining map[domain.FeatureID]bool // a baseline check run is in flight
 	// scribing counts the one-shot scribe passes (check discovery, envelope
 	// estimate) currently in flight against a card. A count, not a flag,
@@ -384,7 +388,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		styles:        styles,
 		version:       version,
 		now:           time.Now,
-		checks:        map[domain.FeatureID][]verify.Result{},
+		checks:        map[domain.FeatureID]stagedChecks{},
 		baselining:    map[domain.FeatureID]bool{},
 		scribing:      map[domain.FeatureID]int{},
 		rounds:        map[roundKey]int{},
@@ -1591,7 +1595,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 			return m, nil
 		}
-		m.checks[msg.feature] = msg.results
+		m.checks[msg.feature] = stagedChecks{stage: msg.stage, results: msg.results}
 		passed := 0
 		for _, r := range msg.results {
 			if r.OK {

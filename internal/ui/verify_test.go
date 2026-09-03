@@ -97,12 +97,12 @@ func TestVerifySurfacesThenRuns(t *testing.T) {
 	if m.Overlay.Top() == nil || m.Overlay.Top().ID() != "verify" {
 		t.Fatal("v did not surface the verify dialog")
 	}
-	if len(m.checks["FD-001"]) != 0 {
+	if len(m.checks["FD-001"].results) != 0 {
 		t.Fatal("checks ran before confirmation")
 	}
 	// enter runs them
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	res := m.checks["FD-001"]
+	res := m.checks["FD-001"].results
 	if len(res) != 2 {
 		t.Fatalf("results = %+v", res)
 	}
@@ -124,7 +124,7 @@ func TestVerifyCancelDoesNotRun(t *testing.T) {
 	if m.Overlay.HasDialogs() {
 		t.Fatal("esc did not close the verify dialog")
 	}
-	if len(m.checks["FD-001"]) != 0 {
+	if len(m.checks["FD-001"].results) != 0 {
 		t.Error("checks ran despite cancel")
 	}
 }
@@ -154,8 +154,23 @@ func TestVerifyDialogGolden(t *testing.T) {
 func TestVerifyResultsInThreadGolden(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.sel = 1 // FD-042 (implement)
-	m.checks["FD-042"] = fakeResults()
+	m.checks["FD-042"] = stagedChecks{stage: domain.StageImplement, results: fakeResults()}
 	golden.RequireEqual(t, []byte(m.View().Content))
+}
+
+// A manual verify's check summary belongs to the stage it ran on. If the
+// card has since moved to a different stage, the entry is stale and must
+// not still render — the bug was that m.checks carried no stage of its
+// own, so it kept surfacing the old summary on every later stage.
+func TestStaleChecksDoNotSurviveStageTransition(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.sel = 1 // FD-042, currently at implement
+	m.openCard()
+	m.checks["FD-042"] = stagedChecks{stage: domain.StageBrainstorm, results: fakeResults()}
+	view := ansi.Strip(m.View().Content)
+	if strings.Contains(view, "golangci-lint run") {
+		t.Fatalf("stale verify summary from an earlier stage still rendered:\n%s", view)
+	}
 }
 
 // worktreeIn confirms the check runs in the worktree directory.
@@ -166,7 +181,7 @@ func TestVerifyRunsInWorktree(t *testing.T) {
 	writeWorktreeChecks(t, m, "FD-001", specChecks("where", "pwd"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	got := m.checks["FD-001"]
+	got := m.checks["FD-001"].results
 	if len(got) != 1 {
 		t.Fatalf("results = %+v", got)
 	}

@@ -20,8 +20,28 @@ import (
 // verifyResultMsg carries the outcome of a verify run.
 type verifyResultMsg struct {
 	feature domain.FeatureID
+	stage   domain.Stage
 	results []verify.Result
 	err     error
+}
+
+// stagedChecks is a manual verify run's result, scoped to the stage it ran
+// against. A card that has since moved to a different stage no longer
+// matches, so the entry stops counting as current without needing an
+// explicit delete at every stage-transition call site.
+type stagedChecks struct {
+	stage   domain.Stage
+	results []verify.Result
+}
+
+// checksFor returns the last manual verify results for f, or nil if there
+// are none or they were produced on a stage f has since moved off of.
+func (m *Shell) checksFor(f domain.Feature) []verify.Result {
+	c, ok := m.checks[f.ID]
+	if !ok || c.stage != f.Stage {
+		return nil
+	}
+	return c.results
 }
 
 // runChecks surfaces the artifact's gummi-checks commands, then (on
@@ -79,7 +99,7 @@ func (m *Shell) execChecks(f domain.Feature, workDir string, checks []domain.Che
 		ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 		defer cancel()
 		results := verify.RunBounded(ctx, workDir, checks, verify.CheckTimeout)
-		return verifyResultMsg{feature: f.ID, results: results}
+		return verifyResultMsg{feature: f.ID, stage: f.Stage, results: results}
 	})
 }
 

@@ -108,7 +108,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 			in.verdict = sessionVerdict(snap)
 		}
 	}
-	for _, res := range m.checks[r.F.ID] {
+	for _, res := range m.checksFor(r.F) {
 		if !res.OK {
 			in.failedCheck = res.Name
 			break

@@ -131,7 +131,7 @@ func TestNextInputForAssembly(t *testing.T) {
 	}
 	m.inbox.addEscalated("FD-001", attnGate, "escalated")
 	m.setRound("FD-001", domain.RoundKindReview, 2)
-	m.checks["FD-001"] = []verify.Result{{Name: "lint", OK: true}, {Name: "unit", OK: false}}
+	m.checks["FD-001"] = stagedChecks{stage: domain.StageVerify, results: []verify.Result{{Name: "lint", OK: true}, {Name: "unit", OK: false}}}
 
 	in := m.nextInputFor(row)
 	want := nextInput{
