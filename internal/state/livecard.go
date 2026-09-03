@@ -58,14 +58,8 @@ const stopGrace = 5 * time.Second
 // therefore reads as not-driven soon after anyone checks — the same "the
 // next read reads it as dead" property the pid files rely on.
 func ForeignDriver(ws Workspace, id domain.FeatureID) (ForeignDrive, bool) {
-	st, err := livelog.Stat(ws.LiveFile(id))
-	if err != nil {
-		return ForeignDrive{}, false
-	}
-	if st.PID == 0 || st.PID == os.Getpid() || !ProcessAlive(st.PID) {
-		return ForeignDrive{}, false
-	}
-	if st.Stopped && time.Since(st.Updated) > stopGrace {
+	st, ok := liveSession(ws, id)
+	if !ok || st.PID == os.Getpid() {
 		return ForeignDrive{}, false
 	}
 	return ForeignDrive{
@@ -74,4 +68,39 @@ func ForeignDriver(ws Workspace, id domain.FeatureID) (ForeignDrive, bool) {
 		Since: st.Started, Updated: st.Updated,
 		Busy: st.Busy,
 	}, true
+}
+
+// CardIsLive reports whether any process — this one or another's — is
+// driving card id right now. It is ForeignDriver's liveness check without
+// the self-exclusion: a board running its own in-process autopilot on a
+// card is trivially "being driven right now" for that check's purposes,
+// where ForeignDriver correctly says "not from outside".
+//
+// This is what a stretch (stretch.go) still open per the event log needs
+// to tell an autopilot period genuinely in progress from one whose
+// driving process died without writing anything on its way out — a
+// question the log alone can never answer, since a killed process leaves
+// no row behind.
+func CardIsLive(ws Workspace, id domain.FeatureID) bool {
+	_, ok := liveSession(ws, id)
+	return ok
+}
+
+// liveSession reads card id's live-file header and reports it plus
+// ok=true iff the session it names is still alive right now: a live file
+// exists, its pid answers a kill -0, and it has not been stopped for
+// longer than stopGrace. ForeignDriver and CardIsLive share this and
+// differ only in whether a session this process itself owns counts.
+func liveSession(ws Workspace, id domain.FeatureID) (livelog.Status, bool) {
+	st, err := livelog.Stat(ws.LiveFile(id))
+	if err != nil {
+		return livelog.Status{}, false
+	}
+	if st.PID == 0 || !ProcessAlive(st.PID) {
+		return livelog.Status{}, false
+	}
+	if st.Stopped && time.Since(st.Updated) > stopGrace {
+		return livelog.Status{}, false
+	}
+	return st, true
 }

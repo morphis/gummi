@@ -1,12 +1,15 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -242,6 +245,97 @@ func TestStretchStaysOpen(t *testing.T) {
 	}
 	if st.mode != domain.GateGates {
 		t.Fatalf("mode = %q, want the mode it was handed over under", st.mode)
+	}
+}
+
+// TestCloseOrphanedDowngradesAnOpenPeriod: a period the log still calls
+// running() renders as orphaned once nothing is actually driving the
+// card any more — the render-time judgement closeOrphaned adds on top of
+// the log-derived stretch.
+func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateGates, at(0)),
+		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
+	}
+	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), false))
+	if st.running() {
+		t.Fatalf("closed = %q, want orphaned — nothing is driving this card", st.closed)
+	}
+	if st.closed != stretchOrphaned {
+		t.Fatalf("closed = %q, want %q", st.closed, stretchOrphaned)
+	}
+}
+
+// TestCloseOrphanedLeavesALiveOneRunning: a period that is still running
+// per the log stays running when a session is actually alive — the
+// board's own in-process autopilot switch, or a foreign process the
+// liveness check found alive.
+func TestCloseOrphanedLeavesALiveOneRunning(t *testing.T) {
+	events := []state.CardEvent{evTookOver(domain.GateGates, at(0))}
+	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), true))
+	if !st.running() {
+		t.Fatal("closeOrphaned closed a period a live session is still driving")
+	}
+}
+
+// TestCloseOrphanedLeavesAnAlreadyClosedPeriodAlone: closeOrphaned only
+// ever touches the newest, still-open period — a period that closed on
+// its own is left exactly as the log says, whether or not anything is
+// live right now.
+func TestCloseOrphanedLeavesAnAlreadyClosedPeriodAlone(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateGates, at(0)),
+		evPark(domain.StageImplement, "needs you", at(10)),
+	}
+	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), false))
+	if st.closed != stretchParked {
+		t.Fatalf("closed = %q, want %q — closeOrphaned must not touch a period the log already closed", st.closed, stretchParked)
+	}
+}
+
+// TestLiveStretchesClosesAKilledDriversOpenPeriod pins BG-059 end to end,
+// through liveStretches — the function every render call site (thread.go,
+// msgs.go, shell.go) now calls instead of autopilotStretches directly.
+//
+// The event log is exactly TestStretchStaysOpen's shape: a took-over row
+// and an in-period gate crossing, nothing after it — no handback, no
+// park, no human gate, no user message. That is what a driver killed
+// mid-run (crash, OOM, SIGKILL, container restart) leaves behind. Before
+// BG-059's fix this stayed open forever; with a real, dead pid behind the
+// card's live file, it must read as closed.
+func TestLiveStretchesClosesAKilledDriversOpenPeriod(t *testing.T) {
+	dir := t.TempDir()
+	ws := state.Workspace{Root: dir, RepoRoot: dir}
+	f := aFeature()
+
+	owner := exec.CommandContext(context.Background(), "true")
+	if err := owner.Start(); err != nil {
+		t.Fatalf("start stand-in owner: %v", err)
+	}
+	// Fully reap it: a killed process a test still parents sits as a
+	// zombie, which a bare kill(pid, 0) probe reads as alive, until Wait.
+	if err := owner.Wait(); err != nil {
+		t.Fatalf("stand-in owner: %v", err)
+	}
+
+	w, err := livelog.Create(ws.LiveFile(f.ID), livelog.Record{
+		Feature: string(f.ID), Stage: string(f.Stage), PID: owner.Process.Pid,
+	})
+	if err != nil {
+		t.Fatalf("create live file: %v", err)
+	}
+	w.Close()
+
+	events := []state.CardEvent{
+		evTookOver(domain.GateGates, at(0)),
+		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
+	}
+	st := onlyStretch(t, liveStretches(f, events, ws))
+	if st.running() {
+		t.Fatalf("closed = %q, want orphaned — the driving pid %d is dead", st.closed, owner.Process.Pid)
+	}
+	if st.closed != stretchOrphaned {
+		t.Fatalf("closed = %q, want %q", st.closed, stretchOrphaned)
 	}
 }
 

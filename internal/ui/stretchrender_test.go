@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -139,11 +140,22 @@ func TestLegacyCardKeepsTheActorsOwnName(t *testing.T) {
 
 // TestRunningStretchHasNoClose: a card autopilot is driving right now
 // draws the rule that opens the period and nothing that ends it, because
-// it has not ended.
+// it has not ended. The live file stands in for engine.bindLiveLog, which
+// is what tells this genuinely open period from one whose driving
+// process is simply gone (BG-059) — without it, the liveness check would
+// read the card as orphaned and this test would stop meaning what it says.
 func TestRunningStretchHasNoClose(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.sel = 1
 	id := m.rows[m.sel].F.ID
+	m.ws = state.Workspace{Root: t.TempDir()}
+	w, err := livelog.Create(m.ws.LiveFile(id), livelog.Record{
+		Feature: string(id), Stage: string(domain.StageImplement),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
 	base := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	enter, _ := json.Marshal(map[string]string{"role": "implementer"})
 	m.cardEvents[id] = []state.CardEvent{

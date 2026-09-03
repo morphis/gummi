@@ -41,11 +41,12 @@ import (
 )
 
 // stretchClose names how a period ended, which is the whole of what the
-// closing rule says. The three are not decoration: they answer different
+// closing rule says. The four are not decoration: they answer different
 // questions. parked means it stopped short and something is waiting;
 // finished means it carried the card as far as it is allowed to, to the
 // landing gate it may never cross itself; taken back means you did not
-// wait for either.
+// wait for either; orphaned means none of the above ever happened — the
+// process driving it is simply gone.
 type stretchClose string
 
 const (
@@ -53,6 +54,14 @@ const (
 	stretchParked    stretchClose = "parked"
 	stretchFinished  stretchClose = "finished"
 	stretchTakenBack stretchClose = "taken-back"
+	// stretchOrphaned is a period the log never closes because nothing
+	// closed it: a crash, an OOM kill, a container restart — the driving
+	// process exited without parking, handing back, or anyone taking the
+	// card back by hand. Distinct from the other three because it is not
+	// derived from any row in the log; it is a query-time judgement
+	// (closeOrphaned) applied on top of a stretch the log alone still
+	// calls running().
+	stretchOrphaned stretchClose = "orphaned"
 )
 
 // autopilotStretch is one such period. from and to bound it as a half-
@@ -211,6 +220,39 @@ func autopilotStretches(f domain.Feature, events []state.CardEvent) []autopilotS
 	return out
 }
 
+// closeOrphaned downgrades the newest stretch from running to orphaned
+// when the process that opened it is no longer driving the card. At most
+// one stretch is ever open (autopilotStretches' own invariant, per
+// autopilotDriving's doc comment), so only the last element can need
+// this, and only when it is still running.
+//
+// live answers "is a session — this process's own or another's — driving
+// this card right now" (state.CardIsLive). It is threaded in by the
+// caller rather than looked up here so this stays a pure function of its
+// inputs, the same way the rest of this file is: a query-time judgement
+// applied on top of the log-derived stretches, never folded into their
+// derivation.
+func closeOrphaned(stretches []autopilotStretch, live bool) []autopilotStretch {
+	if live || len(stretches) == 0 {
+		return stretches
+	}
+	last := &stretches[len(stretches)-1]
+	if last.running() {
+		last.closed = stretchOrphaned
+	}
+	return stretches
+}
+
+// liveStretches is autopilotStretches with the render-time liveness check
+// (closeOrphaned) folded in — what every rendering call site should call
+// instead of autopilotStretches directly. A period still open per the
+// log alone renders as still running only if a process is actually
+// driving the card right now; a process killed mid-run writes nothing on
+// its way out, so the log can never say this by itself (BG-059).
+func liveStretches(f domain.Feature, events []state.CardEvent, ws state.Workspace) []autopilotStretch {
+	return closeOrphaned(autopilotStretches(f, events), state.CardIsLive(ws, f.ID))
+}
+
 // askedBy names who answered an ask. By is what the caller stated
 // outright and is what this trusts; Actor is the older field, inferred
 // from the card's stored mode, and stands in only for rows written
@@ -285,17 +327,20 @@ func stretchAt(stretches []autopilotStretch, i int) (autopilotStretch, bool) {
 
 // --- rendering ---------------------------------------------------------
 
-// stretchLabel names a close the way the rule says it. The three
-// wordings answer different questions and are not interchangeable: a
-// card that parked has something waiting on you, one that finished got
-// as far as it is allowed to go on its own, and one you took back never
-// reached either.
+// stretchLabel names a close the way the rule says it. The wordings
+// answer different questions and are not interchangeable: a card that
+// parked has something waiting on you, one that finished got as far as
+// it is allowed to go on its own, one you took back never reached
+// either, and one orphaned never got a chance to say anything at all —
+// its driving process is simply gone.
 func stretchLabel(how stretchClose) string {
 	switch how {
 	case stretchFinished:
 		return "autopilot finished"
 	case stretchTakenBack:
 		return "you took back control"
+	case stretchOrphaned:
+		return "autopilot stopped without saying so"
 	default:
 		return "autopilot parked it"
 	}

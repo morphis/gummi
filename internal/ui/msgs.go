@@ -141,7 +141,7 @@ func (m *Shell) loadRows() tea.Msg {
 		row.DepBlocked = len(m.dependencyBlockers(ctx, f.ID)) > 0
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		if events, err := m.store.Events(ctx, f.ID); err == nil {
-			row.AutopilotDriving = autopilotDriving(autopilotStretches(f, events))
+			row.AutopilotDriving = autopilotDriving(liveStretches(f, events, m.ws))
 		}
 		rows = append(rows, row)
 	}

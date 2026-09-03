@@ -753,7 +753,7 @@ func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd 
 	// even one read in a previous session (BG-056).
 	if m.cardOpen && m.lastSeen != nil {
 		if r, ok := m.selected(); ok && r.F.ID == id {
-			if st, unread := unseenStretch(autopilotStretches(r.F, events), events, m.lastSeen[id]); unread {
+			if st, unread := unseenStretch(liveStretches(r.F, events, m.ws), events, m.lastSeen[id]); unread {
 				m.anchorTo, m.anchorFrom = id, st.from
 			}
 		}

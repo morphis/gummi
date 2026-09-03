@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
@@ -178,6 +179,18 @@ func TestLoadRowsDerivesAutopilotDrivingFromStore(t *testing.T) {
 		t.Fatal("row missing from load")
 		return nil
 	}
+
+	// The board's own switch binds a live file under its own pid the
+	// instant it takes a card over (engine.Engine.bindLiveLog); loadRows'
+	// liveness check (BG-059) needs that file to tell this genuinely open
+	// period from one whose driving process is simply gone.
+	w, err := livelog.Create(m.ws.LiveFile(f.ID), livelog.Record{
+		Feature: string(f.ID), Stage: string(domain.StageImplement),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
 
 	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
 		state.AutopilotTookOver, "", domain.GateFull, "", fixedTime); err != nil {

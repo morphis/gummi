@@ -225,7 +225,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// it. Folding a stage to one receipt loses its position, and the rules
 	// that bracket a period are placed by position, so the two have to be
 	// resolved together or not at all.
-	stretches := autopilotStretches(f, r.Events)
+	stretches := liveStretches(f, r.Events, m.ws)
 	// segOf answers which folded segment an event index fell in, and -1
 	// for an index before the first stage ever started — where the switch
 	// writes its takeover when it starts a card sitting in todo, since
