@@ -259,8 +259,14 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			in.sess == "",
 		},
 		{
-			"transcript", "t", "transcript", "read the session transcript (tool calls and their outputs)", false,
-			in.sess != "",
+			// t opens the card's thread from the board. There is no
+			// separate transcript view any more — the thread IS the
+			// transcript, tool calls and outputs included — so from the
+			// card page this row could only re-open the page the reader
+			// is already on, which is the same row talkAction withholds
+			// when the conversation is already on screen.
+			"transcript", "t", "open the thread", "read this card's session — the thread is the transcript", false,
+			in.sess != "" && !in.cardOpen,
 		},
 		{
 			"spec", "s", "spec", "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,

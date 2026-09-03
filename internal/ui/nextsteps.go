@@ -45,6 +45,11 @@ type nextInput struct {
 
 	attn      attnKind // "" when the feature has no attention item
 	escalated bool     // the gate is a loop give-up, not a clean finish
+	// cardOpen is whether the reader is on the card page itself rather
+	// than the board — the same test talkAction makes for the
+	// conversation, for the actions that would only re-open the surface
+	// already under the cursor.
+	cardOpen bool
 
 	// verdict is the finished session's outcome (verify: pass/fail),
 	// verdictUnclear when none or when the session is gone — then the
@@ -93,6 +98,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
 	}
+	in.cardOpen = m.cardOpen
 	// An attached interactive session counts too. It used to be excluded,
 	// which left talkAction's own engine.StateInteractive branch — "the
 	// architect is already here, do not offer to start it" — unreachable,
