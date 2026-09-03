@@ -383,7 +383,14 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			// state persisted as interactive, but no backend is attached: a
 			// rehydrated row, not a live wait. sendThreadMessage already
 			// routes this case to sendConsultMessage instead of a live turn.
-			return "no agent attached — press enter to attach and resend."
+			//
+			// It names the state and stops there. Naming a key would be a
+			// promise the cursor can walk away from — the same rule the
+			// status bar follows when it refuses to claim enter for a
+			// choice the line is not aimed at — and the row that does
+			// reattach the conversation is in the picker just below
+			// (talkAction), where enter's own label already says so.
+			return "no agent attached — choose what happens next."
 		}
 		return "nothing is running — choose what happens next."
 	}

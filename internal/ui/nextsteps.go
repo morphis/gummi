@@ -154,11 +154,22 @@ func autopilotAction(why string) nextAction {
 }
 
 func talkAction(in nextInput, who, why string) []nextAction {
-	if in.sess == engine.StateInteractive {
+	// Only an attached conversation is the one already on screen. A row
+	// whose state merely persisted as interactive — a card rehydrated
+	// after a restart, or one a headless run seeded — reports
+	// StateInteractive with no backend behind it, and dropping the row
+	// there leaves the stage's gate as the card's recommendation:
+	// "approve — creates the worktree and starts the agent stages" as the
+	// answer to a conversation that went away. decisionQuestion learned
+	// this distinction as BG-043; this is the same in.live test.
+	if in.sess == engine.StateInteractive && in.live {
 		return nil
 	}
 	verb := "start"
-	if in.sess == engine.StatePaused {
+	// paused and rehydrated-interactive both have a transcript waiting:
+	// the run action attaches to the card's chat (decision.go's "run" →
+	// attachChatWith) rather than opening a blank one.
+	if in.sess == engine.StatePaused || in.sess == engine.StateInteractive {
 		verb = "resume"
 	}
 	return []nextAction{nextStep("run", "enter", verb+" "+who, why)}

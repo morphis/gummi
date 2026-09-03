@@ -153,11 +153,31 @@ func TestNextInputForAssembly(t *testing.T) {
 // something you did not already know.
 func TestNextCardDropsTheChatActionWhenTheChatIsLive(t *testing.T) {
 	for _, stage := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StageInvestigate} {
-		live := nextActions(nextInput{stage: stage, kind: domain.KindFeature, sess: engine.StateInteractive})
+		live := nextActions(nextInput{stage: stage, kind: domain.KindFeature, sess: engine.StateInteractive, live: true})
 		for _, a := range live {
 			if a.key == "enter" {
 				t.Errorf("%s with a live session still offers %q — the input is already on screen", stage, a.label)
 			}
+		}
+
+		// BG-070: a card restored without a backend reports
+		// StateInteractive too, and there the row is the only way back
+		// into the conversation — without it the stage's gate becomes the
+		// card's recommendation, so "approve" answers "my conversation
+		// went away".
+		rehydrated := nextActions(nextInput{stage: stage, kind: domain.KindFeature, sess: engine.StateInteractive})
+		var resume bool
+		for _, a := range rehydrated {
+			if a.key == "enter" {
+				resume = true
+				if !strings.HasPrefix(a.label, "resume") {
+					t.Errorf("%s, detached: %q does not say the conversation is resumed", stage, a.label)
+				}
+			}
+		}
+		if !resume {
+			t.Errorf("%s with a detached session offers no way back into the conversation; got %q",
+				stage, nextActionIDs(rehydrated))
 		}
 
 		// with nobody to talk to yet the action earns its place, and says
