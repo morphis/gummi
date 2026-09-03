@@ -164,7 +164,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// are deciding about is worth more than the strip, the spec line or
 	// the spacing around them.
 	var head []string
-	for i, l := range threadHeader(s, m, r) {
+	for i, l := range threadHeader(s, m, r, inner) {
 		// a row between the card's title and its stage strip: they are two
 		// different questions — which card is this, and how far along is it
 		// — and stacked flush they read as one block of small print.
@@ -592,7 +592,7 @@ func trimTrailingBlanks(lines []string) []string {
 // threadHeader is the thread's two-line masthead: identity, profile,
 // autopilot mode, spend and the active loop's round badge, then the
 // stage strip.
-func threadHeader(s *theme.Styles, m *Shell, r featureRow) []string {
+func threadHeader(s *theme.Styles, m *Shell, r featureRow, width int) []string {
 	f := r.F
 	head := s.Title.Render(string(f.ID)) + " " + s.Base.Render("· "+f.Title)
 	if f.Profile != "" {
@@ -613,7 +613,7 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow) []string {
 	if cl := correctiveLabel(m, f); cl != "" {
 		head += headerGap + s.Faint.Render(cl)
 	}
-	return []string{head, stageStrip(s, f)}
+	return []string{head, stageStrip(s, f, width)}
 }
 
 // correctiveLabel is the card's unified rework budget — every review
@@ -699,17 +699,64 @@ func roundLabel(m *Shell, f domain.Feature) string {
 
 // stageStrip renders every stage of this card's own workflow in order,
 // picking the current one out with its StagePill.
-func stageStrip(s *theme.Styles, f domain.Feature) string {
+//
+// The strip windows itself around the current stage rather than trusting
+// the page's generic right-side clip: a plain left-to-right join truncates
+// from the right, and stageSequence always runs todo→done, so "cut from
+// the right" and "cut the stages closest to done" are the same operation —
+// exactly wrong, since a card spends the second half of its life in those
+// stages. The lit stage is the one thing this row exists to show, so it is
+// the last thing dropped, never the first: try the full sequence, then a
+// window of the lit stage plus one neighbour either side, then the lit
+// stage alone, then a positional summary, and only once none of those
+// fit either, the bare pill — which relies on the page's clip to cut it
+// down, the same generic right-side truncation this function otherwise
+// exists to route around, but is safe here because the pill's own text
+// is always its first (and often only) content.
+func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 	seq := stageSequence(f)
-	parts := make([]string, len(seq))
+	cur := 0
 	for i, st := range seq {
 		if st == f.Stage {
-			parts[i] = s.StagePill(st).Render(string(st))
-		} else {
-			parts[i] = s.Faint.Render(string(st))
+			cur = i
+			break
 		}
 	}
-	return strings.Join(parts, s.Faint.Render(stageJoin))
+
+	window := func(lo, hi int) string {
+		parts := make([]string, 0, hi-lo+3)
+		if lo > 0 {
+			parts = append(parts, s.Faint.Render("…"))
+		}
+		for i := lo; i <= hi; i++ {
+			if seq[i] == f.Stage {
+				parts = append(parts, s.StagePill(seq[i]).Render(string(seq[i])))
+			} else {
+				parts = append(parts, s.Faint.Render(string(seq[i])))
+			}
+		}
+		if hi < len(seq)-1 {
+			parts = append(parts, s.Faint.Render("…"))
+		}
+		return strings.Join(parts, s.Faint.Render(stageJoin))
+	}
+
+	fits := func(str string) bool { return width <= 0 || ansi.StringWidth(str) <= width }
+
+	if full := window(0, len(seq)-1); fits(full) {
+		return full
+	}
+	if near := window(max(cur-1, 0), min(cur+1, len(seq)-1)); fits(near) {
+		return near
+	}
+	if lit := window(cur, cur); fits(lit) {
+		return lit
+	}
+	pill := s.StagePill(f.Stage).Render(string(f.Stage))
+	if positional := pill + s.Faint.Render(" · "+itoa(cur+1)+" of "+itoa(len(seq))); fits(positional) {
+		return positional
+	}
+	return pill
 }
 
 // stageSequence derives the ordered list of stages this exact card's

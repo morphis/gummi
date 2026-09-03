@@ -84,6 +84,30 @@ func TestStageSequence(t *testing.T) {
 	}
 }
 
+// TestStageStripKeepsCurrentStageVisible is BG-048: a plain left-to-right
+// join of stageSequence, cut from the right by threadRender's clip
+// (thread.go:142-148), drops the stages closest to done first — exactly
+// the stages a card spends the second half of its life in. stageStrip must
+// window itself around the current stage instead, so the lit stage
+// survives clipping at every width, not just wide ones.
+func TestStageStripKeepsCurrentStageVisible(t *testing.T) {
+	s := m0Styles()
+	f := domain.Feature{Kind: domain.KindFeature, Stage: domain.StageVerify}
+
+	// 140 and 62/50/40 land on the full sequence and the windowed-neighbour
+	// tiers respectively; 24 reaches the lit-stage-alone tier and 10 the
+	// positional-summary/bare-pill tiers, so the sweep exercises every
+	// fallback stageStrip documents.
+	for _, w := range []int{140, 62, 50, 40, 24, 10} {
+		inner := max(w-threadGutter, 8)
+		strip := stageStrip(s, f, inner)
+		clipped := ansi.Truncate(strip, inner, "…")
+		if !strings.Contains(clipped, string(domain.StageVerify)) {
+			t.Errorf("w=%d inner=%d: clipped strip lost the current stage: %q", w, inner, clipped)
+		}
+	}
+}
+
 // TestStageSegmentsReconstructsHistory builds a synthetic event log —
 // one finished brainstorm generation, one open (unclosed) spec
 // generation — and checks stageSegments folds it into exactly what the
