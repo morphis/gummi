@@ -39,6 +39,24 @@ func ViewSection(content, name string) (body string, ok bool) {
 	return content[start:end], true
 }
 
+// HeadingLine reports the 1-based line number of the named section's
+// top-level `## ` heading, matched the same way ViewSection and
+// ReplaceSection match it: case-insensitively, on the trimmed title of a
+// heading at column 0. ok is false when name is blank or matches no
+// heading, which callers read as "leave the reader at the top".
+func HeadingLine(content, name string) (line int, ok bool) {
+	if strings.TrimSpace(name) == "" {
+		return 0, false
+	}
+	target := strings.ToLower(strings.TrimSpace(name))
+	for i, l := range strings.Split(content, "\n") {
+		if isHeading(l) && strings.ToLower(strings.TrimSpace(l[len("## "):])) == target {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
+
 // ReplaceSection replaces the named section's body — the lines between
 // its `## ` heading and the next top-level `## ` heading or EOF — with
 // body verbatim. The heading line itself is never touched. matchedTitle

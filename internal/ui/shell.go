@@ -1674,6 +1674,17 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		sv := &specView{f: msg.f, path: msg.path, content: msg.content, doc: spec.Parse(msg.content), cursor: 1}
+		// Open where the card is. The thread pins the artifact with the
+		// section this stage is about — "⌄ spec · Implementation notes"
+		// and the key that opens it — and the decision's own rows name it
+		// too ("read the plan — it lives in the spec's Implementation
+		// notes"). Landing on line 1 after either of those made the
+		// reader hunt for the thing they were just pointed at, in a
+		// document long enough that the hunt is the work. A document
+		// without that heading (a fresh draft) keeps the top.
+		if line, ok := spec.HeadingLine(msg.content, currentSpecSection(msg.f.Kind, msg.f.Stage)); ok {
+			sv.cursor = line
+		}
 		if m.spec != nil && m.spec.path == msg.path {
 			// reload in place: keep the cursor, clamped in case the doc
 			// shrank. The window follows the cursor, so that is the whole
