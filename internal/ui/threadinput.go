@@ -390,6 +390,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 				if i < n {
 					m.syncDecision(d)
 					m.decisionCursor = i
+					m.decisionAimed = false
 					return nil
 				}
 			}

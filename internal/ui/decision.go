@@ -307,6 +307,7 @@ func (m *Shell) wordAim(d *threadDecision) int {
 func (m *Shell) syncDecision(d *threadDecision) {
 	if d == nil {
 		m.decisionKey, m.decisionCursor, m.decisionPicked = "", 0, nil
+		m.decisionAimed = false
 		m.threadFreeForm = false
 		return
 	}
@@ -314,6 +315,7 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionKey = d.key
 		m.decisionCursor = 0
 		m.decisionPicked = map[int]bool{}
+		m.decisionAimed = false
 		// a different question invalidates the armed free-form channel —
 		// it belonged to the answer that is gone
 		m.threadFreeForm = false
@@ -328,7 +330,18 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionCursor = clamp(m.decisionCursor, 0, n-1)
 	}
 	if i := m.wordAim(d); i >= 0 {
+		if !m.decisionAimed {
+			m.decisionAimed = true
+			m.decisionAimBase = m.decisionCursor
+		}
 		m.decisionCursor = i
+	} else if m.decisionAimed {
+		// the composer that was driving the aim emptied out (or turned into
+		// a command) — withdraw to the position the aim overrode, not
+		// unconditionally to 0, so a manual pick made before the user
+		// started typing prose survives.
+		m.decisionAimed = false
+		m.decisionCursor = clamp(m.decisionAimBase, 0, n-1)
 	}
 }
 
@@ -498,6 +511,7 @@ func (m *Shell) moveDecision(d *threadDecision, delta int) {
 		return
 	}
 	m.decisionCursor = clamp(m.decisionCursor+delta, 0, n-1)
+	m.decisionAimed = false
 }
 
 // answerAskWith delivers free-form prose as the answer to the open ask —

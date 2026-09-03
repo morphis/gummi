@@ -211,6 +211,12 @@ type Shell struct {
 	decisionKey    string
 	decisionCursor int
 	decisionPicked map[int]bool
+	// decisionAimed and decisionAimBase track wordAim's hold on decisionCursor
+	// separately from an explicit pick, so an emptied composer can withdraw
+	// the aim instead of leaving the cursor stuck where it pointed last. See
+	// syncDecision.
+	decisionAimed   bool
+	decisionAimBase int
 
 	// agent orchestration (nil engine means no agent wired)
 	engine *engine.Engine
