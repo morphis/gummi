@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	activity      TEXT NOT NULL DEFAULT '',
 	error         TEXT NOT NULL DEFAULT '',
 	verdict       TEXT NOT NULL DEFAULT '',
+	verdict_floor        TEXT NOT NULL DEFAULT '',
+	verdict_floor_reason TEXT NOT NULL DEFAULT '',
 	updated_at    TEXT NOT NULL,
 	started_at    TEXT NOT NULL DEFAULT ''
 );
@@ -514,6 +516,12 @@ var migrations = []string{
 	`ALTER TABLE diff_annotations ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS diff_annotations_source_ref ON diff_annotations(feature_id, source_ref) WHERE source_ref != ''`,
 	`ALTER TABLE sessions ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`,
+	// The verdict floor and its reason: gummi's own deterministic judgement
+	// on a stage, which outranks whatever the agent reported. The verdict it
+	// floors was already persisted; the floor was not, so after a restart a
+	// blocked verify could say only THAT it was blocked and never why.
+	`ALTER TABLE sessions ADD COLUMN verdict_floor TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE sessions ADD COLUMN verdict_floor_reason TEXT NOT NULL DEFAULT ''`,
 	// gate_approval vocabulary rename: rewrite the old stored spellings to
 	// their new canonical form (domain.GateGates/domain.GateOff). Both
 	// UPDATEs are idempotent by construction (a row not matching the WHERE

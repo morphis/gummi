@@ -56,6 +56,12 @@ type nextInput struct {
 	// escalated flag on the gate still carries pass vs not-pass.
 	verdict reviewVerdict
 
+	// verdictFloorReason is why gummi overruled the agent's own verdict
+	// — the failing check, or the environment gate's sentence. It
+	// survives a restart now (BG-086), so the blocked arm can name the
+	// blocker instead of pointing vaguely at the artifact.
+	verdictFloorReason string
+
 	reviewRound      int    // automatic review→fix rounds burned so far
 	verifyBounces    int    // verify→work bounces already burned (each one a failed verify)
 	failedCheck      string // first failing manual `v` check, "" if none
@@ -113,6 +119,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		if in.sess == engine.StateDone {
 			in.verdict = sessionVerdict(snap)
 		}
+		in.verdictFloorReason = snap.VerdictFloorReason
 	}
 	for _, res := range m.checksFor(r.F) {
 		if !res.OK {
@@ -410,8 +417,15 @@ func stageActions(in nextInput) []nextAction {
 		// drops this to the fail arm below, same degradation as fail; the
 		// inbox gate text still says BLOCKED.)
 		if in.verdict == verdictBlocked {
+			// name the blocker when gummi's own floor recorded one: after
+			// BG-086 that reason survives a restart, so the card can say
+			// what to fix rather than only that something is wrong.
+			blocked := "verify is blocked on the environment — the missing prerequisites are in the " + artifactNoun(in.kind)
+			if in.verdictFloorReason != "" {
+				blocked = sanitize(in.verdictFloorReason) + " — fix that, or tag the plan's env-bound steps"
+			}
 			return []nextAction{
-				nextStep("spec", "s", "read the blockers", "verify is blocked on the environment — the missing prerequisites are in the "+artifactNoun(in.kind)),
+				nextStep("spec", "s", "read the blockers", blocked),
 				nextStep("run", "enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"),
 				nextStep("advance", "g", "land on main", "only if you verified it by hand — verify never proved this build"),
 			}

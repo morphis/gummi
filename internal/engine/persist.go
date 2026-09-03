@@ -52,7 +52,12 @@ func (e *Engine) persist(s *Session) {
 		SpendModel:   snap.Spend.Model,
 		Activity:     snap.Activity,
 		Verdict:      snap.Verdict,
-		StartedAt:    s.startedAt.UTC().Format(time.RFC3339Nano),
+		// gummi's own ceiling on that verdict travels with it: a verdict
+		// saved without the floor that overruled it reads, on the next
+		// process, as the agent's unchallenged word.
+		VerdictFloor:       snap.VerdictFloor,
+		VerdictFloorReason: snap.VerdictFloorReason,
+		StartedAt:          s.startedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if snap.Err != nil {
 		rec.Error = snap.Err.Error()
@@ -235,6 +240,11 @@ func (e *Engine) Restore(ctx context.Context) error {
 			s.err = restoredErr(snap.Error)
 		}
 		s.verdict = snap.Verdict
+		// restored alongside the verdict it overrules, so the rehydrated
+		// session judges the stage the way the live one did — and can still
+		// say which check made it say so.
+		s.verdictFloor = snap.VerdictFloor
+		s.verdictFloorReason = snap.VerdictFloorReason
 		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
 		// An ask that was open when the process died is re-armed from its
