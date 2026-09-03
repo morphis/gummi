@@ -1,14 +1,21 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/morphis/gummi/internal/mcp"
 )
 
 // __mcp is registered on the root command and hidden.
@@ -123,6 +130,105 @@ func TestMCPWorkspaceDialFailure(t *testing.T) {
 	var ec *exitError
 	if !errors.As(err, &ec) || ec.code != 2 {
 		t.Fatalf("runMCP(--workspace dial error) err = %v, want exitError{2}", err)
+	}
+}
+
+// TestMCPInitializeInstructionsEndToEnd exercises the real wire: a fake
+// engine socket answering the hello handshake, runMCP's actual __mcp
+// client dialing it, and a real initialize round trip over stdin/stdout —
+// proving the instructions text reaches the response through the whole
+// path rather than just NewServer's own unit tests.
+func TestMCPInitializeInstructionsEndToEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		workspace bool
+		featureID string
+		wantSub   string
+	}{
+		{"feature", false, "FD-042", "FD-042"},
+		{"workspace", true, "", "gummi run"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sockPath := filepath.Join(t.TempDir(), "engine.sock")
+			ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", sockPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				sc := bufio.NewScanner(conn)
+				for sc.Scan() {
+					req, err := mcp.Decode(sc.Bytes())
+					if err != nil {
+						continue
+					}
+					if req.Method == "hello" {
+						_ = mcp.Encode(conn, mcp.Response{JSONRPC: mcp.JSONRPC, ID: req.ID, Result: json.RawMessage(`{}`)})
+					}
+				}
+			}()
+
+			t.Setenv("GUMMI_MCP_SOCK", sockPath)
+			var c *cobra.Command
+			if tc.workspace {
+				c = workspaceMCPCmd(t, true)
+			} else {
+				c = freshMCPCmd(t)
+				if err := c.Flags().Set("feature", tc.featureID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			stdinR, stdinW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdoutR, stdoutW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			origStdin, origStdout := os.Stdin, os.Stdout
+			os.Stdin, os.Stdout = stdinR, stdoutW
+			t.Cleanup(func() { os.Stdin, os.Stdout = origStdin, origStdout })
+
+			done := make(chan error, 1)
+			go func() { done <- runMCP(c, nil) }()
+
+			if _, err := io.WriteString(stdinW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`+"\n"); err != nil {
+				t.Fatal(err)
+			}
+
+			respLine, err := bufio.NewReader(stdoutR).ReadString('\n')
+			if err != nil {
+				t.Fatalf("reading response: %v", err)
+			}
+			if err := stdinW.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("runMCP: %v", err)
+			}
+
+			var resp struct {
+				Result struct {
+					Instructions string `json:"instructions"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal([]byte(respLine), &resp); err != nil {
+				t.Fatalf("response not JSON: %v\n%s", err, respLine)
+			}
+			if resp.Result.Instructions == "" {
+				t.Fatal("instructions empty")
+			}
+			if !strings.Contains(resp.Result.Instructions, tc.wantSub) {
+				t.Errorf("instructions missing %q:\n%s", tc.wantSub, resp.Result.Instructions)
+			}
+		})
 	}
 }
 

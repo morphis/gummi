@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,6 +204,136 @@ func TestAgentTabExplainsAMissingBinary(t *testing.T) {
 	got := m.agentTabPlaceholder(60, 5)
 	if !strings.Contains(got, "not found") {
 		t.Errorf("placeholder should say the binary was not found, got %q", got)
+	}
+}
+
+// hostedShellAgent is hostedShell's counterpart for a backend HostedMCPAttach
+// actually recognizes: it points backend's own *_BIN discovery env var
+// (agentcli.go) at a throwaway script and sets GUMMI_AGENT to backend, so
+// resolveAgentAttach's backend identity is one of HostedMCPAttach's known
+// names rather than hostedShell's raw-GUMMI_ATTACH_CMD fallback (which
+// always lands HostedMCPAttach's default, unwired branch).
+func hostedShellAgent(t *testing.T, backend, binEnv, script string) *Shell {
+	t.Helper()
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("needs a unix shell")
+	}
+	path := filepath.Join(t.TempDir(), "fake-agent.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_AGENT", backend)
+	t.Setenv(binEnv, path)
+	m := populatedShell(100, 30)
+	t.Cleanup(m.closeAgent)
+	return m
+}
+
+// TestEnsureAgentWiresMCP proves ensureAgent appends HostedMCPAttach's
+// extra argv/env onto the real spawned process for each backend wired
+// into it, through the actual spawn path (agentview.go's pty) rather than
+// just HostedMCPAttach's own pure-builder tests.
+func TestEnsureAgentWiresMCP(t *testing.T) {
+	old := agentTabExecPath
+	agentTabExecPath = func() (string, error) { return "/opt/gummi", nil }
+	t.Cleanup(func() { agentTabExecPath = old })
+
+	const sock = "/tmp/gummi-ws-test.sock"
+	cases := []struct {
+		name    string
+		backend string
+		binEnv  string
+		want    []string
+	}{
+		{"claude", "claude", "GUMMI_CLAUDE_BIN", []string{"--strict-mcp-config", "--mcp-config", sock, `"--workspace"`}},
+		{"codex", "codex", "GUMMI_CODEX_BIN", []string{"-c", "mcp_servers.gummi", sock, `"--workspace"`}},
+		{"zz", "zz", "GUMMI_ZZ_BIN", []string{"--mcp", "/opt/gummi __mcp --workspace"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "out.txt")
+			// Write to a temp path and rename into place: waitForFileContent
+			// reads as soon as out has any bytes, and a redirected compound
+			// command ({ ...; } > out) can be observed mid-write (printf's
+			// output landed, env's has not) — a rename only makes the
+			// finished file visible at that name.
+			script := "{ printf '%s\\n' \"$@\"; echo ---ENV---; env; } > '" + out + ".tmp' && mv '" + out + ".tmp' '" + out + "'; sleep 30"
+			m := hostedShellAgent(t, tc.backend, tc.binEnv, script)
+			m.SetAgentMCPSock(sock)
+			pressAlt(m, '3')
+			m.ensureAgent()
+			got := waitForFileContent(t, out)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s: recorded argv/env missing %q:\n%s", tc.name, want, got)
+				}
+			}
+		})
+	}
+}
+
+// TestEnsureAgentWiresMCPOpencode is TestEnsureAgentWiresMCP's opencode
+// case, split out because its wiring is a temp config file named by an
+// env var rather than an inline flag: the assertion has to open that file
+// and inspect its shape, not just grep the recorded argv/env dump.
+func TestEnsureAgentWiresMCPOpencode(t *testing.T) {
+	old := agentTabExecPath
+	agentTabExecPath = func() (string, error) { return "/opt/gummi", nil }
+	t.Cleanup(func() { agentTabExecPath = old })
+
+	out := filepath.Join(t.TempDir(), "out.txt")
+	script := "env > '" + out + ".tmp' && mv '" + out + ".tmp' '" + out + "'; sleep 30"
+	m := hostedShellAgent(t, "opencode", "GUMMI_OPENCODE_BIN", script)
+	m.SetAgentMCPSock("/tmp/gummi-ws-test.sock")
+	pressAlt(m, '3')
+	m.ensureAgent()
+	got := waitForFileContent(t, out)
+
+	var cfgPath string
+	for _, line := range strings.Split(got, "\n") {
+		if v, ok := strings.CutPrefix(line, "OPENCODE_CONFIG="); ok {
+			cfgPath = v
+		}
+	}
+	if cfgPath == "" {
+		t.Fatalf("OPENCODE_CONFIG missing from the child's env:\n%s", got)
+	}
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("reading opencode config: %v", err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("config not valid JSON: %v\n%s", err, raw)
+	}
+	if _, present := cfg["permission"]; present {
+		t.Errorf("permission key present in hosted-tab config: %v", cfg["permission"])
+	}
+	if _, present := cfg["mcp"]; !present {
+		t.Errorf("mcp key missing: %v", cfg)
+	}
+}
+
+// TestEnsureAgentNoMCPWiringForUnrecognizedBackend covers HostedMCPAttach's
+// default branch reached live: a raw GUMMI_ATTACH_CMD has no vendor name
+// to recognize, so the child gets the workspace socket (unconditional,
+// backend-independent) but none of the backend-specific MCP flags/files.
+func TestEnsureAgentNoMCPWiringForUnrecognizedBackend(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out.txt")
+	script := "{ printf '%s\\n' \"$@\"; echo ---ENV---; env; } > '" + out + ".tmp' && mv '" + out + ".tmp' '" + out + "'; sleep 30"
+	m := hostedShell(t, script)
+	m.SetAgentMCPSock("/tmp/gummi-ws-test.sock")
+	pressAlt(m, '3')
+	m.ensureAgent()
+	got := waitForFileContent(t, out)
+
+	if !strings.Contains(got, "GUMMI_MCP_SOCK=/tmp/gummi-ws-test.sock") {
+		t.Errorf("workspace socket missing from child env:\n%s", got)
+	}
+	for _, unwanted := range []string{"--mcp-config", "mcp_servers.gummi", "OPENCODE_CONFIG", "--mcp"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected MCP wiring %q for an unrecognized backend:\n%s", unwanted, got)
+		}
 	}
 }
 

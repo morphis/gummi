@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -143,5 +144,115 @@ func TestBuildCodexGummiOverride_RejectsControlChars(t *testing.T) {
 	}
 	if _, err := buildCodexGummiOverride("/opt/gummi", "FD-013", "bad\x01.sock", false); err == nil {
 		t.Fatal("control character in sockPath accepted")
+	}
+}
+
+func TestHostedMCPAttachClaude(t *testing.T) {
+	argv, env, cleanup, err := HostedMCPAttach("claude", "/opt/gummi", "/tmp/mcp/ws.sock")
+	if err != nil {
+		t.Fatalf("HostedMCPAttach: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	want := []string{"--strict-mcp-config", "--mcp-config", string(buildGummiMCPServerConfig("/opt/gummi", "", "/tmp/mcp/ws.sock", true))}
+	if !reflect.DeepEqual(argv, want) {
+		t.Errorf("argv = %#v, want %#v", argv, want)
+	}
+	if env != nil {
+		t.Errorf("env = %#v, want nil", env)
+	}
+}
+
+func TestHostedMCPAttachCodex(t *testing.T) {
+	argv, env, cleanup, err := HostedMCPAttach("codex", "/opt/gummi", "/tmp/mcp/ws.sock")
+	if err != nil {
+		t.Fatalf("HostedMCPAttach: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	override, err := buildCodexGummiOverride("/opt/gummi", "", "/tmp/mcp/ws.sock", true)
+	if err != nil {
+		t.Fatalf("buildCodexGummiOverride: %v", err)
+	}
+	want := []string{"-c", override}
+	if !reflect.DeepEqual(argv, want) {
+		t.Errorf("argv = %#v, want %#v", argv, want)
+	}
+	if env != nil {
+		t.Errorf("env = %#v, want nil", env)
+	}
+}
+
+func TestHostedMCPAttachOpencode(t *testing.T) {
+	_, env, cleanup, err := HostedMCPAttach("opencode", "/opt/gummi", "/tmp/mcp/ws.sock")
+	if err != nil {
+		t.Fatalf("HostedMCPAttach: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	defer cleanup()
+	if len(env) != 1 || !strings.HasPrefix(env[0], "OPENCODE_CONFIG=") {
+		t.Fatalf("env = %#v, want one OPENCODE_CONFIG= entry", env)
+	}
+	path := strings.TrimPrefix(env[0], "OPENCODE_CONFIG=")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading config file: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("config file not valid JSON: %v\n%s", err, raw)
+	}
+	if _, present := m["permission"]; present {
+		t.Errorf("permission key present: %v", m["permission"])
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("config file still exists after cleanup: %v", err)
+	}
+}
+
+func TestHostedMCPAttachZZ(t *testing.T) {
+	argv, env, cleanup, err := HostedMCPAttach("zz", "/opt/gummi", "/tmp/mcp/ws.sock")
+	if err != nil {
+		t.Fatalf("HostedMCPAttach: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	want := []string{"--mcp", "/opt/gummi __mcp --workspace"}
+	if !reflect.DeepEqual(argv, want) {
+		t.Errorf("argv = %#v, want %#v", argv, want)
+	}
+	if env != nil {
+		t.Errorf("env = %#v, want nil", env)
+	}
+}
+
+func TestHostedMCPAttachZZWhitespaceExecPath(t *testing.T) {
+	_, _, cleanup, err := HostedMCPAttach("zz", "/opt/gu mmi", "/tmp/mcp/ws.sock")
+	if err == nil {
+		t.Fatal("expected an error for a whitespace execPath")
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+}
+
+func TestHostedMCPAttachUnknownBackend(t *testing.T) {
+	for _, backend := range []string{"copilot", "some-unknown-backend", "/usr/local/bin/mycli"} {
+		argv, env, cleanup, err := HostedMCPAttach(backend, "/opt/gummi", "/tmp/mcp/ws.sock")
+		if err != nil {
+			t.Errorf("backend %q: unexpected error: %v", backend, err)
+		}
+		if argv != nil || env != nil {
+			t.Errorf("backend %q: argv=%#v env=%#v, want nil/nil", backend, argv, env)
+		}
+		if cleanup == nil {
+			t.Errorf("backend %q: cleanup is nil", backend)
+		}
 	}
 }

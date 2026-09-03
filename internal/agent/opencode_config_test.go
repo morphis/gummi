@@ -164,3 +164,39 @@ func TestBuildOpencodeConfigReadOnly(t *testing.T) {
 		t.Errorf("external_directory = %v, want deny", perm["external_directory"])
 	}
 }
+
+// TestBuildHostedOpencodeMCPConfig pins the hosted-tab shape: exactly the
+// mcp.gummi block bound to --workspace, and specifically no "permission"
+// key — unlike buildOpencodeConfig's scripted-session shape, the hosted tab
+// never cages opencode's file tools.
+func TestBuildHostedOpencodeMCPConfig(t *testing.T) {
+	raw := buildHostedOpencodeMCPConfig("/opt/gummi", "/tmp/mcp/ws.sock")
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
+	}
+	if _, present := m["permission"]; present {
+		t.Errorf("permission key present: %v", m["permission"])
+	}
+	mcp, ok := m["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp block missing: %v", m["mcp"])
+	}
+	gummi, ok := mcp["gummi"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp.gummi missing: %v", mcp)
+	}
+	if gummi["type"] != "local" {
+		t.Errorf("mcp.gummi.type = %v, want local", gummi["type"])
+	}
+	if !reflect.DeepEqual(gummi["command"], []any{"/opt/gummi", "__mcp", "--workspace"}) {
+		t.Errorf("mcp.gummi.command = %v, want [/opt/gummi __mcp --workspace]", gummi["command"])
+	}
+	env, ok := gummi["environment"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp.gummi.environment missing: %v", gummi)
+	}
+	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/ws.sock" {
+		t.Errorf("environment.GUMMI_MCP_SOCK = %v, want /tmp/mcp/ws.sock", env["GUMMI_MCP_SOCK"])
+	}
+}

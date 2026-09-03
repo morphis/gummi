@@ -131,7 +131,7 @@ func newServer() (*Server, *stubEngine) {
 		}},
 		{Name: "ask_user", Description: "ask the user"},
 	}
-	srv := NewServer(stubLister{defs: defs}, eng)
+	srv := NewServer(stubLister{defs: defs}, eng, "")
 	srv.version = "test"
 	return srv, eng
 }
@@ -152,6 +152,23 @@ func TestInitialize(t *testing.T) {
 	}
 	if res["capabilities"].(map[string]any)["tools"] == nil {
 		t.Fatalf("capabilities missing tools: %v", res["capabilities"])
+	}
+	if _, present := res["instructions"]; present {
+		t.Fatalf("instructions present with an empty server string: %v", res["instructions"])
+	}
+}
+
+// initialize's response carries a non-empty instructions string verbatim,
+// and omits the key when the server was built with "".
+func TestInitializeInstructions(t *testing.T) {
+	eng := &stubEngine{result: "ok"}
+	srv := NewServer(stubLister{}, eng, "bridge notes for the hosted agent")
+	c := serve(t, srv)
+	var got map[string]any
+	r := c.do(t, "1", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`, &got)
+	res := r["result"].(map[string]any)
+	if res["instructions"] != "bridge notes for the hosted agent" {
+		t.Fatalf("instructions = %v, want the server's string", res["instructions"])
 	}
 }
 

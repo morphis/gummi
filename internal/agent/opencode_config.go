@@ -75,3 +75,29 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	}
 	return json.Marshal(out)
 }
+
+// buildHostedOpencodeMCPConfig renders the OPENCODE_CONFIG file content for
+// the agent tab's hosted opencode session: just the mcp.gummi block that
+// binds the workspace endpoint, with no permission key. This deliberately
+// differs from buildOpencodeConfig's scripted-session shape, which always
+// cages edits to a worktree — the hosted tab has no equivalent sandboxing
+// concept for any backend (see HostedMCPAttach's doc and the feature's
+// design notes on why applying a cage to opencode alone here would be a
+// backend-specific surprise), so this builder never emits one.
+func buildHostedOpencodeMCPConfig(execPath, sockPath string) []byte {
+	out := map[string]any{
+		"mcp": map[string]any{
+			"gummi": map[string]any{
+				"type":        "local",
+				"command":     []string{execPath, "__mcp", "--workspace"},
+				"environment": map[string]string{"GUMMI_MCP_SOCK": sockPath},
+			},
+		},
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		// Fixed shape of strings/slices; cannot fail on it.
+		panic(err)
+	}
+	return b
+}

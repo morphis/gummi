@@ -73,6 +73,12 @@ type Shell struct {
 	agent     *agentView
 	agentErr  agentSpawnErr
 	agentSock string // workspace MCP socket handed to the hosted CLI
+	// agentMCPCleanup tears down whatever HostedMCPAttach allocated for the
+	// current m.agent (an opencode temp config file; a no-op for every
+	// other backend) — see agenttab.go's ensureAgent/closeAgent, the only
+	// two places it is ever set or called. Never nil while m.agent is
+	// non-nil and MCP wiring was attempted; nil otherwise.
+	agentMCPCleanup func()
 	// agentSpawnedAt is when the current m.agent was started (ensureAgent,
 	// agenttab.go). The agentExitedMsg handler compares it against m.now()
 	// to tell a real, useful session from a CLI that fails at startup and

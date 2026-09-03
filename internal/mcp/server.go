@@ -35,16 +35,20 @@ const protocolVersion = "2025-06-18"
 // -32601. Tools are not implemented here — the EngineTransport and
 // ToolLister supplied at construction own all tool semantics.
 type Server struct {
-	lister  ToolLister
-	engine  EngineTransport
-	version string
+	lister       ToolLister
+	engine       EngineTransport
+	version      string
+	instructions string
 
 	wmu sync.Mutex // serializes writes across the per-request goroutines
 }
 
 // NewServer returns a Server serving lister's tools through engine.
-func NewServer(l ToolLister, t EngineTransport) *Server {
-	return &Server{lister: l, engine: t, version: versionString()}
+// instructions is served verbatim in the initialize response's
+// "instructions" field (see handleInitialize); an empty string omits the
+// key entirely rather than sending an empty one.
+func NewServer(l ToolLister, t EngineTransport, instructions string) *Server {
+	return &Server{lister: l, engine: t, version: versionString(), instructions: instructions}
 }
 
 // Serve runs the server loop over r (requests) and w (responses). Each
@@ -128,11 +132,15 @@ func (s *Server) handleInitialize(req *Request) (json.RawMessage, error) {
 	if ver == "" {
 		ver = protocolVersion
 	}
-	return json.Marshal(map[string]any{
+	result := map[string]any{
 		"protocolVersion": ver,
 		"serverInfo":      map[string]any{"name": "gummi", "version": s.version},
 		"capabilities":    map[string]any{"tools": map[string]any{}},
-	})
+	}
+	if s.instructions != "" {
+		result["instructions"] = s.instructions
+	}
+	return json.Marshal(result)
 }
 
 // handleToolsList maps the lister's ToolDefs 1:1 into MCP Tool

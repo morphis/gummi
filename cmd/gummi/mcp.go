@@ -78,9 +78,14 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		return &exitError{code: 2}
 	}
 
+	instructions := mcp.FeatureInstructions(featureID)
+	if workspace {
+		instructions = mcp.WorkspaceInstructions()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := mcp.NewServer(client, client).Serve(ctx, os.Stdin, os.Stdout); err != nil {
+	if err := mcp.NewServer(client, client, instructions).Serve(ctx, os.Stdin, os.Stdout); err != nil {
 		return err
 	}
 	return nil

@@ -9,8 +9,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
 )
+
+// agentTabExecPath locates gummi's own executable for the hosted-tab MCP
+// wiring (HostedMCPAttach's execPath argument), mirroring the other
+// backend adapters' own rebindable exec-path vars (opencodeExecPath,
+// zzExecPath, claudeExecPath): production uses the real os.Executable,
+// tests rebind it.
+var agentTabExecPath = os.Executable
 
 // agentCrashLoopWindow is how soon after starting a child has to exit to
 // read as "never really started" rather than "ran, then ended" — the
@@ -92,6 +100,14 @@ func (m *Shell) ensureAgent() tea.Cmd {
 	if m.agent != nil || m.agentErr != "" {
 		return nil
 	}
+	// A respawn (shell.go's agentExitedMsg handler) nils m.agent and calls
+	// straight back in here without going through closeAgent, so a prior
+	// backend's hosted-MCP cleanup (an opencode temp config, say) must be
+	// run here too — otherwise it leaks across the respawn.
+	if m.agentMCPCleanup != nil {
+		m.agentMCPCleanup()
+		m.agentMCPCleanup = nil
+	}
 	argv, dir, backend, problem := m.resolveAgentAttach()
 	if problem != "" {
 		m.agentErr = agentSpawnErr(problem)
@@ -110,6 +126,19 @@ func (m *Shell) ensureAgent() tea.Cmd {
 	var env []string
 	if m.agentSock != "" {
 		env = append(env, "GUMMI_MCP_SOCK="+m.agentSock)
+		exe, err := agentTabExecPath()
+		if err != nil {
+			m.notice = noticeMsg{text: "hosted MCP wiring: " + sanitize(err.Error()), isErr: true}
+		} else {
+			extraArgv, extraEnv, cleanup, err := agent.HostedMCPAttach(backend, exe, m.agentSock)
+			m.agentMCPCleanup = cleanup
+			if err != nil {
+				m.notice = noticeMsg{text: "hosted MCP wiring: " + sanitize(err.Error()), isErr: true}
+			} else {
+				argv = append(argv, extraArgv...)
+				env = append(env, extraEnv...)
+			}
+		}
 	}
 	av, err := newAgentViewEnv(argv, dir, w, h, env)
 	if err != nil {
@@ -340,6 +369,10 @@ func (m *Shell) agentKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *Shell) closeAgent() {
 	if m.agent == nil {
 		return
+	}
+	if m.agentMCPCleanup != nil {
+		m.agentMCPCleanup()
+		m.agentMCPCleanup = nil
 	}
 	if err := m.agent.Close(); err != nil {
 		m.notice = noticeMsg{text: "agent exited: " + sanitize(err.Error()), isErr: true}

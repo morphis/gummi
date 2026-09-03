@@ -26,6 +26,16 @@ import (
 // $PATH. Production uses the real os.Executable; tests rebind it.
 var zzExecPath = os.Executable
 
+// zzExecPathHasWhitespace reports whether exe contains whitespace zz's
+// --mcp flag cannot represent: zz splits --mcp on whitespace with no
+// quoting, so a gummi executable path containing whitespace cannot be
+// passed on that flag. Shared by NewSession (the scripted session) and
+// HostedMCPAttach (gummi_mcp.go, the hosted pty), the two callers that
+// build a --mcp value for zz.
+func zzExecPathHasWhitespace(exe string) bool {
+	return strings.ContainsAny(exe, " \t\n\r")
+}
+
 // zzArgvPromptMaxBytes bounds the prompt Send will pass as a positional
 // argv string. Linux caps a single argv string at MAX_ARG_STRLEN (128
 // KiB); 96 KiB leaves headroom for the rest of argv so a too-long prompt
@@ -148,7 +158,7 @@ func (z *ZZ) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		if err != nil {
 			return nil, fmt.Errorf("zz adapter: locating own executable: %w", err)
 		}
-		if strings.ContainsAny(exe, " \t\n\r") {
+		if zzExecPathHasWhitespace(exe) {
 			return nil, fmt.Errorf("zz adapter: gummi executable path %q contains whitespace; "+
 				"zz splits --mcp on whitespace with no quoting, so this session cannot register MCP tools; "+
 				"move the gummi binary to a path without spaces, or accept this role runs without MCP", exe)
