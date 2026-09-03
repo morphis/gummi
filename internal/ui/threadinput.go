@@ -91,6 +91,26 @@ type pendingChip struct {
 // composer is empty — so the two placeholders collapsed back into one.
 const placeholderText = "message the agent, a verb (approve, verify, diff…), or ↑ for actions"
 
+// researchPlaceholderText is the same promise for a card with no branch.
+// The verb vocabulary is shared across kinds (verbs.go), but `diff` is
+// the one entry that cannot mean anything on a research card — there is
+// no worktree and no branch to diff — so naming it as the example is an
+// example of what not to type. `ask` takes its place: it is in the same
+// closed vocabulary and it is on a research card's own action inventory.
+const researchPlaceholderText = "message the agent, a verb (approve, verify, ask…), or ↑ for actions"
+
+// composerPlaceholder is the placeholder for a card the reader can type
+// to. The examples are illustrative rather than exhaustive — the ↑
+// inventory is the real list — but an example has to be something the
+// card can actually do, or the one line telling a newcomer that verbs
+// exist teaches them a verb that will refuse.
+func composerPlaceholder(k domain.Kind) string {
+	if k == domain.KindResearch {
+		return researchPlaceholderText
+	}
+	return placeholderText
+}
+
 // drivenAbroadPlaceholderText is the composer's placeholder on a card
 // another gummi process is driving: no verb vocabulary reaches it (this
 // is the one row where every line is consult prose, implicitly and
@@ -840,8 +860,9 @@ func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 	} else {
 		// up reaches the inventory whether or not a decision is pinned
 		// above the line (F11), so the placeholder no longer has to pick
-		// between two versions of that promise.
-		m.threadInput.Placeholder = placeholderText
+		// between two versions of that promise — only between the verb
+		// examples the card in front of the reader can actually run.
+		m.threadInput.Placeholder = composerPlaceholder(r.F.Kind)
 	}
 	// SetWidth reruns the widget's own recalculateHeight (DynamicHeight,
 	// newThreadInput), so a resize rewraps the content and reflows the
