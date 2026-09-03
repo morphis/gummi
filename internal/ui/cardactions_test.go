@@ -364,6 +364,45 @@ func assertRenderedActionCount(t *testing.T, l *cardActionList, width, maxRows i
 	}
 }
 
+// TestBG053ExplainerFollowsHighlightedRowNotFooter pins the ↳ explainer to
+// the row it describes rather than the block's last line: with the cursor
+// several rows above a danger action, the old "always append last" footer
+// rendered the highlighted row's own description underneath "delete…",
+// across the destructive-actions rule.
+func TestBG053ExplainerFollowsHighlightedRowNotFooter(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	l := newCardActionList([]cardAction{
+		{id: "chat", key: "enter", label: "chat", why: "talk through the draft with the agent"},
+		{id: "park", key: "p", label: "park", why: "park it"},
+		{id: "transcript", key: "t", label: "transcript", why: "view transcript"},
+		{id: "envelope", key: "u", label: "envelope", why: "adjust envelope"},
+		{id: "duplicate", key: "", label: "duplicate", why: "duplicate it"},
+		{id: "delete", key: "D", label: "delete…", why: "delete it", danger: true},
+	})
+	// cursor stays on "chat" (index 0), several rows above the danger rule.
+	out := ansi.Strip(l.View(s, 40, 0, true))
+	lines := strings.Split(out, "\n")
+
+	cursorLineIdx := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "chat") {
+			cursorLineIdx = i
+			break
+		}
+	}
+	explainerIdx := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "↳") {
+			explainerIdx = i
+			break
+		}
+	}
+	if explainerIdx != cursorLineIdx+1 {
+		t.Fatalf("BG-053: explainer for %q rendered at line %d (last line %d, under the danger row), want directly under its own row at line %d\n%s",
+			"chat", explainerIdx, len(lines)-1, cursorLineIdx+1, out)
+	}
+}
+
 func TestCardActionsDialogWideGolden(t *testing.T) {
 	in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning}
 	l := newCardActionList(cardActionsFor(in, cardRow(domain.KindFeature, domain.StageImplement, false, true)))
@@ -393,11 +432,11 @@ func TestCardActionListViewUnfocusedKeepsMarker(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "\u25b8 ") {
 		t.Errorf("cursor row = %q, want it to keep the marker while unfocused", lines[0])
 	}
-	if strings.HasPrefix(lines[1], "\u25b8 ") {
-		t.Errorf("non-cursor row = %q, want no marker", lines[1])
+	if !strings.Contains(lines[1], "start the stage") {
+		t.Errorf("explainer = %q, want it directly under the marked row", lines[1])
 	}
-	if !strings.Contains(lines[2], "start the stage") {
-		t.Errorf("explainer = %q, want it to describe the marked row", lines[2])
+	if strings.HasPrefix(lines[2], "\u25b8 ") {
+		t.Errorf("non-cursor row = %q, want no marker", lines[2])
 	}
 }
 

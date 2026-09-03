@@ -612,20 +612,31 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 		}
 		lines = append(lines, row)
 	}
-	// the "…N more" and "↳ why" lines are part of the block, so they come
-	// out of the same budget the caller granted — otherwise the block
-	// renders maxRows+2 and overruns the reserve the dashboard computed.
+	// the explainer belongs to the row it describes, not to whichever row
+	// happens to render last — insert it right after the highlighted row's
+	// own line so it travels with that row through folding and windowing
+	// alike (BG-053). It carries sepPrefix for the same reason the danger
+	// rule does: so the counting below can tell it apart from an action.
+	if a, ok := l.Selected(); ok {
+		why := sepPrefix + s.Faint.Render(ansi.Truncate("  ↳ "+a.why, w, "…"))
+		insertAt := cursorLine + 1
+		lines = append(lines[:insertAt:insertAt], append([]string{why}, lines[insertAt:]...)...)
+	}
+	// the "…N more" line is the only thing left outside the windowed
+	// block now that the why line moved inside it, so the reserve the
+	// caller granted only has to hold room for that one line.
 	rowBudget := maxRows
 	if rowBudget > 0 {
-		rowBudget = max(rowBudget-2, 1)
+		rowBudget = max(rowBudget-1, 1)
 	}
 	shown := lines
 	hidden := 0
 	if rowBudget > 0 && len(lines) > rowBudget {
 		shown = windowLines(lines, cursorLine, rowBudget)
 		// count hidden *actions*, not hidden lines: the danger separator
-		// is a line but not something ↑↓ can reach, so counting it made
-		// the tally one too many whenever it fell outside the window.
+		// and the why line are lines but not something ↑↓ can reach, so
+		// counting them made the tally too high whenever they fell
+		// outside the window.
 		shownActions := 0
 		for _, l := range shown {
 			if !strings.HasPrefix(l, sepPrefix) {
@@ -636,13 +647,10 @@ func (l *cardActionList) View(s *theme.Styles, w, maxRows int, focused bool) str
 	}
 	// copy before appending: windowLines returns a slice of lines, so
 	// appending in place would scribble over the row after the window.
-	out := make([]string, 0, len(shown)+2)
+	out := make([]string, 0, len(shown)+1)
 	out = append(out, shown...)
 	if hidden > 0 {
 		out = append(out, s.Faint.Render(fmt.Sprintf("  …%d more — ↑↓ to reach them", hidden)))
-	}
-	if a, ok := l.Selected(); ok {
-		out = append(out, s.Faint.Render(ansi.Truncate("  ↳ "+a.why, w, "…")))
 	}
 	return strings.Join(out, "\n")
 }
