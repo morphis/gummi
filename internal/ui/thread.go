@@ -634,31 +634,82 @@ func trimTrailingBlanks(lines []string) []string {
 	return lines
 }
 
-// threadHeader is the thread's two-line masthead: identity, profile,
-// autopilot mode, spend and the active loop's round badge, then the
-// stage strip.
-func threadHeader(s *theme.Styles, m *Shell, r featureRow, width int) []string {
+// threadHeader is the thread's masthead: identity, profile, autopilot
+// mode, spend and the active loop's round badge, then the stage strip —
+// always two lines.
+//
+// The badge cluster is measured first and the title is truncated to
+// whatever room is left, rather than the other way round: the title is
+// already shown one row up in the crumb and one keystroke away on the
+// board, but the autopilot mode and the remaining credits are the two
+// operational facts this row alone carries, and a positional cut blind
+// to field boundaries was losing them first (BG-049). Below the width
+// where even a minimal title fits beside the full badge cluster, badges
+// are shed least-important-first — profile tag (already shown in the
+// crumb, same as the title), then skips (rare, static), then round and
+// corrective last (the only badges that signal active rework in
+// progress) — with autopilot mode and budget/spend never dropped, since
+// those are the two facts the masthead exists to protect. The title
+// can shrink all the way to nothing before any of that shedding starts
+// eating into them.
+//
+// The row never wraps the badge cluster onto a line of its own: this
+// masthead is also the head composeThread trims first when the frame
+// is too short, and that trim keeps a prefix of whatever rows it is
+// given. A badge row placed behind the title would lose exactly the
+// race BG-049 was filed over, just on the height axis instead of the
+// width one — the id survives a short frame and the credits vanish
+// again. Keeping id, title and badges on the single row that
+// composeThread's height trim never has reason to cut is what makes
+// that row's survival cover the badges too.
+func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	f := r.F
-	head := s.Title.Render(string(f.ID)) + " " + s.Base.Render("· "+f.Title)
+
+	id := s.Title.Render(string(f.ID))
+	title := s.Base.Render("· " + f.Title)
+
+	profile := ""
 	if f.Profile != "" {
-		head += headerGap + s.ProfileTag.Render("["+f.Profile+"]")
+		profile = headerGap + s.ProfileTag.Render("["+f.Profile+"]")
 	}
-	head += headerGap + autopilotField(s, m, f)
+	autopilot := headerGap + autopilotField(s, m, f)
+	budget := ""
 	if f.Budget.Envelope > 0 {
-		head += headerGap + s.Faint.Render(budgetSummary(f))
+		budget = headerGap + s.Faint.Render(budgetSummary(f))
 	} else if !f.Spend.Zero() {
-		head += headerGap + s.Faint.Render(featureSpend(f.Spend))
+		budget = headerGap + s.Faint.Render(featureSpend(f.Spend))
 	}
+	skips := ""
 	if sk := skipSummary(f); sk != "" {
-		head += headerGap + s.Faint.Render("skips "+sk)
+		skips = headerGap + s.Faint.Render("skips "+sk)
 	}
+	round := ""
 	if rl := roundLabel(m, f); rl != "" {
-		head += headerGap + s.Faint.Render(rl)
+		round = headerGap + s.Faint.Render(rl)
 	}
+	corrective := ""
 	if cl := correctiveLabel(m, f); cl != "" {
-		head += headerGap + s.Faint.Render(cl)
+		corrective = headerGap + s.Faint.Render(cl)
 	}
-	return []string{head, stageStrip(s, f, width)}
+	badges := func() string { return profile + autopilot + budget + skips + round + corrective }
+	// autopilot and budget/spend are deliberately absent from this list —
+	// they are never shed.
+	dropOrder := []*string{&profile, &skips, &round, &corrective}
+
+	idWidth := ansi.StringWidth(id) + 1 // +1 for the space before the title
+	// Room for the id, a minimally readable truncated title and the
+	// badge cluster together. While there isn't enough, shed badges
+	// least-important-first rather than let the title crowd them out.
+	// badgeWidth is tracked incrementally rather than re-measuring the
+	// whole concatenated cluster on every iteration.
+	badgeWidth := ansi.StringWidth(badges())
+	const minTitleCols = 4
+	for i := 0; i < len(dropOrder) && inner-idWidth-badgeWidth < minTitleCols; i++ {
+		badgeWidth -= ansi.StringWidth(*dropOrder[i])
+		*dropOrder[i] = ""
+	}
+	room := max(inner-idWidth-badgeWidth, 0)
+	return []string{id + " " + ansi.Truncate(title, room, "…") + badges(), stageStrip(s, f, inner)}
 }
 
 // correctiveLabel is the card's unified rework budget — every review
