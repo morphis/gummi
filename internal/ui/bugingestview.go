@@ -246,8 +246,10 @@ func (bv *bugIngestView) bindings() []binding {
 		return withHelpKey([]binding{
 			{key: "type", label: "filter", help: "type to filter the list", bar: true},
 			{key: "up/down/pgup/pgdn", label: "move", help: "move the highlighted row without leaving the filter"},
-			{key: "esc", label: "list", help: "leave the filter for the list, keeping the query", bar: true},
 			{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
+			// esc last here too: leaving the filter is this sub-surface's
+			// own way out, and it is the row that must outlive the others.
+			{key: "esc", label: "list", help: "leave the filter for the list, keeping the query", bar: true},
 		})
 	}
 	return []binding{
@@ -257,8 +259,11 @@ func (bv *bugIngestView) bindings() []binding {
 		{key: "r", label: "rename", help: "rename the bug (also c)", bar: true},
 		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
 		{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
-		{key: "esc", label: "discard", help: "discard the import — nothing created (also q)", bar: true},
+		// esc stays last: the status bar drops hints from the
+		// second-to-last backwards precisely so the surface's escape hatch
+		// outlives every other row (statusbar.Render).
 		{key: "?", label: "help", bar: true},
+		{key: "esc", label: "discard", help: "discard the import — nothing created (also q)", bar: true},
 	}
 }
 

@@ -170,8 +170,11 @@ func (dp *depPicker) bindings() []binding {
 		{key: "j/k", label: "select", help: "move over the candidates"},
 		{key: "enter", label: "add", help: "add the selected candidate as a dependency", bar: true},
 		{key: "x", label: "remove", help: "remove the selected dependency", bar: true},
-		{key: "esc", label: "back", help: "return to the board (also q)", bar: true},
+		// esc stays last: the status bar drops hints from the
+		// second-to-last backwards precisely so the surface's escape hatch
+		// outlives every other row (statusbar.Render).
 		{key: "?", label: "help", bar: true},
+		{key: "esc", label: "back", help: "return to the board (also q)", bar: true},
 	}
 }
 

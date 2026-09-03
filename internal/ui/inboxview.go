@@ -125,10 +125,15 @@ func (m *Shell) inboxBindings() []binding {
 		{key: "enter", label: "go", help: "open the card at its decision, clearing this item", bar: true},
 		{key: "x", label: "dismiss", help: "clear this item without acting on it", bar: true},
 		{key: "u", label: "top up", help: "raise the envelope and resume (budget items only)"},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "stay on the needs-attention queue"},
+		// The inbox is a tab, not a modal, so cycling away IS its way out —
+		// there is no esc to hold the position. It therefore goes last, for
+		// the reason esc does elsewhere: the status bar drops hints from
+		// the second-to-last backwards, so whatever a surface puts last is
+		// the row that survives (statusbar.Render).
 		{key: "?", label: "help", bar: true},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
 		{key: "q", label: "quit"},
 	}
 }
