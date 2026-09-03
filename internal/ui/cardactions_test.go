@@ -9,10 +9,21 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
+	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
+
+// testProfileEngine builds a bare engine carrying only profiles — enough
+// for BoardProfiles/CardProfiles-driven UI checks that never touch a
+// store, worktree, or live agent.
+func testProfileEngine(t *testing.T, profiles config.Profiles) *engine.Engine {
+	t.Helper()
+	e := engine.New(engine.Config{Profiles: profiles})
+	t.Cleanup(func() { e.Close() })
+	return e
+}
 
 // idsOf flattens an action list to its id sequence for compact table
 // expectations, mirroring nextsteps_test.go's keysOf.
@@ -631,5 +642,47 @@ func TestCardActionsForPRActionsExcludedFromForeignSafe(t *testing.T) {
 		if foreignSafeActions[id] {
 			t.Errorf("%q must not be in foreignSafeActions — it writes to the card", id)
 		}
+	}
+}
+
+// TestCardActionsIncludesProfileWhenConfigured: the Shell-level
+// m.cardActions() — not the pure cardActionsFor — carries the
+// profile-switch row once an engine with a declared profile is wired in.
+func TestCardActionsIncludesProfileWhenConfigured(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.engine = testProfileEngine(t, config.Profiles{
+		Default:  "solo",
+		Profiles: map[string]config.Profile{"solo": {"implementer": {Model: "m"}}},
+	})
+	m.rows = []featureRow{{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}}
+	m.sel = 0
+
+	acts := m.cardActions()
+	if !hasID(acts.actions, "profile") {
+		t.Errorf("cardActions() = %v, want a profile row with a profile configured", idsOf(acts.actions))
+	}
+}
+
+// hasID reports whether a cardAction with id is present.
+func hasID(acts []cardAction, id string) bool {
+	for _, a := range acts {
+		if a.id == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCardActionsOmitsProfileWithNoEngine: with no engine attached, there
+// is nothing to pick a profile from, so the row is simply absent — not a
+// disabled/unavailable entry.
+func TestCardActionsOmitsProfileWithNoEngine(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.rows = []featureRow{{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}}
+	m.sel = 0
+
+	acts := m.cardActions()
+	if hasID(acts.actions, "profile") {
+		t.Errorf("cardActions() = %v, want no profile row with no engine attached", idsOf(acts.actions))
 	}
 }

@@ -1,6 +1,48 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/morphis/gummi/internal/config"
+)
+
+// testCardCommandProfile is a minimal declared profile, enough to make
+// cardProfileActions/CardProfiles offer something to pick from.
+func testCardCommandProfile() config.Profiles {
+	return config.Profiles{
+		Default:  "thrifty",
+		Profiles: map[string]config.Profile{"thrifty": {"implementer": {Model: "m"}}},
+	}
+}
+
+// TestRunCommandProfileOpensPicker: the "profile" command (the row
+// cardCommands appends to the space menu) opens the card-scoped value
+// tier — a commandMenu, the same overlay type the board's own /profile
+// value tier uses, not a bespoke dialog.
+func TestRunCommandProfileOpensPicker(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.engine = testProfileEngine(t, testCardCommandProfile())
+
+	m.runCommand("profile")
+
+	if _, ok := m.Overlay.Top().(*commandMenu); !ok {
+		t.Fatalf(`runCommand("profile") did not open the value tier, got %T`, m.Overlay.Top())
+	}
+}
+
+// TestRunCardActionProfileOpensPicker: the action list's keyless
+// "profile" row reaches the identical picker, since it has no key to
+// route through boardVerb.
+func TestRunCardActionProfileOpensPicker(t *testing.T) {
+	m := populatedShell(100, 30)
+	m.engine = testProfileEngine(t, testCardCommandProfile())
+
+	m.runCardAction(cardAction{id: "profile"})
+
+	if _, ok := m.Overlay.Top().(*commandMenu); !ok {
+		t.Fatalf("runCardAction(profile) did not open the value tier, got %T", m.Overlay.Top())
+	}
+}
 
 // TestActionFocusResetsOnCardChange: the list belongs to the selected
 // card, so moving off it must not carry a cursor onto an unrelated

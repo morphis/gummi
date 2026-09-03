@@ -321,6 +321,69 @@ func TestBoardProfilesNoProfiles(t *testing.T) {
 	}
 }
 
+// cardRoleFixture declares one profile whose implementer and reviewer
+// roles diverge from each other and from the architect — so a picker
+// reading the wrong resolver (resolveBoardRole, which borrows the
+// architect's for any role it doesn't itself declare) is caught
+// red-handed rather than accidentally agreeing.
+func cardRoleFixture() config.Profiles {
+	return config.Profiles{
+		Default: "mixed",
+		Profiles: map[string]config.Profile{
+			"mixed": {
+				"architect":   {Model: "architect-model"},
+				"implementer": {Backend: "impl-backend", Model: "impl-model"},
+				"reviewer":    {Backend: "review-backend", Model: "review-model"},
+			},
+		},
+	}
+}
+
+// TestCardProfilesResolvesPerCardRole pins CardProfiles to the card's own
+// role — implement and review resolve to their own distinct
+// backend/model, not the board/architect one BoardProfiles reports for
+// the same profile.
+func TestCardProfilesResolvesPerCardRole(t *testing.T) {
+	e := &Engine{cfg: Config{Profiles: cardRoleFixture()}}
+
+	implement := e.CardProfiles(domain.StageImplement)
+	if len(implement) != 1 || implement[0].Backend != "impl-backend" || implement[0].Model != "impl-model" {
+		t.Errorf("CardProfiles(implement) = %+v, want impl-backend/impl-model", implement)
+	}
+	review := e.CardProfiles(domain.StageReview)
+	if len(review) != 1 || review[0].Backend != "review-backend" || review[0].Model != "review-model" {
+		t.Errorf("CardProfiles(review) = %+v, want review-backend/review-model", review)
+	}
+	// sanity: BoardProfiles borrows the architect's, proving the two
+	// resolvers genuinely disagree for this fixture.
+	board := e.BoardProfiles()
+	if len(board) != 1 || board[0].Model != "architect-model" {
+		t.Errorf("BoardProfiles() = %+v, want architect-model", board)
+	}
+}
+
+// TestCardProfilesFallsBackForUndeclaredRole: a stage with no agent
+// action (roleForStage's ok=false) leaves the role at its zero value, and
+// resolveRole's existing undeclared-role fallback — the engine's
+// single-model config — answers it, the same fallback every other
+// undeclared-role lookup gets.
+func TestCardProfilesFallsBackForUndeclaredRole(t *testing.T) {
+	e := &Engine{cfg: Config{Model: "only-model", Profiles: cardRoleFixture()}}
+	got := e.CardProfiles(domain.StageDone)
+	if len(got) != 1 || got[0].Backend != "" || got[0].Model != "only-model" {
+		t.Errorf("CardProfiles(done) = %+v, want one entry falling back to only-model with an empty backend", got)
+	}
+}
+
+// TestCardProfilesNoProfiles: nil-safe like BoardProfiles, for the
+// identical reason.
+func TestCardProfilesNoProfiles(t *testing.T) {
+	e := &Engine{cfg: Config{Model: "only-model"}}
+	if got := e.CardProfiles(domain.StageImplement); got != nil {
+		t.Errorf("CardProfiles() = %+v, want nil", got)
+	}
+}
+
 // TestKnownModelsDedupsAndSorts: a model reused across profiles/roles
 // collapses into one KnownModel entry naming every use, both the model
 // list and each entry's Uses sorted deterministically.

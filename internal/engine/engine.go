@@ -1557,6 +1557,63 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 	return e.cfg.Store.UpdateFeature(ctx, &f)
 }
 
+// ChangeProfile switches a card's profile in place. It always persists
+// profile to the card's Feature.Profile — the same field every later
+// stage/role already reads, so this is not a one-off override that
+// reverts on the next stage — and, when the card has a live session
+// right now, restarts it immediately under the new profile rather than
+// waiting for the next resume. profile must name a declared profile;
+// an unknown name is refused before any store write or session is
+// touched.
+func (e *Engine) ChangeProfile(ctx context.Context, id domain.FeatureID, profile string) error {
+	known := false
+	for _, name := range e.cfg.Profiles.Names() {
+		if name == profile {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("no profile named %q", profile)
+	}
+	f, err := e.cfg.Store.GetFeature(ctx, id)
+	if err != nil {
+		return err
+	}
+	f.Profile = profile
+	if err := e.cfg.Store.UpdateFeature(ctx, &f); err != nil {
+		return err
+	}
+
+	s := e.Get(id)
+	if !s.Live() {
+		return nil // nothing running to restart
+	}
+
+	// captured before Pause, whose stop() finalizes s and would otherwise
+	// leave these unreadable once the restart needs them.
+	interactive := s.Interactive
+	flavor := s.flavor()
+	note := s.kickoffNote
+
+	// the single-session interrupt/dequeue/persist/stop/freeSlot path —
+	// not StopForQuit's bulk, GateApproval-gated, quit-park-event path,
+	// which this restart has no use for.
+	if err := e.Pause(ctx, id); err != nil {
+		return err
+	}
+	if interactive {
+		// Pause's stop() leaves s.agentSess non-nil (Live's own doc
+		// comment); without clearing it, Attach's reuse check
+		// (prior.agent() != nil) would hand back the now-dead session
+		// instead of spawning fresh under the new profile.
+		s.clearAgent()
+		_, err := e.Attach(ctx, f)
+		return err
+	}
+	return e.run(f, note, flavor)
+}
+
 // beforeTurn snapshots main's dirty set immediately before a Send hands
 // work to the agent, arming the tripwire's post-turn comparison. On a
 // MainDirtyPaths error it records a diagnostic activity line and skips

@@ -427,6 +427,17 @@ func (s *Session) setAgentSessionID(id string) {
 	s.agentSessionID = id
 }
 
+// clearAgent nils the stale agent handle stop() leaves behind (Live's own
+// doc comment: "Pause leaves agentSess non-nil after closing the
+// backend"). Without this, Attach's reuse check (prior.agent() != nil)
+// mistakes a just-paused, already-closed session for one still worth
+// reusing, and hands the caller a session whose backend is gone.
+func (s *Session) clearAgent() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentSess = nil
+}
+
 // finishRunning atomically marks a running autonomous turn done, reporting
 // whether it did (false if the session was paused or stopped meanwhile).
 // Doing the check-and-set under one lock stops a racing Pause from being

@@ -5,6 +5,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // resolveRole picks the role config and backend name for a feature's
@@ -146,6 +147,36 @@ func (e *Engine) BoardProfiles() []BoardProfile {
 	out := make([]BoardProfile, 0, len(names))
 	for _, name := range names {
 		rc, backend := e.resolveBoardRole(name)
+		out = append(out, BoardProfile{Name: name, Backend: backend, Model: rc.Model})
+	}
+	return out
+}
+
+// CardProfiles lists every declared profile for a card-scoped profile
+// picker, same shape and ordering as BoardProfiles, but resolved for the
+// role a card at stage actually runs — not the board's own roleless
+// board/architect resolution. Every live card session resolves its
+// backend/model via resolveRole(s.Feature.Profile, s.Role) (see Run/
+// Attach), so a picker that labeled choices with resolveBoardRole would
+// show what the board tab would run, not what this card would.
+//
+// stage, not agent.Role, is deliberate: roleForStage stays unexported
+// and package-engine-only, so callers (internal/ui) never need to know
+// agent.Role exists. A stage with no agent action (e.g. domain.StageDone)
+// leaves role at its zero value "", which resolveRole's own undeclared-
+// role fallback already handles — the same fallback every other
+// undeclared-role lookup gets, not a new one invented for this picker.
+//
+// Nil-safe, for the identical reason BoardProfiles is.
+func (e *Engine) CardProfiles(stage domain.Stage) []BoardProfile {
+	names := e.cfg.Profiles.Names()
+	if len(names) == 0 {
+		return nil
+	}
+	role, _ := roleForStage(stage)
+	out := make([]BoardProfile, 0, len(names))
+	for _, name := range names {
+		rc, backend := e.resolveRole(name, role)
 		out = append(out, BoardProfile{Name: name, Backend: backend, Model: rc.Model})
 	}
 	return out

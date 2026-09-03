@@ -135,6 +135,21 @@ func (m *Shell) boardAgentValueRows() []completionRow {
 	return out
 }
 
+// labelBackendModel words an empty Backend or Model coming back from the
+// engine as the thing it falls back to, never left blank — a blank field
+// reads as missing data, not as "the default". Shared by the board's own
+// /profile picker (boardProfileValueRows) and the card-scoped one
+// (openCardProfilePicker, cardprofile.go) so their wording can't drift.
+func labelBackendModel(backend, model string) (string, string) {
+	if backend == "" {
+		backend = "engine default"
+	}
+	if model == "" {
+		model = "backend default"
+	}
+	return backend, model
+}
+
 // boardProfileValueRows lists every declared profile for the /profile
 // picker. Each row's description names what the profile actually
 // resolves to rather than the raw yaml (engine.BoardProfile's own doc
@@ -156,14 +171,7 @@ func (m *Shell) boardProfileValueRows() []completionRow {
 	}
 	var out []completionRow
 	for _, p := range m.engine.BoardProfiles() {
-		backend := p.Backend
-		if backend == "" {
-			backend = "engine default"
-		}
-		model := p.Model
-		if model == "" {
-			model = "backend default"
-		}
+		backend, model := labelBackendModel(p.Backend, p.Model)
 		desc := backend + " · " + model
 		if m.board != nil && p.Name == m.board.Profile() {
 			desc += " · current"

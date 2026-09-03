@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -22,12 +24,33 @@ func (m *Shell) cardActions() *cardActionList {
 	if !ok {
 		return newCardActionList(nil)
 	}
-	l := newCardActionList(cardActionsFor(m.nextInputFor(r), r))
+	actions := append(cardActionsFor(m.nextInputFor(r), r), m.cardProfileActions()...)
+	l := newCardActionList(actions)
 	l.expanded = m.actionsExpanded
 	if n := l.Len(); n > 0 {
 		l.cursor = clamp(m.actionCursor, 0, n-1)
 	}
 	return l
+}
+
+// cardProfileActions returns the profile-switch entry for the selected
+// card — one keyless cardAction when there is a profile picker to open,
+// nil otherwise. Kept at the Shell layer, not inside the pure
+// cardActionsFor, because it needs m.engine to know whether there is
+// anything to pick from and cardActionsFor takes no engine at all (see
+// TestCardActionsDialogWideGolden/NarrowGolden, which call it directly
+// and would need no regeneration only if this row is appended here
+// instead). It applies uniformly to whichever card is selected, so it
+// takes no featureRow of its own.
+func (m *Shell) cardProfileActions() []cardAction {
+	if m.engine == nil || len(m.engine.BoardProfiles()) == 0 {
+		return nil
+	}
+	return []cardAction{{
+		id:    "profile",
+		label: "profile",
+		why:   "switch this card's profile — a live session restarts under it",
+	}}
 }
 
 // blurActions hands the arrow keys back to the cards and refolds the
@@ -135,7 +158,7 @@ func (m *Shell) cardCommands(existing []command) []command {
 		}
 	}
 	var out []command
-	for _, a := range cardActionsFor(m.nextInputFor(r), r) {
+	for _, a := range append(m.cardProfileActions(), cardActionsFor(m.nextInputFor(r), r)...) {
 		id := a.id
 		if a.key != "" {
 			if taken[a.key] {
@@ -155,6 +178,16 @@ func (m *Shell) cardCommands(existing []command) []command {
 // functions runCardAction calls for them, rather than a second copy of
 // that dispatch. Everything else is a board key.
 func (m *Shell) runCommand(id string) tea.Cmd {
+	// the card profile picker's value tier, mirroring runBoardCompletion's
+	// own "agent-cli:"-prefix split (boardcomplete.go) — no new parsing
+	// convention introduced for it.
+	if name, ok := strings.CutPrefix(id, "profile-value:"); ok {
+		r, ok := m.selected()
+		if !ok {
+			return nil
+		}
+		return m.confirmCardProfileChange(r.F.ID, name)
+	}
 	switch id {
 	case "q":
 		return m.quitCmd()
@@ -168,6 +201,8 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 			return m.openAutopilot(r.F)
 		}
 		return nil
+	case "profile":
+		return m.openCardProfilePicker()
 	case "board-profile", "board-model":
 		return m.openBoardValuePicker(id)
 	}
@@ -212,6 +247,8 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		return nil
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "profile":
+		return m.openCardProfilePicker()
 	case "ask":
 		// arms the same channel typing `ask` on the composer does
 		// (threadinput.go's routeVerb) — this is just the inventory's own
