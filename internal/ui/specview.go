@@ -305,7 +305,11 @@ func (m *Shell) specViewRender(w, h int) string {
 		return ""
 	}
 	var b strings.Builder
-	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· spec")
+	// the same noun the card page used to send the reader here: this view
+	// opens over a bug's report as often as over a feature's spec, and
+	// calling both "spec" renamed the document between the line that
+	// pointed at it and the header of the thing it opened.
+	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· "+artifactNoun(sv.f.Kind))
 	if open := len(sv.doc.OpenQuestions()); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}

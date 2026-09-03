@@ -269,7 +269,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			in.sess != "" && !in.cardOpen,
 		},
 		{
-			"spec", "s", "spec", "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,
+			// the label is the interface, so it takes the card's own noun
+			// for its document the way the why-line beneath it always has
+			// — a bug card offering to open a "spec" named the document by
+			// a word appearing nowhere else on its page. The id stays
+			// "spec": that is what the Shell switches on, not what a
+			// reader sees.
+			"spec", "s", artifactNoun(in.kind), "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,
 			true,
 		},
 		{
