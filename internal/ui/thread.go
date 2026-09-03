@@ -1475,6 +1475,22 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		}
 		pad(idx)
 	}
+	// A period nothing in the log ever closed, closed instead by a
+	// render-time judgement — closeHandedOver when the card came to rest
+	// at a stage autopilot may not drive, closeOrphaned when the driver
+	// went away — has no closing event to be placed against: its `to` is
+	// the end of the log, past every index the loop above walks. Its rule
+	// closes here, after everything this stage holds, or it is derived
+	// and never drawn at all and the page still says a machine has the
+	// card (BG-085).
+	for _, st := range stretches {
+		if st.running() || st.to < len(r.Events) {
+			continue
+		}
+		lines = append(lines, "")
+		lines = append(lines, stretchCloseLines(s, st, w)...)
+		pad(-1)
+	}
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 		pad(-1)

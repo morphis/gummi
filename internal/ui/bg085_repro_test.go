@@ -1,9 +1,16 @@
 package ui
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -106,5 +113,54 @@ func TestBG085AlreadyClosedPeriodIsLeftAlone(t *testing.T) {
 	}
 	if st.reason == "" {
 		t.Error("the park's reason was dropped")
+	}
+}
+
+// TestBG085HandoverRuleIsActuallyDrawn is the same defect at the surface
+// it was seen on. Closing the period in the derivation is only half of
+// it: the thread places a closing rule at the index of the event that
+// closed it, and a period closed by a query-time judgement closes at the
+// end of the log, where there is no such event. So a card carrying a
+// finished stage segment drew no closing rule at all — the state said
+// handed over and the screen still said a machine had the card.
+func TestBG085HandoverRuleIsActuallyDrawn(t *testing.T) {
+	ctx := context.Background()
+	m := populatedShell(120, 34)
+	ws, store, wt := uiRepo(t)
+	m.Attach(store, wt, ws)
+
+	f := mkFeature(t, store, 7, "snapshot retention across backends", domain.StageShape)
+	f.Kind = domain.KindResearch
+	m.rows = []featureRow{{F: f}}
+	m.sel = 0
+	m.cardOpen = true
+
+	stamp := time.Date(2026, 9, 3, 20, 53, 0, 0, time.UTC)
+	took, _ := json.Marshal(state.AutopilotPayload{Event: state.AutopilotTookOver, Mode: domain.GateGates})
+	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "demo", "flavor": "stage"})
+	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "Done."})
+	exit, _ := json.Marshal(map[string]any{"verdict": "", "credits": 18})
+	cross, _ := json.Marshal(state.GatePayload{
+		From: string(domain.StageInvestigate), To: string(domain.StageShape), Actor: state.ActorAutopilot,
+	})
+	if err := store.AppendEvents(ctx, []state.CardEvent{
+		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventAutopilot, At: stamp, Payload: string(took), Dedupe: "took"},
+		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventStageEnter, At: stamp, Payload: string(enter), Dedupe: "enter"},
+		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventMessage, At: stamp.Add(time.Minute), Payload: string(says), Dedupe: "said"},
+		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventStageExit, At: stamp.Add(time.Minute), Payload: string(exit), Dedupe: "exit"},
+		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventGate, At: stamp.Add(2 * time.Minute), Payload: string(cross), Dedupe: "cross"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadCardEvents(f.ID))
+
+	w, h := m.threadSize()
+	body := ansi.Strip(m.threadView(w, h))
+
+	if !strings.Contains(body, "autopilot took over") {
+		t.Fatalf("precondition: the period never opened\n%s", body)
+	}
+	if !strings.Contains(body, "autopilot handed it to you") {
+		t.Errorf("the period was closed in the derivation but no closing rule reached the screen:\n%s", body)
 	}
 }
