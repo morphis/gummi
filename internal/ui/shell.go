@@ -1190,6 +1190,39 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	return nil
 }
 
+// refreshOpenCardEvents re-reads the open card's event log when the event
+// just handled means the log grew. The thread's history above the live
+// stage — the folded receipt for every finished stage session, the
+// autopilot period rules drawn around them — is composed from
+// featureRow.Events (thread.go), and that snapshot is otherwise taken
+// once, when the card page opens or the selection moves on it
+// (loadCardEvents). A stage that starts and finishes while the page is
+// already open therefore left nothing behind: the live block moved on to
+// the next stage and the one before it simply vanished from the history,
+// with no receipt, no crossing line and a live header still stamped with
+// the previous stage's time — until the reader left the card and came
+// back, which reloaded the log and restored all of it.
+//
+// The three kinds below are the ones the engine sends after it has
+// written to the log, so a reload here can never race ahead of the
+// write: Idle follows handle's once-per-turn persist, Stopped follows
+// the setState(StateDone)/persist pair that records stage_exit, and
+// Started follows the fresh session's own persist on the interactive
+// path (the autonomous one persists just after, and its first Idle picks
+// that up). Only the card actually on screen is reloaded, so this stays
+// one small read per turn of one card, not the per-row IO the row
+// snapshot exists to avoid.
+func (m *Shell) refreshOpenCardEvents(ev engine.Event) tea.Cmd {
+	if !m.cardOpen || ev.Feature == "" || m.selectedID() != ev.Feature {
+		return nil
+	}
+	switch ev.Kind {
+	case engine.EventStarted, engine.EventIdle, engine.EventStopped:
+		return m.loadCardEvents(ev.Feature)
+	}
+	return nil
+}
+
 // Update implements tea.Model. It delegates to update, then keeps the
 // shared spinner clock alive: while anything on screen animates exactly
 // one tick loop runs, and it winds down on the first tick after the
@@ -1792,8 +1825,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
 		// just signal "re-render from Snapshot" — so keep listening, plus
-		// any automatic review-loop follow-up.
-		return m, tea.Batch(m.listenEngineCmd(), cmd)
+		// any automatic review-loop follow-up and, when the event means
+		// the open card's event log grew, a reload of it.
+		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev))
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly. There is no pane left
