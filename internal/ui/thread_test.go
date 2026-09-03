@@ -157,6 +157,26 @@ func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 	}
 }
 
+// TestFoldedReceiptFallsBackToEnterTime is BG-047: the interactive
+// stages (brainstorm, spec, triage, diagnose, shape) never earn a
+// stage_exit on an ordinary approval, so seg.exitAt stays zero and the
+// receipt used to end on a bare "·" with no time at all. It should fall
+// back to the segment's enterAt instead, labeled as a start rather than
+// an end so it isn't mistaken for when the stage finished.
+func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
+	seg := stageSegment{
+		stage: domain.StageBrainstorm, role: "architect", exited: false,
+		enterAt: time.Date(2026, 8, 1, 20, 35, 0, 0, time.UTC),
+		events: []state.CardEvent{
+			{Kind: state.EventMessage}, {Kind: state.EventMessage},
+		},
+	}
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 80))
+	if !strings.Contains(line, "from 20:35") {
+		t.Errorf("folded receipt %q missing the enterAt fallback timestamp", line)
+	}
+}
+
 // TestPinnedSpecLineNamesOpenQuestions checks the pinned line's anchor
 // (section) and its open-%%-count badge.
 func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {

@@ -1004,6 +1004,14 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 	ts := ""
 	if !seg.exitAt.IsZero() {
 		ts = seg.exitAt.Format("15:04")
+	} else if !seg.enterAt.IsZero() {
+		// The interactive stages (brainstorm, spec, triage, diagnose,
+		// shape) never earn a stage_exit on an ordinary approval — Advance
+		// tears the session down via Drop without recording one — so
+		// seg.exitAt stays zero forever for them. Falling back to when the
+		// segment opened, labeled as a start rather than an end, keeps
+		// every row in this chronological column placeable in time.
+		ts = "from " + seg.enterAt.Format("15:04")
 	}
 	tail := mark + s.Faint.Render(ts)
 	fill := max(w-ansi.StringWidth(head)-ansi.StringWidth(ts)-4, 1)
