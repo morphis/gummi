@@ -97,8 +97,19 @@ func (s *Store) OpenDecision(ctx context.Context, id domain.FeatureID, stage dom
 // failing the crossing — the decision row stays open and a later
 // crossing correlates to it instead.
 func (s *Store) newestOpenGateDecisionTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID) string {
+	// The answered set is read in the caller's transaction, from the same
+	// scan OpenDecisions uses. Skipping it does not merely mislabel the
+	// correlation: appendGateEventTx keys its dedupe on whatever comes
+	// back, so returning a spent decision id makes the crossing collide
+	// with the crossing that already answered it, and ON CONFLICT DO
+	// NOTHING drops the newer one — a stage change with no event behind
+	// it, which is the one outcome that function refuses to allow.
+	answered, err := answeredIDsOn(ctx, tx, id, 0)
+	if err != nil {
+		return "" // best-effort: the crossing still records its own event
+	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT seq, payload FROM card_events
+		SELECT payload FROM card_events
 		WHERE feature_id = ? AND kind = ? ORDER BY seq DESC`,
 		string(id), EventDecisionOpen)
 	if err != nil {
@@ -107,11 +118,9 @@ func (s *Store) newestOpenGateDecisionTx(ctx context.Context, tx *sql.Tx, id dom
 	defer rows.Close()
 
 	var answerID string
-	answered := map[string]bool{}
 	for rows.Next() {
-		var seq int64
 		var payload string
-		if err := rows.Scan(&seq, &payload); err != nil {
+		if err := rows.Scan(&payload); err != nil {
 			return ""
 		}
 		var p DecisionPayload
@@ -297,11 +306,25 @@ func (s *Store) stageRerunSeq(ctx context.Context, id domain.FeatureID, stage do
 	return 0, rows.Err()
 }
 
+// rowQuerier is the part of *sql.DB and *sql.Tx that the answered-set
+// scan needs. Both readers of that set ask the same question and must
+// get the same answer — OpenDecisions from the pool, a crossing's
+// correlation from inside the transaction it commits with — so the scan
+// is written once here and takes whichever handle its caller holds.
+type rowQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // answeredIDs returns the decision ids a card's later gate/ask events
-// close, read from its own log after the earliest decision row. A
-// malformed or pre-decision payload reads as uncorrelated.
+// close, read from its own log after the earliest decision row.
 func (s *Store) answeredIDs(ctx context.Context, id domain.FeatureID, afterSeq int64) (map[string]bool, error) {
-	ansRows, err := s.db.QueryContext(ctx, `
+	return answeredIDsOn(ctx, s.db, id, afterSeq)
+}
+
+// answeredIDsOn is answeredIDs against an explicit handle. A malformed or
+// pre-decision payload reads as uncorrelated.
+func answeredIDsOn(ctx context.Context, q rowQuerier, id domain.FeatureID, afterSeq int64) (map[string]bool, error) {
+	ansRows, err := q.QueryContext(ctx, `
 		SELECT kind, payload FROM card_events
 		WHERE feature_id = ? AND seq > ? AND (kind = ? OR kind = ?)`,
 		string(id), afterSeq, EventGate, EventAsk)
