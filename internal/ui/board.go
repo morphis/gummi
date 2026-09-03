@@ -12,12 +12,25 @@ import (
 )
 
 // stageGlyph is the card marker: readable by shape as well as color.
+//
+// The four pipeline states are one filling circle — empty, full, half,
+// then the tick — so their shapes read as progress along a single route.
+// Research is a diamond rather than a fifth point on that circle because
+// it is not a stage of the same journey: it runs its own route and
+// delivers a document, not a branch, and a shape borrowed from the
+// pipeline would place it somewhere in that sequence.
+//
+// "?" is the marker for a stage this function has no wording for, so it
+// must never be reachable for a super-state the board actually groups by
+// (BG-083 — a research card wore it).
 func stageGlyph(s domain.Stage) string {
 	switch s.SuperState() {
 	case domain.SuperTodo:
 		return "○"
 	case domain.SuperInProgress:
 		return "●"
+	case domain.SuperResearch:
+		return "◇"
 	case domain.SuperReviewVerify:
 		return "◐"
 	case domain.SuperDone:
