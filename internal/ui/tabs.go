@@ -71,6 +71,10 @@ func (m *Shell) setTab(t Tab) {
 	if int(t) < 0 || int(t) >= len(m.tabDefs()) {
 		return
 	}
+	// A notice raised on one tab has no standing on another (BG-038's
+	// rule, BG-087's missing wiring). Cleared first, so an action that
+	// switches tabs AND reports something keeps its own message.
+	m.clearTransientNotice()
 	// An open card page is not closed on the way out. It is a board
 	// surface like the spec view, the diff and the dependency picker, and
 	// the rule for all of them is that leaving the tab hides them and

@@ -2828,6 +2828,12 @@ func (m *Shell) moveSel(delta int) {
 	pos = (pos + delta + len(order)) % len(order)
 	m.sel = order[pos]
 	m.syncActionFocus()
+	// A notice names the card it is about, so moving to a different card
+	// leaves it describing something the reader is no longer looking at.
+	// Cleared AFTER the selection moves, not before: the one notice
+	// clearTransientNotice keeps is an error about the selected card, and
+	// that question has to be asked of the card being moved TO.
+	m.clearTransientNotice()
 }
 
 // jumpSel selects the nth visible card (1-based), matching the numbers

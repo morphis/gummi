@@ -21,6 +21,12 @@ func (m *Shell) openCard() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	// A notice belongs to the surface that raised it (BG-038's rule, in
+	// clearTransientNotice). Clearing it FIRST, rather than on the way
+	// out, is what lets an action that both moves the view and reports
+	// something keep its own message — the same order backlogKey's enter
+	// already used before running a card action.
+	m.clearTransientNotice()
 	m.cardOpen = true
 	m.actionCursor = 0
 	m.actionsExpanded = false
@@ -45,6 +51,7 @@ func (m *Shell) openCard() tea.Cmd {
 // (F5) — "leaving hides, never discards" applies to the draft too, just
 // scoped to the card that owns it rather than to the shared widget.
 func (m *Shell) closeCard() {
+	m.clearTransientNotice()
 	if r, ok := m.selected(); ok {
 		m.saveThreadDraft(r.F.ID)
 	}
