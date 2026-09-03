@@ -661,11 +661,24 @@ func composeThread(s *theme.Styles, head, headMin, body, decision, decisionMin, 
 		up = clamp(up, 0, len(body)-budget)
 		end := len(body) - up
 		start := end - budget
-		mark := func(arrow string, n int) string {
-			return ansi.Truncate(scrollNote(s.Faint.Render, arrow, n), w, "…")
+		// The marker names the key, not just the direction. In a list the
+		// arrow is the answer — the backlog's own scrollNote can leave it
+		// at that, since ↑↓ move the list — but in the thread ↑ and ↓
+		// belong to the composer's line: they walk a pinned decision's
+		// options, and off the top they open the action inventory. So a
+		// reader who follows the arrow here moves the highlight instead of
+		// the window. The bar's "pgup/pgdn scroll" row says so too, but it
+		// is one of the first hints width pressure sheds, and this marker
+		// is on screen exactly when the need arises.
+		mark := func(arrow, key string, n int) string {
+			note := scrollNote(s.Faint.Render, arrow, n)
+			if note != "" {
+				note += s.Faint.Render(" · ") + s.KeyHint.Render(key)
+			}
+			return ansi.Truncate(note, w, "…")
 		}
-		window = append([]string{mark("↑", start)}, body[start:end]...)
-		window = append(window, mark("↓", len(body)-end))
+		window = append([]string{mark("↑", "pgup", start)}, body[start:end]...)
+		window = append(window, mark("↓", "pgdn", len(body)-end))
 	} else if len(body) > remaining {
 		// too little room to spend two of it on markers (an extreme-short
 		// terminal): fall back to a plain, unmarked window rather than
