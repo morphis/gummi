@@ -102,7 +102,7 @@ func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
 	}
 	out := ansi.Strip(m.threadView(100, 30))
 	want := pickerView(m0Styles(), "FD-001 asks", ask.Question,
-		askPickerOptions(ask), 0, nil, ask.MultiPick, 100)
+		askPickerOptions(ask), 0, nil, ask.MultiPick, 100, true)
 	for _, line := range strings.Split(ansi.Strip(want), "\n") {
 		if line == "" {
 			continue
@@ -533,6 +533,37 @@ func TestThreadDecisionACommandKeepsTheParser(t *testing.T) {
 	}
 	if m.rows[m.sel].F.Stage != domain.StageReview {
 		t.Fatalf("the bounced card moved to %s", m.rows[m.sel].F.Stage)
+	}
+}
+
+// TestVerbLeavesPickerAtFullBrightness is BG-052: F7 made threadInputBindings
+// swap the bar's enter label to name a recognised verb's real destination
+// once the composer holds one, but the picker had no equivalent branch —
+// pickerOptionLines paints the highlighted row from decisionCursor alone,
+// so it kept the bright band and the ▸ marker while the bar had already
+// moved enter's claim elsewhere. Two controls cannot claim enter at once;
+// while the composer holds a verb, the picker must visibly stand down.
+func TestVerbLeavesPickerAtFullBrightness(t *testing.T) {
+	m := reviewGateWorkspace(t)
+	s := m0Styles()
+	before := m.openDecisionBlock(s, m.rows[m.sel], 60, 8)
+
+	m = typeString(t, m, "diff")
+
+	var enterLabel string
+	for _, b := range m.threadInputBindings() {
+		if b.key == "enter" {
+			enterLabel = b.label
+		}
+	}
+	if enterLabel != "diff" {
+		t.Fatalf("bar enter label = %q, want diff", enterLabel)
+	}
+
+	after := m.openDecisionBlock(s, m.rows[m.sel], 60, 8)
+	if strings.Join(before, "\n") == strings.Join(after, "\n") {
+		t.Fatalf("picker rendered identically once the bar switched enter to %q — the picker still claims enter for its own highlighted option:\n%s",
+			enterLabel, strings.Join(after, "\n"))
 	}
 }
 

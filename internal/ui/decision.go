@@ -170,7 +170,7 @@ func pickerHead(s *theme.Styles, title, question string, width int) []string {
 	return out
 }
 
-func pickerView(s *theme.Styles, title, question string, options []pickerOption, selected int, picked map[int]bool, multi bool, w int) string {
+func pickerView(s *theme.Styles, title, question string, options []pickerOption, selected int, picked map[int]bool, multi bool, w int, armed bool) string {
 	width := max(w-2, 10)
 	var b strings.Builder
 	for _, l := range pickerHead(s, title, question, width) {
@@ -182,7 +182,7 @@ func pickerView(s *theme.Styles, title, question string, options []pickerOption,
 		// can only ever afford the one truncated line it always has
 		// (F20's wrap is openDecisionBlock's own call to make, once it
 		// knows what's left over — expandHighlighted, below).
-		for _, l := range pickerOptionLines(s, option, i, selected, picked, multi, width, 0) {
+		for _, l := range pickerOptionLines(s, option, i, selected, picked, multi, width, 0, armed) {
 			b.WriteString(l + "\n")
 		}
 	}
@@ -202,12 +202,26 @@ func pickerView(s *theme.Styles, title, question string, options []pickerOption,
 // row's own furniture stay on the first line unchanged; only the detail,
 // the part that actually runs long ("please point me at the rig…"),
 // wraps.
-func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, picked map[int]bool, multi bool, width, maxExtra int) []string {
+//
+// armed says whether enter actually answers this picker right now
+// (decisionArmed): the highlighted row wears its bright marker and title
+// paint only while armed. The moment something else has taken the
+// composer's line — a verb, the confirm chip, an armed free-form channel
+// — the row falls back to the same dim, unfocused paint board.go gives a
+// remembered-but-not-armed cursor (SelMarkerDim, s.Base, no bright band),
+// so the picker never keeps claiming enter after the bar has already
+// named a different destination for it.
+func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, picked map[int]bool, multi bool, width, maxExtra int, armed bool) []string {
 	marker := "  "
 	label := s.Base
 	if i == selected {
-		marker = s.KeyHint.Render("▸ ")
-		label = s.Title
+		if armed {
+			marker = s.KeyHint.Render("▸ ")
+			label = s.Title
+		} else {
+			marker = s.SelMarkerDim.Render("▸ ")
+			label = s.Base
+		}
 	}
 	tick := ""
 	if multi {
@@ -302,6 +316,27 @@ func (m *Shell) wordAim(d *threadDecision) int {
 		return -1
 	}
 	return d.wordConsumer()
+}
+
+// decisionArmed reports whether enter, right now, would actually answer
+// this picker: false the moment the composer's line has been claimed by
+// something else — a recognised verb (the parser's own line, regardless
+// of what the decision offers), the confirm chip already standing, or an
+// armed free-form answer channel. Threaded into the picker's paint
+// (openDecisionBlock through pickerOptionLines) so it never disagrees
+// with the bar, which asks this exact question in threadInputBindings to
+// name enter's real destination (F7) — one control claims enter at a
+// time, and while a verb is pending that control is the composer, not
+// the picker's highlighted row.
+func (m *Shell) decisionArmed(d *threadDecision) bool {
+	if m.threadChip != nil {
+		return false
+	}
+	if d.ask != nil && d.ask.FreeForm && m.threadFreeForm {
+		return false
+	}
+	text := strings.TrimSpace(m.threadInput.Value())
+	return text == "" || parseInput(text).Kind == verbNone
 }
 
 func (m *Shell) syncDecision(d *threadDecision) {
@@ -403,15 +438,16 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 		// owns the answer is said on the title.
 		title += " · autopilot is taking this one"
 	}
+	armed := m.decisionArmed(d)
 	width := max(w-2, 10)
 	lines := strings.Split(pickerView(s, title, d.question, options,
-		m.decisionCursor, m.decisionPicked, multi, w), "\n")
+		m.decisionCursor, m.decisionPicked, multi, w, armed), "\n")
 	// the head is however many rows the question needed (pickerHead wraps
 	// it onto its own when it will not sit beside the title), so the
 	// window has to be told rather than assuming one.
 	head := len(pickerHead(s, title, d.question, width))
 	windowed := windowDecisionBlock(s, lines, head, len(options), m.decisionCursor, maxRows)
-	return expandHighlighted(s, windowed, lines, head, options, m.decisionCursor, m.decisionPicked, multi, width, maxRows)
+	return expandHighlighted(s, windowed, lines, head, options, m.decisionCursor, m.decisionPicked, multi, width, maxRows, armed)
 }
 
 // expandHighlighted spends any vertical budget windowDecisionBlock left
@@ -428,7 +464,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 // short-circuited by the length check below). So the wrap only ever grows
 // into rows the block's own budget already owned and was not going to use
 // for anything else — never the foot's, and never another option's.
-func expandHighlighted(s *theme.Styles, windowed, lines []string, headRows int, options []pickerOption, cursor int, picked map[int]bool, multi bool, width, maxRows int) []string {
+func expandHighlighted(s *theme.Styles, windowed, lines []string, headRows int, options []pickerOption, cursor int, picked map[int]bool, multi bool, width, maxRows int, armed bool) []string {
 	if maxRows <= 0 || len(windowed) == 0 || len(windowed) != len(lines) {
 		return windowed
 	}
@@ -440,7 +476,7 @@ func expandHighlighted(s *theme.Styles, windowed, lines []string, headRows int, 
 	if i < 0 || i >= len(windowed) {
 		return windowed
 	}
-	wrapped := pickerOptionLines(s, options[cursor], cursor, cursor, picked, multi, width, leftover)
+	wrapped := pickerOptionLines(s, options[cursor], cursor, cursor, picked, multi, width, leftover, armed)
 	if len(wrapped) <= 1 {
 		// the row already said everything on one line — nothing to gain
 		return windowed
