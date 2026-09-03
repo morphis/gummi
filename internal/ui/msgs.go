@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
@@ -879,33 +880,80 @@ func (m *Shell) artifactFile(f *domain.Feature) string {
 	return ""
 }
 
-// bounceStage sends a review/verify feature back to implement (the
-// rerun edge). Only those two stages bounce: from anywhere else the
-// edge into Implement is a forward move and belongs to g. note is the
-// prose the composer aimed at the bounce — the findings it carries
-// rewind with the card and ride the reborn work stage's kickoff when
-// that run starts (shell.go's bounceNotes); empty for the plain b key.
+// bounceStage sends a feature back for rework. Review/Verify bounce via
+// the domain transition into Implement/Fix (the rerun edge) — the edge
+// into Implement is normally a forward move belonging to g, so only
+// those two stages take it backward. Plan bounces without leaving the
+// stage: it sits *before* the work stage, so there is no stage to
+// transition back to — instead it resets the critique loop's round
+// counter and re-runs the same in-stage replan onPlanDone's automatic
+// path already uses, giving the human a fresh capped budget instead of
+// g's silent override of an unresolved "changes needed" verdict. Only
+// legal once the loop has actually escalated — see the attnGate check
+// below; a plan that hasn't hit that gate has nothing to bounce.
+// note is the prose the composer aimed at the bounce: for
+// Review/Verify it rides the reborn work stage's kickoff when that run
+// starts (shell.go's bounceNotes); for Plan there is no later kickoff
+// to catch it, so it is appended to the replan kickoff directly. Empty
+// for the plain b key either way.
+//
+// bounceStage itself runs on the Update goroutine (every call site
+// invokes it directly from a key/decision handler, never from inside a
+// tea.Cmd), so the store read that decides which branch applies, and
+// every write this function makes to Shell's own unguarded fields
+// (m.rounds via setRound, m.bounceNotes), happen here, synchronously,
+// before any tea.Cmd is returned — matching how onPlanDone resets the
+// same round counter. Only the engine/store calls that do real I/O
+// (RunWith, Transition) are deferred into the returned cmd, which runs
+// later on its own goroutine.
 func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
+	ctx := context.Background()
+	f, err := m.store.GetFeature(ctx, id)
+	if err != nil {
+		return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
+	}
+	if f.Stage == domain.StagePlan {
+		it, ok := m.inbox.get(id)
+		if !ok || it.Kind != attnGate || !it.Escalated {
+			text := fmt.Sprintf("%s plan has no escalated gate to bounce", id)
+			return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
+		}
+		if err := rounds.Reset(ctx, m.roundStore, id, domain.RoundKindPlan); err != nil {
+			return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
+		}
+		m.setRound(id, domain.RoundKindPlan, 0)
+		m.dropSession(id)
+		kickoff := replanNote
+		if note != "" {
+			kickoff += "\n\n" + note
+		}
+		return func() tea.Msg {
+			if err := m.engine.RunWith(f, kickoff); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
+			text := fmt.Sprintf("%s sent back for another plan round", id)
+			if note != "" {
+				text += " — your line rides the kickoff"
+			}
+			return noticeMsg{text: text, reload: true, clearInbox: id}
+		}
+	}
+	if f.Stage != domain.StageReview && f.Stage != domain.StageVerify {
+		text := fmt.Sprintf("%s is in %s — only review/verify/plan can bounce back", id, f.Stage)
+		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
+	}
 	if note != "" {
 		if m.bounceNotes == nil {
 			m.bounceNotes = map[domain.FeatureID]string{}
 		}
 		m.bounceNotes[id] = note
 	}
+	back := workflow.WorkStage(f.Kind)
+	m.dropSession(id)
 	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if f.Stage != domain.StageReview && f.Stage != domain.StageVerify {
-			return noticeMsg{text: fmt.Sprintf("%s is in %s — only review/verify can bounce back", id, f.Stage), isErr: true}
-		}
-		back := workflow.WorkStage(f.Kind)
 		if _, err := m.store.Transition(ctx, id, back, "user"); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		m.dropSession(id)
 		text := fmt.Sprintf("%s bounced back to %s", id, back)
 		if note != "" {
 			text += " — your line rides the next run's kickoff"

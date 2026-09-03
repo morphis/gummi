@@ -236,6 +236,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	}
 	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval)
 
+	bounceWhy := "send it back to " + string(work) + " for rework"
+	if in.stage == domain.StagePlan {
+		bounceWhy = "send it back for a fresh, human-triggered replan round"
+	}
+
 	specs := []actionSpec{
 		{
 			"run", "enter", runLabel, runWhy, false,
@@ -270,8 +275,9 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			!doneStage || research,
 		},
 		{
-			"bounce", "b", "bounce", "send it back to " + string(work) + " for rework", false,
-			in.stage == domain.StageReview || in.stage == domain.StageVerify,
+			"bounce", "b", "bounce", bounceWhy, false,
+			in.stage == domain.StageReview || in.stage == domain.StageVerify ||
+				(in.stage == domain.StagePlan && in.escalated),
 		},
 		{
 			"addplan", "P", "add plan", "restore the plan stage on a quick/skip-plan feature (design phase only)", false,

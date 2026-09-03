@@ -5,10 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -370,6 +374,77 @@ func TestBounceFromPlanRefused(t *testing.T) {
 	}
 	if !m.notice.isErr {
 		t.Error("b from plan produced no error notice")
+	}
+}
+
+// TestBounceFromEscalatedPlan drives the success branch TestBounceFromPlanRefused
+// can't reach: a plan gate that has actually escalated. b there must reset
+// the round budget, clear the gate, keep the feature in Plan (not transition
+// it anywhere), and kick off a fresh architect turn addressed at the
+// critique's findings — never override the "changes needed" verdict the way
+// g's approve does.
+func TestBounceFromEscalatedPlan(t *testing.T) {
+	var mu sync.Mutex
+	var kickoffs []string
+	record := func(msg string) {
+		mu.Lock()
+		kickoffs = append(kickoffs, msg)
+		mu.Unlock()
+	}
+	var critiques atomic.Int32
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		record(msg)
+		if isReview(opts) {
+			critiques.Add(1)
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "Still broken.\nVERDICT: changes"},
+				{Kind: agent.EventIdle},
+			}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "plan written"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	m := runPlan(t, ag) // drains to escalation: every critique round says "changes"
+
+	it, ok := m.inbox.get("FD-001")
+	if !ok || it.Kind != attnGate || !it.Escalated {
+		t.Fatalf("runPlan did not leave an escalated plan gate: %+v (ok=%v)", it, ok)
+	}
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("escalated plan not staying in Plan: %s", m.rows[0].F.Stage)
+	}
+
+	mu.Lock()
+	kickoffs = nil
+	mu.Unlock()
+
+	m = toKeys(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
+
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("bounce from escalated plan moved feature to %s, want it to stay in Plan", m.rows[0].F.Stage)
+	}
+	if got := m.round("FD-001", domain.RoundKindPlan); got != 0 {
+		t.Errorf("plan round counter after bounce = %d, want reset to 0", got)
+	}
+	if _, ok := m.inbox.get("FD-001"); ok {
+		t.Error("escalated gate still in inbox after bounce")
+	}
+	if m.notice.isErr {
+		t.Errorf("bounce from an escalated plan gate produced an error notice: %q", m.notice.text)
+	}
+
+	m = drainEngineLoop(t, m) // let the fresh architect turn the bounce kicked off actually run
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(kickoffs) == 0 {
+		t.Fatal("bounce did not start a new session — no kickoff recorded")
+	}
+	if !strings.Contains(kickoffs[0], replanNote) {
+		t.Errorf("architect kickoff after bounce = %q, want it to contain replanNote %q", kickoffs[0], replanNote)
 	}
 }
 

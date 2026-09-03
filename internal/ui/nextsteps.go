@@ -310,6 +310,8 @@ func stageActions(in nextInput) []nextAction {
 		why := "plan critiqued clean — start implementing"
 		if in.escalated {
 			why = "the critique loop gave up — judge the plan yourself before approving"
+			acts = append(acts, nextStep("bounce", "b", "bounce for another plan round",
+				"send it back for a fresh, human-triggered replan round"))
 		}
 		return append(acts, nextStep("advance", "g", "approve & "+string(work), why))
 

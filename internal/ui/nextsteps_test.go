@@ -46,6 +46,7 @@ func TestNextActionsByState(t *testing.T) {
 		{"spec with open questions blocks approve", nextInput{stage: domain.StageSpec, kind: feat, openSpecQs: 2}, "s enter"},
 		{"plan idle runs the planner", nextInput{stage: domain.StagePlan, kind: feat}, "enter"},
 		{"plan gate reads then approves", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "s g"},
+		{"escalated plan gate offers a replan bounce, not just override", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, escalated: true}, "s b g"},
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
 		{"implement gate diffs then advances", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g"},
 		{"review gate reads findings", nextInput{stage: domain.StageReview, kind: feat, attn: attnGate, escalated: true}, "s b g A"},
