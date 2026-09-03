@@ -186,6 +186,10 @@ func TestCommitMsgMergeReachableWithoutCtrl(t *testing.T) {
 		nil,
 	)
 	d.input.SetValue("land the thing")
+	// simulate the operator having typed this themselves (SetValue alone
+	// is a test shortcut that bypasses the modified flag, which would
+	// otherwise arm the merge as an unreviewed draft — see BG-054).
+	d.modified = true
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // → buttons
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight}) // Cancel → Redraft → Merge
@@ -195,6 +199,37 @@ func TestCommitMsgMergeReachableWithoutCtrl(t *testing.T) {
 	}
 	if got != "land the thing" {
 		t.Fatalf("onSubmit got %q, want the message", got)
+	}
+}
+
+// TestCommitMsgMergeButtonArmsUnmodifiedDraft: the button row reaches the
+// same merge() gate as ctrl+s, so an unreviewed scribe draft (non-empty,
+// never modified) arms on the first Merge as well — see BG-054.
+func TestCommitMsgMergeButtonArmsUnmodifiedDraft(t *testing.T) {
+	var got string
+	d := newCommitMsgDialog(
+		domain.Feature{ID: "FD-001", Slug: "x"},
+		func(msg string) tea.Cmd { got = msg; return nil },
+		nil,
+	)
+	d.gen = 1
+	d.apply(commitDraftMsg{f: d.feature, gen: 1, draft: "feat(ui): add dark mode"})
+
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab}) // → buttons
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight}) // Cancel → Redraft → Merge
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done {
+		t.Fatal("first Merge against an unreviewed draft closed the dialog, want arm")
+	}
+	if got != "" {
+		t.Fatalf("onSubmit fired on the first Merge: got %q", got)
+	}
+
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done {
+		t.Fatal("second Merge against the still-unmodified draft did not submit")
+	}
+	if got != "feat(ui): add dark mode" {
+		t.Fatalf("onSubmit got %q, want the draft", got)
 	}
 }
 

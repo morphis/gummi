@@ -110,7 +110,7 @@ func TestSquashMergeFlow(t *testing.T) {
 		t.Error("mergePrep flag still set with the dialog open")
 	}
 
-	d.input.SetValue(message)
+	typeMessage(t, m, message)
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
@@ -154,7 +154,21 @@ func TestCommitMsgDraftFillsTextarea(t *testing.T) {
 	if d.input.Value() != want {
 		t.Fatalf("dialog prefill = %q, want the scribe draft %q", d.input.Value(), want)
 	}
-	// ctrl+s on an unmodified pre-filled draft is a deliberate approval
+	// ctrl+s on an unreviewed pre-filled draft arms rather than landing it
+	// immediately (BG-054): the operator never modified the box, so the
+	// first press only asks for confirmation.
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.notice.isErr || strings.Contains(m.notice.text, "squash-merged") {
+		t.Fatalf("first ctrl+s on an unreviewed draft landed it: notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	d, ok = m.Overlay.Top().(*commitMsgDialog)
+	if !ok {
+		t.Fatalf("first ctrl+s closed the dialog instead of arming (notice %q)", m.notice.text)
+	}
+	if !d.armed {
+		t.Fatal("first ctrl+s on an unreviewed draft did not arm")
+	}
+	// a second ctrl+s, with the draft still unmodified, is the confirmation
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)

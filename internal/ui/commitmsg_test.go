@@ -236,6 +236,77 @@ func TestCommitDraftFailurePersistsDurably(t *testing.T) {
 	}
 }
 
+// TestCommitMsgDialogArmsBeforeSubmittingUnmodifiedDraft pins BG-054:
+// ctrl+s against a scribe draft the operator never reviewed must not land
+// on the first press — merge() arms instead of submitting. Only a
+// second press, with the text still unmodified, actually lands it.
+func TestCommitMsgDialogArmsBeforeSubmittingUnmodifiedDraft(t *testing.T) {
+	d := newTestCommitMsgDialog(t)
+	d.gen = 1
+	d.apply(commitDraftMsg{f: d.feature, gen: 1, draft: "feat(ui): add dark mode"})
+	if d.drafting {
+		t.Fatal("apply left drafting true; probe assumption invalid")
+	}
+	if d.modified {
+		t.Fatal("apply marked modified; probe assumption invalid")
+	}
+
+	if ok, _ := d.merge(); ok {
+		t.Fatal("BG-054: first ctrl+s against an unreviewed draft submitted immediately, want arm")
+	}
+	if !d.armed {
+		t.Fatal("first ctrl+s against an unreviewed draft did not arm")
+	}
+	if v := d.View(theme.New(theme.GummiDark()), 80, 24); !strings.Contains(v, "ctrl+s again") {
+		t.Fatalf("armed dialog missing the confirm hint:\n%s", v)
+	}
+
+	if ok, _ := d.merge(); !ok {
+		t.Fatal("second ctrl+s against the still-unmodified draft did not submit")
+	}
+}
+
+// TestCommitMsgDialogRedraftClearsArm pins the "can't be primed once and
+// fired later against different, unseen text" guarantee: a fresh draft
+// pass invalidates an arm taken against the text it is about to replace.
+func TestCommitMsgDialogRedraftClearsArm(t *testing.T) {
+	d := newTestCommitMsgDialog(t)
+	d.gen = 1
+	d.apply(commitDraftMsg{f: d.feature, gen: 1, draft: "feat(ui): add dark mode"})
+	if ok, _ := d.merge(); ok {
+		t.Fatal("first ctrl+s should arm, not submit")
+	}
+	if !d.armed {
+		t.Fatal("merge did not arm")
+	}
+
+	d.startDraft()
+	if d.armed {
+		t.Fatal("a fresh draft pass left a stale arm from the previous draft")
+	}
+}
+
+// TestCommitMsgDialogTypingAfterArmingSubmitsWithoutFurtherConfirm pins
+// that reviewing (typing into) an armed, unreviewed draft is itself the
+// confirmation — the next ctrl+s submits normally, it doesn't stay armed.
+func TestCommitMsgDialogTypingAfterArmingSubmitsWithoutFurtherConfirm(t *testing.T) {
+	d := newTestCommitMsgDialog(t)
+	d.gen = 1
+	d.apply(commitDraftMsg{f: d.feature, gen: 1, draft: "feat(ui): add dark mode"})
+	if ok, _ := d.merge(); ok {
+		t.Fatal("first ctrl+s should arm, not submit")
+	}
+
+	d.HandleKey(tea.KeyPressMsg{Code: '!', Text: "!"})
+	if !d.modified {
+		t.Fatal("typing a character should mark the box modified")
+	}
+
+	if ok, _ := d.merge(); !ok {
+		t.Fatal("ctrl+s after the operator edited the draft should submit immediately")
+	}
+}
+
 // TestCommitMsgDialogHidesDraftingHintOnceModified pins the drafting
 // affordance to an unmodified box: once the operator types, the hint
 // must not claim "edit below to keep yours" over their own keystrokes.

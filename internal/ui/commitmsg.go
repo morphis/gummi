@@ -37,6 +37,12 @@ type commitMsgDialog struct {
 	cancel   context.CancelFunc
 	drafting bool // a draft pass is in flight — show the "drafting…" affordance
 	modified bool // the user has typed; never overwrite their keystrokes
+	// armed is set by the first merge() attempt against non-empty,
+	// unmodified text (a scribe draft the operator hasn't reviewed) and
+	// requires a second attempt to actually land it. Editing the box
+	// (modified flips true) or a fresh startDraft() pass clears it, so an
+	// arm from one draft can never fire against a later, unseen one.
+	armed bool
 	// reason is a non-empty failure explanation from the last draft pass
 	// (empty on success); guard marks a deliberate guard rejection (diff
 	// dump / attribution) so it reads differently from a config fault.
@@ -84,6 +90,7 @@ func (d *commitMsgDialog) startDraft() tea.Cmd {
 	d.cancel = cancel
 	d.drafting = true
 	d.reason = ""
+	d.armed = false // a fresh pass invalidates any earlier arm
 	f := d.f
 	return func() tea.Msg {
 		draft, err := d.draft(ctx, f)
@@ -109,6 +116,9 @@ func (d *commitMsgDialog) apply(msg commitDraftMsg) {
 		return // stale pass (a re-draft or a closed dialog) is dropped
 	}
 	d.drafting = false
+	// an arm taken against whatever text was showing before this reply
+	// must not carry over to the text this reply lands.
+	d.armed = false
 	d.reason = msg.reason
 	d.guard = msg.guard
 	if d.modified || msg.draft == "" {
@@ -127,11 +137,19 @@ const (
 )
 
 // merge validates and fires onSubmit — the same path ctrl+s and the
-// Merge button both reach.
+// Merge button both reach. Non-empty text the operator never modified is
+// an unreviewed scribe draft, not something they authored or explicitly
+// accepted; the first attempt against it only arms — the view shows a
+// confirm hint — and a second attempt, with the text still unmodified,
+// is what actually lands it.
 func (d *commitMsgDialog) merge() (bool, tea.Cmd) {
 	text := strings.TrimSpace(d.input.Value())
 	if text == "" {
 		return false, nil // nothing to commit with — keep editing
+	}
+	if !d.modified && !d.armed {
+		d.armed = true
+		return false, nil // arm: require a second attempt to land unreviewed text
 	}
 	if d.cancel != nil {
 		d.cancel()
@@ -213,6 +231,8 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString(s.Subtle.Render(d.branch+" → main") + "\n\n")
 	b.WriteString(d.input.View() + "\n")
 	switch {
+	case d.armed && !d.modified:
+		b.WriteString("\n" + s.Warning.Render("unreviewed draft — ctrl+s again to land without reviewing"))
 	case d.drafting && !d.modified:
 		b.WriteString("\n" + s.Faint.Render("drafting a suggested message… (edit below to keep yours)"))
 	case d.reason != "":
