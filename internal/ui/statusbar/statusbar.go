@@ -84,6 +84,28 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 		hs = append(hs[:i], hs[i+1:]...)
 		rightStr = joinHints(s, hs)
 	}
+	// With the hints shed to the bone and the row still over, whole pills
+	// go next — before anything is cut in half. The pill row is ordered
+	// oldest-standing to newest, and the newest is the notice: the answer
+	// to the key just pressed, on screen for a moment and nowhere else
+	// afterwards. Truncating the row from its right edge (below) spends
+	// exactly that segment, and spends it from the tail, where the
+	// sentence says what happened — "no diff — …" for "no diff — research
+	// cards carry no branch". The counts it was protecting are ambient:
+	// unchanged for minutes, and readable again on the next frame.
+	//
+	// So the pills shed by the hints' own rule, which already means the
+	// right thing here: never the last (the notice), and never the mode
+	// pill at index 0, which is where "locked" announces itself.
+	for lw+ansi.StringWidth(rightStr)+1 > width {
+		i := lastSheddablePill(left)
+		if i < 0 {
+			break
+		}
+		left = append(left[:i], left[i+1:]...)
+		leftStr = strings.Join(left, " ")
+		lw = ansi.StringWidth(leftStr)
+	}
 	if lw+ansi.StringWidth(rightStr)+1 > width {
 		if hasSticky(hs) {
 			// Only sticky hints (and maybe the escape hatch) are left, and
@@ -139,6 +161,20 @@ func lastSheddable(hs []Hint) int {
 		if !hs[i].Sticky {
 			return i
 		}
+	}
+	return -1
+}
+
+// lastSheddablePill finds the rightmost pill Render is allowed to drop
+// next: the hints' own scan, with the two ends of the row held back. The
+// last pill is the newest thing the bar has to say — the notice, when
+// there is one — and the pill at index 0 is the mode pill, which is
+// where a locked workspace announces itself. -1 means only those two are
+// left. A row of one or two pills therefore never sheds at all, and
+// falls through to the truncation below exactly as it did before.
+func lastSheddablePill(left []string) int {
+	if i := len(left) - 2; i >= 1 {
+		return i
 	}
 	return -1
 }
