@@ -1223,6 +1223,27 @@ func (m *Shell) refreshOpenCardEvents(ev engine.Event) tea.Cmd {
 	return nil
 }
 
+// reloadOpenCardEvents re-reads id's event log when id is the card whose
+// page is open, and does nothing otherwise. It is the crossing-shaped
+// counterpart to refreshOpenCardEvents above: a gate records its
+// transition in the same log the thread's history is composed from, but
+// a crossing's outcome only ever asked for a row reload, and rows are
+// where the masthead and the stage rail come from — never the history.
+//
+// That gap only shows when nothing is running at the gate. A crossing
+// made from a live stage drops that stage's session, and the Stopped
+// event which follows reloads the log through refreshOpenCardEvents, so
+// its receipt lands; a crossing made at an idle stage emits no engine
+// event at all, and used to move the rail while leaving the thread
+// showing the previous transition as its newest line. One card could
+// therefore show a receipt for one crossing and not the next.
+func (m *Shell) reloadOpenCardEvents(id domain.FeatureID) tea.Cmd {
+	if !m.cardOpen || id == "" || m.selectedID() != id {
+		return nil
+	}
+	return m.loadCardEvents(id)
+}
+
 // Update implements tea.Model. It delegates to update, then keeps the
 // shared spinner clock alive: while anything on screen animates exactly
 // one tick loop runs, and it winds down on the first tick after the
@@ -1431,7 +1452,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A routine status notice ("queued", "paused", a non-mutating
 		// error) never triggers a board reload.
 		if msg.reload && m.attached() {
-			return m, m.loadRows
+			// the same mutation that moved a row can have written to the
+			// open card's event log — crossing a gate records its
+			// transition there — and the thread's history is not composed
+			// from rows, so reloading them alone leaves the page saying two
+			// different things about the same card.
+			return m, tea.Batch(m.loadRows, m.reloadOpenCardEvents(m.selectedID()))
 		}
 		return m, nil
 
@@ -1618,7 +1644,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The approval succeeded, so its attention item is resolved here.
 		m.inbox.remove(msg.id)
 		m.notice = noticeMsg{text: msg.note}
-		cmds := []tea.Cmd{m.loadRows}
+		cmds := []tea.Cmd{m.loadRows, m.reloadOpenCardEvents(msg.id)}
 		if msg.discover {
 			cmds = append(cmds, m.discoverChecks(msg.id))
 		}
