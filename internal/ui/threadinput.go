@@ -352,7 +352,13 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
 			if d := m.visibleDecision(r); d != nil && d.ask != nil && d.ask.MultiPick && len(d.ask.Options) > 0 {
 				m.syncDecision(d)
-				m.decisionPicked[m.decisionCursor] = !m.decisionPicked[m.decisionCursor]
+				// the synthetic "Chat about this" row (index len(d.ask.Options),
+				// present iff FreeForm) has no tick box — decisionAnswerText
+				// never reads it — so toggling here would record picked state
+				// the render doesn't show and the answer ignores.
+				if m.decisionCursor < len(d.ask.Options) {
+					m.decisionPicked[m.decisionCursor] = !m.decisionPicked[m.decisionCursor]
+				}
 				return nil
 			}
 		}
@@ -364,6 +370,12 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
 			if d := m.visibleDecision(r); d != nil && d.ask != nil && d.ask.FreeForm {
 				m.syncDecision(d)
+				// syncDecision alone won't move the cursor here: wordAim's
+				// ask branch only aims once the composer holds prose, and
+				// this handler is gated on an empty one — so land on the
+				// synthetic row explicitly, the same index digit-select and
+				// answerDecision's enter guard reach.
+				m.decisionCursor = len(d.ask.Options)
 				m.threadFreeForm = true
 				return nil
 			}
@@ -383,11 +395,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		if d := m.visibleDecision(r); d != nil {
 			if key := msg.String(); len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
 				i := int(key[0] - '1')
-				n := len(d.actions)
-				if d.ask != nil {
-					n = len(d.ask.Options)
-				}
-				if i < n {
+				if i < d.optionCount() {
 					m.syncDecision(d)
 					m.decisionCursor = i
 					m.decisionAimed = false

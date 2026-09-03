@@ -507,6 +507,20 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 	// the thread types prose the way the pane's 'o' channel does, from
 	// the second keystroke on.
 	m = typeString(t, m, "the floor is 2.4 to 1, note the exception in the spec")
+	// before enter is pressed, the picker already shows the highlight
+	// where enter is about to send the line — the "Chat about this" row —
+	// proving the highlight and the delivery below agree.
+	out := ansi.Strip(m.threadView(100, 30))
+	var chatLine string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Chat about this") {
+			chatLine = l
+		}
+	}
+	if !strings.Contains(chatLine, "▸") {
+		t.Errorf("\"Chat about this\" row not lit before enter was pressed:\n%s", out)
+	}
+
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
 	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
@@ -725,5 +739,212 @@ func TestThreadDecisionProseNothingConsumesSends(t *testing.T) {
 	}
 	if !saw {
 		t.Errorf("consult transcript = %+v, missing the sent-as-message line", c.Snapshot().Transcript)
+	}
+}
+
+// TestAskPickerOptionsAddsChatAboutThisRow is FD-063: a free-form ask's
+// picker gains a synthetic "Chat about this" row after its real options,
+// visible before the user ever types anything. A structured ask — nothing
+// to route free text to — gets no such row.
+func TestAskPickerOptionsAddsChatAboutThisRow(t *testing.T) {
+	freeForm := &engine.Ask{
+		Question: "Persist where?",
+		Options:  []engine.AskOption{{Label: "per-device"}, {Label: "synced"}},
+		FreeForm: true,
+	}
+	got := askPickerOptions(freeForm)
+	if len(got) != 3 {
+		t.Fatalf("free-form ask got %d options, want 3 (2 real + synthetic): %+v", len(got), got)
+	}
+	if got[2].label != "Chat about this" {
+		t.Errorf("last row = %q, want \"Chat about this\"", got[2].label)
+	}
+
+	structured := &engine.Ask{
+		Question: "Which rig?",
+		Options:  []engine.AskOption{{Label: "rig-a"}, {Label: "rig-b"}},
+	}
+	got = askPickerOptions(structured)
+	if len(got) != 2 {
+		t.Fatalf("structured ask got %d options, want 2 (no synthetic row): %+v", len(got), got)
+	}
+	for _, o := range got {
+		if o.label == "Chat about this" {
+			t.Errorf("structured ask grew a \"Chat about this\" row: %+v", got)
+		}
+	}
+}
+
+// TestThreadDecisionDigitAndArrowsReachChatAboutThisRow: the synthetic row
+// is reachable the same way any other option is, via digit-select or
+// ↑↓, since optionCount folds it into every bound check.
+func TestThreadDecisionDigitAndArrowsReachChatAboutThisRow(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"})
+	if m.decisionCursor != 2 {
+		t.Fatalf("digit 3 landed on cursor %d, want 2 (the synthetic row)", m.decisionCursor)
+	}
+
+	m.decisionCursor = 0
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.decisionCursor != 2 {
+		t.Fatalf("walking down twice from 0 landed on cursor %d, want 2 (the synthetic row), no clamping", m.decisionCursor)
+	}
+}
+
+// TestThreadDecisionTypedProseAimsAtChatAboutThis: wordAim's ask branch
+// aims at the synthetic row's index once the composer holds prose, and
+// never for a structured ask (nothing to route free text to there).
+func TestThreadDecisionTypedProseAimsAtChatAboutThis(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || d.ask == nil {
+		t.Fatalf("no live ask decision open: %+v", d)
+	}
+	m = typeString(t, m, "the floor is 2.4 to 1")
+	if got, want := m.wordAim(d), len(d.ask.Options); got != want {
+		t.Errorf("wordAim = %d, want %d (the synthetic row)", got, want)
+	}
+
+	m2, eng2 := chatWorkspace(t, structuredAskFake())
+	m2 = openAndAttach(t, m2)
+	waitAsk(t, eng2)
+	d2 := m2.openDecision(m2.rows[m2.sel])
+	if d2 == nil || d2.ask == nil {
+		t.Fatalf("no live ask decision open: %+v", d2)
+	}
+	m2 = typeString(t, m2, "please point me at the rig")
+	if got := m2.wordAim(d2); got != -1 {
+		t.Errorf("wordAim = %d for a structured ask, want -1", got)
+	}
+}
+
+// TestThreadDecisionTypedProseLightsUpChatAboutThis mirrors
+// TestThreadDecisionTypedProseRidesTheRun's "with your words" assertion:
+// selecting an option, then typing prose, moves the bright marker onto
+// the synthetic row and off the previously-selected option.
+func TestThreadDecisionTypedProseLightsUpChatAboutThis(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	m = press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"}) // select "per-device"
+	if m.decisionCursor != 0 {
+		t.Fatalf("digit 1 did not select option 0: cursor=%d", m.decisionCursor)
+	}
+	m = typeString(t, m, "the floor is 2.4 to 1")
+
+	out := ansi.Strip(m.threadView(100, 30))
+	lines := strings.Split(out, "\n")
+	var chatLine, perDeviceLine string
+	for _, l := range lines {
+		if strings.Contains(l, "Chat about this") {
+			chatLine = l
+		}
+		if strings.Contains(l, "per-device") {
+			perDeviceLine = l
+		}
+	}
+	if !strings.Contains(chatLine, "▸") {
+		t.Errorf("\"Chat about this\" row not marked bright:\n%s", out)
+	}
+	if strings.Contains(perDeviceLine, "▸") {
+		t.Errorf("previously-selected option still marked bright:\n%s", out)
+	}
+}
+
+// TestThreadDecisionEnterOnChatAboutThisArmsFreeForm covers step 5: enter
+// on an empty composer with the synthetic row selected arms free-form,
+// the same as pressing 'o', rather than resolving to no answer.
+func TestThreadDecisionEnterOnChatAboutThisArmsFreeForm(t *testing.T) {
+	m, eng := chatWorkspace(t, askingFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"}) // select the synthetic row
+	if m.decisionCursor != 2 {
+		t.Fatalf("digit 3 did not select the synthetic row: cursor=%d", m.decisionCursor)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.threadFreeForm {
+		t.Fatal("enter on the synthetic row did not arm free-form")
+	}
+	out := ansi.Strip(m.threadView(100, 30))
+	if !strings.Contains(out, "your line is the answer") {
+		t.Errorf("thread does not show the armed free-form title:\n%s", out)
+	}
+	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
+		t.Error("the ask closed on its own — arming free-form should not answer it")
+	}
+}
+
+// TestThreadDecisionStructuredAskNeverShowsChatAboutThis: the out-of-scope
+// boundary — a structured ask never grows or aims at the synthetic row,
+// even once the user starts typing.
+func TestThreadDecisionStructuredAskNeverShowsChatAboutThis(t *testing.T) {
+	m, eng := chatWorkspace(t, structuredAskFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	m = typeString(t, m, "please point me at the rig")
+	out := ansi.Strip(m.threadView(100, 30))
+	if strings.Contains(out, "Chat about this") {
+		t.Errorf("structured ask shows a \"Chat about this\" row:\n%s", out)
+	}
+}
+
+// TestDecisionAnswerTextIgnoresSyntheticIndex is a defensive test for the
+// untested MultiPick && FreeForm combination: decisionAnswerText only
+// ever reads ask.Options, so a stray pick landing on the synthetic row's
+// index (reachable now that optionCount includes it) is inert.
+func TestDecisionAnswerTextIgnoresSyntheticIndex(t *testing.T) {
+	ask := &engine.Ask{
+		Options:   []engine.AskOption{{Label: "per-device"}, {Label: "synced"}},
+		MultiPick: true,
+		FreeForm:  true,
+	}
+	base := map[int]bool{0: true}
+	withSynthetic := map[int]bool{0: true, len(ask.Options): true}
+
+	want := decisionAnswerText(ask, 0, base)
+	got := decisionAnswerText(ask, 0, withSynthetic)
+	if got != want {
+		t.Errorf("decisionAnswerText with a picked synthetic index = %q, want %q (unchanged)", got, want)
+	}
+}
+
+// TestThreadDecisionMultiPickNeverTogglesChatAboutThis is the review fix:
+// a MultiPick && FreeForm ask's synthetic "Chat about this" row must never
+// render a tick box or accept space, since decisionAnswerText never reads
+// that index — a togglable-looking row that space silently no-ops on is
+// the same class of "picker shows a state enter/space won't honour" bug
+// the one-liner describes.
+func TestThreadDecisionMultiPickNeverTogglesChatAboutThis(t *testing.T) {
+	m, eng := chatWorkspace(t, multiPickFreeFormAskFake())
+	m = openAndAttach(t, m)
+	waitAsk(t, eng)
+
+	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"})
+	if m.decisionCursor != 2 {
+		t.Fatalf("digit 3 landed on cursor %d, want 2 (the synthetic row)", m.decisionCursor)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if m.decisionPicked[2] {
+		t.Errorf("space toggled the synthetic row's picked state; decisionAnswerText never reads it")
+	}
+
+	out := ansi.Strip(m.threadView(100, 30))
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Chat about this") && (strings.Contains(line, "○") || strings.Contains(line, "●")) {
+			t.Errorf("synthetic row rendered a tick box: %q", line)
+		}
 	}
 }

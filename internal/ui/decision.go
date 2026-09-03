@@ -171,6 +171,19 @@ func (d *threadDecision) wordConsumer() int {
 	return -1
 }
 
+// optionCount is the number of rows the picker shows for this decision —
+// the workflow actions, or a live ask's options plus the synthetic "Chat
+// about this" row askPickerOptions appends. It is the one place that
+// counts rows, so every bound check (↑↓, digit-select, the o-key's
+// landing, answerDecision's enter guard) agrees on where the synthetic
+// row lives without a shared constant (invariant, Considered approaches).
+func (d *threadDecision) optionCount() int {
+	if d.ask != nil {
+		return len(askPickerOptions(d.ask))
+	}
+	return len(d.actions)
+}
+
 // pickerOption is one row in the decision's picker: what the choice is,
 // and the detail that says what it does.
 //
@@ -183,16 +196,32 @@ func (d *threadDecision) wordConsumer() int {
 // all, so the column is gone rather than fixed — the row's number is
 // still there for the digit that does work (F14).
 type pickerOption struct {
-	label  string
-	detail string
-	danger bool
+	label    string
+	detail   string
+	danger   bool
+	noToggle bool
 }
 
-// askPickerOptions shapes a live ask_user question for the picker.
+// askPickerOptions shapes a live ask_user question for the picker. A
+// free-form ask gains a synthetic, always-present "Chat about this" row
+// after the real options, so the free-form channel is visible before the
+// user ever types anything — closing the gap where the picker offered no
+// legible way to see that prose would be routed there (Chosen approach).
+// The row's index is always len(ask.Options): appended last and never
+// reordered, so wordAim, the digit/arrow bound checks, the o-key handler,
+// and answerDecision's enter guard all agree on it without a shared
+// constant.
 func askPickerOptions(ask *engine.Ask) []pickerOption {
-	options := make([]pickerOption, 0, len(ask.Options))
+	options := make([]pickerOption, 0, len(ask.Options)+1)
 	for _, option := range ask.Options {
 		options = append(options, pickerOption{label: option.Label, detail: option.Detail})
+	}
+	if ask.FreeForm {
+		options = append(options, pickerOption{
+			label:    "Chat about this",
+			detail:   "reply with your own words instead of picking an option",
+			noToggle: true,
+		})
 	}
 	return options
 }
@@ -285,7 +314,7 @@ func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, pi
 		}
 	}
 	tick := ""
-	if multi {
+	if multi && !option.noToggle {
 		box := "○ "
 		if picked[i] {
 			box = "● "
@@ -369,11 +398,17 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 // user put it, and while a chip is pending the line belongs to the chip
 // anyway.
 func (m *Shell) wordAim(d *threadDecision) int {
-	if d == nil || d.ask != nil || m.threadChip != nil {
+	if d == nil || m.threadChip != nil {
 		return -1
 	}
 	text := strings.TrimSpace(m.threadInput.Value())
 	if text == "" || parseInput(text).Kind != verbNone {
+		return -1
+	}
+	if d.ask != nil {
+		if d.ask.FreeForm {
+			return len(d.ask.Options)
+		}
 		return -1
 	}
 	return d.wordConsumer()
@@ -416,10 +451,7 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		// it belonged to the answer that is gone
 		m.threadFreeForm = false
 	}
-	n := len(d.actions)
-	if d.ask != nil {
-		n = len(d.ask.Options)
-	}
+	n := d.optionCount()
 	if n == 0 {
 		m.decisionCursor = 0
 	} else {
@@ -600,10 +632,7 @@ func windowDecisionBlock(s *theme.Styles, lines []string, headRows, nOptions, cu
 // there would suggest a fourth option cycling back into a three-option
 // gate.
 func (m *Shell) moveDecision(d *threadDecision, delta int) {
-	n := len(d.actions)
-	if d.ask != nil {
-		n = len(d.ask.Options)
-	}
+	n := d.optionCount()
 	if n == 0 {
 		return
 	}
@@ -677,6 +706,14 @@ func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, tex
 
 func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 	if d.ask != nil {
+		if d.ask.FreeForm && m.decisionCursor == len(d.ask.Options) {
+			// the synthetic "Chat about this" row is selected: there is no
+			// entry in ask.Options at this index for decisionAnswerText to
+			// resolve, so enter arms the free-form channel instead of
+			// silently no-oping — the same effect pressing 'o' has.
+			m.threadFreeForm = true
+			return nil
+		}
 		answer := decisionAnswerText(d.ask, m.decisionCursor, m.decisionPicked)
 		if answer == "" {
 			return nil

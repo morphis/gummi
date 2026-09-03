@@ -322,6 +322,26 @@ func structuredAskFake() *agent.Fake {
 	return f
 }
 
+// multiPickFreeFormAskFake is askingFake with multi_select also set — the
+// combination the review flagged: the synthetic "Chat about this" row
+// (added because allow_free_form) sits alongside a multi-pick picker whose
+// tick boxes must never land on that row (decisionAnswerText never reads
+// it).
+func multiPickFreeFormAskFake() *agent.Fake {
+	f := agent.NewFake("")
+	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}
+	args := []byte(`{"question":"Persist where?","options":[{"label":"per-device","detail":"localStorage"},{"label":"synced","detail":"account"}],"multi_select":true,"allow_free_form":true}`)
+	first := true
+	f.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		if first {
+			first = false
+			return []agent.Event{{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: args}}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ack: " + msg}, {Kind: agent.EventIdle}}
+	}
+	return f
+}
+
 // waitAsk blocks until FD-001 has an open ask (the picker is showing).
 func waitAsk(t *testing.T, eng *engine.Engine) {
 	t.Helper()
@@ -713,6 +733,10 @@ func TestThreadOArmsFreeForm(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'o', Text: "o"})
 	if !m.threadFreeForm {
 		t.Fatal("'o' did not arm the free-form channel")
+	}
+	ask := eng.Get("FD-001").Snapshot().PendingAsk
+	if want := len(ask.Options); m.decisionCursor != want {
+		t.Errorf("'o' left decisionCursor at %d, want %d (the synthetic \"Chat about this\" row — the same index digit-select reaches)", m.decisionCursor, want)
 	}
 	m = typeString(t, m, "2.4 to 1 is the floor")
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
