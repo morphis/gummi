@@ -1058,7 +1058,7 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	if r.OpenSpecQs > 0 {
 		tail = itoa(r.OpenSpecQs) + " open %%  "
 	}
-	tail += "s"
+	tail += "alt+s"
 
 	// a rule carries the eye from the section name to the key that opens
 	// it, and right-aligns the hint the way a folded receipt's timestamp
@@ -1070,7 +1070,11 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	if r.OpenSpecQs > 0 {
 		out += s.Warning.Render(itoa(r.OpenSpecQs)+" open %%") + "  "
 	}
-	return out + s.KeyHint.Render("s")
+	// alt+s, not s: the composer owns every printable key on this page
+	// (threadinput.go), so a bare s landed in the reader's draft instead
+	// of opening anything — the one surface that draws this line was the
+	// one surface its hint could not fire on.
+	return out + s.KeyHint.Render("alt+s")
 }
 
 // threadEmptyLine is the body's one line when nothing else fills it: a
@@ -1188,7 +1192,7 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 	// Shell.expandedStages or the transcript view (t), and neither exists
 	// any more — the thread is the only view there is, so the glyph would
 	// promise an expansion this line can no longer deliver. pinnedSpecLine
-	// keeps its own chevron; that one still opens something (s).
+	// keeps its own chevron; that one still opens something (alt+s).
 	head := string(seg.stage)
 	if seg.role != "" {
 		head += " · " + seg.role

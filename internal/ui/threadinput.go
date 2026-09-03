@@ -249,6 +249,17 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")
 		return nil
+	case "alt+s":
+		// the artifact the pinned line names, opened from the line that
+		// names it. That line has always advertised a key, but the plain
+		// s it used to name is a printable one, so the composer swallowed
+		// it and the reader who pressed it got the letter in their draft
+		// instead of the document — the hint could not fire on the only
+		// surface that draws it. Alt for the same reason alt+o and
+		// alt+j/k take it, and hoisted here with them so checking what a
+		// pending chip is about to confirm works the way scrolling up to
+		// re-read does.
+		return m.openSpec(r.F)
 	}
 	// A chip left standing by a step away (F6) belongs to the card that
 	// raised it, not to whichever one is selected now — inputBlock
@@ -875,6 +886,7 @@ func (m *Shell) threadInputBindings() []binding {
 			{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
 			m.threadOutputsBinding(),
 			{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
+			{key: "alt+s", label: "open", help: "open the artifact the pinned line names"},
 			{key: "esc", label: "steer", help: "drop the consult channel — a plain line steers again (the draft is kept)", bar: true},
 		}
 	}
@@ -897,6 +909,7 @@ func (m *Shell) threadInputBindings() []binding {
 					{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
 					m.threadOutputsBinding(),
 					{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
+					{key: "alt+s", label: "open", help: "open the artifact the pinned line names"},
 					{key: "esc", label: "picker", help: "drop the free-form channel — the decision's own keys come back (the draft is kept)", bar: true},
 				}
 			}
@@ -957,7 +970,8 @@ func (m *Shell) threadInputBindings() []binding {
 				bs = append(bs, binding{key: "o", label: "own answer", help: "type your own answer — the digits stop picking while it's armed", bar: true})
 			}
 			bs = append(bs, m.threadOutputsBinding(),
-				binding{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"})
+				binding{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
+				binding{key: "alt+s", label: "open", help: "open the artifact the pinned line names"})
 			// esc stays last: the status bar drops hints from the
 			// second-to-last backwards precisely so the surface's escape
 			// hatch outlives every other row (statusbar.Render).
@@ -970,6 +984,7 @@ func (m *Shell) threadInputBindings() []binding {
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
 		m.threadOutputsBinding(),
 		{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
+		{key: "alt+s", label: "open", help: "open the artifact the pinned line names"},
 		// esc last, for the reason the decision table gives above: the
 		// bar sheds the second-to-last hint first, so the way out is the
 		// last thing to go.
