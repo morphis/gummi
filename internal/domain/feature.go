@@ -98,6 +98,29 @@ func (k Kind) prefix() string {
 	return "FD" // KindFeature and the empty default
 }
 
+// ArtifactNoun names the design artifact this kind of work item carries,
+// in the word the rest of that kind uses for it: a bug's report, a
+// research card's research document, a feature's spec. It lives here,
+// rather than in whichever package needs it, because both the agent's
+// stage kickoff and every surface the reader sees must call the document
+// the same thing — a document renamed between the instruction sent to
+// the agent and the line the reader opens it from is the same defect in
+// two places (BG-079, BG-081).
+//
+// The default is deliberately the feature wording rather than a generic
+// one: "spec" is what a feature card's own template, gates and hints
+// say, and a neutral word here would make every one of those surfaces
+// disagree with the artifact itself.
+func (k Kind) ArtifactNoun() string {
+	switch k {
+	case KindBug:
+		return "bug report"
+	case KindResearch:
+		return "research document"
+	}
+	return "spec" // KindFeature and the empty default
+}
+
 // Valid reports whether k is a recognized kind (empty is not — callers
 // that accept a default normalize it before validating).
 func (k Kind) Valid() bool { return k == KindFeature || k == KindBug || k == KindResearch }

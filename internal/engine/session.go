@@ -331,7 +331,7 @@ func (s *Session) Snapshot() Snapshot {
 // rebase session opens with its own go-ahead; its note carries the
 // rebase target and expected conflicts (RunRebase).
 func (s *Session) kickoffMessage() string {
-	base := kickoff
+	base := kickoff(s.Feature.Kind)
 	if s.Rebase {
 		base = rebaseKickoff
 	}

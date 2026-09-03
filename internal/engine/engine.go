@@ -43,7 +43,15 @@ import (
 
 // kickoff is the go-ahead sent to start an autonomous stage; the stage
 // hints already tell the agent what to do.
-const kickoff = "Proceed with this stage per your instructions and the spec."
+//
+// It names the card's own document — a bug's report, a research card's
+// research document — rather than always saying "spec": the agent is
+// being told to go read a file whose name and sections belong to the
+// kind, and the thread renders this line back to the reader, who sees
+// the same document named correctly everywhere else on the page.
+func kickoff(k domain.Kind) string {
+	return "Proceed with this stage per your instructions and the " + k.ArtifactNoun() + "."
+}
 
 // rebaseKickoff opens a rebase-resolve session; the run's kickoff note
 // carries the target commit and the files expected to conflict.

@@ -315,7 +315,7 @@ func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(got, kickoff) || !strings.Contains(got, "split the migration") {
+	if !strings.Contains(got, kickoff(f.Kind)) || !strings.Contains(got, "split the migration") {
 		t.Errorf("kickoff missing the review comments:\n%s", got)
 	}
 	// the combined kickoff is what the transcript records

@@ -79,27 +79,16 @@ func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
 	return nil
 }
 
-// artifactNoun names a card's design artifact, in the word the rest of
-// that kind of card uses for it: a bug's report, a research card's
-// research document, a feature's spec. Every surface that names the
-// document goes through here — the thread's pinned line, the action
-// inventory row, the header of the view that row opens, the gate
-// wording and the verify notices — so the document cannot be renamed
-// between the line pointing at it and the thing that line opens.
+// artifactNoun names a card's design artifact for the surfaces that show
+// it — the thread's pinned line, the action inventory row, the header of
+// the view that row opens, the gate wording and the verify notices — so
+// the document cannot be renamed between the line pointing at it and the
+// thing that line opens.
 //
-// The default is deliberately the feature wording rather than a generic
-// one: "spec" is what a feature card's own template, gates and hints
-// say, and a neutral word here would make every one of those surfaces
-// disagree with the artifact itself.
-func artifactNoun(k domain.Kind) string {
-	switch k {
-	case domain.KindBug:
-		return "bug report"
-	case domain.KindResearch:
-		return "research document"
-	}
-	return "spec"
-}
+// The wording itself belongs to the kind (domain.Kind.ArtifactNoun), not
+// to the UI: the engine's stage kickoff names the same document to the
+// agent, and the two must agree.
+func artifactNoun(k domain.Kind) string { return k.ArtifactNoun() }
 
 // verifyTimeout bounds a whole verify run so a hung repo command can't
 // wedge the run goroutine forever.
