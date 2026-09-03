@@ -196,12 +196,23 @@ func (m *Shell) boardThreadRender(w, h int, measure bool) string {
 	}
 
 	// --- head ---
-	head := []string{clip(boardHeader(s, snap))}
-	head = append(head, "")
+	buildHead := func(sep int) []string {
+		head := []string{clip(boardHeader(s, snap))}
+		head = append(head, "")
+		if sep > 0 {
+			// the leading blank separates the masthead from the page's crumb
+			// above it, the same reason threadRender adds one.
+			head = append([]string{""}, head...)
+		}
+		return head
+	}
+	head := buildHead(sep)
+	// headMin is head with its sep-gated leading blank given up before any
+	// row of content — threadRender's headMin, for the same reason
+	// (BG-050).
+	headMin := head
 	if sep > 0 {
-		// the leading blank separates the masthead from the page's crumb
-		// above it, the same reason threadRender adds one.
-		head = append([]string{""}, head...)
+		headMin = buildHead(0)
 	}
 
 	// --- body ---
@@ -229,9 +240,15 @@ func (m *Shell) boardThreadRender(w, h int, measure bool) string {
 	body = trimTrailingBlanks(body)
 
 	// --- foot ---
-	foot := make([]string, sep)
+	// footMin is foot without its own sep-gated lead-in blank —
+	// threadRender's footMin, for the same reason (BG-050).
+	var footMin []string
 	for _, l := range strings.Split(m.boardInputBlock(inner), "\n") {
-		foot = append(foot, clip(l))
+		footMin = append(footMin, clip(l))
+	}
+	foot := footMin
+	if sep > 0 {
+		foot = append(make([]string, sep), footMin...)
 	}
 
 	// the measure wants every row there is (composeThread's h<=0 branch),
@@ -241,7 +258,7 @@ func (m *Shell) boardThreadRender(w, h int, measure bool) string {
 	if measure {
 		composeH = 0
 	}
-	return strings.Join(composeThread(s, head, body, nil, foot, composeH, m.boardScroll, inner), "\n")
+	return strings.Join(composeThread(s, head, headMin, body, nil, nil, foot, footMin, composeH, m.boardScroll, inner), "\n")
 }
 
 // boardHeader is the board thread's masthead: what threadHeader is to a

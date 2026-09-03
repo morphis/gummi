@@ -177,3 +177,30 @@ func TestCardPageChromeYieldsInOrder(t *testing.T) {
 		t.Errorf("the 36×9 page spent rows on chrome: crumb=%d blank=%d", crumb, blank)
 	}
 }
+
+// TestStageStripDoesNotReturnBelowWhereItYielded is BG-050: composeThread
+// used to cut the head to a raw prefix once it overflowed its budget, and
+// that prefix cut could land between the two blanks sep switches on
+// together — sacrificing the strip to pay for rows that carry no content
+// at all. Shrinking further then dropped sep back to zero, the head's own
+// budget shrank back under it, and the strip reappeared below the height
+// it had just yielded at. Chrome must shed monotonically: once a height
+// drops the strip, every shorter height must keep it dropped.
+func TestStageStripDoesNotReturnBelowWhereItYielded(t *testing.T) {
+	m := reviewGateWorkspace(t)
+	dropped := -1
+	for h := 20; h >= 8; h-- {
+		model, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: h})
+		m = model.(*Shell)
+		present := strings.Contains(ansi.Strip(m.View().Content), stageJoin)
+		if !present {
+			if dropped < 0 {
+				dropped = h
+			}
+			continue
+		}
+		if dropped >= 0 {
+			t.Fatalf("h=%d: stage strip reappeared after being dropped at h=%d", h, dropped)
+		}
+	}
+}

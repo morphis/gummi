@@ -163,24 +163,38 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// first. That is the card's own identity — being told which card you
 	// are deciding about is worth more than the strip, the spec line or
 	// the spacing around them.
-	var head []string
-	for i, l := range threadHeader(s, m, r, inner) {
-		// a row between the card's title and its stage strip: they are two
-		// different questions — which card is this, and how far along is it
-		// — and stacked flush they read as one block of small print.
-		if i > 0 {
-			head = append(head, make([]string, sep)...)
+	buildHead := func(sep int) []string {
+		var head []string
+		for i, l := range threadHeader(s, m, r, inner) {
+			// a row between the card's title and its stage strip: they are two
+			// different questions — which card is this, and how far along is it
+			// — and stacked flush they read as one block of small print.
+			if i > 0 {
+				head = append(head, make([]string, sep)...)
+			}
+			head = append(head, clip(l))
 		}
-		head = append(head, clip(l))
+		head = append(head, "")
+		if sl := pinnedSpecLine(s, r, inner); sl != "" {
+			head = append(head, clip(sl), "")
+		}
+		if sep > 0 && len(head) > 0 {
+			// the leading blank separates the masthead from the page's crumb
+			// above it.
+			head = append([]string{""}, head...)
+		}
+		return head
 	}
-	head = append(head, "")
-	if sl := pinnedSpecLine(s, r, inner); sl != "" {
-		head = append(head, clip(sl), "")
-	}
-	if sep > 0 && len(head) > 0 {
-		// the leading blank separates the masthead from the page's crumb
-		// above it.
-		head = append([]string{""}, head...)
+	head := buildHead(sep)
+	// headMin is head with its own sep-gated separators — the leading
+	// blank and the one between the identity line and the strip — given
+	// up. composeThread falls back to it, and to decisionMin/footMin
+	// below, whenever the full layout does not fit at h, which is what
+	// keeps the rail from being sacrificed just to buy back the air sep
+	// switched on (BG-050).
+	headMin := head
+	if sep > 0 {
+		headMin = buildHead(0)
 	}
 
 	// --- body: the conversation, scrollable ---
@@ -419,11 +433,17 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	}
 
 	// --- foot: pinned to the bottom ---
-	foot := make([]string, sep)
+	// footMin is foot without its own sep-gated lead-in blank — the foot's
+	// share of headMin's treatment, for the same reason (BG-050).
+	var footMin []string
 	// the input is a multi-row widget: clip each row, or a stray tail of
 	// the second one lands on the first.
 	for _, l := range strings.Split(m.inputBlock(s, r, inner), "\n") {
-		foot = append(foot, clip(l))
+		footMin = append(footMin, clip(l))
+	}
+	foot := footMin
+	if sep > 0 {
+		foot = append(make([]string, sep), footMin...)
 	}
 
 	// --- decision: pinned directly above the composer while open ---
@@ -453,12 +473,16 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		// one row past what the page can hold.
 		budget = max(h-len(foot)-reserve-sep, 1)
 	}
-	decision := m.openDecisionBlock(s, r, inner, budget)
-	for i := range decision {
-		decision[i] = clip(decision[i])
+	// decisionMin is the decision's content with its own sep-gated lead-in
+	// blank given up — headMin's and footMin's treatment, applied here too
+	// (BG-050).
+	decisionMin := m.openDecisionBlock(s, r, inner, budget)
+	for i := range decisionMin {
+		decisionMin[i] = clip(decisionMin[i])
 	}
-	if len(decision) > 0 && sep > 0 {
-		decision = append(make([]string, sep), decision...)
+	decision := decisionMin
+	if len(decisionMin) > 0 && sep > 0 {
+		decision = append(make([]string, sep), decisionMin...)
 	}
 
 	// the measure wants every row there is, so it composes at zero — the
@@ -471,7 +495,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	if measure {
 		composeH = 0
 	}
-	return strings.Join(composeThread(s, head, body, decision, foot, composeH, m.threadScroll, inner), "\n")
+	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, foot, footMin, composeH, m.threadScroll, inner), "\n")
 }
 
 // composeThread lays the four regions into h rows: head at the top, foot
@@ -484,13 +508,32 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 // is foot, decision, head, body. The decision arrives already windowed
 // to what the foot leaves it (windowDecisionBlock), so the trim below is
 // only a safety net for a caller that skipped that step.
-func composeThread(s *theme.Styles, head, body, decision, foot []string, h, up, w int) []string {
+//
+// headMin, decisionMin and footMin are head, decision and foot with their
+// own sep-gated separator rows already given up — the four blanks sep
+// switches on together, rather than any row that carries content. Below,
+// if foot, decision and head do not fit h between them as a whole, the
+// three Min variants are used instead, all at once. Each of the four
+// separators is exactly as expendable as the other three, so this is the
+// row a separator loses to content, not a row of content losing to one:
+// trying the with-separator layout only when it fits h means a separator
+// can never survive at a row of content's expense. Without this, a raw
+// prefix cut of the with-separator head could land between two of its
+// own separators and cut the strip to pay for rows that carry nothing —
+// and dropping the terminal further below the height that first forces
+// this would flip sep back to 0 and give the strip back, which is
+// BG-050: the shed was not monotone. The trim beneath this only runs
+// when even the separator-free layout does not fit.
+func composeThread(s *theme.Styles, head, headMin, body, decision, decisionMin, foot, footMin []string, h, up, w int) []string {
 	if h <= 0 {
 		out := append(append(append([]string{}, head...), body...), decision...)
 		return append(out, foot...)
 	}
 	if len(foot) >= h {
 		return foot[len(foot)-h:]
+	}
+	if len(foot)+len(decision)+len(head) > h {
+		head, decision, foot = headMin, decisionMin, footMin
 	}
 	remaining := h - len(foot)
 	if len(decision) > remaining {
@@ -501,9 +544,11 @@ func composeThread(s *theme.Styles, head, body, decision, foot []string, h, up, 
 		remaining -= len(decision)
 	}
 	if len(head) > remaining {
-		// trailing blanks go with the trim: the head's separators are
-		// decorations, and a head cut short mid-way should not spend its
-		// last surviving row on the space under a row that no longer fits.
+		// trailing blanks go with the trim: a head cut short mid-way should
+		// not spend its last surviving row on the space under a row that no
+		// longer fits. head is already the separator-free headMin here —
+		// the swap above ran, or this call's head had none to begin with —
+		// so what is left to trim is content, not decoration.
 		head = trimTrailingBlanks(head[:remaining])
 		body = nil
 		remaining = 0
