@@ -79,10 +79,24 @@ func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
 	return nil
 }
 
-// artifactNoun names the design artifact for notices.
+// artifactNoun names a card's design artifact, in the word the rest of
+// that kind of card uses for it: a bug's report, a research card's
+// research document, a feature's spec. Every surface that names the
+// document goes through here — the thread's pinned line, the action
+// inventory row, the header of the view that row opens, the gate
+// wording and the verify notices — so the document cannot be renamed
+// between the line pointing at it and the thing that line opens.
+//
+// The default is deliberately the feature wording rather than a generic
+// one: "spec" is what a feature card's own template, gates and hints
+// say, and a neutral word here would make every one of those surfaces
+// disagree with the artifact itself.
 func artifactNoun(k domain.Kind) string {
-	if k == domain.KindBug {
+	switch k {
+	case domain.KindBug:
 		return "bug report"
+	case domain.KindResearch:
+		return "research document"
 	}
 	return "spec"
 }
