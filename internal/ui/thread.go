@@ -199,8 +199,16 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 
 	// --- body: the conversation, scrollable ---
 	var body []string
-	add := func(str string) { body = append(body, clip(str)) }
-	blank := func() { body = append(body, "") }
+	// bodyEventAt tags each row of body with the r.Events index that
+	// rendered it, or -1 — add's and blank's own rows are always -1, and
+	// the live stage block below overwrites its own span with whatever
+	// liveStageBlock reported. A resize (BG-057) reads it to find which
+	// event the reader was looking at before the reflow and put it back
+	// at the top of the window afterwards, since threadScroll alone is
+	// just a row count with no memory of what it was pointing at.
+	var bodyEventAt []int
+	add := func(str string) { body = append(body, clip(str)); bodyEventAt = append(bodyEventAt, -1) }
+	blank := func() { body = append(body, ""); bodyEventAt = append(bodyEventAt, -1) }
 
 	segs := stageSegments(r.Events)
 	// Computed once from the card's whole event log rather than once per
@@ -329,10 +337,13 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	if anchoring {
 		anchorWant = m.anchorFrom
 	}
-	if ls, at := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens, anchorWant); len(ls) > 0 {
+	if ls, at, evAt := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens, anchorWant); len(ls) > 0 {
 		base := len(body)
-		for _, l := range ls {
+		for i, l := range ls {
 			add(l)
+			if i < len(evAt) {
+				bodyEventAt[base+i] = evAt[i]
+			}
 		}
 		if at >= 0 && anchorIdx < 0 {
 			anchorIdx = base + at
@@ -401,6 +412,10 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		add(threadEmptyLine(s, f))
 	}
 	body = trimTrailingBlanks(body)
+	// trimTrailingBlanks only ever shortens from the end, so re-slicing
+	// bodyEventAt to the same length keeps every row's tag lined up with
+	// the row it was appended for.
+	bodyEventAt = bodyEventAt[:len(body)]
 
 	// threadScroll is a distance from the end of body, so an appended line
 	// would otherwise slide the window forward by one for every line that
@@ -485,6 +500,38 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		decision = append(make([]string, sep), decisionMin...)
 	}
 
+	// BG-057: threadScroll is a row count with no memory of what it points
+	// at, so a resize that rewraps body — changing its length — leaves it
+	// indexing different content with no key pressed and no notice drawn.
+	// pendingScrollAnchor is the WindowSizeMsg handler's request, made
+	// just before it applied the new width, to put the event that was at
+	// the top of the window back at the top again; threadTopEvent is then
+	// refreshed here, on every real render, so the next resize always has
+	// a fresh row to ask for. The measure pass is skipped: it renders
+	// unwindowed (composeH below) and would only report the newest event
+	// as "at the top", which is never what a scrolled-back reader sees.
+	if !measure {
+		bodyBudget := bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin, len(body), h)
+		if m.pendingScrollAnchor && m.pendingScrollAnchorCard == f.ID {
+			m.pendingScrollAnchor = false
+			if target := m.pendingScrollAnchorEvent; target >= 0 {
+				for row, ev := range bodyEventAt {
+					if ev == target {
+						maxUp := max(len(body)-bodyBudget, 0)
+						m.threadScroll = clamp(len(body)-bodyBudget-row, 0, maxUp)
+						break
+					}
+				}
+			}
+		}
+		m.threadTopEvent = -1
+		if len(body) > 0 {
+			maxUp := max(len(body)-bodyBudget, 0)
+			start := (len(body) - clamp(m.threadScroll, 0, maxUp)) - bodyBudget
+			m.threadTopEvent = bodyEventAt[clamp(start, 0, len(body)-1)]
+		}
+	}
+
 	// the measure wants every row there is, so it composes at zero — the
 	// unwindowed branch — having laid the regions out at the real height.
 	// That branch never scrolls, so it never spends a row on the markers
@@ -496,6 +543,43 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		composeH = 0
 	}
 	return strings.Join(composeThread(s, head, headMin, body, decision, decisionMin, foot, footMin, composeH, m.threadScroll, inner), "\n")
+}
+
+// bodyWindowBudget reports how many body rows composeThread has room to
+// show at height h once head, decision and foot have taken their share —
+// the same number composeThread's own windowing arithmetic below derives,
+// pulled out here so BG-057's resize anchor can predict a scroll window
+// without rendering one. Keep this in sync with composeThread: it mirrors
+// that function's layout branches (the Min swap, the decision and head
+// clamps) up to but not including the two rows composeThread spends on
+// scroll markers once it actually clips the body, which the anchor math
+// accounts for on its own.
+func bodyWindowBudget(head, headMin, decision, decisionMin, foot, footMin []string, bodyLen, h int) int {
+	if h <= 0 {
+		return bodyLen
+	}
+	if len(foot) >= h {
+		return 0
+	}
+	if len(foot)+len(decision)+len(head) > h {
+		head, decision, foot = headMin, decisionMin, footMin
+	}
+	remaining := h - len(foot)
+	if len(decision) > remaining {
+		return 0
+	}
+	remaining -= len(decision)
+	if len(head) > remaining {
+		return 0
+	}
+	remaining -= len(head)
+	if bodyLen > remaining && remaining >= 2 {
+		return remaining - 2
+	}
+	if bodyLen > remaining {
+		return remaining
+	}
+	return bodyLen
 }
 
 // composeThread lays the four regions into h rows: head at the top, foot
@@ -1180,7 +1264,16 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // autopilot works, parks, and you come back and start typing — all
 // inside one stage. Bracketing the block as a whole would put the turns
 // you typed after the handback above the rule announcing it.
-func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens []autopilotStretch, anchorFrom int) (lines []string, anchorAt int) {
+// evAt tags each returned line with the index (into r.Events) of the
+// event that rendered it, or -1 for a line that belongs to no single
+// event (a boundary rule, a period's own rule, blanks). It is only
+// populated for the reconstructed-segment branch, where events have
+// stable indices to tag lines with; the live-session and followed-tail
+// branches render from a snapshot with no event log behind it, so they
+// return a nil evAt. A resize (BG-057) uses it to find whichever event
+// was at the top of the scrolled window before the reflow, so it can ask
+// for that same event again after.
+func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens []autopilotStretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
@@ -1234,7 +1327,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		case len(lines) == 1:
 			lines = append(lines, "  "+s.Faint.Render("starting…"))
 		}
-		return lines, anchorAt
+		return lines, anchorAt, nil
 	}
 
 	// an open tail is the freshest thing this board has for this card, so
@@ -1260,15 +1353,24 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		}
 		lines = append(lines, "  "+s.Warning.Render(m.follow.marker())+
 			s.Faint.Render(" — "+m.follow.footer(snap)))
-		return lines, anchorAt
+		return lines, anchorAt, nil
 	}
 
 	if len(segs) == 0 {
-		return nil, -1
+		return nil, -1, nil
 	}
 	last := segs[len(segs)-1]
 	anchorAt = -1
 	lines = []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
+	// pad fills evAt up to len(lines) with idx, so every append above can
+	// stay exactly as it was and the tagging happens as a single extra
+	// call afterwards instead of touching each one.
+	pad := func(idx int) {
+		for len(evAt) < len(lines) {
+			evAt = append(evAt, idx)
+		}
+	}
+	pad(-1)
 	// A period that opened inside this stage rather than before it — the
 	// switch pressed on a card already sitting here — gets its rule where
 	// it happened, above the first thing it did.
@@ -1295,6 +1397,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 			lines = append(lines, stretchCloseLines(s, st, w)...)
 			lines = append(lines, "")
 		}
+		pad(-1)
 	}
 	// the whole session, not the last few events: capping this to a recent
 	// tail was how the (now-gone) transcript view earned its keep, and
@@ -1317,6 +1420,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 				lines = append(lines, stretchOpenLine(s, st, w), "")
 			}
 		}
+		pad(-1)
 		closed := false
 		for _, st := range stretches {
 			if st.running() || st.to != idx {
@@ -1333,21 +1437,25 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 			lines = append(lines, "")
 			closed = closed || ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot
 		}
+		pad(-1)
 		if closed {
 			continue
 		}
 		if dl := stretchDecisionLine(s, ev, inStretch(stretches, idx), w-2); dl != "" {
 			lines = append(lines, "  "+dl)
+			pad(idx)
 			continue
 		}
 		for _, l := range stageEventLines(s, ev, w, m.threadOutputs, last.role, answered) {
 			lines = append(lines, "  "+l)
 		}
+		pad(idx)
 	}
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
+		pad(-1)
 	}
-	return lines, anchorAt
+	return lines, anchorAt, evAt
 }
 
 // consultBlock renders the card's consult exchange, if any, as its own

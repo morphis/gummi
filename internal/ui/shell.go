@@ -299,6 +299,25 @@ type Shell struct {
 	// never applies one card's growth to another's offset.
 	threadBodyCard domain.FeatureID
 	threadBodyLen  int
+	// threadTopEvent is the event index (featureRow.Events) rendered at
+	// the top of the current scrolled window, refreshed by threadBody on
+	// every non-measure render for the card named by threadBodyCard. A
+	// resize reads it before applying the new width, because threadScroll
+	// on its own is a raw row count with no notion of which content it
+	// points at — a width change rewraps the body underneath it and the
+	// same number lands on a different row (BG-057). -1 means no event
+	// owns the top row (it fell in a folded stage, a rule, or the window
+	// is not scrolled).
+	threadTopEvent int
+	// pendingScrollAnchor{Card,Event} carry a resize's request across to
+	// the next render: land threadTopEvent as it was captured just before
+	// the resize back at the top of the window again, however the reflow
+	// moved it. Set by the WindowSizeMsg handler, consumed and cleared by
+	// threadBody the same frame it is set, so it never survives a card
+	// switch or outlives the render it was meant for.
+	pendingScrollAnchor      bool
+	pendingScrollAnchorCard  domain.FeatureID
+	pendingScrollAnchorEvent int
 	// lastSeen is how far through each card's event log this machine has
 	// already read (state's card_last_seen), and anchorTo names the one
 	// card whose thread should open on its newest unread period instead
@@ -1177,6 +1196,21 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// BG-057: a width change rewraps the thread body, so the row
+		// threadScroll counts back from no longer names the same content.
+		// Captured before the resize is applied, using threadTopEvent as
+		// threadBody left it on the last render at the old width — the
+		// WindowSizeMsg handler has no rendering of its own to derive it
+		// from. threadBody consumes this on its next render, at the new
+		// width, and re-derives threadScroll from where that same event
+		// landed after the reflow instead of leaving the old row count in
+		// place.
+		if m.cardOpen && msg.Width != m.width && m.threadScroll > 0 && m.threadTopEvent >= 0 &&
+			m.sel >= 0 && m.sel < len(m.rows) && m.threadBodyCard == m.rows[m.sel].F.ID {
+			m.pendingScrollAnchor = true
+			m.pendingScrollAnchorCard = m.threadBodyCard
+			m.pendingScrollAnchorEvent = m.threadTopEvent
+		}
 		m.width, m.height = msg.Width, msg.Height
 		m.layout = m.computeLayout()
 		// the hosted CLI has to learn the new pane size from both halves
