@@ -3547,7 +3547,18 @@ func (m *Shell) statusView(w int) string {
 	// the hint row tracks whichever surface owns the main pane, from the
 	// same tables the ? overlay renders (keymap.go)
 	_, bindings := m.activeSurface()
-	return statusbar.Render(m.styles, w, pills, barHints(bindings))
+	hints := barHints(bindings)
+	// …except while a modal has the keyboard. Then the surface's keys are
+	// not what the next keystroke does — the bar would read "enter land on
+	// main" over a merge dialog where enter activates a button — and every
+	// dialog already draws its own hint row inside its frame (buttons.go's
+	// "enter activates the focused control" convention, and the same rule
+	// agentBindings follows when the completion popup is open). All that
+	// is left to say from out here is the one key every dialog answers to.
+	if m.Overlay.HasDialogs() {
+		hints = []statusbar.Hint{{Key: "esc", Label: "close"}}
+	}
+	return statusbar.Render(m.styles, w, pills, hints)
 }
 
 // runCounts summarizes live agent sessions for the status bar
