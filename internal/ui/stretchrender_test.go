@@ -299,6 +299,11 @@ func TestUnreadPeriodScrollsTheThreadToIt(t *testing.T) {
 	events := withSeqs(m.cardEvents[id])
 	m.cardEvents[id] = events
 
+	// Simulate fetchLastSeen's reply already landed, having found nothing
+	// for this card — as opposed to not having landed at all, which
+	// markSeen now treats as "don't know, don't jump" (BG-056).
+	m.lastSeen = map[domain.FeatureID]int64{}
+
 	if cmd := m.markSeen(id, events); cmd != nil {
 		cmd() // the store write; irrelevant here, but drain it
 	}
@@ -325,6 +330,10 @@ func TestSecondVisitDoesNotJump(t *testing.T) {
 	events := withSeqs(m.cardEvents[id])
 	m.cardEvents[id] = events
 
+	// See TestUnreadPeriodScrollsTheThreadToIt: mark lastSeen as loaded
+	// so the first markSeen below actually evaluates the anchor.
+	m.lastSeen = map[domain.FeatureID]int64{}
+
 	if cmd := m.markSeen(id, events); cmd != nil {
 		cmd()
 	}
@@ -340,6 +349,109 @@ func TestSecondVisitDoesNotJump(t *testing.T) {
 	_ = m.threadView(96, 20)
 	if m.threadScroll != 0 {
 		t.Fatalf("threadScroll = %d, want 0 — a card already read opens at its newest line", m.threadScroll)
+	}
+}
+
+// TestLastSeenMsgMergesMarkMadeDuringLoad is BG-056: Init fires loadRows
+// and fetchLastSeen unordered, so a card can be opened and marked read
+// before fetchLastSeen's reply lands. That reply must not wipe out the
+// mark made in the window — it merges in, taking the max seq per card.
+func TestLastSeenMsgMergesMarkMadeDuringLoad(t *testing.T) {
+	m := stretchThread(t)
+	id := m.rows[m.sel].F.ID
+	events := withSeqs(m.cardEvents[id])
+	m.cardEvents[id] = events
+
+	if m.lastSeen != nil {
+		t.Fatal("setup: lastSeen already loaded before markSeen ran")
+	}
+
+	// Startup ordering: the card is opened and read before fetchLastSeen's
+	// reply lands (loadRows and fetchLastSeen race unordered from Init).
+	if cmd := m.markSeen(id, events); cmd != nil {
+		cmd()
+	}
+	// The mark lands in pendingSeen, not lastSeen, while lastSeen is still
+	// nil (see TestMarkSeenAcrossCardsSuppressesAnchorBeforeLastSeenLoads
+	// for why lastSeen itself must not be lazily written here).
+	marked := m.pendingSeen[id]
+	if marked == 0 {
+		t.Fatal("setup: markSeen did not record a mark")
+	}
+
+	// fetchLastSeen's reply now arrives, carrying whatever the store held
+	// before the in-window mark above was written.
+	m.Update(lastSeenMsg{seqs: map[domain.FeatureID]int64{}})
+
+	if m.lastSeen[id] != marked {
+		t.Fatalf("lastSeen[%s] = %d after fetchLastSeen landed, want %d — the mark made during the startup window was discarded", id, m.lastSeen[id], marked)
+	}
+}
+
+// TestMarkSeenSuppressesAnchorBeforeLastSeenLoads: opening a card before
+// fetchLastSeen's reply lands must not force an unread anchor. Without
+// this, m.lastSeen[id] reads as 0 for every card — indistinguishable
+// from "queried the store, found nothing" — so a card read in a
+// previous session would false-anchor as unread on this one.
+func TestMarkSeenSuppressesAnchorBeforeLastSeenLoads(t *testing.T) {
+	m := stretchThread(t)
+	id := m.rows[m.sel].F.ID
+	events := withSeqs(m.cardEvents[id])
+	m.cardEvents[id] = events
+
+	if m.lastSeen != nil {
+		t.Fatal("setup: lastSeen already loaded before markSeen ran")
+	}
+
+	if cmd := m.markSeen(id, events); cmd != nil {
+		cmd()
+	}
+	if m.anchorTo != "" {
+		t.Fatalf("anchorTo = %q, want none — lastSeen has not loaded yet, so unread cannot be decided", m.anchorTo)
+	}
+}
+
+// TestMarkSeenAcrossCardsSuppressesAnchorBeforeLastSeenLoads is the
+// cross-card case the single-card version above can't catch: markSeen's
+// write path used to lazily init m.lastSeen to {} the moment *any* card
+// got a mark, which flipped the nil check non-nil for every other card
+// too. A second card opened later in the same startup window then read
+// lastSeen[id] == 0 for its own still-unqueried entry — indistinguishable
+// from "loaded, confirmed unread" — and false-anchored (BG-056 review).
+// Marks made before load now go into pendingSeen instead, which can't
+// leak into other cards' nil check.
+func TestMarkSeenAcrossCardsSuppressesAnchorBeforeLastSeenLoads(t *testing.T) {
+	m := stretchThread(t)
+	idA := m.rows[m.sel].F.ID
+	eventsA := withSeqs(m.cardEvents[idA])
+	m.cardEvents[idA] = eventsA
+
+	if m.lastSeen != nil {
+		t.Fatal("setup: lastSeen already loaded before markSeen ran")
+	}
+
+	// Card A is opened and marked read first, before fetchLastSeen's reply
+	// lands.
+	if cmd := m.markSeen(idA, eventsA); cmd != nil {
+		cmd()
+	}
+	if m.lastSeen != nil {
+		t.Fatal("markSeen on card A flipped lastSeen non-nil — that leaks into every other card's not-loaded check")
+	}
+
+	// Board navigation moves to a second, unrelated card with the same
+	// finished-autopilot-stretch shape, still before fetchLastSeen's reply
+	// lands.
+	idB := m.rows[0].F.ID
+	eventsB := withSeqs(append([]state.CardEvent(nil), eventsA...))
+	m.cardEvents[idB] = eventsB
+	m.sel = 0
+
+	if cmd := m.markSeen(idB, eventsB); cmd != nil {
+		cmd()
+	}
+	if m.anchorTo != "" {
+		t.Fatalf("anchorTo = %q, want none — lastSeen has not loaded yet for %s either, marking %s first must not make %s look confirmed-unread", m.anchorTo, idB, idA, idB)
 	}
 }
 

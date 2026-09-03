@@ -310,7 +310,16 @@ type Shell struct {
 	// being from the bottom. Everything about the body's height — folding,
 	// wrapping, whether a session is live — is decided there.
 	lastSeen map[domain.FeatureID]int64
-	anchorTo domain.FeatureID
+	// pendingSeen holds marks written by markSeen before fetchLastSeen's
+	// reply lands. It exists so that mark can't flip lastSeen non-nil for
+	// every *other* card too: markSeen's anchor check gates on lastSeen ==
+	// nil to mean "not loaded yet, don't know, don't anchor" per card, and
+	// if writing card A's mark lazily initialised lastSeen to {}, card B
+	// opened later in the same window would read lastSeen[B] == 0 —
+	// indistinguishable from "loaded, confirmed unread" — and false-anchor
+	// (BG-056 review). Kept separate until lastSeenMsg merges it in.
+	pendingSeen map[domain.FeatureID]int64
+	anchorTo    domain.FeatureID
 	// anchorFrom is the event index the anchored period opens at. The
 	// period is resolved once, by markSeen, and carried here rather than
 	// asked again at render time — markSeen advances the read mark in the
@@ -717,10 +726,13 @@ func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
 // card alone, but a card can be selected without its page being open,
 // and moving the board's cursor past a card is not reading it.
 func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd {
-	if m.lastSeen == nil {
-		m.lastSeen = map[domain.FeatureID]int64{}
-	}
-	if m.cardOpen {
+	// m.lastSeen is nil until fetchLastSeen's reply lands (see lastSeenMsg
+	// below); that is "not loaded yet", distinct from "loaded, nothing
+	// seen". A card opened in that window has no read position to compare
+	// against, so it must not anchor as unread — computing the anchor
+	// against a lazily-zeroed map would treat every such card as unread,
+	// even one read in a previous session (BG-056).
+	if m.cardOpen && m.lastSeen != nil {
 		if r, ok := m.selected(); ok && r.F.ID == id {
 			if st, unread := unseenStretch(autopilotStretches(r.F, events), events, m.lastSeen[id]); unread {
 				m.anchorTo, m.anchorFrom = id, st.from
@@ -728,10 +740,25 @@ func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd 
 		}
 	}
 	seq := newestSeq(events)
-	if seq <= m.lastSeen[id] {
-		return nil
+	// Marks made before lastSeen has loaded go into pendingSeen instead of
+	// lazily initialising lastSeen itself — doing the latter would make
+	// this card's write flip lastSeen non-nil for every other card too,
+	// reviving the same false-unread-anchor bug one level down (BG-056
+	// review).
+	if m.lastSeen != nil {
+		if seq <= m.lastSeen[id] {
+			return nil
+		}
+		m.lastSeen[id] = seq
+	} else {
+		if seq <= m.pendingSeen[id] {
+			return nil
+		}
+		if m.pendingSeen == nil {
+			m.pendingSeen = map[domain.FeatureID]int64{}
+		}
+		m.pendingSeen[id] = seq
 	}
-	m.lastSeen[id] = seq
 	if m.store == nil {
 		return nil
 	}
@@ -1755,8 +1782,24 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, open
 
 	case lastSeenMsg:
-		if msg.err == nil && msg.seqs != nil {
-			m.lastSeen = msg.seqs
+		// Merge rather than replace: a card can be opened and marked read
+		// (markSeen, into pendingSeen while lastSeen is still nil) before
+		// this startup reply lands, and that mark must survive the reply
+		// rather than be overwritten by the store's pre-mark value
+		// (BG-056). Take the max seq per card so neither side's knowledge
+		// is lost.
+		if msg.err == nil {
+			seqs := msg.seqs
+			if seqs == nil {
+				seqs = map[domain.FeatureID]int64{}
+			}
+			for id, seq := range m.pendingSeen {
+				if seq > seqs[id] {
+					seqs[id] = seq
+				}
+			}
+			m.pendingSeen = nil
+			m.lastSeen = seqs
 		}
 		return m, nil
 
