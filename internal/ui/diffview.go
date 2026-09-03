@@ -252,16 +252,19 @@ func (m *Shell) deleteDiffAnnotation() tea.Cmd {
 // because there is one mode: every verb is live whenever the surface is.
 func (dv *diffView) bindings() []binding {
 	return []binding{
+		// bar order is shedding order, for the reason specView.bindings
+		// spells out: what to do about the diff leads, the way out is
+		// last, and the line-level annotation keys sit between them.
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
+		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
+		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
 		{key: "D", label: "delete", help: "delete the annotation at the cursor"},
 		{key: "n/p", label: "annotations", help: "jump between annotated lines", bar: true},
-		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
-		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
-		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 		{key: "?", label: "help", bar: true},
+		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 	}
 }
 

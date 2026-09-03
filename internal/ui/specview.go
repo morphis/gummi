@@ -198,17 +198,25 @@ func (sv *specView) threadAtCursor() *spec.Thread {
 // bindings is the spec surface's key table (see keymap.go). One table,
 // because there is one mode: every verb is live whenever the surface is.
 func (sv *specView) bindings() []binding {
+	// Bar order is shedding order: the status bar drops hints from the
+	// second-to-last backwards and never the last, so the two rows that
+	// answer "what do I do about this document" lead, and the way out
+	// goes last where it outlives everything else (threadInputBindings
+	// keeps esc last for the same reason). Reading and annotating are
+	// what the surface is obviously for; approving it, sending it back
+	// and leaving are the rows a reader would otherwise have to go
+	// looking for.
 	return []binding{
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
+		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
+		{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
 		{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
-		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
-		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
-		{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
 		{key: "?", label: "help", bar: true},
+		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 	}
 }
 
