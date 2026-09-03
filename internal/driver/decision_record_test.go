@@ -68,11 +68,23 @@ func TestCallerGateRecordsItsDecision(t *testing.T) {
 
 	// the crossing is the answer: the gate event's payload carries the
 	// decision id, and nothing reads open afterwards.
+	//
+	// It is the crossing OUT OF the gated stage that answers, not simply
+	// the newest crossing in the log. This assertion used to take the last
+	// gate event and expect the id on that, which held only while
+	// newestOpenGateDecisionTx handed the same spent id to every later
+	// crossing — and that is BG-080: those crossings then wrote the
+	// answering crossing's dedupe key and were dropped by ON CONFLICT DO
+	// NOTHING, so the card's history lost every stage change after the
+	// first answered gate. Approving here runs the card all the way to
+	// done, so the log holds several crossings after this one; exactly one
+	// carries the id.
 	evs, err := h.store.Events(context.Background(), h.only())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gate *state.GatePayload
+	var carriers []state.GatePayload
+	var crossings int
 	for _, ev := range evs {
 		if ev.Kind != state.EventGate {
 			continue
@@ -81,10 +93,26 @@ func TestCallerGateRecordsItsDecision(t *testing.T) {
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
 			t.Fatal(err)
 		}
-		gate = &p
+		crossings++
+		if p.ID != "" {
+			carriers = append(carriers, p)
+		}
 	}
-	if gate == nil || gate.ID != decisionID {
-		t.Fatalf("gate event = %+v, want payload id == the decision id", gate)
+	if len(carriers) != 1 {
+		t.Fatalf("%d crossings carry a decision id, want exactly 1: %+v", len(carriers), carriers)
+	}
+	if carriers[0].ID != decisionID {
+		t.Fatalf("the answering crossing carries %q, want the decision id %q", carriers[0].ID, decisionID)
+	}
+	// every stage change on the route left a receipt: the approve ran the
+	// card from the gated stage through to done, and none of those
+	// crossings may go missing.
+	hist, err := h.store.History(context.Background(), h.only())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := len(hist); crossings != want {
+		t.Errorf("the history holds %d crossings for %d transitions — a stage change with no receipt behind it", crossings, want)
 	}
 	opens, err = h.store.OpenDecisions(context.Background())
 	if err != nil {
