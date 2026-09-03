@@ -66,9 +66,6 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 	leftStr := strings.Join(left, " ")
 
 	lw := ansi.StringWidth(leftStr)
-	if lw+1 > width {
-		return s.StatusBase.Render(ansi.Truncate(leftStr, width, "…"))
-	}
 	// keep the pills; when the hints don't fit, drop whole hints rather
 	// than truncating mid-word. Hints arrive most-important-first except
 	// the last (help / the surface's escape hatch), which survives
@@ -90,13 +87,24 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 	if lw+ansi.StringWidth(rightStr)+1 > width {
 		if hasSticky(hs) {
 			// Only sticky hints (and maybe the escape hatch) are left, and
-			// even those don't fit: truncating keeps SOME sign of what a
-			// sticky row promises rather than erasing it outright, which is
-			// exactly the silent failure Sticky exists to prevent. This is
-			// the deep edge — the concrete case that motivated Sticky (a
-			// 120-column decision bar) never reaches it, since shedding
-			// pgup/pgdn and outputs is already enough room.
-			rightStr = ansi.Truncate(rightStr, max(width-lw-1, 0), "…")
+			// even those don't fit — including, as here, when the pills
+			// alone already ate the whole width (BG-064): truncating keeps
+			// SOME sign of what a sticky row promises rather than erasing
+			// it outright, which is exactly the silent failure Sticky
+			// exists to prevent. Reserve room for it first, truncating the
+			// pills if that's what it takes, rather than letting an
+			// overlong pill row crowd out the one hint Render must not
+			// silently drop.
+			rw := min(ansi.StringWidth(rightStr), max(width-1, 0))
+			rightStr = ansi.Truncate(rightStr, rw, "…")
+			rw = ansi.StringWidth(rightStr)
+			leftStr = ansi.Truncate(leftStr, max(width-rw-1, 0), "…")
+			lw = ansi.StringWidth(leftStr)
+		} else if lw+1 > width {
+			// the pills alone don't fit and nothing sheddable survived to
+			// need room anyway: unchanged from before Sticky existed, show
+			// as much of the pills as fits and drop hints entirely.
+			return s.StatusBase.Render(ansi.Truncate(leftStr, width, "…"))
 		} else {
 			// unchanged from before Sticky existed: a plain hint row that
 			// still doesn't fit with nothing left to drop just goes blank.
