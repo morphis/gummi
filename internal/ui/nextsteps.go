@@ -114,7 +114,31 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 			break
 		}
 	}
+	in.verdict = escalatedGateVerdict(in.verdict, in.escalated)
 	return in
+}
+
+// escalatedGateVerdict refuses to read an escalated gate as a clean pass.
+//
+// A gate the loop escalated is, by construction, not one: a clean verify
+// raises the plain gate (raiseAttention, recorded as DecisionKindGate),
+// and only a give-up escalates (raiseEscalation, recorded as
+// DecisionKindVerify). So a pass alongside an escalation is one the
+// engine already overruled — its verdict floor (setVerdictFloor, stamped
+// when a live gummi-check fails) lives on the session and is not
+// persisted, so after a restart verdict.SessionVerdict drops back to
+// parsing the agent's own "VERDICT: pass" out of the transcript and
+// resurrects the claim the floor existed to refuse. The card then read
+// as verified and recommended landing the branch on main.
+//
+// Unclear is what is actually known at that point, and it is the
+// fallback nextInput.verdict's own comment already describes: "the
+// escalated flag on the gate still carries pass vs not-pass".
+func escalatedGateVerdict(v reviewVerdict, escalated bool) reviewVerdict {
+	if escalated && v == verdictPass {
+		return verdictUnclear
+	}
+	return v
 }
 
 // blockedGate returns the resolve-first action when open review
