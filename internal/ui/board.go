@@ -290,8 +290,16 @@ func (m *Shell) boardCounts() string {
 	}
 	var parts []string
 	for _, super := range domain.SuperStates {
+		// An unnamed super-state contributes nothing rather than an empty
+		// segment: strings.Join below would otherwise render it as a
+		// separator with a hole in it, which is how a missing count shows
+		// up on the bar — as punctuation, not as an absence anyone can
+		// read. formatCount names every super-state today; this keeps the
+		// bar honest if a new one is added before its wording is.
 		if n := counts[super]; n > 0 {
-			parts = append(parts, formatCount(super, n))
+			if txt := formatCount(super, n); txt != "" {
+				parts = append(parts, txt)
+			}
 		}
 	}
 	if m.engine != nil {
@@ -340,6 +348,8 @@ func formatCount(super domain.SuperState, n int) string {
 		return c + " todo"
 	case domain.SuperInProgress:
 		return c + " active"
+	case domain.SuperResearch:
+		return c + " research"
 	case domain.SuperReviewVerify:
 		return c + " in review"
 	case domain.SuperDone:
