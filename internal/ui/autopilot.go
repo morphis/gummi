@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The `A` overlay: point autopilot at a card and the card runs — not at
@@ -298,15 +299,38 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 	if f.Budget.Envelope > 0 {
 		envelope = fmt.Sprintf(", inside a %d credit envelope", f.Budget.Envelope)
 	}
-	var lead string
-	if mode == domain.GateFull {
-		lead = fmt.Sprintf("%s it on full runs %s without you — up to %d corrections%s.",
-			verb, englishList(plan.remaining), verdict.MaxRounds(domain.RoundKindCorrective), envelope)
-	} else {
-		lead = fmt.Sprintf("%s it on gates runs %s, crossing each design gate for you%s — but it still stops whenever the agent needs an answer.",
-			verb, englishList(plan.remaining), envelope)
+	// The stages ahead split in two, and naming them as one list was a
+	// promise the switch could not keep. Autopilot never runs a stage
+	// that needs a person: it crosses into one and hands the card
+	// straight back (autoStepStage, and closeHandedOver's own reading of
+	// it). A card started from todo always meets one of those first —
+	// brainstorm, triage, shape — so the old single list opened by naming
+	// the stage the run was about to stop at as one it would run.
+	var runs, stops []domain.Stage
+	for _, st := range plan.remaining {
+		if workflow.Interactive(st) {
+			stops = append(stops, st)
+		} else {
+			runs = append(runs, st)
+		}
 	}
-	return []string{lead, "it parks to the inbox if it can't finish, and it never lands on main."}
+	var out []string
+	if len(stops) > 0 {
+		// first, because it happens first: this is the sentence someone
+		// starting a card from todo needs before they walk away.
+		out = append(out, fmt.Sprintf("it never runs %s on its own — it opens each one and stops for you.", englishList(stops)))
+	}
+	switch {
+	case len(runs) == 0:
+		// nothing it may run unattended, so no promise about running one
+	case mode == domain.GateFull:
+		out = append(out, fmt.Sprintf("%s it on full runs %s without you — up to %d corrections%s.",
+			verb, englishList(runs), verdict.MaxRounds(domain.RoundKindCorrective), envelope))
+	default:
+		out = append(out, fmt.Sprintf("%s it on gates runs %s, crossing each design gate for you%s — but it still stops whenever the agent needs an answer.",
+			verb, englishList(runs), envelope))
+	}
+	return append(out, "it parks to the inbox if it can't finish, and it never lands on main.")
 }
 
 // autopilotAnswers reports whether mode answers a decision of kind on

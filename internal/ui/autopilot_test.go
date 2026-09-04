@@ -94,7 +94,12 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		t.Fatalf("test assumes the corrective cap is 5 (sourced from verdict.MaxRounds); it is now %d — update the test's expectation, not the source", wantCorrective)
 	}
 	for _, want := range []string{
-		"brainstorm, spec, plan, implement, review and verify",
+		// only the stages it actually runs. brainstorm and spec need a
+		// person, and autopilot crosses into one and hands the card back
+		// rather than running it, so naming them here was the switch
+		// promising work it never does (BG-099).
+		"plan, implement, review and verify",
+		"it never runs brainstorm and spec on its own",
 		"5 corrections",
 		"2400 credit envelope",
 		"parks to the inbox if it can't finish",
@@ -520,7 +525,10 @@ func TestAutopilotBodyDistinguishesGatesFromFull(t *testing.T) {
 		ID: "FD-051", Num: 51, Title: "rate limits", Slug: "rate-limits",
 		Stage: domain.StageTodo,
 	}
-	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec}}
+	// the tail has to hold a stage autopilot may actually run: the two
+	// modes differ in how they run one, so a card with nothing runnable
+	// ahead of it is the one case where neither promise is made.
+	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan}}
 
 	full := strings.Join(autopilotBody(f, plan, domain.GateFull), " ")
 	gates := strings.Join(autopilotBody(f, plan, domain.GateGates), " ")
