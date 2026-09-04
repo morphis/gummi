@@ -173,13 +173,24 @@ func autopilotStretches(f domain.Feature, events []state.CardEvent) []autopilotS
 			_ = json.Unmarshal([]byte(ev.Payload), &p)
 			how := stretchParked
 			verdict, ran := stageExitVerdict(events[:i], ev.Stage)
-			if landingGate(f, ev.Stage) && ran && verdict != state.StatusFail {
+			if landingGate(f, ev.Stage) && ran && verdict != state.StatusFail &&
+				p.Reason != state.ParkReasonGaveUp {
 				// It got the card as far as a card is allowed to go on its
-				// own. The verdict guard matters: autopilot parks at the
-				// landing gate whether verification passed or failed, and
-				// calling a failed verify "finished" would be the closing
-				// rule congratulating itself over a card that is worse off
-				// than when it started.
+				// own. Both guards matter, and they answer different
+				// questions: autopilot parks at the landing gate whether
+				// verification passed or failed, and calling a failed
+				// verify "finished" would be the closing rule
+				// congratulating itself over a card that is worse off than
+				// when it started.
+				//
+				// The verdict alone cannot carry that. A stage that could
+				// not reach a verdict at all — the environment could not
+				// run the checks, the loop hit its cap — exits with an
+				// empty one, which is not StatusFail and so reads here as
+				// success. The park's own reason is the field that says
+				// what happened: gave-up is by its own definition a stop at
+				// a decision only a person can take, which is the opposite
+				// of finishing.
 				how = stretchFinished
 			}
 			closeWith(i, ev.At, how, p.Detail)
