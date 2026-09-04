@@ -2557,8 +2557,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "d":
 		if r, ok := m.selected(); ok {
-			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": no diff — research cards carry no branch"}
+			if n := branchVerbRefusal(r, "diff"); n != nil {
+				m.notice = *n
 				return nil
 			}
 			m.clearTransientNotice()
@@ -2686,20 +2686,16 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "r":
 		if r, ok := m.selected(); ok {
-			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": no rebase — research cards carry no branch"}
+			if n := branchVerbRefusal(r, "rebase"); n != nil {
+				m.notice = *n
 				return nil
 			}
 			return m.rebaseFeature(r.F)
 		}
 	case "m":
 		if r, ok := m.selected(); ok {
-			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": no merge — research cards carry no branch"}
-				return nil
-			}
-			if !r.HasWorktree {
-				m.notice = noticeMsg{text: noWorktreeYet(r.F), isErr: true}
+			if n := branchVerbRefusal(r, "merge"); n != nil {
+				m.notice = *n
 				return nil
 			}
 			if r.Landed {
@@ -2716,12 +2712,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "z":
 		if r, ok := m.selected(); ok {
-			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": no squash — research cards carry no branch"}
-				return nil
-			}
-			if !r.HasWorktree {
-				m.notice = noticeMsg{text: noWorktreeYet(r.F), isErr: true}
+			if n := branchVerbRefusal(r, "squash"); n != nil {
+				m.notice = *n
 				return nil
 			}
 			if r.Landed {
@@ -2738,8 +2730,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "c":
 		if r, ok := m.selected(); ok {
-			if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) {
-				m.notice = noticeMsg{text: string(r.F.ID) + ": no cleanup — research cards carry no branch"}
+			if n := branchVerbRefusal(r, "cleanup"); n != nil {
+				m.notice = *n
 				return nil
 			}
 			if !r.Landed {

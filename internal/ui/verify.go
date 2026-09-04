@@ -15,6 +15,7 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/verifydoc"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // verifyResultMsg carries the outcome of a verify run.
@@ -104,6 +105,29 @@ func artifactNoun(k domain.Kind) string { return k.ArtifactNoun() }
 // the sentence stays true.
 func noWorktreeYet(f domain.Feature) string {
 	return string(f.ID) + " has no worktree yet (created when you approve the " + artifactNoun(f.Kind) + ")"
+}
+
+// branchVerbRefusal is the single answer to "why can this card not do
+// diff / rebase / merge / squash / cleanup", for the five board verbs
+// that all need a branch in a worktree. It returns nil when the verb may
+// proceed.
+//
+// The five used to share one guard — !workflow.NeedsWorktree — and one
+// sentence, "research cards carry no branch". But that predicate is
+// false for two unrelated reasons: a research card, which never has a
+// branch, and any other card still in the design phase, which does not
+// have one yet. So a feature card sitting at spec was told it was a
+// research card. The two causes now get the two different answers they
+// always had: the second one is the refusal the merge and squash cases
+// were already giving one line further down.
+func branchVerbRefusal(r featureRow, verb string) *noticeMsg {
+	if r.F.Kind == domain.KindResearch {
+		return &noticeMsg{text: string(r.F.ID) + ": no " + verb + " — research cards carry no branch"}
+	}
+	if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) || !r.HasWorktree {
+		return &noticeMsg{text: noWorktreeYet(r.F), isErr: true}
+	}
+	return nil
 }
 
 // verifyTimeout bounds a whole verify run so a hung repo command can't
