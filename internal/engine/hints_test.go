@@ -408,3 +408,26 @@ func TestResearchRolesAndShapeKickoff(t *testing.T) {
 		t.Errorf("shape kickoff = %q, want the shape opener", got)
 	}
 }
+
+// TestSpecHintTeachesBaselineOptOut: baseline: false is a domain.Check
+// field the rubric is the only place an agent could learn about. Without
+// the rule, a check aimed at a file the feature has yet to create fails
+// the approval-time baseline, is written off as pre-existing at Verify,
+// and gates nothing for the whole run — so both Spec flavors must teach
+// it, and must scope it to checks that cannot run on the branch as it
+// stands (or every check acquires the marker defensively).
+func TestSpecHintTeachesBaselineOptOut(t *testing.T) {
+	for _, quick := range []bool{false, true} {
+		h := unwrap(specHint(quick))
+		for _, want := range []string{
+			"set baseline: false on that entry",
+			"written off as pre-existing at Verify",
+			"target does not exist yet on the branch as it stands",
+			"a check that runs today needs no such marker",
+		} {
+			if !strings.Contains(h, want) {
+				t.Errorf("quick=%v: spec hint missing %q", quick, want)
+			}
+		}
+	}
+}

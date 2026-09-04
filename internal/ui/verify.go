@@ -292,27 +292,39 @@ func (d *docVerifyDialog) View(s *theme.Styles, w, h int) string {
 
 // baselineNotice summarizes a baseline run: quiet on all-green, loud on
 // a failing command — at approval the block is still the architect's to
-// fix, and a failure here is a bad command or pre-existing breakage,
-// never the feature's fault.
+// fix, and a failure here is a bad command, pre-existing breakage, or a
+// check aimed at something the feature has yet to build, never the
+// feature's fault.
 func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
 	for _, r := range results {
 		if r.OK {
 			continue
 		}
 		reason := fmt.Sprintf("FAILS on the fresh branch (exit %d) — pre-existing failure or wrong command", r.ExitCode)
+		fix := "fix the gummi-checks block or it reads FAIL (pre-existing) at verify"
 		switch r.Status {
 		case verify.StatusTimeout:
 			reason = "did not finish — timed out"
 		case verify.StatusNotRun:
 			reason = "could not run — check budget exhausted"
 		case verify.StatusFail:
-			if r.ExitCode == -1 {
+			switch r.ExitCode {
+			case -1:
 				reason = "could not run — malformed command"
+			case 127:
+				// The shell's command-not-found code, which a missing
+				// script file also returns. Either the command names a
+				// tool this environment lacks, or it names a file the
+				// feature has yet to create — the second is legitimate
+				// and has a marker, so name it rather than sending the
+				// architect off to fix a command that is already right.
+				reason = "could not run on the fresh branch (exit 127) — command or file not found"
+				fix = "if this feature creates that file, add 'baseline: false' to the check so it stays a live gate; otherwise fix the gummi-checks block or it reads FAIL (pre-existing) at verify"
 			}
 		}
 		return noticeMsg{isErr: true, text: fmt.Sprintf(
-			"%s: baseline — check '%s' %s; fix the gummi-checks block or it reads FAIL (pre-existing) at verify",
-			id, sanitize(r.Name), reason)}
+			"%s: baseline — check '%s' %s; %s",
+			id, sanitize(r.Name), reason, fix)}
 	}
 	return noticeMsg{text: fmt.Sprintf("%s: baseline — all %d repo check(s) pass on the fresh branch", id, len(results))}
 }

@@ -289,8 +289,11 @@ guessing.`))
 }
 
 // verificationPlanHint is the Verification plan rubric, shared by both
-// Spec stage flavors: what a live check must prove and how env-bound
-// steps are tagged.
+// Spec stage flavors: what a live check must prove, how env-bound steps
+// are tagged, and when a check must opt out of the approval-time
+// baseline. The baseline clause is the only place the agent learns the
+// field exists; without it every check a feature's own work makes
+// runnable is born failing and is written off as pre-existing.
 const verificationPlanHint = `the Verification plan (gummi discovers the
 repo's build/test/lint commands into a gummi-checks block there at
 approval; add the feature-specific live checks that prove this works —
@@ -301,7 +304,14 @@ an agent. Tag any step that needs environment the agent may lack with
 can never run locally — untagged steps are promises the verify agent
 will hold you to. Tags belong on prose live-check lines only — never
 inside the gummi-checks block, which must contain only runnable
-commands)`
+commands. gummi runs the block once on the fresh branch at approval to
+learn what was already broken, and a check failing there is written off
+as pre-existing at Verify — it gates nothing. So for any check whose
+target does not exist yet on the branch as it stands — a file this
+feature will create, a flag it will add — set baseline: false on that
+entry to keep it a live gate. Judge each command against the current
+branch, not the finished feature; a check that runs today needs no such
+marker)`
 
 // specHint is the Spec stage contract. The quick flavor is the whole
 // design phase in one conversation: no brainstorm preceded it and no
