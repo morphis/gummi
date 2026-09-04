@@ -169,7 +169,7 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	})
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
-		m.raiseAttention(id, attnGate, "verify passed — review & land on main")
+		m.raiseAttention(id, attnGate, verifyGateReason(id.Kind()))
 	case out.Reason == "verify-blocked":
 		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
@@ -366,4 +366,20 @@ func ordinal(n int) string {
 		}
 	}
 	return itoa(n) + suffix
+}
+
+// verifyGateReason is what a clean verify asks the reader to do, in the
+// words of the act itself.
+//
+// It is not only the inbox line: raiseAttention writes the reason into
+// the card's events as the park receipt, so it stays in the card's
+// history. A research card carries no branch and has nothing to land —
+// the picker's own row already says "mark done" — so a fixed "land on
+// main" left the card permanently recorded as having been asked to do
+// something it cannot.
+func verifyGateReason(k domain.Kind) string {
+	if k == domain.KindResearch {
+		return "verify passed — review & mark it done"
+	}
+	return "verify passed — review & land on main"
 }

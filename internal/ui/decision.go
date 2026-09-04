@@ -359,6 +359,14 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		return string(r.F.Stage) + " reached its envelope."
 	case decisionVerify:
 		if in.verdict == verdictPass {
+			// A research card has no branch, so there is nothing to land
+			// and the picker this heads says "mark done" — the question
+			// and its only answer have to be about the same act
+			// (reviewloop's own gate wording is the third place this
+			// decision shows up).
+			if r.F.Kind == domain.KindResearch {
+				return "verification passed — decide whether the research is done."
+			}
 			return "verification passed — decide whether this work is ready to land."
 		}
 		return "verification stopped here — choose what happens next."
