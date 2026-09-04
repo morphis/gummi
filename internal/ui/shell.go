@@ -654,7 +654,7 @@ func (m *Shell) reconstructInbox() {
 			// running/queued/interactive sessions raise their own items live
 			continue
 		case exhaustedActivity(snap.Activity):
-			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: string(snap.Feature.Stage) + " hit its budget — u top up or x park"})
+			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: budgetAttentionText(snap.Feature.Stage, false)})
 		default:
 			m.inbox.seed(attnItem{Feature: id, Kind: attnGate, Text: string(snap.Feature.Stage) + " finished — review & advance"})
 		}
@@ -1108,10 +1108,10 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// wrap-up exhaustion: the stage's work is committed, so this
 			// reads as ready-to-advance with top-up as the alternative —
 			// not lost work.
-			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" reached its budget with work committed — g advance, or u top up for more")
+			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, true))
 			m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
 		} else {
-			m.raiseAttention(ev.Feature, attnBudget, string(ev.Stage)+" hit its budget — u top up or x park")
+			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, false))
 			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
 		}
 	case engine.EventQuestion:
@@ -3453,6 +3453,25 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: envelope set to %d credits (applies from the next agent session)", id, to), reload: true}
 	}
+}
+
+// budgetAttentionText is the sentence a stage records when it runs out
+// of credits, in its two flavours: work committed and ready to advance,
+// or stopped with nothing banked.
+//
+// It names the surface to act on rather than the keys to press, because
+// it is written once and read twice — on the inbox row, where u and x
+// really do top up and park, and as the reason the card's own history
+// gives for the run stopping. The card page composer owns every
+// printable key (BG-078), so a bare letter offered there types itself
+// into the message box one line under the sentence offering it. The
+// card page's own next step already points at the inbox; this is the
+// line that used to disagree with it.
+func budgetAttentionText(stage domain.Stage, committed bool) string {
+	if committed {
+		return string(stage) + " reached its budget with work committed — advance it, or top it up from the inbox"
+	}
+	return string(stage) + " hit its budget — top it up or park it from the inbox"
 }
 
 // setGateApproval persists a card's gate-approval mode — the write half
