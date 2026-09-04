@@ -64,6 +64,13 @@ type autopilotPlan struct {
 	bucket    string         // "todo" | "gate" | "running" — drives the confirm label and the body
 	to        domain.Stage   // the stage a non-off mode enters now; "" when bucket == "running"
 	remaining []domain.Stage // to and everything after it, short of done
+	// working is whether something is driving the card at this moment, as
+	// opposed to a session merely existing for it. The "running" bucket
+	// is the switch's catch-all — a card actually running, one whose run
+	// is paused, one parked at a gate autopilot may not cross — and only
+	// the first of those is underway. Saying so of the others put the
+	// dialog's own header at odds with the card page underneath it.
+	working bool
 }
 
 // confirmLabel words the confirm button to what pressing it actually
@@ -197,7 +204,29 @@ func (m *Shell) planAutopilot(f domain.Feature) autopilotPlan {
 	if to, ok := autopilotHandoverEdge(f); ok && m.atGate(f.ID) {
 		return autopilotPlan{bucket: "gate", to: to, remaining: remainingStages(f, to)}
 	}
-	return autopilotPlan{bucket: "running"}
+	return autopilotPlan{bucket: "running", working: m.sessionWorking(f.ID)}
+}
+
+// sessionWorking reports whether something is driving the card at this
+// moment. It is the question "is there a session for this card" is
+// repeatedly mistaken for, and the two are not the same: the engine
+// keeps a session after its run ends, a restart restores one for a card
+// that has been waiting for hours, and both answer yes to the lookup
+// while nothing at all is happening.
+//
+// Busy() is asked as well as the scheduling state, matching cardBusy
+// (board.go): an interactive session mid-reply is working just as much
+// as an autonomous one, and a card's row, its thread and this switch
+// must not disagree about whether it is.
+func (m *Shell) sessionWorking(id domain.FeatureID) bool {
+	s := m.sessionFor(id)
+	if s == nil {
+		return false
+	}
+	if st := s.State(); st == engine.StateRunning || st == engine.StateQueued {
+		return true
+	}
+	return s.Snapshot().Busy
 }
 
 // atGate reports whether the card is sitting at a decision a person would
@@ -260,7 +289,10 @@ func autopilotHeader(f domain.Feature, plan autopilotPlan) string {
 	case "gate":
 		return "this card is parked at " + string(f.Stage)
 	default:
-		return string(f.ID) + " is already underway"
+		if plan.working {
+			return string(f.ID) + " is already underway"
+		}
+		return "nothing is running on " + string(f.ID)
 	}
 }
 
@@ -283,10 +315,11 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 		verb = "crossing"
 	}
 	if plan.bucket != "todo" && plan.bucket != "gate" {
-		return []string{
-			fmt.Sprintf("setting %s doesn't change what %s is doing right now — only how its next gate is handled.", mode, f.ID),
-			"it parks to the inbox if it can't finish, and it never lands on main.",
+		lead := fmt.Sprintf("setting %s starts nothing — it decides how %s's next gate is handled.", mode, f.ID)
+		if plan.working {
+			lead = fmt.Sprintf("setting %s doesn't change what %s is doing right now — only how its next gate is handled.", mode, f.ID)
 		}
+		return []string{lead, "it parks to the inbox if it can't finish, and it never lands on main."}
 	}
 
 	// The two modes promise different things, so they must not share a
@@ -548,17 +581,22 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 		//
 		// A takeover needs something to have actually happened. plan.to
 		// names a card the switch moves — a todo card started, a parked
-		// gate crossed — and a live session names one already working that
-		// autopilot now owns the gates of, which is the shape of setting a
-		// running card to full and going to bed. Neither holds for a card
-		// merely sitting at a gate autopilot may not cross on its own, and
-		// that is right: the mode changed, nothing was handed over, and
-		// claiming a period there would put a stretch around a card that
-		// sat still.
+		// gate crossed — and a working session names one already running
+		// that autopilot now owns the gates of, which is the shape of
+		// setting a running card to full and going to bed. Neither holds
+		// for a card merely sitting at a gate autopilot may not cross on
+		// its own, and that is right: the mode changed, nothing was handed
+		// over, and claiming a period there would put a stretch around a
+		// card that sat still.
+		//
+		// "working" and "has a session" are different questions, and
+		// asking the second one here was how a paused card gained a
+		// period: nothing ran, so nothing ever closed it, and the thread
+		// drew a run that opened and was immediately reported lost.
 		switch {
 		case mode == domain.GateOff:
 			m.logAutopilot(f.ID, state.AutopilotHandedBack, "you turned autopilot off", mode)
-		case plan.to != "" || m.sessionFor(f.ID) != nil:
+		case plan.to != "" || m.sessionWorking(f.ID):
 			m.logAutopilot(f.ID, state.AutopilotTookOver, "you handed it to autopilot", mode)
 		}
 		if mode == domain.GateOff || plan.to == "" {
