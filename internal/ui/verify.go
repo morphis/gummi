@@ -90,6 +90,22 @@ func (m *Shell) runChecks(f domain.Feature) tea.Cmd {
 // agent, and the two must agree.
 func artifactNoun(k domain.Kind) string { return k.ArtifactNoun() }
 
+// noWorktreeYet is the refusal a surface gives when it needs a worktree
+// the card has not got. It exists so the sentence names a gate the card
+// will actually cross: the worktree appears when the design phase is
+// approved, and what you approve there is the card's own artifact — a
+// feature's spec, a bug's report. The five copies of this line all said
+// "created at spec approval", which is a stage a bug card's route
+// (triage → diagnose → fix) does not contain, so it sent that reader
+// looking for something that was never coming.
+//
+// Naming the artifact rather than the stage also survives the skip
+// flags: a bug with diagnose skipped approves its report at triage, and
+// the sentence stays true.
+func noWorktreeYet(f domain.Feature) string {
+	return string(f.ID) + " has no worktree yet (created when you approve the " + artifactNoun(f.Kind) + ")"
+}
+
 // verifyTimeout bounds a whole verify run so a hung repo command can't
 // wedge the run goroutine forever.
 const verifyTimeout = 10 * time.Minute

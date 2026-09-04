@@ -737,7 +737,7 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		} else if !ok {
-			return noticeMsg{text: string(f.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+			return noticeMsg{text: noWorktreeYet(f), isErr: true}
 		}
 		// a rebase stranded mid-flight (a crash, a killed agent session)
 		// blocks any new rebase and reads as dirty; abort it first so r

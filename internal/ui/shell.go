@@ -2699,7 +2699,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if !r.HasWorktree {
-				m.notice = noticeMsg{text: string(r.F.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+				m.notice = noticeMsg{text: noWorktreeYet(r.F), isErr: true}
 				return nil
 			}
 			if r.Landed {
@@ -2721,7 +2721,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if !r.HasWorktree {
-				m.notice = noticeMsg{text: string(r.F.ID) + " has no worktree yet (created at spec approval)", isErr: true}
+				m.notice = noticeMsg{text: noWorktreeYet(r.F), isErr: true}
 				return nil
 			}
 			if r.Landed {

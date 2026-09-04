@@ -23,7 +23,7 @@ func (m *Shell) resolveAttach(f domain.Feature) (argv []string, dir string, prob
 	if ok, err := m.wt.Exists(ctx, &f); err != nil {
 		return nil, "", err.Error()
 	} else if !ok {
-		return nil, "", string(f.ID) + " has no worktree yet (created at spec approval)"
+		return nil, "", noWorktreeYet(f)
 	}
 	cmdline := strings.TrimSpace(os.Getenv("GUMMI_ATTACH_CMD"))
 	if cmdline == "" {

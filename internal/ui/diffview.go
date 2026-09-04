@@ -2,7 +2,7 @@ package ui
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -48,7 +48,7 @@ func (m *Shell) openDiff(f domain.Feature) tea.Cmd {
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
 			return diffLoadedMsg{err: err}
 		} else if !ok {
-			return diffLoadedMsg{err: fmt.Errorf("%s has no worktree yet (created at spec approval)", f.ID)}
+			return diffLoadedMsg{err: errors.New(noWorktreeYet(f))}
 		}
 		diff, err := m.wt.Diff(ctx, &f)
 		if err != nil {
