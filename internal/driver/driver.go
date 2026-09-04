@@ -172,13 +172,23 @@ func (d *Driver) Create(ctx context.Context, kind domain.Kind, desc string) (dom
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	route := "quick"
-	if d.opts.Full {
-		route = "full"
+	// the route the card was actually created with, not the flag the
+	// caller passed: research forces the full flags a dozen lines up
+	// regardless of --full, and reporting the caller's flag announced
+	// "quick" for a kind that has no quick one-pass route.
+	route := "full"
+	if skip.Quick {
+		route = "quick"
+	}
+	// a branch only where one will exist: a research card is
+	// worktree-less at every stage and never gets one.
+	branch := ""
+	if workflow.NeedsWorktree(kind, workflow.WorkStage(kind)) {
+		branch = f.BranchName()
 	}
 	d.out.emit(createdEvent{
 		Event: "created", ID: string(f.ID), Ref: d.opts.Ref,
-		Branch: f.BranchName(), Route: route, Envelope: d.opts.Envelope,
+		Branch: branch, Route: route, Envelope: d.opts.Envelope,
 	})
 	return f, nil
 }

@@ -42,10 +42,14 @@ func (e *emitter) emit(v any) {
 // wire so the default stream stays terse.
 
 type createdEvent struct {
-	Event    string `json:"event"`
-	ID       string `json:"id"`
-	Ref      string `json:"ref,omitempty"`
-	Branch   string `json:"branch"`
+	Event string `json:"event"`
+	ID    string `json:"id"`
+	Ref   string `json:"ref,omitempty"`
+	// omitempty because a research card never gets a branch: every
+	// research stage is worktree-less (workflow.NeedsWorktree), so a
+	// name here would be one nothing will ever create, and a caller
+	// could act on it.
+	Branch   string `json:"branch,omitempty"`
 	Route    string `json:"route"`
 	Envelope int    `json:"envelope"`
 }
