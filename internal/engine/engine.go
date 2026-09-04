@@ -2111,10 +2111,17 @@ func (e *Engine) checkpoint(s *Session) error {
 		return nil // design-phase chats run in the main checkout; never auto-commit there
 	}
 	// Research stages are worktree-less by design (workflow.NeedsWorktree),
-	// not merely worktree-less because one went missing — CommitAll's
-	// ErrNoWorktree there is the expected, permanently-benign case, never
-	// the total-loss one this function otherwise treats as fatal.
-	needsWT := workflow.NeedsWorktree(s.Feature.Kind, s.Feature.Stage)
+	// not merely worktree-less because one went missing. There is nothing
+	// on disk to commit and there never will be, so the whole function is
+	// a no-op here — and, the reason this is a return rather than a
+	// swallow of CommitAll's ErrNoWorktree below, there is nothing to
+	// report either. That swallow still wrote the failure into the
+	// session's activity, so every autonomous research stage told the
+	// reader its checkpoint had failed, for a condition the design
+	// guarantees and no reader can act on.
+	if !workflow.NeedsWorktree(s.Feature.Kind, s.Feature.Stage) {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
@@ -2128,11 +2135,12 @@ func (e *Engine) checkpoint(s *Session) error {
 		s.appendActivity("checkpoint commit failed: " + err.Error())
 		if !errors.Is(err, worktree.ErrNoWorktree) {
 			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventCheckpointFailed, Err: err})
+			return nil
 		}
-		if needsWT && errors.Is(err, worktree.ErrNoWorktree) {
-			return err
-		}
-		return nil
+		// past the guard above this stage needs a worktree, so a missing
+		// one is the total-loss case: report it back rather than letting
+		// the run read as a clean finish.
+		return err
 	}
 	if committed {
 		s.appendActivity("worktree committed: " + msg)
