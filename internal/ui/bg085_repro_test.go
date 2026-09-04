@@ -45,7 +45,7 @@ func TestBG085PeriodClosesWhenAutopilotHandsOver(t *testing.T) {
 
 	// live: the TUI that ran the stage is still up and still holds the
 	// card's live file, which is the case the defect lived in.
-	st := onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(f, events), events), true))
+	st := onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(f, events), events), events, true))
 	if st.running() {
 		t.Fatal("the period is still open while the card waits at an interactive stage")
 	}
@@ -87,7 +87,7 @@ func TestBG085AutonomousStageKeepsThePeriodOpen(t *testing.T) {
 
 	// and with the driver gone, that same period still reads as orphaned,
 	// so BG-059's judgement is not shadowed by this one
-	st = onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(f, events), events), false))
+	st = onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(f, events), events), events, false))
 	if st.closed != stretchOrphaned {
 		t.Errorf("closed = %q, want %q for a dead driver mid-route", st.closed, stretchOrphaned)
 	}

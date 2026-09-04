@@ -254,13 +254,24 @@ func autopilotStretches(f domain.Feature, events []state.CardEvent) []autopilotS
 // inputs, the same way the rest of this file is: a query-time judgement
 // applied on top of the log-derived stretches, never folded into their
 // derivation.
-func closeOrphaned(stretches []autopilotStretch, live bool) []autopilotStretch {
+func closeOrphaned(stretches []autopilotStretch, events []state.CardEvent, live bool) []autopilotStretch {
 	if live || len(stretches) == 0 {
 		return stretches
 	}
 	last := &stretches[len(stretches)-1]
-	if last.running() {
-		last.closed = stretchOrphaned
+	if !last.running() {
+		return stretches
+	}
+	last.closed = stretchOrphaned
+	// Dated from the last thing the run managed to write. The stop
+	// itself was never recorded — that is what this closing means — so
+	// there is no exact moment to read, and an undated rule was the
+	// wrong answer to that: this is the one closing whose rule is the
+	// only record the run ended at all, which makes "when" the thing the
+	// reader most needs from it. closeHandedOver makes the same
+	// approximation from the crossing that brought the card to rest.
+	if len(events) > 0 {
+		last.closedAt = events[len(events)-1].At
 	}
 	return stretches
 }
@@ -318,7 +329,7 @@ func closeHandedOver(f domain.Feature, stretches []autopilotStretch, events []st
 // log can never say this by itself (BG-059).
 func liveStretches(f domain.Feature, events []state.CardEvent, ws state.Workspace) []autopilotStretch {
 	sts := closeHandedOver(f, autopilotStretches(f, events), events)
-	return closeOrphaned(sts, state.CardIsLive(ws, f.ID))
+	return closeOrphaned(sts, events, state.CardIsLive(ws, f.ID))
 }
 
 // askedBy names who answered an ask. By is what the caller stated

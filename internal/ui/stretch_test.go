@@ -257,7 +257,7 @@ func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
 		evTookOver(domain.GateGates, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), false))
+	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), events, false))
 	if st.running() {
 		t.Fatalf("closed = %q, want orphaned — nothing is driving this card", st.closed)
 	}
@@ -272,7 +272,7 @@ func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
 // liveness check found alive.
 func TestCloseOrphanedLeavesALiveOneRunning(t *testing.T) {
 	events := []state.CardEvent{evTookOver(domain.GateGates, at(0))}
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), true))
+	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), events, true))
 	if !st.running() {
 		t.Fatal("closeOrphaned closed a period a live session is still driving")
 	}
@@ -287,7 +287,7 @@ func TestCloseOrphanedLeavesAnAlreadyClosedPeriodAlone(t *testing.T) {
 		evTookOver(domain.GateGates, at(0)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 	}
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), false))
+	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), events, false))
 	if st.closed != stretchParked {
 		t.Fatalf("closed = %q, want %q — closeOrphaned must not touch a period the log already closed", st.closed, stretchParked)
 	}
