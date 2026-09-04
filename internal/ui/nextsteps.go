@@ -37,6 +37,10 @@ type nextInput struct {
 	kind   domain.Kind
 	landed bool
 	quick  bool // the quick route: one-pass spec, approval goes straight to implement
+	// hasWorktree is whether the card's worktree exists on disk right
+	// now — the same question cardactions' own attach row asks, and the
+	// only thing that makes attaching a raw agent CLI possible.
+	hasWorktree bool
 
 	sess   engine.SessionState // "" when the feature has no live session
 	live   bool                // sess.Live(): a backend is genuinely attached, not just persisted as interactive
@@ -94,6 +98,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		stage:            r.F.Stage,
 		kind:             r.F.Kind,
 		landed:           r.Landed,
+		hasWorktree:      r.HasWorktree,
 		quick:            r.F.Skip.Quick,
 		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),
 		verifyBounces:    verifyBounces(r.History, r.F.Kind),
@@ -243,6 +248,23 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 	return append(acts, nextStep("prpull", "", "pull PR review", "read the PR's review comments back onto the diff"))
 }
 
+// withAttach offers the raw agent CLI alongside lead, but only on a card
+// that has a worktree to attach into.
+//
+// The action inventory (cardactions.go) has always asked exactly this,
+// gating its own attach row on HasWorktree. The two arms below — a
+// paused run and a failed one — did not, so the picker recommended
+// attaching on cards where the attach could only print a refusal. On a
+// research card that is not a "not yet" either: research runs in the
+// main checkout and never gets a worktree, so attach was one of only two
+// offered ways forward and neither of them was one.
+func withAttach(in nextInput, lead nextAction, why string) []nextAction {
+	if !in.hasWorktree {
+		return []nextAction{lead}
+	}
+	return []nextAction{lead, nextStep("attach", "a", "attach the agent CLI", why)}
+}
+
 // stageActions is nextActions' own stage-by-stage derivation, factored out
 // so the PR-pull nudge above can post-process its result uniformly instead
 // of being threaded into every one of its early returns.
@@ -270,19 +292,17 @@ func stageActions(in nextInput) []nextAction {
 		}
 		return nil
 	case engine.StatePaused:
-		return []nextAction{
+		return withAttach(in,
 			nextStep("run", "enter", "re-run "+string(in.stage), "the run is paused — a fresh run picks the stage back up"),
-			nextStep("attach", "a", "attach the agent CLI", "work in the worktree by hand instead"),
-		}
+			"work in the worktree by hand instead")
 	}
 
 	// failures, budget stops, and questions override stage guidance.
 	switch in.attn {
 	case attnFailure:
-		return []nextAction{
+		return withAttach(in,
 			nextStep("run", "enter", "re-run "+string(in.stage), "the session errored — a fresh run retries the stage"),
-			nextStep("attach", "a", "attach the agent CLI", "debug it by hand in the worktree"),
-		}
+			"debug it by hand in the worktree")
 	case attnBudget:
 		return []nextAction{nextStep("inbox", "i", "open the inbox", "the stage hit its budget — top up (u) or park (x) from there")}
 	case attnQuestion:

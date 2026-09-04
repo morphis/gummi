@@ -241,14 +241,16 @@ func (m *Shell) boardBindings() []binding {
 		return filtered
 	}
 	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch {
-		// research cards carry no branch: the four worktree-verb keys
-		// refuse with a notice (shell.go), so surfacing them here — in
-		// both the status bar and the ? help overlay, the single slice
-		// both render from — would mislead.
+		// research cards carry no branch and never get a worktree: every
+		// key below refuses with a notice (shell.go), so surfacing them
+		// here — in both the status bar and the ? help overlay, the
+		// single slice both render from — would mislead. "a" belongs in
+		// this list for the same reason as the branch verbs and was
+		// missed: raw-attach needs a worktree to attach into.
 		filtered := bs[:0:0]
 		for _, b := range bs {
 			switch b.key {
-			case "d", "r", "m", "c", "z":
+			case "a", "d", "r", "m", "c", "z":
 				continue
 			}
 			filtered = append(filtered, b)

@@ -2566,6 +2566,13 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "a":
 		if r, ok := m.selected(); ok {
+			// attach needs a worktree to attach into, so it takes the same
+			// refusal as the branch verbs rather than reaching resolveAttach
+			// and coming back with a worse one.
+			if n := branchVerbRefusal(r, "attach"); n != nil {
+				m.notice = *n
+				return nil
+			}
 			return m.attachRaw(r.F)
 		}
 	case "A":

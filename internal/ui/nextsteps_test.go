@@ -34,8 +34,12 @@ func TestNextActionsByState(t *testing.T) {
 		{"queued run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateQueued}, ""},
 		{"busy run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, busy: true}, ""},
 		{"blocking ask interrupts the run", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, hasAsk: true}, "enter p"},
-		{"paused offers a re-run", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused}, "enter a"},
-		{"failure offers retry and CLI", nextInput{stage: domain.StageReview, kind: feat, attn: attnFailure}, "enter a"},
+		// hasWorktree: a feature card at review/verify always has one, and
+		// the CLI row is offered only where there is something to attach
+		// into (BG-089).
+		{"paused offers a re-run", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter a"},
+		{"failure offers retry and CLI", nextInput{stage: domain.StageReview, kind: feat, attn: attnFailure, hasWorktree: true}, "enter a"},
+		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StageSpec, kind: feat, sess: engine.StatePaused}, "enter"},
 		{"budget stop routes to the inbox", nextInput{stage: domain.StageImplement, kind: feat, attn: attnBudget}, "i"},
 		{"question routes to attach", nextInput{stage: domain.StageSpec, kind: feat, attn: attnQuestion}, "enter"},
 		{"todo starts the flow", nextInput{stage: domain.StageTodo, kind: feat}, "g"},
