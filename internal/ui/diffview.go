@@ -9,6 +9,7 @@ import (
 
 	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 // diffView is the diff surface: a feature's worktree diff, colorized and
@@ -248,16 +249,18 @@ func (m *Shell) deleteDiffAnnotation() tea.Cmd {
 	}
 }
 
-// bindings is the diff surface's key table (see keymap.go). One table,
-// because there is one mode: every verb is live whenever the surface is.
+// bindings is the diff surface's key table (see keymap.go). Near enough to
+// one table: the surface has one mode, so every verb it lists is live
+// whenever the surface is — which is exactly why the one verb that can
+// stop being live, the gate crossing, is added by withGateKey rather
+// than sitting here.
 func (dv *diffView) bindings() []binding {
-	return []binding{
+	bs := []binding{
 		// bar order is shedding order, for the reason specView.bindings
 		// spells out: what to do about the diff leads, the way out is
 		// last, and the line-level annotation keys sit between them.
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
 		{key: "R", label: "request changes", help: "send the open comments to the implementer", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "toggle the annotation resolved", bar: true},
@@ -266,6 +269,26 @@ func (dv *diffView) bindings() []binding {
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 	}
+	return withGateKey(dv.f, bs)
+}
+
+// withGateKey puts the gate crossing back at the head of a document or
+// diff surface's key table — unless the card has nowhere left to go.
+//
+// Both tables carried "g approve" unconditionally, each under a comment
+// saying there is one mode and every verb is live whenever the surface
+// is. That is not true at the end of the workflow: done is terminal, the
+// board's own g refuses with "nothing to advance", and the bar and the
+// help overlay went on offering the crossing anyway.
+//
+// It is inserted rather than filtered so the shedding order both tables
+// document survives: g leads when it exists, and the way out stays last.
+func withGateKey(f domain.Feature, bs []binding) []binding {
+	if workflow.Terminal(f.Kind, f.Stage) {
+		return bs
+	}
+	g := binding{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true}
+	return append(bs[:2:2], append([]binding{g}, bs[2:]...)...)
 }
 
 // handleDiffKey processes keys while the diff surface is open.

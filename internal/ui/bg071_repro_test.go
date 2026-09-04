@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -21,9 +22,13 @@ import (
 // document with comment/resolve/markers and no visible way to approve
 // it, send it back, or leave.
 func TestBG071ReviewSurfacesKeepTheWayOutAndTheGate(t *testing.T) {
+	// a real card at a stage it can still cross: the gate row this test
+	// is about only exists on one (BG-091), and a zero-value feature is
+	// at no stage of no kind.
+	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageSpec}
 	surfaces := map[string][]binding{
-		"spec": (&specView{}).bindings(),
-		"diff": (&diffView{}).bindings(),
+		"spec": (&specView{f: f}).bindings(),
+		"diff": (&diffView{f: f}).bindings(),
 	}
 	for name, bs := range surfaces {
 		hints := barHints(bs)

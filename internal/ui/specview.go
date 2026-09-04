@@ -195,8 +195,11 @@ func (sv *specView) threadAtCursor() *spec.Thread {
 	return nil
 }
 
-// bindings is the spec surface's key table (see keymap.go). One table,
-// because there is one mode: every verb is live whenever the surface is.
+// bindings is the spec surface's key table (see keymap.go). Near enough to
+// one table: the surface has one mode, so every verb it lists is live
+// whenever the surface is — which is exactly why the one verb that can
+// stop being live, the gate crossing, is added by withGateKey rather
+// than sitting here.
 func (sv *specView) bindings() []binding {
 	// Bar order is shedding order: the status bar drops hints from the
 	// second-to-last backwards and never the last, so the two rows that
@@ -206,10 +209,9 @@ func (sv *specView) bindings() []binding {
 	// what the surface is obviously for; approving it, sending it back
 	// and leaving are the rows a reader would otherwise have to go
 	// looking for.
-	return []binding{
+	bs := []binding{
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-		{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true},
 		{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
 		{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
@@ -218,6 +220,7 @@ func (sv *specView) bindings() []binding {
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
 	}
+	return withGateKey(sv.f, bs)
 }
 
 // handleSpecKey processes keys while the spec surface is open.
