@@ -1114,9 +1114,15 @@ type (
 )
 
 // stageSegment is one generation of a stage session, reconstructed from
-// its stage_enter/stage_exit event pair. An unclosed segment (exited ==
-// false) has no stage_exit yet — that is always the last segment in the
-// slice, and it is the live stage, never folded.
+// its stage_enter/stage_exit event pair — or, for a stage that never
+// opened a session at all, from the first event recorded at it.
+//
+// An unclosed segment (exited == false) has no stage_exit yet. That is
+// usually the last segment in the slice, the live stage; it is not a
+// rule. The interactive stages never earn a stage_exit on an ordinary
+// approval, and a stage whose session was refused never earns one
+// either, so an unclosed segment can be folded like any other —
+// foldedReceiptLine dates those from when they opened.
 type stageSegment struct {
 	stage   domain.Stage
 	role    string
@@ -1141,10 +1147,22 @@ type stageSegment struct {
 // stageSegments reconstructs a card's session history from its event
 // log, in seq order: each stage_enter opens a segment, the matching
 // stage_exit (same stage, still open) closes it, and every other event
-// in between belongs to whichever segment is currently open. Nil input
-// (events not loaded yet, or none recorded) yields no segments — the
-// caller degrades to omitting the folded receipts and the live-stage
-// fallback, exactly as required.
+// belongs to the open segment for its own stage. Nil input (events not
+// loaded yet, or none recorded) yields no segments — the caller degrades
+// to omitting the folded receipts and the live-stage fallback, exactly
+// as required.
+//
+// "for its own stage" is the part that is easy to lose. Every event
+// carries the stage it happened at, and most of the time that is the
+// stage whose session is open, so appending to the newest segment and
+// never looking is right — until a stage never opens a session at all.
+// A stage the agent was refused entry to (the backend cannot run it)
+// writes its park receipt and nothing else: no stage_enter, so no
+// segment, so the receipt landed under the previous stage's heading,
+// naming that stage's role and model as the ones that failed. It looked
+// right while the failed session was still in memory, because the card
+// page renders a live block for that instead, and then moved on the next
+// restart. A stage with something to say opens a segment for it.
 func stageSegments(events []state.CardEvent) []stageSegment {
 	var segs []stageSegment
 	for i, ev := range events {
@@ -1168,7 +1186,19 @@ func stageSegments(events []state.CardEvent) []stageSegment {
 			last.exited, last.verdict, last.credits, last.exitAt = true, p.Verdict, p.Credits, ev.At
 		default:
 			if len(segs) == 0 {
+				// nothing has started yet: the todo→first-stage crossing
+				// is recorded before any session exists and has no block
+				// of its own to sit in.
 				continue
+			}
+			if ev.Stage != "" && segs[len(segs)-1].stage != ev.Stage {
+				// a stage that never opened a session — see the doc
+				// comment. enterAt/enterIdx come from the event itself,
+				// which is the only moment this stage is known to have
+				// been reached; role and model stay empty because no
+				// session was ever chosen for it, and foldedReceiptLine
+				// already renders a segment that has neither.
+				segs = append(segs, stageSegment{stage: ev.Stage, enterAt: ev.At, enterIdx: i})
 			}
 			last := &segs[len(segs)-1]
 			last.events = append(last.events, ev)
@@ -1556,7 +1586,16 @@ func boundaryRule(s *theme.Styles, stage, role, model string, at time.Time, w in
 	if model != "" {
 		label += " · " + model
 	}
-	label += " · fresh context"
+	// "fresh context" is a fact about a session: every stage session
+	// starts one, since the artifact rather than a transcript carries
+	// context between stages, which is why it is otherwise
+	// unconditional. A block for a stage that never opened a session at
+	// all (BG-093) has no role and no model because none was ever
+	// chosen, and claiming a fresh context for it would describe
+	// something that did not happen.
+	if role != "" || model != "" {
+		label += " · fresh context"
+	}
 	ts := ""
 	if !at.IsZero() {
 		ts = at.Format("15:04")
