@@ -3466,11 +3466,13 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		label := "attended — caller approves each design gate"
-		if mode == domain.GateGates {
-			label = "unattended — design gates auto-approve"
-		}
-		return noticeMsg{text: fmt.Sprintf("%s: gate approval now %s", id, label), reload: true}
+		// Named from the same table the dialog offered the stops in, so
+		// the confirmation reads back in the words the choice was made
+		// in. The wording this replaces knew only the two states the
+		// switch had before it grew a third, and folded off and full —
+		// the two furthest apart — into one sentence that described off.
+		stop := autopilotStops[autopilotCursorFor(mode)]
+		return noticeMsg{text: fmt.Sprintf("%s: autopilot %s — %s", id, stop.label, stop.why), reload: true}
 	}
 }
 

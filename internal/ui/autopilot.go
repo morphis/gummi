@@ -562,7 +562,7 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 			m.logAutopilot(f.ID, state.AutopilotTookOver, "you handed it to autopilot", mode)
 		}
 		if mode == domain.GateOff || plan.to == "" {
-			// nothing to start: the plain "gate approval now …" notice
+			// nothing to start: the plain "autopilot <stop>" notice
 			// already says the whole of what changed.
 			return msg
 		}
