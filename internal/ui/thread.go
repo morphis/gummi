@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -309,31 +310,63 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 			counts[seg.stage]++
 		}
 		for i, seg := range folded {
+			// A period already running when this stage began brackets the
+			// whole of it, so its rule is the one thing that belongs above
+			// the receipt. Everything else that fell in this segment
+			// happened after the stage started, and goes below in the order
+			// the log recorded it.
 			for _, st := range stretches {
-				if openSeg(st) == i {
+				if openSeg(st) == i && st.from < seg.enterIdx {
 					markAnchor(st)
 					add(stretchOpenLine(s, st, inner))
 				}
 			}
 			add(foldedReceiptLine(s, seg, spend, counts[seg.stage], inner))
-			// The decisions autopilot made inside this stage, pulled back
-			// out of the fold and printed under the receipt they came from
-			// (stretch.go's stretchDecisionLine). They print after it, even
-			// though their stamps can precede its close: the group reads as
-			// "this stage, and what it decided inside it", where printing
-			// them first would put a stage's decisions above the line that
-			// names the stage they happened in.
-			for k, ev := range seg.events {
-				_, in := stretchAt(stretches, seg.evIdx[k])
-				if l := stretchDecisionLine(s, ev, in, inner-2); l != "" {
-					add("  " + l)
+			// The rest of the segment, sorted by the event that produced
+			// it. Drawing all the openings first and all the closings last
+			// was what let a card handed to autopilot twice read as one
+			// period nested inside another, with its timestamps running
+			// backwards: the moment one run ends and the next begins is a
+			// single fold apart, so the close and the open that follows it
+			// land in the same segment, and grouping by kind put them on
+			// the page in the opposite order to the log.
+			//
+			// The decisions autopilot made inside the stage are pulled back
+			// out of the fold and printed here too (stretch.go's
+			// stretchDecisionLine) — under the receipt they came from, so
+			// the group reads as "this stage, and what it decided inside
+			// it", but among the rules rather than always before them: a
+			// crossing made after a handover belongs under the rule saying
+			// the card changed hands, not above it.
+			var inside []segItem
+			for _, st := range stretches {
+				if openSeg(st) == i && st.from >= seg.enterIdx {
+					inside = append(inside, segItem{at: st.from, open: st, isOpen: true})
 				}
 			}
 			for _, st := range stretches {
 				if !st.running() && closeSeg(st) == i {
-					for _, l := range stretchCloseLines(s, st, inner) {
-						add(l)
-					}
+					inside = append(inside, segItem{at: st.to, lines: stretchCloseLines(s, st, inner)})
+				}
+			}
+			for k, ev := range seg.events {
+				_, in := stretchAt(stretches, seg.evIdx[k])
+				if l := stretchDecisionLine(s, ev, in, inner-2); l != "" {
+					inside = append(inside, segItem{at: seg.evIdx[k], lines: []string{"  " + l}})
+				}
+			}
+			// stable, so an event that both closes a period and is itself
+			// a decision keeps the closing rule above its own line — the
+			// order the live stage block draws that pair in.
+			slices.SortStableFunc(inside, func(a, b segItem) int { return a.at - b.at })
+			for _, it := range inside {
+				if it.isOpen {
+					markAnchor(it.open)
+					add(stretchOpenLine(s, it.open, inner))
+					continue
+				}
+				for _, l := range it.lines {
+					add(l)
 				}
 			}
 		}
@@ -1935,4 +1968,16 @@ func messageAuthorLabel(author, role string) string {
 		}
 		return author
 	}
+}
+
+// segItem is one thing drawn under a folded stage's receipt, tagged with
+// the event index that produced it so the whole group can be put back
+// into log order. A period's opening rule carries the period itself
+// rather than pre-rendered lines, because drawing it is also what sets
+// the unread anchor and that has to happen at the position it lands in.
+type segItem struct {
+	at     int
+	lines  []string
+	open   autopilotStretch
+	isOpen bool
 }
