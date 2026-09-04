@@ -1191,9 +1191,15 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// silently downgrade the read-only guarantee to the tripwire alone.
 	readOnly := researchReadOnly(f)
 	if readOnly && !ag.Capabilities().ReadOnlyEnforce {
+		// ag.Name(), not the resolved backend name: an empty name is
+		// resolveRole's documented fallback to the engine's default
+		// backend — the normal path on a workspace with no profiles.yaml,
+		// not an edge — and `backend ""` names nothing the reader could
+		// go and change. The nil-agent guard above makes the same
+		// distinction for the same reason.
 		return nil, "", nil, fmt.Errorf("backend %q cannot enforce a read-only research session "+
 			"(feature %s stage %s); point this role at `claude` or `opencode`, or accept that "+
-			"autonomous research cannot run on that backend", backend, f.ID, f.Stage)
+			"autonomous research cannot run on that backend", ag.Name(), f.ID, f.Stage)
 	}
 	hints := stageHints(f, specPath, flavor)
 	if card := e.environmentCard(); card != "" {
