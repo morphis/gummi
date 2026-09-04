@@ -284,6 +284,19 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 			liveOpens = append(liveOpens, st)
 		}
 	}
+	// The same partition for the rules that close a period. The folded
+	// loop closes the ones whose ending fell in a stage it draws; these
+	// ended in the stage still on screen, and only the live block can
+	// place them. The log branch below finds them again by event index
+	// and draws them exactly where they happened — this slice is what
+	// the two branches that render from a session snapshot instead have,
+	// since a snapshot carries no event indices to place a rule against.
+	var liveCloses []autopilotStretch
+	for _, st := range stretches {
+		if live >= 0 && !st.running() && closeSeg(st) == live {
+			liveCloses = append(liveCloses, st)
+		}
+	}
 	if len(segs) > 1 {
 		spend := stageSpendByStage(r.StageSpend)
 		// how many segments each stage folds to a receipt for — the review
@@ -337,7 +350,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	if anchoring {
 		anchorWant = m.anchorFrom
 	}
-	if ls, at, evAt := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens, anchorWant); len(ls) > 0 {
+	if ls, at, evAt := m.liveStageBlock(s, r, segs, inner, answered, stretches, liveOpens, liveCloses, anchorWant); len(ls) > 0 {
 		base := len(body)
 		for i, l := range ls {
 			add(l)
@@ -1327,7 +1340,34 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // return a nil evAt. A resize (BG-057) uses it to find whichever event
 // was at the top of the scrolled window before the reflow, so it can ask
 // for that same event again after.
-func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens []autopilotStretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
+// appendStretchCloses draws the closing rules for periods that ended in
+// the stage the block is rendering, separated from what came before by a
+// row of air the way every other rule in the thread is. It exists for
+// the two branches of liveStageBlock that render from a live session's
+// snapshot rather than from the event log: those have no indices to
+// place a rule against, so the rules go last, and without them a closed
+// period had no ending anywhere on the page.
+func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []autopilotStretch, w int) []string {
+	for _, st := range closes {
+		lines = append(lines, "")
+		// A period that also opened in this stage has had no rule drawn
+		// for it anywhere — the folded loop never reached it and the
+		// snapshot has no position to hang it off — so its opening rule
+		// goes here too, immediately above its closing one. Half a period
+		// is worse than a period drawn without room inside it: the pair
+		// at least reads as one run that began and ended in this stage.
+		for _, op := range opens {
+			if op.from == st.from {
+				lines = append(lines, stretchOpenLine(s, st, w))
+				break
+			}
+		}
+		lines = append(lines, stretchCloseLines(s, st, w)...)
+	}
+	return lines
+}
+
+func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens, liveCloses []autopilotStretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
@@ -1381,6 +1421,16 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		case len(lines) == 1:
 			lines = append(lines, "  "+s.Faint.Render("starting…"))
 		}
+		// A period that ended in this stage still says so. The session
+		// object outlives the run that filled it — the engine keeps a
+		// finished one, and a restart restores it — so "there is a
+		// session here" is not "a machine is driving this card", and
+		// reading it as the latter left the newest thing the page said
+		// about an unattended run being that it started. The rules go
+		// under the transcript because that is the only honest place a
+		// snapshot can put them: it carries no event indices, and the
+		// period covered the work above.
+		lines = appendStretchCloses(s, lines, liveOpens, liveCloses, w)
 		return lines, anchorAt, nil
 	}
 
@@ -1407,6 +1457,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		}
 		lines = append(lines, "  "+s.Warning.Render(m.follow.marker())+
 			s.Faint.Render(" — "+m.follow.footer(snap)))
+		lines = appendStretchCloses(s, lines, liveOpens, liveCloses, w)
 		return lines, anchorAt, nil
 	}
 
