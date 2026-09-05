@@ -555,7 +555,15 @@ func reviewHint(kind domain.Kind) string {
 	}
 	return strings.TrimSpace(fmt.Sprintf(`
 Stage: Review (autonomous, fresh context). Review the worktree diff
-against the %s. If the %s's Review section carries resolved threads
+against the %s. The kickoff carries that diff (or, when it is too
+large to carry, its file-by-file shape and the exact command for the
+rest) and the results of the repo's own build/test/lint commands,
+which gummi already ran in this worktree — read both; do not
+reassemble the diff a file at a time and do not re-run those
+commands. Those results are review's own snapshot of a branch that is
+not final yet: they are not verify's run, and verify will take its
+own. If the kickoff carries no diff or no results block, work it out
+yourself. If the %s's Review section carries resolved threads
 from a prior round, start there: verify each resolution against the
 diff before reviewing fresh. Then review through two lenses, reported
 separately — never merged or reranked, so one cannot mask the other:

@@ -1017,22 +1017,54 @@ func (m *Manager) assertNoForkDriftAgainstBase(ctx context.Context, f *domain.Fe
 // branch work and uncommitted edits show, without main's later commits
 // appearing as spurious reversals). Empty when nothing changed.
 func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
-	p, err := m.requireWorktree(f)
-	if err != nil {
-		return "", err
-	}
-	if err := m.AssertNoForkDrift(ctx, f); err != nil {
-		return "", err
-	}
-	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	base, err := runGit(ctx, p, "merge-base", mainHead, "HEAD")
+	p, base, err := m.diffBase(ctx, f)
 	if err != nil {
 		return "", err
 	}
 	return runGit(ctx, p, "diff", base)
+}
+
+// DiffStat is Diff's summary: the same base, `--stat` instead of the
+// patch. It is what a caller shows when the full diff is too large to
+// hand over inline, alongside DiffBase so the reader can fetch the rest.
+func (m *Manager) DiffStat(ctx context.Context, f *domain.Feature) (string, error) {
+	p, base, err := m.diffBase(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return runGit(ctx, p, "diff", "--stat", base)
+}
+
+// DiffBase returns the SHA Diff and DiffStat compare against — the
+// merge-base of main's HEAD and the feature branch. A caller that hands
+// an agent a diff needs it too: without the base, "review the diff" makes
+// the agent guess at a revision range, and a wrong guess reviews the
+// wrong work.
+func (m *Manager) DiffBase(ctx context.Context, f *domain.Feature) (string, error) {
+	_, base, err := m.diffBase(ctx, f)
+	return base, err
+}
+
+// diffBase resolves the worktree path and the base SHA the diff family
+// shares, refusing on fork drift first: main rewound past the recorded
+// fork makes every range below name work the feature never did.
+func (m *Manager) diffBase(ctx context.Context, f *domain.Feature) (wtPath, base string, err error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return "", "", err
+	}
+	if err := m.AssertNoForkDrift(ctx, f); err != nil {
+		return "", "", err
+	}
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", err
+	}
+	base, err = runGit(ctx, p, "merge-base", mainHead, "HEAD")
+	if err != nil {
+		return "", "", err
+	}
+	return p, base, nil
 }
 
 // rebaseInProgress reports whether wt has rebase state on disk.

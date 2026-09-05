@@ -876,6 +876,27 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			}
 		}
 	}
+	// Review gets the same two things it was otherwise spending its own
+	// turns assembling. Measured on one review session: 33 turns, 28 Bash
+	// calls, zero edits — about twelve of them rebuilding `git diff
+	// base..HEAD` one file at a time, and then `go build ./...` and
+	// `go vet ./...` it could have been handed.
+	//
+	// The checks it is handed are review's own run, not verify's. They
+	// answer different questions at different times: review reads a branch
+	// that is not final, so a result here can be stale by the time verify
+	// asks. Nothing is recorded, and verify still runs its own — this only
+	// saves review from re-deriving what is already true right now.
+	if s.Feature.Stage == domain.StageReview && !s.Rebase && !s.Critique {
+		if pre := e.reviewDiffPreamble(s); pre != "" {
+			msg = pre + "\n\n" + msg
+		}
+		if e.cfg.Permission != agent.PermissionGuarded {
+			if pre := e.runSpecChecks(s); pre != "" {
+				msg = pre + "\n\n" + msg
+			}
+		}
+	}
 	e.beforeTurn(s)
 	if err := sess.Send(context.Background(), msg); err != nil {
 		e.failRun(s, err)
@@ -897,6 +918,71 @@ func (e *Engine) failRun(s *Session, err error) {
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
 	e.freeSlot(s)
+}
+
+// reviewDiffInlineMax caps how much diff rides inline in the review
+// kickoff. The kickoff preamble is re-read on every turn of the session,
+// so anything put here is paid for repeatedly — that mechanism is how a
+// ~32k floor came to be 41-44% of gummi's whole context volume. Below the
+// cap, handing over the patch beats a reviewer rebuilding it a file at a
+// time; above it, the stat plus the command is the cheaper shape, and the
+// reviewer fetches only the parts it reads.
+//
+// GUMMI_REVIEW_DIFF_MAX overrides it in bytes, so the two shapes can be
+// measured against each other without a rebuild; 0 forces the stat shape.
+const reviewDiffInlineMax = 48 << 10
+
+// reviewDiffLimit resolves the inline cap, honoring the override. A
+// malformed or negative value falls back to the constant rather than
+// silently disabling the preamble.
+func reviewDiffLimit() int {
+	raw := strings.TrimSpace(os.Getenv("GUMMI_REVIEW_DIFF_MAX"))
+	if raw == "" {
+		return reviewDiffInlineMax
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return reviewDiffInlineMax
+	}
+	return n
+}
+
+// reviewDiffPreamble hands the review session the diff it would otherwise
+// spend its own turns reassembling, and — always — the base SHA to name a
+// range against, so "review the diff" never becomes a guess at a revision.
+//
+// Two shapes, chosen by size (see reviewDiffInlineMax). Any git failure
+// yields "" and the stage proceeds exactly as it did before: this is an
+// economy, never a gate.
+func (e *Engine) reviewDiffPreamble(s *Session) string {
+	wt, err := e.mgr(context.Background(), &s.Feature)
+	if err != nil {
+		return ""
+	}
+	ctx := context.Background()
+	base, err := wt.DiffBase(ctx, &s.Feature)
+	if err != nil {
+		return ""
+	}
+	diff, err := wt.Diff(ctx, &s.Feature)
+	if err != nil {
+		return ""
+	}
+	if strings.TrimSpace(diff) == "" {
+		return "" // nothing on the branch yet; the reviewer's own look is the honest one
+	}
+	header := fmt.Sprintf("gummi assembled this review's diff — it is `git diff %s` in your working directory. "+
+		"Do NOT rebuild it file by file.", base)
+	if len(diff) <= reviewDiffLimit() {
+		return header + "\n\n```diff\n" + diff + "\n```"
+	}
+	stat, err := wt.DiffStat(ctx, &s.Feature)
+	if err != nil {
+		return header
+	}
+	return fmt.Sprintf("%s It is %d bytes — too large to carry in every turn of this session, "+
+		"so here is the shape of it. Read the parts you need with `git diff %s -- <path>`.\n\n```\n%s```",
+		header, len(diff), base, stat)
 }
 
 // verifyStageTimeout bounds the gummi-side check run at the Verify stage

@@ -140,7 +140,15 @@ Stage semantics:
   serious findings bounce the feature back to Implement. After fixes, a
   fresh review pass triggers **automatically**, capped (default 2–3 rounds,
   bounded by the protected budget floor); past the cap it escalates to you
-  instead of looping.
+  instead of looping. The kickoff hands the session what it would
+  otherwise spend its own turns assembling: the branch diff with its base
+  SHA named (or, past a size cap, the file-by-file stat and the command
+  for the rest — the preamble is re-read on every turn, so a large diff
+  costs more inline than it saves), and the results of the repo's
+  gummi-checks, run gummi-side first. Those results are **review's own
+  snapshot of a branch that is not final**: nothing is recorded from
+  them, and Verify still takes its own run. They answer different
+  questions at different times.
 - **Verify** *(autonomous, role: implementer or scribe)* — two parts:
   the repo's check commands (build/test/lint) always run, and the spec's
   verification plan adds feature-specific live checks the agent
