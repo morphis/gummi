@@ -435,6 +435,10 @@ func TestHandoverAtADesignGateCrossesAndStarts(t *testing.T) {
 		t.Fatal("fixture parked an inbox gate; this test is about the case with none")
 	}
 
+	// the architect answered in chat but never wrote the spec; stand in for
+	// it, or the undrafted-sections gate holds this crossing shut.
+	draftRequiredSections(t, m)
+
 	f := m.rows[0].F
 	plan := m.planAutopilot(f)
 	if plan.bucket != "gate" {

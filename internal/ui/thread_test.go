@@ -1462,9 +1462,9 @@ func TestParkVerbPausesRatherThanOpeningDeps(t *testing.T) {
 			}
 		}}
 		m, eng := agentWorkspace(t, ag)
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
+		m = pressAdvance(t, m)
+		m = pressAdvance(t, m)
 		m = openAndAttach(t, m)
 		waitForActivity(t, eng)
 

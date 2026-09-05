@@ -52,8 +52,8 @@ func TestQuitWithAutopilotLiveSessionWordsDialog(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec → plan
+	m = pressAdvance(t, m) // brainstorm → spec
+	m = pressAdvance(t, m) // spec → plan
 	m = openAndAttach(t, m)                                // run plan (autonomous)
 	waitLive(t, eng, "FD-001")
 
@@ -89,8 +89,8 @@ func TestQuitWithGateOffLiveSessionKeepsOriginalWording(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m.rows[0].F.GateApproval = domain.GateOff // set before the run starts, matching the session's own snapshot
 	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
@@ -124,8 +124,8 @@ func TestQuitConfirmParksAutopilotSessionOnConfirm(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
 

@@ -50,6 +50,13 @@ const (
 	// verify→done edge — a bug with a clean-present env prerequisite, zero
 	// [env:] live checks, and no human waiver cannot finalize.
 	StatusBlockedOmission
+	// StatusBlockedUndrafted: the stage the item is leaving wrote nothing
+	// into the one section that gate expects as its output — a stage that
+	// ran and produced no work must not be waved through just because
+	// nothing is technically wrong with it (measured: 4/9 spec sessions
+	// drafted nothing, auto-approved, and implement started from a stub).
+	// Undrafted names the sections; the stage stays put.
+	StatusBlockedUndrafted
 )
 
 // BlockingDep names a single outstanding dependency blocking a card's
@@ -86,6 +93,11 @@ type AdvanceResult struct {
 	// Reason is populated only for StatusBlockedOmission; it mirrors the
 	// human-facing reason produced by the shared omission-gate predicate.
 	Reason string
+	// Undrafted names the required section(s) the departing stage left
+	// blank when Status is StatusBlockedUndrafted (requiredSections' entry
+	// for this edge, filtered to the ones spec.UndraftedSections found
+	// empty).
+	Undrafted []string
 	// EnteredWorktree reports that this call created the item's worktree
 	// (the design→work approval gate), so the caller can kick off the
 	// one-shot check-discovery + baseline passes over the fresh branch.
@@ -130,6 +142,13 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// approval — the gate re-opens only once they resolve (DESIGN §6.1).
 	if n := e.openQuestionsBlockingGate(f); n > 0 {
 		res.Status, res.Blockers = StatusBlockedQuestions, n
+		return res, nil
+	}
+	// a stage that ran and wrote nothing into its one required section is
+	// not a clean crossing — auto-approval must not wave a stub through to
+	// the next stage (the measured failure this gate exists to catch).
+	if names := e.undraftedBlockingGate(f); len(names) > 0 {
+		res.Status, res.Undrafted = StatusBlockedUndrafted, names
 		return res, nil
 	}
 	// so do unresolved diff annotations, the gate's other backend.
@@ -486,6 +505,56 @@ func fileMap(root string, paths []string) map[string][]string {
 		out[p] = strings.Split(string(data), "\n")
 	}
 	return out
+}
+
+// requiredSections names the one section a gate expects the departing
+// stage to have actually written, keyed on the edge Advance is crossing.
+// Deliberately one section per gate, not a completeness checklist: the
+// gate is checking that the stage did its own job (spec chose an
+// approach, diagnose found a root cause, plan wrote the notes implement
+// needs, and the coding stages wrote their verification story), not that
+// every template section got filled in. A research card's gates always
+// return nil — its verify→done edge already has a floor of its own
+// (verifydoc, see documentReport in this file), and no other research
+// edge produces a section this predicate should hold open.
+func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
+	switch {
+	case kind == domain.KindFeature && from == domain.StageSpec:
+		return []string{"Chosen approach"}
+	case kind == domain.KindBug && from == domain.StageDiagnose:
+		return []string{"Root cause"}
+	case kind == domain.KindFeature && from == domain.StagePlan && to == domain.StageImplement:
+		return []string{"Implementation notes"}
+	case kind == domain.KindFeature && to == domain.StageDone:
+		return []string{"Verification plan"}
+	case kind == domain.KindBug && to == domain.StageDone:
+		return []string{"Verification"}
+	default:
+		return nil
+	}
+}
+
+// undraftedBlockingGate returns the required section(s) the departing
+// stage left undrafted, or nil when the gate has nothing to check or the
+// artifact can't be read. Mirrors openQuestionsBlockingGate's zero-on-error
+// contract: a missing or unreadable artifact must never wedge the gate
+// shut, because a card whose artifact moved (or hasn't been created yet)
+// would otherwise become permanently unadvanceable.
+func (e *Engine) undraftedBlockingGate(f domain.Feature) []string {
+	path := e.artifactFile(&f)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	next := e.nextStage(f)
+	want := requiredSections(f.Kind, f.Stage, next)
+	if len(want) == 0 {
+		return nil
+	}
+	return spec.UndraftedSections(string(raw), want)
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored `%%`

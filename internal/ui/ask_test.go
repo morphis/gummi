@@ -207,9 +207,9 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)

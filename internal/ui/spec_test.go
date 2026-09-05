@@ -208,8 +208,8 @@ func TestSpecCommentFlow(t *testing.T) {
 func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
 	m := specWorkspace(t)
 	// advance to spec, open the draft, annotate it
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openSpecFor(t, m)
 	draftPath := m.spec.path
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
@@ -223,7 +223,7 @@ func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// approve the spec (leave Spec) → worktree + promoted spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	m = openSpecFor(t, m)
 	if m.spec.path == draftPath {
 		t.Fatalf("spec still reads the draft after approval: %s", m.spec.path)
@@ -378,14 +378,14 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	// A from the spec surface advances the gate exactly as board g does.
 	m := specWorkspace(t)
 	ctx := context.Background()
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	f, _ := m.store.GetFeature(ctx, "FD-001")
 	if f.Stage != domain.StageSpec {
 		t.Fatalf("setup: feature at %s, want spec", f.Stage)
 	}
 	m = openSpecFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.spec != nil {
 		t.Fatal("g did not close the spec surface")
 	}
@@ -397,13 +397,13 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	// with an open @user marker the surface still closes but the gate
 	// stays shut and the blocking notice surfaces.
 	m2 := specWorkspace(t)
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m2 = pressAdvance(t, m2)
+	m2 = pressAdvance(t, m2)
 	m2 = openSpecFor(t, m2)
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m2 = typeString(t, m2, "still open")
 	m2 = press(t, m2, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m2 = pressAdvance(t, m2)
 	if m2.spec != nil {
 		t.Fatal("A should close the surface even when blocked")
 	}

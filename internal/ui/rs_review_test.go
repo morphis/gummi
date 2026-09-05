@@ -191,7 +191,7 @@ func TestBoardKeyGReDecomposesDoneRS(t *testing.T) {
 		t.Fatal("no row selected after loadRows — RS-001 should be on the board")
 	}
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.ingest == nil {
 		t.Fatal("g on a done RS card did not open the ingest-review pane")
 	}

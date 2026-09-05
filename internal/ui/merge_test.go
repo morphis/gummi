@@ -386,7 +386,7 @@ func TestAdvanceToDoneRoutesThroughMerge(t *testing.T) {
 	m, root, _ := mergeFixture(t)
 	m = atVerify(t, m)
 	m.sel = 0
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
@@ -408,7 +408,7 @@ func TestAdvanceToDoneCancelledStaysAtVerify(t *testing.T) {
 	m, _, _ := mergeFixture(t)
 	m = atVerify(t, m)
 	m.sel = 0
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.Overlay.Top() == nil {
 		t.Fatal("g at verify did not open the commit-message dialog")
 	}
@@ -424,7 +424,7 @@ func TestAdvanceToDoneLandedBranchSkipsMerge(t *testing.T) {
 	landFeature(t, m, root, wt) // commits + merges --no-ff into main
 	m = atVerify(t, m)
 	m.sel = 0
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.Overlay.Top() != nil {
 		t.Fatal("landed branch still opened the merge dialog")
 	}
@@ -449,7 +449,7 @@ func TestAdvanceToDoneMergeConflictStaysAtVerify(t *testing.T) {
 	git(t, root, "commit", "-qm", "main readme")
 	m = atVerify(t, m)
 	m.sel = 0
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.Overlay.Top() == nil {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}

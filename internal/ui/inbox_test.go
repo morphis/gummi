@@ -68,8 +68,8 @@ func TestCompletedRunRaisesGate(t *testing.T) {
 	}
 	m = pump(t, m, m.loadRows)
 	// advance to plan (autonomous), run it
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m) // run
 	settleChat(t, eng)
 
@@ -83,7 +83,7 @@ func TestCompletedRunRaisesGate(t *testing.T) {
 	}
 	// acting on the feature (advance) clears the item
 	m = toKeys(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.inbox.len() != 0 {
 		t.Error("advancing did not clear the gate item")
 	}
@@ -133,8 +133,8 @@ func TestGateBlockedKeepsInboxItem(t *testing.T) {
 	// no clearInbox, so the entry survives until the gate is actually
 	// attended to.
 	m := specWorkspace(t)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // todo → brainstorm
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
+	m = pressAdvance(t, m) // todo → brainstorm
+	m = pressAdvance(t, m) // brainstorm → spec
 	m = openSpecFor(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "is this the right approach?")
@@ -143,7 +143,7 @@ func TestGateBlockedKeepsInboxItem(t *testing.T) {
 	// a needs-attention item awaits the user on this feature
 	m.inbox.add("FD-001", attnGate, "spec approval pending")
 	// approving is blocked while the annotation is open
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("blocked advance moved the stage to %s, want spec", m.rows[0].F.Stage)
 	}

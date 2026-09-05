@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -35,6 +36,11 @@ type harness struct {
 	eng    *engine.Engine
 	buf    *bytes.Buffer
 	root   string
+
+	// noDraft switches off the fake agent's stand-in drafting, so a test can
+	// exercise the stage-produced-nothing failure the undrafted-sections
+	// gate exists to catch.
+	noDraft bool
 
 	mu    sync.Mutex
 	calls map[domain.Stage]int
@@ -76,6 +82,9 @@ func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]sta
 	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: clientTools}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
 		stage := h.stageFromWorkDir(opts.WorkDir)
+		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {
+			h.draftRequiredSections(f)
+		}
 		fn := script[stage]
 		if fn == nil {
 			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
@@ -148,6 +157,9 @@ func newMultiRepoHarness(t *testing.T, script map[domain.Stage]stageFn) *harness
 	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
 		stage := h.stageFromWorkDir(opts.WorkDir)
+		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {
+			h.draftRequiredSections(f)
+		}
 		fn := script[stage]
 		if fn == nil {
 			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
@@ -314,4 +326,78 @@ func convAsk(model, question string, options ...string) []agent.Event {
 		"question": question, "options": opts, "allow_free_form": true,
 	})
 	return msgIdle(model, "Considering.\n```gummi-ask\n"+string(body)+"\n```")
+}
+
+// harnessRoot is the repo root the harness resolves card artifacts under:
+// the pool's root for a multi-repo harness, the manager's for a single-repo
+// one.
+func (h *harness) harnessRoot() string {
+	if h.pool != nil {
+		return h.pool.Root()
+	}
+	if h.wt != nil {
+		return h.wt.Root()
+	}
+	return h.root
+}
+
+// draftRequiredSections fills in the one section the running stage's gate
+// will ask for, simulating an agent that actually did its job. The blank
+// template leaves every section holding nothing but its `%% @gummi:` prompt,
+// which the undrafted-sections gate (correctly) refuses to advance — so a
+// fixture whose fake agent only emits chat would otherwise stall at its
+// first design gate. It writes only a section that is still undrafted, so a
+// stage that wrote its own content (or a discovered gummi-checks block)
+// keeps it. A test that wants the empty-artifact failure asserts it against
+// Advance directly rather than through this harness.
+func (h *harness) draftRequiredSections(f domain.Feature) {
+	if h.noDraft {
+		return
+	}
+	var want []string
+	switch {
+	case f.Kind == domain.KindFeature && f.Stage == domain.StageSpec:
+		want = []string{"Chosen approach"}
+	case f.Kind == domain.KindFeature && f.Stage == domain.StagePlan:
+		want = []string{"Implementation notes"}
+	case f.Kind == domain.KindBug && f.Stage == domain.StageDiagnose:
+		want = []string{"Root cause"}
+	case f.Kind == domain.KindFeature && f.Stage == domain.StageVerify:
+		want = []string{"Verification plan"}
+	case f.Kind == domain.KindBug && f.Stage == domain.StageVerify:
+		want = []string{"Verification"}
+	default:
+		return
+	}
+	root := h.harnessRoot()
+	path := spec.LocateArtifact(
+		filepath.Join(root, f.ArtifactPath()),
+		filepath.Join(h.ws.DraftsDir(), spec.DraftFilename(&f)),
+		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
+	)
+	if path == "" {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	content := string(raw)
+	for _, name := range spec.UndraftedSections(content, want) {
+		// append, never replace: the section may already hold % markers a
+		// test put there on purpose, and an agent drafting its section does
+		// not delete the reader's comments.
+		body, ok := spec.ViewSection(content, name)
+		if !ok {
+			return
+		}
+		next, _, err := spec.ReplaceSection(content, name, body+"drafted by the fake agent.\n\n")
+		if err != nil {
+			return
+		}
+		content = next
+	}
+	if content != string(raw) {
+		_ = os.WriteFile(path, []byte(content), 0o600)
+	}
 }

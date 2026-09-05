@@ -89,7 +89,7 @@ func agentWorkspaceProfiles(t *testing.T, ag agent.Agent, profiles config.Profil
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	// advance todo → brainstorm
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	return m, eng
 }
 
@@ -146,6 +146,10 @@ func toKeys(t *testing.T, m *Shell) *Shell {
 // ready, and the thread is the conversation.
 func openAndAttach(t *testing.T, m *Shell) *Shell {
 	t.Helper()
+	// the scripted agents answer in chat and never write the artifact, so
+	// stand in for the stage's own output before it runs — otherwise the
+	// undrafted-sections gate holds the crossing that follows.
+	draftRequiredSections(t, m)
 	open := tea.KeyPressMsg{Code: tea.KeyEnter}
 	m = press(t, m, open)
 	m = press(t, m, open)
@@ -253,7 +257,7 @@ func TestThreadAttachRespectsStage(t *testing.T) {
 	m = toKeys(t, m)
 
 	// advance brainstorm → spec while the composer is blurred
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("stage = %s, want spec", m.rows[0].F.Stage)
 	}
@@ -414,8 +418,8 @@ func TestThreadDecisionDigitJumpsAndAnswers(t *testing.T) {
 func TestThreadRunStartsOnAutonomousStage(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("x"))
 	// advance brainstorm → spec → plan (needs worktree at spec approval)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan (worktree created)
+	m = pressAdvance(t, m) // brainstorm→spec
+	m = pressAdvance(t, m) // spec→plan (worktree created)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
 	}
@@ -636,9 +640,9 @@ func TestThreadFailureTailShowsWithoutExpansion(t *testing.T) {
 			}
 		},
 	})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // plan→implement
+	m = pressAdvance(t, m) // brainstorm→spec
+	m = pressAdvance(t, m) // spec→plan
+	m = pressAdvance(t, m) // plan→implement
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
@@ -667,9 +671,9 @@ func TestThreadAltOExpandsToolOutput(t *testing.T) {
 			}
 		},
 	})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // plan→implement
+	m = pressAdvance(t, m) // brainstorm→spec
+	m = pressAdvance(t, m) // spec→plan
+	m = pressAdvance(t, m) // plan→implement
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 

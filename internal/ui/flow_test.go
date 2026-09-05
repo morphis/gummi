@@ -153,8 +153,8 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	}
 
 	// advance: todo → brainstorm → spec (no worktree yet)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("stage = %s, want spec", m.rows[0].F.Stage)
 	}
@@ -163,7 +163,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	}
 
 	// advance out of spec → worktree + branch created (DESIGN §10.11)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
 	}
@@ -176,7 +176,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 
 	// walk to verify: plan→implement→review→verify
 	for _, want := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageVerify} {
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 		if m.rows[0].F.Stage != want {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
 		}
@@ -186,7 +186,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	// g at verify is the "done" decision: it routes through the squash
 	// merge — commit-message dialog (drafts a message the user approves), then
 	// land on main and move to done
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
@@ -200,7 +200,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Errorf("Landed after done = %v, %v; want true", landed, err)
 	}
 	// g on done is a no-op with a notice
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageDone {
 		t.Fatal("done advanced somewhere")
 	}
@@ -247,8 +247,8 @@ func TestBugLifecycleFlow(t *testing.T) {
 	}
 
 	// advance: todo → triage → diagnose (interactive; no worktree yet)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageDiagnose {
 		t.Fatalf("stage = %s, want diagnose", m.rows[0].F.Stage)
 	}
@@ -257,7 +257,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 	}
 
 	// advance out of diagnose → worktree + branch created, report promoted
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageFix {
 		t.Fatalf("stage = %s, want fix", m.rows[0].F.Stage)
 	}
@@ -274,7 +274,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 
 	// walk to verify: fix → review → verify
 	for _, want := range []domain.Stage{domain.StageReview, domain.StageVerify} {
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 		if m.rows[0].F.Stage != want {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
 		}
@@ -282,7 +282,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 	commitWork(t, root, "BG-001")
 
 	// g at verify routes through the squash merge before done
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("g at verify did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
@@ -308,13 +308,13 @@ func TestBugBouncesReviewToFix(t *testing.T) {
 	m = typeString(t, m, "Crash on nil")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 4 { // todo→triage→diagnose→fix→review
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != domain.StageReview {
 		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
 	}
 	// forward g from review goes to verify (not the rerun edge to fix)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageVerify {
 		t.Fatalf("forward from review = %s, want verify", m.rows[0].F.Stage)
 	}
@@ -332,7 +332,7 @@ func TestBounceFromReview(t *testing.T) {
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 5 { // todo→brainstorm→spec→plan→implement→review
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != domain.StageReview {
 		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
@@ -366,7 +366,7 @@ func TestBounceFromPlanRefused(t *testing.T) {
 	m = typeString(t, m, "No shortcut")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 3 { // → brainstorm → spec → plan
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
 	if m.rows[0].F.Stage != domain.StagePlan {
@@ -466,11 +466,11 @@ func TestSkipFlagsChangeRoute(t *testing.T) {
 		t.Fatalf("skip flags not set: %+v", m.rows[0].F.Skip)
 	}
 	// todo → spec directly, then spec → implement directly
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("stage = %s, want spec (brainstorm skipped)", m.rows[0].F.Stage)
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want implement (plan skipped)", m.rows[0].F.Stage)
 	}

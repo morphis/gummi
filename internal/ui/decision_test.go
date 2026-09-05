@@ -364,7 +364,7 @@ func reviewGateWorkspace(t *testing.T) *Shell {
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	for range 5 { // todo→brainstorm→spec→plan→implement→review
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != domain.StageReview {
 		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
@@ -429,7 +429,7 @@ func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("on it"))
 	// advance to implement: the work stage a bounce rewinds to
 	for range 3 { // brainstorm→spec→plan→implement
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 	}
 	if m.rows[m.sel].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want implement", m.rows[m.sel].F.Stage)
@@ -461,8 +461,8 @@ func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 // appended to its kickoff.
 func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("on it"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan
+	m = pressAdvance(t, m) // brainstorm→spec
+	m = pressAdvance(t, m) // spec→plan
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
 
@@ -701,8 +701,8 @@ func TestThreadDecisionDigitSelectsWorkflowOption(t *testing.T) {
 // line sends as a turn, always safe (DESIGN §6.3), and the bar says so.
 func TestThreadDecisionProseNothingConsumesSends(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("on it"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm→spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // spec→plan
+	m = pressAdvance(t, m) // brainstorm→spec
+	m = pressAdvance(t, m) // spec→plan
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m.raiseAttention("FD-001", attnBudget, "the plan stage reached its envelope")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page

@@ -32,8 +32,8 @@ func TestCompileOpenQuestions(t *testing.T) {
 
 func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	m := specWorkspace(t)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // todo → brainstorm
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
+	m = pressAdvance(t, m) // todo → brainstorm
+	m = pressAdvance(t, m) // brainstorm → spec
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("setup: stage = %s, want spec", m.rows[0].F.Stage)
 	}
@@ -45,7 +45,7 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// approving is blocked while the annotation is open
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageSpec {
 		t.Fatalf("open user annotation did not block approval (stage=%s)", m.rows[0].F.Stage)
 	}
@@ -59,22 +59,49 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	m = typeString(t, m, "resolved — yes, going with it")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("resolving the annotation did not unblock approval (stage=%s)", m.rows[0].F.Stage)
 	}
 }
 
-func TestTemplatePromptsDoNotBlock(t *testing.T) {
-	// a fresh spec (template @gummi prompts only) must not block approval
+// TestTemplatePromptsDoNotBlockAsQuestions: gummi's own `%% @gummi:`
+// prompts are not user threads, so they never raise the open-question
+// blocker. They do leave their sections undrafted, which is a different
+// gate with a different message — asserted below — so this walks a card
+// whose required section has been written and checks it crosses cleanly.
+func TestTemplatePromptsDoNotBlockAsQuestions(t *testing.T) {
 	m := specWorkspace(t)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // todo → brainstorm
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // brainstorm → spec
-	m = openSpecFor(t, m)                                  // creates the draft with @gummi prompts
+	m = pressAdvance(t, m) // todo → brainstorm
+	m = pressAdvance(t, m) // brainstorm → spec
+	m = openSpecFor(t, m)  // creates the draft with @gummi prompts
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // approve spec → plan
+	m = pressAdvance(t, m) // approve spec → plan
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("template @gummi prompts blocked approval (stage=%s)", m.rows[0].F.Stage)
+	}
+}
+
+// TestUndraftedSectionBlocksSpecApproval is the floor a blank spec used to
+// walk straight through: a spec stage that wrote nothing leaves `Chosen
+// approach` holding only its `%% @gummi:` prompt, and that must hold the
+// gate shut even though no user thread is open. Measured before this gate
+// existed: the crossing recorded `gate spec→implement auto-approved`,
+// implement started from a stub, and the run still finished verified.
+func TestUndraftedSectionBlocksSpecApproval(t *testing.T) {
+	m := specWorkspace(t)
+	m = pressAdvance(t, m) // todo → brainstorm
+	m = pressAdvance(t, m) // brainstorm → spec
+	m = openSpecFor(t, m)  // creates the draft, every section undrafted
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	// press g WITHOUT drafting: the stage produced nothing
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StageSpec {
+		t.Fatalf("an undrafted spec crossed its gate (stage=%s)", m.rows[0].F.Stage)
+	}
+	if !strings.Contains(m.notice.text, "Chosen approach") {
+		t.Errorf("notice = %q, want it to name the undrafted section", m.notice.text)
 	}
 }
 
@@ -84,7 +111,7 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 	// check must read the worktree copy of the spec, not the retired draft.
 	m := specWorkspace(t)
 	for range 3 { // todo → brainstorm → spec → plan (worktree created)
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
@@ -95,7 +122,7 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("open user annotation did not block the plan gate (stage=%s)", m.rows[0].F.Stage)
 	}
@@ -109,7 +136,7 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 	m = typeString(t, m, "resolved — added below")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("resolving the annotation did not unblock the gate (stage=%s)", m.rows[0].F.Stage)
 	}
@@ -119,8 +146,8 @@ func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
 	// R at an autonomous stage (plan) has no chat to send to: it re-runs
 	// the stage with the compiled comments appended to the kickoff.
 	m, eng := chatWorkspace(t, agent.NewFake("Tightened the plan."))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → plan (worktree created)
+	m = pressAdvance(t, m) // → spec
+	m = pressAdvance(t, m) // → plan (worktree created)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
 	}
@@ -151,7 +178,7 @@ func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
 func TestRequestChangesSendsToAgent(t *testing.T) {
 	// chatWorkspace wires an engine; its FD-001 is at brainstorm
 	m, eng := chatWorkspace(t, agent.NewFake("I'll address those."))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → spec (interactive)
+	m = pressAdvance(t, m) // → spec (interactive)
 	m = openSpecFor(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "please reconsider the storage choice")

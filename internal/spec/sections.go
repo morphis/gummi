@@ -346,3 +346,50 @@ func hasHeadingAtCol0(body string) bool {
 	}
 	return false
 }
+
+// UndraftedSections returns the subset of want that names undrafted sections.
+// A section is undrafted when its body — the lines between its top-level
+// `## ` heading and the next top-level heading or EOF — contains no line that
+// is both non-blank (after trimming whitespace) and not a `%%` marker line.
+// A section name in want that matches no heading in the document also counts
+// as undrafted. The return value preserves want's order, using each name's
+// spelling from want (not the on-disk heading title).
+//
+// This predicate is exact rather than heuristic: every untouched section body
+// in a gummi artifact is a single `%% @gummi:` prompt line (the template's
+// prompts in spec.go), and Implementation notes renders with an empty body.
+// So "no non-blank non-marker line" is precisely "the stage wrote nothing
+// here". The check needs no mtime, hash, or baseline snapshot.
+func UndraftedSections(content string, want []string) []string {
+	if len(want) == 0 {
+		return nil
+	}
+
+	var undrafted []string
+	for _, name := range want {
+		start, end, _, ok := sectionBounds(content, name)
+		if !ok {
+			// a template that lost its heading is not a drafted section.
+			undrafted = append(undrafted, name)
+			continue
+		}
+		body := content[start:end]
+		hasContent := false
+		for _, line := range strings.Split(body, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			if !IsMarkerLine(line) {
+				hasContent = true
+				break
+			}
+		}
+
+		if !hasContent {
+			undrafted = append(undrafted, name)
+		}
+	}
+
+	return undrafted
+}

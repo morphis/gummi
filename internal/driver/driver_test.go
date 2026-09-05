@@ -274,7 +274,7 @@ func TestReviewChangesThenPass(t *testing.T) {
 func TestDoneEventCarriesLinkedPR(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec)
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestDoneEventCarriesLinkedPR(t *testing.T) {
 func TestDoneEventOmitsPRWhenUnlinked(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec)
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 func TestResumeBounceRefusesOffStage(t *testing.T) {
 	h := newHarness(t, true, nil)
 	f := feature(1, domain.StageSpec)
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +560,7 @@ func happyResumeScript() map[domain.Stage]stageFn {
 func TestResumeEnvelopeRaisesBudget(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec) // Budget.Envelope == 500
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestResumeEnvelopeRaisesBudget(t *testing.T) {
 func TestResumeEnvelopeFloorNoOp(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec) // Budget.Envelope == 500
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -1159,6 +1159,27 @@ func feature(num int, stage domain.Stage) domain.Feature {
 }
 
 // putDraft writes a spec draft for f at its drafts home.
+// stubSpecDraft is a minimal but template-shaped feature draft. Fixtures
+// that seed a card mid-flight need the same top-level `## ` headings a real
+// spec.Template carries: the undrafted-sections gate treats a section whose
+// heading is absent as undrafted, so a sectionless stub would hold every
+// design gate shut. Chosen approach is filled in because these fixtures
+// start at or after spec; the harness's fake agent drafts the later stages'
+// sections as it reaches them.
+const stubSpecDraft = `# Spec
+
+Export as JSON.
+
+## Chosen approach
+
+Export as JSON.
+
+## Implementation notes
+
+## Verification plan
+
+`
+
 func putDraft(t *testing.T, h *harness, f *domain.Feature, body string) {
 	t.Helper()
 	if err := os.MkdirAll(h.ws.DraftsDir(), 0o750); err != nil {
@@ -1347,4 +1368,40 @@ func TestDriverEscalationRecordsAPark(t *testing.T) {
 		}
 	}
 	t.Fatal("escalation logged no gave-up park carrying its reason")
+}
+
+
+// TestUndraftedSpecBlocksTheHeadlessGate is the measured failure this floor
+// exists to stop, asserted on the path it was measured on: a spec stage
+// that runs, says something, and writes nothing into `Chosen approach`.
+// Before the gate, the drive recorded `gate spec→implement auto-approved`,
+// implement started from a stub, and the run still finished verified. Now
+// the crossing stops, exit is blocked, and the wire names the section.
+func TestUndraftedSpecBlocksTheHeadlessGate(t *testing.T) {
+	h := newHarness(t, true, happyResumeScript())
+	h.noDraft = true // the stage produces nothing, which is the point
+	f := feature(1, domain.StageSpec)
+	putDraft(t, h, &f, spec.Template(&f)) // every section still its %% prompt
+	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := h.driver(Options{}).Resume(context.Background(), f.ID, ResumeInput{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if out.Status != StatusBlocked {
+		t.Fatalf("status = %q, want blocked; stream=%v", out.Status, h.eventKinds())
+	}
+	if got := h.stageOf(f.ID); got != domain.StageSpec {
+		t.Fatalf("an undrafted spec crossed its gate: stage = %s, want spec", got)
+	}
+	ev := lastEvent(h, "blocked")
+	if ev == nil {
+		t.Fatalf("no blocked event; stream=%v", h.eventKinds())
+	}
+	names, _ := ev["undrafted"].([]any)
+	if len(names) != 1 || names[0] != "Chosen approach" {
+		t.Fatalf("blocked undrafted = %v, want [Chosen approach]", ev["undrafted"])
+	}
 }

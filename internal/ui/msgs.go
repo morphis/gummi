@@ -548,6 +548,9 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedOmission:
 			return blockedMsg(actor, id, res.Reason)
+		case engine.StatusBlockedUndrafted:
+			text := fmt.Sprintf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted", id, res.From, strings.Join(res.Undrafted, ", "))
+			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedDependency:
 			names := make([]string, 0, len(res.BlockingDeps))
 			for _, d := range res.BlockingDeps {

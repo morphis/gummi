@@ -256,9 +256,9 @@ func TestCardLinePausedMarker(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 
@@ -576,9 +576,9 @@ func TestBoardAttentionAndPausedGolden(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 	pausedRow := m.rows[0]
@@ -742,9 +742,9 @@ func TestBG038QueuedNoticeNotLeftBehind(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("setup: want FD-001 at implement, got %s", m.rows[0].F.Stage)
 	}

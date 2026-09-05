@@ -358,6 +358,10 @@ func TestAutopilotCrossesParkedGateToAutonomousStage(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("ok"))
 	m = advanceTo(t, m, domain.StagePlan)
 
+	// the fake answers in chat and never writes the plan; stand in for it,
+	// or the undrafted-sections gate holds this crossing shut.
+	draftRequiredSections(t, m)
+
 	f := m.rows[0].F
 	m.inbox.add(f.ID, attnGate, "plan critiqued: clean — review & approve")
 	plan := m.planAutopilot(f)

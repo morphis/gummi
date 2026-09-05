@@ -99,7 +99,7 @@ func TestAdvanceBlockedByDependency(t *testing.T) {
 	}
 
 	m = pump(t, m, m.Init()) // load rows
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	got, _ := m.store.GetFeature(ctx, f.ID)
 	if got.Stage != domain.StagePlan {
 		t.Fatalf("unmet dependency did not block the gate (stage=%s)", got.Stage)
@@ -136,7 +136,7 @@ func TestAdvanceBlockedByDocument(t *testing.T) {
 	}
 
 	m = pump(t, m, m.Init()) // load rows
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	got, _ := m.store.GetFeature(ctx, f.ID)
 	if got.Stage != domain.StageVerify {
 		t.Fatalf("failing document did not block the gate (stage=%s)", got.Stage)

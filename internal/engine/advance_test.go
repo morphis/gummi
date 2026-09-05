@@ -45,6 +45,26 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// fillPromotedSection overwrites a section's body in a feature's promoted
+// (post gate) artifact — the workspace-home copy at f.ArtifactPath() — so a
+// forward-walk test can supply the content a later gate's requiredSections
+// row expects, the same way a real coding-stage agent would have written it.
+func fillPromotedSection(t *testing.T, wt *worktree.Manager, f domain.Feature, name, body string) {
+	t.Helper()
+	p := filepath.Join(wt.Root(), f.ArtifactPath())
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _, err := spec.ReplaceSection(string(raw), name, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // gatedVerifyBug returns a bug parked at the verify stage with a worktree,
 // a bug report containing verificationBody, and a branch that is ahead of
 // main by one commit. The caller must have configured env probes so that at
@@ -204,6 +224,9 @@ func TestAdvanceForwardWalkFeature(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wt.Root(), f.ArtifactPath())); err != nil {
 		t.Fatalf("spec not promoted to its workspace home: %v", err)
 	}
+	// the plan→implement gate expects Implementation notes drafted — the
+	// blank template promoted above leaves it empty.
+	fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
 
 	// plan → implement → review → verify: no further worktree creation
 	for _, want := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageVerify} {
@@ -311,9 +334,14 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 		f := feature(1, "ship it", domain.StageSpec)
 		putFeature(t, store, f)
 		mustAdvance(t, e, f.ID) // spec → plan, creates the worktree
+		// the plan→implement gate expects Implementation notes drafted.
+		fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
 		// walk to verify
 		for stage := domain.StagePlan; stage != domain.StageVerify; {
 			res := mustAdvance(t, e, f.ID)
+			if res.Status != StatusAdvanced {
+				t.Fatalf("walk to verify: status=%d at %s, want advanced", res.Status, stage)
+			}
 			stage = res.To
 		}
 		// commit real work on the branch
@@ -329,6 +357,9 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 		if got, _ := store.GetFeature(ctx, f.ID); !got.VerifiedAt.IsZero() {
 			t.Fatalf("verified_at stamped before the verify gate: %v", got.VerifiedAt)
 		}
+
+		// the verify→done gate expects Verification plan drafted.
+		fillPromotedSection(t, wt, f, "Verification plan", "Run the repo's discovered checks.")
 
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusNeedsMerge {
@@ -349,13 +380,25 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 
 	// no branch commits → straight to Done
 	t.Run("empty branch to done", func(t *testing.T) {
-		e, _, store, _ := advanceEngine(t)
+		e, _, store, wt := advanceEngine(t)
 		f := feature(2, "nothing to land", domain.StageSpec)
 		putFeature(t, store, f)
 		for stage := domain.StageSpec; stage != domain.StageVerify; {
 			res := mustAdvance(t, e, f.ID)
+			if res.Status != StatusAdvanced {
+				t.Fatalf("walk to verify: status=%d at %s, want advanced", res.Status, stage)
+			}
 			stage = res.To
+			if stage == domain.StagePlan {
+				// the plan→implement gate (the next crossing) expects
+				// Implementation notes drafted — the blank template
+				// promoted at spec approval leaves it empty.
+				fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
+			}
 		}
+		// the verify→done gate expects Verification plan drafted.
+		fillPromotedSection(t, wt, f, "Verification plan", "Run the repo's discovered checks.")
+
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusAdvanced || res.To != domain.StageDone {
 			t.Fatalf("empty branch: status=%d to=%s, want advanced/done", res.Status, res.To)
@@ -918,5 +961,139 @@ func TestAdvanceVerifyDocument(t *testing.T) {
 	}
 	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDone {
 		t.Fatalf("research card did not reach done: %s", got.Stage)
+	}
+}
+
+// TestRequiredSections is a table test over the free function's whole
+// contract: exactly one section per gate, nothing for every other edge —
+// including every research edge, whose verify→done floor is verifydoc
+// (documentReport), not this predicate.
+func TestRequiredSections(t *testing.T) {
+	cases := []struct {
+		name string
+		kind domain.Kind
+		from domain.Stage
+		to   domain.Stage
+		want []string
+	}{
+		{"feature leaving spec", domain.KindFeature, domain.StageSpec, domain.StagePlan, []string{"Chosen approach"}},
+		{"feature leaving spec via skip edge", domain.KindFeature, domain.StageSpec, domain.StageImplement, []string{"Chosen approach"}},
+		{"bug leaving diagnose", domain.KindBug, domain.StageDiagnose, domain.StageFix, []string{"Root cause"}},
+		{"feature plan to implement", domain.KindFeature, domain.StagePlan, domain.StageImplement, []string{"Implementation notes"}},
+		{"feature to done", domain.KindFeature, domain.StageReview, domain.StageDone, []string{"Verification plan"}},
+		{"bug to done", domain.KindBug, domain.StageVerify, domain.StageDone, []string{"Verification"}},
+		{"research to done exempt", domain.KindResearch, domain.StageVerify, domain.StageDone, nil},
+		{"research leaving spec-shaped stage", domain.KindResearch, domain.StageSpec, domain.StagePlan, nil},
+		{"plan to implement wrong to-stage", domain.KindFeature, domain.StagePlan, domain.StageReview, nil},
+		{"bug leaving triage", domain.KindBug, domain.StageTriage, domain.StageDiagnose, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := requiredSections(c.kind, c.from, c.to)
+			if len(got) != len(c.want) {
+				t.Fatalf("requiredSections(%s, %s, %s) = %v, want %v", c.kind, c.from, c.to, got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("requiredSections(%s, %s, %s) = %v, want %v", c.kind, c.from, c.to, got, c.want)
+				}
+			}
+		})
+	}
+}
+
+// writeDraftBody drops body at the draft location for f — the pre-promotion
+// home every design-stage artifact lives at before its stage's approval
+// gate promotes it into the workspace or worktree.
+func writeDraftBody(t *testing.T, ws state.Workspace, f domain.Feature, body string) {
+	t.Helper()
+	if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	if err := os.WriteFile(draft, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAdvanceBlockedByUndraftedChosenApproach is the whole point of this
+// change: the measured failure (4/9 spec sessions drafted nothing, the run
+// still recorded an auto-approved gate and finished verified) was an
+// auto-approved crossing, so the fix must hold even under GateFull, which
+// no other floor check in Advance treats specially — the gate is a
+// property of the artifact, not of who is watching it. The assertion goes
+// through the real e.Advance blocker chain, not requiredSections or
+// undraftedBlockingGate directly.
+func TestAdvanceBlockedByUndraftedChosenApproach(t *testing.T) {
+	e, ws, store, _ := advanceEngine(t)
+	f := feature(1, "dark mode", domain.StageSpec)
+	f.GateApproval = domain.GateFull
+	putFeature(t, store, f)
+
+	writeDraftBody(t, ws, f, "# Spec\n\n## Problem\n\nToggle needed.\n\n"+
+		"## Chosen approach\n\n%% @gummi: converge on one during the spec stage\n")
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusBlockedUndrafted {
+		t.Fatalf("status=%d, want StatusBlockedUndrafted", res.Status)
+	}
+	if len(res.Undrafted) != 1 || res.Undrafted[0] != "Chosen approach" {
+		t.Fatalf("Undrafted = %v, want [Chosen approach]", res.Undrafted)
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageSpec {
+		t.Fatalf("blocked undrafted gate still transitioned to %s", got.Stage)
+	}
+}
+
+// A drafted Chosen approach section is not a false positive: the gate
+// passes and the crossing proceeds normally.
+func TestAdvanceNotBlockedWhenChosenApproachDrafted(t *testing.T) {
+	e, ws, store, _ := advanceEngine(t)
+	f := feature(1, "dark mode", domain.StageSpec)
+	putFeature(t, store, f)
+
+	writeDraftBody(t, ws, f, "# Spec\n\n## Problem\n\nToggle needed.\n\n"+
+		"## Chosen approach\n\nStore the preference per-device.\n")
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StagePlan {
+		t.Fatalf("status=%d to=%s, want advanced/plan", res.Status, res.To)
+	}
+}
+
+// A bug leaving diagnose with an undrafted Root cause blocks the same way,
+// on the bug graph's own required section.
+func TestAdvanceBlockedByUndraftedRootCause(t *testing.T) {
+	e, ws, store, _ := advanceEngine(t)
+	f := bugFeature("crash on empty input")
+	f.Stage = domain.StageDiagnose
+	putFeature(t, store, f)
+
+	writeDraftBody(t, ws, f, "# Report\n\n## Summary\n\nCrashes on empty input.\n\n"+
+		"## Root cause\n\n%% @gummi: the diagnose stage records the root cause here — the why\n")
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusBlockedUndrafted {
+		t.Fatalf("status=%d, want StatusBlockedUndrafted", res.Status)
+	}
+	if len(res.Undrafted) != 1 || res.Undrafted[0] != "Root cause" {
+		t.Fatalf("Undrafted = %v, want [Root cause]", res.Undrafted)
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDiagnose {
+		t.Fatalf("blocked undrafted gate still transitioned to %s", got.Stage)
+	}
+}
+
+// A card whose artifact does not exist on disk at all — never drafted, or
+// moved out from under it — must not block: the zero-on-error contract
+// proves a missing artifact can never wedge a gate shut permanently.
+func TestAdvanceUndraftedGateFallsThroughOnMissingArtifact(t *testing.T) {
+	e, _, store, _ := advanceEngine(t)
+	f := feature(1, "no artifact yet", domain.StageSpec)
+	putFeature(t, store, f)
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StagePlan {
+		t.Fatalf("status=%d to=%s, want advanced/plan (missing artifact must fall through)", res.Status, res.To)
 	}
 }

@@ -40,7 +40,7 @@ func TestResumeInheritsPersistedGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec)
 	f.GateApproval = domain.GateOff
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestResumeOverridesPersistedGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	f := feature(1, domain.StageSpec)
 	f.GateApproval = domain.GateOff
-	putDraft(t, h, &f, "# Spec\nExport as JSON.\n")
+	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}

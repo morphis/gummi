@@ -135,7 +135,10 @@ type blockedEvent struct {
 	// the numeric blockers (e.g. the omission gate). Existing emits leave
 	// it zero and omitempty keeps it off the wire.
 	Reason string `json:"reason,omitempty"`
-	Resume string `json:"resume"`
+	// Undrafted names the sections a stage left undrafted when the draft
+	// floor holds its gate shut.
+	Undrafted []string `json:"undrafted,omitempty"`
+	Resume    string   `json:"resume"`
 }
 
 // documentSummary is the NDJSON-facing shape of a verifydoc.Report: counts

@@ -74,8 +74,8 @@ func TestVerifyNoChecksNotice(t *testing.T) {
 func TestVerifyNoBlockNotice(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("x"))
 	// worktree + spec exist, but no gummi-checks block was discovered
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'v', Text: "v"})
 	if m.Overlay.HasDialogs() {
 		t.Fatal("verify opened a dialog with no gummi-checks block")
@@ -88,8 +88,8 @@ func TestVerifyNoBlockNotice(t *testing.T) {
 func TestVerifySurfacesThenRuns(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("x"))
 	// advance to spec so a worktree exists (checks run in the worktree)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → spec
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"}) // → plan (worktree created)
+	m = pressAdvance(t, m) // → spec
+	m = pressAdvance(t, m) // → plan (worktree created)
 	writeWorktreeChecks(t, m, "FD-001", specChecks("ok", "exit 0", "bad", "exit 7"))
 
 	// v surfaces the commands first (safety), does not run yet
@@ -116,8 +116,8 @@ func TestVerifySurfacesThenRuns(t *testing.T) {
 
 func TestVerifyCancelDoesNotRun(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("x"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	writeWorktreeChecks(t, m, "FD-001", specChecks("ok", "exit 0"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // cancel
@@ -176,8 +176,8 @@ func TestStaleChecksDoNotSurviveStageTransition(t *testing.T) {
 // worktreeIn confirms the check runs in the worktree directory.
 func TestVerifyRunsInWorktree(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("x"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	writeWorktreeChecks(t, m, "FD-001", specChecks("where", "pwd"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})

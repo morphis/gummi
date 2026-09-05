@@ -26,9 +26,9 @@ func TestRunAutonomousStage(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
 	}
@@ -60,9 +60,9 @@ func TestRunAutonomousStage(t *testing.T) {
 
 func TestPauseStopsRun(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("working…"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m) // run
 	settleChat(t, eng)
 	if m.sessionFor("FD-001") == nil {
@@ -120,7 +120,7 @@ func TestBugInteractiveStagesAttachConversation(t *testing.T) {
 		// next stage's attach runs from the action list instead, because
 		// the composer blur is where esc leaves you
 		m = toKeys(t, m)
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		m = pressAdvance(t, m)
 		if m.rows[m.sel].F.Stage != stage {
 			t.Fatalf("setup: stage = %s, want %s", m.rows[m.sel].F.Stage, stage)
 		}
@@ -149,9 +149,9 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 
 	// first enter answers the idle decision and starts the run — the
 	// thread shows it live, no pane to open
@@ -236,9 +236,9 @@ func TestThreadActivityGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	// settleChat only waits on Busy/Transcript, not the session's own
@@ -292,9 +292,9 @@ func TestCardBusyStateRunning(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 
@@ -338,9 +338,9 @@ func TestCardLineGlyphSelectionGate(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
+	m = pressAdvance(t, m)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 

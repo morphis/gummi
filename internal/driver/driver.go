@@ -372,6 +372,8 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Document: newDocumentSummary(res.Advance.DocumentReport), Resume: string(id)})
 		case engine.StatusBlockedOmission:
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Reason: res.Advance.Reason, Resume: string(id)})
+		case engine.StatusBlockedUndrafted:
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Undrafted: res.Advance.Undrafted, Resume: string(id)})
 		default:
 			d.out.emit(blockedEvent{Event: "blocked", ID: string(id), Gate: string(res.Advance.From), Resume: string(id)})
 		}
@@ -1299,6 +1301,10 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 	case engine.StatusBlockedOmission:
 		d.recordBlocked(f, res.Reason)
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
+		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
+	case engine.StatusBlockedUndrafted:
+		d.recordBlocked(f, fmt.Sprintf("undrafted %s blocks %s.", strings.Join(res.Undrafted, ", "), res.From))
+		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Undrafted: res.Undrafted, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusNeedsMerge:
 		return d.done(ctx, res.Feature)

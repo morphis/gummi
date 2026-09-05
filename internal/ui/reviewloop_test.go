@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +17,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -69,7 +72,8 @@ func isVerify(opts agent.SessionOpts) bool {
 func advanceTo(t *testing.T, m *Shell, target domain.Stage) *Shell {
 	t.Helper()
 	for i := 0; i < 8 && m.rows[0].F.Stage != target; i++ {
-		m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+		draftRequiredSections(t, m)
+		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != target {
 		t.Fatalf("could not reach %s (at %s)", target, m.rows[0].F.Stage)
@@ -955,5 +959,80 @@ func TestEscalationRecordsAPark(t *testing.T) {
 	}
 	if parks[0].Detail == "" {
 		t.Error("park carries no detail — the reason code alone does not explain the stop")
+	}
+}
+
+
+// pressAdvance is `g` — the advance key — with the card's owed section
+// drafted first, so the fixture stands in for the stage's agent. Walking a
+// card forward in the TUI tests means pressing g with nothing attached that
+// writes the artifact, so it would otherwise stay the blank template and the
+// undrafted-sections gate would hold every design gate shut.
+func pressAdvance(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	draftRequiredSections(t, m)
+	return press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+}
+
+// draftRequiredSections writes content into the section the card's current
+// stage owes its gate, simulating an architect that actually wrote
+// something. The TUI fixtures walk a card forward with `g` and no drafting
+// agent, so its artifact would otherwise stay the blank template and the
+// undrafted-sections gate would — correctly — refuse every design gate. It
+// only fills a section that is still undrafted, so a fixture that wrote its
+// own content keeps it, and it is a no-op before the artifact exists.
+func draftRequiredSections(t *testing.T, m *Shell) {
+	t.Helper()
+	if m.store == nil || m.wt == nil {
+		return
+	}
+	f := m.rows[0].F
+	var want []string
+	switch {
+	case f.Kind == domain.KindFeature && f.Stage == domain.StageSpec:
+		want = []string{"Chosen approach"}
+	case f.Kind == domain.KindFeature && f.Stage == domain.StagePlan:
+		want = []string{"Implementation notes"}
+	case f.Kind == domain.KindBug && f.Stage == domain.StageDiagnose:
+		want = []string{"Root cause"}
+	case f.Kind == domain.KindFeature && f.Stage == domain.StageVerify:
+		want = []string{"Verification plan"}
+	case f.Kind == domain.KindBug && f.Stage == domain.StageVerify:
+		want = []string{"Verification"}
+	default:
+		return
+	}
+	root := m.wt.Root()
+	path := spec.LocateArtifact(
+		filepath.Join(root, f.ArtifactPath()),
+		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f)),
+		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
+	)
+	if path == "" {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	content := string(raw)
+	for _, name := range spec.UndraftedSections(content, want) {
+		// append, never replace: the section may already hold % markers a
+		// test put there on purpose, and an agent drafting its section does
+		// not delete the reader's comments.
+		body, ok := spec.ViewSection(content, name)
+		if !ok {
+			return
+		}
+		next, _, err := spec.ReplaceSection(content, name, body+"drafted by the fixture.\n\n")
+		if err != nil {
+			return
+		}
+		content = next
+	}
+	if content != string(raw) {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

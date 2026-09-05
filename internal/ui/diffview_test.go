@@ -212,7 +212,7 @@ func TestOpenDiffCommentBlocksGate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	f, _ := m.store.GetFeature(ctx, "FD-001")
 	if f.Stage != domain.StageReview {
 		t.Fatalf("open diff comment did not block the gate (stage=%s)", f.Stage)
@@ -224,7 +224,7 @@ func TestOpenDiffCommentBlocksGate(t *testing.T) {
 	if err := m.store.SetDiffAnnotationResolved(ctx, id, true); err != nil {
 		t.Fatal(err)
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	f, _ = m.store.GetFeature(ctx, "FD-001")
 	if f.Stage != domain.StageVerify {
 		t.Fatalf("resolving the diff comment did not unblock the gate (stage=%s)", f.Stage)
@@ -395,7 +395,7 @@ func TestDiffApproveFromSurface(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	ctx := context.Background()
 	m = openDiffFor(t, m)
-	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = pressAdvance(t, m)
 	if m.diff != nil {
 		t.Fatal("g did not close the diff surface")
 	}
@@ -414,7 +414,7 @@ func TestDiffApproveFromSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	m2 = openDiffFor(t, m2)
-	m2 = press(t, m2, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m2 = pressAdvance(t, m2)
 	if m2.diff != nil {
 		t.Fatal("A should close the surface even when blocked")
 	}

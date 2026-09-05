@@ -386,3 +386,148 @@ func TestHealWeldedHeadingsKnownTitleInProseIsResidual(t *testing.T) {
 		t.Errorf("healer not idempotent after residual split:\n%q vs\n%q", again, healed)
 	}
 }
+
+func TestUndraftedSectionsFeatureTemplate(t *testing.T) {
+	// Test the blank feature template: all sections should be undrafted
+	// (containing only %% marker lines).
+	f := &domain.Feature{ID: "FD-001", Num: 1, Title: "Test feature", Slug: "test-feature", Stage: domain.StageTodo}
+	tpl := Template(f)
+
+	sections := []string{"Problem", "Out of scope", "Considered approaches", "Chosen approach",
+		"Implementation notes", "Progress", "Review", "Verification plan"}
+	undrafted := UndraftedSections(tpl, sections)
+
+	// All sections should be undrafted in a blank template
+	if len(undrafted) != len(sections) {
+		t.Errorf("undrafted = %v, want all sections to be undrafted: %v", undrafted, sections)
+	}
+	for i, name := range undrafted {
+		if name != sections[i] {
+			t.Errorf("undrafted[%d] = %q, want %q", i, name, sections[i])
+		}
+	}
+}
+
+func TestUndraftedSectionsBugTemplate(t *testing.T) {
+	// Test the blank bug template: all sections should be undrafted
+	f := &domain.Feature{ID: "BG-001", Num: 1, Title: "Test bug", Slug: "test-bug", Stage: domain.StageTodo}
+	tpl := BugTemplate(f)
+
+	sections := []string{"Summary", "Reproduction", "Expected vs actual", "Environment",
+		"Root cause", "Fix", "Review", "Verification"}
+	undrafted := UndraftedSections(tpl, sections)
+
+	// All sections should be undrafted in a blank template
+	if len(undrafted) != len(sections) {
+		t.Errorf("undrafted = %v, want all sections to be undrafted: %v", undrafted, sections)
+	}
+	for i, name := range undrafted {
+		if name != sections[i] {
+			t.Errorf("undrafted[%d] = %q, want %q", i, name, sections[i])
+		}
+	}
+}
+
+func TestUndraftedSectionsMarkerLinesOnly(t *testing.T) {
+	// A section with only %% marker lines is undrafted
+	const doc = "## Problem\n%% @gummi: some prompt\n%% @user: a comment\n\n## Solution\nDone\n"
+	undrafted := UndraftedSections(doc, []string{"Problem", "Solution"})
+	if len(undrafted) != 1 || undrafted[0] != "Problem" {
+		t.Errorf("undrafted = %v, want [Problem]", undrafted)
+	}
+}
+
+func TestUndraftedSectionsBlankLinesOnly(t *testing.T) {
+	// A section with only blank lines is undrafted
+	const doc = "## Problem\n\n\n   \n\n## Solution\nDone\n"
+	undrafted := UndraftedSections(doc, []string{"Problem", "Solution"})
+	if len(undrafted) != 1 || undrafted[0] != "Problem" {
+		t.Errorf("undrafted = %v, want [Problem]", undrafted)
+	}
+}
+
+func TestUndraftedSectionsMixedBlankAndMarkers(t *testing.T) {
+	// A section with blank lines and marker lines is undrafted
+	const doc = "## Problem\n\n%% @gummi: prompt\n\n   \n\n## Solution\nDone\n"
+	undrafted := UndraftedSections(doc, []string{"Problem", "Solution"})
+	if len(undrafted) != 1 || undrafted[0] != "Problem" {
+		t.Errorf("undrafted = %v, want [Problem]", undrafted)
+	}
+}
+
+func TestUndraftedSectionsDraftedContent(t *testing.T) {
+	// A section with one real prose line plus %% markers is drafted
+	// (not returned as undrafted)
+	const doc = "## Problem\n%% @gummi: prompt\n\n## Solution\nThere is a solution.\n%% @user: comment\n"
+	undrafted := UndraftedSections(doc, []string{"Problem", "Solution"})
+	// Only Problem should be undrafted (Solution has real content)
+	if len(undrafted) != 1 || undrafted[0] != "Problem" {
+		t.Errorf("undrafted = %v, want [Problem]", undrafted)
+	}
+}
+
+func TestUndraftedSectionsMissingSectionName(t *testing.T) {
+	// A section name absent from the document is undrafted
+	const doc = "## Problem\n%% @gummi: prompt\n\n## Solution\nDone\n"
+	undrafted := UndraftedSections(doc, []string{"Problem", "Nonexistent", "Solution"})
+	// Problem and Nonexistent should be undrafted
+	if len(undrafted) != 2 || undrafted[0] != "Problem" || undrafted[1] != "Nonexistent" {
+		t.Errorf("undrafted = %v, want [Problem Nonexistent]", undrafted)
+	}
+}
+
+func TestUndraftedSectionsOrderPreservation(t *testing.T) {
+	// Verify order preservation: want order is maintained in the output,
+	// and caller's spelling is preserved
+	const doc = `## Problem
+%% @gummi: prompt
+
+## Solution
+Done
+
+## Review
+%% @user: comment
+
+## Implementation notes
+
+`
+	// Request in a specific order with specific spelling
+	want := []string{"review", "solution", "problem", "implementation notes"}
+	undrafted := UndraftedSections(doc, want)
+
+	// Problem and Implementation notes are undrafted, but review and solution are drafted
+	expected := []string{"review", "problem", "implementation notes"}
+	if len(undrafted) != len(expected) {
+		t.Errorf("undrafted = %v, want %v", undrafted, expected)
+		return
+	}
+	for i, name := range undrafted {
+		if name != expected[i] {
+			t.Errorf("undrafted[%d] = %q, want %q (caller's spelling should be preserved)", i, name, expected[i])
+		}
+	}
+}
+
+func TestUndraftedSectionsEmptyWant(t *testing.T) {
+	// Empty want list returns nil
+	const doc = "## Problem\nTest\n"
+	if undrafted := UndraftedSections(doc, []string{}); undrafted != nil {
+		t.Errorf("undrafted = %v, want nil for empty want", undrafted)
+	}
+}
+
+func TestUndraftedSectionsNilWant(t *testing.T) {
+	// Nil want list returns nil
+	const doc = "## Problem\nTest\n"
+	if undrafted := UndraftedSections(doc, nil); undrafted != nil {
+		t.Errorf("undrafted = %v, want nil for nil want", undrafted)
+	}
+}
+
+func TestUndraftedSectionsAllDrafted(t *testing.T) {
+	// When all sections are drafted, return nil (not empty slice)
+	const doc = "## Problem\nThere is a problem.\n\n## Solution\nDone\n"
+	if undrafted := UndraftedSections(doc, []string{"Problem", "Solution"}); undrafted != nil {
+		t.Errorf("undrafted = %v, want nil when nothing is undrafted", undrafted)
+	}
+}
