@@ -263,6 +263,14 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	fd := forkDriftStatus(ws, defaultRoot, namedRepos)
 	add(fd.Name, fd.Status, fd.Detail, fd.Remediation)
 
+	// 9. decoy database — an empty .gummi/gummi.db beside the real one.
+	// Advisory (warn): it breaks nothing, it just lies to whoever opens it.
+	// Unconditional: this only stats paths, and ws is a usable path-only
+	// value even when the workspace has not been initialized — a stray file
+	// in a .gummi that predates `gummi init` is worth naming too.
+	dc := decoyDBCheck(ws)
+	add(dc.Name, dc.Status, dc.Detail, dc.Remediation)
+
 	ready := true
 	for _, c := range checks {
 		if c.Status == statusFail {
@@ -982,6 +990,41 @@ func sortedStringKeys(m map[string]string) []string {
 
 // forkDriftStatus reports whether any feature's recorded fork point is no
 // longer an ancestor of its own repository's main HEAD. It is read-only and
+// decoyDBCheck reports an empty .gummi/gummi.db sitting beside the real
+// store at .gummi/state/gummi.db. gummi never creates that path — sqlite3
+// does, silently, for anyone who types the shorter one:
+//
+//	sqlite3 .gummi/gummi.db "select ..."   # creates an empty db, returns nothing
+//
+// The query then succeeds with no rows, and the file stays behind to make
+// the same promise to the next reader. It has already cost one session a
+// wrong conclusion (per-stage spend read as absent when it was merely in
+// the other file), which is exactly the failure a decoy produces: not an
+// error, an answer that is quietly empty. Advisory, and never removed
+// automatically — deleting a file that might be someone's own is not
+// doctor's call.
+func decoyDBCheck(ws state.Workspace) doctorCheck {
+	decoy := filepath.Join(ws.GummiDir(), "gummi.db")
+	ok := doctorCheck{Name: "decoy-db", Status: statusOK, Detail: "no stray database beside the state store"}
+	fi, err := os.Lstat(decoy)
+	if err != nil || fi.IsDir() {
+		return ok
+	}
+	// A non-empty file at that path is somebody's real database, not the
+	// accident this check is about; say so rather than calling it a decoy.
+	what := "an empty"
+	if fi.Size() > 0 {
+		what = fmt.Sprintf("a %d-byte", fi.Size())
+	}
+	return doctorCheck{
+		Name:   "decoy-db",
+		Status: statusWarn,
+		Detail: fmt.Sprintf("%s is %s file; the real state store is %s", decoy, what, ws.DBFile()),
+		Remediation: fmt.Sprintf("a tool was pointed at the wrong path (sqlite3 creates the file it cannot find). "+
+			"Query %s instead, and `rm %s` once you have checked it holds nothing you want", ws.DBFile(), decoy),
+	}
+}
+
 // safe to run while a feature is live: it reads the store's fork points,
 // resolves each card to its repository's manager, and runs local git
 // ancestry checks against that repo only, never re-anchoring or backfilling.

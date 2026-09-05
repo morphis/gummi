@@ -1459,3 +1459,37 @@ func TestDoctorEnvSection(t *testing.T) {
 		t.Errorf("absent env detail = %q, want describe and ABSENT", absent.Detail)
 	}
 }
+
+// An empty .gummi/gummi.db is a decoy: gummi's store is at
+// .gummi/state/gummi.db, and sqlite3 creates the shorter path for anyone
+// who types it. doctor must name both paths, so the reader learns which
+// one holds the data rather than concluding the data is missing.
+func TestDoctorFlagsDecoyDatabase(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t)
+	if r := buildDoctorReport(repo, doctorOpts{}); checkByName(r, "decoy-db").Status != statusOK {
+		t.Fatalf("decoy-db = %+v on a clean workspace, want ok", checkByName(r, "decoy-db"))
+	}
+
+	decoy := filepath.Join(repo, ".gummi", "gummi.db")
+	if err := os.MkdirAll(filepath.Dir(decoy), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decoy, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := checkByName(buildDoctorReport(repo, doctorOpts{}), "decoy-db")
+	if c.Status != statusWarn {
+		t.Fatalf("decoy-db = %+v, want warn", c)
+	}
+	if !strings.Contains(c.Detail, filepath.Join(".gummi", "state", "gummi.db")) {
+		t.Errorf("detail %q must point at the real store", c.Detail)
+	}
+	if !strings.Contains(c.Remediation, "sqlite3") {
+		t.Errorf("remediation %q should say what created the file", c.Remediation)
+	}
+	// advisory only: a stray file must not block readiness
+	if !buildDoctorReport(repo, doctorOpts{}).Ready {
+		t.Error("a decoy database blocked readiness; it is advisory")
+	}
+}
