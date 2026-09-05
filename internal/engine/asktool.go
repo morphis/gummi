@@ -31,6 +31,16 @@ type Ask struct {
 	MultiPick  bool        `json:"multi_select"`
 	FreeForm   bool        `json:"allow_free_form"`
 	SpecAnchor string      `json:"spec_anchor"`
+	// Gate marks this question AS the stage's gate: answering it is the
+	// crossing, rather than a decision the stage then acts on itself.
+	//
+	// The model supplies the sentence and the anchor — what it is good at,
+	// and what makes the gate read as part of the conversation instead of
+	// a control to go find. gummi supplies the options (gateAskOptions),
+	// because what "yes" means has to be reliable and a model-authored
+	// option list is not. That split is the whole reason this is a flag
+	// rather than a convention about option order.
+	Gate bool `json:"gate"`
 	// DecisionID is the identity of the durable decision this ask opened
 	// (the decision_open row's id): the tool-call id, or a minted,
 	// generation-scoped stand-in on the convention path. It correlates the
@@ -178,6 +188,13 @@ func askUserTool() agent.ToolDef {
 				},
 				"multi_select":    map[string]any{"type": "boolean", "description": "Allow choosing more than one option."},
 				"allow_free_form": map[string]any{"type": "boolean", "description": "Let the user type their own answer instead (default true)."},
+				"gate": map[string]any{
+					"type": "boolean",
+					"description": "Set true ONLY for the question that closes an attended stage — " +
+						"\"may this card move on?\". gummi replaces the options with its own " +
+						"(move on / not yet / say what is wrong), because answering a gate IS the " +
+						"crossing. Write the question and the spec_anchor; leave the choices to gummi.",
+				},
 				"spec_anchor": map[string]any{
 					"type": "string",
 					"description": "Optional: a unique snippet of a spec line this decision belongs to. " +
@@ -787,6 +804,24 @@ func (e *Engine) resolveNow(s *Session, callID, result string) {
 	}
 }
 
+// GateAdvanceLabel is the option that crosses the gate. The UI matches an
+// answer against it, so it is an exported constant rather than prose
+// either side is free to reword.
+const GateAdvanceLabel = "Yes, move on"
+
+// gateHoldLabel is the option that leaves the card where it is.
+const gateHoldLabel = "Not yet"
+
+// GateAskOptions are the choices every gate offers, whatever stage asked
+// and whatever words it asked in. gummi supplies them rather than the
+// model: "yes" has to mean the crossing, every time.
+func GateAskOptions() []AskOption {
+	return []AskOption{
+		{Label: GateAdvanceLabel, Detail: "cross the gate and start what is behind it"},
+		{Label: gateHoldLabel, Detail: "leave the card here — nothing moves"},
+	}
+}
+
 // parseAsk decodes an ask_user tool call's arguments into an Ask.
 func parseAsk(callID string, args json.RawMessage) (*Ask, error) {
 	var a Ask
@@ -794,6 +829,14 @@ func parseAsk(callID string, args json.RawMessage) (*Ask, error) {
 		return nil, fmt.Errorf("ask_user args: %w", err)
 	}
 	a.CallID = callID
+	if a.Gate {
+		// gummi owns a gate's options and its free-form channel; whatever
+		// the model sent is replaced, so a gate can never offer a choice
+		// gummi does not know how to honour.
+		a.Options = GateAskOptions()
+		a.MultiPick = false
+		a.FreeForm = true
+	}
 	if strings.TrimSpace(a.Question) == "" || len(a.Options) == 0 {
 		return nil, fmt.Errorf("ask_user needs a question and at least one option")
 	}

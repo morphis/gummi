@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/workflow"
 )
@@ -725,6 +726,13 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 			return nil
 		}
 		answer := decisionAnswerText(d.ask, m.decisionCursor, m.decisionPicked)
+		// A gate ask IS the crossing: answering it with the advance option
+		// has to move the card, or the question would be a control that
+		// looks like a decision and does nothing. Everything else about it
+		// — recording the answer, resolving the agent's blocked call —
+		// goes through the ordinary answer path first, so the transcript
+		// and the spec anchor read the same as any other answer.
+		crossing := gateAnswerCrosses(d.ask, answer)
 		if answer == "" {
 			// Belt to parseAsk's braces. Nothing that reaches here should
 			// be able to resolve to an empty answer, but if it ever does,
@@ -738,7 +746,7 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 		}
 		sess := m.sessionFor(r.F.ID)
 		eng := m.engine
-		return func() tea.Msg {
+		answerCmd := func() tea.Msg {
 			if sess == nil || eng.Get(r.F.ID) != sess {
 				return noticeMsg{text: "session is no longer active", isErr: true}
 			}
@@ -747,6 +755,14 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 			}
 			return nil
 		}
+		if !crossing {
+			return answerCmd
+		}
+		// Sequenced, not batched: the crossing must see the answer already
+		// recorded, and the gate's own blocker checks (open threads, the
+		// undrafted floor) still run inside Advance — answering a gate
+		// asks for the crossing, it does not force one.
+		return tea.Sequence(answerCmd, m.advanceStageAs(r.F.ID, state.ActorUser))
 	}
 	if m.decisionCursor < 0 || m.decisionCursor >= len(d.actions) {
 		return nil
@@ -757,6 +773,15 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 		id: action.id, key: action.key, label: action.label,
 		why: action.detail, danger: action.danger,
 	})
+}
+
+// gateAnswerCrosses reports whether answering ask with this text is the
+// gate crossing itself, rather than an ordinary answer the stage then
+// acts on. Only a gate ask can cross, and only its advance option does —
+// "not yet" and any free-form reply are answers that leave the card
+// exactly where it is.
+func gateAnswerCrosses(ask *engine.Ask, answer string) bool {
+	return ask != nil && ask.Gate && answer == engine.GateAdvanceLabel
 }
 
 func decisionAnswerText(ask *engine.Ask, cursor int, picked map[int]bool) string {

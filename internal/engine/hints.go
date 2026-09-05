@@ -145,7 +145,11 @@ func researchReadOnly(f domain.Feature) bool {
 func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	switch flavor {
 	case flavorCritique:
-		return []string{contractHint(f, specPath, agent.RoleReviewer), critiqueHint(f)}
+		h := []string{contractHint(f, specPath, agent.RoleReviewer), critiqueHint(f)}
+		if gate := gateAskHint(f); gate != "" {
+			h = append(h, gate)
+		}
+		return h
 	case flavorRebase:
 		return []string{contractHint(f, specPath, agent.RoleImplementer), rebaseHint()}
 	}
@@ -415,6 +419,40 @@ behavior and contracts — types, signatures, invariants — never file
 paths or line numbers, which go stale; file-level detail belongs in
 Implementation notes. The user approves the spec to advance — do not
 start implementing.`)
+}
+
+// gateAskHint tells an attended stage to close by ASKING whether to move
+// on, rather than falling silent and leaving gummi to raise a control the
+// reader has to go and find. It is the interaction change in one
+// paragraph: the gate becomes the last turn of the stage, in the
+// conversation, anchored to the thing it is asking about.
+//
+// Only for a card a person is actually attending. An autopilot card
+// answers its own questions (unattendedAskHint), so asking would be
+// theatre — and only for a stage whose pass reaches a human gate at all.
+//
+// Nothing depends on the agent obeying this. If the critique ends without
+// the ask, gummi raises the same inbox gate it always did: the ask is a
+// better-placed surface for the same decision, never the only one. A
+// model that ignores the instruction costs the reader a nicer question,
+// not a stuck card.
+func gateAskHint(f domain.Feature) string {
+	if f.GateApproval == domain.GateAutopilot {
+		return ""
+	}
+	if f.Stage != domain.StagePlan {
+		// only the plan critique's pass reaches a human gate; every other
+		// critique advances in the floor (gatepolicy.decideCritique).
+		return ""
+	}
+	return strings.TrimSpace(`
+Closing this stage: if your verdict is pass, make your LAST action a
+call to ask_user with "gate": true — the question a person should answer
+to let this card move on, in your own words, naming what you would want
+them to look at. Set spec_anchor to a line of the section you just
+judged, so the answer is recorded against it. Do not invent the options:
+gummi supplies them, because answering that question IS the crossing.
+If your verdict is changes, do not ask — the loop is not finished.`)
 }
 
 // critiqueHint selects the contract for the stage's critique pass. The

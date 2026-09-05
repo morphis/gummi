@@ -1487,3 +1487,74 @@ func TestParseAskRejectsUnlabelledOption(t *testing.T) {
 		t.Errorf("a well-formed ask was rejected: %v", err)
 	}
 }
+
+// TestGateAskOptionsAreGummisNotTheModels: a gate's options are replaced
+// with gummi's own, whatever the model sent. What "yes" means at a gate
+// has to be reliable, and a model-authored option list is not — so the
+// model writes the sentence and the anchor, and gummi writes the choices.
+func TestGateAskOptionsAreGummisNotTheModels(t *testing.T) {
+	body := `{"question":"ship it?","gate":true,"spec_anchor":"the plan",
+		"options":[{"label":"ok"},{"label":"lgtm"},{"label":"YOLO"}],
+		"multi_select":true,"allow_free_form":false}`
+	a, err := parseAsk("c1", json.RawMessage(body))
+	if err != nil {
+		t.Fatalf("parseAsk: %v", err)
+	}
+	if len(a.Options) != 2 || a.Options[0].Label != GateAdvanceLabel {
+		t.Fatalf("gate options = %+v, want gummi's own with %q first", a.Options, GateAdvanceLabel)
+	}
+	// the model's own words survive where they are the model's to write
+	if a.Question != "ship it?" || a.SpecAnchor != "the plan" {
+		t.Errorf("gate lost the model's question or anchor: %+v", a)
+	}
+	// and the shape gummi depends on is forced
+	if a.MultiPick {
+		t.Error("a gate must not be multi-select — it is one crossing")
+	}
+	if !a.FreeForm {
+		t.Error("a gate must keep the free-form channel: saying what is wrong is an answer")
+	}
+
+	// an ordinary ask is untouched
+	plain, err := parseAsk("c2", json.RawMessage(`{"question":"which?","options":[{"label":"a"},{"label":"b"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Gate || len(plain.Options) != 2 || plain.Options[0].Label != "a" {
+		t.Errorf("a non-gate ask was rewritten: %+v", plain)
+	}
+}
+
+// TestGateAskHintOnlyWhereAGateStops: the instruction to close with a
+// gate ask goes only to a stage whose pass actually reaches a human gate,
+// on a card a human is actually attending. Asking anywhere else would be
+// theatre — an autopilot card answers its own questions, and every
+// critique but the plan's advances in the floor.
+func TestGateAskHintOnlyWhereAGateStops(t *testing.T) {
+	attendedPlan := feature(1, "x", domain.StagePlan)
+	if gateAskHint(attendedPlan) == "" {
+		t.Error("an attended plan critique was not told to close by asking")
+	}
+
+	autopilot := attendedPlan
+	autopilot.GateApproval = domain.GateAutopilot
+	if gateAskHint(autopilot) != "" {
+		t.Error("an autopilot card was told to ask a question it would answer itself")
+	}
+
+	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageInvestigate} {
+		f := feature(1, "x", st)
+		if gateAskHint(f) != "" {
+			t.Errorf("%s's critique was told to ask a gate question; its pass advances in the floor", st)
+		}
+	}
+
+	// and it rides the critique's hints, not the stage's own
+	joined := strings.Join(stageHints(attendedPlan, "spec.md", flavorCritique), "\n")
+	if !strings.Contains(joined, `"gate": true`) {
+		t.Error("the critique's hints do not carry the gate-ask instruction")
+	}
+	if plain := strings.Join(stageHints(attendedPlan, "spec.md", flavorStage), "\n"); strings.Contains(plain, `"gate": true`) {
+		t.Error("the plan WRITER was told to ask the gate question; only its critique should be")
+	}
+}
