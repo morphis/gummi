@@ -407,13 +407,11 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 // wordAim is the composer's emptiness driving the highlight (DESIGN
 // §6.3): while a decision is open, a typed prose line aims the cursor at
 // the option that consumes words, so the screen always states what enter
-// is about to do with them before it does. A command never aims — the
-// first word being a verb makes the line a command the parser owns (the
-// chip is its confirmation), so verb-words leave the highlight where the
-// user put it, and while a chip is pending the line belongs to the chip
-// anyway.
+// is about to do with them before it does. A "/verb" line never aims —
+// the sigil makes it a command the parser owns, so it leaves the
+// highlight where the user put it.
 func (m *Shell) wordAim(d *threadDecision) int {
-	if d == nil || m.threadChip != nil {
+	if d == nil {
 		return -1
 	}
 	text := strings.TrimSpace(m.threadInput.Value())
@@ -431,18 +429,15 @@ func (m *Shell) wordAim(d *threadDecision) int {
 
 // decisionArmed reports whether enter, right now, would actually answer
 // this picker: false the moment the composer's line has been claimed by
-// something else — a recognised verb (the parser's own line, regardless
-// of what the decision offers), the confirm chip already standing, or an
-// armed free-form answer channel. Threaded into the picker's paint
+// something else — a "/verb" line (the parser's own, regardless of what
+// the decision offers), or an armed free-form answer channel. Threaded
+// into the picker's paint
 // (openDecisionBlock through pickerOptionLines) so it never disagrees
 // with the bar, which asks this exact question in threadInputBindings to
 // name enter's real destination (F7) — one control claims enter at a
 // time, and while a verb is pending that control is the composer, not
 // the picker's highlighted row.
 func (m *Shell) decisionArmed(d *threadDecision) bool {
-	if m.threadChip != nil {
-		return false
-	}
 	if d.ask != nil && d.ask.FreeForm && m.threadFreeForm {
 		return false
 	}

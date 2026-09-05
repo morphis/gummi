@@ -19,11 +19,11 @@ import (
 // only which of it gets named as an example moves.
 func TestComposerPlaceholderNamesARunnableVerb(t *testing.T) {
 	research := composerPlaceholder(domain.KindResearch)
-	if strings.Contains(research, "diff") {
-		t.Errorf("a research card's composer offers diff as an example, which it cannot run: %q", research)
+	if strings.Contains(research, "/diff") {
+		t.Errorf("a research card's composer offers /diff as an example, which it cannot run: %q", research)
 	}
-	// it still teaches that verbs exist, and names ones that work here
-	for _, want := range []string{"a verb (", "verify", "↑ for actions"} {
+	// it still teaches the sigil, and names verbs that work here
+	for _, want := range []string{"/verify", "↑ for actions"} {
 		if !strings.Contains(research, want) {
 			t.Errorf("a research card's composer placeholder lost %q: %q", want, research)
 		}
@@ -37,8 +37,8 @@ func TestComposerPlaceholderNamesARunnableVerb(t *testing.T) {
 
 	// the kinds that do have a branch keep diff
 	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.Kind("")} {
-		if got := composerPlaceholder(k); !strings.Contains(got, "diff") {
-			t.Errorf("a %q card's composer placeholder lost diff: %q", k, got)
+		if got := composerPlaceholder(k); !strings.Contains(got, "/diff") {
+			t.Errorf("a %q card's composer placeholder lost /diff: %q", k, got)
 		}
 	}
 	for _, v := range placeholderVerbs(t, composerPlaceholder(domain.KindFeature)) {
@@ -53,15 +53,16 @@ func TestComposerPlaceholderNamesARunnableVerb(t *testing.T) {
 // says rather than a copy of it kept in the test.
 func placeholderVerbs(t *testing.T, s string) []string {
 	t.Helper()
-	open := strings.Index(s, "(")
-	close := strings.Index(s, ")")
-	if open < 0 || close < open {
-		t.Fatalf("placeholder has no example list: %q", s)
-	}
+	// under the sigil rule the placeholder advertises the sigil itself, so
+	// the examples are "/verb" tokens rather than a parenthesised list.
 	var out []string
-	for _, part := range strings.Split(s[open+1:close], ",") {
-		v := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(part), "…"))
-		if v != "" {
+	for _, f := range strings.Fields(s) {
+		if !strings.HasPrefix(f, "/") {
+			continue
+		}
+		v := strings.TrimSuffix(strings.TrimSuffix(f, "…"), ",")
+		v = strings.TrimSuffix(strings.TrimSpace(v), "…")
+		if v = strings.TrimPrefix(v, "/"); v != "" {
 			out = append(out, v)
 		}
 	}

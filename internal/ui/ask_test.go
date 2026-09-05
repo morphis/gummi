@@ -19,7 +19,7 @@ func TestAskArmsWithEmptyLine(t *testing.T) {
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
-	m = typeString(t, m, "ask")
+	m = typeString(t, m, "/ask")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !m.threadAsk {
@@ -41,14 +41,11 @@ func TestAskWithRemainderArmsAndDelivers(t *testing.T) {
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
-	m = typeString(t, m, "ask is the envelope close to the cap?")
+	m = typeString(t, m, "/ask is the envelope close to the cap?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !m.threadAsk {
 		t.Fatal("`ask <question>` did not arm the composer")
-	}
-	if m.threadChip != nil {
-		t.Fatalf("ask raised a confirm chip: %+v", m.threadChip)
 	}
 	c := eng.Consult("FD-001")
 	if c == nil {
@@ -78,7 +75,7 @@ func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
 	}
 	stageBefore := len(eng.Get("FD-001").Snapshot().Transcript)
 
-	m = typeString(t, m, "ask")
+	m = typeString(t, m, "/ask")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // arm, empty line
 
 	m = typeString(t, m, "what did you just do?")
@@ -111,7 +108,7 @@ func TestAskEscDisarmsAndRestoresSteering(t *testing.T) {
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
-	m = typeString(t, m, "ask")
+	m = typeString(t, m, "/ask")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // arm
 	if !m.threadAsk {
 		t.Fatal("setup: expected the composer armed")
@@ -214,7 +211,7 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
 
-	m = typeString(t, m, "ask is the envelope close to the cap?")
+	m = typeString(t, m, "/ask is the envelope close to the cap?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = drainEngineLoop(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // disarm — steering resumes for the next line

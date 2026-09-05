@@ -593,56 +593,42 @@ func TestThreadDecisionStructuredAskLabelsEnterSend(t *testing.T) {
 	}
 }
 
-// TestThreadDecisionACommandKeepsTheParser: the collision the composer
-// coupling settles — verb-words are commands the parser owns (the chip is
-// their confirmation), so typing one leaves the highlight where it was,
-// raises the chip on enter, and its esc still sends the line as a
-// message. The screen never claims the words for an option enter will
-// not deliver them to.
-func TestThreadDecisionACommandKeepsTheParser(t *testing.T) {
-	m := reviewGateWorkspace(t)
+// TestThreadDecisionProseAimsAndSlashVerbKeepsTheParser is the sigil rule
+// at the one place it used to hurt most. "verify the contrast is right"
+// is a sentence about contrast, and under the old bare-word vocabulary it
+// was the verb `verify` — which is why every state-changing verb had to
+// raise a confirm chip. Now the first character decides: prose aims the
+// highlight at the option that eats words, and only "/verify" keeps the
+// parser.
+func TestThreadDecisionProseAimsAndSlashVerbKeepsTheParser(t *testing.T) {
+	t.Run("prose aims at the word consumer", func(t *testing.T) {
+		m := reviewGateWorkspace(t)
+		m = typeString(t, m, "verify the contrast is right")
+		out := ansi.Strip(m.threadView(100, 30))
+		if !strings.Contains(out, "with your words") {
+			t.Errorf("a sentence starting with a verb word did not aim at the word-eater:\n%s", out)
+		}
+	})
 
-	m = typeString(t, m, "verify the contrast is right")
-	out := ansi.Strip(m.threadView(100, 30))
-	if strings.Contains(out, "with your words") {
-		t.Errorf("a command aimed the highlight at the word-eater:\n%s", out)
-	}
-	if m.decisionCursor != 0 {
-		t.Errorf("a command moved the cursor to %d, want 0", m.decisionCursor)
-	}
-
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.threadChip == nil || m.threadChip.verb != "verify" {
-		t.Fatalf("enter did not raise the chip: %+v", m.threadChip)
-	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // no — send as a message
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	// with no stage session live at review's decision gate, FD-024 routes
-	// the "send as a message" line to the card's consult session rather
-	// than letting the review decision consume it — reviewGateWorkspace's
-	// shell carries no engine, so the consult channel itself has nowhere
-	// to go either, and says so instead of the old blanket refusal.
-	if !strings.Contains(m.notice.text, "no agent configured") {
-		t.Errorf("chip esc did not route the line to the consult channel: %+v", m.notice)
-	}
-	if m.rows[m.sel].F.Stage != domain.StageReview {
-		t.Fatalf("the bounced card moved to %s", m.rows[m.sel].F.Stage)
-	}
+	t.Run("slash verb keeps the parser", func(t *testing.T) {
+		m := reviewGateWorkspace(t)
+		m = typeString(t, m, "/verify the contrast is right")
+		out := ansi.Strip(m.threadView(100, 30))
+		if strings.Contains(out, "with your words") {
+			t.Errorf("a /verb line aimed the highlight at the word-eater:\n%s", out)
+		}
+		if m.decisionCursor != 0 {
+			t.Errorf("a /verb line moved the cursor to %d, want 0", m.decisionCursor)
+		}
+	})
 }
 
-// TestVerbLeavesPickerAtFullBrightness is BG-052: F7 made threadInputBindings
-// swap the bar's enter label to name a recognised verb's real destination
-// once the composer holds one, but the picker had no equivalent branch —
-// pickerOptionLines paints the highlighted row from decisionCursor alone,
-// so it kept the bright band and the ▸ marker while the bar had already
-// moved enter's claim elsewhere. Two controls cannot claim enter at once;
-// while the composer holds a verb, the picker must visibly stand down.
 func TestVerbLeavesPickerAtFullBrightness(t *testing.T) {
 	m := reviewGateWorkspace(t)
 	s := m0Styles()
 	before := m.openDecisionBlock(s, m.rows[m.sel], 60, 8)
 
-	m = typeString(t, m, "diff")
+	m = typeString(t, m, "/diff")
 
 	var enterLabel string
 	for _, b := range m.threadInputBindings() {

@@ -31,4 +31,4 @@ plan · architect · 180 credits ───────────────�
 gummi  nothing is running — choose what happens next.
 ▸ 1. run implement — no active run — start (or restart) the stage
 
-┃ message the agent, a verb (approve, verify, diff…), or ↑ for actions                      
+┃ message the agent, /approve /verify /diff…, or ↑ for actions                              

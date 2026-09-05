@@ -678,315 +678,21 @@ func TestFocusThreadInputGrantedForDrivenAbroad(t *testing.T) {
 	}
 }
 
-// TestSubmitThreadInputRoutesFreeVerbImmediately: diff/spec fire straight
-// away when they carry no remainder — no chip, no extra step. (park is a
-// state-changing verb — chipVerbs — so it always chips; see
-// TestParkVerbPausesRatherThanOpeningDeps.)
+// TestSubmitThreadInputRoutesFreeVerbImmediately: a "/verb" line fires
+// straight away — under the sigil rule there is nothing left to confirm.
 func TestSubmitThreadInputRoutesFreeVerbImmediately(t *testing.T) {
 	m := populatedShell(120, 34)
 	m.rows[m.sel].F.Kind = domain.KindResearch // boardVerb("d")'s guard fires a synchronous, storeless notice
 	f := m.rows[m.sel].F
-	m.threadInput.SetValue("diff")
+	m.threadInput.SetValue("/diff")
 
 	cmd := m.submitThreadInput(f)
 	pump(t, m, cmd)
-	if m.threadChip != nil {
-		t.Fatal("a remainder-free free verb should not raise a chip")
-	}
 	if m.threadInput.Value() != "" {
 		t.Fatalf("input not cleared after an immediate fire: %q", m.threadInput.Value())
 	}
 	if !strings.Contains(m.notice.text, "no diff") {
 		t.Fatalf("diff did not reach boardVerb(\"d\"): notice = %q", m.notice.text)
-	}
-}
-
-// TestSubmitThreadInputChipsAFreeVerbWithARemainder: the one exception to
-// "free verbs fire immediately" — a remainder they have nowhere to spend
-// must not be silently dropped, so it raises the chip instead.
-func TestSubmitThreadInputChipsAFreeVerbWithARemainder(t *testing.T) {
-	m := populatedShell(120, 34)
-	f := m.rows[m.sel].F
-	m.threadInput.SetValue("diff please check line 42")
-
-	m.submitThreadInput(f)
-	if m.threadChip == nil {
-		t.Fatal("a free verb with a remainder should still raise the chip")
-	}
-	if m.threadChip.verb != "diff" || m.threadChip.remainder != "please check line 42" {
-		t.Fatalf("chip = %+v, want verb diff with the typed remainder", m.threadChip)
-	}
-	if m.notice.text != "" {
-		t.Fatalf("diff must not have fired yet: notice = %q", m.notice.text)
-	}
-}
-
-// TestSubmitThreadInputChipsStateChangingVerbs: every state-changing verb
-// chips even with no remainder at all.
-func TestSubmitThreadInputChipsStateChangingVerbs(t *testing.T) {
-	for verb := range chipVerbs {
-		t.Run(verb, func(t *testing.T) {
-			m := populatedShell(120, 34)
-			f := m.rows[m.sel].F
-			m.threadInput.SetValue(verb)
-			m.submitThreadInput(f)
-			if m.threadChip == nil {
-				t.Fatalf("%s should always raise the chip", verb)
-			}
-			if m.threadChip.verb != verb {
-				t.Fatalf("chip verb = %q, want %q", m.threadChip.verb, verb)
-			}
-		})
-	}
-}
-
-// TestChipEnterFires: confirming the chip runs the mapped board verb,
-// clears the chip, and clears the input.
-func TestChipEnterFires(t *testing.T) {
-	m := populatedShell(120, 34)
-	m.rows[m.sel].F.Kind = domain.KindResearch
-	f := m.rows[m.sel].F
-	m.threadInput.SetValue("clean")
-	m.submitThreadInput(f)
-	if m.threadChip == nil {
-		t.Fatal("clean should have raised a chip")
-	}
-
-	cmd := m.handleChipKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	pump(t, m, cmd)
-	if m.threadChip != nil {
-		t.Fatal("enter on the chip should clear it")
-	}
-	if m.threadInput.Value() != "" {
-		t.Fatalf("enter on the chip should clear the input: %q", m.threadInput.Value())
-	}
-	if !strings.Contains(m.notice.text, "no cleanup") {
-		t.Fatalf("clean did not reach boardVerb(\"c\"): notice = %q", m.notice.text)
-	}
-}
-
-// TestChipEscRestoresLineAndSendsAsMessageNext: esc on the chip puts the
-// original line back — it does not resend it — and the NEXT submit of
-// that same line sends it as a message rather than raising the same chip
-// again (the "esc no, send as a message" half of the chip contract).
-// Real submits go through submitThreadLine (handleThreadInputKey's enter
-// case), not submitThreadInput directly — the flag-consuming half of the
-// contract now lives there (F2).
-func TestChipEscRestoresLineAndSendsAsMessageNext(t *testing.T) {
-	m := populatedShell(120, 34)
-	r := m.rows[m.sel]
-	m.threadInput.SetValue("verify the csv path")
-	m.submitThreadInput(r.F)
-	if m.threadChip == nil {
-		t.Fatal("verify should have raised a chip")
-	}
-
-	m.handleChipKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.threadChip != nil {
-		t.Fatal("esc should clear the chip")
-	}
-	if m.threadInput.Value() != "verify the csv path" {
-		t.Fatalf("esc should put the original line back in the input: %q", m.threadInput.Value())
-	}
-
-	// resubmitting the exact same line now sends it as a message instead
-	// of raising the same chip a second time. With no live stage session
-	// (Live()==false — there is none at all here), sendThreadMessage
-	// (FD-024) now routes it to the consult channel instead of refusing
-	// outright; with no engine wired in this test harness, that channel
-	// itself has nowhere to go, so the notice names that instead.
-	m.submitThreadLine(r, "verify the csv path")
-	if m.threadChip != nil {
-		t.Fatal("the deliberate 'send as a message' resubmit re-raised the chip")
-	}
-	if !strings.Contains(m.notice.text, "no agent configured") {
-		t.Fatalf("expected the no-agent notice from sendConsultMessage, got %q", m.notice.text)
-	}
-	// no engine to hand the text to, so the line stays exactly where it
-	// was rather than vanishing with it (F8's reasoning, now covering the
-	// consult path too).
-	if m.threadInput.Value() != "verify the csv path" {
-		t.Fatalf("a failed send should not have cleared the input: %q", m.threadInput.Value())
-	}
-	if m.threadSkipParse != "" {
-		t.Fatalf("the promise should be spent after the resubmit either way, got %q", m.threadSkipParse)
-	}
-}
-
-// TestChipEscPromiseDoesNotOutliveItsLine is F2's own repro
-// (ptytest-thread.sh section 8 drives the same defect with "spec", a
-// free verb that fires immediately rather than chipping — this uses
-// "verify", another always-chipping verb, so a leaked promise and a
-// correctly-parsed fresh line are distinguishable by one thing: whether
-// a chip comes up): esc on a chip arms "send as a message", but only for
-// the exact line that raised it. ctrl+u then a different verb must not
-// silently inherit that promise; "verify" has to go through the parser
-// (and raise its own chip) rather than being sent to the agent as chat.
-func TestChipEscPromiseDoesNotOutliveItsLine(t *testing.T) {
-	m := populatedShell(120, 34)
-	r := m.rows[m.sel]
-	m.threadInput.SetValue("clean")
-	m.submitThreadInput(r.F)
-	if m.threadChip == nil || m.threadChip.verb != "clean" {
-		t.Fatalf("clean should have raised a chip, got %+v", m.threadChip)
-	}
-
-	m.handleChipKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.threadSkipParse != "clean" {
-		t.Fatalf("threadSkipParse = %q, want the exact line the chip was raised for", m.threadSkipParse)
-	}
-
-	// ctrl+u, then a different verb
-	m.threadInput.Reset()
-	m.threadInput.SetValue("verify")
-
-	m.submitThreadLine(r, "verify")
-	if m.threadChip == nil || m.threadChip.verb != "verify" {
-		t.Fatalf("verify should have raised its own chip rather than being sent as a message: chip=%+v notice=%q", m.threadChip, m.notice.text)
-	}
-	if m.threadSkipParse != "" {
-		t.Fatalf("the stale promise should be spent by the mismatched submit, got %q", m.threadSkipParse)
-	}
-}
-
-// TestChipEscPromiseDroppedWhenComposerEmptied covers the same-line edge
-// case text comparison alone cannot catch: ctrl+u then retyping the
-// EXACT words the chip was raised for should not resurrect the promise —
-// that would send a freshly typed command as a message with no chip at
-// all, indistinguishable from someone deliberately retyping it. Emptying
-// the composer drops the promise outright (clearSkipParseIfEmptied), so
-// a fresh line — even an identical one — goes through the parser again.
-func TestChipEscPromiseDroppedWhenComposerEmptied(t *testing.T) {
-	m := populatedShell(120, 34)
-	r := m.rows[m.sel]
-	m.threadInput.Focus() // Update no-ops unfocused; ctrl+u must reach the textarea
-	m.threadInput.SetValue("clean")
-	m.submitThreadInput(r.F)
-	if m.threadChip == nil {
-		t.Fatal("clean should have raised a chip")
-	}
-	m.handleChipKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.threadSkipParse != "clean" {
-		t.Fatalf("threadSkipParse = %q, want %q", m.threadSkipParse, "clean")
-	}
-
-	m.handleThreadInputKey(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}) // real ctrl+u, through the key router
-	if m.threadInput.Value() != "" {
-		t.Fatalf("ctrl+u should have emptied the composer, got %q", m.threadInput.Value())
-	}
-	if m.threadSkipParse != "" {
-		t.Fatalf("emptying the composer should drop the promise, got %q", m.threadSkipParse)
-	}
-
-	m.threadInput.SetValue("clean")
-	m.submitThreadLine(r, "clean")
-	if m.threadChip == nil {
-		t.Fatal("retyping the same word fresh should raise its own chip, not reuse the stale promise")
-	}
-}
-
-// TestChipSurvivesAltJAndCardSteps is F6: alt+j/alt+k, alt+o and
-// pgup/pgdown all predate the chip and are documented as working
-// mid-draft ("never text"); routing them through handleChipKey's default
-// case first — which cancels whatever it does not recognise and forwards
-// the key to the textarea — used to eat the chip and the card step both,
-// since a modifier chord does nothing typed into a textarea. Hoisted
-// above the chip branch, alt+j both steps the card AND leaves the chip
-// standing (it is keyed to its own feature — inputBlock — so it simply
-// stops rendering on the new card rather than being discarded).
-func TestChipSurvivesAltJAndCardSteps(t *testing.T) {
-	m := attachedBoard(t, 120, 34)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
-	a := m.rows[m.sel].F.ID
-	m = typeString(t, m, "verify")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.threadChip == nil || m.threadChip.verb != "verify" {
-		t.Fatalf("verify should have raised a chip, got %+v", m.threadChip)
-	}
-
-	m = press(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
-	if m.rows[m.sel].F.ID == a {
-		t.Fatal("alt+j should have stepped to a different card")
-	}
-	if m.threadChip == nil || m.threadChip.verb != "verify" || m.threadChip.feature != a {
-		t.Fatalf("the chip did not survive alt+j: %+v", m.threadChip)
-	}
-
-	m = press(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModAlt})
-	if m.rows[m.sel].F.ID != a {
-		t.Fatalf("alt+k did not step back to %s, got %s", a, m.rows[m.sel].F.ID)
-	}
-	if m.threadChip == nil || m.threadChip.verb != "verify" {
-		t.Fatalf("the chip did not survive the round trip: %+v", m.threadChip)
-	}
-}
-
-// TestChipStandingOnAnotherCardDoesNotClaimEnter is the corollary F6
-// surfaced: once alt+j/alt+k can step past a pending chip, the chip can
-// be standing for a card that is no longer selected. Before this, both
-// the bar and handleThreadInputKey gated on "a chip exists" rather than
-// "a chip exists for THIS card" — so the bar kept promising "confirm"
-// on the new card, and enter there would have fired the OLD card's chip
-// (fireVerb acts on whichever card is currently selected) while also
-// wiping the new card's own unsent draft via handleChipKey's
-// Reset(). Off its own card, a chip must be inert: the bar reads like a
-// plain composer, and enter/other keys reach the textarea untouched.
-func TestChipStandingOnAnotherCardDoesNotClaimEnter(t *testing.T) {
-	m := attachedBoard(t, 120, 34)
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open card A
-	a := m.rows[m.sel].F.ID
-	m = typeString(t, m, "verify")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.threadChip == nil {
-		t.Fatal("verify should have raised a chip")
-	}
-
-	m = press(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt}) // step to B
-	b := m.rows[m.sel].F.ID
-	bStage := m.rows[m.sel].F.Stage
-	if b == a {
-		t.Fatal("precondition: alt+j should have moved to a different card")
-	}
-	if m.threadChip == nil || m.threadChip.feature != a {
-		t.Fatalf("precondition: the chip should still belong to A, got %+v", m.threadChip)
-	}
-
-	for _, bnd := range m.threadInputBindings() {
-		if bnd.key == "enter" && bnd.label == "confirm" {
-			t.Errorf("the bar offered 'confirm' on %s for a chip that belongs to %s", b, a)
-		}
-	}
-
-	m = typeString(t, m, "B's own note")
-	if got := m.threadInput.Value(); got != "B's own note" {
-		t.Fatalf("typing on B should have reached the textarea, not the stale chip: %q", got)
-	}
-	if m.rows[m.sel].F.Stage != bStage {
-		t.Fatalf("typing must not have fired A's chip against B: stage = %s, want %s (B's stage before typing)", m.rows[m.sel].F.Stage, bStage)
-	}
-	if m.threadChip == nil || m.threadChip.feature != a {
-		t.Fatalf("the chip should still be standing for A: %+v", m.threadChip)
-	}
-}
-
-// TestChipOtherKeyResumesEditing: any key besides enter/esc cancels the
-// chip and continues editing the (untouched) original line in place.
-func TestChipOtherKeyResumesEditing(t *testing.T) {
-	m := populatedShell(120, 34)
-	f := m.rows[m.sel].F
-	m.threadInput.Focus() // Update no-ops unfocused; the real flow always types focused
-	m.threadInput.SetValue("approve")
-	m.submitThreadInput(f)
-	if m.threadChip == nil {
-		t.Fatal("approve should have raised a chip")
-	}
-
-	m.handleChipKey(tea.KeyPressMsg{Code: '!', Text: "!"})
-	if m.threadChip != nil {
-		t.Fatal("typing over the chip should cancel it")
-	}
-	if m.threadInput.Value() != "approve!" {
-		t.Fatalf("input = %q, want the original line plus the new keystroke", m.threadInput.Value())
 	}
 }
 
@@ -1047,49 +753,44 @@ func TestVerbMenuOpensCommandMenuPreFiltered(t *testing.T) {
 
 // TestSlashVerbResolvesLikeBareVerb is the regression for the finding:
 // "/" and a bare verb used to be two different vocabularies. The command
-// menu (m.globalCommands) never carried the closed verb vocabulary
-// (verbs.go), so "/park" searched a list with no "park" in it and landed
-// on "no commands match", while bare "park" fired straight through
-// fireVerb — same word, opposite outcomes. For every word in verbs, "/"
-// + that word must now resolve exactly like the bare word: same chip
-// state (or lack of one), same notice, and the command menu never opens.
-func TestSlashVerbResolvesLikeBareVerb(t *testing.T) {
+// vocabulary lived in two places. The sigil rule settles it from the
+// other end: a bare word is never a verb, so there is only one way to
+// reach one. For every word in verbs, "/" + that word routes the verb
+// and never opens the menu, and the bare word is prose — it reaches
+// sendThreadMessage instead, and the two outcomes must differ.
+func TestSlashVerbFiresAndBareWordIsProse(t *testing.T) {
 	for verb := range verbs {
 		t.Run(verb, func(t *testing.T) {
 			// attachedBoard, not the bare detached populatedShell: "spec"
-			// fires immediately (it is not in chipVerbs) and openSpec
-			// touches the real worktree pool unconditionally, which panics
-			// on a detached shell (TestVerbKeysLandOnMatchingHandler's own
-			// "spec" subtest needs the same fixture for the same reason).
-			bare := attachedBoard(t, 120, 34)
-			// Research: exercises the worktree-gated verbs' (diff, rebase,
-			// land, squash, clean) own "no X" notice uniformly, the same
-			// setup TestVerbKeysLandOnMatchingHandler uses — a verb that
-			// fires immediately has something verb-named to compare.
-			bare.rows[bare.sel].F.Kind = domain.KindResearch
-			bf := bare.rows[bare.sel].F
-			bare.threadInput.SetValue(verb)
-			pump(t, bare, bare.submitThreadInput(bf))
-
+			// fires immediately and openSpec touches the real worktree
+			// pool unconditionally, which panics on a detached shell.
 			slash := attachedBoard(t, 120, 34)
+			// Research: exercises the worktree-gated verbs' (diff, rebase,
+			// land, squash, clean) own "no X" notice uniformly.
 			slash.rows[slash.sel].F.Kind = domain.KindResearch
 			sf := slash.rows[slash.sel].F
 			slash.threadInput.SetValue("/" + verb)
 			pump(t, slash, slash.submitThreadInput(sf))
 
 			if _, opened := slash.Overlay.Top().(*commandMenu); opened {
-				t.Fatalf("/%s opened the command menu instead of routing the verb — the two-vocabularies bug", verb)
+				t.Fatalf("/%s opened the command menu instead of routing the verb", verb)
 			}
-			if (slash.threadChip == nil) != (bare.threadChip == nil) {
-				t.Fatalf("/%s chip raised = %v, bare %q chip raised = %v", verb, slash.threadChip != nil, verb, bare.threadChip != nil)
+
+			bare := attachedBoard(t, 120, 34)
+			bare.rows[bare.sel].F.Kind = domain.KindResearch
+			bf := bare.rows[bare.sel].F
+			bare.threadInput.SetValue(verb)
+			pump(t, bare, bare.submitThreadInput(bf))
+
+			if _, opened := bare.Overlay.Top().(*commandMenu); opened {
+				t.Fatalf("bare %q opened the command menu — a bare word is prose", verb)
 			}
-			if slash.threadChip != nil {
-				if slash.threadChip.verb != bare.threadChip.verb || slash.threadChip.remainder != bare.threadChip.remainder {
-					t.Fatalf("/%s chip = %+v, bare %q chip = %+v", verb, slash.threadChip, verb, bare.threadChip)
-				}
-			}
-			if slash.notice.text != bare.notice.text {
-				t.Fatalf("/%s notice = %q, bare %q notice = %q", verb, slash.notice.text, verb, bare.notice.text)
+			// prose with nowhere to go leaves the line in the composer and
+			// says so; a fired verb clears it. Whatever each does, they
+			// must not be the same thing.
+			if bare.notice.text == slash.notice.text && bare.threadInput.Value() == slash.threadInput.Value() {
+				t.Fatalf("bare %q and /%s did the same thing (%q) — the sigil is not separating them",
+					verb, verb, bare.notice.text)
 			}
 		})
 	}
@@ -1170,9 +871,6 @@ func TestPlainMessageRoutesToConsultWithNoLiveSession(t *testing.T) {
 	f := m.rows[m.sel].F
 	m.threadInput.SetValue("looks good, but verify the padding")
 	m.submitThreadInput(f)
-	if m.threadChip != nil {
-		t.Fatal("prose starting with a non-verb word must not raise a chip")
-	}
 	if !strings.Contains(m.notice.text, "no agent configured") {
 		t.Fatalf("notice = %q, want the no-agent-configured notice from sendConsultMessage", m.notice.text)
 	}

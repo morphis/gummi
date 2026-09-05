@@ -159,18 +159,10 @@ type Shell struct {
 	// threadInput is the card page's persistent message/verb box
 	// (thread.go, threadinput.go): a Shell field rather than one rebuilt
 	// per render so an unsent draft survives leaving and returning to the
-	// tab, same as the chat pane's own m.chat. threadChip is the inline
-	// confirm chip pending in its place, or nil. threadSkipParse holds the
-	// exact line the chip's esc promised to send as a message — not just
-	// whether one was promised — so a submit only honours it when the text
-	// still matches; any submit spends it either way, matched or not
-	// (threadinput.go's doc comments own the full story; F2).
-	threadInput     textarea.Model
-	threadChip      *pendingChip
-	threadSkipParse string
+	// tab, same as the chat pane's own m.chat.
+	threadInput textarea.Model
 	// threadDrafts holds every card's unsent line except the one currently
-	// live in threadInput, keyed by feature — the same per-card scoping
-	// threadChip already had via pendingChip.feature. openCard/stepCard
+	// live in threadInput, keyed by feature. openCard/stepCard
 	// swap the composer's buffer to the newly selected card's entry (empty
 	// if it has none) after stashing the outgoing card's own text here;
 	// closeCard stashes on the way out. Without this a line typed on one

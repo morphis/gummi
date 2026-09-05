@@ -115,9 +115,9 @@ func TestQuitWithLiveSessionPushesDialog(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m) // brainstorm → spec
-	m = pressAdvance(t, m) // spec → plan
-	m = openAndAttach(t, m)                                // run plan (autonomous)
+	m = pressAdvance(t, m)  // brainstorm → spec
+	m = pressAdvance(t, m)  // spec → plan
+	m = openAndAttach(t, m) // run plan (autonomous)
 	waitLive(t, eng, "FD-001")
 
 	m = toKeys(t, m)

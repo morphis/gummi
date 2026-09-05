@@ -962,7 +962,6 @@ func TestEscalationRecordsAPark(t *testing.T) {
 	}
 }
 
-
 // pressAdvance is `g` — the advance key — with the card's owed section
 // drafted first, so the fixture stands in for the stage's agent. Walking a
 // card forward in the TUI tests means pressing g with nothing attached that

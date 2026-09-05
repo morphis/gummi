@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -64,18 +63,6 @@ import (
 // decision, enter is a no-op and up opens the action inventory. None can
 // surprise anyone mid-sentence — the moment there is text, they belong to
 // the text.
-type pendingChip struct {
-	feature   domain.FeatureID
-	verb      string
-	remainder string
-	// line is the exact composer text that raised this chip — what esc's
-	// "send as a message" promise (threadSkipParse) is scoped to. The chip
-	// never edits the buffer (handleChipKey), so this is also, always,
-	// what m.threadInput.Value() holds for as long as the chip stands
-	// (F2).
-	line string
-}
-
 // The composer's placeholder is the one place the action inventory can
 // be advertised, because it occupies exactly the state that opens it: an
 // empty line. It is not decoration — with esc no longer blurring, up is
@@ -89,7 +76,7 @@ type pendingChip struct {
 // while the decision is open, but off the top of it the very same key
 // escapes into the inventory — one route, reachable everywhere the
 // composer is empty — so the two placeholders collapsed back into one.
-const placeholderText = "message the agent, a verb (approve, verify, diff…), or ↑ for actions"
+const placeholderText = "message the agent, /approve /verify /diff…, or ↑ for actions"
 
 // researchPlaceholderText is the same promise for a card with no branch.
 // The verb vocabulary is shared across kinds (verbs.go), but `diff` is
@@ -97,7 +84,7 @@ const placeholderText = "message the agent, a verb (approve, verify, diff…), o
 // no worktree and no branch to diff — so naming it as the example is an
 // example of what not to type. `ask` takes its place: it is in the same
 // closed vocabulary and it is on a research card's own action inventory.
-const researchPlaceholderText = "message the agent, a verb (approve, verify, ask…), or ↑ for actions"
+const researchPlaceholderText = "message the agent, /approve /verify /ask…, or ↑ for actions"
 
 // composerPlaceholder is the placeholder for a card the reader can type
 // to. The examples are illustrative rather than exhaustive — the ↑
@@ -214,7 +201,6 @@ func (m *Shell) focusThreadInput() {
 // which is not reachable in practice.
 func (m *Shell) blurThreadInput() {
 	m.threadInput.Blur()
-	m.threadChip = nil
 	m.threadFreeForm = false
 	m.threadAsk = false
 }
@@ -281,18 +267,6 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// re-read does.
 		return m.openSpec(r.F)
 	}
-	// A chip left standing by a step away (F6) belongs to the card that
-	// raised it, not to whichever one is selected now — inputBlock
-	// already renders it that way (m.threadChip.feature == r.F.ID), and
-	// handleChipKey has to be gated the same way: it fires the chip's
-	// verb via fireVerb, which acts on the currently selected card, so
-	// running it from a different card than the one the chip belongs to
-	// would confirm the wrong card's action. Off its own card, a chip is
-	// just data waiting to be seen again — every key here is ordinary
-	// composer input instead.
-	if m.threadChip != nil && m.threadChip.feature == r.F.ID {
-		return m.handleChipKey(msg)
-	}
 	switch msg.String() {
 	case "esc":
 		if m.threadFreeForm {
@@ -343,9 +317,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.threadFreeForm || m.threadAsk {
 		// armed: the line is the answer (or the next consult question),
 		// not a picker — everything else is text
-		cmd := m.updateThreadInput(msg)
-		m.clearSkipParseIfEmptied()
-		return cmd
+		return m.updateThreadInput(msg)
 	}
 	switch msg.String() {
 	case "up", "down":
@@ -435,9 +407,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 	}
-	cmd := m.updateThreadInput(msg)
-	m.clearSkipParseIfEmptied()
-	return cmd
+	return m.updateThreadInput(msg)
 }
 
 // updateThreadInput runs msg through the composer textarea and tags the
@@ -462,20 +432,6 @@ func (m *Shell) updateThreadInput(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// clearSkipParseIfEmptied drops a still-armed chip promise the moment the
-// line it was made about is gone (ctrl+u, most commonly) — an emptied
-// composer cannot be the line threadSkipParse names, and leaving the
-// promise standing would let retyping the very same words later reuse a
-// "send as a message" that was never made about that fresh line (F2).
-// submitThreadLine's own text comparison would already refuse a
-// DIFFERENT line, but two typings of the same words are indistinguishable
-// by text alone, so the buffer going empty is the signal to use instead.
-func (m *Shell) clearSkipParseIfEmptied() {
-	if m.threadInput.Value() == "" {
-		m.threadSkipParse = ""
-	}
-}
-
 func (m *Shell) openCardActions(r featureRow) {
 	l := m.cardActions()
 	d := newCardActionsDialog(string(r.F.ID), l, func(cursor int, expanded bool) {
@@ -489,10 +445,8 @@ func (m *Shell) openCardActions(r featureRow) {
 }
 
 // handleThreadPaste routes a bracketed paste into the thread input
-// (shell.go's handlePaste). A pending chip is cancelled first, the same
-// as any other key reaching handleChipKey's default case.
+// (shell.go's handlePaste).
 func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
-	m.threadChip = nil
 	return m.updateThreadInput(msg)
 }
 
@@ -507,14 +461,6 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 // belongs at the point of action. Prose nothing consumes, and the chip's
 // esc contract, send as a message — always safe prose (§6.3).
 //
-// One state outranks the classification: threadSkipParse holds the exact
-// line a chip's esc promised to send as a message (handleChipKey). It is
-// honoured only when the submitted text still matches — a promise made
-// about "clean" must not get spent on "spec" typed after a ctrl+u, which
-// is the whole bug F2 fixes — and it is spent either way, matched or not:
-// a promise is good for one submit of the line it was made about, never
-// carried past it.
-//
 // A card driven by another process outranks all of it: it has no verb
 // vocabulary here at all (Chosen approach) — every submitted line is
 // consult prose, verbatim, so this never even reaches parseInput for
@@ -524,11 +470,6 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	if r.DrivenAbroad {
 		return m.sendConsultMessage(r.F, text)
-	}
-	skip := m.threadSkipParse != "" && m.threadSkipParse == text
-	m.threadSkipParse = ""
-	if skip {
-		return m.sendThreadMessage(r.F, text)
 	}
 	if d := m.visibleDecision(r); d != nil {
 		m.syncDecision(d)
@@ -555,31 +496,15 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 //
 //   - verbNone -> sent as a message to the agent, exactly as the chat
 //     pane's own send path does.
-//   - verbMenu whose remainder is ITSELF a recognised verb ("/park",
-//     "/verify the csv path") -> routed exactly like the bare word, via
-//     routeVerb below, never touching the menu at all. This is the fix
-//     for the two-vocabularies bug: the command menu (m.globalCommands)
-//     only ever carried board-level and card actions, never the closed
-//     verb vocabulary (verbs.go), so "/park" used to search a list that
-//     had no "park" in it and report "no commands match" while bare
-//     "park" fired straight through fireVerb. Re-parsing the remainder on
-//     its own reuses parseInput's exact-first-word rule, so "/appro" (not
-//     an exact match) still falls through to the menu below, filtered —
-//     only a real, whole verb word short-circuits it.
-//   - verbMenu otherwise -> the same command menu overlay boardKey's
+//   - verbMenu -> the same command menu overlay boardKey's
 //     space key opens, pre-filtered by whatever followed the "/". On a
 //     card page that menu now also carries the selected card's own
 //     action inventory (globalCommands), so "/envelope", "/duplicate"
 //     and the rest of cardactions.go's list — none of them in the verb
 //     vocabulary — find something too, instead of needing a second,
 //     narrower inventory here.
-//   - verbCommand -> routeVerb: fires immediately (a free/navigational
-//     verb with no remainder) or raises the inline confirm chip.
-//
-// The chip's own "esc no, send as a message" promise (threadSkipParse) is
-// resolved by submitThreadLine before this ever runs — it either sends
-// straight through sendThreadMessage or falls through here with the
-// promise already spent, so this function parses every line it sees.
+//   - verbCommand ("/verb") -> routeVerb, which fires it. Nothing
+//     confirms: the sigil already said this was meant as a verb.
 func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
 	text := strings.TrimSpace(m.threadInput.Value())
 	if text == "" {
@@ -588,9 +513,6 @@ func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
 	parsed := parseInput(text)
 	switch parsed.Kind {
 	case verbMenu:
-		if sub := parseInput(parsed.Remainder); sub.Kind == verbCommand {
-			return m.routeVerb(f, sub.Verb, sub.Remainder, text)
-		}
 		cm := newCommandMenu(m.globalCommands(), m.runCommand)
 		if parsed.Remainder != "" {
 			cm.filter.SetValue(parsed.Remainder)
@@ -600,29 +522,23 @@ func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
 		m.threadInput.Reset()
 		return nil
 	case verbCommand:
-		return m.routeVerb(f, parsed.Verb, parsed.Remainder, text)
+		return m.routeVerb(f, parsed.Verb, parsed.Remainder)
 	default: // verbNone
 		return m.sendThreadMessage(f, text)
 	}
 }
 
-// routeVerb fires or chips a recognised verb — the one decision both a
-// bare command line and a "/verb" line reach (submitThreadInput above),
-// so they can never land on two different outcomes for the same word.
-// State-changing verbs always chip; a free/navigational one (diff, spec,
-// park) chips too the moment it carries a remainder it has nowhere to
-// spend — raising the chip rather than firing and silently dropping words
-// the user typed on purpose. line is the exact composer text (slash
-// included, when this came from "/verb") that the chip's esc hands back
-// as a message — pendingChip.line's own contract.
-func (m *Shell) routeVerb(f domain.Feature, verb, remainder, line string) tea.Cmd {
+// routeVerb performs a recognised verb. It fires immediately, always:
+// under the sigil rule a "/verb" line cannot be prose that happened to
+// start with a verb word, so there is nothing left for a confirm to
+// protect against. This is the whole of what the inline confirm chip used
+// to do, minus the confirm.
+func (m *Shell) routeVerb(f domain.Feature, verb, remainder string) tea.Cmd {
 	if verb == "ask" {
-		// ask is never a chip: asking is never destructive, and unlike
-		// diff/spec (which chip the moment a remainder has nowhere to
-		// spend) ask DOES have somewhere to spend one — arm the composer
-		// against the consult session and, when the line carried a
-		// question already, deliver it as the first consult turn in the
-		// same motion (Chosen approach's own wording).
+		// ask spends its remainder rather than dropping it — arm the
+		// composer against the consult session and, when the line carried
+		// a question already, deliver it as the first consult turn in the
+		// same motion.
 		m.threadAsk = true
 		if remainder == "" {
 			m.threadInput.Reset()
@@ -630,41 +546,8 @@ func (m *Shell) routeVerb(f domain.Feature, verb, remainder, line string) tea.Cm
 		}
 		return m.sendConsultMessage(f, remainder)
 	}
-	if !chipVerbs[verb] && remainder == "" {
-		m.threadInput.Reset()
-		return m.fireVerb(verb, remainder)
-	}
-	m.threadChip = &pendingChip{feature: f.ID, verb: verb, remainder: remainder, line: line}
-	return nil
-}
-
-// handleChipKey drives the inline confirm chip.
-func (m *Shell) handleChipKey(msg tea.KeyPressMsg) tea.Cmd {
-	chip := m.threadChip
-	switch msg.String() {
-	case "enter":
-		m.threadChip = nil
-		m.threadInput.Reset()
-		return m.fireVerb(chip.verb, chip.remainder)
-	case "esc":
-		// The chip never touched the input's buffer — it only overlays
-		// the rendered line (inputBlock) — so "putting the line back" is
-		// just ceasing to render the chip over it. threadSkipParse carries
-		// chip.line, the exact text this promise was made about:
-		// submitThreadLine only honours it when a submit's text still
-		// matches, so it cannot outlive the line that raised it (F2) —
-		// ctrl+u and a different word, or the same word retyped fresh
-		// after ctrl+u (clearSkipParseIfEmptied), both fall through to the
-		// parser instead of silently sending as a message.
-		m.threadChip = nil
-		m.threadSkipParse = chip.line
-		return nil
-	}
-	// Any other key backs out of the chip and resumes editing in place —
-	// the original line is untouched, so this keystroke just continues
-	// where the user left off (a correction, more text, a delete).
-	m.threadChip = nil
-	return m.updateThreadInput(msg)
+	m.threadInput.Reset()
+	return m.fireVerb(verb, remainder)
 }
 
 // verbKeys maps a parsed verb to the board accelerator that performs the
@@ -698,30 +581,6 @@ var verbKeys = map[string]string{
 	"rebase":  "r",
 	"clean":   "c",
 	"squash":  "z",
-}
-
-// chipVerbs is the set of state-changing verbs that always raise the
-// confirm chip rather than firing straight from the input. verify and
-// changes are ordinary English first words — "verify the CSV path is
-// right" would otherwise run the checks — so the mitigation lives here,
-// at the point of action, rather than in parseInput: the parse stays a
-// deterministic, context-free classification, and nothing about it is
-// ever guessed.
-//
-// spec and diff collide the same way and are deliberately absent: they
-// only navigate, so the worst a misfire costs is a view you can esc out
-// of, which is cheaper than a confirm on every use.
-var chipVerbs = map[string]bool{
-	"approve":   true,
-	"verify":    true,
-	"bounce":    true,
-	"land":      true,
-	"rebase":    true,
-	"squash":    true,
-	"clean":     true,
-	"changes":   true,
-	"autopilot": true,
-	"park":      true,
 }
 
 // fireVerb performs a parsed verb's action: routes to the same key
@@ -816,45 +675,12 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 	}
 }
 
-// chipQuestions is the confirm chip's per-verb question, e.g. "verify ·
-// run the checks?".
-var chipQuestions = map[string]string{
-	"approve":   "advance the stage?",
-	"verify":    "run the checks?",
-	"bounce":    "send it back to work?",
-	"land":      "merge into main?",
-	"rebase":    "rebase onto main?",
-	"squash":    "squash onto main?",
-	"clean":     "remove the worktree?",
-	"changes":   "request changes?",
-	"autopilot": "change autopilot mode?",
-	"park":      "pause the run and free the slot?",
-}
-
-// view renders the inline confirm chip line: "verb · question? enter
-// yes · esc no, send as a message".
-func (c *pendingChip) view(s *theme.Styles) string {
-	q := chipQuestions[c.verb]
-	if q == "" {
-		q = "run it?"
-	}
-	return s.Warning.Render(c.verb) + s.Faint.Render(" · "+q+" ") +
-		s.KeyHint.Render("enter") + s.Faint.Render(" yes · ") +
-		s.KeyHint.Render("esc") + s.Faint.Render(" no, send as a message")
-}
-
 // inputBlock is the thread's bottom input slot (thread.go's threadView).
 // A card owned by another process gets the composer too now, ask-only —
 // every line it accepts goes straight to that card's consult session
 // (submitThreadLine's DrivenAbroad branch), never through the verb
-// vocabulary, so there is nothing here left to withhold. It renders the
-// pending confirm chip in place of the box when one is standing (never
-// true for a DrivenAbroad row, since routeVerb is never reached for one),
-// or the persistent textarea itself.
+// vocabulary, so there is nothing here left to withhold.
 func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
-	if m.threadChip != nil && m.threadChip.feature == r.F.ID {
-		return ansi.Truncate(m.threadChip.view(s), w, "…")
-	}
 	if r.DrivenAbroad {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
 	} else {
@@ -884,19 +710,6 @@ func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 // typed (wordAim), and plain "send" when nothing consumes the words —
 // the bar may not claim enter for a choice the line is not aimed at.
 func (m *Shell) threadInputBindings() []binding {
-	// A chip left standing by a step away (F6) is not this card's row
-	// any more once it belongs to a different one — the same
-	// m.threadChip.feature == r.F.ID gate inputBlock and
-	// handleThreadInputKey use, so the bar never promises "confirm" for
-	// a key that would now just be typed (handleThreadInputKey's chip
-	// gate covers the reverse: why acting on it here would hit the wrong
-	// card).
-	if r, ok := m.selected(); ok && m.threadChip != nil && m.threadChip.feature == r.F.ID {
-		return []binding{
-			{key: "enter", label: "confirm", help: "run " + m.threadChip.verb, bar: true},
-			{key: "esc", label: "cancel", help: "back out — the line goes back in the input as a message", bar: true},
-		}
-	}
 	if m.threadAsk {
 		// armed by `ask`: the composer owns the keyboard the way the
 		// free-form answer channel does, but every line goes to the
@@ -1017,20 +830,12 @@ func (m *Shell) threadInputBindings() []binding {
 // line while a decision is open and wordAim came back -1 for it (F7): the
 // parser owns a command line regardless of what the decision offers, so
 // it routes exactly as the bare composer would (submitThreadInput) —
-// immediately for a free verb with no remainder, through the confirm
-// chip for everything chipVerbs marks, and as a plain message for prose.
+// immediately for a "/verb" line, and as a plain message for prose.
 // parseInput is deterministic and context-free, so this can ask it
 // directly rather than guess from wordAim's -1 alone.
 func threadEnterLabel(text string) (label, help string) {
 	switch parsed := parseInput(text); parsed.Kind {
 	case verbMenu:
-		// A remainder that is itself a verb short-circuits the menu in
-		// submitThreadInput (routeVerb) — the bar has to preview that
-		// same destination, not "menu", or it would promise an overlay
-		// enter never opens.
-		if sub := parseInput(parsed.Remainder); sub.Kind == verbCommand {
-			return verbEnterLabel(sub.Verb, sub.Remainder)
-		}
 		return "menu", "open the command menu, filtered by what follows the /"
 	case verbCommand:
 		return verbEnterLabel(parsed.Verb, parsed.Remainder)
@@ -1039,25 +844,18 @@ func threadEnterLabel(text string) (label, help string) {
 	}
 }
 
-// verbEnterLabel names what routeVerb will do with a recognised verb —
-// shared by threadEnterLabel's two callers (a bare verb line, and a
-// "/verb" line whose remainder resolved to the same verb) so the bar's
-// preview can never drift from routeVerb's own fire-or-chip decision.
+// verbEnterLabel names what routeVerb will do with a recognised verb, so
+// the bar's preview can never drift from routeVerb's own behaviour.
 func verbEnterLabel(verb, remainder string) (label, help string) {
 	if verb == "ask" {
-		// never a chip, and a remainder here is not dropped — it is
-		// delivered as the first consult turn in the same motion
-		// (routeVerb's own "ask" branch), so the preview never promises a
-		// confirm this verb will never raise.
+		// a remainder here is not dropped — it is delivered as the first
+		// consult turn in the same motion (routeVerb's own "ask" branch).
 		if remainder == "" {
 			return "ask", "arm the composer against the card's consult session"
 		}
 		return "ask", "arm and ask this question"
 	}
-	if !chipVerbs[verb] && remainder == "" {
-		return verb, "run " + verb
-	}
-	return "confirm", "run " + verb + " — asks first"
+	return verb, "run " + verb
 }
 
 // threadOutputsBinding is the alt+o row every card-page table carries:

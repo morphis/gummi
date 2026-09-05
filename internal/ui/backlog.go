@@ -74,8 +74,7 @@ func (m *Shell) saveThreadDraft(id domain.FeatureID) {
 }
 
 // loadThreadDraft swaps the composer's buffer to whatever id last had in
-// it — empty if nothing was ever typed there — the per-card counterpart
-// of threadChip's own feature key (inputBlock). Callers still stash the
+// it — empty if nothing was ever typed there. Callers still stash the
 // outgoing card first (saveThreadDraft); this only ever loads.
 func (m *Shell) loadThreadDraft(id domain.FeatureID) {
 	m.threadInput.SetValue(m.threadDrafts[id])
