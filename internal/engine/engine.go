@@ -665,9 +665,9 @@ func (e *Engine) RunCritique(f domain.Feature, note string) error {
 //
 // Each critique burns the counter its predecessor burned, so no budget
 // changes hands when Review stops being a stage: the plan critique keeps
-// RoundKindPlan (cap 2), and the work stage's critique — which IS the old
-// Review — keeps RoundKindReview (cap 3). Research's Review is still a
-// stage and is driven by the review loop, not from here.
+// RoundKindPlan (cap 2), and every work stage's critique — which IS the
+// old Review — keeps RoundKindReview (cap 3). Investigate is research's
+// work stage and is in that group.
 //
 // A new stage that wants a critique has to add a row here, which is the
 // point: verdict.MaxRounds caps by round kind, so a critique whose kind
@@ -677,7 +677,7 @@ func CritiqueRoundKind(stage domain.Stage) (domain.RoundKind, bool) {
 	switch stage {
 	case domain.StagePlan:
 		return domain.RoundKindPlan, true
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		return domain.RoundKindReview, true
 	}
 	return "", false
@@ -719,7 +719,11 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	case flavorRebase:
 		role = agent.RoleImplementer
 	}
-	if interactiveStage(f.Stage) {
+	if interactiveStage(f.Stage) && flavor != flavorCritique {
+		// The guard is about running the STAGE unattended. A critique is
+		// never the stage — it is a fresh reviewer session that borrows
+		// the card without advancing it — so an interactive stage may
+		// still have one.
 		return fmt.Errorf("stage %s is interactive; use Attach", f.Stage)
 	}
 
@@ -921,12 +925,13 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 	// base..HEAD` one file at a time, and then `go build ./...` and
 	// `go vet ./...` it could have been handed.
 	//
-	// The checks it is handed are review's own run, not verify's. They
-	// answer different questions at different times: review reads a branch
-	// that is not final, so a result here can be stale by the time verify
-	// asks. Nothing is recorded, and verify still runs its own — this only
-	// saves review from re-deriving what is already true right now.
-	if s.Feature.Stage == domain.StageReview && !s.Rebase && !s.Critique {
+	// The checks it is handed are the critique's own run, not verify's.
+	// They answer different questions at different times: a critique reads
+	// a branch that is not final, so a result here can be stale by the
+	// time verify asks. Nothing is recorded, and verify still runs its own
+	// — this only saves the critique from re-deriving what is already true
+	// right now.
+	if s.Critique && !s.Rebase && workStageCritique(s.Feature.Stage) {
 		if pre := e.reviewDiffPreamble(s); pre != "" {
 			msg = pre + "\n\n" + msg
 		}
@@ -2396,4 +2401,15 @@ func (e *Engine) send(ev Event) {
 	case e.raw <- ev:
 	case <-e.stopped:
 	}
+}
+
+// workStageCritique reports whether a critique on this stage is judging a
+// diff — the ones that inherited the Review stage's job. The plan's
+// critique judges a document and has no diff to be handed.
+func workStageCritique(stage domain.Stage) bool {
+	switch stage {
+	case domain.StageImplement, domain.StageFix:
+		return true
+	}
+	return false
 }

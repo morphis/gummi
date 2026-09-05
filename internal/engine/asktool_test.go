@@ -321,9 +321,13 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "impl", domain.StageReview)
+	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	// a critique, not the stage's own run: "changes" is a critique verdict
+	if err := e.RunCritique(f, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, e, "FD-001", StateDone)
@@ -400,25 +404,28 @@ func TestVerifyVerdictBlockedRecorded(t *testing.T) {
 	}
 }
 
-// blocked belongs to verify's vocabulary only: a review agent
-// submitting it is bounced (verdict stays empty) rather than recorded,
-// so the review loop never sees a verdict outside its contract.
-func TestReviewVerdictRejectsBlocked(t *testing.T) {
+// blocked belongs to verify's vocabulary only: a critique submitting it
+// is bounced (verdict stays empty) rather than recorded, so the critique
+// loop never sees a verdict outside its contract.
+func TestCritiqueVerdictRejectsBlocked(t *testing.T) {
 	args := json.RawMessage(`{"verdict":"blocked","summary":"cannot run this"}`)
 	ag := toolCallFake("submit_verdict", args)
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "review", domain.StageReview)
+	f := feature(1, "review", domain.StageImplement)
 	withWorktree(t, wt, f)
-	if err := e.Run(f); err != nil {
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RunCritique(f, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, e, "FD-001", StateDone)
 
 	if got := e.Get("FD-001").Snapshot().Verdict; got != "" {
-		t.Errorf("review recorded out-of-vocabulary verdict %q, want rejection", got)
+		t.Errorf("critique recorded out-of-vocabulary verdict %q, want rejection", got)
 	}
 }
 
@@ -618,9 +625,12 @@ func TestAllowedVerdictsPerStage(t *testing.T) {
 		s    *Session
 		want []string
 	}{
-		{"review", &Session{Feature: domain.Feature{Stage: domain.StageReview}}, []string{"pass", "changes"}},
 		{"verify", &Session{Feature: domain.Feature{Stage: domain.StageVerify}}, []string{"pass", "fail", "blocked"}},
-		{"critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
+		// every critique shares one vocabulary now, whichever stage it
+		// borrows — that is what folding Review into a pass means.
+		{"plan critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
+		{"work-stage critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StageImplement}}, []string{"pass", "changes"}},
+		{"research critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StageInvestigate}}, []string{"pass", "changes"}},
 		{"implement (no verdict tool)", &Session{Feature: domain.Feature{Stage: domain.StageImplement}}, nil},
 	}
 	for _, tc := range cases {
@@ -729,7 +739,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 	// the worktree stages carry submit_verdict/resolve_annotation plus the
 	// artifact access tools, so a backend caged to the worktree never has to
 	// read or write the spec through raw file access
-	if got := stageTools(domain.StageReview, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
+	if got := stageTools(domain.StageVerify, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
 		t.Errorf("review tools changed: %+v", got)
 	}
 	if got := stageTools(domain.StageVerify, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
@@ -750,7 +760,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 // agent has to fall back to raw file access, which a caged backend
 // cannot reach and reacts to with a blocked verdict.
 func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
-	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageReview, domain.StageVerify, domain.StagePlan} {
+	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageVerify, domain.StageVerify, domain.StagePlan} {
 		names := map[string]bool{}
 		for _, td := range stageTools(st, flavorStage) {
 			names[td.Name] = true
@@ -774,7 +784,7 @@ func TestFilterReadOnlyTools(t *testing.T) {
 		stripped []string
 	}{
 		{domain.StageInvestigate, []string{"resolve_annotation", "spec_view"}, []string{"spec_replace_section"}},
-		{domain.StageReview, []string{"submit_verdict", "spec_view"}, []string{"spec_replace_section"}},
+		{domain.StageVerify, []string{"submit_verdict", "spec_view"}, []string{"spec_replace_section"}},
 	} {
 		names := map[string]bool{}
 		for _, td := range filterReadOnlyTools(stageTools(tc.stage, flavorStage), true) {

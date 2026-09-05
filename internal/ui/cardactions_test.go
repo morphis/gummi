@@ -538,7 +538,7 @@ func TestCardActionsForBounceGate(t *testing.T) {
 		in := nextInput{stage: stage, kind: domain.KindFeature}
 		r := cardRow(domain.KindFeature, stage, false, true)
 		acts := cardActionsFor(in, r)
-		want := stage == domain.StageReview || stage == domain.StageVerify
+		want := stage == domain.StageVerify
 		got := false
 		for _, a := range acts {
 			if a.id == "bounce" {

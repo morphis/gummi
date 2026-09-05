@@ -122,10 +122,10 @@ func TestLegacyCardKeepsTheActorsOwnName(t *testing.T) {
 	enter, _ := json.Marshal(map[string]string{"role": "reviewer"})
 	exit, _ := json.Marshal(map[string]any{"verdict": "pass"})
 	m.cardEvents[id] = []state.CardEvent{
-		{Kind: state.EventStageEnter, Stage: domain.StageReview, At: base, Payload: string(enter)},
-		evGate(domain.StageReview, domain.StageFix, "review", base.Add(time.Minute)),
-		{Kind: state.EventStageExit, Stage: domain.StageReview, At: base.Add(2 * time.Minute), Payload: string(exit)},
-		{Kind: state.EventStageEnter, Stage: domain.StageFix, At: base.Add(3 * time.Minute), Payload: string(enter)},
+		{Kind: state.EventStageEnter, Stage: domain.StageFix, At: base, Payload: string(enter)},
+		evGate(domain.StageFix, domain.StageVerify, "review", base.Add(time.Minute)),
+		{Kind: state.EventStageExit, Stage: domain.StageFix, At: base.Add(2 * time.Minute), Payload: string(exit)},
+		{Kind: state.EventStageEnter, Stage: domain.StageVerify, At: base.Add(3 * time.Minute), Payload: string(enter)},
 	}
 	m.cardOpen = true
 	out := ansi.Strip(m.threadView(96, 30))
@@ -133,7 +133,7 @@ func TestLegacyCardKeepsTheActorsOwnName(t *testing.T) {
 	if strings.Contains(out, "autopilot took over") {
 		t.Errorf("a card nobody handed over grew a period:\n%s", out)
 	}
-	if !strings.Contains(out, "review crossed review → fix") {
+	if !strings.Contains(out, "review crossed fix → verify") {
 		t.Errorf("the loop's own crossing lost its name:\n%s", out)
 	}
 }
@@ -256,7 +256,7 @@ func TestMidStageTakeoverOpensWhereItHappened(t *testing.T) {
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base, Payload: string(enter)},
 		evMessage("implementer", "worked on this by hand first", base.Add(time.Minute)),
 		evTookOver(domain.GateAutopilot, base.Add(2*time.Minute)),
-		evGate(domain.StageImplement, domain.StageReview, state.ActorAutopilot, base.Add(3*time.Minute)),
+		evGate(domain.StageImplement, domain.StageVerify, state.ActorAutopilot, base.Add(3*time.Minute)),
 	}
 	m.cardOpen = true
 	out := ansi.Strip(m.threadView(96, 30))

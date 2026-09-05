@@ -237,7 +237,7 @@ func TestChangeProfilePersistsAcrossNextStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next.Stage = domain.StageReview
+	next.Stage = domain.StageVerify
 	withWorktree(t, wt, next)
 	if err := e.Run(next); err != nil {
 		t.Fatal(err)

@@ -72,10 +72,8 @@ func legalForBug(skip domain.SkipFlags) map[edge]bool {
 var researchAlways = []edge{
 	{domain.StageTodo, domain.StageInvestigate},
 	{domain.StageInvestigate, domain.StageShape},
-	{domain.StageShape, domain.StageReview},
-	{domain.StageReview, domain.StageVerify},
+	{domain.StageShape, domain.StageVerify},
 	{domain.StageVerify, domain.StageDone},
-	{domain.StageReview, domain.StageInvestigate},
 	{domain.StageVerify, domain.StageInvestigate},
 }
 

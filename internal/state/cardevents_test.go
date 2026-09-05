@@ -135,7 +135,7 @@ func TestPruneStageOutput(t *testing.T) {
 		{Feature: f.ID, Stage: domain.StageImplement, Kind: EventTool, Status: StatusOK, At: time.Now(), Output: "ok output", Dedupe: "impl-ok"},
 		{Feature: f.ID, Stage: domain.StageImplement, Kind: EventTool, Status: StatusFail, At: time.Now(), Output: "fail output", Dedupe: "impl-fail"},
 		{Feature: f.ID, Stage: domain.StageImplement, Kind: EventMessage, At: time.Now(), Output: "", Dedupe: "impl-msg"},
-		{Feature: f.ID, Stage: domain.StageReview, Kind: EventTool, Status: StatusOK, At: time.Now(), Output: "review output", Dedupe: "review-ok"},
+		{Feature: f.ID, Stage: domain.StageVerify, Kind: EventTool, Status: StatusOK, At: time.Now(), Output: "review output", Dedupe: "review-ok"},
 	}
 	if err := s.AppendEvents(ctx, events); err != nil {
 		t.Fatal(err)

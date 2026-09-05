@@ -84,7 +84,7 @@ func TestBG057ReproResizeMovesScrolledUpWindow(t *testing.T) {
 		t.Fatal("precondition: no filler line visible after paging up")
 	}
 
-	model, _ := m.Update(tea.WindowSizeMsg{Width: 220, Height: 16}) // width only
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 220, Height: 25}) // width only — the height matches the shell it started at
 	m = model.(*Shell)
 
 	after, ok := topFillerLine()

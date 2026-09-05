@@ -816,7 +816,7 @@ func TestNextStageCoversEveryCodingEntry(t *testing.T) {
 	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
 		work := workflow.WorkStage(kind)
 		for _, from := range domain.Stages {
-			if from == domain.StageReview || from == domain.StageVerify {
+			if from == domain.StageVerify {
 				continue // rerun edges are bounces, not forward moves
 			}
 			for _, skip := range skipCombos() {
@@ -867,8 +867,7 @@ func TestAdvanceResearchNoWorktree(t *testing.T) {
 	putFeature(t, store, f)
 
 	for _, want := range []domain.Stage{
-		domain.StageInvestigate, domain.StageShape, domain.StageReview,
-		domain.StageVerify, domain.StageDone,
+		domain.StageInvestigate, domain.StageShape, domain.StageVerify, domain.StageDone,
 	} {
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusAdvanced || res.To != want {

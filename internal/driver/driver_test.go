@@ -30,7 +30,7 @@ func TestQuickRouteToVerified(t *testing.T) {
 			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
 			return msgIdle(o.Model, "Implemented.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -68,7 +68,7 @@ func TestQuickRouteToVerified(t *testing.T) {
 // straight to Done via the same crossGate, still without a merge.
 func TestQuickRouteEmptyBranchToDone(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -97,7 +97,7 @@ func TestSpecQuestionThenResume(t *testing.T) {
 			}
 			return msgIdle(o.Model, "Spec drafted.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return prosePass(o.Model)
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -154,7 +154,7 @@ func TestAutonomousAutoAnswers(t *testing.T) {
 			}
 			return msgIdle(o.Model, "Spec drafted.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return prosePass(o.Model)
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -188,7 +188,7 @@ func TestAutonomousAnswerRecordsItsOwnActor(t *testing.T) {
 			}
 			return msgIdle(o.Model, "Spec drafted.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return prosePass(o.Model)
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -242,7 +242,7 @@ func TestReviewChangesThenPass(t *testing.T) {
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Implemented.")
 		},
-		domain.StageReview: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
 			if n == 0 {
 				return toolVerdict(o.Model, "changes")
 			}
@@ -260,8 +260,8 @@ func TestReviewChangesThenPass(t *testing.T) {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	// two review stages were entered (the bounce re-reviewed).
-	if h.calls[domain.StageReview] != 2 {
-		t.Fatalf("review entered %d times, want 2", h.calls[domain.StageReview])
+	if h.calls[stageCritique] != 2 {
+		t.Fatalf("review entered %d times, want 2", h.calls[stageCritique])
 	}
 	if d := lastEvent(h, "done"); d == nil || d["review_rounds"].(float64) != 2 {
 		t.Fatalf("done review_rounds = %v, want 2", d)
@@ -348,7 +348,7 @@ func TestReviewCapEscalates(t *testing.T) {
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Implemented.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "changes") // never satisfied
 		},
 	})
@@ -380,7 +380,7 @@ func TestVerifyFailEscalates(t *testing.T) {
 				domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 					return msgIdle(o.Model, "Spec.")
 				},
-				domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 					return toolVerdict(o.Model, "pass")
 				},
 				domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -426,7 +426,7 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
 			return msgIdle(o.Model, "Implemented.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
@@ -546,7 +546,7 @@ func happyResumeScript() map[domain.Stage]stageFn {
 			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
 			return msgIdle(o.Model, "Implemented.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -719,7 +719,7 @@ func TestCallerGateApproveResume(t *testing.T) {
 		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -1344,7 +1344,7 @@ func TestDriverEscalationRecordsAPark(t *testing.T) {
 	d := h.driver(Options{})
 	f := domain.Feature{
 		ID: "FD-001", Num: 1, Title: "t", Slug: "t",
-		Stage: domain.StageReview, Kind: domain.KindFeature,
+		Stage: domain.StageVerify, Kind: domain.KindFeature,
 	}
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)

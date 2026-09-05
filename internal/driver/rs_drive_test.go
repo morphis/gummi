@@ -39,7 +39,7 @@ func rsFullRouteScript(t *testing.T, prompts *[]string, replies []json.RawMessag
 				{Kind: agent.EventIdle},
 			}
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -182,6 +182,12 @@ func TestDriveResearchUntilShapeStops(t *testing.T) {
 		},
 		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Shaped.")
+		},
+	
+		// investigate ends with a critique now; a drive that is not about
+		// the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	h.fake.Caps.ReadOnlyEnforce = true

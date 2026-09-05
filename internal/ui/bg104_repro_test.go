@@ -30,7 +30,7 @@ func TestBG104AttentionTextNamesNoBareKeys(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
-	f := mkFeature(t, store, 9, "config device add unix-char path", domain.StageReview)
+	f := mkFeature(t, store, 9, "config device add unix-char path", domain.StageVerify)
 
 	// "— g advance", "(u) top up", " u top up": a single letter offered as
 	// something to press. Two-letter and longer words are prose.
@@ -55,7 +55,7 @@ func TestBG104AttentionTextNamesNoBareKeys(t *testing.T) {
 	// the card page's own next step is the one place these keys belong,
 	// and it still points at the surface that has them
 	steps := nextActions(nextInput{
-		kind: domain.KindFeature, stage: domain.StageReview, attn: attnBudget, sess: engine.StateDone,
+		kind: domain.KindFeature, stage: domain.StageVerify, attn: attnBudget, sess: engine.StateDone,
 	})
 	if len(steps) == 0 || !strings.Contains(steps[0].label+steps[0].why, "inbox") {
 		t.Errorf("the card page no longer sends a budget stop to the inbox: %+v", steps)

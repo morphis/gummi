@@ -86,14 +86,6 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			// many systems. Force the fixed-string form.
 			"grep -rF",
 		}},
-		{domain.StageReview, domain.KindFeature, []string{
-			"conformance", "standards", "scope", "blocking or nit",
-			"resolved threads from a prior round", "VERDICT: pass", "VERDICT: changes",
-			"requirements, not creep",
-		}},
-		{domain.StageReview, domain.KindBug, []string{
-			"smallest change that resolves the bug", "bounce back to fix",
-		}},
 		{domain.StageVerify, domain.KindFeature, []string{
 			"runs without erroring", "SKIPPED", "VERDICT: fail", "VERDICT: blocked",
 			"[CI-only]", "allowed:",
@@ -120,6 +112,36 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"do not re-run the same commands", "If the kickoff has no results block",
 		}},
 	}
+	// The work stage's critique carries what the Review stage's contract
+	// carried — it IS that contract, reached through flavorCritique rather
+	// than through a stage of its own.
+	for _, tc := range []struct {
+		stage domain.Stage
+		kind  domain.Kind
+		want  []string
+	}{
+		{domain.StageImplement, domain.KindFeature, []string{
+			"conformance", "standards", "scope", "blocking or nit",
+			"resolved threads from a prior round", "VERDICT: pass", "VERDICT: changes",
+			"requirements, not creep",
+		}},
+		{domain.StageFix, domain.KindBug, []string{
+			"smallest change that resolves the bug", "bounce back to fix",
+		}},
+		{domain.StageInvestigate, domain.KindResearch, []string{
+			"critique what the investigation gathered", "submit_verdict",
+		}},
+	} {
+		f := feature(1, "Dark mode", tc.stage)
+		f.Kind = tc.kind
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorCritique), "\n"))
+		for _, want := range tc.want {
+			if !strings.Contains(joined, unwrap(want)) {
+				t.Errorf("%s/%s critique hint missing %q", tc.stage, tc.kind, want)
+			}
+		}
+	}
+
 	for _, tc := range cases {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
@@ -135,6 +157,36 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 
 	// F19/F20: the new Triage/Diagnose environment-contract language must
 	// not leak into other stages; the tags are scoped to those contracts.
+	// The work stage's critique carries what the Review stage's contract
+	// carried — it IS that contract, reached through flavorCritique rather
+	// than through a stage of its own.
+	for _, tc := range []struct {
+		stage domain.Stage
+		kind  domain.Kind
+		want  []string
+	}{
+		{domain.StageImplement, domain.KindFeature, []string{
+			"conformance", "standards", "scope", "blocking or nit",
+			"resolved threads from a prior round", "VERDICT: pass", "VERDICT: changes",
+			"requirements, not creep",
+		}},
+		{domain.StageFix, domain.KindBug, []string{
+			"smallest change that resolves the bug", "bounce back to fix",
+		}},
+		{domain.StageInvestigate, domain.KindResearch, []string{
+			"critique what the investigation gathered", "submit_verdict",
+		}},
+	} {
+		f := feature(1, "Dark mode", tc.stage)
+		f.Kind = tc.kind
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorCritique), "\n"))
+		for _, want := range tc.want {
+			if !strings.Contains(joined, unwrap(want)) {
+				t.Errorf("%s/%s critique hint missing %q", tc.stage, tc.kind, want)
+			}
+		}
+	}
+
 	for _, tc := range cases {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
@@ -154,7 +206,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// F9: contractHint's `%% @gummi:` line reads differently by role.
 	// Reviewers (Review/Verify/Critique) shouldn't be told to fill in
 	// sections — they read and add findings.
-	reviewHints := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageReview), "spec.md", flavorStage), "\n"))
+	reviewHints := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageVerify), "spec.md", flavorStage), "\n"))
 	if !strings.Contains(reviewHints, "leave them where they are") {
 		t.Error("review contractHint missing the softened seeded-line phrasing")
 	}
@@ -278,9 +330,6 @@ func TestResearchStageHints(t *testing.T) {
 			"Converge", "exactly one", "behind per-action confirmation",
 			"scratch checkout of main",
 		}},
-		{domain.StageReview, []string{
-			"read-only", "submit_verdict", "critique",
-		}},
 	}
 	for _, tc := range cases {
 		f := feature(1, "RS topic", tc.stage)
@@ -293,24 +342,30 @@ func TestResearchStageHints(t *testing.T) {
 		}
 	}
 
-	// review-of-a-document must not carry the worktree-diff review hint
-	// (it is read-only and has no spec_replace_section to record with).
-	rf := feature(1, "RS topic", domain.StageReview)
+	// research's critique judges a document, so it must not carry the
+	// worktree-diff contract: it is read-only and has no
+	// spec_replace_section to record findings with.
+	rf := feature(1, "RS topic", domain.StageInvestigate)
 	rf.Kind = domain.KindResearch
-	review := unwrap(strings.Join(stageHints(rf, "research.md", flavorStage), "\n"))
+	critique := unwrap(strings.Join(stageHints(rf, "research.md", flavorCritique), "\n"))
+	for _, want := range []string{"read-only", "submit_verdict", "critique"} {
+		if !strings.Contains(critique, unwrap(want)) {
+			t.Errorf("research critique hint missing %q", want)
+		}
+	}
 	for _, absent := range []string{"spec_replace_section", "Review the worktree diff"} {
-		if strings.Contains(review, absent) {
-			t.Errorf("research review hint contains %q; it must be absent", absent)
+		if strings.Contains(critique, absent) {
+			t.Errorf("research critique hint contains %q; it must be absent", absent)
 		}
 	}
 
-	// non-research review is unchanged: it still records findings by
-	// editing the artifact.
-	nf := feature(1, "Dark mode", domain.StageReview)
+	// a feature's critique is unchanged: it still reviews the diff and
+	// records findings by editing the artifact.
+	nf := feature(1, "Dark mode", domain.StageImplement)
 	nf.Kind = domain.KindFeature
-	nrev := unwrap(strings.Join(stageHints(nf, "spec.md", flavorStage), "\n"))
-	if !strings.Contains(nrev, "Review the worktree diff") {
-		t.Error("feature review hint lost the worktree-diff contract")
+	ncrit := unwrap(strings.Join(stageHints(nf, "spec.md", flavorCritique), "\n"))
+	if !strings.Contains(ncrit, "Review the worktree diff") {
+		t.Error("feature critique hint lost the worktree-diff contract")
 	}
 }
 

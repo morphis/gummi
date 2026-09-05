@@ -37,7 +37,7 @@ func populatedShell(w, h int) *Shell {
 		row(42, "dark mode", domain.StageImplement, "thrifty", true),
 		row(47, "csv export", domain.StageBrainstorm, "premium", false),
 		row(49, "auth fix", domain.StageSpec, "thrifty", false),
-		row(44, "search", domain.StageReview, "local-heavy", true),
+		row(44, "search", domain.StageVerify, "local-heavy", true),
 		row(39, "onboarding", domain.StageDone, "premium", false),
 		row(46, "billing sync", domain.StageFix, "thrifty", false),
 	}
@@ -448,7 +448,7 @@ func TestEstimatedSpendGolden(t *testing.T) {
 			Credits: 61.6, EstimatedCredits: 61.6, OutputTokens: 123219, UpdatedAt: time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC),
 		},
 		{
-			Stage: domain.StageReview, Model: "claude-sonnet-4.6", Role: "reviewer",
+			Stage: domain.StageVerify, Model: "claude-sonnet-4.6", Role: "reviewer",
 			Credits: 11.1, EstimatedCredits: 11.1, OutputTokens: 22266, UpdatedAt: time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC),
 		},
 	}
@@ -468,7 +468,7 @@ func TestMeteredSpendGolden(t *testing.T) {
 			Credits: 61.6, OutputTokens: 123219, UpdatedAt: time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC),
 		},
 		{
-			Stage: domain.StageReview, Model: "claude-sonnet-4.6", Role: "reviewer",
+			Stage: domain.StageVerify, Model: "claude-sonnet-4.6", Role: "reviewer",
 			Credits: 11.1, OutputTokens: 22266, UpdatedAt: time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC),
 		},
 	}

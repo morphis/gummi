@@ -499,7 +499,7 @@ func TestHandoverNeverWalksPastUnstartedWork(t *testing.T) {
 // every mode — landing on main stays a keypress, so handing over there
 // crosses nothing.
 func TestHandoverRefusesTheLandingGate(t *testing.T) {
-	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageReview} {
+	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageVerify} {
 		if _, ok := autopilotHandoverEdge(domain.Feature{Stage: stage}); ok {
 			t.Errorf("the handover offered to cross %s on its own", stage)
 		}

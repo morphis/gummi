@@ -74,7 +74,7 @@ func TestBG089AttachSurvivesWhereItWorks(t *testing.T) {
 // verbs give.
 func TestBG089ResearchBoardKeysDropAttach(t *testing.T) {
 	id, _ := domain.NewID(domain.KindResearch, 5)
-	r := featureRow{F: domain.Feature{ID: id, Kind: domain.KindResearch, Stage: domain.StageReview}}
+	r := featureRow{F: domain.Feature{ID: id, Kind: domain.KindResearch, Stage: domain.StageVerify}}
 
 	m := &Shell{rows: []featureRow{r}}
 	for _, b := range m.backlogBindings() {

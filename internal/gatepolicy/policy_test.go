@@ -20,55 +20,69 @@ func TestDecide(t *testing.T) {
 	}{
 		// --- review ---------------------------------------------------
 		{
-			name: "review pass advances to verify",
+			name: "critique pass advances along the stage's forward edge",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Pass, WorkStage: workStage,
 			},
-			want: Outcome{Action: Advance, Stage: domain.StageVerify, Reason: "review-pass"},
+			want: Outcome{Action: Advance, Stage: domain.StageVerify, Reason: "critique-pass"},
 		},
 		{
-			name: "review changes under cap bounces to work and burns",
+			name: "research's critique passes to shape, not verify",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageInvestigate, Forward: domain.StageShape, Kind: domain.KindResearch,
+				Verdict: verdict.Pass, WorkStage: domain.StageInvestigate,
+			},
+			want: Outcome{Action: Advance, Stage: domain.StageShape, Reason: "critique-pass"},
+		},
+		{
+			name: "the plan critique raises its human gate instead of advancing",
+			in: Input{
+				Stage: domain.StagePlan, Forward: domain.StageImplement, Kind: domain.KindFeature,
+				Verdict: verdict.Pass, WorkStage: workStage,
+			},
+			want: Outcome{Action: RaiseGate, Stage: domain.StagePlan, Reason: "critique-pass"},
+		},
+		{
+			name: "critique changes under cap reworks the SAME stage and burns",
+			in: Input{
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Changes, Corrective: 0, CorrectiveMax: 3, WorkStage: workStage,
 			},
-			want: Outcome{Action: BounceToWork, Stage: workStage, Reason: "review-changes", Burns: true},
+			want: Outcome{Action: BounceToWork, Stage: domain.StageImplement, Reason: "critique-changes", Burns: true},
 		},
 		{
-			name: "review changes one under cap still bounces",
+			name: "critique changes one under cap still reworks",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Changes, Corrective: 2, CorrectiveMax: 3, WorkStage: workStage,
 			},
-			want: Outcome{Action: BounceToWork, Stage: workStage, Reason: "review-changes", Burns: true},
+			want: Outcome{Action: BounceToWork, Stage: domain.StageImplement, Reason: "critique-changes", Burns: true},
 		},
 		{
-			name: "review changes exactly at cap parks, escalated, no burn",
+			name: "critique changes exactly at cap parks, escalated, no burn",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Changes, Corrective: 3, CorrectiveMax: 3, WorkStage: workStage,
 			},
-			want: Outcome{Action: Park, Stage: domain.StageReview, Reason: "review-changes-cap"},
+			want: Outcome{Action: Park, Stage: domain.StageImplement, Reason: "critique-changes-cap"},
 		},
 		{
-			name: "review changes past cap also parks",
+			name: "critique changes past cap also parks",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Changes, Corrective: 4, CorrectiveMax: 3, WorkStage: workStage,
 			},
-			want: Outcome{Action: Park, Stage: domain.StageReview, Reason: "review-changes-cap"},
+			want: Outcome{Action: Park, Stage: domain.StageImplement, Reason: "critique-changes-cap"},
 		},
 		{
-			name: "review unclear parks — never guess",
+			name: "critique unclear parks — never guess",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Unclear, WorkStage: workStage,
 			},
-			want: Outcome{Action: Park, Stage: domain.StageReview, Reason: "review-unclear"},
+			want: Outcome{Action: Park, Stage: domain.StageImplement, Reason: "critique-unclear"},
 		},
-
-		// --- verify -----------------------------------------------------
 		{
 			name: "verify pass raises the landing gate",
 			in: Input{
@@ -149,10 +163,10 @@ func TestDecide(t *testing.T) {
 		{
 			name: "open spec threads hold an otherwise-passing review gate open",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageVerify, Kind: domain.KindFeature,
 				Verdict: verdict.Pass, WorkStage: workStage, OpenThreads: 2,
 			},
-			want: Outcome{Action: RaiseGate, Stage: domain.StageReview, Reason: "open-threads"},
+			want: Outcome{Action: RaiseGate, Stage: domain.StageVerify, Reason: "open-threads"},
 		},
 		{
 			name: "open diff comments hold an otherwise-passing verify gate open",
@@ -191,10 +205,10 @@ func TestDecide(t *testing.T) {
 		{
 			name: "sandbox refusal on the review stage parks the same way",
 			in: Input{
-				Stage: domain.StageReview, Kind: domain.KindFeature,
+				Stage: domain.StageVerify, Kind: domain.KindFeature,
 				Halt: HaltSandboxRefusal, WorkStage: workStage,
 			},
-			want: Outcome{Action: Park, Stage: domain.StageReview, Reason: "sandbox-refusal"},
+			want: Outcome{Action: Park, Stage: domain.StageVerify, Reason: "sandbox-refusal"},
 		},
 		{
 			name: "rebase conflict hands to the conflict session and burns a round",
@@ -209,10 +223,13 @@ func TestDecide(t *testing.T) {
 		{
 			name: "a stage Decide doesn't drive parks",
 			in: Input{
-				Stage: domain.StagePlan, Kind: domain.KindFeature,
+				// spec is interactive and runs no critique, so Decide has
+				// no rule for it. Plan is no longer an example: its
+				// critique routes through decideCritique now.
+				Stage: domain.StageSpec, Kind: domain.KindFeature,
 				Verdict: verdict.Pass, WorkStage: workStage,
 			},
-			want: Outcome{Action: Park, Stage: domain.StagePlan, Reason: "unhandled-stage"},
+			want: Outcome{Action: Park, Stage: domain.StageSpec, Reason: "unhandled-stage"},
 		},
 	}
 

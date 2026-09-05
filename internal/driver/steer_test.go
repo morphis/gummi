@@ -68,7 +68,7 @@ func TestUntilSpecThenResumeToVerified(t *testing.T) {
 		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {

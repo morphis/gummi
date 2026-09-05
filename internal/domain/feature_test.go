@@ -245,7 +245,6 @@ func TestStageSuperState(t *testing.T) {
 		StageDiagnose:    SuperInProgress,
 		StageFix:         SuperInProgress,
 		StageImplement:   SuperInProgress,
-		StageReview:      SuperReviewVerify,
 		StageVerify:      SuperReviewVerify,
 		StageDone:        SuperDone,
 	}

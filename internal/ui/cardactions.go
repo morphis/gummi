@@ -291,7 +291,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"bounce", "b", "bounce", bounceWhy, false,
-			in.stage == domain.StageReview || in.stage == domain.StageVerify ||
+			in.stage == domain.StageVerify ||
 				(in.stage == domain.StagePlan && in.escalated),
 		},
 		{

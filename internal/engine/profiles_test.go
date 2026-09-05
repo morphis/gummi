@@ -36,7 +36,7 @@ func TestResolveRolePerProfile(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	// a premium feature at review → the reviewer's model
-	f := feature(1, "review me", domain.StageReview)
+	f := feature(1, "review me", domain.StageVerify)
 	f.Profile = "premium"
 	withWorktree(t, wt, f)
 	if err := e.Run(f); err != nil {
@@ -350,7 +350,7 @@ func TestCardProfilesResolvesPerCardRole(t *testing.T) {
 	if len(implement) != 1 || implement[0].Backend != "impl-backend" || implement[0].Model != "impl-model" {
 		t.Errorf("CardProfiles(implement) = %+v, want impl-backend/impl-model", implement)
 	}
-	review := e.CardProfiles(domain.StageReview)
+	review := e.CardProfiles(domain.StageVerify)
 	if len(review) != 1 || review[0].Backend != "review-backend" || review[0].Model != "review-model" {
 		t.Errorf("CardProfiles(review) = %+v, want review-backend/review-model", review)
 	}

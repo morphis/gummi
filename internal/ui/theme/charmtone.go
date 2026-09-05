@@ -49,7 +49,6 @@ func GummiDark() Theme {
 			domain.StageDiagnose:    charmtone.Mustard, // bug: amber
 			domain.StageFix:         charmtone.Julep,   // bug: lime (the fix)
 			domain.StageImplement:   charmtone.Julep,   // lime
-			domain.StageReview:      charmtone.Citron,  // lemon
 			domain.StageVerify:      charmtone.Dolly,   // berry
 			domain.StageDone:        charmtone.Guac,    // settled green
 		},

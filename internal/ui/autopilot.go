@@ -121,7 +121,7 @@ func autopilotForward(f domain.Feature) (domain.Stage, bool) {
 // between bouncing and overruling is the one thing left that is yours.
 func autopilotHandoverEdge(f domain.Feature) (domain.Stage, bool) {
 	switch f.Stage {
-	case domain.StageReview, domain.StageVerify, domain.StageDone, domain.StageTodo:
+	case domain.StageVerify, domain.StageDone, domain.StageTodo:
 		return "", false
 	}
 	seq := stageSequence(f)

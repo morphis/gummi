@@ -42,7 +42,7 @@ func newReviewRig(t *testing.T, body string) *reviewRig {
 		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "review me", domain.StageReview)
+	f := feature(1, "review me", domain.StageImplement)
 	withWorktree(t, wt, f)
 	wtPath, err := wt.Path(&f)
 	if err != nil {
@@ -57,9 +57,12 @@ func newReviewRig(t *testing.T, body string) *reviewRig {
 	return &reviewRig{e: e, wt: wt, f: f, mu: &mu, got: &got}
 }
 
+// run dispatches the work stage's CRITIQUE — the pass that inherited the
+// Review stage's job, and the only session gummi hands a pre-assembled
+// diff and check results to.
 func (r *reviewRig) run(t *testing.T) string {
 	t.Helper()
-	if err := r.e.Run(r.f); err != nil {
+	if err := r.e.RunCritique(r.f, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitState(t, r.e, "FD-001", StateDone)
@@ -138,7 +141,7 @@ func TestReviewKickoffNoDiffStaysQuiet(t *testing.T) {
 		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "nothing yet", domain.StageReview)
+	f := feature(1, "nothing yet", domain.StageVerify)
 	withWorktree(t, wt, f)
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)

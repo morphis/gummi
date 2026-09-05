@@ -242,7 +242,7 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 	if in.pullRequest.Empty() {
 		return acts
 	}
-	if in.stage != domain.StageReview && in.stage != domain.StageVerify {
+	if in.stage != domain.StageImplement && in.stage != domain.StageFix && in.stage != domain.StageVerify {
 		return acts
 	}
 	return append(acts, nextStep("prpull", "", "pull PR review", "read the PR's review comments back onto the diff"))
@@ -348,7 +348,7 @@ func stageActions(in nextInput) []nextAction {
 	case domain.StageShape:
 		return append(
 			talkAction(in, "the researcher", "converge the findings into the answer"),
-			nextStep("advance", "g", "advance", "move on to "+string(domain.StageReview)),
+			nextStep("advance", "g", "advance", "move on to "+string(domain.StageVerify)),
 		)
 
 	case domain.StageBrainstorm, domain.StageTriage:
@@ -425,28 +425,6 @@ func stageActions(in nextInput) []nextAction {
 		// and it is the same act the diff surface's R performs.
 		return append(acts, nextStep("run", "", "send it back with changes",
 			"re-runs "+string(in.stage)+" with what's wrong — your line goes with it"))
-
-	case domain.StageReview:
-		if !finished {
-			return []nextAction{nextStep("run", "enter", "run review", "no active run — start the fresh-context review")}
-		}
-		// a review gate is always an escalation: clean verdicts advance
-		// automatically, so this review gave up (round cap or no verdict).
-		why := "the review loop gave up — read its findings in the " + artifactNoun(in.kind)
-		if in.reviewRound >= maxReviewRounds {
-			why = "still requesting changes after " + itoa(maxReviewRounds) + " rounds — read the findings yourself"
-		}
-		acts := []nextAction{nextStep("spec", "s", "read the findings", why)}
-		if b := blockedGate(in); b != nil {
-			return append(acts, *b)
-		}
-		return append(acts,
-			nextStep("bounce", "b", "bounce to "+string(work), "send the findings back for another round"),
-			nextStep("advance", "g", "advance to verify", "overrule the reviewer if the findings don't hold"),
-			// no round count here: nextInput carries the review loop's own
-			// counter, not the corrective budget this would be spending,
-			// and the overlay the row opens states that budget exactly.
-			autopilotAction("it takes the remaining correction rounds alone"))
 
 	case domain.StageVerify:
 		if !finished {

@@ -51,15 +51,15 @@ func TestBG100GaveUpNeverReadsAsFinished(t *testing.T) {
 			Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 		})
 		crossed, _ := json.Marshal(state.GatePayload{
-			From: string(domain.StageReview), To: string(domain.StageVerify), Actor: state.ActorAutopilot,
+			From: string(domain.StageVerify), To: string(domain.StageVerify), Actor: state.ActorAutopilot,
 		})
 		parked, _ := json.Marshal(state.ParkPayload{Reason: reason, Detail: detail})
 
 		if err := store.AppendEvents(ctx, []state.CardEvent{
-			{Feature: f.ID, Stage: domain.StageReview, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "rev:enter"},
-			{Feature: f.ID, Stage: domain.StageReview, Kind: state.EventAutopilot, At: at.Add(time.Second), Payload: string(took), Dedupe: "ap:took"},
-			{Feature: f.ID, Stage: domain.StageReview, Kind: state.EventStageExit, At: at.Add(2 * time.Second), Payload: string(exit), Dedupe: "rev:exit"},
-			{Feature: f.ID, Stage: domain.StageReview, Kind: state.EventGate, At: at.Add(3 * time.Second), Payload: string(crossed), Dedupe: "ap:gate"},
+			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "rev:enter"},
+			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventAutopilot, At: at.Add(time.Second), Payload: string(took), Dedupe: "ap:took"},
+			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventStageExit, At: at.Add(2 * time.Second), Payload: string(exit), Dedupe: "rev:exit"},
+			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventGate, At: at.Add(3 * time.Second), Payload: string(crossed), Dedupe: "ap:gate"},
 			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventStageEnter, At: at.Add(4 * time.Second), Payload: string(enter), Dedupe: "ver:enter"},
 			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventMessage, At: at.Add(5 * time.Second), Payload: string(says), Dedupe: "ver:said"},
 			{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventStageExit, At: at.Add(6 * time.Second), Payload: string(exit), Dedupe: "ver:exit"},

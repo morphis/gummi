@@ -104,9 +104,16 @@ func chatWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 // turn — every conversation test creates FD-001 as its subject.
 func settleChat(t *testing.T, eng *engine.Engine) {
 	t.Helper()
+	settleCard(t, eng, "FD-001")
+}
+
+// settleCard is settleChat for a card that is not FD-001 — a research
+// card, say, whose id carries its own prefix.
+func settleCard(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
+	t.Helper()
 	deadline := time.After(testWaitTimeout)
 	for {
-		if a := eng.Get("FD-001"); a != nil {
+		if a := eng.Get(id); a != nil {
 			snap := a.Snapshot()
 			if !snap.Busy && len(snap.Transcript) > 0 {
 				return

@@ -42,7 +42,7 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m.Attach(store, wt, ws)
 
-	f := mkFeature(t, store, 5, "quota accounting", domain.StageReview)
+	f := mkFeature(t, store, 5, "quota accounting", domain.StageVerify)
 	m.rows = []featureRow{{F: f}}
 	m.sel = 0
 	m.cardOpen = true
@@ -50,7 +50,7 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "demo-architect", "flavor": "stage"})
 	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "SHAPED-IT"})
 	gate, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageShape), To: string(domain.StageReview), Actor: state.ActorUser,
+		From: string(domain.StageShape), To: string(domain.StageVerify), Actor: state.ActorUser,
 	})
 	park, _ := json.Marshal(state.ParkPayload{Reason: "needs-you", Detail: refusal})
 	// exactly what the engine leaves behind: the shape session, the
@@ -61,7 +61,7 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 		{Feature: f.ID, Stage: domain.StageShape, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "shape:enter"},
 		{Feature: f.ID, Stage: domain.StageShape, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says), Dedupe: "said"},
 		{Feature: f.ID, Stage: domain.StageShape, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(gate), Dedupe: "gate:1"},
-		{Feature: f.ID, Stage: domain.StageReview, Kind: state.EventPark, At: at.Add(3 * time.Minute), Payload: string(park), Dedupe: "park:1"},
+		{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventPark, At: at.Add(3 * time.Minute), Payload: string(park), Dedupe: "park:1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 				continue
 			}
 			found = true
-			if seg.stage != domain.StageReview {
+			if seg.stage != domain.StageVerify {
 				t.Errorf("the review park was filed under the %s segment", seg.stage)
 			}
 			if seg.role != "" || seg.model != "" {
@@ -107,7 +107,7 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 	}
 	heading := ""
 	for i := parkAt - 1; i >= 0; i-- {
-		if strings.Contains(lines[i], "─") && (strings.Contains(lines[i], "review") || strings.Contains(lines[i], "shape")) {
+		if strings.Contains(lines[i], "─") && (strings.Contains(lines[i], "verify") || strings.Contains(lines[i], "shape")) {
 			heading = lines[i]
 			break
 		}
@@ -115,8 +115,8 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 	if heading == "" {
 		t.Fatalf("no stage heading above the receipt:\n%s", strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(heading, "review") {
-		t.Errorf("the receipt sits under %q, want a review heading", strings.TrimSpace(heading))
+	if !strings.Contains(heading, "verify") {
+		t.Errorf("the receipt sits under %q, want a verify heading", strings.TrimSpace(heading))
 	}
 	// and the heading must not describe a session that never happened:
 	// "fresh context" is a fact about starting one.

@@ -39,7 +39,7 @@ func TestCheckpointFailureWarnsWithoutStopping(t *testing.T) {
 			}
 			return msgIdle(o.Model, "Implemented.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {

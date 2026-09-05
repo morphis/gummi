@@ -314,9 +314,9 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		// key takes via bounceStage. The optional note becomes an addendum to
 		// the reborn implement/fix kickoff, alongside any open diff/spec
 		// annotations the engine folds in independently.
-		if f.Stage != domain.StageVerify && f.Stage != domain.StageReview {
+		if f.Stage != domain.StageVerify {
 			return d.fail(ctx, string(id),
-				fmt.Errorf("%s is at %s; --bounce only rewinds review/verify to %s",
+				fmt.Errorf("%s is at %s; --bounce only rewinds verify to %s",
 					id, f.Stage, workflow.WorkStage(f.Kind)))
 		}
 		back := workflow.WorkStage(f.Kind)
@@ -842,19 +842,8 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 // step the in-floor loop forward, escalate, or reach a verified branch.
 func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome, error) {
 	d.enterStage(f.Stage)
-	if f.Stage == domain.StageReview {
-		d.reviewsRun++ // research still has a Review stage
-	}
 	round := 0
 	switch f.Stage {
-	case domain.StageReview:
-		// seed the in-memory counter from the persisted value so a resume
-		// into the loop honors (and reports) the rounds already burned this
-		// cycle. A failed read aborts entry: the count is the budget.
-		if err := d.seedRounds(ctx, f, domain.RoundKindReview); err != nil {
-			return Outcome{}, err
-		}
-		round = d.reviewsRun
 	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		// the work leg of the review loop can be the resume landing point,
 		// so seed it too — the review-round budget must survive the fresh
@@ -1024,48 +1013,6 @@ func (d *Driver) burnCorrective(ctx context.Context, id domain.FeatureID, out ga
 func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, error) {
 	snap := d.snapshot(f.ID)
 	switch f.Stage {
-	case domain.StageReview:
-		v := verdict.SessionVerdict(snap)
-		d.emitResult(f, v)
-		max := verdict.MaxRounds(domain.RoundKindReview)
-		out := gatepolicy.Decide(gatepolicy.Input{
-			Stage:         domain.StageReview,
-			Kind:          f.Kind,
-			Verdict:       v,
-			Corrective:    d.round(f.ID, domain.RoundKindReview),
-			CorrectiveMax: max,
-			WorkStage:     workflow.WorkStage(f.Kind),
-		})
-		switch out.Action {
-		case gatepolicy.Advance:
-			// clear the persisted count so the next review loop starts fresh.
-			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
-				return Outcome{}, err
-			}
-			d.setRound(f.ID, domain.RoundKindReview, 0)
-			return d.stepTo(ctx, f.ID, out.Stage)
-		case gatepolicy.BounceToWork:
-			// persist the burned round before it lands in the fast path, so a
-			// mid-loop resume observes it.
-			if err := rounds.Bump(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
-				return Outcome{}, err
-			}
-			d.setRound(f.ID, domain.RoundKindReview, d.round(f.ID, domain.RoundKindReview)+1)
-			d.burnCorrective(ctx, f.ID, out)
-			return d.stepTo(ctx, f.ID, out.Stage)
-		default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
-			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindReview); err != nil {
-				return Outcome{}, err
-			}
-			d.setRound(f.ID, domain.RoundKindReview, 0)
-			if out.Reason == "review-changes-cap" {
-				// escalation hands the loop to a human; the cap was cleared
-				// above so the next review cycle starts a fresh budget.
-				return d.bounceEscalation(f, fmt.Sprintf("review still requesting changes after %d rounds", max)), nil
-			}
-			return d.escalation(f, "review finished with no clear verdict"), nil
-		}
-
 	case domain.StageVerify:
 		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
@@ -1092,7 +1039,7 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			return d.escalation(f, "verify finished with no clear verdict"), nil
 		}
 
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		if !snap.Critique {
 			// the work was just written: critique it before the gate. This
 			// is what the Review stage did, minus the transition.
@@ -1103,13 +1050,6 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			return d.awaitCritique(ctx, f)
 		}
 		return d.judgeCritique(ctx, f, snap)
-
-	case domain.StageInvestigate:
-		// research's work leg: the forward edge to shape (never straight to
-		// review — research has no direct investigate→review edge). This is
-		// what makes the review loop's changes bounce (review→investigate)
-		// re-enter the loop instead of parking with no case to drive it.
-		return d.stepTo(ctx, f.ID, domain.StageShape)
 
 	case domain.StagePlan:
 		if !snap.Critique {
@@ -1166,45 +1106,49 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 	}
 	v := verdict.SessionVerdict(snap)
 	d.emitResult(f, v)
-	switch v {
-	case verdict.Pass:
+	max := verdict.MaxRounds(kind)
+	out := gatepolicy.Decide(gatepolicy.Input{
+		Stage:         f.Stage,
+		Forward:       forwardEdge(f),
+		Kind:          f.Kind,
+		Verdict:       v,
+		Corrective:    d.round(f.ID, kind),
+		CorrectiveMax: max,
+		WorkStage:     workflow.WorkStage(f.Kind),
+	})
+	switch out.Action {
+	case gatepolicy.RaiseGate:
+		// the plan gate: crossing it is the user's call (or autopilot's)
 		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
 		d.setRound(f.ID, kind, 0)
-		if f.Stage == domain.StagePlan {
-			// the plan gate is a human approval gate; crossing it is the
-			// user's call (or autopilot's).
-			return d.crossGate(ctx, f)
+		return d.crossGate(ctx, f)
+	case gatepolicy.Advance:
+		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
+			return Outcome{}, err
 		}
-		// The work stage's critique is what the Review stage was, and a
-		// passing review stepped to verify in the floor — it never raised
-		// a gate. Folding the stage away must not quietly add one: making
-		// implement gate is the interaction change (Phase 3), not this one.
-		return d.stepTo(ctx, f.ID, domain.StageVerify)
-	case verdict.Changes:
-		max := verdict.MaxRounds(kind)
-		if d.round(f.ID, kind) >= max {
-			if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
-				return Outcome{}, err
-			}
-			d.setRound(f.ID, kind, 0)
-			return d.bounceEscalation(f, fmt.Sprintf("%s critique still requesting changes after %d rounds", f.Stage, max)), nil
-		}
+		d.setRound(f.ID, kind, 0)
+		return d.stepTo(ctx, f.ID, out.Stage)
+	case gatepolicy.BounceToWork:
 		if err := rounds.Bump(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
 		d.setRound(f.ID, kind, d.round(f.ID, kind)+1)
+		d.burnCorrective(ctx, f.ID, out)
 		if err := d.eng.RunWith(f, reworkNote(f.Stage)); err != nil {
 			return Outcome{}, err
 		}
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: reworkLabel(f.Stage), Round: d.round(f.ID, kind)})
 		return d.awaitRework(ctx, f)
-	default:
+	default: // Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
 		d.setRound(f.ID, kind, 0)
+		if out.Reason == "critique-changes-cap" {
+			return d.bounceEscalation(f, fmt.Sprintf("%s critique still requesting changes after %d rounds", f.Stage, max)), nil
+		}
 		return d.escalation(f, string(f.Stage)+" critique finished with no clear verdict"), nil
 	}
 }
@@ -1260,7 +1204,7 @@ func (d *Driver) awaitRework(ctx context.Context, f domain.Feature) (Outcome, er
 // its own reporting.
 func (d *Driver) dispatchCritique(f domain.Feature, note string) error {
 	switch f.Stage {
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		d.reviewsRun++
 	}
 	return d.eng.RunCritique(f, note)

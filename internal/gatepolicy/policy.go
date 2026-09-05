@@ -86,7 +86,12 @@ const (
 // it needs (verdict, round counts, gate mode, open-thread/comment counts)
 // before calling Decide, and performs the resulting side effects itself.
 type Input struct {
-	// Stage is the autonomous stage that just finished (StageReview or
+	// Forward is the stage a passing critique advances to — the critique
+	// stage's own forward edge, which the caller resolves because only it
+	// knows the card's skip flags. Ignored for the plan critique, whose
+	// pass raises a human gate rather than advancing.
+	Forward domain.Stage
+	// Stage is the autonomous stage that just finished (StageVerify or
 	// StageVerify drive real branches below; anything else parks).
 	Stage domain.Stage
 	// Kind distinguishes feature/bug/research — consulted where a rule is
@@ -179,15 +184,10 @@ func Decide(in Input) Outcome {
 	}
 
 	switch in.Stage {
-	case domain.StageImplement, domain.StageFix:
-		// the work stage's own critique pass — what the Review stage used
-		// to be, judged in place without a transition
+	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+		// a stage's own critique pass — what the Review stage used to be,
+		// judged without a transition of its own
 		return decideCritique(in)
-	case domain.StageReview:
-		// research still has a Review stage (its converging stage is
-		// interactive, so it has no autonomous stage to hang a critique
-		// off); feature and bug reach decideCritique above instead.
-		return decideReview(in)
 	case domain.StageVerify:
 		return decideVerify(in)
 	default:
@@ -197,45 +197,33 @@ func Decide(in Input) Outcome {
 	}
 }
 
-// decideCritique resolves a finished critique pass on a work stage — the
-// judgement the Review stage used to make, now made without the stage.
-// Pass advances to verify; changes iterates the work stage again under
-// the corrective cap, or parks (escalated) at it; anything else is an
-// unclear verdict, and an unclear verdict is never guessed.
+// decideCritique resolves a finished critique pass — the judgement the
+// Review stage used to make, now made without the stage.
 //
-// BounceToWork here names the stage the card is already in, so it is an
-// iteration rather than a transition. That is the whole difference
-// between a stage and a pass, and it is why the review → implement rerun
-// edge could be deleted from the graph rather than repointed.
+// A `changes` verdict reworks the critique's OWN stage, never another
+// one. That is what makes a critique a pass rather than a stage: there is
+// no edge to come back on, so implement's critique re-runs implement,
+// plan's re-runs plan, and research's re-runs investigate. It is also why
+// the review→work rerun edges could be deleted from all three graphs
+// rather than repointed.
+//
+// A `pass` advances to the stage's forward edge, except at plan, whose
+// gate is a human approval gate and always was — folding Review away must
+// not quietly remove the one design gate that stops for a person.
 func decideCritique(in Input) Outcome {
 	switch in.Verdict {
 	case verdict.Pass:
-		return Outcome{Action: Advance, Stage: domain.StageVerify, Reason: "critique-pass"}
+		if in.Stage == domain.StagePlan {
+			return Outcome{Action: RaiseGate, Stage: in.Stage, Reason: "critique-pass"}
+		}
+		return Outcome{Action: Advance, Stage: in.Forward, Reason: "critique-pass"}
 	case verdict.Changes:
 		if in.Corrective >= in.CorrectiveMax {
 			return Outcome{Action: Park, Stage: in.Stage, Reason: "critique-changes-cap"}
 		}
-		return Outcome{Action: BounceToWork, Stage: in.WorkStage, Reason: "critique-changes", Burns: true}
+		return Outcome{Action: BounceToWork, Stage: in.Stage, Reason: "critique-changes", Burns: true}
 	default:
 		return Outcome{Action: Park, Stage: in.Stage, Reason: "critique-unclear"}
-	}
-}
-
-// decideReview resolves a finished review session: pass advances to
-// verify; changes bounces to work under the corrective cap, or parks
-// (escalated) at it; anything else is an unclear verdict — never guess,
-// park.
-func decideReview(in Input) Outcome {
-	switch in.Verdict {
-	case verdict.Pass:
-		return Outcome{Action: Advance, Stage: domain.StageVerify, Reason: "review-pass"}
-	case verdict.Changes:
-		if in.Corrective >= in.CorrectiveMax {
-			return Outcome{Action: Park, Stage: in.Stage, Reason: "review-changes-cap"}
-		}
-		return Outcome{Action: BounceToWork, Stage: in.WorkStage, Reason: "review-changes", Burns: true}
-	default:
-		return Outcome{Action: Park, Stage: in.Stage, Reason: "review-unclear"}
 	}
 }
 

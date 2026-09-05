@@ -33,7 +33,7 @@ func reviewLoopScript(verdicts ...string) map[domain.Stage]stageFn {
 			}
 			return []agent.Event{{Kind: agent.EventBudgetExhausted}}
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			mu.Lock()
 			n := reviews
 			reviews++
@@ -103,7 +103,7 @@ func TestReviewRoundsClearedOnPassGate(t *testing.T) {
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return prosePass(o.Model)
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			mu.Lock()
 			n := reviews
 			reviews++
@@ -187,6 +187,12 @@ func TestRSReviewLegLanding(t *testing.T) {
 		},
 		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Shaped.")
+		},
+	
+		// investigate ends with a critique now; a drive that is not about
+		// the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	// research stages run read-only in the main checkout; only a backend

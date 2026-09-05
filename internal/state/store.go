@@ -1312,8 +1312,7 @@ func (s *Store) History(ctx context.Context, id domain.FeatureID) ([]TransitionR
 	return out, rows.Err()
 }
 
-// migrateReviewStage moves feature and bug cards off the retired Review
-// stage. Review stopped being a stage when the critique it performed
+// migrateReviewStage moves cards off the retired Review stage. Review stopped being a stage when the critique it performed
 // became the pass the work stage ends with, so `implement → review →
 // verify` collapsed to `implement → verify` and a stored card sitting at
 // `review` has no forward edge left — it would load fine and then refuse
@@ -1324,11 +1323,12 @@ func (s *Store) History(ctx context.Context, id domain.FeatureID) ([]TransitionR
 // diff a critique would judge. The alternative — rewinding to the work
 // stage — would re-run work that is finished.
 //
-// Research keeps its Review stage and is deliberately untouched: its
-// converging stage is interactive, so it has no autonomous stage to hang
-// a critique off yet.
+// Research moves too: its critique now runs at investigate, judging the
+// evidence before shape converges on it, so a research card that had
+// already reached Review has been shaped and belongs at verify for the
+// same reason.
 func migrateReviewStage(db *sql.DB) error {
 	_, err := db.ExecContext(context.Background(),
-		`UPDATE features SET stage = 'verify' WHERE stage = 'review' AND kind != 'research'`)
+		`UPDATE features SET stage = 'verify' WHERE stage = 'review'`)
 	return err
 }

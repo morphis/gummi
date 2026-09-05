@@ -28,9 +28,9 @@ func TestRecordStageSpendAccumulates(t *testing.T) {
 		credits     float64
 		in, cd, out int64
 	}{
-		{domain.StageReview, "reviewer", "gpt-5-codex", 30, 1200, 300, 400},
-		{domain.StageReview, "reviewer", "gpt-5-codex", 8, 300, 100, 90},
-		{domain.StageReview, "reviewer", "gpt-4o-mini", 4, 800, 0, 100},
+		{domain.StageVerify, "reviewer", "gpt-5-codex", 30, 1200, 300, 400},
+		{domain.StageVerify, "reviewer", "gpt-5-codex", 8, 300, 100, 90},
+		{domain.StageVerify, "reviewer", "gpt-4o-mini", 4, 800, 0, 100},
 		{domain.StageImplement, "implementer", "gpt-5-codex", 50, 5000, 1000, 2000},
 	}
 	var wantTotal float64
@@ -54,10 +54,10 @@ func TestRecordStageSpendAccumulates(t *testing.T) {
 	if bd[0].Stage != domain.StageImplement {
 		t.Errorf("row[0] stage = %s, want implement (workflow order)", bd[0].Stage)
 	}
-	if bd[1].Stage != domain.StageReview || bd[1].Model != "gpt-5-codex" {
+	if bd[1].Stage != domain.StageVerify || bd[1].Model != "gpt-5-codex" {
 		t.Errorf("row[1] = %s/%s, want review/gpt-5-codex (dominant first)", bd[1].Stage, bd[1].Model)
 	}
-	if bd[2].Stage != domain.StageReview || bd[2].Model != "gpt-4o-mini" {
+	if bd[2].Stage != domain.StageVerify || bd[2].Model != "gpt-4o-mini" {
 		t.Errorf("row[2] = %s/%s, want review/gpt-4o-mini", bd[2].Stage, bd[2].Model)
 	}
 
@@ -142,10 +142,10 @@ func TestRecordStageSpendEstimated(t *testing.T) {
 		t.Fatal(err)
 	}
 	// token-derived (estimated == credits), then provider-metered (0)
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5-codex", 6, 6, 0, 0, 12000); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageVerify, "reviewer", "gpt-5-codex", 6, 6, 0, 0, 12000); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5-codex", 30, 0, 1200, 300, 400); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageVerify, "reviewer", "gpt-5-codex", 30, 0, 1200, 300, 400); err != nil {
 		t.Fatal(err)
 	}
 	bd, err := s.StageBreakdown(ctx, f.ID)
@@ -293,7 +293,7 @@ func TestRecordStageSpendCascades(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageReview, "reviewer", "gpt-5", 1, 0, 1, 0, 1); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageVerify, "reviewer", "gpt-5", 1, 0, 1, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteFeature(ctx, f.ID); err != nil {

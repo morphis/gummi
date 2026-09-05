@@ -37,8 +37,6 @@ const (
 	StageFix Stage = "fix"
 	// StageImplement is the autonomous implementation in the worktree.
 	StageImplement Stage = "implement"
-	// StageReview is a fresh-context autonomous review. Never skippable.
-	StageReview Stage = "review"
 	// StageVerify runs the repo checks plus the spec's verification
 	// plan. Never skippable.
 	StageVerify Stage = "verify"
@@ -46,17 +44,18 @@ const (
 	StageDone Stage = "done"
 )
 
-// Stages lists every stage across both workflows, in workflow order:
+// Stages lists every stage across all three workflows, in workflow order:
 // the shared entry (todo), the feature-specific stages, the bug-specific
-// stages, then the shared tail (implement/fix converge into review →
-// verify → done).
+// stages, then the shared tail (the work stages converge into verify →
+// done). There is no Review: the critique it performed is the pass each
+// work stage ends with, judged without a stage of its own.
 var Stages = []Stage{
 	StageTodo,
 	StageInvestigate, StageShape,
 	StageBrainstorm, StageSpec, StagePlan,
 	StageTriage, StageDiagnose,
 	StageFix, StageImplement,
-	StageReview, StageVerify, StageDone,
+	StageVerify, StageDone,
 }
 
 // Valid reports whether s is one of the compiled-in stages.
@@ -93,7 +92,7 @@ func (s Stage) SuperState() SuperState {
 		return SuperInProgress
 	case StageInvestigate, StageShape:
 		return SuperResearch
-	case StageReview, StageVerify:
+	case StageVerify:
 		return SuperReviewVerify
 	case StageDone:
 		return SuperDone
@@ -108,7 +107,7 @@ func (s Stage) SuperState() SuperState {
 // picker share this single definition.
 func AtOrPastCoding(st Stage) bool {
 	switch st {
-	case StageImplement, StageFix, StageReview, StageVerify, StageDone:
+	case StageImplement, StageFix, StageVerify, StageDone:
 		return true
 	}
 	return false
@@ -116,8 +115,8 @@ func AtOrPastCoding(st Stage) bool {
 
 // SkipFlags are the only per-item workflow flexibility, set at creation.
 // Brainstorm/Plan gate the feature workflow; Triage/Diagnose gate the bug
-// workflow; each workflow ignores the other's flags. Review and Verify
-// have no flags in either workflow: they can never be skipped.
+// workflow; each workflow ignores the other's flags. Verify has no flag
+// in any workflow: it can never be skipped.
 //
 // Quick is not a skip of its own but a route marker: a quick feature is
 // created with Brainstorm and Plan both skipped (QuickRoute), and the

@@ -19,7 +19,6 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 func TestParseVerdict(t *testing.T) {
@@ -72,14 +71,6 @@ func isVerify(opts agent.SessionOpts) bool {
 // advanceTo drives g until the feature reaches the target stage.
 func advanceTo(t *testing.T, m *Shell, target domain.Stage) *Shell {
 	t.Helper()
-	// Review stopped being a stage for features and bugs — the critique it
-	// performed is the pass the work stage ends with. A fixture asking to
-	// reach "review" means "reach the point where the diff gets judged",
-	// which is now the work stage; the critique runs from there without a
-	// transition. Research still has a Review stage and is unaffected.
-	if target == domain.StageReview && m.rows[m.sel].F.Kind != domain.KindResearch {
-		target = workflow.WorkStage(m.rows[m.sel].F.Kind)
-	}
 	for i := 0; i < 8 && m.rows[0].F.Stage != target; i++ {
 		draftRequiredSections(t, m)
 		m = pressAdvance(t, m)
@@ -98,7 +89,7 @@ func TestReviewPassAdvancesToVerify(t *testing.T) {
 		return "done"
 	})
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 
 	// run review; a passing verdict should auto-advance to verify
 	m = openAndAttach(t, m)
@@ -120,7 +111,7 @@ func TestReviewChangesBouncesAndLoops(t *testing.T) {
 		return "fixed"
 	})
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 
 	m = openAndAttach(t, m) // first review
 	settleChat(t, eng)
@@ -144,7 +135,7 @@ func TestReviewChangesBouncesAndLoops(t *testing.T) {
 func TestReviewUnclearVerdictEscalates(t *testing.T) {
 	ag := verdictAgent(func(opts agent.SessionOpts) string { return "I reviewed it." })
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
@@ -173,7 +164,7 @@ func runVerify(t *testing.T, verifyReply string) *Shell {
 		}
 	})
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m) // run review → auto verify
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
@@ -285,17 +276,12 @@ func TestVerifyBounces(t *testing.T) {
 	}{
 		{"no history", nil, domain.KindFeature, 0},
 		{"forward only", []state.TransitionRecord{
-			tr(domain.StageImplement, domain.StageReview),
-			tr(domain.StageReview, domain.StageVerify),
-		}, domain.KindFeature, 0},
-		{"review bounces don't count", []state.TransitionRecord{
-			tr(domain.StageReview, domain.StageImplement),
-			tr(domain.StageReview, domain.StageImplement),
+			tr(domain.StageImplement, domain.StageVerify),
+			tr(domain.StageVerify, domain.StageVerify),
 		}, domain.KindFeature, 0},
 		{"two verify bounces", []state.TransitionRecord{
 			tr(domain.StageVerify, domain.StageImplement),
-			tr(domain.StageImplement, domain.StageReview),
-			tr(domain.StageReview, domain.StageVerify),
+			tr(domain.StageImplement, domain.StageVerify),
 			tr(domain.StageVerify, domain.StageImplement),
 		}, domain.KindFeature, 2},
 		{"bug bounces target fix", []state.TransitionRecord{
@@ -814,7 +800,7 @@ func TestReviewRoundsSeedsFromStoreOnReviewEntry(t *testing.T) {
 		return "done"
 	})
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 	// a prior session burned one round; the store is the shared record
 	if err := m.store.SetReviewRounds(context.Background(), "FD-001", 1); err != nil {
 		t.Fatal(err)
@@ -841,7 +827,7 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 			return "done"
 		})
 		m, _ := chatWorkspace(t, ag)
-		m = advanceTo(t, m, domain.StageReview)
+		m = advanceTo(t, m, domain.StageImplement)
 		m = openAndAttach(t, m)
 		m = drainEngineLoop(t, m)
 		if got := m.round("FD-001", domain.RoundKindReview); got != 0 {
@@ -857,7 +843,7 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 		if err := m.store.SetReviewRounds(context.Background(), "FD-001", 1); err != nil {
 			t.Fatal(err)
 		}
-		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageReview, Committed: false}))
+		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageVerify, Committed: false}))
 		if got := m.round("FD-001", domain.RoundKindReview); got != 0 {
 			t.Errorf("m.round(review) after exhaustion = %d, want 0", got)
 		}
@@ -869,7 +855,7 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 		m, _ := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
 		m.setRound("FD-001", domain.RoundKindReview, 1)
 		m.roundStore = &failRoundStore{failWrite: true}
-		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageReview, Committed: false}))
+		m = pump(t, m, m.handleEngineEvent(engine.Event{Kind: engine.EventExhausted, Feature: "FD-001", Stage: domain.StageVerify, Committed: false}))
 		if got := m.round("FD-001", domain.RoundKindReview); got != 1 {
 			t.Errorf("m.round(review) after failed exhaustion clear = %d, want 1 (count not lost)", got)
 		}
@@ -883,7 +869,7 @@ func TestReviewRoundsClearOnPassAndExhaustion(t *testing.T) {
 // review dispatch.
 func TestReviewRoundsWriteThroughFailsClosed(t *testing.T) {
 	m, eng := chatWorkspace(t, verdictAgent(func(opts agent.SessionOpts) string { return "done" }))
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 	m.roundStore = &failRoundStore{failLoad: true}
 	m = openAndAttach(t, m)
 	if !m.notice.isErr {
@@ -911,7 +897,7 @@ func TestReviewBouncesBurnCorrectiveRounds(t *testing.T) {
 		return "fixed"
 	})
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
@@ -939,7 +925,7 @@ func TestEscalationRecordsAPark(t *testing.T) {
 		return "fixed"
 	})
 	m, eng := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StageReview)
+	m = advanceTo(t, m, domain.StageImplement)
 
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
@@ -991,7 +977,7 @@ func pressAdvance(t *testing.T, m *Shell) *Shell {
 // own content keeps it, and it is a no-op before the artifact exists.
 func draftRequiredSections(t *testing.T, m *Shell) {
 	t.Helper()
-	if m.store == nil || m.wt == nil {
+	if m.store == nil || m.wt == nil || len(m.rows) == 0 {
 		return
 	}
 	f := m.rows[0].F

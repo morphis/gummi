@@ -21,9 +21,9 @@
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mnothing is running — choose what happens next.[39m                                             [m
 [48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. run implement[38;2;96;95;107m — no active run — start (or restart) the stage[39m                                 [m
+[48;2;32;31;38m  [38;2;247;246;251m  2. pull PR review[38;2;96;95;107m — read the PR's review comments back onto the diff[39m                            [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;96;95;107m┃ message the agent, /approve /verify /diff…, or ↑ for actions[39m                                    [m
 [48;2;32;31;38m                                                                                                    [m

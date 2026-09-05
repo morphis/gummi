@@ -83,7 +83,7 @@ func TestRunCritiqueOnlyWhereARoundCounterIsDeclared(t *testing.T) {
 	}
 
 	// undeclared: refused outright rather than run on a default budget
-	for _, stage := range []domain.Stage{domain.StageReview, domain.StageSpec, domain.StageVerify, domain.StageTodo} {
+	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageSpec, domain.StageVerify, domain.StageTodo} {
 		if err := e.RunCritique(feature(1, "x", stage), ""); err == nil {
 			t.Errorf("critique allowed on %s, which declares no round counter", stage)
 		}

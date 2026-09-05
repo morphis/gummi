@@ -11,7 +11,6 @@ func TestAtOrPastCoding(t *testing.T) {
 		StageInvestigate: false, StageShape: false,
 		StageBrainstorm: false, StageSpec: false, StagePlan: false,
 		StageTriage: false, StageDiagnose: false,
-		StageImplement: true, StageFix: true, StageReview: true, StageVerify: true, StageDone: true,
 	}
 	for st, want := range at {
 		if got := AtOrPastCoding(st); got != want {

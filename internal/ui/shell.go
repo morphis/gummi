@@ -3192,8 +3192,8 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	// any of those can be the resume landing point, so seed the counter on
 	// each of them. Investigate is research's work leg — a resume landing
 	// on the RS work leg must not re-grant the review budget either.
-	if f.Stage == domain.StageReview || f.Stage == domain.StageImplement ||
-		f.Stage == domain.StageFix || f.Stage == domain.StageInvestigate {
+	if f.Stage == domain.StageImplement || f.Stage == domain.StageFix ||
+		f.Stage == domain.StageInvestigate {
 		if err := m.seedRounds(f, domain.RoundKindReview); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
@@ -3500,7 +3500,7 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 // (as opposed to interactive chat or no agent).
 func autonomousStage(s domain.Stage) bool {
 	switch s {
-	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageInvestigate, domain.StageReview, domain.StageVerify:
+	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageInvestigate, domain.StageVerify:
 		return true
 	default:
 		return false

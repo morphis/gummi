@@ -49,7 +49,6 @@ func GummiLight() Theme {
 			domain.StageDiagnose:    charmtone.Mustard,
 			domain.StageFix:         charmtone.Pickle,
 			domain.StageImplement:   charmtone.Pickle,
-			domain.StageReview:      charmtone.Cumin,
 			domain.StageVerify:      charmtone.Chili,
 			domain.StageDone:        charmtone.Gator, // dark settled green
 		},
@@ -97,7 +96,6 @@ func GummiNeon() Theme {
 			domain.StageTriage:      charmtone.Coral,
 			domain.StageDiagnose:    charmtone.Cumin,
 			domain.StageFix:         charmtone.Julep,
-			domain.StageReview:      charmtone.Mustard,
 			domain.StageVerify:      charmtone.Cherry,
 			domain.StageDone:        charmtone.Turtle,
 		},

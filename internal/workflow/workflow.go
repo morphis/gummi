@@ -86,27 +86,28 @@ var bugGraph = graph{
 }
 
 // researchGraph is the investigation-driven workflow: todo → investigate →
-// shape → review → verify → done. It has no skip edges — investigate and
-// shape are both always mandatory. Its rerun edges bounce findings back to
-// investigate (the research WorkStage), never to shape.
+// shape → verify → done. It has no skip edges — investigate and shape are
+// both always mandatory.
 //
-// Research KEEPS its Review stage, deliberately, while feature and bug
-// give theirs up. A critique is a pass a stage runs before it ends, and
-// research's converging stage (shape) is interactive — there is no
-// autonomous stage for it to hang off. Folding research in needs the
-// interaction change (Phase 3) underneath it, so it waits.
+// Review is not a stage here either. Investigate ends with the critique
+// that judges what it gathered, so a `changes` verdict re-runs
+// investigate in place — which is exactly where the review→investigate
+// rerun edge used to point, minus the round trip through a stage. The
+// critique moved EARLIER than the old Review stage sat: it now judges the
+// evidence before shape converges on it, rather than judging the shaped
+// document afterwards.
 var researchGraph = graph{
 	initial: domain.StageTodo,
 	table: []transition{
 		// forward path
 		{from: domain.StageTodo, to: domain.StageInvestigate},
 		{from: domain.StageInvestigate, to: domain.StageShape},
-		{from: domain.StageShape, to: domain.StageReview},
-		{from: domain.StageReview, to: domain.StageVerify},
+		{from: domain.StageShape, to: domain.StageVerify},
 		{from: domain.StageVerify, to: domain.StageDone},
 
-		// rerun edges: findings or failed checks bounce work back to investigate
-		{from: domain.StageReview, to: domain.StageInvestigate},
+		// rerun edge: failed checks bounce work back to investigate.
+		// Investigate's own critique iterates it in place, so its findings
+		// need no edge — which is what let the review→investigate rerun go.
 		{from: domain.StageVerify, to: domain.StageInvestigate},
 	},
 }

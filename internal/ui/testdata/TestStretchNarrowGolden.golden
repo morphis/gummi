@@ -25,10 +25,10 @@ plan · architect · 180 credits ─────────────── �
   implementer
     sure — nothing else is running.
 
-
 gummi
  nothing is running — choose what happens next.
 ▸ 1. run implement
   no active run — start (or restart) the stage
+  2. pull PR review — read the PR's review comments…
 
 ┃ message the agent, /approve /verify /diff…, or ↑  

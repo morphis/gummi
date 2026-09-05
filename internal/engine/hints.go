@@ -113,7 +113,7 @@ func roleForStage(s domain.Stage) (agent.Role, bool) {
 		return agent.RoleArchitect, true
 	case domain.StageImplement, domain.StageFix:
 		return agent.RoleImplementer, true
-	case domain.StageReview, domain.StageVerify:
+	case domain.StageVerify:
 		return agent.RoleReviewer, true
 	default:
 		return "", false
@@ -326,12 +326,6 @@ guessing.`))
 		if f.Kind == domain.KindResearch {
 			hints = append(hints, shapeHint())
 		}
-	case domain.StageReview:
-		if f.Kind == domain.KindResearch {
-			hints = append(hints, researchReviewHint())
-		} else {
-			hints = append(hints, reviewHint(f.Kind))
-		}
 	case domain.StageVerify:
 		hints = append(hints, verifyHint(f.Kind))
 	}
@@ -433,6 +427,8 @@ func critiqueHint(f domain.Feature) string {
 	switch f.Stage {
 	case domain.StageImplement, domain.StageFix:
 		return reviewHint(f.Kind)
+	case domain.StageInvestigate:
+		return researchCritiqueHint()
 	default:
 		return planCritiqueHint()
 	}
@@ -593,15 +589,18 @@ option.`)
 // adversarial critique of the research document. It is autonomous and
 // read-only — findings are recorded via submit_verdict, never by
 // editing the artifact.
-func researchReviewHint() string {
+func researchCritiqueHint() string {
 	return strings.TrimSpace(`
-Stage: Review (autonomous, fresh context, read-only). Adversarially
-critique the research document — the survey's evidence, the shaped
-option, and the open questions — for soundness, grounding, and
-completeness. You run in the main checkout with no worktree and cannot
-modify the artifact: record your findings in your final message and
-submit a verdict via the submit_verdict tool (pass or changes), exactly
-once, instead of writing to the document.`)
+Investigate's critique (autonomous, fresh context, read-only).
+Adversarially critique what the investigation gathered — the evidence,
+its grounding in cited sources, and whether the brief's questions are
+actually answered — for soundness and completeness. Judge the evidence,
+not a conclusion: shape has not converged on one yet, and that is the
+point of critiquing here. A "changes" verdict sends the investigation
+back for another round rather than blocking a written-up document. You
+run with no worktree and cannot modify the artifact: record your findings
+in your final message and submit a verdict via the submit_verdict tool
+(pass or changes), exactly once, instead of writing to the document.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both

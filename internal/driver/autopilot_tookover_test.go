@@ -67,7 +67,7 @@ func TestUnattendedRunLogsTookOver(t *testing.T) {
 		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -201,7 +201,7 @@ func TestTookOverWritesEveryCall(t *testing.T) {
 		t.Fatalf("two runs at one stage produced %d took-over rows, want 2 — a dedupe key here would swallow the second run's whole stretch: %+v", len(rows), rows)
 	}
 
-	f.Stage = domain.StageReview
+	f.Stage = domain.StageVerify
 	d.logTookOver(f)
 	if rows := tookOverEvents(t, h, f.ID); len(rows) != 3 {
 		t.Fatalf("a run beginning at a new stage produced %d took-over rows, want 3: %+v", len(rows), rows)

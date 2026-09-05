@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -1031,7 +1032,7 @@ func stageSequence(f domain.Feature) []domain.Stage {
 			break
 		}
 		next := nexts[len(nexts)-1]
-		if cur == domain.StageReview || cur == domain.StageVerify {
+		if cur == domain.StageVerify {
 			next = nexts[0]
 		}
 		if seen[next] {
@@ -1058,8 +1059,6 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 			return "Root cause"
 		case domain.StageFix:
 			return "Fix"
-		case domain.StageReview:
-			return "Review"
 		case domain.StageVerify:
 			return "Verification"
 		}
@@ -1069,8 +1068,6 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 			return "Findings"
 		case domain.StageShape:
 			return "Direction"
-		case domain.StageReview:
-			return "Review"
 		case domain.StageVerify:
 			return "Verification plan"
 		}
@@ -1082,8 +1079,6 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 			return "Chosen approach"
 		case domain.StagePlan, domain.StageImplement:
 			return "Implementation notes"
-		case domain.StageReview:
-			return "Review"
 		case domain.StageVerify:
 			return "Verification plan"
 		}
@@ -1304,9 +1299,15 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 	}
 	mark := eventMarker(s, "")
 	if seg.exited {
-		switch seg.stage {
-		case domain.StageReview, domain.StageVerify:
-			// review/verify sessions carry a real pass/changes/fail/blocked
+		// The reviewer's own sessions — a stage's critique, and verify —
+		// are the ones that submit a verdict. Keyed on the ROLE rather
+		// than the stage, because a work stage now hosts both: its writer
+		// (implementer, no verdict, ✓ on a clean exit) and its critique
+		// (reviewer, a real verdict). Keying on the stage would have made
+		// every finished implement look unverdicted and lose its check.
+		switch seg.role {
+		case string(agent.RoleReviewer):
+			// a critique and a verify carry a real pass/changes/fail/blocked
 			// verdict (internal/verdict); only a resolved "pass" earns ✓, and
 			// only "fail" earns ✗ — anything else (including "", the shape
 			// left behind by a session that exited without ever calling
@@ -1319,8 +1320,8 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 				mark = eventMarker(s, state.StatusFail)
 			}
 		default:
-			// every other stage never calls submit_verdict, so verdict=="" is
-			// its only possible value and isn't itself a negative signal —
+			// every other session never calls submit_verdict, so verdict==""
+			// is its only possible value and isn't itself a negative signal —
 			// exited and not failed still reads ✓.
 			if seg.verdict == state.StatusFail {
 				mark = eventMarker(s, state.StatusFail)

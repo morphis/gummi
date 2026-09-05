@@ -79,7 +79,7 @@ func TestReconstructInboxAfterRestart(t *testing.T) {
 	ctx := context.Background()
 
 	fBudget := mkFeature(t, store, 1, "budget park", domain.StageImplement)
-	fGate := mkFeature(t, store, 2, "plain gate", domain.StageReview)
+	fGate := mkFeature(t, store, 2, "plain gate", domain.StageVerify)
 	fFail := mkFeature(t, store, 3, "failed run", domain.StageVerify)
 
 	// persist the sessions the way a pre-restart engine would have

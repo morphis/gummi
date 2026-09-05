@@ -139,7 +139,7 @@ func TestPlanLoopLegIgnoresNonGateAttention(t *testing.T) {
 func TestPlanLoopLineOtherStageEmpty(t *testing.T) {
 	m := loopShell()
 	m.inbox.add("FD-001", attnGate, "review finished")
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageReview}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StageVerify}
 	if line := m.planLoopLine(f); line != "" {
 		t.Errorf("loop line rendered off the plan stage: %q", line)
 	}

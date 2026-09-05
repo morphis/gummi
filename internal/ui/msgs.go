@@ -947,7 +947,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 			return noticeMsg{text: text, reload: true, clearInbox: id}
 		}
 	}
-	if f.Stage != domain.StageReview && f.Stage != domain.StageVerify {
+	if f.Stage != domain.StageImplement && f.Stage != domain.StageFix && f.Stage != domain.StageVerify {
 		text := fmt.Sprintf("%s is in %s — only review/verify/plan can bounce back", id, f.Stage)
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}

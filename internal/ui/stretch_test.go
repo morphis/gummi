@@ -81,9 +81,9 @@ func onlyStretch(t *testing.T, sts []autopilotStretch) autopilotStretch {
 // from its crossings alone.
 func TestStretchOpensOnlyOnAnExplicitRow(t *testing.T) {
 	events := []state.CardEvent{
-		evGate(domain.StageReview, domain.StageFix, "review", at(0)),
-		evGate(domain.StageFix, domain.StageReview, "review", at(10)),
-		evPark(domain.StageReview, "review needs you", at(20)),
+		evGate(domain.StageVerify, domain.StageFix, "review", at(0)),
+		evGate(domain.StageFix, domain.StageVerify, "review", at(10)),
+		evPark(domain.StageVerify, "review needs you", at(20)),
 	}
 	if got := autopilotStretches(aFeature(), events); len(got) != 0 {
 		t.Fatalf("stretches = %+v, want none — nobody handed this card over", got)
@@ -165,7 +165,7 @@ func TestStretchClosers(t *testing.T) {
 		},
 		{
 			name: "a gate a person crossed",
-			tail: []state.CardEvent{evGate(domain.StageImplement, domain.StageReview, "user", at(30))},
+			tail: []state.CardEvent{evGate(domain.StageImplement, domain.StageVerify, "user", at(30))},
 			want: stretchTakenBack,
 		},
 		{
@@ -349,7 +349,7 @@ func TestTwoStretchesAlternate(t *testing.T) {
 		evPark(domain.StageImplement, "needs you", at(10)),
 		evMessage(string(engine.AuthorUser), "let me look", at(20)),
 		evTookOver(domain.GateAutopilot, at(30)),
-		evGate(domain.StageImplement, domain.StageReview, state.ActorAutopilot, at(36)),
+		evGate(domain.StageImplement, domain.StageVerify, state.ActorAutopilot, at(36)),
 	}
 	got := autopilotStretches(aFeature(), events)
 	if len(got) != 2 {
@@ -450,7 +450,7 @@ func TestUnseenStretchIsTheNewestClosedOne(t *testing.T) {
 // nothing to jump to, however much history it carries.
 func TestNoUnseenStretchWithoutAPeriod(t *testing.T) {
 	events := withSeqs([]state.CardEvent{
-		evGate(domain.StageReview, domain.StageFix, "review", at(0)),
+		evGate(domain.StageVerify, domain.StageFix, "review", at(0)),
 		evPark(domain.StageFix, "needs you", at(10)),
 	})
 	sts := autopilotStretches(aFeature(), events)
@@ -468,7 +468,7 @@ func TestNoUnseenStretchWithoutAPeriod(t *testing.T) {
 func TestInterruptedLandingGateIsNotFinished(t *testing.T) {
 	events := []state.CardEvent{
 		evTookOver(domain.GateAutopilot, at(0)),
-		evExit(domain.StageReview, state.StatusOK, at(10)), // an earlier stage passed
+		evExit(domain.StageImplement, state.StatusOK, at(10)), // an earlier stage passed
 		{Kind: state.EventStageEnter, Stage: domain.StageVerify, At: at(11)},
 		// verify itself never exits: the board quit mid-run
 		evPark(domain.StageVerify, "stopped when the board quit", at(20)),
@@ -485,7 +485,7 @@ func TestInterruptedLandingGateIsNotFinished(t *testing.T) {
 func TestLandingGateFinishesOnItsOwnVerdict(t *testing.T) {
 	events := []state.CardEvent{
 		evTookOver(domain.GateAutopilot, at(0)),
-		evExit(domain.StageReview, state.StatusFail, at(10)), // an earlier failure
+		evExit(domain.StageVerify, state.StatusFail, at(10)), // an earlier failure
 		evExit(domain.StageVerify, state.StatusOK, at(19)),   // verify's own pass
 		evPark(domain.StageVerify, "verify passed — ready to land", at(20)),
 	}

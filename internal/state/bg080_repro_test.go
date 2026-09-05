@@ -61,7 +61,7 @@ func TestBG080SecondCrossingAfterAnsweredGateIsRecorded(t *testing.T) {
 
 	// shape is the interactive stage: the user advances out of it by hand,
 	// and nothing opens a gate decision for that crossing to answer.
-	if _, err := s.Transition(ctx, id, domain.StageReview, "user"); err != nil {
+	if _, err := s.Transition(ctx, id, domain.StageVerify, "user"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +84,7 @@ func TestBG080SecondCrossingAfterAnsweredGateIsRecorded(t *testing.T) {
 	want := [][2]string{
 		{string(domain.StageTodo), string(domain.StageInvestigate)},
 		{string(domain.StageInvestigate), string(domain.StageShape)},
-		{string(domain.StageShape), string(domain.StageReview)},
+		{string(domain.StageShape), string(domain.StageVerify)},
 	}
 	if len(crossings) != len(want) {
 		t.Fatalf("the card's history holds %d crossings, want %d — a stage change with no receipt behind it:\n got %v\nwant %v",

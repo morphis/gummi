@@ -38,7 +38,7 @@ func TestNextActionsByState(t *testing.T) {
 		// the CLI row is offered only where there is something to attach
 		// into (BG-089).
 		{"paused offers a re-run", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter a"},
-		{"failure offers retry and CLI", nextInput{stage: domain.StageReview, kind: feat, attn: attnFailure, hasWorktree: true}, "enter a"},
+		{"failure offers retry and CLI", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter a"},
 		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StageSpec, kind: feat, sess: engine.StatePaused}, "enter"},
 		{"budget stop routes to the inbox", nextInput{stage: domain.StageImplement, kind: feat, attn: attnBudget}, "i"},
 		{"question routes to attach", nextInput{stage: domain.StageSpec, kind: feat, attn: attnQuestion}, "enter"},
@@ -53,7 +53,6 @@ func TestNextActionsByState(t *testing.T) {
 		{"escalated plan gate offers a replan bounce, not just override", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, escalated: true}, "s b g"},
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
 		{"implement gate diffs, advances, or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g "},
-		{"review gate reads findings", nextInput{stage: domain.StageReview, kind: feat, attn: attnGate, escalated: true}, "s b g A"},
 		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
 		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g d b"},
 		{"verify fail verdict reads evidence first", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true, verdict: verdictFail}, "s b g"},
@@ -74,7 +73,7 @@ func TestNextActionsByState(t *testing.T) {
 func TestNextActionsCapAndRanking(t *testing.T) {
 	for _, in := range []nextInput{
 		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate},
-		{stage: domain.StageReview, kind: domain.KindFeature, attn: attnGate, escalated: true},
+		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, escalated: true},
 		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "lint"},
 	} {
 		acts := nextActions(in)
@@ -101,11 +100,6 @@ func TestNextActionsProseDetails(t *testing.T) {
 	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "unit tests"})
 	if !strings.Contains(acts[0].why, "unit tests") {
 		t.Errorf("failed-check why = %q, want the check named", acts[0].why)
-	}
-	// the round-capped review gate explains itself
-	acts = nextActions(nextInput{stage: domain.StageReview, kind: domain.KindFeature, attn: attnGate, escalated: true, reviewRound: maxReviewRounds})
-	if !strings.Contains(acts[0].why, "rounds") {
-		t.Errorf("capped review why = %q, want the round cap mentioned", acts[0].why)
 	}
 	// open comment counts surface in the blocker why
 	acts = nextActions(nextInput{stage: domain.StageSpec, kind: domain.KindFeature, openSpecQs: 2})
@@ -221,7 +215,7 @@ func nextActionIDs(acts []nextAction) string {
 func TestNextActionsRanksPullReview(t *testing.T) {
 	linked := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
 
-	for _, stage := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageVerify} {
 		acts := nextActions(nextInput{stage: stage, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
 		if !strings.Contains(nextActionIDs(acts), "prpull") {
 			t.Errorf("%s linked: ids = %q, want prpull ranked", stage, nextActionIDs(acts))
@@ -229,18 +223,20 @@ func TestNextActionsRanksPullReview(t *testing.T) {
 	}
 
 	// unlinked: never ranked, in either stage.
-	for _, stage := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageVerify} {
 		acts := nextActions(nextInput{stage: stage, kind: domain.KindFeature, attn: attnGate})
 		if strings.Contains(nextActionIDs(acts), "prpull") {
 			t.Errorf("%s unlinked: ids = %q, want no prpull", stage, nextActionIDs(acts))
 		}
 	}
 
-	// linked but outside review/verify: still not ranked — the loop this
-	// nudges toward only exists once there is something to review.
-	acts := nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
+	// linked but with nothing to review yet: not ranked — the loop this
+	// nudges toward only exists once there is a diff. Review is no longer
+	// one of those stages, so the work stage is: its critique is what
+	// review was, and a PR's comments belong on the diff it just produced.
+	acts := nextActions(nextInput{stage: domain.StageSpec, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
 	if strings.Contains(nextActionIDs(acts), "prpull") {
-		t.Errorf("implement linked: ids = %q, want no prpull outside review/verify", nextActionIDs(acts))
+		t.Errorf("spec linked: ids = %q, want no prpull before there is a diff", nextActionIDs(acts))
 	}
 }
 
@@ -250,8 +246,8 @@ func TestNextActionsRanksPullReview(t *testing.T) {
 // than one keystroke away.
 func TestCardActionsForPromotesPullReview(t *testing.T) {
 	linked := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
-	in := nextInput{stage: domain.StageReview, kind: domain.KindFeature, attn: attnGate, escalated: true, pullRequest: linked}
-	r := cardRow(domain.KindFeature, domain.StageReview, false, true)
+	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, escalated: true, pullRequest: linked}
+	r := cardRow(domain.KindFeature, domain.StageVerify, false, true)
 	r.F.PullRequest = linked
 
 	acts := cardActionsFor(in, r)

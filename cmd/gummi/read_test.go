@@ -369,7 +369,7 @@ func TestBuildStatusExplainsAParkedCard(t *testing.T) {
 	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageImplement, "implementer", "m1", 431, 0, 10, 20, 30); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageReview, "reviewer", "m2", 97, 0, 1, 2, 3); err != nil {
+	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageVerify, "reviewer", "m2", 97, 0, 1, 2, 3); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,7 +400,7 @@ func TestBuildStatusExplainsAParkedCard(t *testing.T) {
 	if v.StageSpend[0].CachedTokens != 20 {
 		t.Errorf("cached_tok = %d, want 20 (the field the spend fix made real)", v.StageSpend[0].CachedTokens)
 	}
-	if v.StageSpend[1].Stage != string(domain.StageReview) {
+	if v.StageSpend[1].Stage != string(domain.StageVerify) {
 		t.Errorf("stage_spend[1] = %+v, want review second", v.StageSpend[1])
 	}
 }

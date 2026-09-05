@@ -94,58 +94,40 @@ func researchWorkspace(t *testing.T, ag agent.Agent, stage domain.Stage) (*Shell
 // Shape: onAutonomousDone's investigate case mirrors the Implement/Fix
 // case, so the RS review loop turns in the TUI exactly like the feature
 // loop, instead of parking as a generic gate item.
-func TestRSInvestigateAutoStepsToShape(t *testing.T) {
-	ag := verdictAgent(func(agent.SessionOpts) string { return "shaped" })
+// TestRSInvestigateRoutesIntoTheCritiqueLoop: research's Review is a pass
+// now, and investigate is the stage that runs it, so the TUI's loop must
+// CLAIM an investigate completion rather than leaving it to the generic
+// gate. That claim is this package's responsibility and is all this test
+// asserts.
+//
+// What the verdict then does — a pass steps to shape, a changes re-runs
+// investigate under the review cap — is gatepolicy's rule, covered
+// exhaustively by its own table (TestDecide, including the
+// research-passes-to-shape case) and end to end by the headless driver's
+// RS tests. It is deliberately not re-tested through this fixture, which
+// cannot drive a read-only research session.
+//
+// This replaces two older tests whose shared premise is gone. They turned
+// on whether a review round had already been burned — a fresh investigate
+// raised the generic gate, and only one already inside the review loop
+// auto-continued. Every investigate ends with a critique now, so there is
+// no loop to be inside or outside of.
+func TestRSInvestigateRoutesIntoTheCritiqueLoop(t *testing.T) {
+	if _, ok := engine.CritiqueRoundKind(domain.StageInvestigate); !ok {
+		t.Fatal("investigate declares no critique round counter, so it can run no critique")
+	}
+	ag := verdictAgent(func(agent.SessionOpts) string { return "investigated" })
 	// research stages run read-only in the main checkout; only a backend
 	// that can structurally enforce that is allowed to drive them.
 	ag.Caps.ReadOnlyEnforce = true
-	m, eng := researchWorkspace(t, ag, domain.StageInvestigate)
-	m.setRound("RS-001", domain.RoundKindReview, 1)
+	m, _ := researchWorkspace(t, ag, domain.StageInvestigate)
 
-	handled, cmd := m.onAutonomousDone("RS-001", domain.StageInvestigate)
+	handled, _ := m.onAutonomousDone("RS-001", domain.StageInvestigate)
 	if !handled {
-		t.Fatal("onAutonomousDone(investigate, round>0) not handled — the RS work leg should auto-continue")
-	}
-	if cmd == nil {
-		t.Fatal("onAutonomousDone(investigate, round>0) returned a nil command")
-	}
-	m = pump(t, m, cmd)
-
-	f, err := m.store.GetFeature(context.Background(), "RS-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Stage != domain.StageShape {
-		t.Fatalf("feature at %s, want Shape (investigate auto-continued)", f.Stage)
-	}
-	// shape is interactive: the loop only clears the way to it, it never
-	// auto-runs an agent turn there — that happens on the human's own
-	// attach/Enter, so no session should have started.
-	if s := eng.Get("RS-001"); s != nil && (s.State() == engine.StateRunning || s.State() == engine.StateQueued) {
-		t.Error("shape session auto-started; want it to wait for the human's attach")
+		t.Fatal("an investigate completion was not claimed by the critique loop — it would raise the generic gate instead")
 	}
 }
 
-// A fresh, loop-free Investigate completion (no review round burned) is
-// NOT auto-continued — it raises the generic gate instead, matching
-// Implement/Fix's behavior for a first-time work-stage completion.
-func TestRSInvestigateNoLoopNotAutoStepped(t *testing.T) {
-	m, _ := researchWorkspace(t, verdictAgent(func(agent.SessionOpts) string { return "shaped" }), domain.StageInvestigate)
-
-	handled, cmd := m.onAutonomousDone("RS-001", domain.StageInvestigate)
-	if handled {
-		t.Fatal("onAutonomousDone(investigate, round==0) was handled — want the generic gate instead")
-	}
-	if cmd != nil {
-		t.Fatal("onAutonomousDone(investigate, round==0) returned a non-nil command")
-	}
-}
-
-const boardKeyDecomposeTwoRows = "# RS-001: research card\n\n## Findings\n\nNothing cited.\n\n## Slices\n\n" +
-	"```yaml\n" +
-	"- title: Row one\n  one-liner: first\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
-	"- title: Row two\n  one-liner: second\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
-	"```\n"
 
 // decomposeProposer answers a decompose pass with a fixed two-feature
 // proposal set, in the same propose_features shape a real architect
@@ -167,12 +149,14 @@ func decomposeProposer() *agent.Fake {
 	}
 }
 
-// TestBoardKeyGReDecomposesDoneRS proves the board-key re-run surface
-// FD-081's Chosen approach promises alongside the headless verb: pressing
-// g on a done RS card runs DecomposeForCard and opens the ingest-review
-// pane tagged so its approve path dispatches to MintProposals (not
-// Materialize) — the same two engine ops the auto-trigger and
-// --request-changes already share.
+// boardKeyDecomposeTwoRows is a finished research document whose Slices
+// block proposes exactly two rows — the artifact a re-decompose reads.
+const boardKeyDecomposeTwoRows = "# RS-001: research card\n\n## Findings\n\nNothing cited.\n\n## Slices\n\n" +
+	"```yaml\n" +
+	"- title: Row one\n  one-liner: first\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
+	"- title: Row two\n  one-liner: second\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
+	"```\n"
+
 func TestBoardKeyGReDecomposesDoneRS(t *testing.T) {
 	m, _ := researchWorkspace(t, decomposeProposer(), domain.StageDone)
 	path := filepath.Join(m.ws.Root, "RS-001.md")
@@ -724,7 +708,7 @@ func TestRS_NextSteps_HintsMatchKind(t *testing.T) {
 		{"todo", nextInput{stage: domain.StageTodo, kind: domain.KindResearch}},
 		{"investigate", nextInput{stage: domain.StageInvestigate, kind: domain.KindResearch}},
 		{"shape", nextInput{stage: domain.StageShape, kind: domain.KindResearch}},
-		{"review", nextInput{stage: domain.StageReview, kind: domain.KindResearch, attn: attnGate}},
+		{"review", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate}},
 		{"verify_pass", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate, verdict: verdictPass}},
 		{"verify_fail", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate, verdict: verdictFail}},
 		{"verify_blocked_gate", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate, openSpecQs: 1}},

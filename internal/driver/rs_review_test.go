@@ -26,7 +26,7 @@ func TestRSReviewCapEscalates(t *testing.T) {
 		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Shaped.")
 		},
-		domain.StageReview: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Issues.\nVERDICT: changes")
 		},
 	})
@@ -41,7 +41,7 @@ func TestRSReviewCapEscalates(t *testing.T) {
 	now := time.Now()
 	f := domain.Feature{
 		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
-		Stage: domain.StageReview, CreatedAt: now, UpdatedAt: now,
+		Stage: domain.StageInvestigate, CreatedAt: now, UpdatedAt: now,
 	}
 	putDraft(t, h, &f, "# RS-001: research card\n\n## Findings\n\nNothing yet.\n")
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
@@ -57,7 +57,7 @@ func TestRSReviewCapEscalates(t *testing.T) {
 		t.Fatalf("status = %q, want escalation; stream=%v", out.Status, h.eventKinds())
 	}
 	max := verdict.MaxRounds(domain.RoundKindReview)
-	want := fmt.Sprintf("review still requesting changes after %d rounds", max)
+	want := fmt.Sprintf("investigate critique still requesting changes after %d rounds", max)
 	esc := lastEvent(h, "escalation")
 	if esc == nil || esc["reason"] != want {
 		t.Fatalf("escalation reason = %v, want %q", esc, want)

@@ -43,14 +43,14 @@ func TestBG103EveryClosingRuleCarriesItsTime(t *testing.T) {
 	// from the log rather than from a stated ending.
 	ctx := context.Background()
 	ws, store, wt := uiRepo(t)
-	f := mkFeature(t, store, 5, "network zone list project column", domain.StageReview)
+	f := mkFeature(t, store, 5, "network zone list project column", domain.StageVerify)
 
 	enter, _ := json.Marshal(map[string]string{"role": "reviewer", "model": "demo", "flavor": "stage"})
 	took, _ := json.Marshal(state.AutopilotPayload{
 		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 	})
 	crossed, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageImplement), To: string(domain.StageReview), Actor: state.ActorAutopilot,
+		From: string(domain.StageImplement), To: string(domain.StageVerify), Actor: state.ActorAutopilot,
 	})
 	// the log simply stops: the process died between entering the stage
 	// and anything else, writing no park and no handback on its way out.
@@ -58,7 +58,7 @@ func TestBG103EveryClosingRuleCarriesItsTime(t *testing.T) {
 		{Feature: f.ID, Stage: domain.StageImplement, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "impl:enter"},
 		{Feature: f.ID, Stage: domain.StageImplement, Kind: state.EventAutopilot, At: at, Payload: string(took), Dedupe: "ap:took"},
 		{Feature: f.ID, Stage: domain.StageImplement, Kind: state.EventGate, At: at, Payload: string(crossed), Dedupe: "ap:gate"},
-		{Feature: f.ID, Stage: domain.StageReview, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "rev:enter"},
+		{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "rev:enter"},
 	}); err != nil {
 		t.Fatal(err)
 	}

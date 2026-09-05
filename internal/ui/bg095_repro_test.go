@@ -76,7 +76,7 @@ func TestBG095ResearchKeepsItsOwnReason(t *testing.T) {
 func TestBG095AWorktreeBearingCardIsNotRefused(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug} {
 		id, _ := domain.NewID(k, 1)
-		r := featureRow{F: domain.Feature{ID: id, Kind: k, Stage: domain.StageReview}, HasWorktree: true}
+		r := featureRow{F: domain.Feature{ID: id, Kind: k, Stage: domain.StageVerify}, HasWorktree: true}
 		for _, verb := range branchVerbs {
 			if n := branchVerbRefusal(r, verb); n != nil {
 				t.Errorf("%s at review with a worktree: %s refused with %q", k, verb, n.text)

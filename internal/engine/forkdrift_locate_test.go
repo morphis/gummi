@@ -71,7 +71,7 @@ func TestLocateRecreatesWorktreeAfterFilesystemLoss(t *testing.T) {
 	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "locate recover", domain.StageReview)
+	f := feature(1, "locate recover", domain.StageVerify)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestLocateRefusesRecreateWithNoForkPoint(t *testing.T) {
 	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "locate no fork", domain.StageReview)
+	f := feature(1, "locate no fork", domain.StageVerify)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestRunResearchReviewSpawnsReviewerReadOnly(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(2, "run rs review", domain.StageReview)
+	f := feature(2, "run rs review", domain.StageVerify)
 	f.ID = domain.FeatureID("RS-002")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {

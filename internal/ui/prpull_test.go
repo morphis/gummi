@@ -9,7 +9,7 @@ import (
 	"github.com/morphis/gummi/internal/pr"
 )
 
-// linkFixture links FD-001 (from diffWorkspace: StageReview, a worktree
+// linkFixture links FD-001 (from diffWorkspace: StageVerify, a worktree
 // with an uncommitted "+second line" README.md change) to a fake PR and
 // reloads the rows so the board's own snapshot carries the link.
 func linkFixture(t *testing.T) *Shell {

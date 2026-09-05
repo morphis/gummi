@@ -117,8 +117,6 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
 		domain.StageShape:
 		return []agent.ToolDef{askUserTool(), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StageReview:
-		return []agent.ToolDef{submitVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageVerify:
 		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
@@ -379,14 +377,6 @@ between its ## heading and the next — heading match is case-insensitive.
 The write is a naive splice: re-emit any %% @user: marker lines yourself,
 since gummi does not preserve them for you; never include a top-level
 ## heading in the body.`
-	case domain.StageReview:
-		return `Read the relevant parts of the design artifact with spec_view (pass a
-section heading for one section's body, omit it for the whole document).
-Record your findings in the artifact with spec_replace_section: rewrite a
-section's body between its ## heading and the next, and re-emit any
-%% @user: marker lines yourself. Then call the submit_verdict tool exactly
-once at the end of your review (verdict "pass" or "changes") to drive
-gummi's review loop, instead of writing a VERDICT: line.`
 	case domain.StageVerify:
 		return `Record the verification evidence in the design artifact with
 spec_view and spec_replace_section (a section's body sits between its ##
@@ -742,8 +732,6 @@ func allowedVerdicts(s *Session) []string {
 	case s.Feature.Stage == domain.StageVerify:
 		return []string{"pass", "fail", "blocked"}
 	case s.Critique:
-		return []string{"pass", "changes"}
-	case s.Feature.Stage == domain.StageReview:
 		return []string{"pass", "changes"}
 	default:
 		return nil

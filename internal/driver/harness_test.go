@@ -411,26 +411,32 @@ func (h *harness) draftRequiredSections(f domain.Feature) {
 	}
 }
 
+// stageCritique keys a script entry to a stage's critique pass rather
+// than to the stage's own writer. Review used to be a stage, so a script
+// said what the reviewer would answer by filing it under StageVerify; the
+// stage is gone, but the question it answered is not, so a script files
+// the critique's answer here instead. It is a test-local sentinel and
+// never reaches the store or the workflow.
+const stageCritique domain.Stage = "critique"
+
 // scriptStage picks the script entry that answers this session.
 //
 // Normally that is the card's stored stage. The exception is a critique
-// pass on a work stage: Review stopped being a stage, so what used to run
-// as a StageReview session now runs as a reviewer-role session borrowing
-// implement/fix. A script's StageReview entry still means "what the
-// critique says about the diff", so it is still the right answer — the
-// stage it is filed under is just historical. Routing here keeps every
-// existing script meaning what it meant.
+// pass: it runs as a reviewer-role session borrowing the stage it
+// critiques, so the card's stored stage cannot tell it apart from the
+// stage's own writer. A script answers the critique under stageCritique.
 //
-// Research is untouched: it still has a real Review stage, so its
-// sessions arrive with StageReview stored and never take this branch.
+// The plan critique is deliberately NOT routed here: plan scripts have
+// always told the writer and the critique apart by opts.Role themselves,
+// and rerouting them would break that.
 func (h *harness) scriptStage(opts agent.SessionOpts) domain.Stage {
 	stage := h.stageFromWorkDir(opts.WorkDir)
 	if opts.Role != agent.RoleReviewer {
 		return stage
 	}
 	switch stage {
-	case domain.StageImplement, domain.StageFix:
-		return domain.StageReview
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+		return stageCritique
 	}
 	return stage
 }

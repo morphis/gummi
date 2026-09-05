@@ -290,7 +290,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// The guard used to key on entering Review. Review stopped being a
 	// stage for features and bugs, so the equivalent crossing is the one
 	// into Verify; research still has its Review stage and keeps it here.
-	if (next == domain.StageVerify || next == domain.StageReview) && f.Kind != domain.KindResearch {
+	if next == domain.StageVerify && f.Kind != domain.KindResearch {
 		wt, err := e.mgr(ctx, &f)
 		if err != nil {
 			return res, err
@@ -321,9 +321,9 @@ func (e *Engine) nextStage(f domain.Feature) domain.Stage {
 		return f.Stage
 	}
 	next := nexts[len(nexts)-1]
-	if f.Stage == domain.StageReview || f.Stage == domain.StageVerify {
-		// the last edge out of review/verify is a rerun (→ implement/fix),
-		// a bounce, not a forward move; Advance always goes forward.
+	if f.Stage == domain.StageVerify {
+		// the last edge out of verify is a rerun (→ the work stage), a
+		// bounce, not a forward move; Advance always goes forward.
 		next = nexts[0]
 	}
 	return next

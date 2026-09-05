@@ -17,7 +17,7 @@ import (
 func TestSeedInboxFromOpenGateDecision(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
-	f := mkFeature(t, store, 1, "needs review", domain.StageReview)
+	f := mkFeature(t, store, 1, "needs review", domain.StageVerify)
 	at := time.Date(2026, 8, 30, 9, 0, 0, 0, time.UTC)
 	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
 		ID: "gate:1", Kind: state.DecisionKindGate, Question: "review is ready for your decision.",

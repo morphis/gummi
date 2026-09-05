@@ -27,8 +27,8 @@ plan · architect · 180 credits ───────────────�
 
 
 
-
 gummi  nothing is running — choose what happens next.
 ▸ 1. run implement — no active run — start (or restart) the stage
+  2. pull PR review — read the PR's review comments back onto the diff
 
 ┃ message the agent, /approve /verify /diff…, or ↑ for actions                              

@@ -65,7 +65,7 @@ func TestStageSequence(t *testing.T) {
 			domain.Feature{Kind: domain.KindResearch},
 			[]domain.Stage{
 				domain.StageTodo, domain.StageInvestigate, domain.StageShape,
-				domain.StageReview, domain.StageVerify, domain.StageDone,
+				domain.StageVerify, domain.StageDone,
 			},
 		},
 	}
@@ -413,24 +413,30 @@ func TestFoldedReceiptPerSessionSpendDiffers(t *testing.T) {
 // Non-review/verify stages never carry a verdict at all and keep reading
 // ✓ on exit, since verdict=="" is their only possible value there.
 func TestFoldedReceiptVerdictMarker(t *testing.T) {
+	// The ROLE decides, not the stage: a work stage hosts both its writer
+	// (implementer, no verdict) and its critique (reviewer, a real one),
+	// so keying on the stage would make every finished implement look
+	// unverdicted and lose its check.
 	tests := []struct {
 		name    string
 		stage   domain.Stage
+		role    string
 		verdict string
 		want    string // "check", "cross", or "neutral"
 	}{
-		{"verify empty verdict is neutral, not a pass", domain.StageVerify, "", "neutral"},
-		{"review empty verdict is neutral, not a pass", domain.StageReview, "", "neutral"},
-		{"verify changes is neutral, not a pass", domain.StageVerify, "changes", "neutral"},
-		{"verify blocked is neutral, not a pass", domain.StageVerify, "blocked", "neutral"},
-		{"verify pass is a check", domain.StageVerify, "pass", "check"},
-		{"verify fail is a cross", domain.StageVerify, "fail", "cross"},
-		{"review pass is a check", domain.StageReview, "pass", "check"},
-		{"implement stage still checks on exit despite empty verdict", domain.StageImplement, "", "check"},
+		{"verify empty verdict is neutral, not a pass", domain.StageVerify, "reviewer", "", "neutral"},
+		{"critique empty verdict is neutral, not a pass", domain.StageImplement, "reviewer", "", "neutral"},
+		{"verify changes is neutral, not a pass", domain.StageVerify, "reviewer", "changes", "neutral"},
+		{"verify blocked is neutral, not a pass", domain.StageVerify, "reviewer", "blocked", "neutral"},
+		{"verify pass is a check", domain.StageVerify, "reviewer", "pass", "check"},
+		{"verify fail is a cross", domain.StageVerify, "reviewer", "fail", "cross"},
+		{"critique pass is a check", domain.StageImplement, "reviewer", "pass", "check"},
+		{"the work stage's own writer still checks on exit despite empty verdict",
+			domain.StageImplement, "implementer", "", "check"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seg := stageSegment{stage: tt.stage, role: "reviewer", exited: true, verdict: tt.verdict, credits: 18}
+			seg := stageSegment{stage: tt.stage, role: tt.role, exited: true, verdict: tt.verdict, credits: 18}
 			line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 80))
 			hasCheck := strings.Contains(line, "✓")
 			hasCross := strings.Contains(line, "✗")

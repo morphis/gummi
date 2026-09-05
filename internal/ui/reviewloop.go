@@ -51,94 +51,18 @@ func sessionVerdict(snap engine.Snapshot) reviewVerdict { return verdict.Session
 // advance), which may be nil (e.g. an escalation with no follow-up).
 func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool, tea.Cmd) {
 	switch stage {
-	case domain.StageReview:
-		return true, m.onReviewDone(id)
 	case domain.StagePlan:
 		return true, m.onCritiqueStageDone(id, stage)
 	case domain.StageVerify:
 		return true, m.onVerifyDone(id)
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
 		// the work stage ends with its own critique pass — what the Review
 		// stage used to be, minus the transition.
 		return true, m.onCritiqueStageDone(id, stage)
-	case domain.StageInvestigate:
-		// research's work leg: mirrors Implement/Fix, but the forward edge
-		// is to shape (never straight to review — research has no direct
-		// investigate→review edge), and shape is interactive (a chat stage,
-		// unlike review), so the stage only steps forward — the human's
-		// chat turn opens it via the normal Enter, not an auto-run. Only
-		// auto-continue when this completion is part of a review loop (a
-		// review→investigate bounce burned a round); a fresh, loop-free
-		// investigate still raises the generic gate, matching Implement/Fix.
-		if m.round(id, domain.RoundKindReview) > 0 {
-			return true, m.autoStepStage(id, domain.StageShape, "re-shaping", "review")
-		}
 	}
 	return false, nil
 }
 
-// onReviewDone reads the review verdict and either advances (pass),
-// bounces to implement for another round (changes, under the cap), or
-// escalates to the human (changes past the cap, or an unclear verdict).
-func (m *Shell) onReviewDone(id domain.FeatureID) tea.Cmd {
-	s := m.engine.Get(id)
-	if s == nil {
-		return nil
-	}
-	out := gatepolicy.Decide(gatepolicy.Input{
-		Stage:         domain.StageReview,
-		Kind:          id.Kind(),
-		Verdict:       sessionVerdict(s.Snapshot()),
-		Corrective:    m.round(id, domain.RoundKindReview),
-		CorrectiveMax: maxReviewRounds,
-		WorkStage:     workflow.WorkStage(id.Kind()),
-	})
-	switch out.Action {
-	case gatepolicy.Advance:
-		// clear the persisted count so the next review loop starts fresh.
-		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
-			return m.writeHalt(id, err)
-		}
-		m.setRound(id, domain.RoundKindReview, 0)
-		return m.autoStep(id, out.Stage, "review passed → verify", "review")
-	case gatepolicy.BounceToWork:
-		// persist the burned round before it lands in the fast path, so a
-		// mid-loop resume observes it.
-		if err := rounds.Bump(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
-			return m.writeHalt(id, err)
-		}
-		m.setRound(id, domain.RoundKindReview, m.round(id, domain.RoundKindReview)+1)
-		m.burnCorrective(id, out)
-		return m.autoStep(id, out.Stage, "review requested changes → fixing (round "+itoa(m.round(id, domain.RoundKindReview))+")", "review")
-	default: // gatepolicy.Park: the cap was hit, or the verdict was unclear
-		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindReview); err != nil {
-			return m.writeHalt(id, err)
-		}
-		m.setRound(id, domain.RoundKindReview, 0)
-		if out.Reason == "review-changes-cap" {
-			m.raiseEscalation(id, "review still requesting changes after "+itoa(maxReviewRounds)+" rounds — needs you")
-			m.notice = noticeMsg{text: string(id) + " review escalated after " + itoa(maxReviewRounds) + " rounds", isErr: true}
-			return nil
-		}
-		// no clear verdict: don't guess — reset the loop and hand it to
-		// the human.
-		m.raiseEscalation(id, "review finished with no clear verdict — review manually")
-		return nil
-	}
-}
-
-// burnCorrective records an outcome that spent a corrective round against
-// the card's unified budget — the running total of everything that is the
-// same work done again: review bounces, verify bounces, conflict
-// handoffs. It is deliberately separate from each loop's own cap, which
-// still governs that loop: this counter is what says how much rework a
-// card has cost overall, and it is what an unattended run is finally
-// stopped by. It never resets mid-run, because "total across" is the
-// whole point of it.
-//
-// Best-effort: the loop's own persisted cap is the one that must not
-// drift, and it is written above. Failing to tally here miscounts a
-// report; it never re-grants budget.
 func (m *Shell) burnCorrective(id domain.FeatureID, out gatepolicy.Outcome) {
 	if !out.Burns {
 		return
@@ -244,56 +168,62 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		// raising the gate.
 		return m.critiqueStep(id, stage, true, noun+" written → critiquing")
 	}
-	switch sessionVerdict(snap) {
-	case verdictPass:
-		// clear the persisted count so the next cycle starts fresh.
+
+	// gatepolicy owns the rule, so this loop and the headless driver's
+	// judgeCritique can never drift into two ideas of what a verdict means.
+	out := gatepolicy.Decide(gatepolicy.Input{
+		Stage:         stage,
+		Forward:       forwardEdge(snap.Feature),
+		Kind:          id.Kind(),
+		Verdict:       sessionVerdict(snap),
+		Corrective:    m.round(id, kind),
+		CorrectiveMax: maxRounds,
+		WorkStage:     workflow.WorkStage(id.Kind()),
+	})
+	switch out.Action {
+	case gatepolicy.RaiseGate:
+		// the plan gate: a person crosses it (or autopilot does)
 		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, kind, 0)
-		if stage != domain.StagePlan {
-			// The work stage's critique is what the Review stage was, and
-			// a passing review stepped straight to verify — it never
-			// raised a gate. Folding the stage away must not quietly add
-			// one; making implement gate is Phase 3's change, not this.
-			return m.autoStep(id, domain.StageVerify, "critique passed → verify", "review")
-		}
 		text := noun + " critiqued: clean — review & approve"
 		if cmd, attempted := m.autopilotCrossGate(snap.Feature, text); attempted {
 			return cmd
 		}
 		m.raiseAttention(id, attnGate, text)
 		return nil
-	case verdictChanges:
-		if m.round(id, kind) >= maxRounds {
-			if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
-				return m.writeHalt(id, err)
-			}
-			m.setRound(id, kind, 0)
-			m.raiseEscalation(id, noun+" critique still requesting changes after "+itoa(maxRounds)+" rounds — review it manually")
-			m.notice = noticeMsg{text: string(id) + " " + noun + " critique escalated after " + itoa(maxRounds) + " rounds", isErr: true}
-			return nil
+	case gatepolicy.Advance:
+		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
+			return m.writeHalt(id, err)
 		}
+		m.setRound(id, kind, 0)
+		// Shape is interactive, so research's crossing steps the stage and
+		// stops rather than running what is behind it; every other forward
+		// edge here lands on an autonomous stage that may start at once.
+		if workflow.Interactive(out.Stage) {
+			return m.autoStepStage(id, out.Stage, "critique passed → "+string(out.Stage), "review")
+		}
+		return m.autoStep(id, out.Stage, "critique passed → "+string(out.Stage), "review")
+	case gatepolicy.BounceToWork:
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.
 		if err := rounds.Bump(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, kind, m.round(id, kind)+1)
-		// A work-stage critique's bounce is a corrective round in the
-		// budget sense too — the same one review's bounce burned. The plan
-		// critique's replan is not: it has never burned a corrective.
-		if stage != domain.StagePlan {
-			m.burnCorrective(id, gatepolicy.Outcome{Burns: true})
-		}
+		m.burnCorrective(id, out)
 		return m.critiqueStep(id, stage, false, "critique requested changes → reworking (round "+itoa(m.round(id, kind))+")")
-	default:
-		// no clear verdict: don't guess — reset the loop and hand it to
-		// the human.
+	default: // Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, kind, 0)
+		if out.Reason == "critique-changes-cap" {
+			m.raiseEscalation(id, noun+" critique still requesting changes after "+itoa(maxRounds)+" rounds — review it manually")
+			m.notice = noticeMsg{text: string(id) + " " + noun + " critique escalated after " + itoa(maxRounds) + " rounds", isErr: true}
+			return nil
+		}
 		m.raiseEscalation(id, noun+" critique finished with no clear verdict — review it manually")
 		return nil
 	}
@@ -302,8 +232,11 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 // critiqueNoun names what a stage's critique is judging, for the notices
 // and inbox lines the reader sees.
 func critiqueNoun(stage domain.Stage) string {
-	if stage == domain.StagePlan {
+	switch stage {
+	case domain.StagePlan:
 		return "plan"
+	case domain.StageInvestigate:
+		return "investigation"
 	}
 	return "diff"
 }
@@ -429,4 +362,17 @@ func verifyGateReason(k domain.Kind) string {
 		return "verify passed — review & mark it done"
 	}
 	return "verify passed — review & land on main"
+}
+
+// forwardEdge is the primary forward stage out of f's current stage — the
+// same edge engine.Advance would take, and the same one the headless
+// driver's own forwardEdge names. A critique's pass advances along it
+// rather than along a stage hardcoded here, because the answer differs by
+// kind: implement passes to verify, investigate passes to shape.
+func forwardEdge(f domain.Feature) domain.Stage {
+	nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
+	if len(nexts) == 0 {
+		return f.Stage
+	}
+	return nexts[len(nexts)-1]
 }
