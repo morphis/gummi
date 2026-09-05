@@ -58,9 +58,9 @@ for line in sys.stdin:
     else:
         out({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}})
         out({"type":"assistant","message":{"model":MODEL,"content":[{"type":"text","text":"ok"}]}})
-        out({"type":"stream_event","event":{"type":"message_delta","delta":{},"usage":{"input_tokens":20,"output_tokens":30,"cache_read_input_tokens":50,"cache_creation_input_tokens":0}}})
+        out({"type":"stream_event","event":{"type":"message_delta","delta":{},"usage":{"input_tokens":20,"output_tokens":30,"cache_read_input_tokens":50,"cache_creation_input_tokens":5}}})
         out({"type":"result","subtype":"success","is_error":False,"session_id":"sess-1",
-             "modelUsage":{MODEL:{"inputTokens":30,"outputTokens":50,"cacheReadInputTokens":120,"cacheCreationInputTokens":0,"costUSD":0.025,"contextWindow":200000}}})
+             "modelUsage":{MODEL:{"inputTokens":30,"outputTokens":50,"cacheReadInputTokens":120,"cacheCreationInputTokens":5,"costUSD":0.025,"contextWindow":200000}}})
 `
 
 func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
@@ -137,17 +137,23 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	if len(usages) != 2 {
 		t.Fatalf("turn 2 usage events = %+v, want mid-turn + settlement", usages)
 	}
-	if math.Abs(usages[0].Credits-1.0) > 1e-6 || usages[0].InputTokens != 20 || usages[0].OutputTokens != 30 {
-		t.Errorf("turn 2 mid-turn estimate = %+v, want ≈1.0 credits (100 tokens at realized rate)", usages[0])
+	if math.Abs(usages[0].Credits-1.05) > 1e-6 || usages[0].InputTokens != 25 || usages[0].OutputTokens != 30 {
+		t.Errorf("turn 2 mid-turn estimate = %+v, want ≈1.05 credits (105 tokens at realized rate) and 20+5 input", usages[0])
 	}
-	if math.Abs(usages[1].Credits-0.5) > 1e-6 {
-		t.Errorf("turn 2 settlement = %+v, want ≈0.5 ((0.025-0.01)×100 − 1.0)", usages[1])
+	// Cache reads are metered separately from the uncached input side, or
+	// the per-stage breakdown reports cached_tok=0 and an input count far
+	// below the tokens actually billed.
+	if usages[0].CachedTokens != 50 {
+		t.Errorf("turn 2 mid-turn cached tokens = %d, want 50 (the request's cache reads)", usages[0].CachedTokens)
+	}
+	if math.Abs(usages[1].Credits-0.45) > 1e-6 {
+		t.Errorf("turn 2 settlement = %+v, want ≈0.45 ((0.025-0.01)×100 − 1.05)", usages[1])
 	}
 	if math.Abs((usages[0].Credits+usages[1].Credits)-1.5) > 1e-6 {
 		t.Errorf("turn 2 total = %v, want the CLI's actual turn cost 1.5", usages[0].Credits+usages[1].Credits)
 	}
-	if ctx2.Tokens != 70 || ctx2.Limit != 200000 {
-		t.Errorf("turn 2 context = %+v, want 70/200000", ctx2)
+	if ctx2.Tokens != 75 || ctx2.Limit != 200000 {
+		t.Errorf("turn 2 context = %+v, want 75/200000 (20 input + 50 cache read + 5 cache write)", ctx2)
 	}
 }
 

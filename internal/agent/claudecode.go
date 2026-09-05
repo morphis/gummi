@@ -561,7 +561,18 @@ func (s *claudeSession) mapStreamEvent(raw json.RawMessage) []Event {
 		if model == s.mainModel || s.mainModel == "" {
 			s.ctxTokens = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 		}
-		ev := Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, Model: model}
+		// Split the CLI's four-way usage onto Usage's convention: cache
+		// writes are part of the uncached input side, cache reads are
+		// CachedTokens. Dropping them (as this did) left stage_spend
+		// reporting cached_tok=0 and an input count ~100x below the real
+		// volume — credits were unaffected, since they price `total`
+		// above, but the token breakdown was unusable for tuning.
+		ev := Usage{
+			InputTokens:  u.InputTokens + u.CacheCreationInputTokens,
+			CachedTokens: u.CacheReadInputTokens,
+			OutputTokens: u.OutputTokens,
+			Model:        model,
+		}
 		// Estimated credits at the session's realized rate keep the engine's
 		// budget check live mid-turn (a claude turn is a whole agentic loop;
 		// metering only at result would let a runaway turn blow past the
