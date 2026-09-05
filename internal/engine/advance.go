@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,6 +243,16 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		// (DESIGN §10.11)
 		if err := e.promoteDraft(&f); err != nil {
 			return res, err
+		}
+		// The design stages' scratch tree has served its purpose: the
+		// artifact just promoted is the only thing that crosses this
+		// hand-off. Anything a design stage left on disk is discarded here,
+		// deliberately — a spec chat's stray edits must never arrive on the
+		// branch as work nobody wrote on purpose. Best-effort: the card has
+		// already advanced and its worktree exists, so a leftover scratch
+		// directory is garbage to sweep, not a reason to fail the gate.
+		if serr := wt.RemoveScratch(ctx, &f); serr != nil {
+			log.Printf("discarding scratch tree for %s: %v", f.ID, serr)
 		}
 		// plan-time estimation is feature-specific (spec approval): size the
 		// spend-plan envelope from what completed features cost, before

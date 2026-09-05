@@ -799,21 +799,12 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.exhaust(s)
 		return
 	}
-	// A research autonomous stage runs in the main checkout (no worktree),
-	// so the operator's pre-existing dirt is a hard stop before any
-	// session: a dirty main is exactly the state the tripwire exists to
-	// keep the agent out of, and with no session yet created nothing
-	// spawns against it. Fail-open on a git error (like beforeTurn) so a
-	// flaky snapshot never blocks a run; the mid-turn checkTrip remains
-	// the armed layer.
-	if s.ReadOnly {
-		if paths, derr := e.dirtyPathsFn(s.ctx, &s.Feature); derr != nil {
-			s.appendActivity("main-checkout tripwire: pre-start snapshot failed — skipping start check for this run: " + derr.Error())
-		} else if len(paths) > 0 {
-			e.trip(s, paths)
-			return
-		}
-	}
+	// No pre-start dirty check on main: a research pass used to run in the
+	// main checkout, which made the operator's uncommitted work a hard stop
+	// before any session. It runs in the card's scratch tree now, so that
+	// dirt is out of reach and refusing here would park a card over a state
+	// it cannot touch. checkTrip is still the armed layer — it compares
+	// pre-turn against post-turn, so genuine new dirt on main still trips.
 	// run() always builds a brand-new in-process Session with no carried
 	// transcript (kickoff, bounce, and restart-then-resume all dispatch
 	// through the same path), so every startAutonomous spawn is fresh: any
@@ -1309,12 +1300,17 @@ func (e *Engine) recoverMissingWorktree(ctx context.Context, wt *worktree.Manage
 }
 
 // locate resolves the working directory and spec path for a feature's
-// stage. Interactive pre-worktree stages run in the main checkout
-// against the draft — materialized here so the agent never starts
-// against a missing spec. Later stages require the worktree but read and
-// write the artifact at its workspace home in the main checkout
-// (.gummi/specs|bugs, never committed) — promoted here in case a crash
-// or a legacy committed-artifact item left promotion undone.
+// stage. Pre-worktree stages run in the card's scratch tree
+// (.gummi/scratch/<ID>, a detached checkout of main) against the draft —
+// materialized here so the agent never starts against a missing spec.
+// Later stages require the worktree but read and write the artifact at
+// its workspace home in the main checkout (.gummi/specs|bugs, never
+// committed) — promoted here in case a crash or a legacy
+// committed-artifact item left promotion undone. No stage runs in the
+// main checkout: every agent gets a real filesystem boundary its
+// backend's write cage already enforces, and the artifact — which lives
+// outside every working directory — is reached through gummi's spec
+// tools, not the filesystem.
 func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPath string, err error) {
 	wt, err := e.mgr(ctx, &f)
 	if err != nil {
@@ -1323,29 +1319,39 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	root := e.pool.Root()
 	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
 	// Every research stage — interactive (shape) or autonomous (investigate/
-	// review/verify) — is worktree-less and runs in the main checkout
-	// against the artifact at its workspace home. Research has no
-	// draft-then-promote step (Create seeds the artifact directly, never a
-	// draft), and never enters a worktree — the only path that promotes a
-	// draft into its artifact — so routing shape through a draft the way
-	// brainstorm/spec do would orphan its edits: nothing ever merges them
-	// back. Promote here is a no-op cleanup once the artifact exists (the
-	// common case); it only materializes a fresh one for a crash-recovery
-	// or legacy edge case.
+	// review/verify) — is branch-worktree-less and reads the artifact at its
+	// workspace home. Research has no draft-then-promote step (Create seeds
+	// the artifact directly, never a draft), and never enters a worktree —
+	// the only path that promotes a draft into its artifact — so routing
+	// shape through a draft the way brainstorm/spec do would orphan its
+	// edits: nothing ever merges them back. Promote here is a no-op cleanup
+	// once the artifact exists (the common case); it only materializes a
+	// fresh one for a crash-recovery or legacy edge case. The scratch tree
+	// is the cwd for the same reason it is everywhere else — the ReadOnly
+	// tool-stripping stays the research guarantee, and the tree is what
+	// makes it structural rather than a promise about tool coverage.
 	if f.Kind == domain.KindResearch {
 		artifact := filepath.Join(root, f.ArtifactPath())
 		if err := spec.Promote(artifact, draft, "", &f); err != nil {
 			return "", "", err
 		}
-		return wt.RepoRoot(), artifact, nil
+		scratch, serr := wt.EnsureScratch(ctx, &f)
+		if serr != nil {
+			return "", "", serr
+		}
+		return scratch, artifact, nil
 	}
 	if interactiveStage(f.Stage) {
 		if err := spec.EnsureDraft(draft, &f); err != nil {
 			return "", "", err
 		}
-		// interactive stages run in the repo root (the main checkout), not
-		// the workspace root: the repo may live in a nested subdirectory.
-		return wt.RepoRoot(), draft, nil
+		// One scratch tree per card, shared by all of its design stages the
+		// way its worktree is shared by all of its work stages.
+		scratch, serr := wt.EnsureScratch(ctx, &f)
+		if serr != nil {
+			return "", "", serr
+		}
+		return scratch, draft, nil
 	}
 	hasWT, err := wt.Exists(ctx, &f)
 	if err != nil {

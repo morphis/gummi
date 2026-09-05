@@ -149,11 +149,13 @@ func TestLocateInteractiveStageIgnoresDrift(t *testing.T) {
 	}
 }
 
-// A research investigate stage resolves to the main checkout with the
-// artifact at its workspace home (.gummi/research), never materializing a
-// worktree — research branches receive no commits, so there is nothing to
-// isolate in one.
-func TestLocateResearchUsesRepoRoot(t *testing.T) {
+// A research investigate stage resolves to the card's scratch tree with
+// the artifact at its workspace home (.gummi/research), never
+// materializing a branch worktree — research branches receive no commits,
+// so there is nothing to isolate in one. The scratch tree is not that
+// isolation; it is the working directory boundary that keeps the pass out
+// of the operator's checkout.
+func TestLocateResearchScratchTree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
@@ -169,8 +171,15 @@ func TestLocateResearchUsesRepoRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locate failed: %v", err)
 	}
-	if workDir != wt.RepoRoot() {
-		t.Fatalf("workdir = %s, want repo root %s", workDir, wt.RepoRoot())
+	scratch, err := wt.ScratchPath(&f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workDir != scratch {
+		t.Fatalf("workdir = %s, want scratch tree %s", workDir, scratch)
+	}
+	if _, statErr := os.Stat(workDir); statErr != nil {
+		t.Fatalf("scratch tree not materialized at %s: %v", workDir, statErr)
 	}
 	want := filepath.Join(wt.RepoRoot(), f.ArtifactPath())
 	if specPath != want {
@@ -209,11 +218,11 @@ func TestRunResearchInvestigateSpawnsArchitectNoWorktree(t *testing.T) {
 	if got.Role != agent.RoleArchitect {
 		t.Errorf("investigate session role = %s, want architect", got.Role)
 	}
-	if got.WorkDir != wt.RepoRoot() {
-		t.Errorf("investigate workdir = %s, want repo root %s", got.WorkDir, wt.RepoRoot())
+	if got.WorkDir != scratchPath(t, wt, &f) {
+		t.Errorf("investigate workdir = %s, want scratch tree %s", got.WorkDir, scratchPath(t, wt, &f))
 	}
 	if !got.ReadOnly {
-		t.Error("investigate session ReadOnly = false, want true (autonomous pass over the main checkout)")
+		t.Error("investigate session ReadOnly = false, want true (autonomous research pass)")
 	}
 	if ok, _ := wt.Exists(context.Background(), &f); ok {
 		t.Fatal("running research investigate materialized a worktree")
@@ -242,11 +251,11 @@ func TestRunResearchReviewSpawnsReviewerReadOnly(t *testing.T) {
 	if got.Role != agent.RoleReviewer {
 		t.Errorf("review session role = %s, want reviewer", got.Role)
 	}
-	if got.WorkDir != wt.RepoRoot() {
-		t.Errorf("review workdir = %s, want repo root %s", got.WorkDir, wt.RepoRoot())
+	if got.WorkDir != scratchPath(t, wt, &f) {
+		t.Errorf("review workdir = %s, want scratch tree %s", got.WorkDir, scratchPath(t, wt, &f))
 	}
 	if !got.ReadOnly {
-		t.Error("review session ReadOnly = false, want true (autonomous pass over the main checkout)")
+		t.Error("review session ReadOnly = false, want true (autonomous research pass)")
 	}
 	if ok, _ := wt.Exists(context.Background(), &f); ok {
 		t.Fatal("running research review materialized a worktree")
@@ -255,7 +264,8 @@ func TestRunResearchReviewSpawnsReviewerReadOnly(t *testing.T) {
 
 // TestAttachResearchShapeNotReadOnly: shape is the interactive gated-write
 // seam, so a research shape session does not set ReadOnly while still
-// resolving WorkDir to the repo root (no worktree for a research card).
+// resolving WorkDir to the card's scratch tree (no branch worktree for a
+// research card).
 func TestAttachResearchShapeNotReadOnly(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
@@ -275,8 +285,8 @@ func TestAttachResearchShapeNotReadOnly(t *testing.T) {
 	if got.Role != agent.RoleArchitect {
 		t.Errorf("shape session role = %s, want architect", got.Role)
 	}
-	if got.WorkDir != wt.RepoRoot() {
-		t.Errorf("shape workdir = %s, want repo root %s", got.WorkDir, wt.RepoRoot())
+	if got.WorkDir != scratchPath(t, wt, &f) {
+		t.Errorf("shape workdir = %s, want scratch tree %s", got.WorkDir, scratchPath(t, wt, &f))
 	}
 	if got.ReadOnly {
 		t.Error("shape session ReadOnly = true, want false (interactive gated-write seam)")
@@ -334,4 +344,15 @@ func TestAttachResearchShapeUsesRealArtifactNotDraft(t *testing.T) {
 	if _, err := os.Stat(draft); !os.IsNotExist(err) {
 		t.Fatalf("shape materialized a draft at %s (research has no draft step)", draft)
 	}
+}
+
+// scratchPath resolves a card's scratch-tree path for the workdir
+// assertions above — every pre-worktree stage now runs in one.
+func scratchPath(t *testing.T, wt *worktree.Manager, f *domain.Feature) string {
+	t.Helper()
+	p, err := wt.ScratchPath(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

@@ -124,32 +124,42 @@ func (m *Manager) worktreesDir() string {
 	return filepath.Join(m.wsRoot, ".gummi", "worktrees")
 }
 
-// featurePaths validates the feature and derives its absolute worktree
-// path, refusing anything that would escape .gummi/worktrees. This is
-// the single chokepoint every operation goes through.
-func (m *Manager) featurePaths(f *domain.Feature) (wtPath, branch string, err error) {
+// cardTreePath validates the feature and derives its absolute checkout
+// path under base, refusing anything that would escape base. This is the
+// single chokepoint every operation goes through — both the card's branch
+// worktree (.gummi/worktrees) and its scratch tree (.gummi/scratch).
+func (m *Manager) cardTreePath(base string, f *domain.Feature) (string, error) {
 	if err := f.Validate(); err != nil {
-		return "", "", fmt.Errorf("refusing worktree operation: %w", err)
+		return "", fmt.Errorf("refusing worktree operation: %w", err)
 	}
-	base := m.worktreesDir()
-	wtPath = filepath.Clean(filepath.Join(base, string(f.ID)))
-	if filepath.Dir(wtPath) != base {
-		return "", "", fmt.Errorf("refusing worktree operation: %s escapes %s", wtPath, base)
+	p := filepath.Clean(filepath.Join(base, string(f.ID)))
+	if filepath.Dir(p) != base {
+		return "", fmt.Errorf("refusing worktree operation: %s escapes %s", p, base)
 	}
-	// A hostile repo can commit .gummi or .gummi/worktrees as a symlink
+	// A hostile repo can commit .gummi or the tree's parent as a symlink
 	// pointing outside the checkout; writing through it would escape
 	// the repo, which the lexical check above cannot see.
-	for _, p := range []string{filepath.Join(m.wsRoot, ".gummi"), base} {
-		fi, err := os.Lstat(p)
+	for _, dir := range []string{filepath.Join(m.wsRoot, ".gummi"), base} {
+		fi, err := os.Lstat(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue // not created yet — fine
 			}
-			return "", "", err
+			return "", err
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return "", "", fmt.Errorf("refusing worktree operation: %s is a symlink", p)
+			return "", fmt.Errorf("refusing worktree operation: %s is a symlink", dir)
 		}
+	}
+	return p, nil
+}
+
+// featurePaths derives the feature's absolute branch-worktree path and
+// branch name through cardTreePath's chokepoint.
+func (m *Manager) featurePaths(f *domain.Feature) (wtPath, branch string, err error) {
+	wtPath, err = m.cardTreePath(m.worktreesDir(), f)
+	if err != nil {
+		return "", "", err
 	}
 	return wtPath, f.BranchName(), nil
 }

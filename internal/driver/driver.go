@@ -504,6 +504,11 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err := wt.Remove(ctx, &f, true); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
+	// The design stages' scratch tree outlives the branch worktree it was
+	// handed off to; a cleaned card must leave neither behind.
+	if err := wt.RemoveScratch(ctx, &f); err != nil {
+		return d.fail(ctx, string(id), err)
+	}
 	if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	}

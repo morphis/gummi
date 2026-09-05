@@ -38,16 +38,21 @@ const planClaimsRubric = "a `Plan claims` subsection: a table (one " +
 	"    contract the reader would otherwise have to re-derive from prose,\n" +
 	"    one bullet per claim"
 
-// interactiveWorkingDirGuard fences the interactive stages that run in
-// the main checkout (locate returns Worktrees.RepoRoot() for them, not an
-// isolated worktree). Without this, a model may edit repo files or
-// commit on main, dirtying the user's tree — the design chat's writes
-// belong in the .gummi/ draft, nowhere else.
-const interactiveWorkingDirGuard = `You are running in the main checkout, not an isolated worktree.
-Do not edit repo files, and do not run git commit here — the design
-artifact under .gummi/ is yours to update, but everything else in
-the repo is off-limits. If a decision needs a change to the repo,
-describe it in the artifact and let the implementation stage make it.`
+// interactiveWorkingDirGuard tells an interactive design stage what its
+// working directory is. It used to fence the main checkout — locate
+// handed these stages Worktrees.RepoRoot(), so a prompt was the only
+// thing standing between a design chat and the operator's tree. It is a
+// scratch worktree now (locate → EnsureScratch), and the backend's own
+// write cage enforces the boundary, so what is left here is the part a
+// filesystem cannot say: the tree is disposable, and the durable surface
+// is the artifact, which is reached through gummi's spec tools rather
+// than the filesystem.
+const interactiveWorkingDirGuard = `Your working directory is a scratch checkout of main: a throwaway, not
+this item's branch and not the main checkout. Nothing you write to disk
+here is kept — so do not start implementing, and do not run git commit.
+The design artifact is the one durable surface, and gummi's spec tools
+are how you reach it. If a decision needs a change to the repo, record
+it in the artifact and let the implementation stage make it.`
 
 // repoInstructionsPrecedenceHint states the precedence between the managed
 // repo's own instructions (AGENTS.md, CLAUDE.md, or equivalent) and gummi's

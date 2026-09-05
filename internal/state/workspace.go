@@ -101,10 +101,15 @@ func (w Workspace) LiveFile(id domain.FeatureID) string {
 // mid-run can tail progress off disk instead of a lost stdout pipe.
 func (w Workspace) EventsFile() string { return filepath.Join(w.StateDir(), "events.jsonl") }
 
-// gitignore rules written by Init: worktrees and state are machinery
-// and must never be committed (state may contain transcripts).
+// gitignore rules written by Init: the managed checkouts (worktrees, and
+// the scratch trees the pre-worktree stages run in) and state are
+// machinery and must never be committed (state may contain transcripts).
+// Belt-and-braces: the launch pass also excludes /.gummi/ wholesale in
+// the repo's info/exclude, which is what covers a workspace predating any
+// line added here.
 const gummiIgnore = `# written by gummi init — machinery, never commit
 /worktrees/
+/scratch/
 /state/
 /seq.lock
 /seq.tmp
@@ -129,12 +134,18 @@ func Open(ws, repo string) (Workspace, error) {
 // tests can recognize the refusal without string matching.
 var ErrNestedInit = errors.New("refusing to init inside a managed worktree")
 
+// managedTreeDirs are the .gummi children that hold a card's managed
+// checkouts: its branch worktree, and the scratch tree its pre-worktree
+// stages run in. Both are gummi-owned working directories an agent is
+// handed, so both are places a nested workspace must never be initialized.
+var managedTreeDirs = []string{"worktrees", "scratch"}
+
 // enclosingWorkspace walks from root toward the filesystem root and
-// reports the first managed worktree (parent workspace root P and entry
+// reports the first managed checkout (parent workspace root P and entry
 // <id>) that contains (or equals) root. The walk starts at
 // filepath.Dir(root) so that root itself — where .gummi/ sits as a direct
-// child, not inside any worktrees/<id>/ — is never inspected. Each
-// ancestor .gummi/ and .gummi/worktrees/ must be a real directory (not a
+// child, not inside any managed tree — is never inspected. Each ancestor
+// .gummi/ and each managed tree directory must be a real directory (not a
 // symlink), matching the anti-symlink-smuggle convention of mkdirChecked.
 func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
 	for p := filepath.Dir(root); ; p = filepath.Dir(p) {
@@ -144,22 +155,24 @@ func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
 			}
 			continue
 		}
-		wt := filepath.Join(p, ".gummi", "worktrees")
-		if fi, err := os.Lstat(wt); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
-			if p == filepath.VolumeName(p) || filepath.Dir(p) == p {
+		for _, sub := range managedTreeDirs {
+			base := filepath.Join(p, ".gummi", sub)
+			// An absent one is normal — a workspace whose cards have never
+			// reached a worktree has no worktrees/ — so skip it and keep
+			// checking the others rather than abandoning the walk.
+			if fi, err := os.Lstat(base); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+				continue
+			}
+			entries, err := os.ReadDir(base)
+			if err != nil {
 				return "", "", false
 			}
-			continue
-		}
-		entries, err := os.ReadDir(wt)
-		if err != nil {
-			return "", "", false
-		}
-		for _, e := range entries {
-			id := e.Name()
-			dir := filepath.Join(wt, id)
-			if rel, err := filepath.Rel(dir, root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return p, id, true
+			for _, e := range entries {
+				id := e.Name()
+				dir := filepath.Join(base, id)
+				if rel, err := filepath.Rel(dir, root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					return p, id, true
+				}
 			}
 		}
 		if p == filepath.VolumeName(p) || filepath.Dir(p) == p {

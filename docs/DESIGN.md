@@ -296,7 +296,20 @@ envelope that is gummi's real spend limiter.
 - `gummi` runs from the main checkout; each feature gets
   `git worktree add .gummi/worktrees/FD-042 -b gummi/FD-042-slug`.
   Worktrees are nested by design — `gummi init` writes the ignore rules
-  (`.gummi/worktrees/`, `.gummi/state/`) so the repo stays clean.
+  (`.gummi/worktrees/`, `.gummi/scratch/`, `.gummi/state/`) so the repo
+  stays clean.
+- **No agent stage runs in the main checkout.** A stage that has no
+  branch worktree yet — every interactive design stage, and every
+  research stage — gets a *scratch tree* instead:
+  `git worktree add --detach .gummi/scratch/FD-042 HEAD`, one per card,
+  reused across its pre-worktree stages. It is deliberately branchless,
+  so nothing done in it can become the card's work, and it is discarded
+  when the real worktree is cut. Every backend already cages its file
+  tools to the session's working directory, so this is what makes "the
+  design chat does not write to your repo" a boundary rather than a
+  sentence in a prompt — and it keeps the §4.4 tripwire's meaning sharp:
+  dirt on main is now unambiguously a violation, not a build command's
+  side effect.
 - Handles: creation at spec-approval (drafts live in `.gummi/state/drafts/`
   until then), rebase-on-main helper, dirty-state detection, landed-branch
   detection with worktree cleanup + spec archival.
@@ -1593,7 +1606,8 @@ A work item's `Kind` gains a third value: `research`. `RS-NNN` IDs draw from
 the same monotonic counter features and bugs share, so numbers never
 collide. Unlike a feature or a bug, an `RS` card has **no branch and no
 worktree** — its artifact resolves to `.gummi/research/RS-NNN-slug.md` in the
-main checkout, and investigate runs there directly. Only three things branch
+main checkout, and investigate runs against the repo from the card's
+scratch tree (§4.3). Only three things branch
 on kind, same as bugs: which workflow governs transitions, which template
 seeds the artifact, and a board badge. The empty kind still reads as a
 feature, so nothing predating research needs a backfill.
@@ -1610,8 +1624,8 @@ all**:
 
 - **Investigate** *(autonomous, architect)* — the work stage: ground the
   brief against the repo (and any cited external sources) and write up
-  findings with citations. Worktree-less — it runs in the main checkout, not
-  a branch. It is also the stage rerun/bounce edges land on, the research
+  findings with citations. Branchless — it runs in the card's scratch tree
+  (§4.3), never on a branch. It is also the stage rerun/bounce edges land on, the research
   analog of Implement/Fix.
 - **Shape** *(interactive, architect)* — converge the findings into a
   recommended direction and a proposed slice breakdown; the convergence gate
@@ -1662,9 +1676,11 @@ all deterministic:
   `## Out of scope` line; anything left unmapped is surfaced loudly rather
   than silently dropped.
 
-A safety note: research's autonomous Investigate runs in the main checkout
-rather than a worktree, under the sandbox `warn` tripwire and the reviewer's
-per-role read-only deny policy — both defined in §4.4.
+A safety note: research's autonomous Investigate runs branchless, in the
+card's scratch tree (§4.3) rather than the main checkout, under the sandbox
+`warn` tripwire and the reviewer's per-role read-only deny policy — both
+defined in §4.4. The read-only tool stripping is the research guarantee; the
+scratch tree is what keeps it from resting on tool coverage alone.
 
 ### 13.5 The decompose gate
 

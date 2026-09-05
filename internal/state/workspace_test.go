@@ -72,3 +72,20 @@ func TestInitNestedInsideWorktreeStillRefuses(t *testing.T) {
 		t.Fatalf("Init inside a managed worktree = %v, want ErrNestedInit", err)
 	}
 }
+
+// A card's scratch tree is a managed checkout too — it is where every
+// pre-worktree stage runs — so initializing a workspace inside one is the
+// same nesting mistake, refused for the same reason.
+func TestInitNestedInsideScratchTreeRefuses(t *testing.T) {
+	p := gitRoot(t)
+	scratch := filepath.Join(p, ".gummi", "scratch", "FD-042")
+	if err := os.MkdirAll(scratch, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, ".git"), []byte("gitdir: ../.git/worktrees/scratch-FD-042\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(scratch, scratch); !errors.Is(err, ErrNestedInit) {
+		t.Fatalf("Init inside a scratch tree = %v, want ErrNestedInit", err)
+	}
+}

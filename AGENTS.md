@@ -23,7 +23,8 @@ path.
 - **TUI stack:** Bubbletea v2 / Lipgloss v2 / Bubbles v2 (Charm).
 - **Storage:** SQLite (`modernc.org/sqlite`, pure-Go, no cgo).
 - **Runtime workspace:** a `.gummi/` dir created lazily in the target
-  repo (state DB, `config.yaml`, `profiles.yaml`, `worktrees/`). Gitignored.
+  repo (state DB, `config.yaml`, `profiles.yaml`, `worktrees/`, `scratch/`).
+  Gitignored.
 
 The mental model: every unit of work is a **card** moving through a
 compiled-in workflow. Each stage is performed by a **role**
@@ -54,7 +55,7 @@ leaf services.
 | `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
 | `engine` | The orchestrator. Binds stages to agent sessions, schedules autonomous runs across attention slots, routes turns, streams activity. Start here to trace behavior. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
-| `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. |
+| `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Also the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout that gives every pre-worktree stage a real working directory instead of the main checkout. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |

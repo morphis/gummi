@@ -89,8 +89,8 @@ research RS-NNN   todo → investigate → shape ──────────�
   different model) with nothing but the spec and the diff. Findings
   bounce the work back automatically, capped before it escalates to you.
   Verify runs the repo's checks plus the spec's own verification plan.
-- **Research is a document, not a branch.** Investigate runs worktree-less
-  in the main checkout, grounding a brief against the repo; Shape is the
+- **Research is a document, not a branch.** Investigate runs branchless in a
+  throwaway checkout, grounding a brief against the repo without touching it; Shape is the
   convergence stage where findings become a recommended direction and a
   slice breakdown. Verify is a deterministic citation + coverage check
   that spends no tokens. Crossing `done` decomposes the approved document

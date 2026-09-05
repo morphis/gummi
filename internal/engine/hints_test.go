@@ -187,14 +187,14 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		f := feature(1, "x", st)
 		f.Kind = kind
 		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
-		for _, want := range []string{"not an isolated worktree", "do not run git commit"} {
+		for _, want := range []string{"scratch checkout of main", "do not run git commit"} {
 			if !strings.Contains(h, want) {
 				t.Errorf("%s hint missing interactive guard %q", st, want)
 			}
 		}
 	}
 	autonomous := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageImplement), "spec.md", flavorStage), "\n"))
-	if strings.Contains(autonomous, "not an isolated worktree") {
+	if strings.Contains(autonomous, "scratch checkout of main") {
 		t.Error("autonomous Implement stage carries the interactive-only guard")
 	}
 
@@ -280,7 +280,7 @@ func TestResearchStageHints(t *testing.T) {
 		}},
 		{domain.StageShape, []string{
 			"Converge", "exactly one", "behind per-action confirmation",
-			"not an isolated worktree",
+			"scratch checkout of main",
 		}},
 		{domain.StageReview, []string{
 			"read-only", "submit_verdict", "critique",

@@ -291,11 +291,13 @@ func TestTripwireDisarmedOnOff(t *testing.T) {
 	}
 }
 
-// TestResearchPreExistingDirtKillsBeforeSession: a research autonomous
-// stage on a pre-dirty main checkout aborts with a tripwire-style stop
-// before any session is created — an RS run never spawns against the
-// operator's dirt, so nothing can be misattributed to it.
-func TestResearchPreExistingDirtKillsBeforeSession(t *testing.T) {
+// TestResearchPreExistingDirtStartsAnyway: a research autonomous stage on
+// a pre-dirty main checkout runs normally. It used to abort before any
+// session, because it ran in that checkout; it runs in the card's scratch
+// tree now, so the operator's uncommitted work is out of its reach and
+// refusing to start would park a card over a state it cannot touch. The
+// dirt must still be there afterwards, untouched.
+func TestResearchPreExistingDirtStartsAnyway(t *testing.T) {
 	rec := &recorder{Fake: agent.NewFake("ack")}
 	rec.Caps.ReadOnlyEnforce = true
 	ws, store, wt := newRepo(t)
@@ -312,9 +314,9 @@ func TestResearchPreExistingDirtKillsBeforeSession(t *testing.T) {
 	if err := e.Run(f); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	waitFor(t, e, EventTripwire)
-	if rec.count() != 0 {
-		t.Fatalf("session count = %d, want 0 (killed before any session was created)", rec.count())
+	waitFor(t, e, EventIdle) // a trip would replace this with EventTripwire and hang the wait
+	if rec.count() != 1 {
+		t.Fatalf("session count = %d, want 1 (the operator's dirt must not block the run)", rec.count())
 	}
 	if out := gitOut(t, wt.Root(), "status", "--porcelain"); !strings.Contains(out, "README.md") {
 		t.Fatal("operator's README.md dirt vanished")

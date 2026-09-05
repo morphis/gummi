@@ -202,6 +202,22 @@ func (p *Pool) Exists(ctx context.Context, f *domain.Feature) (bool, error) {
 	return wt.Exists(ctx, f)
 }
 
+func (p *Pool) EnsureScratch(ctx context.Context, f *domain.Feature) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.EnsureScratch(ctx, f)
+}
+
+func (p *Pool) RemoveScratch(ctx context.Context, f *domain.Feature) error {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return err
+	}
+	return wt.RemoveScratch(ctx, f)
+}
+
 func (p *Pool) Create(ctx context.Context, f *domain.Feature) (string, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
