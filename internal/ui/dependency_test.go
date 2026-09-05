@@ -193,7 +193,7 @@ func TestLoadRowsDerivesAutopilotDrivingFromStore(t *testing.T) {
 	t.Cleanup(func() { w.Close() })
 
 	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		state.AutopilotTookOver, "", domain.GateFull, "", fixedTime); err != nil {
+		state.AutopilotTookOver, "", domain.GateAutopilot, "", fixedTime); err != nil {
 		t.Fatal(err)
 	}
 	if row := drivingOf(m.loadRows()); !row.AutopilotDriving {
@@ -201,7 +201,7 @@ func TestLoadRowsDerivesAutopilotDrivingFromStore(t *testing.T) {
 	}
 
 	if err := m.store.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		state.AutopilotHandedBack, "", domain.GateFull, "", fixedTime.Add(time.Minute)); err != nil {
+		state.AutopilotHandedBack, "", domain.GateAutopilot, "", fixedTime.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if row := drivingOf(m.loadRows()); row.AutopilotDriving {

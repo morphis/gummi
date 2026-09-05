@@ -98,7 +98,7 @@ type ParkPayload struct {
 // crossed it. Actor mirrors the transitions table's own actor vocabulary
 // (internal/state.Store.Transition's actor parameter) verbatim — "user"
 // for a human crossing it by hand in the TUI, "caller" for a headless
-// GateOff run waiting on its caller, "auto" for the headless driver's
+// GateAttended run waiting on its caller, "auto" for the headless driver's
 // unattended loop (internal/driver's d.actor). Only "auto" is a gate the
 // card crossed on its own; the decision receipt (internal/ui/receipt.go)
 // counts exactly that value and no other.
@@ -188,7 +188,7 @@ const (
 // those two get an explicit handed-back row. (Everything else here
 // deliberately closes late rather than not at all.)
 //
-// Mode records which stop (domain.GateGates or domain.GateFull) was in
+// Mode records which stop (domain.GateAttended or domain.GateAutopilot) was in
 // force when it took over, because the same card can be handed over
 // twice under different modes and this row is the only place that
 // distinction survives.

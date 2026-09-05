@@ -101,8 +101,8 @@ type Input struct {
 	// overflow. Ignored for KindResearch.
 	Acceptance string
 	// GateApproval selects who crosses this card's design gates:
-	// domain.GateGates (auto-crosses) or domain.GateOff (checkpoints
-	// each for a human). Empty reads as domain.GateGates, matching
+	// domain.GateAttended (auto-crosses) or domain.GateAttended (checkpoints
+	// each for a human). Empty reads as domain.GateAttended, matching
 	// Feature.GateApproval's own empty-reads-as-auto contract.
 	GateApproval string
 }
@@ -145,7 +145,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	}
 	gate := in.GateApproval
 	if gate == "" {
-		gate = domain.GateGates
+		gate = domain.GateAttended
 	}
 	now := time.Now()
 	f := domain.Feature{

@@ -16,44 +16,29 @@ import (
 	"github.com/morphis/gummi/internal/workflow"
 )
 
-// The `A` overlay: point autopilot at a card and the card runs — not at
-// the next gate, now, from wherever it currently sits. It replaces the
-// old two-state gate-approval toggle (boardactions.go's former
-// toggleGateApproval/confirmGateAuto) with the three stored stops
-// (domain.GateOff/GateGates/GateFull) and, unlike that toggle, actually
-// moves the card rather than only recording a preference for next time.
+// The `A` dialog: point autopilot at a card and the card runs — not at
+// the next gate, now, from wherever it currently sits.
+//
+// It used to be a picker over three stored stops. There are two modes
+// now, and a binary does not need a list: the dialog states what handing
+// this card over will actually do — resolved from the card's LIVE state,
+// not described in the abstract — and its confirm is the whole choice.
+// Choosing it IS the judgment that the gate in front of it may be
+// crossed, which is why the deliberate gesture stays even though the
+// list is gone.
 //
 // Both entry points — the `A` key (shell.go's boardVerb) and the "gate"
 // card action it supersedes (boardactions.go's runCardAction) — go
 // through openAutopilot, so the plan they show can never drift apart.
 
-// autopilotStop is one of the three gate-approval modes the overlay
-// offers, in the order they are shown.
-type autopilotStop struct {
-	mode  string
-	label string
-	why   string
-}
-
-var autopilotStops = []autopilotStop{
-	{domain.GateOff, "off", "every gate stops for you"},
-	{domain.GateGates, "gates", "design gates cross themselves; questions still stop for you"},
-	{domain.GateFull, "full", "it runs to a verified branch on its own"},
-}
-
-// autopilotCursorFor finds the stop index matching a card's stored mode,
-// reading empty as domain.GateGates like everywhere else the field is
-// interpreted (domain.Feature.GateApproval's own doc comment).
-func autopilotCursorFor(mode string) int {
-	if mode == "" {
-		mode = domain.GateGates
+// autopilotModeFor reads a card's stored mode, treating empty as
+// attended like everywhere else the field is interpreted
+// (domain.Feature.GateApproval's own doc comment).
+func autopilotModeFor(mode string) string {
+	if mode == domain.GateAutopilot {
+		return domain.GateAutopilot
 	}
-	for i, st := range autopilotStops {
-		if st.mode == mode {
-			return i
-		}
-	}
-	return autopilotCursorFor(domain.GateGates)
+	return domain.GateAttended
 }
 
 // autopilotPlan is the concrete, card-specific effect of turning
@@ -306,8 +291,8 @@ func autopilotHeader(f domain.Feature, plan autopilotPlan) string {
 // two guarantees that make the switch safe to use at all — that it parks
 // to the inbox if it can't finish and that it never lands on main.
 func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
-	if mode == domain.GateOff {
-		return []string{"off never starts anything on its own — every gate, including this one, waits for you."}
+	if autopilotModeFor(mode) == domain.GateAttended {
+		return []string{"attended never starts anything on its own — every gate, including this one, waits for you."}
 	}
 
 	verb := "starting"
@@ -322,12 +307,10 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 		return []string{lead, "it parks to the inbox if it can't finish, and it never lands on main."}
 	}
 
-	// The two modes promise different things, so they must not share a
-	// sentence. full is the only one that runs a card unattended end to
-	// end, and the only one the corrective budget applies to; gates still
-	// stops the moment the agent needs an answer, and saying otherwise
-	// would be the one lie this dialog cannot afford — it is what someone
-	// reads before leaving the room.
+	// This is what someone reads before leaving the room, so it has to be
+	// exactly what autopilot will do — not a description of a mode. It
+	// names the stages it will run unattended and, separately, the ones it
+	// will only open and hand back.
 	envelope := ""
 	if f.Budget.Envelope > 0 {
 		envelope = fmt.Sprintf(", inside a %d credit envelope", f.Budget.Envelope)
@@ -356,7 +339,7 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 	switch {
 	case len(runs) == 0:
 		// nothing it may run unattended, so no promise about running one
-	case mode == domain.GateFull:
+	case mode == domain.GateAutopilot:
 		out = append(out, fmt.Sprintf("%s it on full runs %s without you — up to %d corrections%s.",
 			verb, englishList(runs), verdict.MaxRounds(domain.RoundKindCorrective), envelope))
 	default:
@@ -377,36 +360,28 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 //     may spend, which is the definition of widening its reach rather
 //     than redoing its work, and `u` (the top-up key) never silently
 //     restarts a run on its own.
-//   - domain.GateOff never answers anything, by the stop's own words
-//     (autopilotStops above: "every gate stops for you").
-//   - domain.GateFull answers every kind but budget — "it runs to a
+//   - domain.GateAttended — and the empty default that reads as it —
+//     never answers anything. Every gate stops; that is what the mode
+//     is. The retired middle mode ("gates") DID answer decisionGate and
+//     decisionIdle on the card's behalf, and collapsing three modes into
+//     two is exactly the decision not to keep doing that: a card the
+//     reader has not handed over stops at its gates, full stop.
+//   - domain.GateAutopilot answers every kind but budget — "it runs to a
 //     verified branch on its own" is the promise, and a card that must
-//     stop for its own design gates or its own questions is not that.
-//     Reporting true here for decisionVerify is the rule table's own
-//     word for what full may do (bounce a failed verify); it is not a
-//     license to flip gatepolicy.Input.VerifyMayBounce on, which stays
-//     false everywhere in this change — that switch is a behavior change
-//     of its own the design reserves for later, not a side effect of
-//     this table.
-//   - domain.GateGates, and the empty default that reads as it
-//     (autopilotCursorFor's own rule), answers only decisionGate and
-//     decisionIdle. The stop's own words are "design gates cross
-//     themselves; questions still stop for you" — decisionAsk is
-//     refused for exactly that reason, and decisionVerify with it: a
-//     failed verify is a question about what to do next (bounce, or
-//     hand it to a human), not a design gate crossing itself.
+//     stop for its own gates or its own questions is not that. Reporting
+//     true here for decisionVerify is the rule table's own word for what
+//     autopilot may do (bounce a failed verify); it is not a license to
+//     flip gatepolicy.Input.VerifyMayBounce on, which stays false
+//     everywhere — that switch is a behavior change of its own the
+//     design reserves for later, not a side effect of this table.
 func autopilotAnswers(mode string, kind decisionKind) bool {
 	if kind == decisionBudget {
 		return false
 	}
-	switch mode {
-	case domain.GateFull:
-		return true
-	case domain.GateGates, "":
-		return kind == decisionGate || kind == decisionIdle
-	default: // domain.GateOff and anything unrecognized: off's own guarantee
-		return false
-	}
+	// autopilot answers everything but budget; attended (and anything
+	// unrecognized, and the empty default that reads as attended) answers
+	// nothing.
+	return mode == domain.GateAutopilot
 }
 
 // autopilotCrossGate is the two live raise sites' (shell.go's
@@ -518,7 +493,6 @@ const autopilotDialogWidth = 62
 type autopilotDialog struct {
 	feature domain.Feature
 	plan    autopilotPlan
-	cursor  int
 	// buttons is the dialog's own row, held rather than rebuilt each
 	// frame. It used to be constructed inside View with its cursor forced
 	// to the confirm every time, so Cancel was drawn as a control you
@@ -534,10 +508,7 @@ func newAutopilotDialog(f domain.Feature, plan autopilotPlan, onSubmit func(stri
 	// the way back out of it.
 	buttons := newButtonRow(button{label: "Cancel"}, button{label: plan.confirmLabel()})
 	buttons.SetCursor(1)
-	return &autopilotDialog{
-		feature: f, plan: plan, cursor: autopilotCursorFor(f.GateApproval),
-		buttons: buttons, onSubmit: onSubmit,
-	}
+	return &autopilotDialog{feature: f, plan: plan, buttons: buttons, onSubmit: onSubmit}
 }
 
 // openAutopilot pushes the overlay for f, computing its plan once so the
@@ -594,12 +565,12 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 		// period: nothing ran, so nothing ever closed it, and the thread
 		// drew a run that opened and was immediately reported lost.
 		switch {
-		case mode == domain.GateOff:
+		case mode == domain.GateAttended:
 			m.logAutopilot(f.ID, state.AutopilotHandedBack, "you turned autopilot off", mode)
 		case plan.to != "" || m.sessionWorking(f.ID):
 			m.logAutopilot(f.ID, state.AutopilotTookOver, "you handed it to autopilot", mode)
 		}
-		if mode == domain.GateOff || plan.to == "" {
+		if mode == domain.GateAttended || plan.to == "" {
 			// nothing to start: the plain "autopilot <stop>" notice
 			// already says the whole of what changed.
 			return msg
@@ -637,12 +608,6 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
 		return true, nil
-	case "up", "k":
-		d.cursor = max(d.cursor-1, 0)
-		return false, nil
-	case "down", "j":
-		d.cursor = min(d.cursor+1, len(autopilotStops)-1)
-		return false, nil
 	case "left", "h", "shift+tab":
 		d.buttons.Move(-1)
 		return false, nil
@@ -651,35 +616,14 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, nil
 	case "enter":
 		// enter activates the focused control, with no exceptions
-		// (buttonRow's own contract). The stop list is what the confirm
-		// acts on; it is not itself what enter reads.
+		// (buttonRow's own contract). There is one thing to confirm now
+		// that the modes are a binary: hand this card to autopilot.
 		if d.buttons.Cursor() == 0 {
 			return true, nil
 		}
-		return true, d.onSubmit(autopilotStops[d.cursor].mode)
+		return true, d.onSubmit(domain.GateAutopilot)
 	}
 	return false, nil
-}
-
-// autopilotStopLines renders one stop row, wrapped and hanging-indented
-// under its label when its "why" text doesn't fit width — "gates"'s does
-// not, in the overlay's usual size.
-func autopilotStopLines(s *theme.Styles, st autopilotStop, selected bool, labelWidth, width int) []string {
-	marker := "  "
-	style := s.Faint
-	if selected {
-		marker = "▸ "
-		style = s.Selection
-	}
-	indent := ansi.StringWidth(marker) + labelWidth + 2
-	wrapped := strings.Split(wrapText(st.why, max(width-indent, 8)), "\n")
-	label := padRight(st.label, labelWidth)
-	lines := make([]string, len(wrapped))
-	lines[0] = style.Render(marker + label + "  " + wrapped[0])
-	for i := 1; i < len(wrapped); i++ {
-		lines[i] = style.Render(strings.Repeat(" ", indent) + wrapped[i])
-	}
-	return lines
 }
 
 // dashRule renders "── label ────…" filled to width, the same dash-fill
@@ -701,20 +645,8 @@ func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString(s.DialogTitle.Render(title) + "\n\n")
 
-	labelWidth := 0
-	for _, st := range autopilotStops {
-		labelWidth = max(labelWidth, ansi.StringWidth(st.label))
-	}
-	for i, st := range autopilotStops {
-		for _, l := range autopilotStopLines(s, st, i == d.cursor, labelWidth, width) {
-			b.WriteString(l + "\n")
-		}
-	}
-	b.WriteString("\n")
-
 	b.WriteString(s.Faint.Render(dashRule(autopilotHeader(d.feature, d.plan), width)) + "\n")
-	mode := autopilotStops[d.cursor].mode
-	for _, l := range autopilotBody(d.feature, d.plan, mode) {
+	for _, l := range autopilotBody(d.feature, d.plan, domain.GateAutopilot) {
 		for _, wl := range strings.Split(wrapText(l, width), "\n") {
 			b.WriteString(s.Subtle.Render(wl) + "\n")
 		}
@@ -722,6 +654,6 @@ func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString("\n")
 
 	b.WriteString(d.buttons.View(s, true) + "\n")
-	b.WriteString("\n" + s.Faint.Render("↑↓ choose · ←/→ move · enter select · esc cancel"))
+	b.WriteString("\n" + s.Faint.Render("←/→ move · enter select · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }

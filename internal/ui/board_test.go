@@ -165,25 +165,26 @@ func TestCardLineNeverShellsGH(t *testing.T) {
 
 // TestCardLineGateMarker: the ⚡ badge marks only an explicit "auto"
 // gate-approval mode. Empty reads as auto everywhere else in the code
-// (domain.ValidGateApproval), but every TUI-created card stores empty —
-// badging it too would light up the whole board as if each card had
-// opted in to something nobody chose.
+// (domain.ValidGateApproval). Attended is the default and what empty
+// reads as, so it badges nothing — a marker on every card is not a
+// marker. Autopilot is the opted-in state, and the only one where the
+// board moves without you.
 func TestCardLineGateMarker(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	auto := row(1, "auto card", domain.StageTodo, "", false)
-	auto.F.GateApproval = domain.GateGates
+	autopilot := row(1, "autopilot card", domain.StageTodo, "", false)
+	autopilot.F.GateApproval = domain.GateAutopilot
 	empty := row(2, "empty card", domain.StageTodo, "", false)
-	caller := row(3, "caller card", domain.StageTodo, "", false)
-	caller.F.GateApproval = domain.GateOff
+	attended := row(3, "attended card", domain.StageTodo, "", false)
+	attended.F.GateApproval = domain.GateAttended
 
-	if !strings.Contains(m.cardLine(auto, 1, false, true, 80), "⚡") {
-		t.Error("explicit auto gate mode should show the ⚡ marker")
+	if !strings.Contains(m.cardLine(autopilot, 1, false, true, 80), "⚡") {
+		t.Error("an autopilot card should show the ⚡ marker")
 	}
 	if strings.Contains(m.cardLine(empty, 2, false, true, 80), "⚡") {
-		t.Error("empty gate mode reads as auto but must not show the marker")
+		t.Error("empty gate mode reads as attended and must not show the marker")
 	}
-	if strings.Contains(m.cardLine(caller, 3, false, true, 80), "⚡") {
-		t.Error("caller gate mode should not show the marker")
+	if strings.Contains(m.cardLine(attended, 3, false, true, 80), "⚡") {
+		t.Error("attended is the default — it must not show the marker")
 	}
 }
 

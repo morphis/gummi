@@ -595,7 +595,7 @@ type cardNewArgs struct {
 // internal/driver.
 //
 // Its gate-approval default deliberately differs from every headless
-// entry point's: cardmint reads an empty GateApproval as domain.GateGates
+// entry point's: cardmint reads an empty GateApproval as domain.GateAttended
 // (matching driver.Options' own default), but a card minted by an agent
 // hosted inside someone else's TUI is not the same thing as a card a
 // human typed `gummi run` for — the human at this board did not ask for
@@ -619,9 +619,9 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 	}
 	gate := a.GateApproval
 	if gate == "" {
-		gate = domain.GateOff
+		gate = domain.GateAttended
 	} else if norm, ok := domain.NormalizeGateApproval(gate); !ok {
-		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateGates, domain.GateOff, gate)
+		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateAttended, domain.GateAttended, gate)
 	} else {
 		gate = norm
 	}

@@ -200,7 +200,7 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 	// off-screen, which is a viewport artifact this golden isn't for.
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = model.(*Shell)
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateOff); err != nil {
+	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)

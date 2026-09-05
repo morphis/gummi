@@ -37,7 +37,7 @@ func stretchThread(t *testing.T) *Shell {
 	}
 
 	m.cardEvents[id] = []state.CardEvent{
-		evTookOver(domain.GateFull, tt(0)),
+		evTookOver(domain.GateAutopilot, tt(0)),
 		{Kind: state.EventStageEnter, Stage: domain.StageSpec, At: tt(1), Payload: enter("architect")},
 		{Kind: state.EventMessage, Stage: domain.StageSpec, At: tt(2), Payload: msg("architect", "spec written.")},
 		{Kind: state.EventStageExit, Stage: domain.StageSpec, At: tt(6), Payload: string(exit)},
@@ -159,7 +159,7 @@ func TestRunningStretchHasNoClose(t *testing.T) {
 	base := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	enter, _ := json.Marshal(map[string]string{"role": "implementer"})
 	m.cardEvents[id] = []state.CardEvent{
-		evTookOver(domain.GateFull, base),
+		evTookOver(domain.GateAutopilot, base),
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base.Add(time.Minute), Payload: string(enter)},
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, base.Add(2*time.Minute)),
 	}
@@ -221,7 +221,7 @@ func TestPeriodBeforeAnyStageDrawsBothRules(t *testing.T) {
 			m.sel = 1
 			id := m.rows[m.sel].F.ID
 			events := []state.CardEvent{
-				evTookOver(domain.GateFull, base),
+				evTookOver(domain.GateAutopilot, base),
 				evHandedBack("you turned autopilot off", base.Add(time.Minute)),
 				{Kind: state.EventStageEnter, Stage: domain.StageSpec, At: base.Add(10 * time.Minute),
 					Payload: string(enter)},
@@ -255,7 +255,7 @@ func TestMidStageTakeoverOpensWhereItHappened(t *testing.T) {
 	m.cardEvents[id] = []state.CardEvent{
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base, Payload: string(enter)},
 		evMessage("implementer", "worked on this by hand first", base.Add(time.Minute)),
-		evTookOver(domain.GateFull, base.Add(2*time.Minute)),
+		evTookOver(domain.GateAutopilot, base.Add(2*time.Minute)),
 		evGate(domain.StageImplement, domain.StageReview, state.ActorAutopilot, base.Add(3*time.Minute)),
 	}
 	m.cardOpen = true
@@ -282,7 +282,7 @@ func TestPeriodWithNoStagesStillDraws(t *testing.T) {
 	m.sel = 1
 	id := m.rows[m.sel].F.ID
 	m.cardEvents[id] = []state.CardEvent{
-		evTookOver(domain.GateFull, base),
+		evTookOver(domain.GateAutopilot, base),
 		evHandedBack("you turned autopilot off", base.Add(time.Minute)),
 	}
 	m.cardOpen = true
@@ -500,7 +500,7 @@ func TestPeriodThatDecidedNothingWithholdsOnlyTheTally(t *testing.T) {
 	m.sel = 1
 	id := m.rows[m.sel].F.ID
 	m.cardEvents[id] = []state.CardEvent{
-		evTookOver(domain.GateFull, base),
+		evTookOver(domain.GateAutopilot, base),
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base.Add(time.Minute), Payload: string(enter)},
 		evMessage("implementer", "did the work", base.Add(2*time.Minute)),
 		evPark(domain.StageImplement, "implement finished, review it", base.Add(3*time.Minute)),
@@ -527,20 +527,20 @@ func TestPeriodThatDecidedNothingWithholdsOnlyTheTally(t *testing.T) {
 // cannot outlive its own truth the way the deleted rollup did.
 func TestMastheadSaysWhenAutopilotIsRunning(t *testing.T) {
 	s := m0Styles()
-	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, GateApproval: domain.GateFull}
+	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, GateApproval: domain.GateAutopilot}
 	m := populatedShell(120, 30)
 
 	// no session: the mode alone, no claim about now
 	if got := ansi.Strip(autopilotField(s, m, f)); strings.Contains(got, "running") {
 		t.Fatalf("autopilotField = %q, want no claim that a card with no session is running", got)
 	}
-	if !strings.Contains(ansi.Strip(autopilotField(s, m, f)), "autopilot: full") {
+	if !strings.Contains(ansi.Strip(autopilotField(s, m, f)), "autopilot: on") {
 		t.Fatalf("autopilotField = %q, want the stored mode", ansi.Strip(autopilotField(s, m, f)))
 	}
 
-	// off never claims it either, whatever is running
+	// attended never claims it either, whatever is running
 	off := f
-	off.GateApproval = domain.GateOff
+	off.GateApproval = domain.GateAttended
 	if got := ansi.Strip(autopilotField(s, m, off)); strings.Contains(got, "running") {
 		t.Fatalf("autopilotField(off) = %q, want no running claim", got)
 	}

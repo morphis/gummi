@@ -334,11 +334,11 @@ func TestAppendAutopilotRoundTrip(t *testing.T) {
 	at2 := at1.Add(time.Hour)
 
 	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		AutopilotTookOver, "", domain.GateFull, "", at1); err != nil {
+		AutopilotTookOver, "", domain.GateAutopilot, "", at1); err != nil {
 		t.Fatalf("AppendAutopilot (took-over): %v", err)
 	}
 	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		AutopilotHandedBack, "gate-approval switched off", domain.GateFull, "", at2); err != nil {
+		AutopilotHandedBack, "gate-approval switched off", domain.GateAutopilot, "", at2); err != nil {
 		t.Fatalf("AppendAutopilot (handed-back): %v", err)
 	}
 
@@ -363,9 +363,9 @@ func TestAppendAutopilotRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(got[0].Payload), &took); err != nil {
 		t.Fatal(err)
 	}
-	if took.Event != AutopilotTookOver || took.Reason != "" || took.Mode != domain.GateFull {
+	if took.Event != AutopilotTookOver || took.Reason != "" || took.Mode != domain.GateAutopilot {
 		t.Errorf("took-over payload = %+v, want {Event:%q Reason:%q Mode:%q}",
-			took, AutopilotTookOver, "", domain.GateFull)
+			took, AutopilotTookOver, "", domain.GateAutopilot)
 	}
 	if !got[0].At.Equal(at1) {
 		t.Errorf("took-over At = %v, want %v", got[0].At, at1)
@@ -375,9 +375,9 @@ func TestAppendAutopilotRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(got[1].Payload), &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Event != AutopilotHandedBack || back.Reason != "gate-approval switched off" || back.Mode != domain.GateFull {
+	if back.Event != AutopilotHandedBack || back.Reason != "gate-approval switched off" || back.Mode != domain.GateAutopilot {
 		t.Errorf("handed-back payload = %+v, want {Event:%q Reason:%q Mode:%q}",
-			back, AutopilotHandedBack, "gate-approval switched off", domain.GateFull)
+			back, AutopilotHandedBack, "gate-approval switched off", domain.GateAutopilot)
 	}
 	if !got[1].At.Equal(at2) {
 		t.Errorf("handed-back At = %v, want %v", got[1].At, at2)
@@ -410,7 +410,7 @@ func TestAppendAutopilotInterleavedSeqOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		AutopilotTookOver, "resumed unattended", domain.GateGates, "", next()); err != nil {
+		AutopilotTookOver, "resumed unattended", domain.GateAttended, "", next()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AppendEvent(ctx, CardEvent{
@@ -419,7 +419,7 @@ func TestAppendAutopilotInterleavedSeqOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.AppendAutopilot(ctx, f.ID, domain.StageImplement,
-		AutopilotHandedBack, "", domain.GateGates, "", next()); err != nil {
+		AutopilotHandedBack, "", domain.GateAttended, "", next()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AppendEvent(ctx, CardEvent{
@@ -473,7 +473,7 @@ func TestSetGateApprovalRecordsAutopilotEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.SetGateApproval(ctx, f.ID, domain.GateFull); err != nil {
+	if err := s.SetGateApproval(ctx, f.ID, domain.GateAutopilot); err != nil {
 		t.Fatal(err)
 	}
 	evs, err := s.Events(ctx, f.ID)
@@ -487,8 +487,8 @@ func TestSetGateApprovalRecordsAutopilotEvent(t *testing.T) {
 	if err := json.Unmarshal([]byte(evs[0].Payload), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Mode != domain.GateFull {
-		t.Errorf("payload mode = %q, want %q", p.Mode, domain.GateFull)
+	if p.Mode != domain.GateAutopilot {
+		t.Errorf("payload mode = %q, want %q", p.Mode, domain.GateAutopilot)
 	}
 
 	// an invalid mode is refused before the store write, so no event

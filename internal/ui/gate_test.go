@@ -21,7 +21,7 @@ func TestGateActionOpensAutopilotOverlay(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
 
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "auto card", Slug: "auto-card", Stage: domain.StageTodo, GateApproval: domain.GateGates}
+	f := domain.Feature{ID: "FD-001", Num: 1, Title: "auto card", Slug: "auto-card", Stage: domain.StageTodo, GateApproval: domain.GateAttended}
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +38,8 @@ func TestGateActionOpensAutopilotOverlay(t *testing.T) {
 	if !ok {
 		t.Fatalf("top overlay is %T, want *autopilotDialog", m.Overlay.Top())
 	}
-	if d.cursor != autopilotCursorFor(domain.GateGates) {
-		t.Fatalf("cursor = %d, want the card's current mode (%d)", d.cursor, autopilotCursorFor(domain.GateGates))
+	if d.feature.ID != "FD-001" {
+		t.Fatalf("dialog opened on %q, want the selected card", d.feature.ID)
 	}
 
 	// unconfirmed: the store must be untouched.
@@ -47,7 +47,7 @@ func TestGateActionOpensAutopilotOverlay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateGates {
+	if got.GateApproval != domain.GateAttended {
 		t.Fatalf("gate approval changed before the overlay was confirmed: %q", got.GateApproval)
 	}
 }
@@ -72,8 +72,11 @@ func TestGateActionOverlayCursorReadsEmptyAsGates(t *testing.T) {
 	if !ok {
 		t.Fatalf("top overlay is %T, want *autopilotDialog", m.Overlay.Top())
 	}
-	if want := autopilotCursorFor(domain.GateGates); d.cursor != want {
-		t.Fatalf("cursor for empty mode = %d, want %d (gates)", d.cursor, want)
+	// nothing to position: with two modes the dialog states what handing
+	// the card over does and its confirm is the whole choice, so a card
+	// carrying the empty mode opens the same dialog as any other.
+	if d.feature.ID != "FD-001" {
+		t.Fatalf("dialog opened on %q, want the selected card", d.feature.ID)
 	}
 }
 
@@ -92,13 +95,13 @@ func TestGateActionLabelReflectsCurrentMode(t *testing.T) {
 		t.Fatalf("no gate action found for mode %q", mode)
 		return ""
 	}
-	if got := label(domain.GateGates); got != "require approval" {
-		t.Errorf("label for explicit auto = %q, want %q", got, "require approval")
+	if got := label(domain.GateAutopilot); got != "take back the gates" {
+		t.Errorf("label for autopilot = %q, want %q", got, "take back the gates")
 	}
-	if got := label(domain.GateOff); got != "auto-approve gates" {
-		t.Errorf("label for caller = %q, want %q", got, "auto-approve gates")
+	if got := label(domain.GateAttended); got != "hand to autopilot" {
+		t.Errorf("label for attended = %q, want %q", got, "hand to autopilot")
 	}
-	if got := label(""); got != "auto-approve gates" {
-		t.Errorf("label for empty = %q, want %q", got, "auto-approve gates")
+	if got := label(""); got != "hand to autopilot" {
+		t.Errorf("label for empty (reads as attended) = %q, want %q", got, "hand to autopilot")
 	}
 }

@@ -48,13 +48,13 @@ func TestBG098TwoPeriodsReadInTheOrderTheyHappened(t *testing.T) {
 	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "converged"})
 	exit, _ := json.Marshal(map[string]any{"credits": 18, "verdict": ""})
 	first, _ := json.Marshal(state.AutopilotPayload{
-		Event: state.AutopilotTookOver, Reason: "the headless run is driving it unattended", Mode: domain.GateGates,
+		Event: state.AutopilotTookOver, Reason: "the headless run is driving it unattended", Mode: domain.GateAttended,
 	})
 	stopped, _ := json.Marshal(state.ParkPayload{
 		Reason: state.ParkReasonNeedsYou, Detail: "stopped early at --until spec, as requested.",
 	})
 	second, _ := json.Marshal(state.AutopilotPayload{
-		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateFull,
+		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 	})
 	crossed, _ := json.Marshal(state.GatePayload{
 		From: string(domain.StageSpec), To: string(domain.StagePlan), Actor: state.ActorAutopilot,

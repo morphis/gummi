@@ -526,14 +526,20 @@ var migrations = []string{
 	// blocked verify could say only THAT it was blocked and never why.
 	`ALTER TABLE sessions ADD COLUMN verdict_floor TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE sessions ADD COLUMN verdict_floor_reason TEXT NOT NULL DEFAULT ''`,
-	// gate_approval vocabulary rename: rewrite the old stored spellings to
-	// their new canonical form (domain.GateGates/domain.GateOff). Both
-	// UPDATEs are idempotent by construction (a row not matching the WHERE
-	// clause is left untouched, so re-running on an already-migrated or
-	// fresh DB is a no-op) and, unlike the ADD COLUMN statements above,
-	// never error — they just affect zero rows when there is nothing to do.
-	`UPDATE features SET gate_approval = 'gates' WHERE gate_approval = 'auto'`,
-	`UPDATE features SET gate_approval = 'off'   WHERE gate_approval = 'caller'`,
+	// gate_approval vocabulary collapse: three modes became two, so every
+	// spelling any older gummi could have stored is rewritten to its new
+	// canonical form. This mirrors domain.NormalizeGateApproval exactly —
+	// off/caller/gates/auto were all "a person decides", full was "nobody
+	// stops it" — and the pair that loses something in the collapse
+	// (gates/auto auto-crossed design gates and now stop at them) does so
+	// deliberately: the new default is stricter than the old one.
+	//
+	// Every UPDATE is idempotent by construction (a row not matching the
+	// WHERE clause is left untouched, so re-running on an already-migrated
+	// or fresh DB is a no-op) and, unlike the ADD COLUMN statements above,
+	// never errors — it just affects zero rows when there is nothing to do.
+	`UPDATE features SET gate_approval = 'attended'  WHERE gate_approval IN ('auto', 'caller', 'gates', 'off')`,
+	`UPDATE features SET gate_approval = 'autopilot' WHERE gate_approval = 'full'`,
 	`ALTER TABLE features ADD COLUMN landed_sha TEXT NOT NULL DEFAULT ''`,
 }
 
@@ -709,7 +715,7 @@ func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.T
 // side-channel write — it neither touches updated_at nor moves the stage —
 // so `run` records the chosen mode at creation and a later `resume` that
 // re-passes --gate-approval can override it without a full-feature write.
-// An empty mode reads as domain.GateGates.
+// An empty mode reads as domain.GateAttended.
 func (s *Store) SetGateApproval(ctx context.Context, id domain.FeatureID, mode string) error {
 	if !domain.ValidGateApproval(mode) {
 		return fmt.Errorf("setting gate-approval for %s: unknown mode %q", id, mode)

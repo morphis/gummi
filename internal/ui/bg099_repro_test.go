@@ -45,7 +45,10 @@ func TestBG099PlanNeverPromisesAStageItHandsBack(t *testing.T) {
 				}
 			}
 
-			for _, mode := range []string{domain.GateGates, domain.GateFull} {
+			// autopilot only: attended's body says one thing — every gate
+			// waits for you — because that IS the mode. Naming a stage
+			// list under it would describe a run it never performs.
+			for _, mode := range []string{domain.GateAutopilot} {
 				body := strings.Join(autopilotBody(f, plan, mode), " ")
 				runs := "runs " + englishList(runnableTail(plan.remaining))
 				if len(runnableTail(plan.remaining)) > 0 && !strings.Contains(body, runs) {

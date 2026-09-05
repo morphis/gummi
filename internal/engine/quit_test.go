@@ -11,7 +11,7 @@ import (
 )
 
 // TestStopForQuitParksAutopilotSession: a live autopilot session
-// (GateApproval GateGates, the default) is stopped and the park event
+// (GateApproval GateAttended, the default) is stopped and the park event
 // StopForQuit writes carries reason "quit". A second call is a no-op —
 // the dedupe key holds the marker to one write per session generation.
 func TestStopForQuitParksAutopilotSession(t *testing.T) {
@@ -25,7 +25,7 @@ func TestStopForQuitParksAutopilotSession(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 
 	f := feature(1, "one", domain.StageImplement)
-	f.GateApproval = domain.GateGates
+	f.GateApproval = domain.GateAutopilot
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +78,11 @@ func TestStopForQuitParksAutopilotSession(t *testing.T) {
 	}
 }
 
-// TestStopForQuitLeavesGateOffSessionRunning: a card driven by hand
-// (GateOff) is untouched by StopForQuit — it is not what "on autopilot"
+// TestStopForQuitLeavesGateAttendedSessionRunning: a card driven by hand
+// (GateAttended) is untouched by StopForQuit — it is not what "on autopilot"
 // means, and quitting the process stops it the way it always did,
 // without a marker claiming a reopen should offer it back.
-func TestStopForQuitLeavesGateOffSessionRunning(t *testing.T) {
+func TestStopForQuitLeavesGateAttendedSessionRunning(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
 		<-release
@@ -93,7 +93,7 @@ func TestStopForQuitLeavesGateOffSessionRunning(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 
 	f := feature(1, "one", domain.StageImplement)
-	f.GateApproval = domain.GateOff
+	f.GateApproval = domain.GateAttended
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestStopForQuitLeavesGateOffSessionRunning(t *testing.T) {
 	e.StopForQuit(context.Background())
 
 	if st := e.Get("FD-001").State(); st != StateRunning {
-		t.Fatalf("GateOff session state after StopForQuit = %s, want still running", st)
+		t.Fatalf("GateAttended session state after StopForQuit = %s, want still running", st)
 	}
 	evs, err := store.Events(context.Background(), "FD-001")
 	if err != nil {
@@ -114,7 +114,7 @@ func TestStopForQuitLeavesGateOffSessionRunning(t *testing.T) {
 	}
 	for _, ev := range evs {
 		if ev.Kind == state.EventPark {
-			t.Fatalf("GateOff session got a park event, want none: %+v", ev)
+			t.Fatalf("GateAttended session got a park event, want none: %+v", ev)
 		}
 	}
 }
@@ -133,7 +133,7 @@ func TestQuitStoppedCardsAfterRestore(t *testing.T) {
 	e1 := persistEngine(t, ag, ws, store, wt)
 
 	f := feature(1, "csv export", domain.StageImplement)
-	f.GateApproval = domain.GateFull
+	f.GateApproval = domain.GateAutopilot
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}

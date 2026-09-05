@@ -9,60 +9,71 @@ import (
 	"time"
 )
 
-// Gate approval modes: who crosses a feature's design gates on an
-// unattended resume.
+// Gate approval modes: who crosses a feature's gates on an unattended
+// resume. There are two, and the axis is "how much do I trust this card"
+// rather than a per-gate policy:
 //
-//   - GateOff stops every design gate for the caller: nothing crosses
-//     without an explicit --approve/--request-changes.
-//   - GateGates lets design gates cross themselves; a question raised
-//     mid-stage still stops for the caller. This is the default when the
-//     field is empty.
-//   - GateFull runs all the way to a verified branch on its own — design
-//     gates, review/verify bounces, and conflict handoffs all auto-cross
-//     — and stops there: it never lands on main by itself.
+//   - GateAttended stops at every gate. The stage asks whether to
+//     advance; you review, comment, and answer. This is the default when
+//     the field is empty.
+//   - GateAutopilot stops at none. It runs all the way to a verified
+//     branch on its own — gates, critique bounces and conflict handoffs
+//     all auto-cross — and stops there: it never lands on main by itself.
+//
+// This replaces three modes with two, and the default gets STRICTER in
+// the process. The retired middle mode ("gates") auto-crossed design
+// gates while still stopping for a mid-stage question, and it was the
+// default; attended stops at all of them. The trade is that each stop is
+// a question in the conversation rather than a control to go find.
 //
 // The mode is chosen at `run` and persisted on the card so an unattended
 // `resume` keeps it instead of silently reverting to the default. Empty
-// reads as GateGates. These are the canonical, stored values — the only
-// ones ValidGateApproval accepts. "auto" and "caller" are the spellings
-// that came before them ("auto" == GateGates, "caller" == GateOff): they
-// are still accepted as INPUT through NormalizeGateApproval, so existing
-// scripts keep working and old rows migrate, but they are never stored
-// and nothing branches on them.
+// reads as GateAttended. These are the canonical, stored values — the
+// only ones ValidGateApproval accepts. The spellings that came before
+// them ("off", "gates", "caller", "auto" → attended; "full" →
+// autopilot) are still accepted as INPUT through NormalizeGateApproval,
+// so existing scripts keep working and old rows migrate, but they are
+// never stored and nothing branches on them.
 const (
-	GateOff   = "off"
-	GateGates = "gates"
-	GateFull  = "full"
+	GateAttended  = "attended"
+	GateAutopilot = "autopilot"
 )
 
 // ValidGateApproval reports whether s is a storable gate-approval mode:
-// empty, "off", "gates", or "full". Empty is valid and reads as
-// GateGates. It does not accept the legacy "auto"/"caller" input
-// spellings — those are resolved to their canonical form by
-// NormalizeGateApproval before anything reaches storage or Validate.
+// empty, "attended", or "autopilot". Empty is valid and reads as
+// GateAttended. It does not accept the retired input spellings — those
+// are resolved to their canonical form by NormalizeGateApproval before
+// anything reaches storage or Validate.
 func ValidGateApproval(s string) bool {
-	return s == "" || s == GateOff || s == GateGates || s == GateFull
+	return s == "" || s == GateAttended || s == GateAutopilot
 }
 
 // NormalizeGateApproval resolves a gate-approval mode as given by a
-// caller (CLI flag, MCP tool argument, …) to its canonical stored form,
-// reporting false when s is not a recognized mode or alias. It is the
-// ONE place a legacy alias is resolved: "auto" maps to GateGates and
-// "caller" maps to GateOff (preserving their historical meaning exactly,
-// under the new spelling); the three canonical values pass through
-// unchanged; and "" passes through unchanged too — the empty string
-// carries no default here, the caller decides what empty means for it
-// (persisted rows and Feature.GateApproval read it as GateGates).
+// caller (CLI flag, MCP tool argument, a persisted row written by an
+// older version) to its canonical stored form, reporting false when s is
+// not a recognized mode or alias. It is the ONE place a retired spelling
+// is resolved, which is what lets the three-mode era migrate without a
+// separate migration: every old value has an unambiguous new meaning.
+//
+// "off" and "caller" were "stop at every gate", which is attended.
+// "gates" and "auto" were "cross design gates but stop for a question";
+// they map to attended too, and that is the one place this collapse
+// loses something — a card stored at "gates" will now stop where it used
+// to walk. That is the deliberate default change, not an accident of the
+// mapping. "full" was "stop at nothing until the branch is verified",
+// which is autopilot exactly.
+//
+// "" passes through unchanged — the empty string carries no default
+// here; the caller decides what empty means for it (persisted rows and
+// Feature.GateApproval read it as GateAttended).
 func NormalizeGateApproval(s string) (string, bool) {
 	switch s {
 	case "":
 		return "", true
-	case "auto":
-		return GateGates, true
-	case "caller":
-		return GateOff, true
-	case GateOff, GateGates, GateFull:
-		return s, true
+	case "off", "caller", "gates", "auto", GateAttended:
+		return GateAttended, true
+	case "full", GateAutopilot:
+		return GateAutopilot, true
 	default:
 		return "", false
 	}
@@ -225,10 +236,10 @@ type Feature struct {
 	Skip     SkipFlags
 	Profile  string // profile name mapping roles to agent configs
 	// GateApproval is who crosses this feature's design gates on an
-	// unattended resume: GateOff, GateGates (default), or GateFull.
+	// unattended resume: GateAttended, GateAttended (default), or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
 	// --gate-approval inherits the run's choice rather than reverting to
-	// the default. Empty reads as GateGates.
+	// the default. Empty reads as GateAttended.
 	GateApproval string
 	Budget       Budget
 	Spend        Spend // metered cost across all stages

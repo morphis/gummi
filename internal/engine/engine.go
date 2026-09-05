@@ -6,7 +6,7 @@
 // and hold no slot — you are the scarce resource. Autonomous sessions
 // (plan/implement/review/verify) compete for one of two independent
 // attention pools: attended (a card whose gate-approval mode is
-// domain.GateOff — a human is expected to stay with it) and autopilot
+// domain.GateAttended — a human is expected to stay with it) and autopilot
 // (everything else, including the empty default). Each pool has its own
 // cap and its own FIFO queue, so a slot freed in one pool is never handed
 // to a session waiting in the other — an attended card never queues
@@ -176,15 +176,15 @@ type Config struct {
 	// a value falls back to the built-in default (warn).
 	Sandbox string
 	// MaxActive caps concurrent autonomous slots in the ATTENDED pool — a
-	// card whose gate-approval mode is domain.GateOff. Zero or
+	// card whose gate-approval mode is domain.GateAttended. Zero or
 	// negative — the default — means no cap: every attended run started
 	// begins immediately. cmd/gummi's own default for this field is 1;
 	// GUMMI_MAX_ACTIVE overrides it from there. A positive value queues
 	// attended runs beyond it.
 	MaxActive int
 	// AutopilotLanes caps concurrent autonomous slots in the AUTOPILOT
-	// pool — every card whose gate-approval mode is domain.GateGates or
-	// domain.GateFull, which includes the empty default (see
+	// pool — every card whose gate-approval mode is domain.GateAttended or
+	// domain.GateAutopilot, which includes the empty default (see
 	// domain.Feature.GateApproval). Zero or negative means no cap, the
 	// same "unlimited" semantics MaxActive has always had — kept
 	// available here for tests and any caller that wants both pools
@@ -235,13 +235,13 @@ type laneState struct {
 }
 
 // lanePoolFor decides which attention pool an autonomous session for f
-// competes in. GateOff is the only mode that reads as attended: a human
+// competes in. GateAttended is the only mode that reads as attended: a human
 // is expected to stay with that card, so it must never queue behind
-// unattended work. Everything else — GateGates, GateFull, and the empty
+// unattended work. Everything else — GateAttended, GateAutopilot, and the empty
 // default (domain.Feature.GateApproval documents empty as reading like
-// GateGates) — runs unattended and belongs in the autopilot pool.
+// GateAttended) — runs unattended and belongs in the autopilot pool.
 func lanePoolFor(f domain.Feature) lanePool {
-	if f.GateApproval == domain.GateOff {
+	if f.GateApproval == domain.GateAttended {
 		return poolAttended
 	}
 	return poolAutopilot
@@ -1407,7 +1407,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// A card left to run alone answers its own questions, so the agent is
 	// told that before it asks one — whichever of the two routes above it
 	// would have used.
-	if f.GateApproval == domain.GateFull && !readOnly {
+	if f.GateApproval == domain.GateAutopilot && !readOnly {
 		hints = append(hints, unattendedAskHint)
 	}
 	// Every stage session gets its own inbound MCP endpoint, so a backend

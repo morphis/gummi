@@ -96,7 +96,7 @@ func TestStretchOpensOnlyOnAnExplicitRow(t *testing.T) {
 // would open a period every time the switch moved.
 func TestModeChangeIsNotABoundary(t *testing.T) {
 	events := []state.CardEvent{
-		evModeChange(domain.GateFull, at(0)),
+		evModeChange(domain.GateAutopilot, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(5)),
 	}
 	if got := autopilotStretches(aFeature(), events); len(got) != 0 {
@@ -108,7 +108,7 @@ func TestModeChangeIsNotABoundary(t *testing.T) {
 // and answers made inside the period, and nothing a person did.
 func TestStretchCollectsWhatAutopilotDecided(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateAutopilot, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
 		evAsk("stream rows", state.ActorAutopilot, at(20)),
 		evAsk("8080", state.ActorUser, at(21)), // a person: closes the period
@@ -176,7 +176,7 @@ func TestStretchClosers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			events := append([]state.CardEvent{evTookOver(domain.GateFull, at(0))}, tc.tail...)
+			events := append([]state.CardEvent{evTookOver(domain.GateAutopilot, at(0))}, tc.tail...)
 			st := onlyStretch(t, autopilotStretches(aFeature(), events))
 			if st.closed != tc.want {
 				t.Fatalf("closed = %q, want %q", st.closed, tc.want)
@@ -200,7 +200,7 @@ func TestStretchClosers(t *testing.T) {
 // end every stretch at its first line of output.
 func TestAgentTurnDoesNotClose(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateAutopilot, at(0)),
 		evMessage("implementer", "wired the theme layer", at(5)),
 		evMessage(string(engine.AuthorSystem), "kickoff", at(6)),
 	}
@@ -217,8 +217,8 @@ func TestAgentTurnDoesNotClose(t *testing.T) {
 // crashed run restarted inside it.
 func TestSecondTookOverInsideAPeriodIsIgnored(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
-		evTookOver(domain.GateFull, at(5)),
+		evTookOver(domain.GateAutopilot, at(0)),
+		evTookOver(domain.GateAutopilot, at(5)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 	}
 	st := onlyStretch(t, autopilotStretches(aFeature(), events))
@@ -233,7 +233,7 @@ func TestSecondTookOverInsideAPeriodIsIgnored(t *testing.T) {
 // counts as inside it.
 func TestStretchStaysOpen(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
 	st := onlyStretch(t, autopilotStretches(aFeature(), events))
@@ -243,7 +243,7 @@ func TestStretchStaysOpen(t *testing.T) {
 	if st.to != len(events) {
 		t.Fatalf("to = %d, want %d", st.to, len(events))
 	}
-	if st.mode != domain.GateGates {
+	if st.mode != domain.GateAttended {
 		t.Fatalf("mode = %q, want the mode it was handed over under", st.mode)
 	}
 }
@@ -254,7 +254,7 @@ func TestStretchStaysOpen(t *testing.T) {
 // the log-derived stretch.
 func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
 	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), events, false))
@@ -271,7 +271,7 @@ func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
 // board's own in-process autopilot switch, or a foreign process the
 // liveness check found alive.
 func TestCloseOrphanedLeavesALiveOneRunning(t *testing.T) {
-	events := []state.CardEvent{evTookOver(domain.GateGates, at(0))}
+	events := []state.CardEvent{evTookOver(domain.GateAttended, at(0))}
 	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), events, true))
 	if !st.running() {
 		t.Fatal("closeOrphaned closed a period a live session is still driving")
@@ -284,7 +284,7 @@ func TestCloseOrphanedLeavesALiveOneRunning(t *testing.T) {
 // live right now.
 func TestCloseOrphanedLeavesAnAlreadyClosedPeriodAlone(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 	}
 	st := onlyStretch(t, closeOrphaned(autopilotStretches(aFeature(), events), events, false))
@@ -327,7 +327,7 @@ func TestLiveStretchesClosesAKilledDriversOpenPeriod(t *testing.T) {
 	w.Close()
 
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
 	st := onlyStretch(t, liveStretches(f, events, ws))
@@ -344,11 +344,11 @@ func TestLiveStretchesClosesAKilledDriversOpenPeriod(t *testing.T) {
 // bounded, with your own work in between belonging to neither.
 func TestTwoStretchesAlternate(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateAutopilot, at(0)),
 		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, at(6)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 		evMessage(string(engine.AuthorUser), "let me look", at(20)),
-		evTookOver(domain.GateFull, at(30)),
+		evTookOver(domain.GateAutopilot, at(30)),
 		evGate(domain.StageImplement, domain.StageReview, state.ActorAutopilot, at(36)),
 	}
 	got := autopilotStretches(aFeature(), events)
@@ -371,7 +371,7 @@ func TestTwoStretchesAlternate(t *testing.T) {
 // is a real period worth drawing. Only the tally row is withheld.
 func TestStretchDecidedNothingStillOpens(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateAutopilot, at(0)),
 		evMessage("implementer", "did the work", at(5)),
 		evPark(domain.StageImplement, "implement finished, review it", at(10)),
 	}
@@ -416,12 +416,12 @@ func withSeqs(events []state.CardEvent) []state.CardEvent {
 // conversation is where a reader should land.
 func TestUnseenStretchIsTheNewestClosedOne(t *testing.T) {
 	events := withSeqs([]state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),                     // 1
+		evTookOver(domain.GateAutopilot, at(0)),                     // 1
 		evPark(domain.StageImplement, "first", at(10)),         // 2
 		evMessage(string(engine.AuthorUser), "looked", at(20)), // 3
-		evTookOver(domain.GateFull, at(30)),                    // 4
+		evTookOver(domain.GateAutopilot, at(30)),                    // 4
 		evPark(domain.StageImplement, "second", at(40)),        // 5
-		evTookOver(domain.GateFull, at(50)),                    // 6
+		evTookOver(domain.GateAutopilot, at(50)),                    // 6
 	})
 	sts := autopilotStretches(aFeature(), events)
 	if len(sts) != 3 {
@@ -467,7 +467,7 @@ func TestNoUnseenStretchWithoutAPeriod(t *testing.T) {
 // itself over a verify that never produced a verdict at all.
 func TestInterruptedLandingGateIsNotFinished(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateAutopilot, at(0)),
 		evExit(domain.StageReview, state.StatusOK, at(10)), // an earlier stage passed
 		{Kind: state.EventStageEnter, Stage: domain.StageVerify, At: at(11)},
 		// verify itself never exits: the board quit mid-run
@@ -484,7 +484,7 @@ func TestInterruptedLandingGateIsNotFinished(t *testing.T) {
 // that parked must be the stage whose exit is read.
 func TestLandingGateFinishesOnItsOwnVerdict(t *testing.T) {
 	events := []state.CardEvent{
-		evTookOver(domain.GateFull, at(0)),
+		evTookOver(domain.GateAutopilot, at(0)),
 		evExit(domain.StageReview, state.StatusFail, at(10)), // an earlier failure
 		evExit(domain.StageVerify, state.StatusOK, at(19)),   // verify's own pass
 		evPark(domain.StageVerify, "verify passed — ready to land", at(20)),
@@ -509,13 +509,13 @@ func TestAutopilotDriving(t *testing.T) {
 		},
 		{
 			name:   "one still-open period",
-			events: []state.CardEvent{evTookOver(domain.GateFull, at(0))},
+			events: []state.CardEvent{evTookOver(domain.GateAutopilot, at(0))},
 			want:   true,
 		},
 		{
 			name: "one period opened then closed",
 			events: []state.CardEvent{
-				evTookOver(domain.GateFull, at(0)),
+				evTookOver(domain.GateAutopilot, at(0)),
 				evHandedBack("", at(10)),
 			},
 			want: false,
@@ -523,9 +523,9 @@ func TestAutopilotDriving(t *testing.T) {
 		{
 			name: "a closed period followed by a second still-open one",
 			events: []state.CardEvent{
-				evTookOver(domain.GateFull, at(0)),
+				evTookOver(domain.GateAutopilot, at(0)),
 				evHandedBack("", at(10)),
-				evTookOver(domain.GateFull, at(20)),
+				evTookOver(domain.GateAutopilot, at(20)),
 			},
 			want: true,
 		},

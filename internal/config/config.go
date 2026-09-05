@@ -30,11 +30,11 @@ type Config struct {
 	// DESIGN §4.4 for what each layer actually guarantees.
 	Sandbox string `yaml:"sandbox"`
 	// AutopilotLanes caps how many autopilot-pool cards — every card whose
-	// gate-approval mode is domain.GateGates or domain.GateFull, which
+	// gate-approval mode is domain.GateAttended or domain.GateAutopilot, which
 	// includes the empty default — can drive at once (internal/engine's
 	// autopilot pool). 0 or unset means the built-in default of 2; a
 	// negative value is rejected by Load. The ATTENDED pool (a card whose
-	// mode is domain.GateOff) is sized separately: it defaults to 1 and is
+	// mode is domain.GateAttended) is sized separately: it defaults to 1 and is
 	// overridden by GUMMI_MAX_ACTIVE, not by this key — a human is expected
 	// to stay with an attended card, so it must never queue behind
 	// autopilot work.

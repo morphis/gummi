@@ -54,7 +54,7 @@ func TestBG097ClosedPeriodSaysItEndedInTheLiveStage(t *testing.T) {
 		return string(b)
 	}
 	took, _ := json.Marshal(state.AutopilotPayload{
-		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateFull,
+		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 	})
 	crossed, _ := json.Marshal(state.GatePayload{
 		From: string(domain.StageImplement), To: string(domain.StageVerify), Actor: state.ActorAutopilot,

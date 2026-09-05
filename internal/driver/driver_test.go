@@ -175,7 +175,7 @@ func TestAutonomousAutoAnswers(t *testing.T) {
 
 // An unattended answer is recorded as the machine's own, whoever's stored
 // mode it runs under. appendAskEvent used to read the card's gate-approval
-// mode (GateFull ⇒ autopilot), while the driver auto-answers off a
+// mode (GateAutopilot ⇒ autopilot), while the driver auto-answers off a
 // separate flag — so `resume <id> --autonomous` on a card stored at
 // "gates" recorded its own taken answers as a human's, and the morning
 // receipt (internal/ui/receipt.go) silently dropped them. The answer
@@ -196,10 +196,11 @@ func TestAutonomousAnswerRecordsItsOwnActor(t *testing.T) {
 		},
 	})
 
-	// the card's stored mode is the default "gates": a design gate would
-	// stop for the caller, but --autonomous takes the recommended answer
-	// by itself. The receipt must still see that answer as machine-taken.
-	out, err := h.driver(Options{Autonomous: true, GateApproval: GateGates}).Run(context.Background(), "add export")
+	// --autonomous takes the ask's recommended answer by itself rather than
+	// parking on it. The receipt must record that answer as machine-taken
+	// — the actor is the caller's to declare, not something the engine
+	// infers from the card's stored mode.
+	out, err := h.driver(Options{Autonomous: true}).Run(context.Background(), "add export")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -725,7 +726,7 @@ func TestCallerGateApproveResume(t *testing.T) {
 			return toolVerdict(o.Model, "pass")
 		},
 	})
-	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "feature")
+	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "feature")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -763,7 +764,7 @@ func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 	})
-	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "feature")
+	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "feature")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -774,7 +775,7 @@ func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 	// bare resume: no decision. A short timeout makes a regression (turn-less
 	// await) fail fast instead of hanging the suite.
 	h.buf.Reset()
-	out2, err := h.driver(Options{GateApproval: GateOff, StageTimeout: 2 * time.Second}).
+	out2, err := h.driver(Options{GateApproval: GateAttended, StageTimeout: 2 * time.Second}).
 		Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
@@ -919,7 +920,7 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 				return msgIdle(o.Model, "Spec drafted.")
 			},
 		})
-		out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "feature")
+		out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "feature")
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -1255,7 +1256,7 @@ func TestCallerGatePreCheckDependency(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := h.driver(Options{GateApproval: GateOff}).drive(context.Background(), f.ID)
+	out, err := h.driver(Options{GateApproval: GateAttended}).drive(context.Background(), f.ID)
 	if err != nil {
 		t.Fatalf("drive: %v", err)
 	}

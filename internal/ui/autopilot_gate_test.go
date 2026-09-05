@@ -76,12 +76,12 @@ func hasInboxKind(m *Shell, kind attnKind) bool {
 // state.ActorAutopilot, and never parks an attnQuestion item — DESIGN
 // §10.17's "under full it may ... answer its own consequential
 // questions", closing the gap the engine's unattendedAskHint already
-// promised the agent (engine.go's GateFull check) but the TUI did not
+// promised the agent (engine.go's GateAutopilot check) but the TUI did not
 // keep before this change.
 func TestAutopilotFullAutoAnswersOwnQuestion(t *testing.T) {
 	m, eng := agentWorkspace(t, askingFake())
 	ctx := context.Background()
-	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateFull); err != nil {
+	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateAutopilot); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -125,13 +125,13 @@ func TestAutopilotFullAutoAnswersOwnQuestion(t *testing.T) {
 // --- item 3: gates never answers its own question ---
 
 // TestAutopilotGatesNeverAnswersOwnQuestion: gates crosses design gates
-// on its own but "questions still stop for you" (autopilotStops' own
+// on its own but questions still stop for you (the retired middle mode's
 // words) — a live ask must still reach the inbox exactly as it does with
 // no autopilot at all.
 func TestAutopilotGatesNeverAnswersOwnQuestion(t *testing.T) {
 	m, eng := agentWorkspace(t, askingFake())
 	ctx := context.Background()
-	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateGates); err != nil {
+	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateAttended); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -152,16 +152,20 @@ func TestAutopilotGatesNeverAnswersOwnQuestion(t *testing.T) {
 
 // --- item 4: gates crosses its own design gate ---
 
-// TestAutopilotGatesCrossesCleanPlanCritique: a card stored at gates,
+// TestAutopilotCrossesCleanPlanCritique: a card stored at autopilot,
 // whose plan critique comes back clean, crosses the approval gate to
 // Implement on its own — no attnGate item parks, and the gate event's
 // actor is autopilot, not a human.
-func TestAutopilotGatesCrossesCleanPlanCritique(t *testing.T) {
+//
+// This used to be the "gates" mode's contract, and gates was the
+// DEFAULT. It is autopilot's alone now: a card nobody handed over stops
+// here (TestAutopilotAttendedParksCleanPlanCritique below).
+func TestAutopilotCrossesCleanPlanCritique(t *testing.T) {
 	var critiques atomic.Int32
 	m, eng := chatWorkspace(t, planAgent(&critiques, "Sound.\nVERDICT: pass"))
 	ctx := context.Background()
 	m = advanceTo(t, m, domain.StagePlan)
-	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateGates); err != nil {
+	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateAutopilot); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -171,7 +175,7 @@ func TestAutopilotGatesCrossesCleanPlanCritique(t *testing.T) {
 	m = drainEngineLoop(t, m)
 
 	if m.rows[0].F.Stage == domain.StagePlan {
-		t.Fatal("gates did not cross the clean plan critique gate: still at plan")
+		t.Fatal("autopilot did not cross the clean plan critique gate: still at plan")
 	}
 	gates := gateEventsFor(t, m, "FD-001", domain.StagePlan)
 	if len(gates) == 0 {
@@ -211,12 +215,12 @@ func TestAutopilotGatesCrossesCleanPlanCritique(t *testing.T) {
 
 // TestAutopilotOffParksCleanPlanCritique: a card stored at off never
 // crosses a gate on its own — every gate stops for you, unconditionally.
-func TestAutopilotOffParksCleanPlanCritique(t *testing.T) {
+func TestAutopilotAttendedParksCleanPlanCritique(t *testing.T) {
 	var critiques atomic.Int32
 	m, eng := chatWorkspace(t, planAgent(&critiques, "Sound.\nVERDICT: pass"))
 	ctx := context.Background()
 	m = advanceTo(t, m, domain.StagePlan)
-	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateOff); err != nil {
+	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateAttended); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -245,7 +249,7 @@ func TestAutopilotCrossedGateClosesItsDecisionRow(t *testing.T) {
 	m, eng := chatWorkspace(t, planAgent(&critiques, "Sound.\nVERDICT: pass"))
 	ctx := context.Background()
 	m = advanceTo(t, m, domain.StagePlan)
-	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateFull); err != nil {
+	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateAutopilot); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -294,7 +298,7 @@ func TestAutopilotBlockedGateParksEvenOnFull(t *testing.T) {
 	}
 
 	m = advanceTo(t, m, domain.StagePlan)
-	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateFull); err != nil {
+	if err := m.store.SetGateApproval(ctx, "FD-001", domain.GateAutopilot); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
@@ -449,7 +453,7 @@ func TestHandoverAtADesignGateCrossesAndStarts(t *testing.T) {
 		t.Errorf("plan.to = %s, want plan", plan.to)
 	}
 
-	msg := m.startAutopilot(f, domain.GateGates, plan)()
+	msg := m.startAutopilot(f, domain.GateAutopilot, plan)()
 	if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 		t.Fatalf("handover failed: %s", nm.text)
 	}
@@ -461,8 +465,8 @@ func TestHandoverAtADesignGateCrossesAndStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateGates {
-		t.Errorf("gate approval = %q, want gates", got.GateApproval)
+	if got.GateApproval != domain.GateAutopilot {
+		t.Errorf("gate approval = %q, want autopilot", got.GateApproval)
 	}
 	if got.Stage == domain.StageSpec {
 		t.Fatal("the handover wrote the mode but never crossed the gate")
@@ -508,7 +512,7 @@ func TestHandoverRefusesTheLandingGate(t *testing.T) {
 // confirm, so ←→ moved nothing and enter submitted whichever button
 // looked focused. A control drawn as focusable has to be focusable.
 func TestAutopilotDialogButtonsAreReachable(t *testing.T) {
-	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, GateApproval: domain.GateOff}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, GateApproval: domain.GateAttended}
 	plan := autopilotPlan{bucket: "gate", to: domain.StageImplement}
 
 	submitted := ""
@@ -553,24 +557,11 @@ func TestAutopilotDialogButtonsAreReachable(t *testing.T) {
 		t.Errorf("enter on Cancel submitted %q — Cancel must change nothing", submitted)
 	}
 
-	// ↑↓ still drive the stop list, independently of the buttons
+	// there is one thing to confirm now that the modes are a binary: the
+	// dialog submits autopilot, and nothing else.
 	d = newDialog()
-	before := d.cursor
-	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	if d.cursor == before {
-		t.Error("↓ did not move through the stops")
-	}
-	if d.buttons.Cursor() != 1 {
-		t.Error("moving through the stops moved the button focus with it")
-	}
-
-	// and the mode submitted is the stop the list is on, not the one it
-	// opened with
-	d = newDialog()
-	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	want := autopilotStops[d.cursor].mode
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if submitted != want {
-		t.Errorf("submitted %q, want the highlighted stop %q", submitted, want)
+	if submitted != domain.GateAutopilot {
+		t.Errorf("submitted %q, want %q — the confirm IS the choice", submitted, domain.GateAutopilot)
 	}
 }

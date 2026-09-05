@@ -393,16 +393,16 @@ func TestWorkspaceMCPCardNewDefaultsGateCaller(t *testing.T) {
 	if !strings.Contains(result, "FD-001") {
 		t.Fatalf("card_new result = %q, want it to name the new card", result)
 	}
-	if !strings.Contains(result, domain.GateOff) {
-		t.Fatalf("card_new result = %q, want it to report gate approval %q", result, domain.GateOff)
+	if !strings.Contains(result, domain.GateAttended) {
+		t.Fatalf("card_new result = %q, want it to report gate approval %q", result, domain.GateAttended)
 	}
 
 	f, err := e.cfg.Store.GetFeature(context.Background(), "FD-001")
 	if err != nil {
 		t.Fatalf("card_new did not persist FD-001: %v", err)
 	}
-	if f.GateApproval != domain.GateOff {
-		t.Errorf("persisted gate approval = %q, want %q", f.GateApproval, domain.GateOff)
+	if f.GateApproval != domain.GateAttended {
+		t.Errorf("persisted gate approval = %q, want %q", f.GateApproval, domain.GateAttended)
 	}
 
 	// reachable by board_list, not just by direct store lookup.
@@ -487,14 +487,14 @@ func TestWorkspaceMCPCardNewExplicitGateAndValidation(t *testing.T) {
 	if errMsg != "" {
 		t.Fatalf("card_new error: %s", errMsg)
 	}
-	if !strings.Contains(result, domain.GateGates) {
-		t.Fatalf("card_new result = %q, want it to report gate approval %q", result, domain.GateGates)
+	if !strings.Contains(result, domain.GateAttended) {
+		t.Fatalf("card_new result = %q, want it to report gate approval %q", result, domain.GateAttended)
 	}
 	f, err := e.cfg.Store.GetFeature(context.Background(), "BG-001")
 	if err != nil {
 		t.Fatalf("card_new did not persist BG-001: %v", err)
 	}
-	if f.Kind != domain.KindBug || f.GateApproval != domain.GateGates {
+	if f.Kind != domain.KindBug || f.GateApproval != domain.GateAttended {
 		t.Errorf("persisted feature = %+v", f)
 	}
 }

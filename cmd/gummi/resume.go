@@ -44,8 +44,8 @@ func runResume(args []string) error {
 	gate, ok := domain.NormalizeGateApproval(*rv.gate)
 	if !ok {
 		return fmt.Errorf(
-			"--gate-approval must be %q, %q, or %q (aliases %q, %q accepted), got %q",
-			domain.GateOff, domain.GateGates, domain.GateFull, "auto", "caller", *rv.gate)
+			"--gate-approval must be %q or %q (the retired %q/%q/%q/%q spellings are still accepted), got %q",
+			domain.GateAttended, domain.GateAutopilot, "off", "gates", "caller", "auto", *rv.gate)
 	}
 	if *rv.envelope < 0 {
 		return fmt.Errorf("--envelope must be a positive credit count, got %d", *rv.envelope)
@@ -108,7 +108,7 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
 		bounce:         fs.Bool("bounce", false, "rewind a verify/review-fail escalation to the work stage and continue (the TUI's `b` key)"),
 		note:           fs.String("note", "", "addendum to the reborn implement/fix kickoff (used with --bounce)"),
-		gate:           fs.String("gate-approval", driver.GateGates, "who approves later design gates: off|gates|full (aliases: auto=gates, caller=off; inherits the run's mode when omitted; pass to change it)"),
+		gate:           fs.String("gate-approval", driver.GateAttended, "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)"),
 		timeout:        fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous:     fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:        fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),

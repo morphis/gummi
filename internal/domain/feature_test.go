@@ -145,9 +145,9 @@ func TestValidGateApproval(t *testing.T) {
 		want bool
 	}{
 		{"", true},
-		{GateOff, true},
-		{GateGates, true},
-		{GateFull, true},
+		{GateAttended, true},
+		{GateAttended, true},
+		{GateAutopilot, true},
 		{"auto", false},   // legacy input spelling — not a stored form
 		{"caller", false}, // legacy input spelling — not a stored form
 		{"bogus", false},
@@ -166,11 +166,11 @@ func TestNormalizeGateApproval(t *testing.T) {
 		wantOK bool
 	}{
 		{"", "", true},
-		{"auto", GateGates, true},
-		{"caller", GateOff, true},
-		{GateOff, GateOff, true},
-		{GateGates, GateGates, true},
-		{GateFull, GateFull, true},
+		{"auto", GateAttended, true},
+		{"caller", GateAttended, true},
+		{GateAttended, GateAttended, true},
+		{GateAttended, GateAttended, true},
+		{GateAutopilot, GateAutopilot, true},
 		{"bogus", "", false},
 	}
 	for _, c := range cases {
@@ -188,13 +188,35 @@ func TestNormalizeGateApproval(t *testing.T) {
 // it.
 func TestGateApprovalStoredSpellings(t *testing.T) {
 	for _, c := range []struct{ got, want string }{
-		{GateOff, "off"},
-		{GateGates, "gates"},
-		{GateFull, "full"},
+		{GateAttended, "attended"},
+		{GateAutopilot, "autopilot"},
 	} {
 		if c.got != c.want {
 			t.Errorf("stored gate-approval spelling = %q, want %q", c.got, c.want)
 		}
+	}
+}
+
+// TestGateApprovalRetiredSpellingsMigrate: every value the three-mode era
+// could have stored resolves to one of the two, so a workspace written by
+// an older gummi needs no migration of its own. "gates" and "auto" are
+// the lossy pair — they auto-crossed design gates and now stop at them —
+// and that is the deliberate default change, not an accident.
+func TestGateApprovalRetiredSpellingsMigrate(t *testing.T) {
+	for in, want := range map[string]string{
+		"off": GateAttended, "caller": GateAttended,
+		"gates": GateAttended, "auto": GateAttended,
+		"full": GateAutopilot,
+		GateAttended: GateAttended, GateAutopilot: GateAutopilot,
+		"": "",
+	} {
+		got, ok := NormalizeGateApproval(in)
+		if !ok || got != want {
+			t.Errorf("NormalizeGateApproval(%q) = %q, %v; want %q, true", in, got, ok, want)
+		}
+	}
+	if _, ok := NormalizeGateApproval("sometimes"); ok {
+		t.Error("an unknown mode was accepted")
 	}
 }
 

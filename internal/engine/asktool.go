@@ -414,7 +414,7 @@ const askConventionHint = "When you need a decision from the user, end your mess
 	"gummi shows the user a picker and delivers their answer as the next message. " +
 	"Ask about one decision at a time."
 
-// unattendedAskHint is appended for a card running on GateFull, whichever
+// unattendedAskHint is appended for a card running on GateAutopilot, whichever
 // way it asks. On that mode nobody is at the keyboard: gummi takes the
 // agent's own recommended option and the run carries on. The agent is
 // told so plainly, because a recommendation that will be acted on

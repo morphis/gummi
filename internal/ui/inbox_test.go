@@ -63,7 +63,7 @@ func TestCompletedRunRaisesGate(t *testing.T) {
 	// autopilot — pin the card to off so a clean critique still parks the
 	// gate for a human, unaffected by gates' own crossing (autopilot_gate_test.go
 	// covers that).
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateOff); err != nil {
+	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)

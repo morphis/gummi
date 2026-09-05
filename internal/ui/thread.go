@@ -900,7 +900,7 @@ func correctiveLabel(m *Shell, f domain.Feature) string {
 // stale, and nothing to clean up.
 func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
 	label := "autopilot: " + autopilotLabel(f.GateApproval)
-	if f.GateApproval == domain.GateOff {
+	if f.GateApproval == domain.GateAttended {
 		return s.Faint.Render(label)
 	}
 	sess := m.sessionFor(f.ID)
@@ -917,15 +917,16 @@ func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
 	return s.Info.Render(label + " · running")
 }
 
-// autopilotLabel names the card's gate-approval mode as stored
-// (domain.GateOff/GateGates/GateFull; empty reads as gates). It shows
-// exactly what the card carries rather than inventing wording the stored
-// value does not have.
+// autopilotLabel names the card's gate-approval mode for a field already
+// labelled "autopilot:", so it answers that field's own question rather
+// than repeating the mode's name back ("autopilot: autopilot"). Two modes
+// means the answer is a state: on for domain.GateAutopilot, off for
+// attended and for the empty value that reads as it.
 func autopilotLabel(mode string) string {
-	if mode == "" {
-		return domain.GateGates
+	if mode == domain.GateAutopilot {
+		return "on"
 	}
-	return mode
+	return "off"
 }
 
 // roundLabel renders the "⟲ n of m" badge for whichever automatic loop
@@ -1911,12 +1912,23 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// this is not a boundary crossing, just the stored mode changing to
 		// p.Mode, and it renders as exactly that one fact.
 		//
-		// autopilotLabel, not p.Mode: the empty string is a legal stored
-		// mode (domain.ValidGateApproval accepts it) that everywhere else
-		// in this package reads as gates, and printing it raw would leave
-		// the row trailing off after "set to" as though the value had gone
-		// missing.
-		line := "autopilot set to " + sanitize(autopilotLabel(p.Mode))
+		// Normalized, then labelled. The event log is history: a row
+		// written before the three modes collapsed carries a retired
+		// spelling ("full", "gates", "caller"), and labelling that
+		// directly would render an old handover as "off" — the exact
+		// opposite of what happened. NormalizeGateApproval is the one
+		// place those spellings resolve, so the past reads correctly for
+		// the same reason a stored row does.
+		//
+		// Labelling at all, rather than printing p.Mode raw: the empty
+		// string is a legal stored mode (domain.ValidGateApproval accepts
+		// it), and printing it would leave the row trailing off after
+		// "set to" as though the value had gone missing.
+		mode := p.Mode
+		if canonical, ok := domain.NormalizeGateApproval(mode); ok {
+			mode = canonical
+		}
+		line := "autopilot set to " + sanitize(autopilotLabel(mode))
 		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)

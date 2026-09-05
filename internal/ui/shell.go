@@ -2019,7 +2019,7 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 // quitCmd is the shared exit path for q and ctrl+c. Quitting with
 // autonomous work live stops sessions mid-turn; ask first so the user
 // who means it can still get out. A live session on an autopilot card
-// (GateApproval anything but GateOff) is not lost work in the same way:
+// (GateApproval anything but GateAttended) is not lost work in the same way:
 // StopForQuit records where it stopped, and it picks back up on reopen
 // (quitresume.go) — so it gets its own wording, naming the cards and
 // saying so, never implying they keep going once the terminal closes
@@ -2101,9 +2101,9 @@ func (m *Shell) quitNow() tea.Cmd {
 
 // liveAutopilotSplit splits the board's live (StateRunning/StateQueued)
 // sessions by whether their card is on autopilot — GateApproval
-// anything but domain.GateOff, same as everywhere else the field is
+// anything but domain.GateAttended, same as everywhere else the field is
 // interpreted (domain.Feature.GateApproval's own doc: empty reads as
-// GateGates). autopilot holds bare ids, sorted — all the quit dialog
+// GateAttended). autopilot holds bare ids, sorted — all the quit dialog
 // needs to name them; plain mirrors the old liveSessions' "<id>
 // (<stage>)" labels, so a hand-driven session's wording stays exactly
 // what it was.
@@ -2117,7 +2117,7 @@ func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
 		default:
 			continue
 		}
-		if s.Feature.GateApproval == domain.GateOff {
+		if s.Feature.GateApproval == domain.GateAttended {
 			plain = append(plain, fmt.Sprintf("%s (%s)", id, s.Feature.Stage))
 			continue
 		}
@@ -3486,13 +3486,13 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		// Named from the same table the dialog offered the stops in, so
-		// the confirmation reads back in the words the choice was made
-		// in. The wording this replaces knew only the two states the
-		// switch had before it grew a third, and folded off and full —
-		// the two furthest apart — into one sentence that described off.
-		stop := autopilotStops[autopilotCursorFor(mode)]
-		return noticeMsg{text: fmt.Sprintf("%s: autopilot %s — %s", id, stop.label, stop.why), reload: true}
+		// The confirmation reads back in the words the choice was made in.
+		// Two modes, so two sentences — no table to look them up in.
+		text := fmt.Sprintf("%s: attended — every gate stops for you", id)
+		if autopilotModeFor(mode) == domain.GateAutopilot {
+			text = fmt.Sprintf("%s: autopilot — it runs to a verified branch on its own", id)
+		}
+		return noticeMsg{text: text, reload: true}
 	}
 }
 

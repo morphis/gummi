@@ -39,7 +39,7 @@ func TestResumeLabelWording(t *testing.T) {
 // --- quitCmd wording ---
 
 // TestQuitWithAutopilotLiveSessionWordsDialog: a live autonomous session
-// on a card that is not GateOff gets the autopilot wording — it names
+// on a card that is not GateAttended gets the autopilot wording — it names
 // the card, says it stops and picks back up, and never implies it keeps
 // going once the terminal closes.
 func TestQuitWithAutopilotLiveSessionWordsDialog(t *testing.T) {
@@ -76,10 +76,10 @@ func TestQuitWithAutopilotLiveSessionWordsDialog(t *testing.T) {
 	}
 }
 
-// TestQuitWithGateOffLiveSessionKeepsOriginalWording: a card driven by
-// hand (GateOff) is not "on autopilot" for this wording — quitCmd's
+// TestQuitWithGateAttendedLiveSessionKeepsOriginalWording: a card driven by
+// hand (GateAttended) is not "on autopilot" for this wording — quitCmd's
 // pre-existing sentence about a discarded in-flight turn is unchanged.
-func TestQuitWithGateOffLiveSessionKeepsOriginalWording(t *testing.T) {
+func TestQuitWithGateAttendedLiveSessionKeepsOriginalWording(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
@@ -91,7 +91,7 @@ func TestQuitWithGateOffLiveSessionKeepsOriginalWording(t *testing.T) {
 	m, eng := chatWorkspace(t, ag)
 	m = pressAdvance(t, m)
 	m = pressAdvance(t, m)
-	m.rows[0].F.GateApproval = domain.GateOff // set before the run starts, matching the session's own snapshot
+	m.rows[0].F.GateApproval = domain.GateAttended // set before the run starts, matching the session's own snapshot
 	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
 
@@ -267,8 +267,8 @@ func TestMaybeOfferQuitResumePushesDialogWithBothCards(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
 	parked := time.Now().Add(-7 * time.Hour)
-	fSearch := seedQuitStopped(t, store, 44, "search", domain.StageVerify, domain.GateGates, 0, parked)
-	fCSV := seedQuitStopped(t, store, 47, "csv export", domain.StageImplement, domain.GateFull, 2, parked)
+	fSearch := seedQuitStopped(t, store, 44, "search", domain.StageVerify, domain.GateAttended, 0, parked)
+	fCSV := seedQuitStopped(t, store, 47, "csv export", domain.StageImplement, domain.GateAutopilot, 2, parked)
 
 	eng := engine.New(engine.Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Pool: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { eng.Close() })
@@ -325,7 +325,7 @@ func TestMaybeOfferQuitResumeNothingToOffer(t *testing.T) {
 func TestResumeCardRestartsMidStageSession(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
-	f := seedQuitStopped(t, store, 1, "csv export", domain.StageImplement, domain.GateFull, 0, time.Now())
+	f := seedQuitStopped(t, store, 1, "csv export", domain.StageImplement, domain.GateAutopilot, 0, time.Now())
 	if _, err := wt.Create(ctx, &f); err != nil {
 		t.Fatal(err)
 	}

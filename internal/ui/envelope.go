@@ -90,14 +90,14 @@ func (d *envelopeDialog) submit() (bool, tea.Cmd) {
 
 // offersResume reports whether raising the envelope to `to` earns the
 // follow-up "resume it?" question: an autopilot card (any gate-approval
-// mode but domain.GateOff) whose envelope, before this raise, was
+// mode but domain.GateAttended) whose envelope, before this raise, was
 // already spent — the one shape of "parked for lack of budget" this
 // dialog can tell from a card that's simply mid-run without reaching
 // into live session state, which this dialog — built from a bare
 // domain.Feature snapshot — has no access to.
 func (d *envelopeDialog) offersResume(to int) bool {
 	f := d.feature
-	if f.GateApproval == domain.GateOff {
+	if f.GateApproval == domain.GateAttended {
 		return false
 	}
 	if f.Budget.Envelope <= 0 || to <= f.Budget.Envelope {

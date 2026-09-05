@@ -48,7 +48,7 @@ func TestBG100GaveUpNeverReadsAsFinished(t *testing.T) {
 		// reason it cannot be the discriminator.
 		exit, _ := json.Marshal(map[string]any{"credits": 18, "verdict": ""})
 		took, _ := json.Marshal(state.AutopilotPayload{
-			Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateFull,
+			Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 		})
 		crossed, _ := json.Marshal(state.GatePayload{
 			From: string(domain.StageReview), To: string(domain.StageVerify), Actor: state.ActorAutopilot,

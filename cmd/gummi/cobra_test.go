@@ -163,8 +163,8 @@ func TestResumeArgvKeepsExplicitDefaultGateApproval(t *testing.T) {
 		bindResumeFlags(resumeCmd)
 	})
 
-	if err := resumeCmd.Flags().Set("gate-approval", driver.GateGates); err != nil {
-		t.Fatalf("Set(gate-approval, %q): %v", driver.GateGates, err)
+	if err := resumeCmd.Flags().Set("gate-approval", driver.GateAttended); err != nil {
+		t.Fatalf("Set(gate-approval, %q): %v", driver.GateAttended, err)
 	}
 
 	argv := resumeArgv(resumeCmd, []string{"FD-000"})
@@ -177,8 +177,8 @@ func TestResumeArgvKeepsExplicitDefaultGateApproval(t *testing.T) {
 	if !isSet(fs, "gate-approval") {
 		t.Fatalf("isSet(gate-approval) = false after explicit --gate-approval auto; argv was %v", argv)
 	}
-	if *rv.gate != driver.GateGates {
-		t.Fatalf("gate = %q, want %q", *rv.gate, driver.GateGates)
+	if *rv.gate != driver.GateAttended {
+		t.Fatalf("gate = %q, want %q", *rv.gate, driver.GateAttended)
 	}
 }
 

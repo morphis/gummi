@@ -47,7 +47,7 @@ func TestBG103EveryClosingRuleCarriesItsTime(t *testing.T) {
 
 	enter, _ := json.Marshal(map[string]string{"role": "reviewer", "model": "demo", "flavor": "stage"})
 	took, _ := json.Marshal(state.AutopilotPayload{
-		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateFull,
+		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 	})
 	crossed, _ := json.Marshal(state.GatePayload{
 		From: string(domain.StageImplement), To: string(domain.StageReview), Actor: state.ActorAutopilot,

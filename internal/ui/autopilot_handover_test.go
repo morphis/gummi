@@ -49,14 +49,14 @@ func TestSwitchRecordsTheHandover(t *testing.T) {
 		t.Fatalf("a todo card's plan moves it somewhere: %+v", plan)
 	}
 
-	m = pump(t, m, m.startAutopilot(f, domain.GateFull, plan))
+	m = pump(t, m, m.startAutopilot(f, domain.GateAutopilot, plan))
 
 	got := handoverEvents(t, m, f.ID)
 	if len(got) != 1 || got[0].Event != state.AutopilotTookOver {
 		t.Fatalf("handover rows = %+v, want exactly one took-over", got)
 	}
-	if got[0].Mode != domain.GateFull {
-		t.Fatalf("took-over mode = %q, want %q", got[0].Mode, domain.GateFull)
+	if got[0].Mode != domain.GateAutopilot {
+		t.Fatalf("took-over mode = %q, want %q", got[0].Mode, domain.GateAutopilot)
 	}
 }
 
@@ -70,8 +70,8 @@ func TestSwitchingOffRecordsTheHandback(t *testing.T) {
 	f := m.rows[0].F
 	plan := m.planAutopilot(f)
 
-	m = pump(t, m, m.startAutopilot(f, domain.GateFull, plan))
-	m = pump(t, m, m.startAutopilot(m.rows[0].F, domain.GateOff, m.planAutopilot(m.rows[0].F)))
+	m = pump(t, m, m.startAutopilot(f, domain.GateAutopilot, plan))
+	m = pump(t, m, m.startAutopilot(m.rows[0].F, domain.GateAttended, m.planAutopilot(m.rows[0].F)))
 
 	got := handoverEvents(t, m, f.ID)
 	if len(got) != 2 {
@@ -96,7 +96,7 @@ func TestModeAloneIsNotAHandover(t *testing.T) {
 		t.Fatalf("a review gate is not autopilot's to cross: %+v", plan)
 	}
 
-	m = pump(t, m, m.startAutopilot(f, domain.GateFull, plan))
+	m = pump(t, m, m.startAutopilot(f, domain.GateAutopilot, plan))
 
 	if got := handoverEvents(t, m, f.ID); len(got) != 0 {
 		t.Fatalf("handover rows = %+v, want none — nothing changed hands", got)

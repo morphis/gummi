@@ -39,7 +39,7 @@ func TestBG085PeriodClosesWhenAutopilotHandsOver(t *testing.T) {
 	f.Stage = domain.StageShape
 
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StageInvestigate, domain.StageShape, state.ActorAutopilot, at(6)),
 	}
 
@@ -77,7 +77,7 @@ func TestBG085AutonomousStageKeepsThePeriodOpen(t *testing.T) {
 	f.Stage = domain.StageImplement
 
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(6)),
 	}
 	st := onlyStretch(t, closeHandedOver(f, autopilotStretches(f, events), events))
@@ -103,7 +103,7 @@ func TestBG085AlreadyClosedPeriodIsLeftAlone(t *testing.T) {
 	f.Stage = domain.StageShape
 
 	events := []state.CardEvent{
-		evTookOver(domain.GateGates, at(0)),
+		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StageInvestigate, domain.StageShape, state.ActorAutopilot, at(6)),
 		evPark(domain.StageShape, "stopped early at --until shape, as requested", at(8)),
 	}
@@ -136,7 +136,7 @@ func TestBG085HandoverRuleIsActuallyDrawn(t *testing.T) {
 	m.cardOpen = true
 
 	stamp := time.Date(2026, 9, 3, 20, 53, 0, 0, time.UTC)
-	took, _ := json.Marshal(state.AutopilotPayload{Event: state.AutopilotTookOver, Mode: domain.GateGates})
+	took, _ := json.Marshal(state.AutopilotPayload{Event: state.AutopilotTookOver, Mode: domain.GateAttended})
 	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "demo", "flavor": "stage"})
 	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "Done."})
 	exit, _ := json.Marshal(map[string]any{"verdict": "", "credits": 18})

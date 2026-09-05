@@ -58,10 +58,10 @@ func parkRows(t *testing.T, h *harness, id domain.FeatureID) []state.ParkPayload
 	return out
 }
 
-// An unattended run (the default --gate-approval=gates, d.actor == "auto")
-// writes exactly one took-over row, naming the card's stored gate-approval
-// mode and the stage the loop actually started driving (its first real
-// stage past todo's pure kickoff hop).
+// An unattended run (--gate-approval=autopilot, d.actor == "auto") writes
+// exactly one took-over row, naming the card's stored gate-approval mode
+// and the stage the loop actually started driving (its first real stage
+// past todo's pure kickoff hop).
 func TestUnattendedRunLogsTookOver(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
 		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -87,8 +87,8 @@ func TestUnattendedRunLogsTookOver(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("took-over rows = %d, want 1: %+v", len(rows), rows)
 	}
-	if rows[0].Mode != domain.GateGates {
-		t.Fatalf("took-over mode = %q, want %q", rows[0].Mode, domain.GateGates)
+	if rows[0].Mode != domain.GateAutopilot {
+		t.Fatalf("took-over mode = %q, want %q", rows[0].Mode, domain.GateAutopilot)
 	}
 	if rows[0].Reason == "" {
 		t.Fatal("took-over row carries no reason")
@@ -142,7 +142,7 @@ func TestAttendedRunLogsNoTookOver(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "add export")
+	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "add export")
 	if err != nil {
 		t.Fatalf("Run: %v; stream=%v", err, h.eventKinds())
 	}

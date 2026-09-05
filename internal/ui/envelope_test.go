@@ -65,7 +65,7 @@ func TestEnvelopeDialogEmptyEnterCancels(t *testing.T) {
 // reaching into live session state it does not have.
 func parkedAutopilotFeature() domain.Feature {
 	return domain.Feature{
-		ID: "FD-047", GateApproval: domain.GateFull,
+		ID: "FD-047", GateApproval: domain.GateAutopilot,
 		Budget: domain.Budget{Envelope: 2400},
 		Spend:  domain.Spend{Credits: 2400},
 	}
@@ -97,16 +97,16 @@ func TestEnvelopeDialogOffersResumeOnParkedAutopilotRaise(t *testing.T) {
 }
 
 // TestEnvelopeDialogNoResumeOffGateApproval: a card driven entirely by
-// hand (GateOff) never gets the resume question — there is no
+// hand (GateAttended) never gets the resume question — there is no
 // autopilot loop to hand it back to.
 func TestEnvelopeDialogNoResumeOffGateApproval(t *testing.T) {
 	f := parkedAutopilotFeature()
-	f.GateApproval = domain.GateOff
+	f.GateApproval = domain.GateAttended
 	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil }, nil)
 	typeInto(d, "4000")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d.askResume {
-		t.Fatal("askResume = true on a GateOff card, want false")
+		t.Fatal("askResume = true on a GateAttended card, want false")
 	}
 }
 

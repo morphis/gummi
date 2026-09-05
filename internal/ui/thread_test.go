@@ -222,13 +222,14 @@ func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
 	}
 }
 
-// TestAutopilotLabel: the header shows exactly what the card carries,
-// without inventing new vocabulary (empty reads as gates).
+// TestAutopilotLabel: the field is already labelled "autopilot:", so its
+// value answers that question — on or off — rather than repeating the
+// mode's name back. Empty reads as attended, which is off.
 func TestAutopilotLabel(t *testing.T) {
 	cases := map[string]string{
-		"":               domain.GateGates,
-		domain.GateGates: domain.GateGates,
-		domain.GateOff:   domain.GateOff,
+		"":                   "off",
+		domain.GateAttended:  "off",
+		domain.GateAutopilot: "on",
 	}
 	for in, want := range cases {
 		if got := autopilotLabel(in); got != want {
@@ -1427,10 +1428,26 @@ func TestAutopilotEventLine(t *testing.T) {
 	s := m0Styles()
 	answered := map[string]bool{}
 	t.Run("plain mode change", func(t *testing.T) {
-		ev := state.CardEvent{Kind: state.EventAutopilot, Payload: `{"mode":"full"}`}
+		ev := state.CardEvent{Kind: state.EventAutopilot, Payload: `{"mode":"autopilot"}`}
 		got := ansi.Strip(stageEventLine(s, ev, 80, "", answered))
-		if !strings.Contains(got, "autopilot set to full") {
-			t.Errorf("autopilot line = %q, want to contain %q", got, "autopilot set to full")
+		if !strings.Contains(got, "autopilot set to on") {
+			t.Errorf("autopilot line = %q, want to contain %q", got, "autopilot set to on")
+		}
+	})
+	t.Run("a retired spelling in the log still reads correctly", func(t *testing.T) {
+		// the event log is history: rows written before three modes
+		// collapsed to two carry "full"/"gates"/"caller", and rendering
+		// "full" as "off" would invert what actually happened.
+		for payload, want := range map[string]string{
+			`{"mode":"full"}`:   "autopilot set to on",
+			`{"mode":"gates"}`:  "autopilot set to off",
+			`{"mode":"caller"}`: "autopilot set to off",
+		} {
+			ev := state.CardEvent{Kind: state.EventAutopilot, Payload: payload}
+			got := ansi.Strip(stageEventLine(s, ev, 80, "", answered))
+			if !strings.Contains(got, want) {
+				t.Errorf("%s rendered %q, want %q", payload, got, want)
+			}
 		}
 	})
 	t.Run("took-over boundary is drawn as a rule, not a line", func(t *testing.T) {

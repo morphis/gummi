@@ -8,12 +8,12 @@ import (
 )
 
 // attendedFeature builds a feature whose gate-approval mode is
-// domain.GateOff — the only mode lanePoolFor reads as attended. Every
+// domain.GateAttended — the only mode lanePoolFor reads as attended. Every
 // other mode, including the empty default feature() builds, lands in
 // the autopilot pool.
 func attendedFeature(num int, title string, stage domain.Stage) domain.Feature {
 	f := feature(num, title, stage)
-	f.GateApproval = domain.GateOff
+	f.GateApproval = domain.GateAttended
 	return f
 }
 

@@ -17,16 +17,20 @@ import (
 
 // --- pure logic: cursor, forward edges, confirm label, body text ---
 
-func TestAutopilotCursorForReadsEmptyAsGates(t *testing.T) {
-	cases := map[string]int{
-		domain.GateOff:   0,
-		domain.GateGates: 1,
-		domain.GateFull:  2,
-		"":               1, // empty reads as gates, same as domain.Feature.GateApproval everywhere else
+// TestAutopilotModeForReadsEmptyAsAttended: every value resolves to one
+// of the two modes, and empty resolves to attended — the same rule
+// domain.Feature.GateApproval states, kept in one place so the dialog and
+// the notice can never disagree about what a blank field means.
+func TestAutopilotModeForReadsEmptyAsAttended(t *testing.T) {
+	cases := map[string]string{
+		domain.GateAttended:  domain.GateAttended,
+		domain.GateAutopilot: domain.GateAutopilot,
+		"":                   domain.GateAttended,
+		"nonsense":           domain.GateAttended,
 	}
 	for mode, want := range cases {
-		if got := autopilotCursorFor(mode); got != want {
-			t.Errorf("autopilotCursorFor(%q) = %d, want %d", mode, got, want)
+		if got := autopilotModeFor(mode); got != want {
+			t.Errorf("autopilotModeFor(%q) = %q, want %q", mode, got, want)
 		}
 	}
 }
@@ -87,7 +91,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		to:        domain.StageBrainstorm,
 		remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageVerify},
 	}
-	body := strings.Join(autopilotBody(f, plan, domain.GateFull), " ")
+	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
 
 	wantCorrective := verdict.MaxRounds(domain.RoundKindCorrective)
 	if wantCorrective != 5 {
@@ -117,7 +121,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
 	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm}}
-	body := strings.Join(autopilotBody(f, plan, domain.GateFull), " ")
+	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
 	if strings.Contains(body, "credit envelope") {
 		t.Errorf("body mentions a credit envelope for an uncapped card: %q", body)
 	}
@@ -129,7 +133,7 @@ func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 func TestAutopilotBodyOffNeverStarts(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
 	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm}}
-	body := strings.Join(autopilotBody(f, plan, domain.GateOff), " ")
+	body := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")
 	if strings.Contains(body, "corrections") || strings.Contains(body, "runs brainstorm") {
 		t.Errorf("off's body should not describe a run: %q", body)
 	}
@@ -141,28 +145,30 @@ func TestAutopilotBodyOffNeverStarts(t *testing.T) {
 // TestAutopilotAnswersRuleTable is DESIGN §10.17's rule table, exhaustive
 // over every (mode × decisionKind) pair the TUI ever asks about,
 // including the empty mode string (domain.Feature.GateApproval's own
-// "empty reads as GateGates" rule).
+// "empty reads as GateAttended" rule).
+//
+// With three modes collapsed to two the table lost its middle row, and
+// that is the whole of the interaction change: the retired "gates" mode
+// answered decisionGate and decisionIdle on the card's behalf and was
+// the DEFAULT. Attended answers nothing, and empty reads as attended, so
+// a card nobody has handed over now stops where it used to walk.
 func TestAutopilotAnswersRuleTable(t *testing.T) {
-	modes := []string{domain.GateOff, domain.GateGates, domain.GateFull, ""}
+	modes := []string{domain.GateAttended, domain.GateAutopilot, ""}
 	kinds := []decisionKind{decisionAsk, decisionGate, decisionVerify, decisionBudget, decisionIdle}
 
 	// want[mode][kind]
 	want := map[string]map[decisionKind]bool{
-		domain.GateOff: {
+		domain.GateAttended: {
 			decisionAsk: false, decisionGate: false, decisionVerify: false,
 			decisionBudget: false, decisionIdle: false,
 		},
-		domain.GateGates: {
-			decisionAsk: false, decisionGate: true, decisionVerify: false,
-			decisionBudget: false, decisionIdle: true,
-		},
-		domain.GateFull: {
+		domain.GateAutopilot: {
 			decisionAsk: true, decisionGate: true, decisionVerify: true,
 			decisionBudget: false, decisionIdle: true,
 		},
-		"": { // empty reads as GateGates
-			decisionAsk: false, decisionGate: true, decisionVerify: false,
-			decisionBudget: false, decisionIdle: true,
+		"": { // empty reads as GateAttended: answers nothing
+			decisionAsk: false, decisionGate: false, decisionVerify: false,
+			decisionBudget: false, decisionIdle: false,
 		},
 	}
 
@@ -181,7 +187,7 @@ func TestAutopilotAnswersRuleTable(t *testing.T) {
 // budget under some mode fails loudly and specifically, not just as one
 // row in the table above.
 func TestAutopilotAnswersNeverBudget(t *testing.T) {
-	for _, mode := range []string{domain.GateOff, domain.GateGates, domain.GateFull, ""} {
+	for _, mode := range []string{domain.GateAttended, domain.GateAutopilot, ""} {
 		if autopilotAnswers(mode, decisionBudget) {
 			t.Errorf("autopilotAnswers(%q, budget) = true, want false — budget always parks", mode)
 		}
@@ -264,7 +270,7 @@ func TestAutopilotStartTodoCardEntersInitialStage(t *testing.T) {
 	}
 	plan := m.planAutopilot(f)
 
-	cmd := m.startAutopilot(f, domain.GateFull, plan)
+	cmd := m.startAutopilot(f, domain.GateAutopilot, plan)
 	if msg := cmd(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("startAutopilot failed: %s", nm.text)
@@ -274,8 +280,8 @@ func TestAutopilotStartTodoCardEntersInitialStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateFull {
-		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateFull)
+	if got.GateApproval != domain.GateAutopilot {
+		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateAutopilot)
 	}
 	// brainstorm is interactive (workflow.Interactive): entering it needs
 	// no engine, so the todo card visibly leaves todo even though nothing
@@ -300,14 +306,14 @@ func TestAutopilotOffNeverStarts(t *testing.T) {
 	}
 	plan := m.planAutopilot(f)
 
-	cmd := m.startAutopilot(f, domain.GateOff, plan)
+	cmd := m.startAutopilot(f, domain.GateAttended, plan)
 	cmd()
 	got, err := store.GetFeature(ctx, "FD-001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateOff {
-		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateOff)
+	if got.GateApproval != domain.GateAttended {
+		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateAttended)
 	}
 	if got.Stage != domain.StageTodo {
 		t.Errorf("stage = %s, want todo — off must not start anything", got.Stage)
@@ -331,7 +337,7 @@ func TestAutopilotRunningBucketOnlyWritesMode(t *testing.T) {
 		t.Fatalf("bucket = %q, want running", plan.bucket)
 	}
 
-	cmd := m.startAutopilot(f, domain.GateGates, plan)
+	cmd := m.startAutopilot(f, domain.GateAttended, plan)
 	if msg := cmd(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("startAutopilot failed: %s", nm.text)
@@ -341,8 +347,8 @@ func TestAutopilotRunningBucketOnlyWritesMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateGates {
-		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateGates)
+	if got.GateApproval != domain.GateAttended {
+		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateAttended)
 	}
 	if got.Stage != domain.StageImplement {
 		t.Errorf("stage = %s, want implement — nothing should move", got.Stage)
@@ -369,7 +375,7 @@ func TestAutopilotCrossesParkedGateToAutonomousStage(t *testing.T) {
 		t.Fatalf("plan = %+v, want bucket=gate to=implement", plan)
 	}
 
-	cmd := m.startAutopilot(f, domain.GateFull, plan)
+	cmd := m.startAutopilot(f, domain.GateAutopilot, plan)
 	msg := cmd()
 	if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 		t.Fatalf("startAutopilot failed: %s", nm.text)
@@ -437,42 +443,36 @@ func TestAutopilotKeyRefusesOnDrivenAbroadCard(t *testing.T) {
 
 // --- dialog navigation ---
 
-func TestAutopilotDialogNavigation(t *testing.T) {
+// TestAutopilotDialogConfirmSubmitsAutopilot: with two modes there is
+// nothing to navigate — the dialog states what handing the card over
+// will do and its confirm is the whole choice. ←/→ still reach Cancel,
+// and enter activates whichever button is focused.
+func TestAutopilotDialogConfirmSubmitsAutopilot(t *testing.T) {
 	var got string
-	f := domain.Feature{ID: "FD-001", GateApproval: domain.GateGates}
+	f := domain.Feature{ID: "FD-001", GateApproval: domain.GateAttended}
 	plan := autopilotPlan{bucket: "running"}
 	d := newAutopilotDialog(f, plan, func(mode string) tea.Cmd {
 		got = mode
 		return nil
 	})
-	if d.cursor != 1 {
-		t.Fatalf("initial cursor = %d, want 1 (gates)", d.cursor)
-	}
-	if done, _ := d.HandleKey(tea.KeyPressMsg{Text: "down"}); done {
-		t.Fatal("down should not close the dialog")
-	}
-	if d.cursor != 2 {
-		t.Fatalf("cursor after down = %d, want 2 (full)", d.cursor)
-	}
-	// clamps, does not wrap
-	d.HandleKey(tea.KeyPressMsg{Text: "down"})
-	if d.cursor != 2 {
-		t.Fatalf("cursor overshot the last stop: %d", d.cursor)
-	}
-	d.HandleKey(tea.KeyPressMsg{Text: "up"})
-	d.HandleKey(tea.KeyPressMsg{Text: "up"})
-	d.HandleKey(tea.KeyPressMsg{Text: "up"})
-	if d.cursor != 0 {
-		t.Fatalf("cursor undershot the first stop: %d", d.cursor)
-	}
-	d.HandleKey(tea.KeyPressMsg{Text: "down"})
-	d.HandleKey(tea.KeyPressMsg{Text: "down"}) // cursor -> full (2)
+	// the confirm leads, so enter submits without moving anything
 	done, _ := d.HandleKey(tea.KeyPressMsg{Text: "enter"})
 	if !done {
 		t.Fatal("enter should close the dialog")
 	}
-	if got != domain.GateFull {
-		t.Fatalf("onSubmit mode = %q, want full", got)
+	if got != domain.GateAutopilot {
+		t.Fatalf("onSubmit mode = %q, want %q", got, domain.GateAutopilot)
+	}
+
+	// ←  reaches Cancel, and enter there changes nothing
+	got = ""
+	d = newAutopilotDialog(f, plan, func(mode string) tea.Cmd { got = mode; return nil })
+	d.HandleKey(tea.KeyPressMsg{Text: "left"})
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Text: "enter"}); !done {
+		t.Fatal("enter on Cancel should close the dialog")
+	}
+	if got != "" {
+		t.Fatalf("Cancel submitted %q — it must change nothing", got)
 	}
 }
 
@@ -524,7 +524,7 @@ func stagesEqual(a, b []domain.Stage) bool {
 // and spends the corrective budget doing it, gates crosses design gates
 // but still stops the moment the agent needs an answer. Sharing a
 // sentence between them would make one of the two a lie.
-func TestAutopilotBodyDistinguishesGatesFromFull(t *testing.T) {
+func TestAutopilotBodyDistinguishesAttendedFromAutopilot(t *testing.T) {
 	f := domain.Feature{
 		ID: "FD-051", Num: 51, Title: "rate limits", Slug: "rate-limits",
 		Stage: domain.StageTodo,
@@ -534,30 +534,30 @@ func TestAutopilotBodyDistinguishesGatesFromFull(t *testing.T) {
 	// ahead of it is the one case where neither promise is made.
 	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan}}
 
-	full := strings.Join(autopilotBody(f, plan, domain.GateFull), " ")
-	gates := strings.Join(autopilotBody(f, plan, domain.GateGates), " ")
+	autopilot := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
+	attended := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")
 
-	if !strings.Contains(full, "without you") {
-		t.Errorf("full body does not say it runs without you: %q", full)
+	if !strings.Contains(autopilot, "without you") {
+		t.Errorf("autopilot body does not say it runs without you: %q", autopilot)
 	}
-	if strings.Contains(gates, "without you") {
-		t.Errorf("gates body claims full's promise: %q", gates)
+	if strings.Contains(attended, "without you") {
+		t.Errorf("attended body claims autopilot's promise: %q", attended)
 	}
-	if !strings.Contains(gates, "still stops") {
-		t.Errorf("gates body does not say it still stops for a question: %q", gates)
+	if !strings.Contains(attended, "waits for you") {
+		t.Errorf("attended body does not say every gate waits: %q", attended)
 	}
-	// the corrective budget is full's; naming it under gates would imply
-	// a bounce loop that mode does not run.
-	if !strings.Contains(full, "corrections") {
-		t.Errorf("full body omits the corrective budget: %q", full)
+	// the corrective budget is autopilot's; naming it under attended would
+	// imply a bounce loop that mode never runs.
+	if !strings.Contains(autopilot, "corrections") {
+		t.Errorf("autopilot body omits the corrective budget: %q", autopilot)
 	}
-	if strings.Contains(gates, "corrections") {
-		t.Errorf("gates body names a budget that does not apply to it: %q", gates)
+	if strings.Contains(attended, "corrections") {
+		t.Errorf("attended body names a budget that does not apply to it: %q", attended)
 	}
-	// both guarantees appear whichever stop is selected
-	for name, body := range map[string]string{"full": full, "gates": gates} {
-		if !strings.Contains(body, "never lands on main") || !strings.Contains(body, "parks to the inbox") {
-			t.Errorf("%s body drops a guarantee: %q", name, body)
-		}
+	// autopilot is the mode that walks away, so it carries the guarantees;
+	// attended stops at everything, so it has nothing to guarantee about
+	// what it does unsupervised.
+	if !strings.Contains(autopilot, "never lands on main") || !strings.Contains(autopilot, "parks to the inbox") {
+		t.Errorf("autopilot body drops a guarantee: %q", autopilot)
 	}
 }

@@ -15,7 +15,7 @@ func TestGateApprovalRoundtrip(t *testing.T) {
 	ctx := context.Background()
 
 	f := feat(1, "Add a healthz endpoint")
-	f.GateApproval = domain.GateOff
+	f.GateApproval = domain.GateAttended
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
@@ -23,20 +23,20 @@ func TestGateApprovalRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateOff {
-		t.Fatalf("gate-approval lost in roundtrip: %q, want %q", got.GateApproval, domain.GateOff)
+	if got.GateApproval != domain.GateAttended {
+		t.Fatalf("gate-approval lost in roundtrip: %q, want %q", got.GateApproval, domain.GateAttended)
 	}
 
 	// side-channel override to auto.
-	if err := s.SetGateApproval(ctx, f.ID, domain.GateGates); err != nil {
+	if err := s.SetGateApproval(ctx, f.ID, domain.GateAttended); err != nil {
 		t.Fatal(err)
 	}
 	got, err = s.GetFeature(ctx, f.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateGates {
-		t.Fatalf("SetGateApproval did not persist: %q, want %q", got.GateApproval, domain.GateGates)
+	if got.GateApproval != domain.GateAttended {
+		t.Fatalf("SetGateApproval did not persist: %q, want %q", got.GateApproval, domain.GateAttended)
 	}
 
 	// an unknown mode is refused, not stored.
@@ -110,14 +110,14 @@ func TestGateApprovalMigrationRewritesOldValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateGates {
-		t.Errorf("migrated gate-approval (was 'auto') = %q, want %q", got.GateApproval, domain.GateGates)
+	if got.GateApproval != domain.GateAttended {
+		t.Errorf("migrated gate-approval (was 'auto') = %q, want %q", got.GateApproval, domain.GateAttended)
 	}
 	got, err = s2.GetFeature(ctx, callerFeat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GateApproval != domain.GateOff {
-		t.Errorf("migrated gate-approval (was 'caller') = %q, want %q", got.GateApproval, domain.GateOff)
+	if got.GateApproval != domain.GateAttended {
+		t.Errorf("migrated gate-approval (was 'caller') = %q, want %q", got.GateApproval, domain.GateAttended)
 	}
 }

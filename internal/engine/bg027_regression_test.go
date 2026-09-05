@@ -71,17 +71,17 @@ func TestBG027AttendedLaneOutlivesBusy(t *testing.T) {
 // TestBG027AutopilotPoolStaysWiderThanTheBadge pins the scheduling
 // invariant that makes defect 2 (see internal/ui's
 // TestBG027FooterLabelMatchesBadgedPopulation) a labeling problem rather
-// than a pooling one: lanePoolFor deliberately pools every non-GateOff
+// than a pooling one: lanePoolFor deliberately pools every non-GateAttended
 // card — including the empty default every TUI-created card stores —
 // into poolAutopilot, while the card line's badge (board.go) lights up
-// only for the explicit GateGates value. That gap is correct and
+// only for the explicit GateAttended value. That gap is correct and
 // pinned by TestAttendedNeverQueuesBehindAutopilot; this test documents
 // it stays open so a future change here doesn't silently make the UI
 // test moot by narrowing the pool to match the badge.
 func TestBG027AutopilotPoolStaysWiderThanTheBadge(t *testing.T) {
 	f := feature(1, "default gate", domain.StageImplement)
 	inAutopilotPool := lanePoolFor(f) == poolAutopilot
-	badgedAsAutopilot := f.GateApproval == domain.GateGates // board.go's badge condition
+	badgedAsAutopilot := f.GateApproval == domain.GateAttended // board.go's badge condition
 	if inAutopilotPool == badgedAsAutopilot {
 		t.Fatalf("BG-027: expected lanePoolFor's autopilot grouping (%v) to stay wider than the card-line autopilot badge (%v) for GateApproval=%q — if these now agree, the footer's \"unattended\" label may no longer be needed",
 			inAutopilotPool, badgedAsAutopilot, f.GateApproval)

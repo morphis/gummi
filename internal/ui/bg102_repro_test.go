@@ -15,7 +15,7 @@ import (
 // first of them. So choosing full — the stop that runs a card to a
 // verified branch on its own — was confirmed with the words for off.
 //
-// Driven over autopilotStops rather than the one mode the drive typed:
+// Driven over every mode rather than the one the drive typed:
 // the defect was a switch that had fallen behind the list it switches
 // on, and the assertion that catches that is one every entry has to
 // pass. The empty mode is included because that is what a card written
@@ -27,30 +27,31 @@ func TestBG102NoticeNamesTheStopThatWasSet(t *testing.T) {
 	m.Attach(store, wt, ws)
 	f := mkFeature(t, store, 1, "rate limits", domain.StagePlan)
 
+	// two modes, and every value resolves to one of them (empty is what a
+	// card written before the field existed carries; it reads as
+	// attended). Each must be confirmed in its OWN sentence — two modes
+	// sharing one wording is the defect this guards.
 	seen := map[string]string{}
-	for _, mode := range []string{domain.GateOff, domain.GateGates, domain.GateFull, ""} {
+	for _, mode := range []string{domain.GateAttended, domain.GateAutopilot, ""} {
 		msg := m.setGateApproval(f.ID, mode)()
 		nm, ok := msg.(noticeMsg)
 		if !ok || nm.isErr {
 			t.Fatalf("%q: setting the stop failed: %#v", mode, msg)
 		}
-		want := autopilotStops[autopilotCursorFor(mode)]
-		if !strings.Contains(nm.text, want.label) {
-			t.Errorf("%q: notice %q never names the stop %q", mode, nm.text, want.label)
+		want := autopilotModeFor(mode)
+		if !strings.Contains(nm.text, want) {
+			t.Errorf("%q: notice %q never names the mode %q", mode, nm.text, want)
 		}
-		// and it must not name a different one: "off" and "full" reading
-		// alike is the whole defect.
-		for _, other := range autopilotStops {
-			if other.label == want.label {
-				continue
-			}
-			if strings.Contains(nm.text, " "+other.label+" ") {
-				t.Errorf("%q: notice %q names %q as well", mode, nm.text, other.label)
-			}
+		other := domain.GateAutopilot
+		if want == domain.GateAutopilot {
+			other = domain.GateAttended
 		}
-		if prev, dup := seen[nm.text]; dup && prev != want.label {
-			t.Errorf("stops %q and %q are confirmed with the identical sentence %q", prev, want.label, nm.text)
+		if strings.Contains(nm.text, other) {
+			t.Errorf("%q: notice %q names %q as well", mode, nm.text, other)
 		}
-		seen[nm.text] = want.label
+		if prev, dup := seen[nm.text]; dup && prev != want {
+			t.Errorf("modes %q and %q are confirmed with the identical sentence %q", prev, want, nm.text)
+		}
+		seen[nm.text] = want
 	}
 }

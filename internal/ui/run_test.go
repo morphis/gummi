@@ -238,7 +238,7 @@ func TestThreadActivityGolden(t *testing.T) {
 	// reply and the gate it parks at. On any other mode autopilot crosses
 	// that gate and runs the stage behind it, which is autopilot's own
 	// contract (autopilot_gate_test.go) and not what this frame is for.
-	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateOff); err != nil {
+	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)

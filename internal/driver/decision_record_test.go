@@ -11,7 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// TestCallerGateRecordsItsDecision: the GateOff caller checkpoint raises
+// TestCallerGateRecordsItsDecision: the GateAttended caller checkpoint raises
 // a durable decision (§10.18 — the card is blocked on a person), the
 // stream's checkpoint carries its id, and the eventual crossing answers
 // it with the same id — after --approve, nothing reads as waiting.
@@ -31,7 +31,7 @@ func TestCallerGateRecordsItsDecision(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "add export")
+	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "add export")
 	if err != nil {
 		t.Fatalf("Run: %v; stream=%v", err, h.eventKinds())
 	}
@@ -219,7 +219,7 @@ func TestResumeAnswerWithoutOpenQuestionIsATypedUsageError(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{GateApproval: GateOff}).Run(context.Background(), "add export")
+	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "add export")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

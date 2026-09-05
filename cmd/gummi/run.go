@@ -114,7 +114,7 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 		envelope:   fs.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)"),
 		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
 		full:       fs.Bool("full", false, "run the full route (brainstorm + plan), not the quick route"),
-		gate:       fs.String("gate-approval", driver.GateGates, "who approves design gates: off|gates|full (aliases: auto=gates, caller=off; persisted on the card; resume keeps it)"),
+		gate:       fs.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)"),
 		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
@@ -165,7 +165,7 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 	if !ok {
 		return driver.Options{}, fmt.Errorf(
 			"--gate-approval must be %q, %q, or %q (aliases %q, %q accepted), got %q",
-			domain.GateOff, domain.GateGates, domain.GateFull, "auto", "caller", gate)
+			domain.GateAttended, domain.GateAttended, domain.GateAutopilot, "auto", "caller", gate)
 	}
 	return driver.Options{
 		Envelope: envelope, Profile: profile, Full: full, GateApproval: norm,

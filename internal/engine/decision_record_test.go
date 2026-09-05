@@ -182,7 +182,7 @@ func TestGateCrossingCorrelatesToItsOpenDecision(t *testing.T) {
 }
 
 // TestCrossingWithoutOpenDecisionIsUncorrelated: a gate crossed with no
-// open decision to answer (an auto crossing under GateFull) carries no
+// open decision to answer (an auto crossing under GateAutopilot) carries no
 // correlating id — the record stays zero rather than inventing one.
 func TestCrossingWithoutOpenDecisionIsUncorrelated(t *testing.T) {
 	_, store, _ := newRepo(t)

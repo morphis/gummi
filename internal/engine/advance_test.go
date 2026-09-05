@@ -1019,7 +1019,7 @@ func writeDraftBody(t *testing.T, ws state.Workspace, f domain.Feature, body str
 // TestAdvanceBlockedByUndraftedChosenApproach is the whole point of this
 // change: the measured failure (4/9 spec sessions drafted nothing, the run
 // still recorded an auto-approved gate and finished verified) was an
-// auto-approved crossing, so the fix must hold even under GateFull, which
+// auto-approved crossing, so the fix must hold even under GateAutopilot, which
 // no other floor check in Advance treats specially — the gate is a
 // property of the artifact, not of who is watching it. The assertion goes
 // through the real e.Advance blocker chain, not requiredSections or
@@ -1027,7 +1027,7 @@ func writeDraftBody(t *testing.T, ws state.Workspace, f domain.Feature, body str
 func TestAdvanceBlockedByUndraftedChosenApproach(t *testing.T) {
 	e, ws, store, _ := advanceEngine(t)
 	f := feature(1, "dark mode", domain.StageSpec)
-	f.GateApproval = domain.GateFull
+	f.GateApproval = domain.GateAutopilot
 	putFeature(t, store, f)
 
 	writeDraftBody(t, ws, f, "# Spec\n\n## Problem\n\nToggle needed.\n\n"+

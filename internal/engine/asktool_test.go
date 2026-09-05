@@ -1334,7 +1334,7 @@ func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
 	}
 }
 
-// A card on GateFull answers its own questions, so its stage sessions
+// A card on GateAutopilot answers its own questions, so its stage sessions
 // must be told that before they ask one — and a card that still stops
 // for a human must NOT be told it, or the agent would reason as though
 // nobody were reading when somebody is.
@@ -1344,7 +1344,7 @@ func TestVerifyHintAuthoritativeEnvClauses(t *testing.T) {
 // gate-approval mode has no vote. The engine's Answer entry point is the
 // human path (state.ActorUser) whoever's mode the card runs under;
 // AnswerAs is the unattended loop's declared word. The old rule —
-// GateFull ⇒ autopilot, read off the stored mode — recorded a headless
+// GateAutopilot ⇒ autopilot, read off the stored mode — recorded a headless
 // --autonomous run's own taken answers as a human's whenever the stored
 // mode disagreed with how the run was driven, and the receipt silently
 // dropped them.
@@ -1354,10 +1354,10 @@ func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 		by   string
 		want string
 	}{
-		{domain.GateFull, state.ActorUser, state.ActorUser},
-		{domain.GateGates, state.ActorUser, state.ActorUser},
-		{domain.GateGates, state.ActorAutopilot, state.ActorAutopilot},
-		{domain.GateOff, state.ActorUser, state.ActorUser},
+		{domain.GateAutopilot, state.ActorUser, state.ActorUser},
+		{domain.GateAttended, state.ActorUser, state.ActorUser},
+		{domain.GateAttended, state.ActorAutopilot, state.ActorAutopilot},
+		{domain.GateAttended, state.ActorUser, state.ActorUser},
 		{"", state.ActorUser, state.ActorUser},
 	} {
 		args := askArgs(t, Ask{
@@ -1422,9 +1422,9 @@ func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
 		gate string
 		want bool
 	}{
-		{domain.GateFull, true},
-		{domain.GateGates, false},
-		{domain.GateOff, false},
+		{domain.GateAutopilot, true},
+		{domain.GateAttended, false},
+		{domain.GateAttended, false},
 		{"", false},
 	} {
 		var mu sync.Mutex

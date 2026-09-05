@@ -210,6 +210,15 @@ func (h *harness) driver(opts Options) *Driver {
 	if opts.StageTimeout == 0 {
 		opts.StageTimeout = 5 * time.Second
 	}
+	// A headless test drive is unattended by definition: there is nobody
+	// to answer a gate, so attended (the new default, and the right one
+	// for a person at a terminal) would park every one of these runs at
+	// its first gate. A test that is ABOUT the attended gate passes the
+	// mode explicitly, and an explicit value still wins — as does a mode
+	// persisted on the card, which is resolved separately on resume.
+	if opts.GateApproval == "" {
+		opts.GateApproval = GateAutopilot
+	}
 	return New(h.eng, h.store, h.ws, h.buf, opts)
 }
 

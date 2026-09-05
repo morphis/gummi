@@ -172,13 +172,12 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if r.AutopilotDriving {
 		badge += " " + s.Subtle.Render("◐ autopilot")
 	}
-	// an explicit "gates" gate-approval mode crosses this card's design
-	// gates unattended, worth flagging at a glance. Only the explicit
-	// value badges: empty reads as domain.GateGates too everywhere else in
-	// the code, but every TUI-created card stores empty, and badging that
-	// as well would light up the whole board as if each card had opted in
-	// to something nobody chose.
-	if r.F.GateApproval == domain.GateGates {
+	// an autopilot card runs its gates unattended, which is worth flagging
+	// at a glance — it is the opted-in state, and the only one where the
+	// board is moving without you. Attended is the default (and what
+	// empty reads as), so it badges nothing: a marker on every card is
+	// not a marker.
+	if r.F.GateApproval == domain.GateAutopilot {
 		badge += " " + s.Info.Render("⚡")
 	}
 	if sev := r.F.Severity; sev != "" {
@@ -330,9 +329,9 @@ func (m *Shell) boardCounts() string {
 // a card count reads like a contradiction rather than an absence.
 //
 // The second pool is labeled "unattended", not "autopilot": lanePoolFor
-// pools every card whose GateApproval isn't GateOff here (including the
+// pools every card whose GateApproval isn't GateAttended here (including the
 // empty default every TUI-created card stores), but the card line's own
-// autopilot badge (below) lights up only for the explicit GateGates
+// autopilot badge (below) lights up only for the explicit GateAttended
 // value. Reusing "autopilot" for this wider count would name a
 // population the board itself refuses to badge as such.
 func laneCountsText(lc engine.LaneCounts) string {
