@@ -649,7 +649,13 @@ feature-specific live checks. Hold each to the rubric: run it
 yourself, and it must prove the feature's behavior — the symptom the
 spec promises, not merely "runs without erroring" — deterministically.
 Record all results in the spec (the Verification plan section, with
-a summary line in Progress).` + verdict)
+a summary line in Progress).
+When the plan lists no live check beyond the commands gummi already
+ran — the section is empty, or every line restates the gummi-checks —
+the question is already answered: record the kickoff's results and
+give your verdict in that same turn. Re-reading the branch to compose
+a report about work the check runner already proved is spend with no
+verdict attached.` + verdict)
 }
 
 // contractHint is the stage-independent contract: the authoritative
