@@ -349,13 +349,41 @@ Escape hatches, because the assumption won't always hold:
 Instead of probing for a container or warning once, gummi ships the
 sandbox assumption as layered, always-on guards. The `permissions:
 allow-all | guarded` mode (above) is the first layer; per-profile
-`sandbox: enforce | warn | off` confinement is the second — `enforce`
-blocks operations that reach outside the sandbox, `warn` (the default for
-allow-all) flags them, `off` trusts the boundary. A main-checkout
-tripwire (approving a spec that would run the implementer in the main
-checkout rather than a worktree) is the third. Running gummi on a bare
-host with allow-all is possible and surfaced, not silently degraded —
-the escape hatches below stay the honest path.
+`sandbox: enforce | warn | off` is the second; the main-checkout
+tripwire is the third. Running gummi on a bare host with allow-all is
+possible and surfaced, not silently degraded — the escape hatches below
+stay the honest path.
+
+**What each layer actually guarantees**, because the names promise more
+than they keep and an operator routing a role deserves the real shape:
+
+- `sandbox: enforce` refuses to start a run whose profile names a backend
+  that cannot reach gummi's tools, and arms the tripwire. `warn` (the
+  default) arms the tripwire without the refusal; `off` disarms it. **None
+  of the three confines a write.** The mode is about tool coverage and
+  detection, not containment.
+- **File-tool confinement is the backend's**, and it comes in two tiers.
+  claude, opencode and zz pin their file-writing tools to the session's
+  working directory, so a write naming somewhere else is refused by the
+  backend. copilot, codex and headless are merely *started* there — their
+  tools may name any path, and only the tripwire notices. `gummi doctor`
+  reports the tier per role per profile as `write-cage:<profile>`, so the
+  choice is visible before a role is routed rather than after a run goes
+  wrong.
+- **No backend confines shell commands, on either tier.** A bash policy is
+  command-string based rather than path based, so a real shell cage needs
+  process-level confinement, which gummi does not do (scoped out of
+  FD-014, and still out). This is the gap that let a weak model on the
+  reviewer role write a feature's files into the operator's main checkout.
+- **The tripwire is the backstop, and it detects — it does not prevent.**
+  It snapshots main's dirty set around every turn and kills the run on a
+  clean→dirty transition, leaving the tree exactly as the agent left it.
+  The write has already happened by then.
+
+Since §4.3, no stage runs in the main checkout at all — the pre-worktree
+stages have their own scratch tree — so worktree discipline no longer
+rests on a prompt asking for it. What still rests on the model is
+everything the shell can reach.
 
 #### Config layering
 

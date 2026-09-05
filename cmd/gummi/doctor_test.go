@@ -1493,3 +1493,59 @@ func TestDoctorFlagsDecoyDatabase(t *testing.T) {
 		t.Error("a decoy database blocked readiness; it is advisory")
 	}
 }
+
+// TestDoctorWriteCageReportsTierPerRole: worktree discipline is the
+// backend's to keep, and the two tiers are not the same guarantee.
+// doctor names which roles have only the weaker one, so the choice is
+// visible before a role is routed rather than after a run goes wrong.
+func TestDoctorWriteCageReportsTierPerRole(t *testing.T) {
+	clearDoctorEnv(t)
+
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: caged
+profiles:
+  caged:
+    architect: { backend: claude, model: m }
+    implementer: { backend: claude, model: m }
+    reviewer: { backend: opencode, model: m }
+    scribe: { backend: claude, model: m }
+`)
+	c := checkByName(buildDoctorReport(repo, doctorOpts{}), "write-cage:caged")
+	if c.Status != statusOK {
+		t.Fatalf("write-cage:caged = %+v, want ok (claude and opencode both pin file tools)", c)
+	}
+	// the shell caveat rides on every profile, caged ones included
+	if !strings.Contains(c.Detail, "no backend cages shell commands") {
+		t.Errorf("a fully caged profile still hides the shell gap: %q", c.Detail)
+	}
+
+	repo2 := gitRepo(t)
+	writeProfiles(t, repo2, `
+default: mixed
+profiles:
+  mixed:
+    architect: { backend: claude, model: m }
+    implementer: { backend: claude, model: m }
+    reviewer: { backend: copilot, model: m }
+    scribe: { backend: claude, model: m }
+`)
+	r := buildDoctorReport(repo2, doctorOpts{})
+	c = checkByName(r, "write-cage:mixed")
+	if c.Status != statusWarn {
+		t.Fatalf("write-cage:mixed = %+v, want warn (copilot is cwd-only)", c)
+	}
+	if !strings.Contains(c.Detail, "reviewer (copilot)") {
+		t.Errorf("detail %q must name the uncaged role and its backend", c.Detail)
+	}
+	if strings.Contains(c.Detail, "architect") {
+		t.Errorf("detail %q named a role that IS caged", c.Detail)
+	}
+	if c.Remediation == "" {
+		t.Error("no remediation naming the backends that do cage")
+	}
+	// advisory: the cwd tier is a legitimate configuration under the tripwire
+	if !r.Ready {
+		t.Error("an uncaged role blocked readiness; the tier is a choice, not a fault")
+	}
+}

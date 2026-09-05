@@ -75,7 +75,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own

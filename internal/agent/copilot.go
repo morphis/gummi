@@ -69,7 +69,7 @@ func (c *Copilot) Name() string { return "copilot" }
 
 // Capabilities implements Agent. The Copilot SDK provides all of these.
 func (c *Copilot) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd}
 }
 
 // CreditRate implements Agent: Copilot self-reports per-model AI-credit

@@ -44,7 +44,7 @@ func NewCodex(bin string) (*Codex, error) {
 
 func (c *Codex) Name() string { return "codex" }
 func (c *Codex) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCageCwd}
 }
 func (c *Codex) CreditRate(string) float64 { return 0 }
 

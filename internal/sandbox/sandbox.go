@@ -1,9 +1,17 @@
-// Package sandbox resolves the effective confinement mode for a run from
-// the workspace config, the selected profile, and the backends that
-// profile actually routes its roles through. It is the single canonical
-// place that turns "sandbox: enforce|warn|off" plus backend capabilities
-// into (mode, coverage gaps), so the engine's session-start refusal and
-// the doctor's per-profile report cannot drift apart.
+// Package sandbox resolves the effective sandbox mode for a run from the
+// workspace config, the selected profile, and the backends that profile
+// actually routes its roles through. It is the single canonical place
+// that turns "sandbox: enforce|warn|off" plus backend capabilities into
+// (mode, coverage gaps), so the engine's session-start refusal and the
+// doctor's per-profile report cannot drift apart.
+//
+// The mode governs TOOL COVERAGE and DETECTION, not containment: enforce
+// refuses a backend that cannot reach gummi's tools and arms the
+// main-checkout tripwire, warn arms the tripwire alone, off disarms it.
+// No mode confines a write. What keeps a role's file writes inside its
+// worktree is the backend's own policy (agent.WriteCage), which doctor
+// reports per role; nothing at all confines shell commands. DESIGN §4.4
+// carries the full shape.
 //
 // The resolver is a pure function of its inputs: it reads no filesystem,
 // constructs no adapter, and mutates nothing. Callers (the engine from

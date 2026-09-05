@@ -18,12 +18,12 @@ var (
 )
 
 var capsBase = map[string]Capabilities{
-	"copilot":  {Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true},
-	"claude":   {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true},
-	"codex":    {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
-	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true},
-	"headless": {Interrupt: true, UsageEvents: true, ClientTools: true},
-	"zz":       {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true},
+	"copilot":  {Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd},
+	"claude":   {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths},
+	"codex":    {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCageCwd},
+	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths},
+	"headless": {Interrupt: true, UsageEvents: true, ClientTools: true, WriteCage: WriteCageCwd},
+	"zz":       {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCagePaths},
 }
 
 // CapabilitiesFor returns the capabilities a constructed adapter named

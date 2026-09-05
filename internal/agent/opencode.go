@@ -60,7 +60,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage, and can be interrupted by killing
 // the turn's process.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step

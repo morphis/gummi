@@ -227,6 +227,41 @@ type Capabilities struct {
 	// choice. Backends without it must refuse a ReadOnly session rather
 	// than silently run read-write.
 	ReadOnlyEnforce bool
+	// WriteCage reports how far the backend confines its own file writes
+	// to SessionOpts.WorkDir. It is what an operator needs before routing
+	// a role at a backend: a role's worktree discipline is the backend's
+	// to keep, and the two tiers below are not the same guarantee.
+	WriteCage WriteCage
+}
+
+// WriteCage is the confinement a backend applies to its file-writing
+// tools. It describes tools only. NO backend confines shell commands: a
+// bash policy is command-string based, not path based, so a real shell
+// cage needs process-level confinement, which gummi does not do (the
+// decision is recorded at internal/agent/opencode_config.go and in
+// DESIGN §4.4). The main-checkout tripwire is the backstop for what slips
+// through, and it detects and kills — it does not prevent.
+type WriteCage string
+
+const (
+	// WriteCagePaths: the backend's file-writing tools are confined to
+	// WorkDir by path, so a write naming somewhere else is refused by the
+	// backend itself rather than by the model's cooperation.
+	WriteCagePaths WriteCage = "paths"
+	// WriteCageCwd: gummi starts the backend in WorkDir and nothing more.
+	// Its tools may name any path they like; only the tripwire notices.
+	WriteCageCwd WriteCage = "cwd"
+)
+
+// Describe renders the tier for an operator-facing report.
+func (c WriteCage) Describe() string {
+	switch c {
+	case WriteCagePaths:
+		return "file tools caged to the worktree"
+	case WriteCageCwd:
+		return "started in the worktree, file tools uncaged"
+	}
+	return "unknown"
 }
 
 // Session is one live agent conversation bound to a feature + stage.

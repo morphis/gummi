@@ -828,8 +828,58 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 		} else {
 			checks = append(checks, doctorCheck{Name: "sandbox:" + name, Status: statusOK, Detail: detail})
 		}
+		checks = append(checks, writeCageCheck(name, resolved, caps))
 	}
 	return checks
+}
+
+// writeCageCheck reports, per profile, how far each role's backend
+// confines its own file writes — the fact an operator needs BEFORE
+// routing a role, not after a run goes wrong.
+//
+// It exists because "sandbox: enforce" reads like a promise it does not
+// make. That mode refuses backends without tool coverage and arms the
+// main-checkout tripwire; it confines nothing. What actually keeps a
+// role's writes in its worktree is the backend's own file-tool policy,
+// and that varies: claude, opencode and zz pin their file tools to the
+// session's working directory, while copilot, codex and headless are
+// merely started there. A weaker model routed at the second tier is held
+// by the prompt alone — which is how a reviewer once wrote a feature's
+// files into the operator's main checkout.
+//
+// Warn, never fail: the cwd tier is a legitimate configuration under the
+// tripwire, and this check's job is to make the choice visible, not to
+// make it for the operator. And the caveat rides on every profile,
+// including a fully caged one: NO backend confines shell commands.
+func writeCageCheck(name string, resolved config.Profile, caps map[string]agent.Capabilities) doctorCheck {
+	const shellNote = "no backend cages shell commands on any tier — the main-checkout tripwire is the only backstop there, and it kills a run rather than preventing the write"
+
+	roles := make([]string, 0, len(resolved))
+	for role := range resolved {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+
+	var uncaged []string
+	for _, role := range roles {
+		if caps[resolved[role].Backend].WriteCage != agent.WriteCagePaths {
+			uncaged = append(uncaged, role+" ("+resolved[role].Backend+")")
+		}
+	}
+	if len(uncaged) == 0 {
+		return doctorCheck{
+			Name:   "write-cage:" + name,
+			Status: statusOK,
+			Detail: "every role's file tools are caged to its worktree; " + shellNote,
+		}
+	}
+	return doctorCheck{
+		Name:   "write-cage:" + name,
+		Status: statusWarn,
+		Detail: "file tools uncaged for " + strings.Join(uncaged, ", ") + " — started in the worktree, free to write outside it; " + shellNote,
+		Remediation: "route these roles at a backend that pins its file tools to the working directory (claude, opencode, zz) " +
+			"if you want worktree discipline held by the harness rather than by the model",
+	}
 }
 
 // guardedChecks emits one guarded:<profile> check per defined profile, but

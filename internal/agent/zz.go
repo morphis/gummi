@@ -110,7 +110,7 @@ func (z *ZZ) Name() string { return "zz" }
 // in NewSession rather than silently run read-write. ClientTools is
 // false: zz's tools reach gummi over MCP (MCPTools), not SessionOpts.Tools.
 func (z *ZZ) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCagePaths}
 }
 
 // CreditRate implements Agent. Reads the env-configured rate (credits per

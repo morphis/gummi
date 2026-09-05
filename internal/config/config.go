@@ -21,9 +21,13 @@ import (
 type Config struct {
 	// Permissions is "allow-all" (default) or "guarded" (DESIGN §4.4).
 	Permissions string `yaml:"permissions"`
-	// Sandbox is the workspace-wide confinement default: "enforce", "warn",
-	// or "off". Empty means unset — profiles that omit their own value fall
-	// back to the built-in "warn".
+	// Sandbox is the workspace-wide default for the tool-coverage refusal
+	// and the main-checkout tripwire: "enforce", "warn", or "off". Empty
+	// means unset — profiles that omit their own value fall back to the
+	// built-in "warn". It does NOT confine writes: what keeps a role's
+	// writes inside its worktree is the backend's own file-tool policy
+	// (agent.WriteCage), and no backend confines the shell at all. See
+	// DESIGN §4.4 for what each layer actually guarantees.
 	Sandbox string `yaml:"sandbox"`
 	// AutopilotLanes caps how many autopilot-pool cards — every card whose
 	// gate-approval mode is domain.GateGates or domain.GateFull, which

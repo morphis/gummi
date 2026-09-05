@@ -77,7 +77,7 @@ func (h *Headless) Name() string { return filepath.Base(h.argv[0]) }
 // the orchestrator meters whatever arrives and enforces caps itself as a
 // backstop regardless.
 func (h *Headless) Capabilities() Capabilities {
-	return Capabilities{Interrupt: true, UsageEvents: true, ClientTools: true}
+	return Capabilities{Interrupt: true, UsageEvents: true, ClientTools: true, WriteCage: WriteCageCwd}
 }
 
 // headlessCreditRateEnv is the operator's escape hatch for pricing a
