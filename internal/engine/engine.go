@@ -876,6 +876,17 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			}
 		}
 	}
+	// Implement gets the plan's file manifest. Measured: gummi's
+	// implementer made its first edit at turn 32 of 97, while a bare agent
+	// with no spec at all first edits at turn 20-31 of 62-72 — it explored
+	// MORE than an agent working blind, despite a spec that had already
+	// located every file. The architect knew; the answer was prose the
+	// implementer re-derived from the repo.
+	if (s.Feature.Stage == domain.StageImplement || s.Feature.Stage == domain.StageFix) && !s.Rebase {
+		if pre := e.fileManifestPreamble(s); pre != "" {
+			msg = pre + "\n\n" + msg
+		}
+	}
 	// Review gets the same two things it was otherwise spending its own
 	// turns assembling. Measured on one review session: 33 turns, 28 Bash
 	// calls, zero edits — about twelve of them rebuilding `git diff
@@ -918,6 +929,46 @@ func (e *Engine) failRun(s *Session, err error) {
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
 	e.freeSlot(s)
+}
+
+// fileManifestPreamble hands the implement session the plan's file
+// manifest — where the work goes — so the stage opens the right files
+// instead of rediscovering them.
+//
+// It is stated as a starting point, never a closed set. A wrong or stale
+// manifest is worse than none if the implementer treats it as exhaustive,
+// so the text says what to do in both failure directions: a file the work
+// needs that the manifest missed gets changed anyway (and noted), and a
+// listed file that turns out irrelevant gets left alone rather than
+// having work invented for it. Missing, empty, or malformed reads as no
+// manifest, and the stage proceeds exactly as it did before.
+func (e *Engine) fileManifestPreamble(s *Session) string {
+	raw, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		return ""
+	}
+	files, _, err := spec.ParseFiles(string(raw))
+	if err != nil || len(files) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("The plan's file manifest — where this work goes. Open these before searching for anything:\n")
+	for _, f := range files {
+		b.WriteString("  - " + f.Path)
+		if f.New {
+			b.WriteString("  (new file)")
+		}
+		if f.Role != "" {
+			b.WriteString("  — " + f.Role)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nThis is where to start, not the whole boundary of the change. " +
+		"If the work needs a file the manifest does not list, change it and add a line to Progress saying which and why — " +
+		"the manifest was a plan-time guess and the next round should inherit the correction. " +
+		"If a listed file turns out to have nothing to do with the change, leave it alone and say so; " +
+		"do not invent work to justify an entry.")
+	return b.String()
 }
 
 // reviewDiffInlineMax caps how much diff rides inline in the review

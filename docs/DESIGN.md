@@ -149,6 +149,21 @@ Stage semantics:
   snapshot of a branch that is not final**: nothing is recorded from
   them, and Verify still takes its own run. They answer different
   questions at different times.
+  The plan also ships a **file manifest** — a `gummi-files` fenced block
+  naming the files the work will change, one line each on what for. The
+  implement kickoff carries it verbatim, so the stage opens the right
+  files instead of rediscovering them: gummi's implementer was measured
+  making its first edit at turn 32 of 97, *later* than a bare agent given
+  no spec at all (turn 20-31 of 62-72) — it explored more than an agent
+  working blind, because the plan's file-level knowledge was prose it
+  re-derived from the repo. The manifest is stated as a **starting point,
+  never a closed set**: a stale list that reads as exhaustive is worse
+  than none, so the implementer is told to change whatever else the work
+  needs (noting the addition in Progress, so the next round inherits the
+  correction) and to leave a listed file alone rather than invent work
+  for it. Written by whichever stage drafts the Implementation notes —
+  Plan on the full route, Spec on the quick one, Diagnose for a bug's Fix
+  section.
 - **Verify** *(autonomous, role: implementer or scribe)* — two parts:
   the repo's check commands (build/test/lint) always run, and the spec's
   verification plan adds feature-specific live checks the agent

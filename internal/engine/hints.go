@@ -38,6 +38,38 @@ const planClaimsRubric = "a `Plan claims` subsection: a table (one " +
 	"    contract the reader would otherwise have to re-derive from prose,\n" +
 	"    one bullet per claim"
 
+// fileManifestRubric is the required shape of the plan's file manifest —
+// the fenced block the implement kickoff carries verbatim, so the stage
+// opens the right files instead of rediscovering them.
+//
+// It exists because the implementer was measured making its first edit at
+// turn 32 of 97, while a bare agent given no spec at all first edits at
+// turn 20-31 of 62-72: it explored MORE than an agent working blind,
+// despite a spec that had already located every file. The architect knew
+// where the work went and wrote it as prose the implementer then re-derived.
+//
+// Every stage that drafts a plan emits it — Plan, the quick-spec flavor,
+// and Diagnose for the bug workflow's Fix section — so one constant keeps
+// the three from drifting. It is scoped deliberately: files the plan
+// expects to CHANGE, not every file worth reading, because a manifest
+// that lists the repo is a manifest nobody reads.
+const fileManifestRubric = "a " + "```gummi-files" + " fenced block: the files this work will\n" +
+	"change, one entry each, so the implementation opens them instead of\n" +
+	"searching for them.\n" +
+	"  ```gummi-files\n" +
+	"  - path: internal/engine/engine.go\n" +
+	"    role: locate() resolves the stage's working directory\n" +
+	"  - path: internal/worktree/scratch.go\n" +
+	"    role: the scratch tree itself\n" +
+	"    new: true\n" +
+	"  ```\n" +
+	"Paths are repo-relative; `role` is one line on what the change to that\n" +
+	"file is for; `new: true` marks a file that does not exist yet. List\n" +
+	"only files you expect to change — a manifest that enumerates every file\n" +
+	"worth reading is one nobody reads. Getting it exactly right is not the\n" +
+	"bar: it is read as a starting point, and the implementation is told to\n" +
+	"go beyond it when the work needs to."
+
 // interactiveWorkingDirGuard tells an interactive design stage what its
 // working directory is. It used to fence the main checkout — locate
 // handed these stages Worktrees.RepoRoot(), so a prompt was the only
@@ -160,6 +192,8 @@ plan is a spec problem, not a plan problem.
 End the plan with `+planClaimsRubric+` (e.g. "SIGHUP arrives before
 checkpoint flushes").
 
+Then add `+fileManifestRubric+`
+
 Then, ONLY when the spec makes them relevant, add these closure
 subsections. Each is a bounded table the critique reads directly
 instead of re-deriving from source; skip a subsection entirely when
@@ -198,7 +232,14 @@ Stop when the plan is written; the user approves it.`))
 	case domain.StageImplement:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Implement (autonomous). Implement the feature in this worktree
-using the spec and plan as context. The spec's Out of scope section is
+using the spec and plan as context. When the kickoff carries the plan's
+file manifest, start there rather than searching the repo for where the
+work goes — the plan already located it. Treat it as a starting point,
+not a boundary: change whatever else the work genuinely needs, and add
+a line to Progress naming any file the manifest missed, so the next
+round inherits the correction rather than the guess. If the kickoff
+carries no manifest, find your own way in as before.
+The spec's Out of scope section is
 binding — build nothing past it. Make focused edits, run the
 relevant checks as you go, and keep changes reviewable. Commit your
 work to this branch with focused git commits as you complete each
@@ -251,12 +292,17 @@ makes the bug disappear" — and put the ranking to the user before
 testing them. Probe one variable at a time, and tag any temporary
 debug logs with [DEBUG-xxxx] so cleanup is a single grep. Put open
 questions to the user one decision at a time — recommended answer
-attached — and resolve each thread as they decide. The user approves
-the diagnosis to advance — do not start fixing.`))
+attached — and resolve each thread as they decide.
+Alongside the shape of the fix, add `+fileManifestRubric+`
+The user approves the diagnosis to advance — do not start fixing.`))
 	case domain.StageFix:
 		hints = append(hints, strings.TrimSpace(`
 Stage: Fix (autonomous). Implement the fix in this worktree, guided by
-the bug report's Root cause. Make the smallest change that resolves the
+the bug report's Root cause. When the kickoff carries the diagnosis's
+file manifest, start there instead of re-locating the code; it is a
+starting point, not a boundary, so touch what the fix genuinely needs
+and note in Progress any file the manifest missed.
+Make the smallest change that resolves the
 bug, and add a regression test at a correct seam — one that exercises
 the real bug pattern as it occurs at its call site — failing before
 your change and passing after; the Verify stage requires it. If no
@@ -348,6 +394,7 @@ End the Implementation notes with ` + planClaimsRubric + `.
 This subsection is what a fresh reader (and any later review) uses to
 spot-check the plan — an unstated claim is one the reader cannot
 verify.
+Then add ` + fileManifestRubric + `
 Flag anything you are genuinely unsure about as its own %% marker
 thread with a recommended answer, rather than interviewing the user
 decision by decision. The user approves the spec to advance — do not
