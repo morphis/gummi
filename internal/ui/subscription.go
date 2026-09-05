@@ -2,6 +2,8 @@ package ui
 
 import (
 	"reflect"
+	"runtime"
+	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,13 +30,45 @@ func subscription(inner tea.Cmd) tea.Cmd {
 	return cmd
 }
 
-// isSubscription reports whether cmd was produced by subscription and so,
-// in the real runtime, never returns on its own.
+// isSubscription reports whether cmd is one the real runtime services
+// asynchronously and that therefore never returns promptly on its own:
+// anything subscription() wrapped, plus the cursor blink a focused text
+// widget hands back.
 func isSubscription(cmd tea.Cmd) bool {
 	subscriptions.mu.Lock()
-	defer subscriptions.mu.Unlock()
 	_, ok := subscriptions.s[reflect.ValueOf(cmd).Pointer()]
-	return ok
+	subscriptions.mu.Unlock()
+	return ok || isCursorBlink(cmd)
+}
+
+// isCursorBlink reports whether cmd is bubbles' cursor-blink command.
+//
+// It is a subscription in everything but name: it blocks until the blink
+// timer fires, and the real event loop runs it on its own goroutine. A
+// test harness that drains commands synchronously does not — so every
+// keystroke into a focused textarea paid a full blink interval, and a
+// test that typed a sixteen-character line paid it sixteen times. That
+// is where internal/ui's runtime went: 266 seconds of sleeping, almost
+// none of it work (a CPU profile of the worst single test showed 40ms of
+// samples in 21s of wall clock).
+//
+// Matched on the symbol name because the command is a closure returned
+// by a third-party constructor — there is no exported identity to
+// compare against. A bubbles upgrade that renames it would make this
+// stop matching, so TestCursorBlinkReadsAsASubscription asserts the
+// match directly: the suite gets slow again only over a failing test,
+// never silently.
+func isCursorBlink(cmd tea.Cmd) bool {
+	pc := reflect.ValueOf(cmd).Pointer()
+	if pc == 0 {
+		return false
+	}
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return false
+	}
+	name := fn.Name()
+	return strings.Contains(name, "/cursor.") && strings.Contains(name, ".Blink")
 }
 
 // subscriptions is the registry of live subscription-wrapped commands.

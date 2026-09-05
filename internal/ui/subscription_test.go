@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"charm.land/bubbles/v2/cursor"
+	"charm.land/bubbles/v2/textarea"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -287,4 +289,26 @@ func bareValueSelector(id *ast.Ident, parents map[ast.Node]ast.Node) (ast.Node, 
 		return nil, false // method call
 	}
 	return node, true
+}
+
+// TestCursorBlinkReadsAsASubscription pins the one match isCursorBlink
+// makes on a third-party symbol name. The blink command is a closure
+// returned by a bubbles constructor, so there is no exported identity to
+// compare against — and if a bubbles upgrade renames it, the harness
+// would silently go back to draining a blocking timer on every keystroke
+// and internal/ui would quietly cost minutes again. Failing here is how
+// that gets noticed.
+func TestCursorBlinkReadsAsASubscription(t *testing.T) {
+	ta := textarea.New()
+	ta.Focus()
+	if cmd := ta.Focus(); cmd != nil && !isSubscription(cmd) {
+		t.Error("a focused textarea's blink command is not recognized as a subscription")
+	}
+	if !isSubscription(cursor.Blink) {
+		t.Error("cursor.Blink is not recognized as a subscription — bubbles may have renamed it")
+	}
+	// and it stays specific: an ordinary command must not match
+	if isSubscription(func() tea.Msg { return nil }) {
+		t.Error("a plain command matched the cursor-blink rule")
+	}
 }
