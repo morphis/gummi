@@ -189,12 +189,13 @@ func TestAutopilotGatesCrossesCleanPlanCritique(t *testing.T) {
 	if m.rows[0].F.Stage != domain.StageVerify {
 		t.Errorf("autopilot stopped at %s, want it to run on to the verify gate", m.rows[0].F.Stage)
 	}
-	// plan and implement are the two gates on that road autopilot itself
-	// crosses. review→verify is not one of them: a clean review has
-	// always auto-continued through the loop's own autoStep (actor
-	// "review"), gate mode or not, so it leaves no autopilot-crossed gate
-	// event and must not be asserted as one.
-	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
+	// plan is the one gate on that road autopilot itself crosses. The work
+	// stage's crossing is not one: a clean critique auto-continues through
+	// the loop's own autoStep (actor "review"), gate mode or not, so it
+	// leaves no autopilot-crossed gate event and must not be asserted as
+	// one. That was true of review→verify before Review stopped being a
+	// stage, and folding it into implement did not change it.
+	for _, stage := range []domain.Stage{domain.StagePlan} {
 		crossed := gateEventsFor(t, m, "FD-001", stage)
 		if len(crossed) == 0 {
 			t.Errorf("%s was never crossed on the way to verify", stage)

@@ -336,7 +336,7 @@ func TestBuildCandsRemovalOnly(t *testing.T) {
 	if err := m.store.AddDependency(ctx, "FD-001", "FD-002"); err != nil {
 		t.Fatal(err)
 	}
-	toStage(t, m, "FD-001", domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageReview)
+	toStage(t, m, "FD-001", domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement)
 	dp := &depPicker{}
 	if err := dp.buildCands(ctx, m.store, *mustFeature(t, m, "FD-001")); err != nil {
 		t.Fatal(err)

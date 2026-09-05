@@ -281,6 +281,10 @@ func OpenStore(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
+	if err := migrateReviewStage(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -1300,4 +1304,25 @@ func (s *Store) History(ctx context.Context, id domain.FeatureID) ([]TransitionR
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// migrateReviewStage moves feature and bug cards off the retired Review
+// stage. Review stopped being a stage when the critique it performed
+// became the pass the work stage ends with, so `implement → review →
+// verify` collapsed to `implement → verify` and a stored card sitting at
+// `review` has no forward edge left — it would load fine and then refuse
+// to advance, with nothing on screen to explain why.
+//
+// Verify is the destination because that is where a passing review sent
+// the card, and a card at review has by definition already produced the
+// diff a critique would judge. The alternative — rewinding to the work
+// stage — would re-run work that is finished.
+//
+// Research keeps its Review stage and is deliberately untouched: its
+// converging stage is interactive, so it has no autonomous stage to hang
+// a critique off yet.
+func migrateReviewStage(db *sql.DB) error {
+	_, err := db.ExecContext(context.Background(),
+		`UPDATE features SET stage = 'verify' WHERE stage = 'review' AND kind != 'research'`)
+	return err
 }

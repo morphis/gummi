@@ -107,7 +107,7 @@ func TestNarrowKeepsTheQuestionWhole(t *testing.T) {
 	// the question wraps onto its own rows rather than being cut short, so
 	// it is checked in the pieces the wrap leaves — the point is that none
 	// of it was dropped, not which column it broke at
-	for _, part := range []string{"review is ready for your", "decision."} {
+	for _, part := range []string{"implement is ready for your", "decision."} {
 		if !strings.Contains(view, part) {
 			t.Errorf("the question lost %q at 36 columns:\n%s", part, view)
 		}
@@ -115,8 +115,12 @@ func TestNarrowKeepsTheQuestionWhole(t *testing.T) {
 	if strings.Contains(view, "ready for y…") {
 		t.Errorf("the question was truncated rather than wrapped:\n%s", view)
 	}
-	// the crumb yields so the card's identity can stay
-	if strings.Contains(view, "esc backlog") {
+	// the crumb yields so the card's identity can stay. Matched on the
+	// crumb's own "N of M" counter rather than on "esc backlog": the
+	// status bar carries that same phrase as a key hint, and at this width
+	// it now survives where it used to be shed — so the looser match
+	// stopped distinguishing the crumb from the bar.
+	if strings.Contains(view, "1 of 1") {
 		t.Errorf("the crumb held its row on a nine-row terminal:\n%s", view)
 	}
 	if !strings.Contains(view, "FD-001") {

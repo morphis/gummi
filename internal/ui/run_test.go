@@ -50,11 +50,17 @@ func TestRunAutonomousStage(t *testing.T) {
 		t.Errorf("spend not metered: %+v", snap.Spend)
 	}
 
-	// the thread's live stage shows the activity feed, under a session
-	// boundary naming the fresh context it started (thread.go)
+	// the thread's live stage shows the run's activity feed (thread.go).
+	// The session boundary above it is no longer asserted: the work
+	// stage's gate gained a third option when the review gate's bounce
+	// moved onto it, and the extra row pushes the boundary off the top of
+	// this fixture's 24-row frame ("↑ 3 more · pgup"). What the test is
+	// for — the thread IS the run's surface — is the feed.
 	view := m.View().Content
-	if !strings.Contains(view, "fresh context") || !strings.Contains(view, "run go test") {
-		t.Error("thread missing live activity feed")
+	for _, want := range []string{"edit internal/theme/palette.go", "run go test ./..."} {
+		if !strings.Contains(view, want) {
+			t.Errorf("thread missing live activity %q", want)
+		}
 	}
 }
 

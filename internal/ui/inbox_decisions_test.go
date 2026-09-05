@@ -156,7 +156,7 @@ func TestSeedInboxRanksBudgetOverGate(t *testing.T) {
 func TestSeedInboxSkipsAbandonedDecision(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
-	f := mkFeature(t, store, 1, "moved on", domain.StageReview)
+	f := mkFeature(t, store, 1, "moved on", domain.StageImplement)
 	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
 		ID: "gate:1", Kind: state.DecisionKindGate, Question: "review is ready for your decision.",
 	}, time.Now()); err != nil {

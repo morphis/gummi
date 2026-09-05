@@ -57,14 +57,35 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 	}
 }
 
-func TestRunCritiqueOnlyOnPlanStage(t *testing.T) {
+// TestRunCritiqueOnlyWhereARoundCounterIsDeclared: a critique may run
+// only on a stage that has declared which round counter it burns. That is
+// the whole guard against the failure mode of making critique a pass —
+// a critique with no cap loops forever — and it is enforced by refusing
+// to start one, not by defaulting to somebody else's budget.
+func TestRunCritiqueOnlyWhereARoundCounterIsDeclared(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	for _, stage := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageSpec} {
+	// declared: the plan stage and the work stages
+	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageFix} {
+		if _, ok := CritiqueRoundKind(stage); !ok {
+			t.Errorf("%s should declare a critique round counter", stage)
+		}
+	}
+	if k, _ := CritiqueRoundKind(domain.StagePlan); k != domain.RoundKindPlan {
+		t.Errorf("the plan critique burns %q, want the plan counter", k)
+	}
+	for _, stage := range []domain.Stage{domain.StageImplement, domain.StageFix} {
+		if k, _ := CritiqueRoundKind(stage); k != domain.RoundKindReview {
+			t.Errorf("%s's critique burns %q, want the review counter it inherited from the Review stage", stage, k)
+		}
+	}
+
+	// undeclared: refused outright rather than run on a default budget
+	for _, stage := range []domain.Stage{domain.StageReview, domain.StageSpec, domain.StageVerify, domain.StageTodo} {
 		if err := e.RunCritique(feature(1, "x", stage), ""); err == nil {
-			t.Errorf("critique allowed on %s stage", stage)
+			t.Errorf("critique allowed on %s, which declares no round counter", stage)
 		}
 	}
 }

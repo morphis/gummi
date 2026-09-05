@@ -135,6 +135,15 @@ const ReplanNote = "The plan critique found issues. Address each open `%% @revie
 	"thread in the spec: revise the plan in Implementation notes accordingly and " +
 	"mark each thread resolved with a line like `%% @architect: resolved — <how>`."
 
+// ReworkNote is the kickoff for a rework run after a work stage's
+// critique requested changes — the note the review→implement bounce used
+// to carry. The findings live in the spec's Review section as `%%
+// @reviewer:` threads (single source of truth), so the implementer is
+// pointed at the threads rather than handed a copy.
+const ReworkNote = "The critique found issues. Address each open `%% @reviewer:` " +
+	"thread: change the code accordingly and mark each thread resolved with a line " +
+	"like `%% @implementer: resolved — <how>`."
+
 // ReCritiqueNote is the kickoff for a critique after a replan round:
 // burn down the prior round's threads instead of re-judging the plan
 // from scratch, so the loop converges rather than churning out fresh

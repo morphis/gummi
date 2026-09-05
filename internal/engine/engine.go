@@ -639,19 +639,48 @@ func (e *Engine) RunWith(f domain.Feature, note string) error {
 	return e.run(f, note, flavorStage)
 }
 
-// RunCritique runs the plan-critique pass: a fresh-context reviewer
-// session on the Plan stage that refutes the written plan (security,
-// correctness, completeness) before the human gate, writing findings
-// as %% marker threads and ending with a verdict. It replaces the done
-// plan session like any re-run; the state machine never sees it — the
-// feature stays at Plan throughout. note is appended to the kickoff;
-// the UI uses it on re-critique rounds to point the fresh session at
-// the prior round's resolved threads.
+// RunCritique runs a stage's critique pass: a fresh-context reviewer
+// session that refutes what the stage just produced — the plan, or the
+// diff — writing findings as %% marker threads and ending with a
+// verdict. It replaces the done stage session like any re-run; the state
+// machine never sees it, so the card stays where it is throughout. note
+// is appended to the kickoff; a re-critique round uses it to point the
+// fresh session at the prior round's resolved threads.
+//
+// Every stage that ends with a critique must declare which round counter
+// that critique burns, and CritiqueRoundKind is where it declares it. A
+// critique with no counter would loop forever, so this refuses to start
+// one rather than defaulting: the failure mode is a loud error at the
+// first call, not an unbounded loop discovered in production.
 func (e *Engine) RunCritique(f domain.Feature, note string) error {
-	if f.Stage != domain.StagePlan {
-		return fmt.Errorf("critique runs on the plan stage, not %s", f.Stage)
+	if _, ok := CritiqueRoundKind(f.Stage); !ok {
+		return fmt.Errorf("stage %s has no critique pass (no round counter declared for it)", f.Stage)
 	}
 	return e.run(f, note, flavorCritique)
+}
+
+// CritiqueRoundKind names the round counter a stage's critique burns, and
+// by existing at all it says which stages HAVE a critique. ok is false for
+// every other stage.
+//
+// Each critique burns the counter its predecessor burned, so no budget
+// changes hands when Review stops being a stage: the plan critique keeps
+// RoundKindPlan (cap 2), and the work stage's critique — which IS the old
+// Review — keeps RoundKindReview (cap 3). Research's Review is still a
+// stage and is driven by the review loop, not from here.
+//
+// A new stage that wants a critique has to add a row here, which is the
+// point: verdict.MaxRounds caps by round kind, so a critique whose kind
+// was left to a default would be capped by whatever that default happened
+// to be, or not capped at all.
+func CritiqueRoundKind(stage domain.Stage) (domain.RoundKind, bool) {
+	switch stage {
+	case domain.StagePlan:
+		return domain.RoundKindPlan, true
+	case domain.StageImplement, domain.StageFix:
+		return domain.RoundKindReview, true
+	}
+	return "", false
 }
 
 // RunRebase runs the rebase-resolve pass: an implementer session in the

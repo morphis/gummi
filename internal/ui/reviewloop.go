@@ -54,14 +54,13 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 	case domain.StageReview:
 		return true, m.onReviewDone(id)
 	case domain.StagePlan:
-		return true, m.onPlanDone(id)
+		return true, m.onCritiqueStageDone(id, stage)
 	case domain.StageVerify:
 		return true, m.onVerifyDone(id)
 	case domain.StageImplement, domain.StageFix:
-		// only auto-continue work stages that are part of a review loop
-		if m.round(id, domain.RoundKindReview) > 0 {
-			return true, m.autoStep(id, domain.StageReview, "re-reviewing", "review")
-		}
+		// the work stage ends with its own critique pass — what the Review
+		// stage used to be, minus the transition.
+		return true, m.onCritiqueStageDone(id, stage)
 	case domain.StageInvestigate:
 		// research's work leg: mirrors Implement/Fix, but the forward edge
 		// is to shape (never straight to review — research has no direct
@@ -216,69 +215,117 @@ func (m *Shell) writeHalt(id domain.FeatureID, err error) tea.Cmd {
 	return nil
 }
 
-func (m *Shell) onPlanDone(id domain.FeatureID) tea.Cmd {
+// onCritiqueStageDone drives the critique loop for any stage that ends
+// with one: the plan stage, and — since Review stopped being a stage —
+// the work stage. A stage that has just written its output gets
+// critiqued; a stage whose critique has landed gets judged, and the
+// verdict either raises the gate, re-runs the stage under its cap, or
+// escalates.
+//
+// The round kind comes from the stage (engine.CritiqueRoundKind), so the
+// plan critique burns plan rounds and the work stage's critique burns
+// review rounds — the same budgets each loop had when the second one was
+// a stage of its own.
+func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea.Cmd {
+	kind, ok := engine.CritiqueRoundKind(stage)
+	if !ok {
+		return nil
+	}
+	maxRounds := verdict.MaxRounds(kind)
+	noun := critiqueNoun(stage)
+
 	s := m.engine.Get(id)
 	if s == nil {
 		return nil
 	}
 	snap := s.Snapshot()
 	if !snap.Critique {
-		// the plan was just written (or revised): critique it before
-		// raising the approval gate.
-		return m.planStep(id, true, "plan written → critiquing")
+		// the output was just written (or reworked): critique it before
+		// raising the gate.
+		return m.critiqueStep(id, stage, true, noun+" written → critiquing")
 	}
 	switch sessionVerdict(snap) {
 	case verdictPass:
-		// clear the persisted count so the next plan cycle starts fresh.
-		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
+		// clear the persisted count so the next cycle starts fresh.
+		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.setRound(id, domain.RoundKindPlan, 0)
-		text := "plan critiqued: clean — review & approve"
+		m.setRound(id, kind, 0)
+		if stage != domain.StagePlan {
+			// The work stage's critique is what the Review stage was, and
+			// a passing review stepped straight to verify — it never
+			// raised a gate. Folding the stage away must not quietly add
+			// one; making implement gate is Phase 3's change, not this.
+			return m.autoStep(id, domain.StageVerify, "critique passed → verify", "review")
+		}
+		text := noun + " critiqued: clean — review & approve"
 		if cmd, attempted := m.autopilotCrossGate(snap.Feature, text); attempted {
 			return cmd
 		}
 		m.raiseAttention(id, attnGate, text)
 		return nil
 	case verdictChanges:
-		if m.round(id, domain.RoundKindPlan) >= maxPlanRounds {
-			if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
+		if m.round(id, kind) >= maxRounds {
+			if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 				return m.writeHalt(id, err)
 			}
-			m.setRound(id, domain.RoundKindPlan, 0)
-			m.raiseEscalation(id, "plan critique still requesting changes after "+itoa(maxPlanRounds)+" rounds — review the plan manually")
-			m.notice = noticeMsg{text: string(id) + " plan critique escalated after " + itoa(maxPlanRounds) + " rounds", isErr: true}
+			m.setRound(id, kind, 0)
+			m.raiseEscalation(id, noun+" critique still requesting changes after "+itoa(maxRounds)+" rounds — review it manually")
+			m.notice = noticeMsg{text: string(id) + " " + noun + " critique escalated after " + itoa(maxRounds) + " rounds", isErr: true}
 			return nil
 		}
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.
-		if err := rounds.Bump(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
+		if err := rounds.Bump(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.setRound(id, domain.RoundKindPlan, m.round(id, domain.RoundKindPlan)+1)
-		return m.planStep(id, false, "critique requested changes → replanning (round "+itoa(m.round(id, domain.RoundKindPlan))+")")
+		m.setRound(id, kind, m.round(id, kind)+1)
+		// A work-stage critique's bounce is a corrective round in the
+		// budget sense too — the same one review's bounce burned. The plan
+		// critique's replan is not: it has never burned a corrective.
+		if stage != domain.StagePlan {
+			m.burnCorrective(id, gatepolicy.Outcome{Burns: true})
+		}
+		return m.critiqueStep(id, stage, false, "critique requested changes → reworking (round "+itoa(m.round(id, kind))+")")
 	default:
 		// no clear verdict: don't guess — reset the loop and hand it to
 		// the human.
-		if err := rounds.Reset(context.Background(), m.roundStore, id, domain.RoundKindPlan); err != nil {
+		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}
-		m.setRound(id, domain.RoundKindPlan, 0)
-		m.raiseEscalation(id, "plan critique finished with no clear verdict — review the plan manually")
+		m.setRound(id, kind, 0)
+		m.raiseEscalation(id, noun+" critique finished with no clear verdict — review it manually")
 		return nil
 	}
 }
 
-// planStep re-runs the Plan stage as the loop's next leg — the critique
-// pass (critique=true) or a replan addressing its findings — with no
-// stage transition; autoStep's analog inside a single stage.
-func (m *Shell) planStep(id domain.FeatureID, critique bool, note string) tea.Cmd {
+// critiqueNoun names what a stage's critique is judging, for the notices
+// and inbox lines the reader sees.
+func critiqueNoun(stage domain.Stage) string {
+	if stage == domain.StagePlan {
+		return "plan"
+	}
+	return "diff"
+}
+
+// critiqueStep re-runs a stage as the loop's next leg — the critique pass
+// (critique=true) or the rework addressing its findings — with no stage
+// transition; autoStep's analog inside a single stage.
+func (m *Shell) critiqueStep(id domain.FeatureID, stage domain.Stage, critique bool, note string) tea.Cmd {
+	kind, ok := engine.CritiqueRoundKind(stage)
+	if !ok {
+		return nil
+	}
 	// the kickoff is decided here, on the update loop, not in the cmd
-	// goroutine: planRounds > 0 means this critique follows a replan, so
+	// goroutine: a burned round means this critique follows a rework, so
 	// it burns down the prior threads instead of re-judging from scratch.
 	var kickoff string
-	if critique && m.round(id, domain.RoundKindPlan) > 0 {
+	if critique && m.round(id, kind) > 0 {
 		kickoff = reCritiqueNote
+	}
+	rework := replanNote
+	if stage != domain.StagePlan {
+		rework = verdict.ReworkNote
 	}
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -290,7 +337,7 @@ func (m *Shell) planStep(id domain.FeatureID, critique bool, note string) tea.Cm
 		if critique {
 			err = m.engine.RunCritique(f, kickoff)
 		} else {
-			err = m.engine.RunWith(f, replanNote)
+			err = m.engine.RunWith(f, rework)
 		}
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}

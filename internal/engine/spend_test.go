@@ -41,9 +41,9 @@ func TestFeatureSpendMeteredAcrossStages(t *testing.T) {
 
 	// a second stage adds to the same running total
 	f2 := got
-	f2.Stage = domain.StageReview
+	f2.Stage = domain.StageVerify
 	e.Drop("FD-001")
-	if _, err := store.Transition(ctx, "FD-001", domain.StageReview, "user"); err != nil {
+	if _, err := store.Transition(ctx, "FD-001", domain.StageVerify, "user"); err != nil {
 		t.Fatal(err)
 	}
 	rf, _ := store.GetFeature(ctx, "FD-001")

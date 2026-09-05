@@ -55,7 +55,7 @@ func TestBG091TerminalCardOffersNoGateCrossing(t *testing.T) {
 // 67e5391 exist to keep).
 func TestBG091EscapeHatchStaysLast(t *testing.T) {
 	id, _ := domain.NewID(domain.KindFeature, 9)
-	for _, st := range []domain.Stage{domain.StageReview, domain.StageDone} {
+	for _, st := range []domain.Stage{domain.StageVerify, domain.StageDone} {
 		f := domain.Feature{ID: id, Kind: domain.KindFeature, Stage: st}
 		for name, bs := range map[string][]binding{
 			"document": (&specView{f: f}).bindings(),

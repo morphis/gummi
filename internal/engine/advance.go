@@ -280,13 +280,17 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		}
 	}
 
-	// Advancing into Review hands a human reviewer (and, after this commit
-	// landed, an autonomous review agent) a diff of the feature's work. The
+	// Leaving the work stage hands the diff to something that judges it —
+	// verify's checks for a feature or bug, research's Review stage. The
 	// agent shells out to git itself rather than routing through
 	// Manager.Diff(), so this transition is the last place the engine can
-	// fail cleanly before the reviewer sees a poisoned diff: refuse to
-	// enter Review if main was rewound past the recorded fork.
-	if next == domain.StageReview && f.Kind != domain.KindResearch {
+	// fail cleanly before a poisoned diff is judged: refuse to cross if
+	// main was rewound past the recorded fork.
+	//
+	// The guard used to key on entering Review. Review stopped being a
+	// stage for features and bugs, so the equivalent crossing is the one
+	// into Verify; research still has its Review stage and keeps it here.
+	if (next == domain.StageVerify || next == domain.StageReview) && f.Kind != domain.KindResearch {
 		wt, err := e.mgr(ctx, &f)
 		if err != nil {
 			return res, err

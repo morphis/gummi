@@ -25,7 +25,7 @@ func diffWorkspace(t *testing.T) (*Shell, string) {
 	ctx := context.Background()
 	f := &domain.Feature{
 		ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode",
-		Stage: domain.StageReview, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	if err := m.store.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
@@ -145,10 +145,10 @@ func TestDiffRequestChangesGuardsStage(t *testing.T) {
 		t.Fatal("surface closed on a rejected request-changes")
 	}
 	f, _ := m.store.GetFeature(context.Background(), "FD-001")
-	if f.Stage != domain.StageReview {
+	if f.Stage != domain.StageImplement {
 		t.Errorf("guard failed: stage changed to %s", f.Stage)
 	}
-	if !strings.Contains(m.notice.text, "implement, review, or verify") {
+	if !strings.Contains(m.notice.text, "implement or verify") {
 		t.Errorf("missing guard notice, got %q", m.notice.text)
 	}
 }
@@ -159,9 +159,6 @@ func TestDiffRequestChangesRerunsWorkStage(t *testing.T) {
 	// run carries the open annotations via the engine's diff hints.
 	m, _ := diffWorkspace(t)
 	ctx := context.Background()
-	if _, err := m.store.Transition(ctx, "FD-001", domain.StageImplement, "review"); err != nil {
-		t.Fatal(err)
-	}
 	eng := engine.New(engine.Config{
 		Agents: singleAgent(agent.NewFake("addressed")), Store: m.store, Pool: m.wt,
 		Workspace: m.ws, MaxActive: 1,
@@ -214,7 +211,7 @@ func TestOpenDiffCommentBlocksGate(t *testing.T) {
 
 	m = pressAdvance(t, m)
 	f, _ := m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageReview {
+	if f.Stage != domain.StageImplement {
 		t.Fatalf("open diff comment did not block the gate (stage=%s)", f.Stage)
 	}
 	if !strings.Contains(m.notice.text, "diff comment") {
@@ -419,8 +416,8 @@ func TestDiffApproveFromSurface(t *testing.T) {
 		t.Fatal("A should close the surface even when blocked")
 	}
 	f2, _ := m2.store.GetFeature(ctx, "FD-001")
-	if f2.Stage != domain.StageReview {
-		t.Errorf("open diff comment did not hold the gate: stage = %s, want review", f2.Stage)
+	if f2.Stage != domain.StageImplement {
+		t.Errorf("open diff comment did not hold the gate: stage = %s, want implement", f2.Stage)
 	}
 	if !strings.Contains(m2.notice.text, "diff comment") {
 		t.Errorf("blocked notice = %q, want a diff blocking message", m2.notice.text)

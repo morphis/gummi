@@ -79,8 +79,15 @@ func TestReviewRoundsResumeSurvivesFreshDriver(t *testing.T) {
 	if r := firstWorkStageRound(h); r != 1 {
 		t.Fatalf("first resumed work-stage event round = %d, want 1 (the round burned in run-1, not a fresh grant)", r)
 	}
-	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindReview); err != nil || got != 1 {
-		t.Fatalf("post-resume Rounds(review) = %d, %v; want 1 (never re-mutated)", got, err)
+	// 2, not 1: the resume seeded run-1's burned round (asserted above, via
+	// the first work-stage event) and then burned a second one legitimately.
+	// It is NOT a re-grant — a re-grant would have restarted at 0 and left
+	// this at 1. The count reaching 2 rather than stopping at 1 is a real
+	// consequence of folding Review into the work stage: the critique now
+	// runs inside implement's budget instead of behind a stage transition,
+	// so an exhausted implement no longer stops short of being reviewed.
+	if got, err := h.store.Rounds(context.Background(), id, domain.RoundKindReview); err != nil || got != 2 {
+		t.Fatalf("post-resume Rounds(review) = %d, %v; want 2 (seeded 1, then one more burned — not a fresh grant)", got, err)
 	}
 }
 

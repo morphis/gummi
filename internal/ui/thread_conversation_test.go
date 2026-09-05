@@ -640,13 +640,26 @@ func TestThreadFailureTailShowsWithoutExpansion(t *testing.T) {
 			}
 		},
 	})
+	// Verify, not implement: a work stage's session is replaced by its
+	// critique the moment it finishes (critiqueStep drops the stale one),
+	// exactly as the plan writer's has always been, so its transcript is
+	// not what the thread is showing by the time this asserts. Verify runs
+	// no critique and keeps its session, which is what this test needs —
+	// the subject is the failure tail's rendering, not which stage it
+	// happened in.
 	m = pressAdvance(t, m) // brainstorm→spec
 	m = pressAdvance(t, m) // spec→plan
 	m = pressAdvance(t, m) // plan→implement
+	m = pressAdvance(t, m) // implement→verify
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
-	view := ansi.Strip(m.threadView(100, 30))
+	// a taller frame than the 30 rows this used to ask for: the tail is
+	// twenty-odd lines of stack and the verify stage's artifact header sits
+	// above it, so at 30 the tool line and its ✗ scroll off the top ("↑ 6
+	// more") and the assertions below measure nothing. The subject is that the
+	// tail renders inline without expansion, not that it fits in 30 rows.
+	view := ansi.Strip(m.threadView(100, 44))
 	if !strings.Contains(view, "✗") {
 		t.Errorf("failed tool not marked ✗:\n%s", view)
 	}

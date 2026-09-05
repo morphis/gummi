@@ -18,10 +18,8 @@ var featureAlways = []edge{
 	{domain.StageBrainstorm, domain.StageSpec},
 	{domain.StageSpec, domain.StagePlan},
 	{domain.StagePlan, domain.StageImplement},
-	{domain.StageImplement, domain.StageReview},
-	{domain.StageReview, domain.StageVerify},
+	{domain.StageImplement, domain.StageVerify},
 	{domain.StageVerify, domain.StageDone},
-	{domain.StageReview, domain.StageImplement},
 	{domain.StageVerify, domain.StageImplement},
 }
 
@@ -45,10 +43,8 @@ var bugAlways = []edge{
 	{domain.StageTodo, domain.StageTriage},
 	{domain.StageTriage, domain.StageDiagnose},
 	{domain.StageDiagnose, domain.StageFix},
-	{domain.StageFix, domain.StageReview},
-	{domain.StageReview, domain.StageVerify},
+	{domain.StageFix, domain.StageVerify},
 	{domain.StageVerify, domain.StageDone},
-	{domain.StageReview, domain.StageFix},
 	{domain.StageVerify, domain.StageFix},
 }
 
@@ -135,13 +131,12 @@ func TestTransitionTableExhaustive(t *testing.T) {
 }
 
 // TestQuickRouteTwoGates: a quick feature runs todo → spec → implement —
-// one design conversation, one approval — and then the unchanged
-// review/verify tail.
+// one design conversation, one approval — and then the verify tail.
 func TestQuickRouteTwoGates(t *testing.T) {
 	quick := domain.QuickRoute()
 	path := []domain.Stage{
 		domain.StageTodo, domain.StageSpec, domain.StageImplement,
-		domain.StageReview, domain.StageVerify, domain.StageDone,
+		domain.StageVerify, domain.StageDone,
 	}
 	for i := 1; i < len(path); i++ {
 		if err := CanTransition(domain.KindFeature, path[i-1], path[i], quick); err != nil {
@@ -160,10 +155,13 @@ func TestQuickRouteTwoGates(t *testing.T) {
 	}
 }
 
-func TestReviewAndVerifyNeverSkippable(t *testing.T) {
-	// In BOTH workflows, the only way into Verify is Review, the only way
-	// into Done is Verify, and the only way out of the work stage
-	// (implement/fix) is Review — no skip combo may jump the quality floor.
+func TestVerifyNeverSkippable(t *testing.T) {
+	// In BOTH workflows, the only way into Verify is the work stage, the
+	// only way into Done is Verify, and the only way out of the work stage
+	// is Verify — no skip combo may jump the quality floor. Review is not
+	// on this path any more: the critique that guarded it is the pass the
+	// work stage ends with, so the floor is one edge shorter without being
+	// one check weaker.
 	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
 		work := WorkStage(kind)
 		for _, skip := range allSkipCombos() {
@@ -173,14 +171,14 @@ func TestReviewAndVerifyNeverSkippable(t *testing.T) {
 						t.Errorf("%s skip=%+v: %s → done must be illegal", kind, skip, from)
 					}
 				}
-				if from != domain.StageReview {
+				if from != work {
 					if err := CanTransition(kind, from, domain.StageVerify, skip); err == nil {
 						t.Errorf("%s skip=%+v: %s → verify must be illegal", kind, skip, from)
 					}
 				}
 			}
 			for _, to := range domain.Stages {
-				if to != domain.StageReview {
+				if to != domain.StageVerify {
 					if err := CanTransition(kind, work, to, skip); err == nil {
 						t.Errorf("%s skip=%+v: %s → %s must be illegal", kind, skip, work, to)
 					}
@@ -208,9 +206,13 @@ func TestNextFeature(t *testing.T) {
 	if len(got) != 2 || got[0] != domain.StageBrainstorm || got[1] != domain.StageSpec {
 		t.Errorf("Next(todo, skip-brainstorm) = %v, want [brainstorm spec]", got)
 	}
-	got = Next(domain.KindFeature, domain.StageReview, domain.SkipFlags{})
-	if len(got) != 2 || got[0] != domain.StageVerify || got[1] != domain.StageImplement {
-		t.Errorf("Next(review) = %v, want [verify implement]", got)
+	got = Next(domain.KindFeature, domain.StageImplement, domain.SkipFlags{})
+	if len(got) != 1 || got[0] != domain.StageVerify {
+		t.Errorf("Next(implement) = %v, want [verify]", got)
+	}
+	got = Next(domain.KindFeature, domain.StageVerify, domain.SkipFlags{})
+	if len(got) != 2 || got[0] != domain.StageDone || got[1] != domain.StageImplement {
+		t.Errorf("Next(verify) = %v, want [done implement]", got)
 	}
 }
 
@@ -224,9 +226,13 @@ func TestNextBug(t *testing.T) {
 	if len(got) != 3 || got[0] != domain.StageTriage || got[1] != domain.StageDiagnose || got[2] != domain.StageFix {
 		t.Errorf("Next(bug todo, skip both) = %v, want [triage diagnose fix]", got)
 	}
-	got = Next(domain.KindBug, domain.StageReview, domain.SkipFlags{})
-	if len(got) != 2 || got[0] != domain.StageVerify || got[1] != domain.StageFix {
-		t.Errorf("Next(bug review) = %v, want [verify fix]", got)
+	got = Next(domain.KindBug, domain.StageFix, domain.SkipFlags{})
+	if len(got) != 1 || got[0] != domain.StageVerify {
+		t.Errorf("Next(bug fix) = %v, want [verify]", got)
+	}
+	got = Next(domain.KindBug, domain.StageVerify, domain.SkipFlags{})
+	if len(got) != 2 || got[0] != domain.StageDone || got[1] != domain.StageFix {
+		t.Errorf("Next(bug verify) = %v, want [done fix]", got)
 	}
 }
 

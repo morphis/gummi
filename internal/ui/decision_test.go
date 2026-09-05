@@ -356,6 +356,28 @@ func TestBG058InputAgreesWithDroppedDecisionBlock(t *testing.T) {
 // attention, so its card page carries a gate decision — read the findings,
 // bounce to implement, advance to verify — with the bounce as the option
 // that consumes words.
+// verifyGateWorkspace parks a card at the verify gate — the one gate
+// autopilot may never cross on its own, under any mode. It used to be
+// reachable as "the review gate" too; Review is a pass now, and the work
+// stage's gate IS autopilot-crossable (autopilotForward), so verify is
+// the remaining example.
+func verifyGateWorkspace(t *testing.T) *Shell {
+	t.Helper()
+	m, _ := newWorkspace(t)
+	m = pump(t, m, m.Init())
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = typeString(t, m, "Bouncy")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	for range 5 { // todo→brainstorm→spec→plan→implement→verify
+		m = pressAdvance(t, m)
+	}
+	if m.rows[0].F.Stage != domain.StageVerify {
+		t.Fatalf("stage = %s, want verify", m.rows[0].F.Stage)
+	}
+	m.raiseAttention("FD-001", attnGate, "verify is ready for your decision")
+	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
+}
+
 func reviewGateWorkspace(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := newWorkspace(t)
@@ -363,11 +385,13 @@ func reviewGateWorkspace(t *testing.T) *Shell {
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 5 { // todo→brainstorm→spec→plan→implement→review
+	for range 4 { // todo→brainstorm→spec→plan→implement
 		m = pressAdvance(t, m)
 	}
-	if m.rows[0].F.Stage != domain.StageReview {
-		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
+	// the work stage IS the review gate now — its critique is what Review
+	// used to be, judged without a stage of its own.
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
 	}
 	m.raiseAttention("FD-001", attnGate, "review is ready for your decision")
 	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
@@ -399,25 +423,24 @@ func TestThreadDecisionTypingIsChoosing(t *testing.T) {
 	if d == nil || d.kind != decisionGate {
 		t.Fatalf("review gate has no gate decision: %+v", d)
 	}
-	if i := d.wordConsumer(); i != 1 {
-		t.Fatalf("word consumer = %d, want the bounce at 1 (actions %v)", i, d.actions)
+	if i := d.wordConsumer(); i != 2 {
+		t.Fatalf("word consumer = %d, want request-changes at 2 (actions %v)", i, d.actions)
 	}
 
 	m = typeString(t, m, "the contrast is off in dark mode")
 	out := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(out, "bounce to implement with your words") {
+	if !strings.Contains(out, "with your words") {
 		t.Errorf("typing did not aim and relabel the word-eating option:\n%s", out)
 	}
-	if m.decisionCursor != 1 {
-		t.Errorf("typed prose left the cursor at %d, want the bounce at 1", m.decisionCursor)
+	if m.decisionCursor != 2 {
+		t.Errorf("typed prose left the cursor at %d, want request-changes at 2", m.decisionCursor)
 	}
 
+	// enter re-runs the work stage with the line rather than rewinding to
+	// it: the critique iterates the stage, so there is no edge to take.
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.rows[m.sel].F.Stage != domain.StageImplement {
-		t.Fatalf("enter did not deliver the line to the bounce: stage %s", m.rows[m.sel].F.Stage)
-	}
-	if got := m.bounceNotes["FD-001"]; got != "the contrast is off in dark mode" {
-		t.Errorf("bounce carried %q, want the composer's line", got)
+		t.Fatalf("request-changes moved the card off its stage: %s", m.rows[m.sel].F.Stage)
 	}
 }
 
@@ -658,27 +681,24 @@ func TestVerbLeavesPickerAtFullBrightness(t *testing.T) {
 func TestThreadDecisionDigitSelectsWorkflowOption(t *testing.T) {
 	m := reviewGateWorkspace(t)
 	d := m.openDecision(m.rows[m.sel])
-	if d == nil || len(d.actions) < 4 || d.actions[1].id != "bounce" {
-		t.Fatalf("precondition: a four-option review gate with bounce at 1, got %+v", d)
+	// the work stage's gate: diff, advance, and the word-eating
+	// send-it-back at index 2 (the bounce's successor now that the
+	// critique iterates the stage instead of rewinding to it)
+	if d == nil || len(d.actions) < 3 || d.actions[2].id != "run" {
+		t.Fatalf("precondition: a work-stage gate with send-it-back at 2, got %+v", d)
 	}
 
-	// digit 2 selects option index 1 — it must not land in the composer,
+	// digit 3 selects option index 2 — it must not land in the composer,
 	// and it must not commit on its own
-	m = press(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
+	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"})
 	if got := m.threadInput.Value(); got != "" {
 		t.Fatalf("the digit typed into the composer instead of selecting: %q", got)
 	}
-	if m.decisionCursor != 1 {
-		t.Fatalf("digit 2 left the cursor at %d, want 1", m.decisionCursor)
+	if m.decisionCursor != 2 {
+		t.Fatalf("digit 3 left the cursor at %d, want 2", m.decisionCursor)
 	}
-	if m.rows[m.sel].F.Stage != domain.StageReview {
-		t.Fatalf("the digit alone committed the option — stage moved to %s", m.rows[m.sel].F.Stage)
-	}
-
-	// only enter commits it
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.rows[m.sel].F.Stage != domain.StageImplement {
-		t.Fatalf("enter did not commit the selected (bounce) option: stage = %s", m.rows[m.sel].F.Stage)
+		t.Fatalf("the digit alone committed the option — stage moved to %s", m.rows[m.sel].F.Stage)
 	}
 }
 

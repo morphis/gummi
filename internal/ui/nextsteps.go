@@ -416,7 +416,15 @@ func stageActions(in nextInput) []nextAction {
 		if b := blockedGate(in); b != nil {
 			return append(acts, *b)
 		}
-		return append(acts, nextStep("advance", "g", "advance to review", "hand it to the fresh-context reviewer"))
+		acts = append(acts, nextStep("advance", "g", "advance to verify", "the critique passed — run the checks"))
+		// Sending it back is an answer in its own right, and it is the
+		// option that consumes the composer's words. It re-runs the stage
+		// in place rather than rewinding to it: the work stage's critique
+		// iterates the stage, so there is no edge to take. This is where
+		// the review gate's bounce went when Review stopped being a stage,
+		// and it is the same act the diff surface's R performs.
+		return append(acts, nextStep("run", "", "send it back with changes",
+			"re-runs "+string(in.stage)+" with what's wrong — your line goes with it"))
 
 	case domain.StageReview:
 		if !finished {

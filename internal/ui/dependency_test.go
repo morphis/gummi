@@ -61,7 +61,7 @@ func TestLoadRowsDerivesBlockedFromStore(t *testing.T) {
 	}
 
 	// land the dep → reloading yields DepBlocked:false
-	for _, st := range []domain.Stage{domain.StageReview, domain.StageVerify, domain.StageDone} {
+	for _, st := range []domain.Stage{domain.StageVerify, domain.StageDone} {
 		if _, err := m.store.Transition(ctx, dep.ID, st, "test"); err != nil {
 			t.Fatalf("transitioning dep to %s: %v", st, err)
 		}

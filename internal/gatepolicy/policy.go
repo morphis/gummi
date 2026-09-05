@@ -179,7 +179,14 @@ func Decide(in Input) Outcome {
 	}
 
 	switch in.Stage {
+	case domain.StageImplement, domain.StageFix:
+		// the work stage's own critique pass — what the Review stage used
+		// to be, judged in place without a transition
+		return decideCritique(in)
 	case domain.StageReview:
+		// research still has a Review stage (its converging stage is
+		// interactive, so it has no autonomous stage to hang a critique
+		// off); feature and bug reach decideCritique above instead.
 		return decideReview(in)
 	case domain.StageVerify:
 		return decideVerify(in)
@@ -187,6 +194,30 @@ func Decide(in Input) Outcome {
 		// Neither loop stage Decide knows how to drive: nothing to do but
 		// hand it back.
 		return Outcome{Action: Park, Stage: in.Stage, Reason: "unhandled-stage"}
+	}
+}
+
+// decideCritique resolves a finished critique pass on a work stage — the
+// judgement the Review stage used to make, now made without the stage.
+// Pass advances to verify; changes iterates the work stage again under
+// the corrective cap, or parks (escalated) at it; anything else is an
+// unclear verdict, and an unclear verdict is never guessed.
+//
+// BounceToWork here names the stage the card is already in, so it is an
+// iteration rather than a transition. That is the whole difference
+// between a stage and a pass, and it is why the review → implement rerun
+// edge could be deleted from the graph rather than repointed.
+func decideCritique(in Input) Outcome {
+	switch in.Verdict {
+	case verdict.Pass:
+		return Outcome{Action: Advance, Stage: domain.StageVerify, Reason: "critique-pass"}
+	case verdict.Changes:
+		if in.Corrective >= in.CorrectiveMax {
+			return Outcome{Action: Park, Stage: in.Stage, Reason: "critique-changes-cap"}
+		}
+		return Outcome{Action: BounceToWork, Stage: in.WorkStage, Reason: "critique-changes", Burns: true}
+	default:
+		return Outcome{Action: Park, Stage: in.Stage, Reason: "critique-unclear"}
 	}
 }
 

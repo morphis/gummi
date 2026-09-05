@@ -89,7 +89,7 @@ func TestSwitchingOffRecordsTheHandback(t *testing.T) {
 // is no period to mark, and marking one would draw a stretch around a
 // card that sat still the whole time.
 func TestModeAloneIsNotAHandover(t *testing.T) {
-	m := reviewGateWorkspace(t)
+	m := verifyGateWorkspace(t)
 	f := m.rows[m.sel].F
 	plan := m.planAutopilot(f)
 	if plan.to != "" {

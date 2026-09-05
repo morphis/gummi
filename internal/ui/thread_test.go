@@ -41,7 +41,7 @@ func TestStageSequence(t *testing.T) {
 			domain.Feature{Kind: domain.KindFeature},
 			[]domain.Stage{
 				domain.StageTodo, domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
-				domain.StageImplement, domain.StageReview, domain.StageVerify, domain.StageDone,
+				domain.StageImplement, domain.StageVerify, domain.StageDone,
 			},
 		},
 		{
@@ -49,7 +49,7 @@ func TestStageSequence(t *testing.T) {
 			domain.Feature{Kind: domain.KindFeature, Skip: domain.SkipFlags{Brainstorm: true, Plan: true}},
 			[]domain.Stage{
 				domain.StageTodo, domain.StageSpec, domain.StageImplement,
-				domain.StageReview, domain.StageVerify, domain.StageDone,
+				domain.StageVerify, domain.StageDone,
 			},
 		},
 		{
@@ -57,7 +57,7 @@ func TestStageSequence(t *testing.T) {
 			domain.Feature{Kind: domain.KindBug},
 			[]domain.Stage{
 				domain.StageTodo, domain.StageTriage, domain.StageDiagnose, domain.StageFix,
-				domain.StageReview, domain.StageVerify, domain.StageDone,
+				domain.StageVerify, domain.StageDone,
 			},
 		},
 		{

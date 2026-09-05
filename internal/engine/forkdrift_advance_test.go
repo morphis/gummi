@@ -66,7 +66,7 @@ func TestAdvanceReviewRefusesOnDrift(t *testing.T) {
 
 	res, err := e.Advance(context.Background(), f.ID, "test")
 	if err == nil {
-		t.Fatal("Advance into review succeeded despite drift")
+		t.Fatal("Advance out of the work stage succeeded despite drift")
 	}
 	var fe *worktree.ForkDriftError
 	if !errors.As(err, &fe) {
@@ -111,8 +111,8 @@ func TestAdvanceReviewBackfillsForkPoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Advance with backfill failed: %v", err)
 	}
-	if res.Status != StatusAdvanced || res.Feature.Stage != domain.StageReview {
-		t.Fatalf("Advance status = %v stage = %s, want Advanced/StageReview", res.Status, res.Feature.Stage)
+	if res.Status != StatusAdvanced || res.Feature.Stage != domain.StageVerify {
+		t.Fatalf("Advance status = %v stage = %s, want Advanced/StageVerify", res.Status, res.Feature.Stage)
 	}
 	want := mustGitsha(t, ws.Root, "merge-base", "HEAD", f.BranchName())
 	stored, gerr := store.GetFeature(context.Background(), f.ID)

@@ -175,7 +175,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 	}
 
 	// walk to verify: plan→implement→review→verify
-	for _, want := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageVerify} {
+	for _, want := range []domain.Stage{domain.StageImplement, domain.StageVerify} {
 		m = pressAdvance(t, m)
 		if m.rows[0].F.Stage != want {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
@@ -205,9 +205,11 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Fatal("done advanced somewhere")
 	}
 
-	// history is the full audit trail
-	if len(m.rows[0].History) != 7 {
-		t.Fatalf("history has %d records, want 7", len(m.rows[0].History))
+	// history is the full audit trail — six transitions now that Review is
+	// a pass rather than a stage of its own (todo→brainstorm→spec→plan→
+	// implement→verify→done)
+	if len(m.rows[0].History) != 6 {
+		t.Fatalf("history has %d records, want 6", len(m.rows[0].History))
 	}
 
 	// D → confirm → y deletes record, worktree, branch. Uppercase: x is
@@ -273,7 +275,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 	}
 
 	// walk to verify: fix → review → verify
-	for _, want := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+	for _, want := range []domain.Stage{domain.StageVerify} {
 		m = pressAdvance(t, m)
 		if m.rows[0].F.Stage != want {
 			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
@@ -307,16 +309,17 @@ func TestBugBouncesReviewToFix(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
 	m = typeString(t, m, "Crash on nil")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 4 { // todo→triage→diagnose→fix→review
+	for range 3 { // todo→triage→diagnose→fix
 		m = pressAdvance(t, m)
 	}
-	if m.rows[0].F.Stage != domain.StageReview {
-		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
+	if m.rows[0].F.Stage != domain.StageFix {
+		t.Fatalf("stage = %s, want fix", m.rows[0].F.Stage)
 	}
-	// forward g from review goes to verify (not the rerun edge to fix)
+	// forward g from the work stage goes straight to verify — Review is a
+	// pass the stage runs, not a stage of its own
 	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageVerify {
-		t.Fatalf("forward from review = %s, want verify", m.rows[0].F.Stage)
+		t.Fatalf("forward from fix = %s, want verify", m.rows[0].F.Stage)
 	}
 	// b from verify bounces back to fix (the bug work stage), not implement
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
@@ -331,12 +334,14 @@ func TestBounceFromReview(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 5 { // todo→brainstorm→spec→plan→implement→review
+	for range 5 { // todo→brainstorm→spec→plan→implement→verify
 		m = pressAdvance(t, m)
 	}
-	if m.rows[0].F.Stage != domain.StageReview {
-		t.Fatalf("stage = %s, want review", m.rows[0].F.Stage)
+	if m.rows[0].F.Stage != domain.StageVerify {
+		t.Fatalf("stage = %s, want verify", m.rows[0].F.Stage)
 	}
+	// verify is the only stage with a bounce edge now: review's went with
+	// the stage, because a critique iterates in place instead of rewinding
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("bounce: stage = %s, want implement", m.rows[0].F.Stage)

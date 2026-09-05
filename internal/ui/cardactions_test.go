@@ -175,7 +175,7 @@ func TestCardActionsForResearchExclusions(t *testing.T) {
 	// and "not available" are the same fact here.
 	stages := []domain.Stage{
 		domain.StageTodo, domain.StageInvestigate, domain.StageShape,
-		domain.StageReview, domain.StageVerify, domain.StageDone,
+		domain.StageVerify, domain.StageDone,
 	}
 	excluded := []string{"diff", "rebase", "merge", "clean"}
 	for _, stage := range stages {
@@ -532,7 +532,7 @@ func TestCardActionsForSessionState(t *testing.T) {
 func TestCardActionsForBounceGate(t *testing.T) {
 	stages := []domain.Stage{
 		domain.StageTodo, domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
-		domain.StageImplement, domain.StageReview, domain.StageVerify, domain.StageDone,
+		domain.StageImplement, domain.StageVerify, domain.StageDone,
 	}
 	for _, stage := range stages {
 		in := nextInput{stage: stage, kind: domain.KindFeature}

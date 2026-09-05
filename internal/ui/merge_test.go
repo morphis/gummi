@@ -374,7 +374,7 @@ func TestSquashMergeReentryRefused(t *testing.T) {
 func atVerify(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	ctx := context.Background()
-	for _, st := range []domain.Stage{domain.StageReview, domain.StageVerify} {
+	for _, st := range []domain.Stage{domain.StageVerify} {
 		if _, err := m.store.Transition(ctx, "FD-001", st, "test"); err != nil {
 			t.Fatal(err)
 		}

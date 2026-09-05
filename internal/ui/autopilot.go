@@ -108,7 +108,7 @@ func autopilotForward(f domain.Feature) (domain.Stage, bool) {
 	case domain.StageDiagnose:
 		return domain.StageFix, true
 	case domain.StageImplement, domain.StageFix:
-		return domain.StageReview, true
+		return domain.StageVerify, true
 	case domain.StageInvestigate:
 		return domain.StageShape, true
 	default:

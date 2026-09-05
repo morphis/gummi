@@ -28,6 +28,13 @@ type graph struct {
 
 // featureGraph is the design-driven workflow. Brainstorm and Plan are the
 // only skippable stages; Spec is the gated convergence point.
+//
+// Review is not a stage here. What it did — a fresh-context reviewer over
+// the diff, findings as %% threads, a pass/changes verdict driving a bounce
+// — is now the critique pass Implement ends with, exactly as Plan has
+// always ended with one. A stage that iterates itself needs no edge, so
+// implement → review → verify collapses to implement → verify and the
+// review → implement rerun edge goes with it.
 var featureGraph = graph{
 	initial: domain.StageTodo,
 	table: []transition{
@@ -36,16 +43,16 @@ var featureGraph = graph{
 		{from: domain.StageBrainstorm, to: domain.StageSpec},
 		{from: domain.StageSpec, to: domain.StagePlan},
 		{from: domain.StagePlan, to: domain.StageImplement},
-		{from: domain.StageImplement, to: domain.StageReview},
-		{from: domain.StageReview, to: domain.StageVerify},
+		{from: domain.StageImplement, to: domain.StageVerify},
 		{from: domain.StageVerify, to: domain.StageDone},
 
 		// skip edges, only for flags set at creation
 		{from: domain.StageTodo, to: domain.StageSpec, needsSkip: skipBrainstorm},
 		{from: domain.StageSpec, to: domain.StageImplement, needsSkip: skipPlan},
 
-		// rerun edges: findings or failed checks bounce work back
-		{from: domain.StageReview, to: domain.StageImplement},
+		// rerun edge: failed checks bounce work back. Review's own bounce
+		// is gone with the stage — implement's critique iterates the stage
+		// in place, so requesting changes is no longer a transition.
 		{from: domain.StageVerify, to: domain.StageImplement},
 	},
 }
@@ -53,8 +60,9 @@ var featureGraph = graph{
 // bugGraph is the diagnosis-driven workflow. Triage (reproduce) and
 // Diagnose (root cause) are skippable for obvious bugs; both may be
 // skipped, so a combined todo→fix edge exists since they are adjacent.
-// Fix is the bug's Implement, and it shares the same Review → Verify
-// floor — where Verify additionally proves the repro is gone.
+// Fix is the bug's Implement, and like Implement it ends with its own
+// critique pass rather than handing off to a Review stage. Verify
+// additionally proves the repro is gone.
 var bugGraph = graph{
 	initial: domain.StageTodo,
 	table: []transition{
@@ -62,8 +70,7 @@ var bugGraph = graph{
 		{from: domain.StageTodo, to: domain.StageTriage},
 		{from: domain.StageTriage, to: domain.StageDiagnose},
 		{from: domain.StageDiagnose, to: domain.StageFix},
-		{from: domain.StageFix, to: domain.StageReview},
-		{from: domain.StageReview, to: domain.StageVerify},
+		{from: domain.StageFix, to: domain.StageVerify},
 		{from: domain.StageVerify, to: domain.StageDone},
 
 		// skip edges, only for flags set at creation
@@ -71,17 +78,23 @@ var bugGraph = graph{
 		{from: domain.StageTriage, to: domain.StageFix, needsSkip: skipDiagnose},
 		{from: domain.StageTodo, to: domain.StageFix, needsSkip: skipTriageAndDiagnose},
 
-		// rerun edges: findings or failed checks bounce work back to Fix
-		{from: domain.StageReview, to: domain.StageFix},
+		// rerun edge: failed checks bounce work back to Fix. Review's own
+		// bounce is gone with the stage — the fix stage's critique iterates
+		// in place rather than transitioning.
 		{from: domain.StageVerify, to: domain.StageFix},
 	},
 }
 
 // researchGraph is the investigation-driven workflow: todo → investigate →
 // shape → review → verify → done. It has no skip edges — investigate and
-// shape are both always mandatory — and shares the never-skippable Review →
-// Verify floor. Its rerun edges bounce findings back to investigate (the
-// research WorkStage), never to shape.
+// shape are both always mandatory. Its rerun edges bounce findings back to
+// investigate (the research WorkStage), never to shape.
+//
+// Research KEEPS its Review stage, deliberately, while feature and bug
+// give theirs up. A critique is a pass a stage runs before it ends, and
+// research's converging stage (shape) is interactive — there is no
+// autonomous stage for it to hang off. Folding research in needs the
+// interaction change (Phase 3) underneath it, so it waits.
 var researchGraph = graph{
 	initial: domain.StageTodo,
 	table: []transition{

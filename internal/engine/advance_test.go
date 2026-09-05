@@ -228,8 +228,8 @@ func TestAdvanceForwardWalkFeature(t *testing.T) {
 	// blank template promoted above leaves it empty.
 	fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
 
-	// plan → implement → review → verify: no further worktree creation
-	for _, want := range []domain.Stage{domain.StageImplement, domain.StageReview, domain.StageVerify} {
+	// plan → implement → verify: no further worktree creation
+	for _, want := range []domain.Stage{domain.StageImplement, domain.StageVerify} {
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusAdvanced || res.To != want {
 			t.Fatalf("advance to %s: status=%d to=%s", want, res.Status, res.To)
@@ -310,7 +310,7 @@ func TestAdvanceBlockedByQuestions(t *testing.T) {
 func TestAdvanceBlockedByDiff(t *testing.T) {
 	e, _, store, _ := advanceEngine(t)
 	ctx := context.Background()
-	f := feature(1, "diff gated", domain.StageReview)
+	f := feature(1, "diff gated", domain.StageImplement)
 	putFeature(t, store, f)
 	if _, err := store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
 		Feature: f.ID, File: "a.go", Anchor: "h", Excerpt: "x", Comment: "fix this",
@@ -676,7 +676,7 @@ func TestAdvanceDependencyMet(t *testing.T) {
 		t.Fatalf("pre-landing status=%d, want blocked-dependency", res.Status)
 	}
 
-	for _, st := range []domain.Stage{domain.StageReview, domain.StageVerify, domain.StageDone} {
+	for _, st := range []domain.Stage{domain.StageVerify, domain.StageDone} {
 		if _, err := store.Transition(ctx, dep.ID, st, "test"); err != nil {
 			t.Fatalf("walking dep to %s: %v", st, err)
 		}
@@ -980,11 +980,11 @@ func TestRequiredSections(t *testing.T) {
 		{"feature leaving spec via skip edge", domain.KindFeature, domain.StageSpec, domain.StageImplement, []string{"Chosen approach"}},
 		{"bug leaving diagnose", domain.KindBug, domain.StageDiagnose, domain.StageFix, []string{"Root cause"}},
 		{"feature plan to implement", domain.KindFeature, domain.StagePlan, domain.StageImplement, []string{"Implementation notes"}},
-		{"feature to done", domain.KindFeature, domain.StageReview, domain.StageDone, []string{"Verification plan"}},
+		{"feature to done", domain.KindFeature, domain.StageVerify, domain.StageDone, []string{"Verification plan"}},
 		{"bug to done", domain.KindBug, domain.StageVerify, domain.StageDone, []string{"Verification"}},
 		{"research to done exempt", domain.KindResearch, domain.StageVerify, domain.StageDone, nil},
 		{"research leaving spec-shaped stage", domain.KindResearch, domain.StageSpec, domain.StagePlan, nil},
-		{"plan to implement wrong to-stage", domain.KindFeature, domain.StagePlan, domain.StageReview, nil},
+		{"plan to implement wrong to-stage", domain.KindFeature, domain.StagePlan, domain.StageVerify, nil},
 		{"bug leaving triage", domain.KindBug, domain.StageTriage, domain.StageDiagnose, nil},
 	}
 	for _, c := range cases {

@@ -58,8 +58,8 @@ func TestAutopilotForwardEdges(t *testing.T) {
 	safe := map[domain.Stage]domain.Stage{
 		domain.StagePlan:        domain.StageImplement,
 		domain.StageDiagnose:    domain.StageFix,
-		domain.StageImplement:   domain.StageReview,
-		domain.StageFix:         domain.StageReview,
+		domain.StageImplement:   domain.StageVerify,
+		domain.StageFix:         domain.StageVerify,
 		domain.StageInvestigate: domain.StageShape,
 	}
 	for from, to := range safe {
@@ -69,7 +69,7 @@ func TestAutopilotForwardEdges(t *testing.T) {
 		}
 	}
 	excluded := []domain.Stage{
-		domain.StageReview, domain.StageVerify, domain.StageTodo,
+		domain.StageVerify, domain.StageTodo,
 		domain.StageBrainstorm, domain.StageSpec, domain.StageShape,
 		domain.StageTriage, domain.StageDone,
 	}
@@ -85,7 +85,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 	plan := autopilotPlan{
 		bucket:    "todo",
 		to:        domain.StageBrainstorm,
-		remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageReview, domain.StageVerify},
+		remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageVerify},
 	}
 	body := strings.Join(autopilotBody(f, plan, domain.GateFull), " ")
 
@@ -98,7 +98,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		// person, and autopilot crosses into one and hands the card back
 		// rather than running it, so naming them here was the switch
 		// promising work it never does (BG-099).
-		"plan, implement, review and verify",
+		"plan, implement and verify",
 		"it never runs brainstorm and spec on its own",
 		"5 corrections",
 		"2400 credit envelope",
@@ -202,7 +202,7 @@ func TestAutopilotPlanTodoCard(t *testing.T) {
 	if plan.to != domain.StageBrainstorm {
 		t.Fatalf("to = %s, want brainstorm", plan.to)
 	}
-	want := []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageReview, domain.StageVerify}
+	want := []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageVerify}
 	if !stagesEqual(plan.remaining, want) {
 		t.Fatalf("remaining = %v, want %v", plan.remaining, want)
 	}
@@ -242,7 +242,7 @@ func TestAutopilotPlanVerifyGateStaysRunningBucket(t *testing.T) {
 // alone rather than re-driving a loop that already gave up.
 func TestAutopilotPlanEscalatedReviewStaysRunningBucket(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageReview}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StageVerify}
 	m.raiseEscalation(f.ID, "review still requesting changes after 3 rounds — needs you")
 	plan := m.planAutopilot(f)
 	if plan.bucket != "running" {

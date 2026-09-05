@@ -19,6 +19,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/workflow"
 )
 
 func TestParseVerdict(t *testing.T) {
@@ -71,6 +72,14 @@ func isVerify(opts agent.SessionOpts) bool {
 // advanceTo drives g until the feature reaches the target stage.
 func advanceTo(t *testing.T, m *Shell, target domain.Stage) *Shell {
 	t.Helper()
+	// Review stopped being a stage for features and bugs — the critique it
+	// performed is the pass the work stage ends with. A fixture asking to
+	// reach "review" means "reach the point where the diff gets judged",
+	// which is now the work stage; the critique runs from there without a
+	// transition. Research still has a Review stage and is unaffected.
+	if target == domain.StageReview && m.rows[m.sel].F.Kind != domain.KindResearch {
+		target = workflow.WorkStage(m.rows[m.sel].F.Kind)
+	}
 	for i := 0; i < 8 && m.rows[0].F.Stage != target; i++ {
 		draftRequiredSections(t, m)
 		m = pressAdvance(t, m)
@@ -140,7 +149,7 @@ func TestReviewUnclearVerdictEscalates(t *testing.T) {
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)
 
-	if m.rows[0].F.Stage != domain.StageReview {
+	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Errorf("unclear verdict advanced the stage to %s", m.rows[0].F.Stage)
 	}
 	if m.inbox.len() == 0 {

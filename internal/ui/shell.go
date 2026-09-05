@@ -3170,6 +3170,14 @@ func (m *Shell) runStage(f domain.Feature) tea.Cmd {
 // bounce's stashed note. engine.RunWith is Run's note-carrying path —
 // the kickoff the fresh session opens with says what it starts from.
 func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
+	if m.engine == nil {
+		// A detached shell (no engine attached) has nothing to dispatch
+		// to. Say so rather than dereferencing nothing: this is now
+		// reachable from the work stage's own gate, where "send it back
+		// with changes" re-runs the stage.
+		m.notice = noticeMsg{text: string(f.ID) + ": no agent configured — nothing to re-run the stage with", isErr: true}
+		return nil
+	}
 	// entering the plan stage hydrates the loop's round counter from the
 	// store, so a resumed plan resumes with the rounds already burned. A
 	// failed read aborts dispatch rather than guessing at a fresh budget.
@@ -3210,29 +3218,30 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 			// would just be one more copy nothing retracts once it starts.
 			return nil
 		case engine.StateDone:
-			// A finished plan session resumes the loop at its position
-			// instead of re-running the plan writer: a finished writer
-			// means the (possibly revised) plan is already on disk, so the
-			// next leg is the critique; a finished critique means the loop
-			// is awaiting the judge's replan-or-approve decision. Other
-			// stages just re-run (status quo).
-			if f.Stage == domain.StagePlan {
+			// A finished session on a stage that ends with a critique
+			// resumes the loop at its position instead of re-running the
+			// stage's writer: a finished writer means the (possibly
+			// reworked) output is already on disk, so the next leg is the
+			// critique; a finished critique means the loop is awaiting the
+			// judge's rework-or-approve decision. Other stages just re-run
+			// (status quo).
+			if _, ok := engine.CritiqueRoundKind(f.Stage); ok {
 				if s.Snapshot().Critique {
-					return m.onPlanDone(f.ID)
+					return m.onCritiqueStageDone(f.ID, f.Stage)
 				}
-				return m.planStep(f.ID, true, "resuming plan critique (plan already written)")
+				return m.critiqueStep(f.ID, f.Stage, true, "resuming "+string(f.Stage)+" critique (output already written)")
 			}
 		case engine.StatePaused:
-			// An interrupted plan critique resumes as a critique: the plan
-			// is already written, so restarting the plan writer would burn
-			// a full plan pass to redo finished work. A mid-flight writer
+			// An interrupted critique resumes as a critique: the stage's
+			// output is already written, so restarting its writer would
+			// burn a full pass to redo finished work. A mid-flight writer
 			// still falls through to engine.Run (status-quo restart).
-			if f.Stage == domain.StagePlan && s.Snapshot().Critique {
+			if _, ok := engine.CritiqueRoundKind(f.Stage); ok && s.Snapshot().Critique {
 				return func() tea.Msg {
 					if err := m.engine.RunCritique(f, ""); err != nil {
 						return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true}
 					}
-					return noticeMsg{text: string(f.ID) + " resuming plan critique (plan already written)", clearInbox: f.ID}
+					return noticeMsg{text: string(f.ID) + " resuming " + string(f.Stage) + " critique (output already written)", clearInbox: f.ID}
 				}
 			}
 		}

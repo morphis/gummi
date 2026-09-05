@@ -81,7 +81,7 @@ func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]sta
 	fake := agent.NewFake("")
 	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: clientTools}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
-		stage := h.stageFromWorkDir(opts.WorkDir)
+		stage := h.scriptStage(opts)
 		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {
 			h.draftRequiredSections(f)
 		}
@@ -156,7 +156,7 @@ func newMultiRepoHarness(t *testing.T, script map[domain.Stage]stageFn) *harness
 	fake := agent.NewFake("")
 	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
-		stage := h.stageFromWorkDir(opts.WorkDir)
+		stage := h.scriptStage(opts)
 		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {
 			h.draftRequiredSections(f)
 		}
@@ -400,4 +400,28 @@ func (h *harness) draftRequiredSections(f domain.Feature) {
 	if content != string(raw) {
 		_ = os.WriteFile(path, []byte(content), 0o600)
 	}
+}
+
+// scriptStage picks the script entry that answers this session.
+//
+// Normally that is the card's stored stage. The exception is a critique
+// pass on a work stage: Review stopped being a stage, so what used to run
+// as a StageReview session now runs as a reviewer-role session borrowing
+// implement/fix. A script's StageReview entry still means "what the
+// critique says about the diff", so it is still the right answer — the
+// stage it is filed under is just historical. Routing here keeps every
+// existing script meaning what it meant.
+//
+// Research is untouched: it still has a real Review stage, so its
+// sessions arrive with StageReview stored and never take this branch.
+func (h *harness) scriptStage(opts agent.SessionOpts) domain.Stage {
+	stage := h.stageFromWorkDir(opts.WorkDir)
+	if opts.Role != agent.RoleReviewer {
+		return stage
+	}
+	switch stage {
+	case domain.StageImplement, domain.StageFix:
+		return domain.StageReview
+	}
+	return stage
 }

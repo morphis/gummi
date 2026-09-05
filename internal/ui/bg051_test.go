@@ -17,7 +17,10 @@ func TestBG051_ClearingComposerWithdrawsWordAim(t *testing.T) {
 
 	m = typeString(t, m, "the contrast is off in dark mode")
 	_ = m.threadView(100, 30) // decisionCursor syncs lazily, on render
-	if m.decisionCursor != 1 {
+	// the work stage's gate offers diff, advance, then "request changes" —
+	// the word consumer, at index 2 now that the bounce lives on the same
+	// stage rather than behind a review→implement edge
+	if m.decisionCursor != 2 {
 		t.Fatalf("precondition: typing did not aim the cursor, got %d", m.decisionCursor)
 	}
 

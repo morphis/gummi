@@ -145,7 +145,7 @@ func researchReadOnly(f domain.Feature) bool {
 func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	switch flavor {
 	case flavorCritique:
-		return []string{contractHint(f, specPath, agent.RoleReviewer), planCritiqueHint()}
+		return []string{contractHint(f, specPath, agent.RoleReviewer), critiqueHint(f)}
 	case flavorRebase:
 		return []string{contractHint(f, specPath, agent.RoleImplementer), rebaseHint()}
 	}
@@ -421,6 +421,21 @@ behavior and contracts — types, signatures, invariants — never file
 paths or line numbers, which go stale; file-level detail belongs in
 Implementation notes. The user approves the spec to advance — do not
 start implementing.`)
+}
+
+// critiqueHint selects the contract for the stage's critique pass. The
+// plan's critique refutes a document; the work stage's critique refutes a
+// diff, which is exactly what the Review stage's contract always was — so
+// it is literally the same hint, now reached without a stage change.
+// RunCritique refuses any stage CritiqueRoundKind does not know, so this
+// never has to invent a contract for one.
+func critiqueHint(f domain.Feature) string {
+	switch f.Stage {
+	case domain.StageImplement, domain.StageFix:
+		return reviewHint(f.Kind)
+	default:
+		return planCritiqueHint()
+	}
 }
 
 // planCritiqueHint is the plan-critique pass contract: Review's shape

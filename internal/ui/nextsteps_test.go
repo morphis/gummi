@@ -52,7 +52,7 @@ func TestNextActionsByState(t *testing.T) {
 		{"plan gate reads then approves", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "s g"},
 		{"escalated plan gate offers a replan bounce, not just override", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, escalated: true}, "s b g"},
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
-		{"implement gate diffs then advances", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g"},
+		{"implement gate diffs, advances, or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g "},
 		{"review gate reads findings", nextInput{stage: domain.StageReview, kind: feat, attn: attnGate, escalated: true}, "s b g A"},
 		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
 		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g d b"},

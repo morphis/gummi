@@ -204,7 +204,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	atWork := dv.f.Stage == workStage
 	if !atWork {
 		if err := workflow.CanTransition(dv.f.Kind, dv.f.Stage, workStage, dv.f.Skip); err != nil {
-			m.notice = noticeMsg{text: "request changes works from the implement, review, or verify gate", isErr: true}
+			m.notice = noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}
 			return nil
 		}
 	}

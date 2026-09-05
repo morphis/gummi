@@ -845,7 +845,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome, error) {
 	d.enterStage(f.Stage)
 	if f.Stage == domain.StageReview {
-		d.reviewsRun++
+		d.reviewsRun++ // research still has a Review stage
 	}
 	round := 0
 	switch f.Stage {
@@ -878,32 +878,33 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Round: round})
 
-	// A resume that lands on the Plan stage must not re-invoke the plan
-	// writer: the restored/live session tells us where the loop was when it
-	// stopped. A finished writer (revised plan already on disk) resumes the
-	// critique; a finished critique routes to the judge (replan on changes /
-	// approve on pass); a paused critique (its session died mid-turn, e.g. a
-	// recoverable backend failure) re-dispatches the critique; an in-flight
-	// session keeps awaiting. Only a fresh plan entry — no restored Plan-stage
-	// session, or a restored paused writer — starts/restarts the writer below.
-	// The snapshot's feature stage is the guard, so a leftover done session
-	// from a prior stage is never mistaken for a plan resume.
-	if f.Stage == domain.StagePlan {
-		if snap := d.snapshot(f.ID); snap.Feature.Stage == domain.StagePlan {
+	// A resume that lands on a stage with a critique must not re-invoke the
+	// stage's writer: the restored/live session tells us where the loop was
+	// when it stopped. A finished writer (revised output already on disk)
+	// resumes the critique; a finished critique routes to the judge (rework
+	// on changes / approve on pass); a paused critique (its session died
+	// mid-turn, e.g. a recoverable backend failure) re-dispatches the
+	// critique; an in-flight session keeps awaiting. Only a fresh entry — no
+	// restored session for this stage, or a restored paused writer —
+	// starts/restarts the writer below. The snapshot's feature stage is the
+	// guard, so a leftover done session from a prior stage is never mistaken
+	// for a resume of this one.
+	if kind, ok := engine.CritiqueRoundKind(f.Stage); ok {
+		if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage {
 			if snap.State == engine.StateDone && !snap.Critique {
 				// the revised plan is on disk: critique it, using the
 				// re-critique kickoff when a prior round was burned.
 				kickoff := ""
 				result := "critiquing"
-				if d.round(f.ID, domain.RoundKindPlan) > 0 {
+				if d.round(f.ID, kind) > 0 {
 					kickoff = verdict.ReCritiqueNote
 					result = "re-critiquing"
 				}
-				if err := d.eng.RunCritique(f, kickoff); err != nil {
+				if err := d.dispatchCritique(f, kickoff); err != nil {
 					return Outcome{}, err
 				}
 				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: result})
-				return d.awaitPlanCritique(ctx, f)
+				return d.awaitCritique(ctx, f)
 			}
 			if snap.State == engine.StateDone && snap.Critique {
 				// awaiting replan/approval: the judge decides (replan writer
@@ -914,13 +915,13 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 				// that dead snapshot would escalate identically forever.
 				// Run a fresh critique instead so the loop recovers.
 				if verdict.SessionVerdict(snap) == verdict.Unclear {
-					if err := d.eng.RunCritique(f, verdict.ReCritiqueNote); err != nil {
+					if err := d.dispatchCritique(f, verdict.ReCritiqueNote); err != nil {
 						return Outcome{}, err
 					}
 					d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "re-critiquing"})
-					return d.awaitPlanCritique(ctx, f)
+					return d.awaitCritique(ctx, f)
 				}
-				return d.judgePlanCritique(ctx, f, snap)
+				return d.judgeCritique(ctx, f, snap)
 			}
 			if snap.State == engine.StatePaused && snap.Critique {
 				// the critique session died mid-turn and was restored
@@ -929,17 +930,17 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 				// forever burns the whole --stage-timeout with nothing
 				// dispatched). Mirrors the TUI's StatePaused+Critique
 				// branch (internal/ui/shell.go:1279-1286).
-				if err := d.eng.RunCritique(f, ""); err != nil {
+				if err := d.dispatchCritique(f, ""); err != nil {
 					return Outcome{}, err
 				}
 				d.sentTurn = true
-				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "resuming plan critique"})
-				return d.awaitPlanCritique(ctx, f)
+				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "resuming " + string(f.Stage) + " critique"})
+				return d.awaitCritique(ctx, f)
 			}
 			if snap.State != engine.StatePaused {
 				// still in flight (running/queued): keep awaiting the
 				// running pass, spawn nothing.
-				return d.awaitPlanCritique(ctx, f)
+				return d.awaitCritique(ctx, f)
 			}
 			// a restored paused writer (!Critique): the writer died
 			// mid-turn before producing a plan to critique. Fall through
@@ -1094,9 +1095,16 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		}
 
 	case domain.StageImplement, domain.StageFix:
-		// the implementation floor always continues into review — review is
-		// mandatory and never skipped; the driver never waits for a human here.
-		return d.stepTo(ctx, f.ID, domain.StageReview)
+		if !snap.Critique {
+			// the work was just written: critique it before the gate. This
+			// is what the Review stage did, minus the transition.
+			if err := d.dispatchCritique(f, ""); err != nil {
+				return Outcome{}, err
+			}
+			d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "critiquing"})
+			return d.awaitCritique(ctx, f)
+		}
+		return d.judgeCritique(ctx, f, snap)
 
 	case domain.StageInvestigate:
 		// research's work leg: the forward edge to shape (never straight to
@@ -1108,24 +1116,25 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 	case domain.StagePlan:
 		if !snap.Critique {
 			// the plan was just written: critique it before the approval gate.
-			if err := d.eng.RunCritique(f, ""); err != nil {
+			if err := d.dispatchCritique(f, ""); err != nil {
 				return Outcome{}, err
 			}
 			d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "critiquing"})
 			// wait out the critique pass in-place (same stage, fresh session).
-			return d.awaitPlanCritique(ctx, f)
+			return d.awaitCritique(ctx, f)
 		}
-		return d.judgePlanCritique(ctx, f, snap)
+		return d.judgeCritique(ctx, f, snap)
 
 	default:
 		return d.escalation(f, "unexpected autonomous stage "+string(f.Stage)), nil
 	}
 }
 
-// awaitPlanCritique waits for the critique session (RunCritique borrows
-// the Plan stage without advancing it) and re-judges — the plan loop is
-// invisible to the state machine, so this stays inside the Plan stage.
-func (d *Driver) awaitPlanCritique(ctx context.Context, f domain.Feature) (Outcome, error) {
+// awaitCritique waits for a stage's critique session (RunCritique borrows
+// the stage without advancing it) and re-judges — a critique loop is
+// invisible to the state machine, so this stays inside the stage it
+// started in, whichever that is.
+func (d *Driver) awaitCritique(ctx context.Context, f domain.Feature) (Outcome, error) {
 	end, err := d.awaitStage(ctx, f.ID)
 	if err != nil {
 		return Outcome{}, err
@@ -1140,51 +1149,88 @@ func (d *Driver) awaitPlanCritique(ctx context.Context, f domain.Feature) (Outco
 	case endTripwire:
 		return d.tripwire(f, end.dirtyPaths), nil
 	default:
-		return d.judgePlanCritique(ctx, f, d.snapshot(f.ID))
+		return d.judgeCritique(ctx, f, d.snapshot(f.ID))
 	}
 }
 
-// judgePlanCritique applies the critique verdict: pass crosses the plan
-// approval gate, changes replan under the cap, else escalate.
-func (d *Driver) judgePlanCritique(ctx context.Context, f domain.Feature, snap engine.Snapshot) (Outcome, error) {
+// judgeCritique applies a critique verdict: pass crosses the stage's gate,
+// changes re-runs the stage under its own cap, else escalate.
+//
+// The round kind comes from the stage (engine.CritiqueRoundKind), so the
+// plan critique burns plan rounds and the work stage's critique burns
+// review rounds — the same budgets both loops had before the critique
+// became a pass. A stage with no counter never reaches here: RunCritique
+// refuses to start one.
+func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engine.Snapshot) (Outcome, error) {
+	kind, ok := engine.CritiqueRoundKind(f.Stage)
+	if !ok {
+		return d.escalation(f, "no critique round counter for stage "+string(f.Stage)), nil
+	}
 	v := verdict.SessionVerdict(snap)
 	d.emitResult(f, v)
 	switch v {
 	case verdict.Pass:
-		if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
+		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
-		d.setRound(f.ID, domain.RoundKindPlan, 0)
-		return d.crossGate(ctx, f)
+		d.setRound(f.ID, kind, 0)
+		if f.Stage == domain.StagePlan {
+			// the plan gate is a human approval gate; crossing it is the
+			// user's call (or autopilot's).
+			return d.crossGate(ctx, f)
+		}
+		// The work stage's critique is what the Review stage was, and a
+		// passing review stepped to verify in the floor — it never raised
+		// a gate. Folding the stage away must not quietly add one: making
+		// implement gate is the interaction change (Phase 3), not this one.
+		return d.stepTo(ctx, f.ID, domain.StageVerify)
 	case verdict.Changes:
-		max := verdict.MaxRounds(domain.RoundKindPlan)
-		if d.round(f.ID, domain.RoundKindPlan) >= max {
-			if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
+		max := verdict.MaxRounds(kind)
+		if d.round(f.ID, kind) >= max {
+			if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
 				return Outcome{}, err
 			}
-			d.setRound(f.ID, domain.RoundKindPlan, 0)
-			return d.escalation(f, fmt.Sprintf("plan critique still requesting changes after %d rounds", max)), nil
+			d.setRound(f.ID, kind, 0)
+			return d.bounceEscalation(f, fmt.Sprintf("%s critique still requesting changes after %d rounds", f.Stage, max)), nil
 		}
-		if err := rounds.Bump(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
+		if err := rounds.Bump(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
-		d.setRound(f.ID, domain.RoundKindPlan, d.round(f.ID, domain.RoundKindPlan)+1)
-		if err := d.eng.RunWith(f, verdict.ReplanNote); err != nil {
+		d.setRound(f.ID, kind, d.round(f.ID, kind)+1)
+		if err := d.eng.RunWith(f, reworkNote(f.Stage)); err != nil {
 			return Outcome{}, err
 		}
-		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning", Round: d.round(f.ID, domain.RoundKindPlan)})
-		return d.awaitReplan(ctx, f)
+		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: reworkLabel(f.Stage), Round: d.round(f.ID, kind)})
+		return d.awaitRework(ctx, f)
 	default:
-		if err := rounds.Reset(ctx, d.roundStore, f.ID, domain.RoundKindPlan); err != nil {
+		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
-		d.setRound(f.ID, domain.RoundKindPlan, 0)
-		return d.escalation(f, "plan critique finished with no clear verdict"), nil
+		d.setRound(f.ID, kind, 0)
+		return d.escalation(f, string(f.Stage)+" critique finished with no clear verdict"), nil
 	}
 }
 
-// awaitReplan waits for a replan pass to finish, then critiques again.
-func (d *Driver) awaitReplan(ctx context.Context, f domain.Feature) (Outcome, error) {
+// reworkNote is the kickoff a stage's rework round carries: the plan
+// stage's own replan note, or — for a work stage — the note the review
+// bounce used to carry into implement/fix.
+func reworkNote(stage domain.Stage) string {
+	if stage == domain.StagePlan {
+		return verdict.ReplanNote
+	}
+	return verdict.ReworkNote
+}
+
+// reworkLabel names the rework round on the event stream.
+func reworkLabel(stage domain.Stage) string {
+	if stage == domain.StagePlan {
+		return "replanning"
+	}
+	return "reworking"
+}
+
+// awaitRework waits for a rework pass to finish, then critiques again.
+func (d *Driver) awaitRework(ctx context.Context, f domain.Feature) (Outcome, error) {
 	end, err := d.awaitStage(ctx, f.ID)
 	if err != nil {
 		return Outcome{}, err
@@ -1195,17 +1241,31 @@ func (d *Driver) awaitReplan(ctx context.Context, f domain.Feature) (Outcome, er
 	case endTimeout:
 		return d.timeout(f), nil
 	case endError:
-		return Outcome{}, firstErr(end.err, errors.New("replan session failed"))
+		return Outcome{}, firstErr(end.err, errors.New("rework session failed"))
 	case endTripwire:
 		return d.tripwire(f, end.dirtyPaths), nil
 	default:
-		// re-critique the revised plan (mirrors reCritiqueNote intent).
-		if err := d.eng.RunCritique(f, verdict.ReCritiqueNote); err != nil {
+		// re-critique the revised output (mirrors ReCritiqueNote intent).
+		if err := d.dispatchCritique(f, verdict.ReCritiqueNote); err != nil {
 			return Outcome{}, err
 		}
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "re-critiquing"})
-		return d.awaitPlanCritique(ctx, f)
+		return d.awaitCritique(ctx, f)
 	}
+}
+
+// dispatchCritique starts a stage's critique pass, counting the work
+// stage's critiques for the done receipt. review_rounds still means "how
+// many times was the diff judged", which is what the Review stage's own
+// entries used to count; the stage is gone but the question is the same.
+// The plan critique is not counted here — it has its own round kind and
+// its own reporting.
+func (d *Driver) dispatchCritique(f domain.Feature, note string) error {
+	switch f.Stage {
+	case domain.StageImplement, domain.StageFix:
+		d.reviewsRun++
+	}
+	return d.eng.RunCritique(f, note)
 }
 
 // stepTo records an in-floor transition (actor "auto") and returns a
