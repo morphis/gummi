@@ -726,7 +726,15 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 		}
 		answer := decisionAnswerText(d.ask, m.decisionCursor, m.decisionPicked)
 		if answer == "" {
-			return nil
+			// Belt to parseAsk's braces. Nothing that reaches here should
+			// be able to resolve to an empty answer, but if it ever does,
+			// say so: a picker that swallows enter and leaves the card
+			// parked on an unanswerable question is the worst outcome
+			// available, and strictly worse than an error the reader can
+			// act on.
+			return func() tea.Msg {
+				return noticeMsg{text: "that option carries no answer text — the question cannot be answered as asked", isErr: true}
+			}
 		}
 		sess := m.sessionFor(r.F.ID)
 		eng := m.engine

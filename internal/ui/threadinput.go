@@ -303,6 +303,15 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 				m.threadScroll = 0 // jump to the newest, where the answer lands
 				return m.answerDecision(r, d)
 			}
+			// An open decision that did not fit is not the same thing as
+			// no decision, and enter must not treat them alike. Acting on
+			// a picker the reader cannot see is the bug BG-058 fixed, so
+			// this still refuses to answer — but it says why, instead of
+			// swallowing the keystroke and leaving the card parked on a
+			// question the reader believes they just answered.
+			if m.openDecision(r) != nil {
+				m.notice = noticeMsg{text: "the decision needs more room than this window has — make the terminal taller to answer it", isErr: true}
+			}
 			return nil
 		}
 		m.threadScroll = 0 // jump to the latest on send, as the pane did

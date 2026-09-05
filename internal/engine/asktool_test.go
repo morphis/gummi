@@ -1441,3 +1441,25 @@ func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
 		}
 	}
 }
+
+// TestParseAskRejectsUnlabelledOption is 0b's root fix. The option label
+// is the answer text the picker delivers, so an unlabelled option is an
+// answer that cannot be given: it rendered as a blank row, enter resolved
+// it to "", and the card parked forever on an unanswerable question. The
+// call is refused at the boundary instead, where the agent still gets an
+// error it can correct.
+func TestParseAskRejectsUnlabelledOption(t *testing.T) {
+	for _, body := range []string{
+		`{"question":"which?","options":[{"label":"","detail":"no label"}]}`,
+		`{"question":"which?","options":[{"label":"ok"},{"label":"   "}]}`,
+		`{"question":"which?","options":[{"detail":"only a detail"}]}`,
+	} {
+		if _, err := parseAsk("c1", json.RawMessage(body)); err == nil {
+			t.Errorf("parseAsk(%s) = nil error, want a rejection", body)
+		}
+	}
+	// the well-formed case still parses
+	if _, err := parseAsk("c1", json.RawMessage(`{"question":"which?","options":[{"label":"yes"}]}`)); err != nil {
+		t.Errorf("a well-formed ask was rejected: %v", err)
+	}
+}

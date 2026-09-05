@@ -809,6 +809,18 @@ func parseAsk(callID string, args json.RawMessage) (*Ask, error) {
 	if strings.TrimSpace(a.Question) == "" || len(a.Options) == 0 {
 		return nil, fmt.Errorf("ask_user needs a question and at least one option")
 	}
+	// Every option must carry a label. An unlabelled option is not a
+	// cosmetic problem: the label IS the answer text the picker delivers
+	// (decisionAnswerText, internal/ui), so a blank one renders as a row
+	// enter can never answer, and the card parks forever on a question
+	// with no reachable answer. Reject it here, at the boundary, where the
+	// agent still gets a tool error it can correct — rather than letting a
+	// malformed call become an unanswerable picker.
+	for i, o := range a.Options {
+		if strings.TrimSpace(o.Label) == "" {
+			return nil, fmt.Errorf("ask_user option %d has no label", i+1)
+		}
+	}
 	return &a, nil
 }
 
