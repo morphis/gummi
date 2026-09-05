@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // TestBG096CreatedEventDescribesTheKindItCreated: the created event told
@@ -55,7 +54,7 @@ func TestBG096CreatedEventDescribesTheKindItCreated(t *testing.T) {
 			t.Errorf("%s full=%v: route = %v, want %q", c.kind, c.full, got, c.want)
 		}
 		// the branch is announced exactly where one will exist
-		branchy := workflow.NeedsWorktree(c.kind, workflow.WorkStage(c.kind))
+		branchy := c.kind != domain.KindResearch
 		_, got := created["branch"]
 		if got != branchy {
 			t.Errorf("%s full=%v: created event carries a branch = %v, want %v (%v)",

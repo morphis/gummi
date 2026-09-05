@@ -183,7 +183,7 @@ func (d *Driver) Create(ctx context.Context, kind domain.Kind, desc string) (dom
 	// a branch only where one will exist: a research card is
 	// worktree-less at every stage and never gets one.
 	branch := ""
-	if workflow.NeedsWorktree(kind, workflow.WorkStage(kind)) {
+	if kind != domain.KindResearch {
 		branch = f.BranchName()
 	}
 	d.out.emit(createdEvent{
@@ -506,8 +506,9 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err := wt.Remove(ctx, &f, true); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	// The design stages' scratch tree outlives the branch worktree it was
-	// handed off to; a cleaned card must leave neither behind.
+	// A research card runs in a scratch tree rather than a branch worktree
+	// (a research branch never receives a commit); absent is success, so
+	// this runs unconditionally for every kind.
 	if err := wt.RemoveScratch(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	}

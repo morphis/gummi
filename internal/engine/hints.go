@@ -70,21 +70,20 @@ const fileManifestRubric = "a " + "```gummi-files" + " fenced block: the files t
 	"bar: it is read as a starting point, and the implementation is told to\n" +
 	"go beyond it when the work needs to."
 
-// interactiveWorkingDirGuard tells an interactive design stage what its
-// working directory is. It used to fence the main checkout — locate
-// handed these stages Worktrees.RepoRoot(), so a prompt was the only
-// thing standing between a design chat and the operator's tree. It is a
-// scratch worktree now (locate → EnsureScratch), and the backend's own
-// write cage enforces the boundary, so what is left here is the part a
-// filesystem cannot say: the tree is disposable, and the durable surface
-// is the artifact, which is reached through gummi's spec tools rather
-// than the filesystem.
-const interactiveWorkingDirGuard = `Your working directory is a scratch checkout of main: a throwaway, not
+// researchWorkingDirGuard tells a research stage what its working
+// directory is. Every other kind now runs in the card's own branch
+// worktree for its whole life, so there is nothing to warn them about —
+// what they write is kept, on the branch that will carry it. A research
+// card is the exception: its branch never receives a commit (DESIGN
+// decision 5), so it runs in a detached scratch tree instead, and the
+// part a filesystem cage cannot say is that the tree is disposable and
+// the durable surface is the document.
+const researchWorkingDirGuard = `Your working directory is a scratch checkout of main: a throwaway, not
 this item's branch and not the main checkout. Nothing you write to disk
 here is kept — so do not start implementing, and do not run git commit.
-The design artifact is the one durable surface, and gummi's spec tools
+The research document is the one durable surface, and gummi's spec tools
 are how you reach it. If a decision needs a change to the repo, record
-it in the artifact and let the implementation stage make it.`
+it in the document and let an implementation card make it.`
 
 // repoInstructionsPrecedenceHint states the precedence between the managed
 // repo's own instructions (AGENTS.md, CLAUDE.md, or equivalent) and gummi's
@@ -152,8 +151,8 @@ func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	}
 	role, _ := roleForStage(f.Stage)
 	hints := []string{contractHint(f, specPath, role)}
-	if interactiveStage(f.Stage) {
-		hints = append(hints, interactiveWorkingDirGuard)
+	if f.Kind == domain.KindResearch {
+		hints = append(hints, researchWorkingDirGuard)
 	}
 
 	switch f.Stage {

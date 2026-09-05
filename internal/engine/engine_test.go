@@ -12,7 +12,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -592,19 +591,21 @@ func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
 	}
 	waitFor(t, e, EventIdle)
 
-	// the draft exists before the agent's first turn
-	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
-	raw, err := os.ReadFile(draft)
+	// the artifact exists before the agent's first turn. It is at its
+	// workspace home rather than in the drafts directory: promotion moved
+	// to the card's first stage run when the card stopped needing two
+	// trees and therefore two artifact locations.
+	raw, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
-		t.Fatalf("draft not materialized: %v", err)
+		t.Fatalf("artifact not materialized: %v", err)
 	}
 	if !strings.Contains(string(raw), "## Problem") {
 		t.Errorf("draft is not the template: %q", raw)
 	}
 
-	// the hints carry the compiled-in contract, pointing at the draft
+	// the hints carry the compiled-in contract, pointing at the artifact
 	hints := strings.Join(rec.opts().SystemHints, "\n")
-	for _, want := range []string{draft, "single source of truth", "nearest preceding non-marker line"} {
+	for _, want := range []string{specDraftPath(e, f), "single source of truth", "nearest preceding non-marker line"} {
 		if !strings.Contains(hints, want) {
 			t.Errorf("contract hint missing %q", want)
 		}

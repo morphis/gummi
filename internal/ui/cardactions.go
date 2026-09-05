@@ -206,8 +206,8 @@ var foreignBlockedKeys = map[string]bool{
 //
 // Validity mirrors boardBindings() and the board's key handler exactly
 // (shell.go's handleKey): a research card carries no branch, so
-// diff/rebase/merge/clean — worktree-gated via workflow.NeedsWorktree —
-// never appear for one, the same way keymap.go filters them from the
+// diff/rebase/merge/clean — branch-gated — never appear for one, the
+// same way keymap.go filters them from the
 // status bar and help overlay. Here that filtering doubles as the
 // availability check itself, so "not shown" and "not available" can't
 // diverge the way they used to when the handler answered a key the
@@ -216,7 +216,10 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	work := workflow.WorkStage(in.kind)
 	research := in.kind == domain.KindResearch
 	doneStage := in.stage == domain.StageDone
-	needsWT := workflow.NeedsWorktree(in.kind, in.stage)
+	// carries a branch: everything but a research card, once it has left
+	// the backlog. Under one worktree per card the tree exists from the
+	// first stage run, so the stage no longer discriminates beyond that.
+	needsWT := in.kind != domain.KindResearch && in.stage != domain.StageTodo
 
 	runLabel, runWhy := runLabelWhy(in)
 	pauseLabel, pauseWhy := pauseLabelWhy(in)

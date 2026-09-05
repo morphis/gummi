@@ -264,30 +264,3 @@ func TestResearchInteractiveShape(t *testing.T) {
 	}
 }
 
-// NeedsWorktree routes research away from worktrees while preserving the
-// exact feature/bug predicate.
-func TestNeedsWorktree(t *testing.T) {
-	for _, st := range []domain.Stage{
-		domain.StageInvestigate, domain.StageShape, domain.StageReview, domain.StageVerify,
-	} {
-		if NeedsWorktree(domain.KindResearch, st) {
-			t.Errorf("NeedsWorktree(research, %s) should be false", st)
-		}
-	}
-	if NeedsWorktree(domain.KindResearch, domain.StageTodo) {
-		t.Error("NeedsWorktree(research, todo) should be false")
-	}
-	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageReview, domain.StageVerify} {
-		if !NeedsWorktree(domain.KindFeature, st) {
-			t.Errorf("NeedsWorktree(feature, %s) should be true", st)
-		}
-	}
-	for _, st := range []domain.Stage{domain.StageFix, domain.StageReview, domain.StageVerify} {
-		if !NeedsWorktree(domain.KindBug, st) {
-			t.Errorf("NeedsWorktree(bug, %s) should be true", st)
-		}
-	}
-	if NeedsWorktree(domain.KindFeature, domain.StageTodo) || NeedsWorktree(domain.KindFeature, domain.StageBrainstorm) {
-		t.Error("feature todo/brainstorm should not need a worktree")
-	}
-}

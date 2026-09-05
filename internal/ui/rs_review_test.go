@@ -263,7 +263,7 @@ func writeRSArtifact(t *testing.T, m *Shell, f domain.Feature, body string) {
 
 // rsCardShell builds a shell attached to a fresh workspace with one RS
 // card (RS-001) at Investigate — every caller here exercises a key or
-// dispatch that fires the same way at any RS stage (NeedsWorktree is
+// dispatch that fires the same way at any RS stage (a research card is
 // false throughout, and verifydoc has no stage dependency either) — and
 // the given repo name ("" = the workspace default).
 func rsCardShell(t *testing.T, repo string) (*Shell, domain.Feature) {

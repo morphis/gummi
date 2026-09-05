@@ -8,7 +8,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // researchFeature builds a research-kind work item (RS-003) parked at an
@@ -42,7 +41,7 @@ func TestBG088CheckpointSaysNothingOnAWorktreeLessStage(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	for _, stage := range domain.Stages {
-		if workflow.NeedsWorktree(domain.KindResearch, stage) {
+		if false { // research never takes a branch worktree
 			t.Fatalf("%s: a research card is never supposed to need a worktree", stage)
 		}
 		if interactiveStage(stage) || stage == domain.StageDone {

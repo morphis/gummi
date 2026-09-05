@@ -9,9 +9,15 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// A card's pre-worktree stages — the interactive design chats, and every
-// research stage — used to run in the main checkout, fenced only by a
-// prompt asking the model not to write there. That is a request, not a
+// Research stages run in a scratch tree. Every OTHER stage of every other
+// kind now runs in the card's own branch worktree, from its first stage
+// run to its last (Ensure, below) — but a research branch never receives
+// a commit (DESIGN decision 5), so a branch worktree would break the
+// merge/clean/rebase/done assumptions built on one. Research keeps the
+// detached tree instead.
+//
+// A card's pre-worktree stages used to run in the main checkout, fenced
+// only by a prompt asking the model not to write there. That is a request, not a
 // boundary: an agent running ordinary build commands while exploring is
 // enough to dirty main (Go rewriting go.sum was observed parking a card
 // at spec having produced nothing), and a weaker model asked politely
@@ -136,4 +142,29 @@ func (m *Manager) RemoveScratch(ctx context.Context, f *domain.Feature) error {
 	}
 	_, err = runGit(ctx, m.repo, "worktree", "prune")
 	return err
+}
+
+// Ensure returns the card's branch worktree, creating it on first use.
+//
+// This is the whole of the one-worktree-per-card rule: a card gets one
+// directory and keeps it, from its first stage run to the day it lands.
+// There is no scratch tree for a feature or a bug any more, and so no
+// hand-off between two trees to get wrong — a design stage that writes a
+// spike writes it on the branch implement will continue, and an
+// implement → plan bounce is a stage change and nothing else.
+//
+// Allocation is lazy, at the first stage RUN rather than at card
+// creation, so a backlog of todo cards is not a backlog of checkouts.
+// It is idempotent: an existing tree is returned as-is.
+func (m *Manager) Ensure(ctx context.Context, f *domain.Feature) (string, error) {
+	p, _, err := m.featurePaths(f)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(p); err == nil {
+		return p, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	return m.Create(ctx, f)
 }

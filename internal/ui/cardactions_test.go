@@ -182,7 +182,7 @@ func TestCardActionsForResearchExclusions(t *testing.T) {
 		for _, landed := range []bool{false, true} {
 			in := nextInput{stage: stage, kind: domain.KindResearch, landed: landed}
 			// HasWorktree deliberately set true to prove the exclusion
-			// comes from the kind (via workflow.NeedsWorktree), not from
+			// comes from the kind (a research card carries no branch), not from
 			// an incidentally-false worktree flag.
 			r := cardRow(domain.KindResearch, stage, landed, true)
 			acts := cardActionsFor(in, r)
@@ -231,7 +231,7 @@ func TestCardActionsForNoWorktreeExcludesDiff(t *testing.T) {
 			t.Error("attach should not be offered without a worktree")
 		}
 	}
-	// diff is gated on stage (workflow.NeedsWorktree), which is
+	// diff is gated on the card carrying a branch, which is
 	// independent of featureRow.HasWorktree — todo/interactive stages
 	// exclude it regardless of worktree presence.
 	in2 := nextInput{stage: domain.StageTodo, kind: domain.KindFeature}
@@ -605,7 +605,7 @@ func TestCardActionsForPRLinkUnlinkPullGating(t *testing.T) {
 		{"unlinked, landed: none — prlink needs !Landed", true, true, false, false, false, false, false},
 		{"unlinked, no worktree row: none — prlink also needs r.HasWorktree", false, false, false, false, false, false, false},
 		// prpull's own gate is `!Empty() && needsWT` — needsWT comes from
-		// workflow.NeedsWorktree(kind, stage), not r.HasWorktree (whether a
+		// the kind carrying a branch, not r.HasWorktree (whether a
 		// worktree actually got created), so it stays offered here.
 		{"linked, no worktree row: unlink+pull — prpull doesn't gate on r.HasWorktree", false, false, true, false, false, true, true},
 		{"driven abroad, unlinked, worktree: none of the three", false, true, false, true, false, false, false},

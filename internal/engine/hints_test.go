@@ -174,11 +174,13 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		t.Error("standard Spec leaked the quick-spec plan-drafting instruction")
 	}
 
-	// F2: interactive stages run in the main checkout — the guard fences
-	// them off from editing repo files or committing on main. Every
-	// interactive stage carries it; no autonomous stage does.
+	// The interactive working-directory guard is gone with the scratch
+	// tree: a design stage now runs in the card's own branch worktree, so
+	// there is no throwaway checkout to warn about and nothing that has to
+	// be fenced off from committing. No stage carries it any more.
 	for _, st := range []domain.Stage{
 		domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
+		domain.StageImplement,
 	} {
 		kind := domain.KindFeature
 		if st == domain.StageTriage || st == domain.StageDiagnose {
@@ -187,15 +189,9 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		f := feature(1, "x", st)
 		f.Kind = kind
 		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
-		for _, want := range []string{"scratch checkout of main", "do not run git commit"} {
-			if !strings.Contains(h, want) {
-				t.Errorf("%s hint missing interactive guard %q", st, want)
-			}
+		if strings.Contains(h, "scratch checkout of main") {
+			t.Errorf("%s still carries the retired scratch-tree guard", st)
 		}
-	}
-	autonomous := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageImplement), "spec.md", flavorStage), "\n"))
-	if strings.Contains(autonomous, "scratch checkout of main") {
-		t.Error("autonomous Implement stage carries the interactive-only guard")
 	}
 
 	// the plan-critique flavor: reviewer contract plus the tag-placement

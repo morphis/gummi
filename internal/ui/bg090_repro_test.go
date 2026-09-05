@@ -46,7 +46,7 @@ func TestBG090ResearchVerifyGateDoesNotOfferToLand(t *testing.T) {
 // TestBG090VerifyGateReasonMatchesTheKind covers the receipt half over
 // every kind: the gate reason onVerifyDone raises is what the inbox
 // shows and what card_events keeps, and it must offer to land exactly
-// when the kind has a branch to land — which workflow.NeedsWorktree is
+// when the kind has a branch to land — which every non-research kind is
 // the standing answer to.
 func TestBG090VerifyGateReasonMatchesTheKind(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
@@ -55,7 +55,7 @@ func TestBG090VerifyGateReasonMatchesTheKind(t *testing.T) {
 			t.Fatal(err)
 		}
 		reason := verifyGateReason(id.Kind())
-		branchy := workflow.NeedsWorktree(k, domain.StageVerify)
+		branchy := k != domain.KindResearch
 		if got := strings.Contains(reason, "land on main"); got != branchy {
 			t.Errorf("%s: gate reason %q offers landing = %v, want %v", k, reason, got, branchy)
 		}

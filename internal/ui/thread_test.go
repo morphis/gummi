@@ -1214,7 +1214,7 @@ func TestParkVerbPausesRatherThanOpeningDeps(t *testing.T) {
 // produce visibly different, verb-named results — a swapped or wrong key
 // mapping fails loudly here rather than only in a human's pty session.
 func TestVerbKeysLandOnMatchingHandler(t *testing.T) {
-	// diff/rebase/land/squash/clean all guard on workflow.NeedsWorktree
+	// diff/rebase/land/squash/clean all guard on the card carrying a branch
 	// for a research card, each with its own verb-named "no <thing>"
 	// notice — routing to the wrong key would fire a DIFFERENT one of
 	// these guards instead of the one matching the typed word.

@@ -202,6 +202,16 @@ func (p *Pool) Exists(ctx context.Context, f *domain.Feature) (bool, error) {
 	return wt.Exists(ctx, f)
 }
 
+// Ensure resolves the card's repo and returns its branch worktree,
+// creating it on first use (Manager.Ensure).
+func (p *Pool) Ensure(ctx context.Context, f *domain.Feature) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.Ensure(ctx, f)
+}
+
 func (p *Pool) EnsureScratch(ctx context.Context, f *domain.Feature) (string, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {

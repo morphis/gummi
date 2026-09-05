@@ -15,7 +15,6 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/verifydoc"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // verifyResultMsg carries the outcome of a verify run.
@@ -112,7 +111,7 @@ func noWorktreeYet(f domain.Feature) string {
 // that all need a branch in a worktree. It returns nil when the verb may
 // proceed.
 //
-// The five used to share one guard — !workflow.NeedsWorktree — and one
+// The five used to share one stage-shaped guard — and one
 // sentence, "research cards carry no branch". But that predicate is
 // false for two unrelated reasons: a research card, which never has a
 // branch, and any other card still in the design phase, which does not
@@ -124,7 +123,7 @@ func branchVerbRefusal(r featureRow, verb string) *noticeMsg {
 	if r.F.Kind == domain.KindResearch {
 		return &noticeMsg{text: string(r.F.ID) + ": no " + verb + " — research cards carry no branch"}
 	}
-	if !workflow.NeedsWorktree(r.F.Kind, r.F.Stage) || !r.HasWorktree {
+	if !r.HasWorktree {
 		return &noticeMsg{text: noWorktreeYet(r.F), isErr: true}
 	}
 	return nil

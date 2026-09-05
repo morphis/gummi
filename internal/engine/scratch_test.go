@@ -11,12 +11,14 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// TestDesignStageRunsInScratchTree: an interactive design stage's session
-// gets the card's scratch tree as its working directory, not the main
-// checkout. Every backend cages its file tools to opts.WorkDir, so this
-// is where "do not write to the operator's repo" stops being a request
-// and becomes a boundary.
-func TestDesignStageRunsInScratchTree(t *testing.T) {
+// TestDesignStageRunsInTheCardsWorktree: a design stage's session gets
+// the card's OWN branch worktree as its working directory — the same
+// directory implement will use, kept for the card's whole life. Every
+// backend cages its file tools to opts.WorkDir, so this is where "do not
+// write to the operator's repo" stops being a request and becomes a
+// boundary; and because the tree is the card's real one, nothing has to
+// be handed off later.
+func TestDesignStageRunsInTheCardsWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -31,24 +33,27 @@ func TestDesignStageRunsInScratchTree(t *testing.T) {
 	}
 
 	got := rec.opts()
-	want := scratchPath(t, wt, &f)
+	want, err := wt.Path(&f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.WorkDir != want {
-		t.Fatalf("spec workdir = %s, want scratch tree %s", got.WorkDir, want)
+		t.Fatalf("spec workdir = %s, want the card's worktree %s", got.WorkDir, want)
 	}
 	if got.WorkDir == wt.RepoRoot() {
 		t.Fatal("spec stage still runs in the main checkout")
 	}
 	if _, err := os.Stat(got.WorkDir); err != nil {
-		t.Fatalf("scratch tree not materialized: %v", err)
+		t.Fatalf("worktree not materialized: %v", err)
 	}
 	// the design artifact stays at its workspace home, outside every
 	// working directory — that contract is unchanged
 	if !strings.HasPrefix(got.ArtifactPath, filepath.Join(ws.Root, ".gummi")) {
 		t.Fatalf("artifact path = %s, want it under the workspace .gummi", got.ArtifactPath)
 	}
-	// and no branch worktree was cut for a card still in design
-	if ok, _ := wt.Exists(context.Background(), &f); ok {
-		t.Fatal("a design stage materialized the card's branch worktree")
+	// the branch worktree is cut BY the design stage, not at approval
+	if ok, err := wt.Exists(context.Background(), &f); err != nil || !ok {
+		t.Fatal("a design stage did not materialize the card's branch worktree")
 	}
 }
 
@@ -96,11 +101,13 @@ func TestDesignStageWritesDoNotTripMain(t *testing.T) {
 	}
 }
 
-// TestScratchDiscardedAtWorktreeCut: the scratch tree's edits must not
-// silently become the card's work. The approval gate promotes the
-// artifact and drops the tree — that hand-off is the decision, not an
-// emergent leftover.
-func TestScratchDiscardedAtWorktreeCut(t *testing.T) {
+// TestDesignStageEditsSurviveTheApprovalGate is the inversion this phase
+// is for. A design stage's edits used to be discarded at the approval
+// gate — a deliberate hand-off between a throwaway tree and the card's
+// real one. There is only one tree now, so a spike written while planning
+// is simply early work on the branch implement continues, and crossing
+// the gate moves nothing and deletes nothing.
+func TestDesignStageEditsSurviveTheApprovalGate(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
@@ -110,25 +117,29 @@ func TestScratchDiscardedAtWorktreeCut(t *testing.T) {
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	scratch, err := wt.EnsureScratch(context.Background(), &f)
-	if err != nil {
+	if _, err := e.Attach(context.Background(), f); err != nil {
 		t.Fatal(err)
 	}
-	writeAt(t, scratch, "half-done.go", "package main\n")
+	tree := rec.opts().WorkDir
+	writeAt(t, tree, "spike.go", "package main\n")
+	// the spec stage has to have written its section, or the
+	// undrafted-sections gate holds the approval shut before this test's
+	// own question is reached
+	fillPromotedSection(t, wt, f, "Chosen approach", "\nA settings toggle.\n\n")
 
 	res := mustAdvance(t, e, f.ID)
 	if !res.EnteredWorktree {
-		t.Fatalf("spec approval did not cut the worktree (to=%s status=%d)", res.To, res.Status)
+		t.Fatalf("spec approval did not report the work crossing (to=%s status=%d)", res.To, res.Status)
 	}
-	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
-		t.Fatalf("scratch tree survived the hand-off: %v", err)
-	}
-	// the card's real worktree carries none of it
+
 	wtPath, err := wt.Path(&f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(wtPath, "half-done.go")); !os.IsNotExist(err) {
-		t.Fatal("a design stage's stray edit arrived on the branch as work")
+	if tree != wtPath {
+		t.Fatalf("the design stage ran in %s but the card's worktree is %s — there should be only one tree", tree, wtPath)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "spike.go")); err != nil {
+		t.Fatalf("the spike written while planning did not survive the gate: %v", err)
 	}
 }

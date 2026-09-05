@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/morphis/gummi/internal/workflow"
 
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // ErrRepoLocked is returned by SetRepo when the card has already entered
@@ -23,7 +23,29 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	if workflow.NeedsWorktree(f.Kind, f.Stage) {
+	// The repo is locked once the card has a worktree: the tree is cut
+	// from that repo, so moving the card would orphan it. Under one
+	// worktree per card that happens at the card's first stage run, so
+	// the lock is keyed on the tree itself rather than on a stage list
+	// that used to stand in for it.
+	// The repo is fixed once the card's tree is cut from it — moving the
+	// card then would orphan the tree. Under one worktree per card that
+	// happens at the first stage run, so the tree on disk is the primary
+	// test; an unresolvable repo cannot have one, so a lookup error reads
+	// as "no tree" rather than failing the move.
+	//
+	// A card past its design gate is locked whether or not a tree is
+	// currently on disk: it has committed work to find, and a tree that
+	// went missing is a thing to recover, not a licence to re-home the
+	// card into a different repository.
+	locked := f.Kind != domain.KindResearch &&
+		f.Stage != domain.StageTodo && !workflow.Interactive(f.Stage)
+	if !locked {
+		if ok, err := e.pool.Exists(ctx, &f); err == nil && ok {
+			locked = true
+		}
+	}
+	if locked {
 		return domain.Feature{}, fmt.Errorf("%s: %w", id, ErrRepoLocked)
 	}
 	if err := e.requireRepo(repo); err != nil {

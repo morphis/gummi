@@ -2667,7 +2667,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "o":
 		if r, ok := m.selected(); ok {
-			if workflow.NeedsWorktree(r.F.Kind, r.F.Stage) || r.HasWorktree {
+			if r.HasWorktree {
 				m.notice = noticeMsg{text: string(r.F.ID) + ": repo is fixed once a worktree exists", isErr: true}
 				return nil
 			}

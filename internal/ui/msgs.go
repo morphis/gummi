@@ -826,10 +826,9 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}
-		// A card cleaned from any stage may still hold the scratch tree its
-		// design chats ran in (a card that never reached a worktree holds
-		// only that). Its contents are disposable by construction, so this
-		// runs unconditionally — absent is success.
+		// A research card runs in a scratch tree rather than a branch
+		// worktree. Disposable by construction, and absent is success, so
+		// this runs unconditionally for every kind.
 		if err := m.wt.RemoveScratch(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
@@ -985,8 +984,8 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
 		}
-		// ...and the scratch tree its design stages ran in — the only tree a
-		// feature that never left Spec has.
+		// ...and the scratch tree, which is the only tree a research card
+		// ever has.
 		if err := m.wt.RemoveScratch(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}

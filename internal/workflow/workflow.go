@@ -150,21 +150,6 @@ func WorkStage(kind domain.Kind) domain.Stage {
 	}
 }
 
-// NeedsWorktree reports whether a stage of the given kind runs in a
-// throwaway worktree. Feature and bug stages that are neither the backlog
-// (todo) nor interactive run worktree-bound — the exact predicate that has
-// governed worktree creation for them all along. Every research stage runs
-// worktree-less: a research branch never receives a commit, so a worktree
-// would break the merge/clean/rebase/commit-message/done assumptions.
-// This is the single source of truth for the engine's worktree-creation
-// gate and the UI's worktree-creation gate.
-func NeedsWorktree(kind domain.Kind, stage domain.Stage) bool {
-	if kind == domain.KindResearch {
-		return false
-	}
-	return stage != domain.StageTodo && !Interactive(stage)
-}
-
 // CanTransition reports whether moving from→to is legal for an item of
 // the given kind created with the given skip flags. The error explains
 // why not.

@@ -37,7 +37,6 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
-	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -1478,35 +1477,41 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 		}
 		return scratch, artifact, nil
 	}
-	if interactiveStage(f.Stage) {
-		if err := spec.EnsureDraft(draft, &f); err != nil {
-			return "", "", err
-		}
-		// One scratch tree per card, shared by all of its design stages the
-		// way its worktree is shared by all of its work stages.
-		scratch, serr := wt.EnsureScratch(ctx, &f)
-		if serr != nil {
-			return "", "", serr
-		}
-		return scratch, draft, nil
-	}
-	hasWT, err := wt.Exists(ctx, &f)
+	// Every feature and bug stage — design and work alike — runs in the
+	// card's own branch worktree, allocated here on its first stage run
+	// and kept for the card's whole life. There is no scratch tree and no
+	// hand-off: the design stages and the coding stages share one
+	// directory, which is why an implement → plan bounce needs no tree
+	// juggling. A plan that writes a spike writes it on the branch
+	// implement will continue, and verify sees the whole diff regardless.
+	hadWT, err := wt.Exists(ctx, &f)
 	if err != nil {
 		return "", "", err
 	}
-	if !hasWT {
+	if !hadWT && !interactiveStage(f.Stage) && f.Stage != domain.StageTodo {
+		// A work stage with no worktree is not a first run — it is a tree
+		// that went missing under a card already past its design gate.
+		// Recover it from the branch rather than silently cutting a fresh
+		// one off main, which would discard the work.
 		if rerr := e.recoverMissingWorktree(ctx, wt, &f); rerr != nil {
-			return "", "", fmt.Errorf("feature %s at stage %s has no worktree and could not be recreated (%v); recreate .gummi/worktrees/%s from the feature's branch manually, or approve the spec again if the design phase was never completed", f.ID, f.Stage, rerr, f.ID)
+			return "", "", fmt.Errorf("feature %s at stage %s has no worktree and could not be recreated (%v); recreate .gummi/worktrees/%s from the feature's branch manually", f.ID, f.Stage, rerr, f.ID)
 		}
 	}
+	workDir, err = wt.Ensure(ctx, &f)
+	if err != nil {
+		return "", "", err
+	}
 	// A rewrite of main reported after the worktree was created makes the
-	// on-disk branch's base incoherent with main; refuse before promoting the
-	// artifact or handing the agent a workdir it can only deepen the
-	// divergence in. The operator recreates the worktree from current main.
+	// on-disk branch's base incoherent with main; refuse before promoting
+	// the artifact or handing the agent a workdir it can only deepen the
+	// divergence in.
 	if err := wt.AssertNoForkDrift(ctx, &f); err != nil {
 		return "", "", err
 	}
-	workDir = filepath.Join(root, f.WorktreePath())
+	// Promotion now happens on the card's first stage run rather than at
+	// its approval gate: the worktree exists from here on, so there is no
+	// later moment the artifact has to be moved into. Promote is a no-op
+	// once the artifact is at its workspace home.
 	artifact := filepath.Join(root, f.ArtifactPath())
 	if err := spec.Promote(artifact, draft, filepath.Join(workDir, f.ArtifactPath()), &f); err != nil {
 		return "", "", err
@@ -2257,10 +2262,15 @@ func (e *Engine) settle(s *Session) error {
 // stage) must fail the run rather than let it read as a clean finish.
 func (e *Engine) checkpoint(s *Session) error {
 	if s.Interactive || interactiveStage(s.Feature.Stage) {
-		return nil // design-phase chats run in the main checkout; never auto-commit there
+		// A design chat runs in the card's own worktree now, so anything it
+		// writes survives to implement without a hand-off — but it is a
+		// conversation, not work, and checkpointing every turn of one would
+		// bury the branch's real history. The tree is no longer discarded,
+		// so nothing is lost by waiting.
+		return nil
 	}
-	// Research stages are worktree-less by design (workflow.NeedsWorktree),
-	// not merely worktree-less because one went missing. There is nothing
+	// Research stages are worktree-less by design (a research branch never
+	// receives a commit), not merely worktree-less because one went missing. There is nothing
 	// on disk to commit and there never will be, so the whole function is
 	// a no-op here — and, the reason this is a return rather than a
 	// swallow of CommitAll's ErrNoWorktree below, there is nothing to
@@ -2268,7 +2278,7 @@ func (e *Engine) checkpoint(s *Session) error {
 	// session's activity, so every autonomous research stage told the
 	// reader its checkpoint had failed, for a condition the design
 	// guarantees and no reader can act on.
-	if !workflow.NeedsWorktree(s.Feature.Kind, s.Feature.Stage) {
+	if s.Feature.Kind == domain.KindResearch {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)

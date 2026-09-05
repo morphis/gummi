@@ -265,6 +265,29 @@ func withAttach(in nextInput, lead nextAction, why string) []nextAction {
 	return []nextAction{lead, nextStep("attach", "a", "attach the agent CLI", why)}
 }
 
+// designDiffAction offers the diff at a design gate.
+//
+// Under one worktree per card, a design stage runs in the same tree
+// implement will continue in, so a plan that prototyped — or a spec chat
+// that tried something — has already written code onto the card's branch.
+// A gate that only showed the artifact would let that code cross on the
+// strength of a document that never mentions it. The proposal's
+// requirement is exactly this: the design gate must show the diff.
+//
+// It is offered whenever the card has a worktree, rather than only when
+// the tree is actually dirty or ahead. Answering "is there a diff?" means
+// two git calls per card per load, and featureRow is deliberately free of
+// per-frame IO; the diff view already says plainly when there is nothing
+// to show, so the cost of the unconditional offer is one wasted keystroke
+// and the cost of the conditional one is a slower board.
+func designDiffAction(in nextInput) []nextAction {
+	if !in.hasWorktree {
+		return nil
+	}
+	return []nextAction{nextStep("diff", "d", "review the diff",
+		"a design stage runs on the card's own branch — see anything it wrote")}
+}
+
 // stageActions is nextActions' own stage-by-stage derivation, factored out
 // so the PR-pull nudge above can post-process its result uniformly instead
 // of being threaded into every one of its early returns.
@@ -342,9 +365,9 @@ func stageActions(in nextInput) []nextAction {
 		if b := blockedGate(in); b != nil {
 			return append([]nextAction{*b}, acts...)
 		}
-		gate := nextStep("advance", "g", "approve", "creates the worktree and starts the agent stages")
+		gate := nextStep("advance", "g", "approve", "hands the card to the agent stages")
 		if in.quick {
-			gate.why = "creates the worktree and starts implementing — P first if it outgrew quick"
+			gate.why = "starts implementing — P first if it outgrew quick"
 		}
 		acts = append(acts, gate)
 		// Sending it back is an answer in its own right, not just
@@ -365,6 +388,7 @@ func stageActions(in nextInput) []nextAction {
 		// take it yet.
 		acts = append(acts, nextStep("spec", "s", "read the "+artifactNoun(in.kind)+" first",
 			"it is what approving signs off on"))
+		acts = append(acts, designDiffAction(in)...)
 		return append(acts, autopilotAction("gates cross themselves from here"))
 
 	case domain.StagePlan:
@@ -372,6 +396,7 @@ func stageActions(in nextInput) []nextAction {
 			return []nextAction{nextStep("run", "enter", "run the planner", "no active run — writes the line-level plan into the spec")}
 		}
 		acts := []nextAction{nextStep("spec", "s", "read the plan", "it lives in the spec's Implementation notes")}
+		acts = append(acts, designDiffAction(in)...)
 		if b := blockedGate(in); b != nil {
 			return append(acts, *b)
 		}

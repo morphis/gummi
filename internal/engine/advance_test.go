@@ -855,7 +855,7 @@ func skipCombos() []domain.SkipFlags {
 // --- research workflow (worktree-less routing) ---
 
 // A research card walks its whole graph without ever materializing a
-// worktree: NeedsWorktree routes investigate/shape/review/verify/done all
+// worktree: research routes investigate/shape/review/verify/done all
 // to the main checkout, so Advance never reports EnteredWorktree and no
 // worktree exists.
 func TestAdvanceResearchNoWorktree(t *testing.T) {

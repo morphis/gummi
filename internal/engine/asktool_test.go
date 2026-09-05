@@ -199,7 +199,7 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
+	draft := specDraftPath(e, f)
 	raw, err := os.ReadFile(draft)
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +300,7 @@ func TestSpecAnnotateWritesMarker(t *testing.T) {
 	}
 	waitFor(t, e, EventIdle)
 
-	draft := filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
+	draft := specDraftPath(e, f)
 	raw, err := os.ReadFile(draft)
 	if err != nil {
 		t.Fatal(err)
@@ -691,7 +691,21 @@ func seedDraft(t *testing.T, e *Engine, f domain.Feature) {
 	}
 }
 
+// specDraftPath resolves the card's artifact wherever it currently lives.
+// Under one worktree per card the artifact is promoted to its workspace
+// home on the card's FIRST stage run, not at its approval gate, so a test
+// that seeds a draft and then runs a design stage finds it at the home,
+// not in the drafts directory. LocateArtifact is the engine's own
+// resolution order, so this answers the same question artifactFile does.
 func specDraftPath(e *Engine, f domain.Feature) string {
+	root := e.pool.Root()
+	if p := spec.LocateArtifact(
+		filepath.Join(root, f.ArtifactPath()),
+		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f)),
+		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
+	); p != "" {
+		return p
+	}
 	return filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(&f))
 }
 

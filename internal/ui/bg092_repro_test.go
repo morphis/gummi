@@ -51,7 +51,7 @@ func TestBG092RefusalReachesEveryStageThatCanRaiseIt(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug} {
 		var firstWT domain.Stage
 		for _, st := range domain.Stages {
-			if workflow.NeedsWorktree(k, st) {
+			if k != domain.KindResearch && st != domain.StageTodo {
 				firstWT = st
 				break
 			}

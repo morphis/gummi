@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/workflow"
-	"github.com/morphis/gummi/internal/worktree"
 )
 
 // AdvanceStatus classifies what Advance did (or why it could not move the
@@ -236,42 +234,43 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		}
 	}
 
-	// Crossing from the design phase (todo / interactive) into the first
-	// worktree stage is the approval gate: it creates the worktree and
-	// promotes the artifact (spec or bug report) to its workspace home.
-	// Bounces (review/verify → work stage) already have a worktree, so this
-	// fires exactly once, whichever design stage is being left.
-	enteringWorktree := workflow.NeedsWorktree(f.Kind, next)
-	existed := true
-	var wt *worktree.Manager
-	if enteringWorktree {
-		wt, err = e.mgr(ctx, &f)
-		if err != nil {
-			return res, err
-		}
-		if existed, err = wt.Exists(ctx, &f); err != nil {
-			return res, err
-		}
-	}
-	if enteringWorktree && !existed {
+	// Crossing out of the design phase is still the approval gate, but it
+	// no longer creates or destroys anything: the card has run in its own
+	// worktree since its first stage, and its artifact has been at its
+	// workspace home since then too. What is still owed here is the
+	// one-shot work that belongs to "work is starting", not to "a tree
+	// exists" — check discovery, the baseline pass, and the plan-time
+	// envelope estimate.
+	//
+	// The crossing is identified by its shape rather than by a side
+	// effect: leaving an interactive stage for a non-interactive one
+	// happens exactly once per card in the forward direction. A bounce
+	// (review/verify → work) leaves a non-interactive stage, so it never
+	// re-triggers discovery the way a worktree-existence test would have
+	// had to be taught not to.
+	if f.Kind != domain.KindResearch &&
+		workflow.Interactive(f.Stage) && !workflow.Interactive(next) && next != domain.StageTodo {
 		res.EnteredWorktree = true
-		if _, err := wt.Create(ctx, &f); err != nil {
-			return res, err
+		// Ensure, not Create: the card has almost certainly been running in
+		// its worktree since its first design stage, in which case this is
+		// a no-op. It still runs, because a card advanced without ever
+		// running a stage (a skip-walked card, a board driven by hand) has
+		// no tree yet, and everything past this gate — the diff at the
+		// gate, check discovery, the landing — assumes one exists.
+		wt, werr := e.mgr(ctx, &f)
+		if werr != nil {
+			return res, werr
 		}
-		// approval promotes the draft to the artifact's workspace home
-		// (DESIGN §10.11)
-		if err := e.promoteDraft(&f); err != nil {
-			return res, err
+		if _, werr := wt.Ensure(ctx, &f); werr != nil {
+			return res, werr
 		}
-		// The design stages' scratch tree has served its purpose: the
-		// artifact just promoted is the only thing that crosses this
-		// hand-off. Anything a design stage left on disk is discarded here,
-		// deliberately — a spec chat's stray edits must never arrive on the
-		// branch as work nobody wrote on purpose. Best-effort: the card has
-		// already advanced and its worktree exists, so a leftover scratch
-		// directory is garbage to sweep, not a reason to fail the gate.
-		if serr := wt.RemoveScratch(ctx, &f); serr != nil {
-			log.Printf("discarding scratch tree for %s: %v", f.ID, serr)
+		// Likewise idempotent: locate promotes the artifact on the card's
+		// first stage run, so this is a no-op for any card that has
+		// actually been worked on. It runs for the same reason Ensure
+		// does — a card walked forward without a stage ever running still
+		// has to arrive past this gate with its artifact at home.
+		if werr := e.promoteDraft(&f); werr != nil {
+			return res, werr
 		}
 		// plan-time estimation is feature-specific (spec approval): size the
 		// spend-plan envelope from what completed features cost, before
@@ -287,7 +286,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// Manager.Diff(), so this transition is the last place the engine can
 	// fail cleanly before the reviewer sees a poisoned diff: refuse to
 	// enter Review if main was rewound past the recorded fork.
-	if next == domain.StageReview && workflow.NeedsWorktree(f.Kind, next) {
+	if next == domain.StageReview && f.Kind != domain.KindResearch {
 		wt, err := e.mgr(ctx, &f)
 		if err != nil {
 			return res, err
@@ -433,21 +432,6 @@ func (r AdvanceResult) EstimateNotice() string {
 	}
 	return fmt.Sprintf(" · envelope estimated at %d credits from %d metered feature(s)",
 		r.EstimatedCredits, r.EstimateSamples)
-}
-
-// promoteDraft promotes the artifact draft (spec or bug report) to its
-// workspace home under .gummi/specs|bugs in the main checkout. The artifact
-// is gummi workspace content: it never enters the worktree and is never
-// committed. An item that never had a draft gets a fresh template — the
-// artifact always exists from approval on.
-func (e *Engine) promoteDraft(f *domain.Feature) error {
-	root := e.pool.Root()
-	return spec.Promote(
-		filepath.Join(root, f.ArtifactPath()),
-		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(f)),
-		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
-		f,
-	)
 }
 
 // artifactFile resolves where an item's design artifact lives right now:
@@ -617,4 +601,20 @@ func (e *Engine) openDiffCommentsBlockingGate(ctx context.Context, id domain.Fea
 		}
 	}
 	return n
+}
+
+// promoteDraft moves the artifact draft (spec or bug report) to its
+// workspace home, from wherever it currently lives. It is idempotent: an
+// artifact already at home is left alone, and an item that never had a
+// draft gets a fresh template, so the artifact always exists from the
+// approval gate on. The draft directory is gummi workspace content — it
+// never enters the worktree and is never committed.
+func (e *Engine) promoteDraft(f *domain.Feature) error {
+	root := e.pool.Root()
+	return spec.Promote(
+		filepath.Join(root, f.ArtifactPath()),
+		filepath.Join(e.cfg.Workspace.DraftsDir(), spec.DraftFilename(f)),
+		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
+		f,
+	)
 }

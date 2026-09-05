@@ -45,10 +45,18 @@ func TestUntilSpecStopsBeforeImplement(t *testing.T) {
 	if h.has("gate") {
 		t.Fatalf("a gate was crossed despite --until spec; stream=%v", kinds)
 	}
-	// the branch must not exist: nothing was implemented.
+	// The branch DOES exist — the card has run in its own worktree since
+	// its first stage, which is the point of one worktree per card. What
+	// must be true is that nothing was implemented on it: the branch is
+	// still level with main, carrying no commits of its own.
 	f, _ := h.store.GetFeature(context.Background(), id)
-	if exists, _ := h.wt.BranchExists(context.Background(), &f); exists {
-		t.Fatal("branch created despite stopping at spec")
+	if exists, _ := h.wt.BranchExists(context.Background(), &f); !exists {
+		t.Fatal("the card's worktree branch was never cut")
+	}
+	if ahead, err := h.wt.BranchAhead(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	} else if ahead {
+		t.Fatal("the branch carries commits despite stopping at spec")
 	}
 }
 
