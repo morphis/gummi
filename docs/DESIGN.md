@@ -1793,7 +1793,16 @@ caller must decide, then exits.
   while verify is still in flight, so an already-ahead branch mid-run never
   false-positives) — and `done` — the branch was **squash-merged** into main.
   A headless run ends at `verified:true`/`done:false`; only a land flips
-  `done`.
+  `done`. It also carries **why** a card stopped, so an unattended driver
+  never has to parse the event stream to find out: `escalation` is the
+  newest open decision (its kind, the question verbatim, and the stage it
+  was raised in) or absent when nothing is waiting; `rounds` is the
+  per-loop bounce counters; and `stage_spend` is the per-stage cost
+  breakdown, largest first. A review bounce buys an entire second implement
+  pass, so `rounds` beside `stage_spend` is what makes "is this reviewer
+  worth its bounces" answerable at all. Note `stage_spend` accumulates
+  across rounds (its key is feature/stage/model/role), so it is per stage,
+  not per round — `rounds` is what says how many passes a figure covers.
 
 ### 14.2 The exit contract
 

@@ -338,3 +338,87 @@ func TestRenderStatusPRLine(t *testing.T) {
 		t.Errorf("rendered status for unlinked card carries a pr: line: %q", buf.String())
 	}
 }
+
+// TestBuildStatusExplainsAParkedCard: a caller that finds verified:false
+// and running:false must be able to learn WHY from the status alone. The
+// three things that answer it — the open decision that parked the card,
+// how many rounds it has burned, and where the spend went — all come from
+// the store, and none of them were exposed before.
+func TestBuildStatusExplainsAParkedCard(t *testing.T) {
+	f := newReadFixture(t)
+	feat := f.mkFeature(t, "JIRA-9")
+
+	// nothing open yet
+	if v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat); v.Escalation != nil {
+		t.Fatalf("escalation = %+v on an unblocked card, want nil", v.Escalation)
+	}
+
+	if err := f.store.OpenDecision(f.ctx, feat.ID, feat.Stage, state.DecisionPayload{
+		ID:       "d1",
+		Kind:     state.DecisionKindAsk,
+		Question: "per-device or synced?\nsay which",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.IncrementRounds(f.ctx, feat.ID, domain.RoundKindReview); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.IncrementRounds(f.ctx, feat.ID, domain.RoundKindReview); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageImplement, "implementer", "m1", 431, 0, 10, 20, 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageReview, "reviewer", "m2", 97, 0, 1, 2, 3); err != nil {
+		t.Fatal(err)
+	}
+
+	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if v.Escalation == nil {
+		t.Fatal("escalation = nil with a decision open")
+	}
+	if v.Escalation.Kind != state.DecisionKindAsk {
+		t.Errorf("escalation kind = %q, want ask", v.Escalation.Kind)
+	}
+	// verbatim, newlines and all — the text render is what trims it
+	if v.Escalation.Reason != "per-device or synced?\nsay which" {
+		t.Errorf("escalation reason = %q, want the question verbatim", v.Escalation.Reason)
+	}
+	if v.Escalation.Stage != string(feat.Stage) {
+		t.Errorf("escalation stage = %q, want %s", v.Escalation.Stage, feat.Stage)
+	}
+	if v.Rounds.Review != 2 || v.Rounds.Plan != 0 {
+		t.Errorf("rounds = %+v, want review 2 / plan 0", v.Rounds)
+	}
+	// largest first: the stage that dominates a run reads at the top
+	if len(v.StageSpend) != 2 {
+		t.Fatalf("stage_spend = %+v, want 2 rows", v.StageSpend)
+	}
+	if v.StageSpend[0].Stage != string(domain.StageImplement) || v.StageSpend[0].Credits != 431 {
+		t.Errorf("stage_spend[0] = %+v, want implement/431 first", v.StageSpend[0])
+	}
+	if v.StageSpend[0].CachedTokens != 20 {
+		t.Errorf("cached_tok = %d, want 20 (the field the spend fix made real)", v.StageSpend[0].CachedTokens)
+	}
+	if v.StageSpend[1].Stage != string(domain.StageReview) {
+		t.Errorf("stage_spend[1] = %+v, want review second", v.StageSpend[1])
+	}
+}
+
+// The newest open decision is the one that stopped the card most recently,
+// and the one a driver asking "why is it not running" wants named.
+func TestBuildStatusEscalationTakesTheNewest(t *testing.T) {
+	f := newReadFixture(t)
+	feat := f.mkFeature(t, "JIRA-9")
+	for _, q := range []string{"older", "newer"} {
+		if err := f.store.OpenDecision(f.ctx, feat.ID, feat.Stage, state.DecisionPayload{
+			ID: q, Kind: state.DecisionKindAsk, Question: q,
+		}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if v.Escalation == nil || v.Escalation.Reason != "newer" {
+		t.Fatalf("escalation = %+v, want the newest decision", v.Escalation)
+	}
+}

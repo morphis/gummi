@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -89,6 +91,58 @@ type statusView struct {
 	// PullRequestLine is the plain-text `pr: owner/repo#N` render, never
 	// marshaled into the JSON view.
 	PullRequestLine string `json:"-"`
+	// Escalation names what the card is waiting on a person for, absent
+	// when nothing is. Without it a caller that finds verified:false and
+	// running:false has to parse the event stream to learn why the card
+	// stopped — which is the question a JSON status endpoint exists to
+	// answer. When several decisions are open it is the newest: the one
+	// that stopped the card most recently.
+	Escalation *statusEscalation `json:"escalation,omitempty"`
+	// Rounds is the automatic round counters, per loop. A review bounce
+	// costs an entire second implement pass and is the most expensive
+	// single event in the workflow, so "how many times did this bounce"
+	// belongs beside the spend rather than in the event log.
+	Rounds statusRounds `json:"rounds"`
+	// StageSpend is where the money went, per stage/role/model, largest
+	// first. It is what makes a reviewer's bounces answerable: a run total
+	// hides a stage that doubled. Note it is per stage, NOT per round —
+	// stage_spend is keyed (feature, stage, model, role) and accumulates
+	// across rounds, so a bounced implement stage reports both passes as
+	// one figure. Rounds above is what tells you how many passes that is.
+	StageSpend []statusStageSpend `json:"stage_spend,omitempty"`
+}
+
+// statusEscalation is the open decision that parked the card, in the
+// words it was raised with.
+type statusEscalation struct {
+	// Kind is the decision vocabulary: gate, ask, verify, conflict,
+	// budget, idle.
+	Kind string `json:"kind"`
+	// Reason is the question verbatim — what the card is waiting for.
+	Reason string `json:"reason"`
+	// Stage is the stage the card was waiting in when it was raised.
+	Stage string `json:"stage"`
+	At    string `json:"at"`
+}
+
+// statusRounds carries each round kind's persisted counter. Plan and
+// review are the two loops with their own caps; corrective is the unified
+// budget across everything that bounces work back.
+type statusRounds struct {
+	Plan       int `json:"plan"`
+	Review     int `json:"review"`
+	Corrective int `json:"corrective"`
+}
+
+// statusStageSpend is one row of the per-stage cost breakdown.
+type statusStageSpend struct {
+	Stage        string  `json:"stage"`
+	Role         string  `json:"role"`
+	Model        string  `json:"model"`
+	Credits      float64 `json:"credits"`
+	InputTokens  int64   `json:"input_tok"`
+	CachedTokens int64   `json:"cached_tok"`
+	OutputTokens int64   `json:"output_tok"`
 }
 
 type statusBlockers struct {
@@ -135,7 +189,82 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		Running:         state.ProcessAlive(state.ReadPIDFile(ws.PIDFile(f.ID))),
 		PullRequest:     f.PullRequest.StatusPayload(),
 		PullRequestLine: f.PullRequest.PlainLine(),
+		Escalation:      openEscalation(ctx, store, f),
+		Rounds:          roundCounts(ctx, store, f),
+		StageSpend:      stageSpendRows(ctx, store, f),
 	}
+}
+
+// openEscalation reads the newest still-open decision on the card — the
+// reason it is waiting on a person — or nil when nothing is. Every read
+// here degrades to nil rather than failing the status: a caller polling a
+// running card must still get its stage and spend when the decision scan
+// is unreadable.
+func openEscalation(ctx context.Context, store *state.Store, f *domain.Feature) *statusEscalation {
+	byCard, err := store.OpenDecisions(ctx)
+	if err != nil {
+		return nil
+	}
+	open := byCard[f.ID]
+	if len(open) == 0 {
+		return nil
+	}
+	// OpenDecisions reports oldest first; the newest is the one that
+	// stopped the card most recently, which is what a driver asking "why
+	// is it not running" wants named.
+	d := open[len(open)-1]
+	return &statusEscalation{
+		Kind:   d.Kind,
+		Reason: d.Question,
+		Stage:  string(d.Stage),
+		At:     d.At.UTC().Format(time.RFC3339),
+	}
+}
+
+// roundCounts reads the three persisted round counters. A store error on
+// any one of them reads as 0 — the same degradation the rest of the view
+// takes, and the honest value for a counter that was never written.
+func roundCounts(ctx context.Context, store *state.Store, f *domain.Feature) statusRounds {
+	n := func(k domain.RoundKind) int {
+		c, err := store.Rounds(ctx, f.ID, k)
+		if err != nil {
+			return 0
+		}
+		return c
+	}
+	return statusRounds{
+		Plan:       n(domain.RoundKindPlan),
+		Review:     n(domain.RoundKindReview),
+		Corrective: n(domain.RoundKindCorrective),
+	}
+}
+
+// stageSpendRows projects the store's per-stage breakdown into the view,
+// largest first so the stage that dominates a run reads at the top. Ties
+// break on stage then role, so the order is stable across calls.
+func stageSpendRows(ctx context.Context, store *state.Store, f *domain.Feature) []statusStageSpend {
+	rows, err := store.StageBreakdown(ctx, f.ID)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	out := make([]statusStageSpend, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, statusStageSpend{
+			Stage: string(r.Stage), Role: r.Role, Model: r.Model,
+			Credits:     r.Credits,
+			InputTokens: r.InputTokens, CachedTokens: r.CachedTokens, OutputTokens: r.OutputTokens,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Credits != out[j].Credits {
+			return out[i].Credits > out[j].Credits
+		}
+		if out[i].Stage != out[j].Stage {
+			return out[i].Stage < out[j].Stage
+		}
+		return out[i].Role < out[j].Role
+	})
+	return out
 }
 
 // branchState collapses the worktree manager's branch queries into one
@@ -168,7 +297,19 @@ func renderStatus(w io.Writer, v statusView) {
 	fmt.Fprintf(w, "  Verified: %s\n", yesNo(v.Verified))
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)
+	// continuation lines under Spend: the breakdown is the same figure
+	// taken apart, not a second one.
+	for _, sp := range v.StageSpend {
+		fmt.Fprintf(w, "            %-9s %-11s %8s  %s\n",
+			sp.Stage, sp.Role, trimCredits(sp.Credits), sp.Model)
+	}
 	fmt.Fprintf(w, "  Blockers: %d open question(s) · %d open diff comment(s)\n", v.Blockers.OpenQuestions, v.Blockers.OpenDiff)
+	if r := v.Rounds; r.Plan > 0 || r.Review > 0 || r.Corrective > 0 {
+		fmt.Fprintf(w, "  Rounds:   plan %d · review %d · corrective %d\n", r.Plan, r.Review, r.Corrective)
+	}
+	if e := v.Escalation; e != nil {
+		fmt.Fprintf(w, "  Waiting:  [%s at %s] %s\n", e.Kind, e.Stage, firstLine(e.Reason))
+	}
 	if v.Ref != "" {
 		fmt.Fprintf(w, "  Ref:      %s\n", v.Ref)
 	}
