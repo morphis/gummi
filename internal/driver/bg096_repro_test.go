@@ -24,22 +24,19 @@ import (
 func TestBG096CreatedEventDescribesTheKindItCreated(t *testing.T) {
 	cases := []struct {
 		kind domain.Kind
-		full bool
 		want string // expected route
 	}{
-		{domain.KindFeature, false, "full"},
-		{domain.KindFeature, true, "full"},
-		{domain.KindBug, false, "full"},
-		{domain.KindResearch, false, "full"},
-		{domain.KindResearch, true, "full"},
+		{domain.KindFeature, "full"},
+		{domain.KindBug, "full"},
+		{domain.KindResearch, "full"},
 	}
 	for _, c := range cases {
 		h := newHarness(t, false, nil)
 		h.fake.Caps.ReadOnlyEnforce = true
-		d := h.driver(Options{Full: c.full})
+		d := h.driver(Options{})
 		f, err := d.Create(context.Background(), c.kind, "some piece of work")
 		if err != nil {
-			t.Fatalf("%s full=%v: Create: %v", c.kind, c.full, err)
+			t.Fatalf("%s: Create: %v", c.kind, err)
 		}
 		var created map[string]any
 		for _, e := range h.events() {
@@ -48,17 +45,17 @@ func TestBG096CreatedEventDescribesTheKindItCreated(t *testing.T) {
 			}
 		}
 		if created == nil {
-			t.Fatalf("%s full=%v: no created event", c.kind, c.full)
+			t.Fatalf("%s: no created event", c.kind)
 		}
 		if got := created["route"]; got != c.want {
-			t.Errorf("%s full=%v: route = %v, want %q", c.kind, c.full, got, c.want)
+			t.Errorf("%s: route = %v, want %q", c.kind, got, c.want)
 		}
 		// the branch is announced exactly where one will exist
 		branchy := c.kind != domain.KindResearch
 		_, got := created["branch"]
 		if got != branchy {
-			t.Errorf("%s full=%v: created event carries a branch = %v, want %v (%v)",
-				c.kind, c.full, got, branchy, created)
+			t.Errorf("%s: created event carries a branch = %v, want %v (%v)",
+				c.kind, got, branchy, created)
 		}
 		if branchy && created["branch"] != f.BranchName() {
 			t.Errorf("%s: branch = %v, want %q", c.kind, created["branch"], f.BranchName())

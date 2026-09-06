@@ -186,7 +186,6 @@ var foreignBlockedKeys = map[string]bool{
 	"b": true, // bounce
 	"u": true, // envelope
 	"o": true, // repo picker
-	"P": true, // route via plan
 	"r": true, // rebase
 	"m": true, // merge
 	"z": true, // squash

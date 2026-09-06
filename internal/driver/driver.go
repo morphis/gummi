@@ -37,7 +37,6 @@ const (
 type Options struct {
 	Envelope     int
 	Profile      string
-	Full         bool   // opt into the brainstorm+plan route (default: quick)
 	GateApproval string // GateAttended (default) | GateAutopilot
 	// GateApprovalSet reports that the caller passed --gate-approval
 	// explicitly on this invocation. A resume uses it to decide between
@@ -1753,7 +1752,7 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
-		Full: d.opts.Full, Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
+		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 	})
 }

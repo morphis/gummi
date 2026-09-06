@@ -33,9 +33,15 @@ roles to concrete models. The durable context carrier between stages is
 a **markdown spec on the feature's branch**, not a transcript.
 
 ```
-feature  FD-NNN   todo → brainstorm → spec → plan → implement → review → verify → done
-bug      BG-NNN   todo → triage → diagnose → fix ──────────────↗ (same review→verify floor)
+todo → plan → implement → verify → done      (every kind, one graph)
+     ↖──────────┘        ↖────────┘          rerun edges
 ```
+
+`plan` is the design stage: explore, converge, write the plan. The kind
+(FD/BG/RS) selects each stage's **contract** — its hints, its artifact,
+the sections its gate demands — never a graph of its own. Every stage
+ends with a critique pass before its gate; review is a pass, not a
+stage.
 
 Read `README.md` for the user-facing feature tour and key bindings.
 
@@ -49,13 +55,13 @@ leaf services.
 | package | responsibility |
 |---|---|
 | `domain` | Core types: features, bugs, stages, work items. No I/O. |
-| `workflow` | The single fixed state machine: stages, legal transitions, skip flags, rerun caps. **Compiled in, never configurable.** |
+| `workflow` | The single fixed state machine: one graph, its legal transitions and rerun edges. **Compiled in, never configurable.** |
 | `gatepolicy` | Shared checkpoint policy used by both the TUI and headless driver to raise and cross workflow gates. |
 | `spec` | The markdown spec artifact + its `gummi-checks` verification block. |
 | `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
 | `engine` | The orchestrator. Binds stages to agent sessions, schedules autonomous runs across attention slots, routes turns, streams activity. Start here to trace behavior. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
-| `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Also the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout that gives every pre-worktree stage a real working directory instead of the main checkout. |
+| `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |
@@ -132,9 +138,9 @@ still work — the board just stays static. Key env vars are tabled in
 ## Conventions & guardrails
 
 - **The workflow is invariant.** No implementation without an approved
-  spec; no merge without review **and** verify. Review and Verify can
-  never be skipped. Do not add configuration that softens this — it's a
-  core design decision, not an oversight.
+  design; no merge without a critique **and** verify. There are no routes
+  and no skips. Do not add configuration that softens this — it's a core
+  design decision, not an oversight.
 - **The spec is the context carrier**, not chat transcripts. Keep token
   windows small: pass specs between stages, not conversation history.
 - **gummi's job ends at a verified branch.** It does not open PRs or

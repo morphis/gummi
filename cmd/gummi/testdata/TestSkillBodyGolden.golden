@@ -1,7 +1,7 @@
 # Using gummi to ship a feature or bug
 
 gummi is a meta-harness that drives coding agents through a **fixed, spec-driven
-workflow** — spec → review → verify — with each work item on its own git
+workflow** — plan → implement → verify — with each work item on its own git
 worktree and branch. You (the calling agent) invoke `gummi run`, answer the
 questions it delegates to you, and report the **verified branch** it produces.
 gummi orchestrates the coding work; it never merges and never skips review or
@@ -68,7 +68,6 @@ gummi run [flags] "<description>"
     --acceptance string       acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --envelope int            credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)
-    --full                    run the full route (brainstorm + plan), not the quick route
     --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
@@ -134,10 +133,12 @@ gummi doctor
 gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run] [--check]
 ```
 
-A run drives one feature via the **quick route** by default (spec → implement →
-review → verify). `--full` opts into the brainstorm + plan stages for larger
-work. The design gates auto-cross under the default `--gate-approval=auto`; pass
-`--gate-approval=caller` to approve them yourself.
+A run drives one feature through the workflow: plan → implement → verify.
+There is one route — plan is the design stage (it explores the problem,
+converges on an approach and writes the implementation plan), implement is the
+coding stage, and verify runs the checks. Each stage ends with a critique pass
+before its gate. The design gate auto-crosses under `--gate-approval=autopilot`;
+the default, `attended`, stops for you to approve it.
 
 `status`, `watch`, `spec`, and `diff` are **read-only** — they take no lock, so
 you can inspect a feature while a run is live. `status` answers *where* a card
@@ -283,23 +284,22 @@ ambiguous forks where the recommended answer might be wrong.
 ## Stop early for a human design review
 
 For work where a human should sign off on the design before implementation burns
-tokens, add `--until spec` (or `--until plan` on `--full`). The run stops cleanly
-at that stage — event `stopped`, exit 0 — with the feature parked and resumable.
-Hand the spec to the human (`gummi spec <id>`); once approved, `gummi resume <id>
---approve` continues to the verified branch.
+tokens, add `--until plan`. The run stops cleanly at the design stage — event
+`stopped`, exit 0 — with the card parked and resumable. Hand the spec to the
+human (`gummi spec <id>`); once approved, `gummi resume <id> --approve`
+continues to the verified branch. `plan` is the only stop `--until` accepts:
+the design gate is the one boundary where stopping is unambiguous.
 
-`--until` is per-invocation only — it is never persisted on the card, so if you
-want the run to stop again at a *later* boundary (e.g. `--until plan` after
-already stopping at `--until spec`), re-pass `--until <stage>` on that `resume`
-too. A bare `resume --approve` with no `--until` runs straight through to the
-end.
+`--until` is per-invocation only — it is never persisted on the card, so a bare
+`resume --approve` with no `--until` runs straight through to the end.
 
 ## Research cards: `gummi research`
 
 `gummi research "<brief>"` mints one RS card from a free-form brief and drives
-it headlessly through investigate and shape to the decompose gate — no
-brainstorm, no plan, no worktree. `--until shape` is the only pre-decompose
-stop on its route. At the gate the stream emits a `question` event whose
+it headlessly to the decompose gate. It runs the same stages every card does,
+with two differences: its implement stage is read-only (it gathers evidence
+rather than writing code) and it never gets a worktree. `--until plan` is the
+only pre-decompose stop. At the gate the stream emits a `question` event whose
 payload carries the proposed follow-on FD slices plus a coverage map, and the
 run exits `question` (code 2). From there, `gummi resume RS-NNN --approve`
 mints each proposed FD and moves the RS card to `done`; `gummi resume RS-NNN

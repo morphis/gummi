@@ -43,7 +43,7 @@ func TestPausedPlanWriterResumeReDispatches(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err == nil || out.Status != StatusError {
 		t.Fatalf("run-1 = %+v, err=%v; want a StatusError from the failed writer", out, err)
 	}
@@ -98,7 +98,7 @@ func TestPausedPlanCritiqueResumeReDispatches(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err == nil || out.Status != StatusError {
 		t.Fatalf("run-1 = %+v, err=%v; want a StatusError from the failed critique", out, err)
 	}
@@ -148,7 +148,7 @@ func TestPausedPlanCritiqueResumeThenStallHintsStalled(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err == nil || out.Status != StatusError {
 		t.Fatalf("run-1 = %+v, err=%v; want a StatusError from the failed critique", out, err)
 	}

@@ -4,7 +4,9 @@
 > spec-driven workflow across git worktrees — from one beautiful TUI, or
 > headlessly from your own agents and CI.
 
-**Status:** brainstorm / v0 design — 2026-07-03
+**Status:** living design record — first written 2026-07-03, amended since.
+Sections marked *superseded in part* keep the record of what a change
+replaced; §3 is always the current workflow.
 
 ---
 
@@ -47,12 +49,12 @@ queue visible and make context-switching between features cheap.
 |---|---|
 | **Feature** | One unit of work. Has an ID (`FD-042`), a spec file, a worktree + branch, a workflow state, and a profile. The kanban card. |
 | **Spec (FD)** | Markdown feature design doc, lives *in the repo* (`.gummi/specs/FD-042-dark-mode.md`). Problem, out of scope, considered solutions, chosen approach, implementation notes, verification plan. The durable artifact agents read and write. |
-| **Workflow** | The single, fixed state machine of stages a feature moves through. Never configurable — only skip flags (early phases, set at creation) and rerun transitions (e.g. re-review after fixes). |
-| **Stage** | One node in the workflow. Declares: agent action, interaction mode (`interactive` / `autonomous` / `manual`), completion gate, and which *role* performs it. |
+| **Workflow** | The single, fixed state machine every card moves through: `todo → plan → implement → verify → done`. Never configurable, and one graph for every kind — the only movement that is not forward is the rerun edges (a wrong plan, a failed verify). |
+| **Stage** | One node in the workflow. Declares: agent action, completion gate, the critique pass it ends with, and which *role* performs it. Its contract varies by the card's kind; the graph does not. |
 | **Role** | A named agent capability slot: `architect`, `implementer`, `reviewer`, `scribe`. Workflows reference roles, never concrete models. |
 | **Profile** | Maps roles → concrete agent configs (adapter, model, provider/BYOK env, permission level). Selected per feature. `premium`, `thrifty`, `local-heavy`, ... |
 | **Session** | One live agent conversation bound to a feature + stage. Can be attached (focused in TUI), running in background, or paused. |
-| **Worktree** | Git worktree per feature: `.gummi/worktrees/FD-042/`, branch `gummi/FD-042-dark-mode`. Created at spec approval, removed after merge. |
+| **Worktree** | Git worktree per card: `.gummi/worktrees/FD-042/`, branch `gummi/FD-042-dark-mode`. Created on the card's first stage run and kept for its whole life; removed after merge. A research card never gets one. |
 
 ### Why roles indirect between workflow and profile
 
@@ -64,64 +66,64 @@ spend. This is the single most important design decision for the cost goal:
 
 ## 3. The workflow
 
-There is exactly one workflow, compiled into gummi — never configurable.
-The only degrees of freedom: **skip flags** (Brainstorm and/or Plan can be
-marked skip at feature creation for small, obvious work) and **rerun
-transitions** (fix → re-review). Review and Verify can never be skipped.
-
-The **quick route** is a named preset over those flags, not a third
-workflow: created with both skips plus a marker that flips the Spec
-stage into a one-pass flavor — the architect asks its few clarifying
-questions up front, then drafts the whole spec (implementation steps
-folded into Implementation notes, since no Plan stage follows) for the
-user to steer and approve. It skips gates, never artifacts: the spec is
-a normal spec, so a quick item that turns out bigger than it looked
-escalates for free — restoring the Plan stage (`P`) re-routes approval
-through plan. Skip flags loosen in one direction only: clearing a flag
-(adding a stage back) is always legal, setting one mid-flight never is.
+There is exactly one workflow, compiled into gummi — never configurable,
+and now literally one: the three graphs this document originally
+described (feature, bug, research) were the same four ideas wearing three
+sets of names, and they have been merged. There are no routes, no skip
+flags and no quick preset. The only movement that is not forward is the
+**rerun edges** (implement → plan when the plan was wrong, verify →
+implement when the checks fail).
 
 ```
             ┌──────────┐    ┌──────────┐    ┌──────────┐
-  todo ───▶ │ Brainstorm│──▶│   Spec    │──▶│   Plan   │──▶ gate: you approve plan
-            │(interactive)  │(interactive)  │(autonomous│
-            └──────────┘    └──────────┘    │ or inter.)│
-                                            └──────────┘
-            ┌──────────┐    ┌──────────┐    ┌──────────┐
-        ──▶ │Implement │──▶ │  Review  │──▶ │  Verify  │──▶ gate: checks green
-            │(autonomous,   │(autonomous,   │(autonomous:
-            │ pausable)     │ fresh context)│ build/test/lint
+  todo ───▶ │   Plan   │──▶ │Implement │──▶ │  Verify  │──▶ gate: checks green
+            │(the design    │(autonomous,   │(autonomous:
+            │ stage)   │    │ pausable)│    │ build/test/lint
             └──────────┘    └──────────┘    │ + live check)
-                                            └──────────┘
+                 ▲   │            ▲   │     └──────────┘
+                 └───┘            └───┘        (rerun edges)
         ──▶ gate: you accept ──▶ Done: landed on main as one squash
                                  commit (you approve the message;
                                  gummi offers worktree cleanup)
 ```
 
+The **kind** (FD/BG/RS) no longer selects a graph. It selects each
+stage's *contract*: which hints its agent gets, which artifact template
+it writes, and which sections its gate demands. A bug's design stage
+reproduces and diagnoses; a research card's design stage shapes the
+question; a feature's explores, converges and plans. Same stage, same
+gate, same critique.
+
+Every stage ends with a **critique pass** before its gate: a
+fresh-context reviewer that tries to refute what the stage produced.
+Review used to be a stage of its own; it is a pass now, because a step
+that iterates its own work in place needs no edge in the graph.
+
 Stage semantics:
 
-- **Brainstorm** *(interactive, role: architect)* — you talk to the agent
-  in the card's own thread (§6). Output: problem statement + candidate
-  approaches appended to the spec draft. Unresolved questions flagged
-  with `%%` markers (schipper convention) that gummi surfaces as a checklist.
-- **Spec** *(interactive, role: architect)* — converge on one approach.
-  Gate: you mark the spec **Approved**. gummi promotes the spec to its
-  workspace home (`.gummi/specs/`).
-- **Plan** *(autonomous or interactive, role: architect)* — numbered,
-  tracer-bullet-ordered implementation plan derived from the spec, one
-  line per step so critique markers can anchor. Gate: your approval (unless
-  the feature was created with the Plan skip flag). Before the gate is
+- **Plan** *(interactive, role: architect)* — the design stage, and the
+  one that absorbed brainstorm, spec and plan (triage and diagnose for a
+  bug; investigate and shape for research). You talk to the agent in the
+  card's own thread (§6), and it works three phases in one prompt:
+  explore the problem and the candidate approaches, converge with you on
+  exactly one, then derive the numbered, tracer-bullet-ordered
+  implementation plan — one line per step so critique markers can anchor.
+  Unresolved questions are flagged with `%%` markers (schipper
+  convention) that gummi surfaces as a checklist. Before the gate is
   raised, a **plan critique** runs: a fresh-context reviewer session
-  (same cross-model property as Review) that tries to refute the plan —
-  security, correctness, completeness — before any implementation
-  tokens are spent. Findings land as `%% @reviewer:` threads anchored
-  to the plan lines they indict, and missing checks are appended to the
-  spec's Verification plan so Verify proves them later. The critique
-  ends with the Review verdict grammar: *pass* raises your approval
-  gate; *changes* bounces to an automatic replan round (capped at 2,
-  then it escalates to you with the findings in the checklist). The
-  loop is invisible to the state machine — the feature never leaves
-  Plan — and it spends from the Plan stage's budget envelope. A feature
-  created with the Plan skip flag skips the critique with it.
+  (same cross-model property as the work stage's critique) that tries to
+  refute the plan — security, correctness, completeness — before any
+  implementation tokens are spent. Findings land as `%% @reviewer:`
+  threads anchored to the plan lines they indict, and missing checks are
+  appended to the spec's Verification plan so Verify proves them later.
+  The critique ends with the verdict grammar: *pass* raises your approval
+  gate; *changes* bounces to an automatic replan round (capped at 2, then
+  it escalates to you with the findings in the checklist). The loop is
+  invisible to the state machine — the card never leaves Plan.
+  Gate: your approval. Crossing it promotes the spec to its workspace
+  home (`.gummi/specs/`), discovers the repo's checks, and starts the
+  implementer. A stage that wrote nothing into the sections its gate
+  names does not cross (§4).
 - **Implement** *(autonomous, role: implementer)* — agent works in the
   worktree with the spec + plan as context. Streams progress into the feature
   card. Pauses when it needs input (or on permission requests in `guarded`
@@ -134,13 +136,16 @@ Stage semantics:
   by `gummi squash` on the branch, because the branch's own commits
   interleaved with checkpoint commits are fit for squashing and nothing
   else.
-- **Review** *(autonomous, role: reviewer)* — **fresh session, no shared
-  context with the implementer**, ideally a *different model* (cross-model
-  review catches more). Findings written into the spec's review section;
-  serious findings bounce the feature back to Implement. After fixes, a
-  fresh review pass triggers **automatically**, capped (default 2–3 rounds,
-  bounded by the protected budget floor); past the cap it escalates to you
-  instead of looping. The kickoff hands the session what it would
+- **The work stage's critique** *(autonomous, role: reviewer)* — not a
+  stage: the pass Implement ends with, exactly as Plan ends with one.
+  **Fresh session, no shared context with the implementer**, ideally a
+  *different model* (cross-model review catches more). Findings written
+  into the spec's review section; serious findings re-run Implement in
+  place rather than moving the card, which is what makes it a pass. A
+  fresh critique triggers **automatically** after fixes, capped (default
+  2–3 rounds, bounded by the protected budget floor); past the cap it
+  escalates to you instead of looping. The kickoff hands the session what
+  it would
   otherwise spend its own turns assembling: the branch diff with its base
   SHA named (or, past a size cap, the file-by-file stat and the command
   for the rest — the preamble is re-read on every turn, so a large diff
@@ -161,9 +166,8 @@ Stage semantics:
   than none, so the implementer is told to change whatever else the work
   needs (noting the addition in Progress, so the next round inherits the
   correction) and to leave a listed file alone rather than invent work
-  for it. Written by whichever stage drafts the Implementation notes —
-  Plan on the full route, Spec on the quick one, Diagnose for a bug's Fix
-  section.
+  for it. Written by the design stage, which drafts the Implementation
+  notes for every kind.
 - **Verify** *(autonomous, role: implementer or scribe)* — two parts:
   the repo's check commands (build/test/lint) always run, and the spec's
   verification plan adds feature-specific live checks the agent
@@ -256,7 +260,7 @@ Each session gets its own env, so BYOK routing
 is per-role, exactly what profiles need.
 
 **Interactive mode is gummi-native, not embedded copilot TUI.** Because
-the SDK exposes full duplex sessions, the Brainstorm/Spec stages render
+the SDK exposes full duplex sessions, the design stage renders
 inside the card's own thread (glamour for markdown, streaming responses,
 tool-call collapsibles, §6) rather than a pane of their own — one
 integration surface for both interactive and autonomous stages, and the
@@ -289,8 +293,8 @@ envelope that is gummi's real spend limiter.
 
 ### 4.2 Orchestrator
 
-- **State machine** per feature — the workflow is compiled in, not
-  configured; the engine only honors skip flags and rerun transitions.
+- **State machine** per card — the workflow is compiled in, not
+  configured; the only non-forward movement is the rerun edges.
   Transitions fire actions (start session, run checks, request human gate)
   and emit events.
 - **Scheduler with attention slots, split into two pools** (§1): an
@@ -625,15 +629,15 @@ design system.
 - **Right pane** swaps by mode:
   - *Dashboard* — selected feature's stage, diffstat, live activity feed,
     pending gate/permission prompts answerable inline.
-  - *Chat/attach* — full-screen-ish interactive session for
-    brainstorm/spec stages; `esc` detaches, session keeps state.
+  - *Chat/attach* — full-screen-ish interactive session for the design
+    stage; `esc` detaches, session keeps state.
   - *Spec view* — glamour-rendered FD with `%%` open questions extracted to
     a checklist; gate approval lives here. `tab` switches into **annotate
     mode** (see 6.1).
   - *Diff view* — worktree diff pager before gates, with the same
     annotation mechanics as the spec view.
-- **Global**: `n` new feature (a single description line — brainstorm
-  develops the rest; profile and skip flags on a demoted options row),
+- **Global**: `n` new feature (a single description line — the design
+  stage develops the rest; profile and envelope on a demoted options row),
   `tab` cycle gummi's own tabs (§6 below), `1..9` jump to feature, `?` help.
 
 **One board, tabbed.** The split layout the diagram above shows (a kanban
@@ -1158,7 +1162,7 @@ snapshot tests wired into CI. No agents yet. *Proves: data model, and that
 the empty shell already looks Crush-grade.*
 
 **M1 — one feature, end to end**
-Copilot adapter via Go SDK: interactive chat pane (brainstorm/spec) +
+Copilot adapter via Go SDK: interactive chat pane (the design stage) +
 autonomous implement with streamed activity. The fixed workflow, single
 active session. *Proves: the core loop feels good.*
 
@@ -1195,23 +1199,25 @@ Decided in the design interview (2026-07-03):
    self-contained; `gummi init` writes the needed ignore rules.
 2. **Feature IDs**: `FD-NNN` monotonic counter in `.gummi/seq`,
    retry-on-conflict.
-3. **One strict workflow, never configurable.** No workflow YAML, ever. The
-   only flexibility: *skip flags* — Brainstorm and Plan can be marked skip
-   at feature creation for small/obvious work, with the quick route as a
-   named preset over them (both skips + the one-pass spec flavor) — and
-   *rerun transitions* (e.g. re-review after fixes). Skip flags may be
-   cleared after creation (restoring a stage is safe), never set. Review
-   and Verify are never skippable; the quality floor is non-negotiable.
-4. **Review loop**: after the implementer addresses findings, a fresh
-   review pass triggers automatically, capped (default 2–3 rounds, and
-   bounded by the feature's budget envelope); past the cap it escalates
-   to the human instead of looping. The **plan critique** is the same
-   pattern at design altitude: critique→replan, capped at 2 rounds,
-   then the human gate — catching design-level security/correctness
-   flaws before implementation tokens are spent.
-5. **Interactive stages are gummi-native chat** over SDK sessions; raw
+3. **One strict workflow, never configurable.** No workflow YAML, ever —
+   and, since the merge (§3), literally one graph for every kind:
+   `todo → plan → implement → verify → done`. There are no skip flags and
+   no quick route; the flexibility they offered was three graphs' worth of
+   duplication for two slots each graph half-ignored. The only movement
+   that is not forward is the *rerun edges* (implement → plan, verify →
+   implement). The quality floor is non-negotiable.
+4. **Critique before every gate**: each stage ends with a fresh-context
+   pass that tries to refute what it produced, and a *changes* verdict
+   re-runs that stage in place — capped (default 2–3 rounds, and bounded
+   by the card's budget envelope); past the cap it escalates to the human
+   instead of looping. Review used to be a stage of its own; it is this
+   pass on the work stage. At design altitude the same pattern is the
+   **plan critique**: critique→replan, capped at 2 rounds, then the human
+   gate — catching design-level security/correctness flaws before
+   implementation tokens are spent.
+5. **The design stage is gummi-native chat** over SDK sessions; raw
    copilot attach is an escape hatch only. **The surface is the card
-   thread** (§6): opening a card in brainstorm or spec *is* opening the
+   thread** (§6): opening a card at its design stage *is* opening the
    conversation, with no separate pane to attach to and detach from, so a
    card has one conversation in one place for its whole length. The chat
    pane that used to host these stages is retired into the thread, which
@@ -1263,9 +1269,9 @@ Decided in the design interview (2026-07-03):
     so a multi-repo board keeps one `.gummi`. Dependency edges cross repos
     freely — `feature_deps` references `features(id)` with no repo
     awareness.
-11. **Spec drafts** live in `.gummi/state/drafts/` during Brainstorm/Spec
-    (no worktree exists yet); at spec approval the worktree + branch are
-    created and the spec is promoted to `.gummi/specs/FD-NNN-slug.md` in
+11. **Spec drafts** live in `.gummi/state/drafts/` while a card is at its
+    design stage and has never run one; at the design gate the worktree +
+    branch are ensured and the spec is promoted to `.gummi/specs/FD-NNN-slug.md` in
     the main checkout — its workspace home for the rest of the feature's
     life. The artifact is gummi workspace content: it never enters the
     worktree and is never committed, so the feature branch (and the
@@ -1414,12 +1420,12 @@ Still open:
 
 gummi's unit is a Feature (FD): one PR-sized branch that flows through the
 fixed workflow. Today features are *born blank* — the creation form takes a
-single title line, mints an ID, and stamps the empty spec template; brainstorm
-and spec then author the FD from scratch. But work often *starts* from a
+single title line, mints an ID, and stamps the empty spec template; the design
+stage then authors the FD from scratch. But work often *starts* from a
 document that already exists — a PRD, a design doc, a meeting write-up that
 describes many features at once. Ingestion inverts the birth path: gummi reads
-a source spec and **decomposes it into N pre-seeded FDs**, so brainstorm/spec
-*refine* an already-populated draft instead of starting cold.
+a source spec and **decomposes it into N pre-seeded FDs**, so the design stage
+*refines* an already-populated draft instead of starting cold.
 
 ### 11.1 How ingestion fits the stances
 
@@ -1452,13 +1458,12 @@ The architect pass emits, per candidate FD, a structured record:
 - **seeded draft** — the extracted *problem*, *constraints*, and *acceptance
   criteria*, mapped into the real template sections. The *considered/chosen
   approach* sections stay open `%%` prompts — ingestion seeds the **what**, not
-  the **how**; converging on an approach is still brainstorm's job.
+  the **how**; converging on an approach is still the design stage's job.
 - **open questions** — anything the decomposition is unsure about is emitted as
   a `%%` marker on its anchor, so **decomposition uncertainty becomes the FD's
   open-questions checklist for free**, with no new machinery.
 - **depends_on** — other proposals this one needs, recorded as a first-class
   edge in the dependency store (§11.4a), not prose.
-- **skip hint** — a well-specified slice may propose the Brainstorm skip flag.
 
 Plus one document-level **coverage map**: every source requirement mapped to an
 FD or explicitly marked out-of-scope, with an **unmapped** list surfaced loudly
@@ -1474,7 +1479,7 @@ only the slice, not the whole document.
 The target is **PR-sized vertical slices**: each FD is one independently
 reviewable and verifiable branch, which is exactly gummi's deliverable. Too
 fine and you drown in per-FD workflow overhead; too coarse and each "feature" is
-a mini-project that brainstorm has to re-split. A typical PRD lands as a handful
+a mini-project the design stage has to re-split. A typical PRD lands as a handful
 to ~15 FDs. The granularity rule lives in the ingest system hint, and the
 coverage map is where the agent justifies its cut.
 
@@ -1499,8 +1504,8 @@ coverage map is where the agent justifies its cut.
   flags the unmapped list loudly. Keys `r` rename · `o` edit one-liner · `x`
   drop/undrop · `m` merge into the proposal above · `A` approve (confirms, and
   surfaces any unmapped count before minting). *Split* is intentionally not a
-  gate operation — a too-coarse slice is better re-split by brainstorm once it
-  is a real feature, so the gate only coarsens (drop/merge) and edits. On the
+  gate operation — a too-coarse slice is better re-split by the design stage
+  once it is a real feature, so the gate only coarsens (drop/merge) and edits. On the
   **CLI**, `gummi ingest <path>` prints the proposals + coverage and gates on a
   y/N confirmation (or `--yes`).
 - **C · materialization** *(engine)* — each approved proposal runs the existing
@@ -1530,9 +1535,8 @@ just a count. `GateBlockers` — the read-only pre-check the headless
 `--gate-approval=caller` path uses — reports the same blockage before
 offering to approve a coding gate. Both TUI and headless drivers route
 through `Advance`, so the gate cannot be bypassed by a future driver; no
-transitive closure is walked (only direct dependencies block), and design
-stages (brainstorm/spec/plan, triage/diagnose) are never gated — only entry
-to the coding stage is. The board and spec view resolve and render each
+transitive closure is walked (only direct dependencies block), and the design
+stage is never gated — only entry to the coding stage is. The board and spec view resolve and render each
 dependency's live status rather than static prose.
 
 Each piece is independently testable: domain types + the seeded template (golden
@@ -1546,15 +1550,24 @@ through simulated key presses against a `Fake` architect).
 - **Persisted coverage report** — keeping the source→FD map queryable after
   ingestion, for traceability audits against the original document.
 
-## 12. Bugs — the second workflow
+## 12. Bugs — the second kind
 
-Features are design-driven: brainstorm an approach, spec it, plan it, build it.
-Bugs are diagnosis-driven: something already works wrong, and the work is to
+> **Superseded in part.** This section was written when a bug ran its own
+> graph. It does not any more: the three workflows merged into one (§3),
+> and a bug walks `todo → plan → implement → verify → done` like every
+> other card. What survives is everything below about the *kind* — the
+> discriminator, the report, ingestion — and the design-stage contract,
+> which is now phase 1 (triage) and phase 2 (diagnose) of one prompt
+> rather than two stages. The graph in §12.2 is kept as the record of
+> what it replaced.
+
+Features are design-driven: explore an approach, converge on it, plan it, build
+it. Bugs are diagnosis-driven: something already works wrong, and the work is to
 reproduce it, find why, and fix it without regressing. gummi models a bug as a
 second **kind** of work item that shares everything structural with a feature —
-the store, the engine, the worktree, the board, the never-skippable Review →
-Verify quality floor — but runs its own compiled-in workflow and carries a bug
-report instead of a spec.
+the store, the engine, the worktree, the board, the never-skippable critique →
+Verify quality floor — and now the workflow too; what differs is its stages'
+contracts and the bug report it carries instead of a spec.
 
 ### 12.1 The kind discriminator
 
@@ -1568,37 +1581,39 @@ separate `Bug` entity: the engine already orchestrates *(item, stage)* sessions
 generically, so a parallel type would duplicate the store, engine, and board for
 no gain.
 
-### 12.2 The bug workflow
+### 12.2 The bug's stage contracts
 
-One more fixed graph, still never configurable:
+A bug runs the one graph (§3). What was a second workflow is now what its
+stages are *told*:
 
 ```
-  todo ──▶ Triage ──▶ Diagnose ──▶ Fix ──▶ Review ──▶ Verify ──▶ Done
-           (interactive) (interactive) (autonomous) (shared quality floor)
+  todo ──▶ Plan ──▶ Implement ──▶ Verify ──▶ Done
+           (triage,   (the fix,     (repro is gone,
+            then       + regression  regression test
+            diagnose)  test)         covers it)
 ```
 
-- **Triage** *(interactive, architect; skippable)* — confirm and reproduce the
-  bug; pin down repro steps, expected vs actual, environment, severity. The
-  analog of Brainstorm.
-- **Diagnose** *(interactive, architect; skippable)* — converge on the root
-  cause and record it in the report; gated on human approval. The analog of
-  Spec. (Both design-side stages are skippable for an obvious bug; when both are
-  skipped a `todo → fix` edge applies, since they are adjacent.)
-- **Fix** *(autonomous, implementer)* — implement the smallest change that
-  resolves the bug **and add a regression test**. The analog of Implement; the
-  Review/Verify rerun edges bounce here.
-- **Review / Verify** — the same stages features use, so the scheduler, slots,
-  budgets, and board columns are untouched. Verify gains a sharp bug meaning:
-  the deterministic repo checks still run, and on top the reproduction must no
-  longer reproduce and a regression test must cover the fix.
+- **Plan, phase 1 — triage** — confirm and reproduce the bug; pin down repro
+  steps, expected vs actual, environment, severity.
+- **Plan, phase 2 — diagnose** — converge on the root cause and record it in
+  the report. The gate demands the Root cause section: a design stage that
+  wrote nothing there does not cross.
+- **Implement** — the smallest change that resolves the bug **and** a
+  regression test. Its critique and the verify rerun edge both land here.
+- **Verify** — Verify gains a sharp bug meaning: the deterministic repo checks
+  still run, and on top the reproduction must no longer reproduce and a
+  regression test must cover the fix.
+
+*(What this replaced: `todo → Triage → Diagnose → Fix → Review → Verify →
+Done`, with Triage and Diagnose skippable.)*
 
 ### 12.3 The bug report
 
 A bug's durable artifact is `.gummi/bugs/BG-NNN-slug.md` (the analog of the
 spec): Summary · Reproduction · Expected vs actual · Environment · Root cause ·
 Fix · Review · Verification. Symptoms are seeded from the source; Root cause and
-Fix stay open `%%` prompts — converging on *why* and *how* is diagnose/fix work,
-exactly as the spec's chosen-approach is brainstorm's.
+Fix stay open `%%` prompts — converging on *why* and *how* is the design
+stage's and the fix's work, exactly as the spec's chosen approach is.
 
 ### 12.4 Ingestion — sources, not decomposition
 
@@ -1611,7 +1626,7 @@ document to decompose, so there is no architect pass and no coverage map. A
   remote; overridable to any `owner/repo`), filtered by label/state. The import
   is **deterministic and agent-free**: one issue → one proposal, body verbatim
   into Summary, labels mapped to severity. Per-bug reproduction and root-cause
-  enrichment is the triage/diagnose stages' job, not the source's — "tool owns
+  enrichment is the design stage's job, not the source's — "tool owns
   mechanics, model owns content" (§11.1), applied to bugs. This spends no tokens
   on issues you drop at the gate.
 - **Manual** — a single hand-entered bug, from the TUI new-bug form or
@@ -1640,16 +1655,23 @@ the same fetched batch and materializes just that one bug.
 - **Agent triage-at-ingest** — an optional pass that dedupes/clusters near-
   duplicate issues before the gate, if verbatim import proves too noisy.
 
-## 13. Research — the third workflow
+## 13. Research — the third kind
+
+> **Superseded in part.** Like §12, this section was written when research
+> ran its own graph. It walks the one graph now (§3). The order also
+> inverted: it used to survey first and converge second, and now the
+> design stage converges on the question and the direction while the work
+> stage gathers the evidence. Everything else here — the kind, the
+> document, the deterministic verify, the decompose gate — is unchanged.
 
 Features are design-driven and bugs are diagnosis-driven; research is
 investigation-driven: the ask is open enough that neither a spec nor a bug
 report fits, and the work is to ground an answer before anything gets built.
 gummi models research as a third **kind** of work item that shares everything
 structural with a feature or a bug — the store, the engine, the worktree
-machinery, the board, the never-skippable Review → Verify quality floor —
-but runs its own compiled-in workflow and carries a research document instead
-of a spec or a bug report.
+machinery, the board, the never-skippable critique → Verify quality floor, and
+now the workflow itself — and carries a research document instead of a spec or
+a bug report.
 
 ### 13.1 The third kind
 
@@ -1657,39 +1679,41 @@ A work item's `Kind` gains a third value: `research`. `RS-NNN` IDs draw from
 the same monotonic counter features and bugs share, so numbers never
 collide. Unlike a feature or a bug, an `RS` card has **no branch and no
 worktree** — its artifact resolves to `.gummi/research/RS-NNN-slug.md` in the
-main checkout, and investigate runs against the repo from the card's
-scratch tree (§4.3). Only three things branch
-on kind, same as bugs: which workflow governs transitions, which template
-seeds the artifact, and a board badge. The empty kind still reads as a
+main checkout, and its work stage runs against the repo from the card's
+scratch tree (§4.3). Only three things branch on kind, same as bugs: the
+contract each stage is given, which template seeds the artifact, and a
+board badge. The empty kind still reads as a
 feature, so nothing predating research needs a backfill.
 
-### 13.2 The research workflow
+### 13.2 The research card's stage contracts
 
-One more fixed graph, still never configurable, and with **no skip edges at
-all**:
+A research card runs the one graph (§3), read-only and worktree-less:
 
 ```
-  todo ──▶ Investigate ──▶ Shape ──▶ Review ──▶ Verify ──▶ Done
-           (autonomous)    (interactive)  (shared quality floor)
+  todo ──▶ Plan ──▶ Implement ──▶ Verify ──▶ Done
+           (shape the (investigate: (deterministic
+            question)  read-only,    citation +
+                       cited)        coverage check)
 ```
 
-- **Investigate** *(autonomous, architect)* — the work stage: ground the
-  brief against the repo (and any cited external sources) and write up
-  findings with citations. Branchless — it runs in the card's scratch tree
-  (§4.3), never on a branch. It is also the stage rerun/bounce edges land on, the research
-  analog of Implement/Fix.
-- **Shape** *(interactive, architect)* — converge the findings into a
-  recommended direction and a proposed slice breakdown; the convergence gate
-  analogous to Spec (features) or Diagnose (bugs).
-- **Review / Verify are reused verbatim** — same stages, same reviewround
-  cap, same escalation, same board columns as features and bugs, sharpened
-  only in *what content they enforce* (§13.4).
+- **Plan** *(interactive, architect)* — converge the brief into a research
+  question, a direction to pursue, and the constraints the investigation is
+  bound by. The gate is the human's.
+- **Implement** *(autonomous, architect, read-only)* — ground the brief
+  against the repo (and any cited external sources) and write up findings
+  with `path:line` citations. Branchless: it runs in the card's scratch tree
+  (§4.3), never on a branch, and every writing tool is stripped, so the
+  read-only property is structural rather than a promise. Rerun/bounce edges
+  land here, as they do for every other kind.
+- **Verify is reused verbatim** — same stage, same round cap, same
+  escalation, same board columns, sharpened only in *what content it
+  enforces* (§13.4).
 
-Unlike the feature and bug graphs, `researchGraph`
-(`internal/workflow/workflow.go` L80–98) carries no skip edges at all —
-Investigate and Shape are both first-class stages that always run before the
-shared Review/Verify floor. Roles reuse `architect` and `reviewer`; there is
-no `profiles.yaml` migration for research.
+Roles reuse `architect` and `reviewer`; there is no `profiles.yaml`
+migration for research.
+
+*(What this replaced: `todo → Investigate → Shape → Review → Verify → Done`,
+which surveyed before it converged.)*
 
 ### 13.3 The research document
 
@@ -1699,15 +1723,15 @@ FDs is nearly free — the template *is* the ingest contract:
 
 | section | seeded by | consumed by |
 |---|---|---|
-| `## Brief` | the ask, in the requester's own words | Investigate (the question to ground) |
-| `## Questions` | the open questions the research must answer | Investigate (grounding target), §13.4's coverage check |
-| `## Findings` | Investigate — prose with inline `path:line`/`path:start-end` citations | §13.4's citation check, Shape |
-| `## Constraints` | the constraints the investigation is bound by | Shape (direction must fit them) |
-| `## Options` | Shape — candidate directions with tradeoffs | Shape's own convergence |
-| `## Direction` | Shape — the recommended direction and why it wins | the reviewer, and the reader of `done` |
-| `## Slices` | Shape — one row per proposed follow-on (title/one-liner/depends-on/requirements/id) | §13.5's decompose gate (`propose_features`-shaped rows), back-annotated with minted FD ids |
-| `## Out of scope` | Shape — what the research deliberately won't cover | §13.4's coverage check (an explicit out-of-scope line settles a question without a slice) |
-| `## Open risks` | Shape — risks and what would de-risk each | the reviewer |
+| `## Brief` | the ask, in the requester's own words | Plan (the question to shape), Implement (the question to ground) |
+| `## Questions` | the open questions the research must answer | Implement (grounding target), §13.4's coverage check |
+| `## Findings` | Implement — prose with inline `path:line`/`path:start-end` citations | §13.4's citation check, the reviewer |
+| `## Constraints` | the constraints the investigation is bound by | Plan (direction must fit them) |
+| `## Options` | Plan — candidate directions with tradeoffs | Plan's own convergence |
+| `## Direction` | Plan — the recommended direction and why it wins | the reviewer, and the reader of `done` |
+| `## Slices` | Plan — one row per proposed follow-on (title/one-liner/depends-on/requirements/id) | §13.5's decompose gate (`propose_features`-shaped rows), back-annotated with minted FD ids |
+| `## Out of scope` | Plan — what the research deliberately won't cover | §13.4's coverage check (an explicit out-of-scope line settles a question without a slice) |
+| `## Open risks` | Plan — risks and what would de-risk each | the reviewer |
 | `## Review` | reviewer findings | the researcher, resolving each one |
 
 The durable artifact lives at `.gummi/research/RS-NNN-slug.md` (§13.1).
@@ -1727,7 +1751,7 @@ all deterministic:
   `## Out of scope` line; anything left unmapped is surfaced loudly rather
   than silently dropped.
 
-A safety note: research's autonomous Investigate runs branchless, in the
+A safety note: research's autonomous work stage runs branchless, in the
 card's scratch tree (§4.3) rather than the main checkout, under the sandbox
 `warn` tripwire and the reviewer's per-role read-only deny policy — both
 defined in §4.4. The read-only tool stripping is the research guarantee; the
@@ -1782,21 +1806,21 @@ silent degradation.
 
 ### 14.1 The driver
 
-One `gummi run` process drives exactly one feature (a free-form description),
-via the quick route by default, holds the feature's per-card lock, streams
+One `gummi run` process drives exactly one card (a free-form description)
+through the one workflow, holds its per-card lock, streams
 milestone + decision NDJSON, and **stops at a verified branch — it never
 merges**. The engine's full restartability (SQLite state, spec on the branch,
 session resume) makes `resume` free: each invocation runs forward until the
 caller must decide, then exits.
 
-- **Gate control** — `--gate-approval=auto` (default) auto-crosses design
-  gates; `=caller` checkpoints them for `resume --approve`/`--request-changes`.
-  Blockers (open `%%`/diff threads) are honored either way; Review and Verify
-  are never a caller gate — Verify is the floor's stop-at-verified.
+- **Gate control** — `--gate-approval=attended` (default) checkpoints the
+  design gate for `resume --approve`/`--request-changes`; `=autopilot` crosses
+  it unattended. Blockers (open `%%`/diff threads, and a stage that drafted
+  nothing) are honored either way; Verify is never a caller gate — it is the
+  floor's stop-at-verified.
 - **Verify-fail bounce** — a `verify FAILED` (or a review cap-hit) escalation
   is un-parked with `resume --bounce [--note <why>]`, which rewinds the
-  feature to its work stage (implement/fix) and drives the review→verify tail
-  again — the CLI counterpart of the TUI's `b` key (§10 review floor's rerun
+  card to implement and drives the critique→verify tail again — the CLI counterpart of the TUI's `b` key (§10 review floor's rerun
   edge). The `--note` becomes an addendum to the reborn implement kickoff,
   alongside any open `%%` diff/spec annotations the engine already folds in.
 - **Dependency gate** — a card cannot enter its coding stage while a direct
@@ -1876,7 +1900,7 @@ ready* — not a merge; it is deliberately distinct from `status --json`'s `done
 field, which is true only once the branch is **merged**. A caller keying off a
 completed run should poll `status`'s `verified`, not its `done` (§14.1).
 
-Long autonomous stretches (implement → review → verify) carry no caller
+Long autonomous stretches (implement → critique → verify) carry no caller
 decisions under `auto`, so one `resume` streams that whole tail and returns
 only at `done` or an escalation.
 

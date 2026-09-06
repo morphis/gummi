@@ -52,11 +52,10 @@ import (
 // reference to an *engine.Engine or a *driver.Driver; wiring those in
 // would immediately create the import cycle this package exists to avoid.
 type Input struct {
-	// Kind selects the card's workflow route and artifact home:
-	// KindFeature/KindBug share the draft-seeded shape; KindResearch mints
-	// an RS card and seeds its `## Brief` directly (research has no draft
-	// step, so Full below is ignored for it — its route is always the
-	// full one).
+	// Kind selects the card's artifact home and its stages' contracts —
+	// not a route, since there is one graph: KindFeature/KindBug share the
+	// draft-seeded shape, and KindResearch mints an RS card and seeds its
+	// `## Brief` directly (research has no draft step).
 	Kind domain.Kind
 	// Description is the free-form input text. For KindResearch it is
 	// split into title/one-liner only (domain.SplitDescription); for
@@ -69,10 +68,6 @@ type Input struct {
 	Profile string
 	// Envelope is the card's credit budget ceiling.
 	Envelope int
-	// Full opts a feature/bug into the brainstorm+plan route instead of
-	// the default quick route (domain.QuickRoute). Ignored for
-	// KindResearch, which has no quick route at all.
-	Full bool
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
 	Repo string

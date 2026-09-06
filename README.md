@@ -39,11 +39,11 @@ agent waiting on you without you knowing.
 
 **The process is fixed; only the spend is yours to choose.** The
 workflow is compiled in, never configurable: no implementation without
-an approved spec, no merge without review and verification. The only
-degrees of freedom are skip flags for the early design stages and
-automatic rerun transitions (fix → re-review). Review and Verify can
-never be skipped. You can't accidentally configure the quality floor
-away, because there is no configuration.
+an approved design, no merge without review and verification. There are
+no routes and no skips — every card walks the same four stages, and the
+only automatic movement is the rerun edges (a wrong plan bounces back to
+plan, a failed verify back to implement). You can't accidentally
+configure the quality floor away, because there is no configuration.
 
 **Frontier models only where they earn it.** Stages are performed by
 *roles* (`architect`, `implementer`, `reviewer`, `scribe`), and a
@@ -55,46 +55,52 @@ feature.
 
 ## The workflow
 
-Three kinds of work item share the machinery:
+Three kinds of work item share one workflow:
 
 ```
-feature  FD-NNN   todo → brainstorm → spec → plan → implement → review → verify → done
-bug      BG-NNN   todo → triage → diagnose → fix ──────────────↗ (same quality floor)
-research RS-NNN   todo → investigate → shape ──────────────────↗ (done = approved doc)
+todo → plan → implement → verify → done
+
+feature  FD-NNN   design the change, build it, prove it
+bug      BG-NNN   same stages: reproduce and diagnose, fix, prove
+research RS-NNN   same stages: shape the question, gather evidence
+                  (read-only, no worktree), check the citations
 ```
 
-- **Design is a conversation.** Brainstorm and Spec (Triage and Diagnose
-  for bugs) are interactive — you talk to the architect directly in the
-  card's thread, and the durable artifact is a markdown spec that lives
-  in the repo's `.gummi` workspace. The spec — not the transcript — is
-  the context carrier between stages, which keeps token windows small.
-- **The quick route trades gates, never artifacts.** For well-understood
-  work, `q` on the creation form picks the quick route: brainstorm and
-  plan are skipped, and the spec stage drafts the complete spec —
-  implementation steps included — in one pass for you to steer and
-  approve. Same spec, same review/verify tail; one conversation and one
-  gate instead of three. If it outgrows quick, `P` restores the plan
-  stage — loosening a skip is always allowed, tightening one never is.
-- **Plans get an adversarial read.** Before a plan reaches your approval
-  gate, a fresh-context reviewer critiques it for security, correctness,
-  and completeness. Findings land as `%%` threads in the spec; serious
-  ones trigger an automatic replan, capped.
-- **Implementation runs alone.** Implement/Fix runs autonomously in the
-  feature's worktree, streaming activity to the card. Agents can ask you
+The kind does not change the route — it changes each stage's *contract*:
+which artifact it writes, what its agent is told, and which sections its
+gate demands.
+
+- **Design is a conversation.** Plan is where the thinking happens: the
+  architect explores the problem with you in the card's thread, converges
+  on one approach, and writes the implementation plan. You can steer it
+  at any point, and the durable artifact is a markdown spec in the repo's
+  `.gummi` workspace. The spec — not the transcript — is the context
+  carrier between stages, which keeps token windows small.
+- **Every stage ends with an adversarial read.** Before a stage reaches
+  its gate, a fresh-context reviewer (ideally a different model) critiques
+  what it produced — the plan for security, correctness and completeness;
+  the diff against the spec it was meant to satisfy. Findings land as
+  `%%` threads anchored to the lines they indict, and serious ones re-run
+  the stage automatically, capped before it escalates to you. Review is
+  a pass, not a stage: it iterates the work in place.
+- **A stage that wrote nothing does not cross its gate.** Each gate names
+  the sections its stage owed; a section holding only its template prompt
+  holds the gate shut, so a stalled agent can't be waved through.
+- **Implementation runs alone.** Implement runs autonomously in the
+  card's worktree, streaming activity to the card. Agents can ask you
   bounded questions mid-turn via a built-in `ask_user` tool — the
   question renders as an inline picker, the blocked turn spends no
   tokens while it waits, and answers anchored to a spec line are written
   back into the spec.
-- **Review has no shared context.** Review is a fresh session (ideally a
-  different model) with nothing but the spec and the diff. Findings
-  bounce the work back automatically, capped before it escalates to you.
-  Verify runs the repo's checks plus the spec's own verification plan.
-- **Research is a document, not a branch.** Investigate runs branchless in a
-  throwaway checkout, grounding a brief against the repo without touching it; Shape is the
-  convergence stage where findings become a recommended direction and a
-  slice breakdown. Verify is a deterministic citation + coverage check
-  that spends no tokens. Crossing `done` decomposes the approved document
-  into pre-seeded features with first-class dependency edges.
+- **Verify proves it.** Verify runs the repo's checks plus the spec's own
+  verification plan, and a failure bounces the work back to implement.
+  Landing on main is always your keypress, under every mode.
+- **Research is a document, not a branch.** A research card runs the same
+  stages, read-only and worktree-less: plan shapes the question and the
+  direction, implement gathers evidence grounded in `path:line` citations,
+  and verify is a deterministic citation + coverage check that spends no
+  tokens. Crossing `done` decomposes the approved document into
+  pre-seeded features with first-class dependency edges.
 
 ## Install
 
@@ -134,20 +140,20 @@ First run creates the `.gummi/` workspace lazily — state directory
 and the ignore rules that keep it all out of your repo's history. Then:
 
 1. Press `n` and describe the feature — that's the whole creation form;
-   brainstorm develops the rest. The first line becomes the card title;
-   write (or paste) as much as you know past it and it seeds the spec's
-   Problem section, so brainstorm starts from your words instead of a
-   blank page (`alt+enter` for a newline). Profile and skip flags sit
-   on a quiet options row.
-2. Open the card and brainstorm/spec with the architect directly in its
+   the design stage develops the rest. The first line becomes the card
+   title; write (or paste) as much as you know past it and it seeds the
+   spec's Problem section, so the architect starts from your words
+   instead of a blank page (`alt+enter` for a newline). Profile and
+   envelope sit on a quiet options row.
+2. Open the card and design it with the architect directly in its
    thread. Open questions are tracked as a `%%` checklist in the
    spec (`s` to view it, `c` to comment on the line under the cursor,
    `x` to resolve a thread).
-3. Press `g` to advance through gates: approving the spec creates the
-   worktree and branch and settles the spec into `.gummi/specs/`;
-   approving the plan launches the autonomous implementer.
-4. Watch the running agent (`↑`, then `enter`), review the diff (`d`), and let the
-   review/verify loop run. `b` bounces work back with your annotations.
+3. Press `g` to cross the design gate: it creates the worktree and
+   branch, settles the spec into `.gummi/specs/`, and launches the
+   autonomous implementer.
+4. Watch the running agent (`↑`, then `enter`), review the diff (`d`), and let
+   the critique/verify loop run. `b` bounces work back with your annotations.
 5. Done means a verified branch. Press `m` to squash-merge it into main:
    the dialog drafts a suggested landing message from the spec and the
    branch's commits; you review, edit, and approve it — nothing is
@@ -167,9 +173,8 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / toggle the thread's transcript view — every stage's events laid out inline instead of one folded receipt each (from the backlog it opens the card page with the view on) |
 | `alt+o` | expand the captured tool outputs in the thread — a failed call always shows its tail without it; not text, so it works mid-draft as well as from the accelerators |
 | `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `g` crosses the gate |
-| `g` / `b` | advance a gate / bounce back to implement or fix |
-| `A` | autopilot: set how far the card runs on its own — off, gates, or full — and start it from wherever it sits |
-| `P` | restore the plan stage on a quick / skip-plan feature (design phase only) |
+| `g` / `b` | advance a gate / bounce back to implement |
+| `A` | autopilot: hand the card over so it crosses its own gates, and start it from wherever it sits |
 | `v` | run the verify checks |
 | `u` | set the budget envelope (credits; 0 = uncapped) |
 | `o` | change the card's managed repository (before worktree); with a live free-form question open, arms an empty composer as the answer channel — the picker digits stand down and `enter` delivers the typed line verbatim |
@@ -298,10 +303,10 @@ An envelope is required (`--envelope N`, or `GUMMI_ENVELOPE`) and an agent
 backend must be configured — both fail loud before any work begins. The
 requirement is a headless one: the board's creation dialogs open on a
 prefilled 2000 credits you can edit, so only unattended runs must name a
-number nobody is there to read. By
-default a run takes the quick route (spec → implement → review → verify) and
-auto-crosses design gates; `--full` adds brainstorm + plan, and
-`--gate-approval=caller` hands the design gates back to you via `resume`.
+number nobody is there to read. By default a run is attended: it stops at the design gate and hands the
+decision back to you via `resume`. `--gate-approval=autopilot` lets it
+cross its own gates and run to a verified branch unattended — landing on
+main is still always yours.
 
 | command | purpose |
 |---|---|

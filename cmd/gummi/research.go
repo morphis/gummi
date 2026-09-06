@@ -39,7 +39,7 @@ func runResearch(args []string) error {
 	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
 		return err
 	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, false, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, "", "", *rv.repo)
+	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, "", "", *rv.repo)
 	if err != nil {
 		return err
 	}

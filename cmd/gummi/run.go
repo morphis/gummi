@@ -32,8 +32,7 @@ const defaultStageTimeout = 20 * time.Minute
 // runRun implements `gummi run [flags] "<description>"` (DESIGN §8.2): it
 // creates one feature and drives it headlessly through the quality floor
 // to a verified branch, streaming milestone + decision NDJSON and exiting
-// with a typed status. Quick route by default; --full opts into
-// brainstorm+plan. An envelope is required (D6) and an agent must be
+// with a typed status. An envelope is required (D6) and an agent must be
 // configured — both fail loud before any work begins.
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
@@ -60,7 +59,7 @@ func runRun(args []string) error {
 	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
 		return err
 	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.full, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo)
+	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo)
 	if err != nil {
 		return err
 	}
@@ -97,7 +96,7 @@ type runFlagValues struct {
 	envelope                       *int
 	profile, gate, ref, acceptance *string
 	repo, until                    *string
-	full, autonomous, verbose      *bool
+	autonomous, verbose            *bool
 	timeout                        *time.Duration
 }
 
@@ -109,7 +108,6 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 	return &runFlagValues{
 		envelope:   fs.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)"),
 		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
-		full:       fs.Bool("full", false, "run the full route (brainstorm + plan), not the quick route"),
 		gate:       fs.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)"),
 		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
@@ -146,7 +144,7 @@ func readAcceptance(pathOrDash string) (string, error) {
 
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
-func driverOptions(envelope int, profile string, full bool, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until, repo string) (driver.Options, error) {
+func driverOptions(envelope int, profile string, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until, repo string) (driver.Options, error) {
 	if envelope == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -164,7 +162,7 @@ func driverOptions(envelope int, profile string, full bool, gate string, timeout
 			domain.GateAttended, domain.GateAttended, domain.GateAutopilot, "auto", "caller", gate)
 	}
 	return driver.Options{
-		Envelope: envelope, Profile: profile, Full: full, GateApproval: norm,
+		Envelope: envelope, Profile: profile, GateApproval: norm,
 		StageTimeout: timeout, Autonomous: autonomous, Verbose: verbose, Ref: ref,
 		Acceptance: acceptance, Until: domain.Stage(until), Repo: repo,
 	}, nil

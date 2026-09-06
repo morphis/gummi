@@ -83,7 +83,7 @@ func TestPlanRoundsResumeSurvivesFreshDriver(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need to export data as JSON.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need to export data as JSON.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestPlanRoundsResumeSurvivesFreshDriver(t *testing.T) {
 // starts a fresh two-round budget.
 func TestPlanRoundsClearedOnPassGate(t *testing.T) {
 	h := newHarness(t, true, planLoopScript("changes", "pass"))
-	out, err := h.driver(Options{Full: true, Until: domain.StagePlan}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{Until: domain.StagePlan}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestPlanRoundsClearedOnPassGate(t *testing.T) {
 // not inherit a stale exhausted count.
 func TestPlanRoundsClearedOnEscalation(t *testing.T) {
 	h := newHarness(t, true, planLoopScript("changes"))
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestPlanRoundsStoreFailureFailsClosed(t *testing.T) {
 				return toolVerdict(o.Model, "pass")
 			},
 		})
-		d := h.driver(Options{Full: true})
+		d := h.driver(Options{})
 		d.roundStore = &failRoundStore{failLoad: true}
 		out, err := d.Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 		if err == nil {
@@ -202,7 +202,7 @@ func TestPlanRoundsStoreFailureFailsClosed(t *testing.T) {
 	})
 	t.Run("write aborts the round", func(t *testing.T) {
 		h := newHarness(t, true, planLoopScript("changes"))
-		d := h.driver(Options{Full: true})
+		d := h.driver(Options{})
 		d.roundStore = &failRoundStore{failWrite: true}
 		out, err := d.Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 		if err == nil {
@@ -276,7 +276,7 @@ func TestPlanRoundsResumeReCritiquesRevisedPlan(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestPlanRoundsResumeCritiquesFreshPlan(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestPlanRoundsResumeFinishedCritiqueReplans(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Full: true}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
+	out, err := h.driver(Options{}).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestPlanRoundsResumeRunningSessionNoOp(t *testing.T) {
 			return []agent.Event{{Kind: agent.EventMessage, Text: "still working"}}
 		},
 	})
-	opts := Options{Full: true, StageTimeout: 300 * time.Millisecond}
+	opts := Options{StageTimeout: 300 * time.Millisecond}
 	out, err := h.driver(opts).Run(context.Background(), "Add JSON export\n\nUsers need JSON export.")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
