@@ -91,9 +91,10 @@ const (
 	KindFeature Kind = "feature"
 	// KindBug is diagnosis-driven work: triage → diagnose → fix → …
 	KindBug Kind = "bug"
-	// KindResearch is investigation-driven work: investigate → shape →
-	// review → verify. It is a third kind with its own workflow, a
-	// dedicated artifact home, and no quick one-pass route.
+	// KindResearch is question-driven work on the shared graph: the
+	// design stage shapes the research question and direction, the build
+	// stage surveys and writes the document up. It is a third kind with
+	// a dedicated artifact home and no quick one-pass route.
 	KindResearch Kind = "research"
 )
 

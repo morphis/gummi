@@ -131,7 +131,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"smallest change that resolves the bug", "bounce back to fix",
 		}},
 		{domain.StagePlan, domain.KindResearch, []string{
-			"critique what the investigation gathered", "submit_verdict",
+			"critique the research document", "submit_verdict",
 		}},
 	} {
 		f := feature(1, "Dark mode", tc.stage)
@@ -176,7 +176,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"smallest change that resolves the bug", "bounce back to fix",
 		}},
 		{domain.StagePlan, domain.KindResearch, []string{
-			"critique what the investigation gathered", "submit_verdict",
+			"critique the research document", "submit_verdict",
 		}},
 	} {
 		f := feature(1, "Dark mode", tc.stage)
@@ -284,12 +284,13 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	}
 }
 
-// Research stages carry their own stage contracts: investigate is an
-// autonomous read-only survey (ground findings with path:line
-// citations), shape is an interactive convergence gate with gated
-// writes, and review-of-a-document is an autonomous read-only critique
-// that records findings via submit_verdict instead of editing the
-// artifact.
+// Research stages carry their own stage contracts: the design stage is
+// an interactive shaping session (scope the question, fix the
+// constraints and success criteria, pick the survey's direction), the
+// build stage is an autonomous read-only survey that grounds findings
+// with path:line citations, and review-of-a-document is an autonomous
+// read-only critique that records findings via submit_verdict instead
+// of editing the artifact.
 func TestResearchStageHints(t *testing.T) {
 	cases := []struct {
 		stage domain.Stage
@@ -299,8 +300,8 @@ func TestResearchStageHints(t *testing.T) {
 			"read-only", "path:line citation", "no worktree",
 		}},
 		{domain.StagePlan, []string{
-			"Converge", "exactly one", "behind per-action confirmation",
-			"scratch checkout of main",
+			"Shape the research question", "direction the survey will take",
+			"spec tools", "scratch checkout of main",
 		}},
 	}
 	for _, tc := range cases {
@@ -399,9 +400,10 @@ func TestInteractiveKickoffQuickSpec(t *testing.T) {
 	}
 }
 
-// Research investigate/shape are architect work (exploring and converging
-// a research topic), and shape is a gated interactive chat that must have
-// its own opener — a missing case panics in interactiveKickoff.
+// Research design and build are architect work (shaping a research
+// topic, then surveying it), and the design stage is a gated interactive
+// chat that must have its own opener — a missing case panics in
+// interactiveKickoff.
 func TestResearchRolesAndKickoff(t *testing.T) {
 	// a research card is architect work at BOTH agent stages: its design
 	// stage shapes the question, and its build stage gathers evidence and
@@ -421,6 +423,38 @@ func TestResearchRolesAndKickoff(t *testing.T) {
 	f.Kind = domain.KindResearch
 	if got := designKickoff(f); !strings.Contains(got, "research") {
 		t.Errorf("research kickoff = %q, want the research opener", got)
+	}
+}
+
+// TestResearchContractsMatchMergedOrder pins the research contracts to the
+// merged graph's order: the design stage shapes the question and the
+// direction before anything has been surveyed, and the survey runs at
+// build. The design contract must therefore not ask the agent to converge
+// surveyed options (nothing has been surveyed when it runs), and the
+// research critique — which serves both stages, always downstream of the
+// design pass — must not claim convergence is still ahead of it. Both
+// stage contracts must also match their wiring on the working directory:
+// every research stage runs in the card's scratch tree, never the main
+// checkout.
+func TestResearchContractsMatchMergedOrder(t *testing.T) {
+	f := feature(1, "RS", domain.StagePlan)
+	f.Kind = domain.KindResearch
+	if design := unwrap(designHints(f)[0]); strings.Contains(design, "surveyed") {
+		t.Errorf("research design contract asks to converge surveyed options before any survey runs: %q", design)
+	}
+	if crit := unwrap(critiqueHint(f)); strings.Contains(crit, "has not converged") {
+		t.Errorf("research critique claims convergence is still ahead, but the design pass already ran: %q", crit)
+	}
+	// the design contract must not contradict its wiring on the working
+	// directory: every research stage runs in the card's scratch tree,
+	// never the main checkout.
+	if design := unwrap(designHints(f)[0]); strings.Contains(design, "main checkout") {
+		t.Errorf("research design contract contradicts its scratch-tree wiring (mentions the main checkout): %q", design)
+	}
+	build := f
+	build.Stage = domain.StageImplement
+	if survey := unwrap(buildHints(build)[0]); strings.Contains(survey, "main checkout") {
+		t.Errorf("research build contract contradicts its scratch-tree wiring (mentions the main checkout): %q", survey)
 	}
 }
 

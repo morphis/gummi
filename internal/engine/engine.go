@@ -117,9 +117,9 @@ func designKickoff(f domain.Feature) string {
 			"question to the user first, with your recommended answer. Keep it short."
 	case domain.KindResearch:
 		return "The user just opened the design chat on a research topic. Read the research " +
-			"artifact at its workspace home, then drive convergence: recommend how the topic " +
-			"should be shaped into its final form, and put the most consequential open " +
-			"question to the user first. Keep it short."
+			"artifact at its workspace home, then shape the question with them: recommend " +
+			"how to scope it and which direction the survey should take, and put the most " +
+			"consequential open question to the user first. Keep it short."
 	default:
 		return "The user just opened the design chat. Read the spec draft and its open %% " +
 			"threads, then drive convergence: state the problem as you understand it, " +

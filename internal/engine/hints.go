@@ -404,52 +404,71 @@ If a conflict cannot be reconciled, run ` + "`git rebase --abort`" + ` and end
 your final message explaining which conflict and why.`)
 }
 
-// investigateHint is the research investigate pass contract: an
-// autonomous, read-only survey of the main checkout (no worktree) that
-// grounds every finding in path:line citations so later stages can
-// navigate to it.
+// investigateHint is the research build pass contract: an autonomous,
+// read-only survey that grounds every finding in path:line citations so
+// later stages can navigate to them. Research stages run in the card's
+// disposable scratch tree, and the session carries
+// researchWorkingDirGuard alongside this contract; the cwd sentence
+// here states the same facts so the contract never contradicts its
+// wiring.
 func investigateHint() string {
 	return strings.TrimSpace(`
 Stage: Implement — investigate (autonomous, read-only). Survey the research
-question against this repo. You run in the main checkout with no
-worktree: every tool that can write or commit is unavailable, so the
-survey is read-only by construction — do not expect to modify anything.
+question against this repo. You run in the card's scratch checkout of
+main — a throwaway, with no worktree — and every tool that can write or
+commit is unavailable, so the survey is read-only by construction — do
+not expect to modify anything.
 Ground every finding with a path:line citation so later stages can
 navigate to it. Record your findings and open questions in the research
 document as you go, and stop when the survey answers the research
 question or names what blocks it.`)
 }
 
-// shapeHint is the research shape pass contract: an interactive
-// convergence gate that narrows the surveyed options to one and writes
-// the converged draft in place behind per-action confirmation.
+// shapeHint is the research design pass contract: an interactive session
+// that shapes the brief into the research question and the direction the
+// build stage's survey will take. It runs before anything has been
+// surveyed, so there are no options to converge and no evidence to
+// judge — its raw material is the brief and its open questions. Research
+// stages run in the card's disposable scratch tree, and the session
+// carries researchWorkingDirGuard alongside this contract; the cwd
+// sentence here states the same facts so the contract never contradicts
+// its wiring again.
 func shapeHint() string {
 	return strings.TrimSpace(`
-Stage: Plan (interactive; the user is in gummi's chat pane). Converge
-the surveyed options to exactly one, working with the user. You run in
-the main checkout with no worktree; the research document is yours to
-update, and one-off writes happen behind per-action confirmation —
-never modify repo files or commit. Ask one decision at a time with a
-recommended answer attached, and stop when the draft converges on one
-option.`)
+Stage: Plan (interactive; the user is in gummi's chat pane). Shape the
+research question with the user. No survey has run yet — gathering
+evidence is the build stage's job — so your raw material is the brief
+and its open questions, not findings. Scope the question, fix the
+constraints and success criteria it must meet, and pick the direction
+the survey will take, writing each decision into the research document
+as it settles. You run in the card's scratch checkout, a throwaway:
+nothing you write to disk there is kept, and the research document is
+the one durable surface, reached through gummi's spec tools rather than
+the filesystem. Ask one decision at a time with a recommended answer
+attached, and stop when the question, its constraints, and the
+direction are set.`)
 }
 
-// researchReviewHint is the research review pass contract: an
-// adversarial critique of the research document. It is autonomous and
-// read-only — findings are recorded via submit_verdict, never by
-// editing the artifact.
+// researchCritiqueHint is the research critique pass contract, served
+// to both stages: an adversarial critique of the research document as
+// the stage that just ran left it. It is autonomous and read-only —
+// findings are recorded via submit_verdict, never by editing the
+// artifact. One text serves both stages, so it names what each stage
+// produces instead of claiming where convergence sits in the order.
 func researchCritiqueHint() string {
 	return strings.TrimSpace(`
-Investigate's critique (autonomous, fresh context, read-only).
-Adversarially critique what the investigation gathered — the evidence,
-its grounding in cited sources, and whether the brief's questions are
-actually answered — for soundness and completeness. Judge the evidence,
-not a conclusion: shape has not converged on one yet, and that is the
-point of critiquing here. A "changes" verdict sends the investigation
-back for another round rather than blocking a written-up document. You
-run with no worktree and cannot modify the artifact: record your findings
-in your final message and submit a verdict via the submit_verdict tool
-(pass or changes), exactly once, instead of writing to the document.`)
+Research critique (autonomous, fresh context, read-only).
+Adversarially critique the research document as the stage that just ran
+left it — the shaped question and direction after the design pass, the
+gathered evidence and its grounding in cited sources after the build
+pass — for soundness and completeness, including whether the brief's
+questions are actually answered. Judge the document the stage produced,
+not the one a later stage will write. A "changes" verdict sends the
+stage back for another round rather than blocking a finished document.
+You run with no worktree and cannot modify the artifact: record your
+findings in your final message and submit a verdict via the
+submit_verdict tool (pass or changes), exactly once, instead of writing
+to the document.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both

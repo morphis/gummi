@@ -46,7 +46,7 @@ func ResearchTemplate(f *domain.Feature) string {
 // SeededResearchTemplate renders a research document pre-populated from a
 // creation form: Brief verbatim (marker-neutralized) and one %% thread per
 // question. The other eight sections keep their %% prompts — they are the
-// investigate/shape stages' work, never the form's.
+// design and build stages' work, never the form's.
 func SeededResearchTemplate(f *domain.Feature, seed domain.ResearchSeed, prov domain.DraftProvenance) string {
 	return renderResearch(f, seed, prov)
 }
