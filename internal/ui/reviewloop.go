@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -182,6 +183,30 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
+		// A critique judges what the stage wrote; the gate it feeds also
+		// demands that the stage's required sections exist. A pass with a
+		// section still blank is not yet a gate for a person to cross —
+		// the stage's writer is the missing step, so run it (naming what
+		// is blank) instead of re-raising the decision approving cannot
+		// cross. This arm also fires unattended from the engine's own
+		// event loop, so the redrafts burn the stage's round budget and
+		// the cap hands the card to a human instead of looping.
+		if names := m.undraftedGate(snap.Feature); len(names) > 0 {
+			if m.round(id, kind) >= maxRounds {
+				if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
+					return m.writeHalt(id, err)
+				}
+				m.setRound(id, kind, 0)
+				m.raiseEscalation(id, noun+" critique passed with "+strings.Join(names, ", ")+
+					" still blank after "+itoa(maxRounds)+" rounds — review it manually")
+				return m.loadRows
+			}
+			if err := rounds.Bump(context.Background(), m.roundStore, id, kind); err != nil {
+				return m.writeHalt(id, err)
+			}
+			m.setRound(id, kind, m.round(id, kind)+1)
+			return m.redraftUndrafted(id, names)
+		}
 		// the plan gate: a person crosses it (or autopilot does)
 		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
@@ -192,7 +217,9 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 			return cmd
 		}
 		m.raiseAttention(id, attnGate, text)
-		return nil
+		// the session edited the artifact and committed; reload so the
+		// gate's row state — the undrafted sections among them — is fresh
+		return m.loadRows
 	case gatepolicy.Advance:
 		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
@@ -268,6 +295,41 @@ func (m *Shell) critiqueStep(id domain.FeatureID, stage domain.Stage, critique b
 		}
 		return noticeMsg{text: string(id) + ": " + note}
 	}
+}
+
+// redraftUndrafted re-runs a stage's writer because the gate it feeds is
+// blocked on required section(s) the departing stage left blank — the
+// half-drafted state only a merged stage can produce, where a critique
+// passes cleanly on what was written and the gate still refuses the
+// crossing. The kickoff names what is missing so the fresh writer's one
+// job is to draft it; when the run finishes, the ordinary loop resumes
+// (critique, then the judge).
+func (m *Shell) redraftUndrafted(id domain.FeatureID, names []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		m.dropSession(id) // the completed critique is stale; the writer starts fresh
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		if err := m.engine.RunWith(f, redraftNote(names, id.Kind())); err != nil {
+			return noticeMsg{text: err.Error(), isErr: true}
+		}
+		return noticeMsg{text: string(id) + " — re-running " + string(f.Stage) + " to draft " + strings.Join(names, ", "), clearInbox: id}
+	}
+}
+
+// redraftNote is the kickoff note a redraft rides — the counterpart of
+// the replan/rework notes, naming the gate's blank sections so the fresh
+// writer knows the one job it has.
+func redraftNote(names []string, kind domain.Kind) string {
+	pronoun, job := "they are", "draft them"
+	if len(names) == 1 {
+		pronoun, job = "it is", "draft it"
+	}
+	return "The card is held at its gate: " + strings.Join(names, ", ") + " " + pronoun +
+		" required in the " + artifactNoun(kind) + " and still blank — " + job +
+		" before the card can move on"
 }
 
 // autoStep transitions a feature to the next loop stage and auto-runs

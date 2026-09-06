@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -69,6 +71,11 @@ type nextInput struct {
 	failedCheck      string // first failing manual `v` check, "" if none
 	openSpecQs       int    // open user %% threads in the artifact (block gates)
 	openDiffComments int    // unresolved diff annotations (block gates)
+	// undrafted names the required section(s) the departing stage left
+	// blank — the artifact half of the same gate, resolved through the
+	// engine's own predicate so the panel can name what is missing before
+	// an approve that cannot cross is tried.
+	undrafted []string
 
 	pullRequest domain.PullRequestRef // the card's linked outbound PR, empty when unlinked
 }
@@ -100,6 +107,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		verifyBounces:    verifyBounces(r.History),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
+		undrafted:        r.Undrafted,
 		pullRequest:      r.F.PullRequest,
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
@@ -155,8 +163,11 @@ func escalatedGateVerdict(v reviewVerdict, escalated bool) reviewVerdict {
 	return v
 }
 
-// blockedGate returns the resolve-first action when open review
-// comments block the gate (DESIGN §6.1), or nil when g is clear.
+// blockedGate returns the resolve-first action when something blocks the
+// gate (DESIGN §6.1), or nil when g is clear. The undrafted-sections case
+// leads with the same lever the gate itself demands: the stage's writer
+// run again, now that the panel knows what is missing before approve is
+// tried and refused.
 func blockedGate(in nextInput) *nextAction {
 	if in.openSpecQs > 0 {
 		a := nextStep("spec", "s", "resolve open comments",
@@ -166,6 +177,17 @@ func blockedGate(in nextInput) *nextAction {
 	if in.openDiffComments > 0 {
 		a := nextStep("diff", "d", "resolve diff comments",
 			itoa(in.openDiffComments)+" open block the gate — R requests changes, x resolves")
+		return &a
+	}
+	if len(in.undrafted) > 0 {
+		blank := strings.Join(in.undrafted, ", ")
+		pronoun, be, label := "they", "are", "draft the missing sections"
+		if len(in.undrafted) == 1 {
+			pronoun, be, label = "it", "is", "draft the missing section"
+		}
+		a := nextStep("run", "enter", label,
+			blank+" "+be+" required in the "+artifactNoun(in.kind)+" and still blank — the gate stays shut until "+
+				pronoun+" "+be+" drafted; enter re-runs the stage to write "+pronoun)
 		return &a
 	}
 	return nil

@@ -3155,6 +3155,16 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 			// (status quo).
 			if _, ok := engine.CritiqueRoundKind(f.Stage); ok {
 				if s.Snapshot().Critique {
+					// A critique that passed with a required section still
+					// blank did not finish the job: the writer, not the
+					// human, is the missing step, and re-raising the gate
+					// only stacks another decision approving cannot cross.
+					// Run the writer with the blank sections named; the
+					// loop re-critiques when it is done. The human asked
+					// for this run, so the round cap does not apply here.
+					if names := m.undraftedGate(f); len(names) > 0 {
+						return m.redraftUndrafted(f.ID, names)
+					}
 					return m.onCritiqueStageDone(f.ID, f.Stage)
 				}
 				return m.critiqueStep(f.ID, f.Stage, true, "resuming "+string(f.Stage)+" critique (output already written)")

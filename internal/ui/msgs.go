@@ -33,7 +33,12 @@ type featureRow struct {
 	// next block can explain why g would bounce without doing IO per frame
 	OpenSpecQs       int // open user %% threads in the artifact
 	OpenDiffComments int // unresolved diff annotations
-	BaselineFails    int // gummi-checks already failing on the fresh branch
+	// Undrafted names the required section(s) the departing stage left
+	// blank — the artifact half of the same gate, resolved through the
+	// engine's own predicate so the panel names the blocker the crossing
+	// would be refused for.
+	Undrafted     []string
+	BaselineFails int // gummi-checks already failing on the fresh branch
 	// DepBlocked is whether the Advance gate would block this card on an
 	// unmet direct dependency at its coding-stage entry — a load-time
 	// snapshot resolved against the live dependency store (never a
@@ -123,6 +128,7 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 		row.OpenSpecQs = m.openQuestionsBlockingGate(f)
 		row.OpenDiffComments = m.openDiffCommentsBlockingGate(ctx, f.ID)
+		row.Undrafted = m.undraftedGate(f)
 		if bl, err := m.store.CheckBaseline(ctx, f.ID); err == nil {
 			for _, r := range bl {
 				if !r.OK {
@@ -841,6 +847,25 @@ func (m *Shell) artifactFile(f *domain.Feature) string {
 		}
 	}
 	return ""
+}
+
+// undraftedGate names the required section(s) the departing stage left
+// blank — the same predicate engine.Advance applies when the gate refuses
+// (engine.UndraftedGateSections), read live from the artifact so the
+// decision panel can name the blocker before the crossing is attempted
+// and the critique loop can send the stage's writer back instead of
+// re-raising a gate approving cannot cross. Nil for an edge that owes no
+// sections — a research card's stages among them.
+func (m *Shell) undraftedGate(f domain.Feature) []string {
+	path := m.artifactFile(&f)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return engine.UndraftedGateSections(f.Kind, f.Stage, forwardEdge(f), string(raw))
 }
 
 // bounceStage sends a feature back for rework. Review/Verify bounce via

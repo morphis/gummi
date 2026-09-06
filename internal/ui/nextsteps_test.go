@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -53,6 +54,9 @@ func TestNextActionsByState(t *testing.T) {
 		// stage behind it any more.
 		{"design gate offers the same approval", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "enter g s A"},
 		{"design stage with open questions blocks approve", nextInput{stage: domain.StagePlan, kind: feat, openSpecQs: 2}, "s enter"},
+		// a gate blocked on a section the stage never drafted leads with
+		// the writer re-run that unblocks it, not with approve
+		{"design gate with a blank section leads with the redraft", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter enter"},
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
 		{"implement gate diffs, advances, or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g "},
 		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
@@ -108,6 +112,19 @@ func TestNextActionsProseDetails(t *testing.T) {
 	if !strings.Contains(acts[0].why, "2 open") {
 		t.Errorf("blocked-gate why = %q, want the count", acts[0].why)
 	}
+	// a blank required section is named in the blocker why, on the run
+	// action that redrafts it — approve is not even offered
+	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, undrafted: []string{"Chosen approach", "Implementation notes"}})
+	if acts[0].id != "run" || acts[0].label != "draft the missing sections" {
+		t.Errorf("undrafted-gate lead = %s/%q, want the redraft run action", acts[0].id, acts[0].label)
+	}
+	if !strings.Contains(acts[0].why, "Chosen approach, Implementation notes") {
+		t.Errorf("undrafted-gate why = %q, want the blank sections named", acts[0].why)
+	}
+	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindBug, undrafted: []string{"Root cause"}})
+	if acts[0].label != "draft the missing section" || !strings.Contains(acts[0].why, "Root cause") {
+		t.Errorf("single undrafted-gate lead = %q/%q, want the section named", acts[0].label, acts[0].why)
+	}
 	// a verified linked card's top action points at the PR
 	linkedRef := domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
 	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, pullRequest: linkedRef})
@@ -129,6 +146,7 @@ func TestNextInputForAssembly(t *testing.T) {
 		Landed:           true,
 		OpenSpecQs:       1,
 		OpenDiffComments: 2,
+		Undrafted:        []string{"Verification plan"},
 	}
 	m.inbox.addEscalated("FD-001", attnGate, "escalated")
 	m.setRound("FD-001", domain.RoundKindReview, 2)
@@ -140,8 +158,11 @@ func TestNextInputForAssembly(t *testing.T) {
 		attn: attnGate, escalated: true,
 		reviewRound: 2, failedCheck: "unit",
 		openSpecQs: 1, openDiffComments: 2,
+		undrafted: []string{"Verification plan"},
 	}
-	if in != want {
+	// undrafted is a slice (one blocker per blank section), so the struct
+	// no longer compares with ==; DeepEqual keeps the assembly pinned.
+	if !reflect.DeepEqual(in, want) {
 		t.Errorf("nextInputFor = %+v, want %+v", in, want)
 	}
 }

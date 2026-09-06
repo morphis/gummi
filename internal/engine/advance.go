@@ -527,6 +527,19 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	}
 }
 
+// UndraftedGateSections names the required section(s) the stage crossing
+// from `from` to `to` left blank in an artifact's text — the read-only
+// half of the undrafted-sections gate, split out so a caller can name the
+// same blocker Advance would refuse on without re-deriving which sections
+// an edge owes. Nil when the edge owes nothing or nothing is blank.
+func UndraftedGateSections(kind domain.Kind, from, to domain.Stage, artifact string) []string {
+	want := requiredSections(kind, from, to)
+	if len(want) == 0 {
+		return nil
+	}
+	return spec.UndraftedSections(artifact, want)
+}
+
 // undraftedBlockingGate returns the required section(s) the departing
 // stage left undrafted, or nil when the gate has nothing to check or the
 // artifact can't be read. Mirrors openQuestionsBlockingGate's zero-on-error
@@ -542,12 +555,7 @@ func (e *Engine) undraftedBlockingGate(f domain.Feature) []string {
 	if err != nil {
 		return nil
 	}
-	next := e.nextStage(f)
-	want := requiredSections(f.Kind, f.Stage, next)
-	if len(want) == 0 {
-		return nil
-	}
-	return spec.UndraftedSections(string(raw), want)
+	return UndraftedGateSections(f.Kind, f.Stage, e.nextStage(f), string(raw))
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored `%%`

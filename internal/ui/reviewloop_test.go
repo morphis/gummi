@@ -171,7 +171,12 @@ func runVerify(t *testing.T, verifyReply string) *Shell {
 	if m.rows[0].F.Stage != domain.StageVerify {
 		t.Fatalf("flow did not reach verify (at %s)", m.rows[0].F.Stage)
 	}
-	return m
+	// the scripted verify never writes the artifact either; stand in for
+	// the verification story a real verify run leaves behind, then
+	// reload so the gate's row state (the undrafted sections among them)
+	// sees it.
+	draftRequiredSections(t, m)
+	return pump(t, m, m.loadRows)
 }
 
 // verifyGate returns the feature's single gate item, failing the test
@@ -955,11 +960,211 @@ func TestEscalationRecordsAPark(t *testing.T) {
 	}
 }
 
-// pressAdvance is `g` — the advance key — with the card's owed section
-// drafted first, so the fixture stands in for the stage's agent. Walking a
-// card forward in the TUI tests means pressing g with nothing attached that
-// writes the artifact, so it would otherwise stay the blank template and the
-// undrafted-sections gate would hold every design gate shut.
+// draftOnlySection is draftRequiredSections narrowed to a single named
+// section, so a test can leave the gate's other required section(s)
+// blank on purpose — the "drafted one, not the other" shape of BG-001's
+// parked design gate, which draftRequiredSections (by construction)
+// can never produce.
+func draftOnlySection(t *testing.T, m *Shell, name string) {
+	t.Helper()
+	if m.store == nil || m.wt == nil || len(m.rows) == 0 {
+		t.Fatal("draftOnlySection: workspace not ready")
+	}
+	f := m.rows[0].F
+	root := m.wt.Root()
+	path := spec.LocateArtifact(
+		filepath.Join(root, f.ArtifactPath()),
+		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f)),
+		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
+	)
+	if path == "" {
+		t.Fatal("draftOnlySection: no artifact found")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	body, ok := spec.ViewSection(content, name)
+	if !ok {
+		t.Fatalf("draftOnlySection: no %q section in the artifact", name)
+	}
+	next, _, err := spec.ReplaceSection(content, name, body+"drafted by the fixture.\n\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(next), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestParkedDesignGateRedraftsBlankSections pins the way forward the
+// parked design gate gained: a critique can pass cleanly while the gate
+// it feeds is still shut on a section the stage never drafted (the
+// half-drafted state only the merged design stage can produce), and the
+// answer to that is the stage's writer again — its kickoff naming the
+// blank section — not another raise of a decision approving cannot
+// cross. The unattended loop redrafts under the stage's round cap and
+// escalates at it; a human answering the parked gate re-runs the writer
+// regardless, which is what TestParkedDesignGateHasNoWayForward's skip
+// observes.
+func TestParkedDesignGateRedraftsBlankSections(t *testing.T) {
+	var mu sync.Mutex
+	var writerRuns int
+	var writerNotes []string
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if isReview(opts) {
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "Sound.\nVERDICT: pass"},
+				{Kind: agent.EventIdle},
+			}
+		}
+		mu.Lock()
+		writerRuns++
+		writerNotes = append(writerNotes, msg)
+		mu.Unlock()
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "plan written"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StagePlan)
+	m = openSpecFor(t, m) // materializes the draft from the template
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	draftOnlySection(t, m, "Implementation notes") // "Chosen approach" stays blank
+
+	open := tea.KeyPressMsg{Code: tea.KeyEnter}
+	m = press(t, m, open)
+	m = press(t, m, open)
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m) // writer → critique (passes, section blank) → redrafts
+
+	// the unattended loop re-ran the writer under the plan-round cap,
+	// each redraft's kickoff naming what the gate is missing, and handed
+	// the card to a human at the cap instead of looping forever.
+	mu.Lock()
+	if writerRuns != 1+maxPlanRounds {
+		mu.Unlock()
+		t.Fatalf("writer ran %d times, want 1 + %d redrafts under the cap", writerRuns, maxPlanRounds)
+	}
+	named := false
+	for _, n := range writerNotes[1:] {
+		if strings.Contains(n, "Chosen approach") {
+			named = true
+		}
+	}
+	mu.Unlock()
+	if !named {
+		t.Errorf("no redraft kickoff names the blank section; notes = %q", writerNotes)
+	}
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("redraft loop moved the stage to %s", m.rows[0].F.Stage)
+	}
+	if m.round("FD-001", domain.RoundKindPlan) != 0 {
+		t.Errorf("rounds not reset at the capped escalation: %d", m.round("FD-001", domain.RoundKindPlan))
+	}
+	escalated := false
+	for _, it := range m.inbox.list() {
+		if it.Feature == "FD-001" && it.Kind == attnGate && it.Escalated {
+			escalated = true
+		}
+	}
+	if !escalated {
+		t.Fatalf("capped redrafts did not escalate to the inbox: %+v", m.inbox.list())
+	}
+
+	// the cap bounds the unattended loop, not the human: answering the
+	// parked gate's lead action still re-runs the writer.
+	mu.Lock()
+	before := writerRuns
+	mu.Unlock()
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // leave the card page
+	m = press(t, m, open)
+	m = press(t, m, open)
+	settleChat(t, eng)
+	drainEngineLoop(t, m)
+	mu.Lock()
+	got := writerRuns
+	mu.Unlock()
+	if got <= before {
+		t.Fatalf("answering the parked gate ran no session (writer runs stayed at %d)", before)
+	}
+}
+
+// TestParkedDesignGateHasNoWayForward is BG-001's red repro: the plan
+// writer drafts "Implementation notes" but leaves "Chosen approach"
+// blank — the critique judges what was written, not whether the gate's
+// required sections are complete, so it still passes and the loop parks
+// exactly like a real architect run that missed a section. Every action
+// the decision panel offers next must be a dead end on current gummi:
+// approve refuses, R has nothing to send (the undrafted section is not
+// a user thread), and answering the pinned "start the architect"
+// decision starts no new session at all. This must go green once the
+// gate has a real way back to a drafting session.
+func TestParkedDesignGateHasNoWayForward(t *testing.T) {
+	var runs atomic.Int32
+	ag := verdictAgent(func(opts agent.SessionOpts) string {
+		runs.Add(1)
+		if isReview(opts) {
+			return "Sound.\nVERDICT: pass"
+		}
+		return "plan written"
+	})
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StagePlan)
+	m = openSpecFor(t, m) // materializes the draft from the template
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	draftOnlySection(t, m, "Implementation notes") // "Chosen approach" stays blank
+
+	open := tea.KeyPressMsg{Code: tea.KeyEnter}
+	m = press(t, m, open) // open the card
+	m = press(t, m, open) // answer "start the architect"
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m) // writer idles -> critique -> passes -> gate parks
+
+	s := eng.Get("FD-001")
+	if s == nil || s.State() != engine.StateDone || !s.Snapshot().Critique {
+		t.Fatalf("setup: want a parked, critiqued session; got %+v", s)
+	}
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("setup: stage advanced before the gate was ever tested (%s)", m.rows[0].F.Stage)
+	}
+	runsAtPark := runs.Load()
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // leave the card page; back to the board
+
+	// approve is refused, and should name the undrafted section.
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("approve crossed a gate with an undrafted section")
+	}
+	if !strings.Contains(m.notice.text, "Chosen approach") {
+		t.Errorf("approve notice = %q, want it to name the undrafted section", m.notice.text)
+	}
+
+	// R has nothing to send: the undrafted section is not an open %%
+	// user thread, so the panel's other lever is also a dead end.
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	if m.notice.text != "no open review comments to send" {
+		t.Errorf("R notice = %q, want the no-open-comments refusal", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	// "start the architect" — the pinned decision's own recommendation —
+	// must actually start something. On current gummi it re-raises the
+	// same gate instead: no new agent invocation happens.
+	m = press(t, m, open)
+	m = press(t, m, open)
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m)
+	if runs.Load() != runsAtPark {
+		t.Skip("a session ran: the gate now has a way forward")
+	}
+	t.Errorf("'start the architect' ran no session (invocations stayed at %d) — the gate has no way forward", runsAtPark)
+}
 func pressAdvance(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	draftRequiredSections(t, m)
@@ -972,7 +1177,9 @@ func pressAdvance(t *testing.T, m *Shell) *Shell {
 // agent, so its artifact would otherwise stay the blank template and the
 // undrafted-sections gate would — correctly — refuse every design gate. It
 // only fills a section that is still undrafted, so a fixture that wrote its
-// own content keeps it, and it is a no-op before the artifact exists.
+// own content keeps it. When no artifact exists yet, the template the
+// stage's own run would have materialized is created first — the stand-in
+// has to be able to write somewhere before the first run happens.
 func draftRequiredSections(t *testing.T, m *Shell) {
 	t.Helper()
 	if m.store == nil || m.wt == nil || len(m.rows) == 0 {
@@ -1000,7 +1207,10 @@ func draftRequiredSections(t *testing.T, m *Shell) {
 		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
 	)
 	if path == "" {
-		return
+		path = filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
+		if err := spec.EnsureDraft(path, &f); err != nil {
+			t.Fatal(err)
+		}
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
