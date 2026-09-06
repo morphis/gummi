@@ -24,7 +24,7 @@ func TestPausedInteractiveResumeReDispatches(t *testing.T) {
 		resumed   bool
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			st.mu.Lock()
 			st.specCalls++
 			resumed := st.resumed
@@ -51,7 +51,7 @@ func TestPausedInteractiveResumeReDispatches(t *testing.T) {
 		t.Fatalf("run-1 = %+v, err=%v; want a StatusError from the failed spec interview", out, err)
 	}
 	id := h.only()
-	if stg := h.stageOf(id); stg != domain.StageSpec {
+	if stg := h.stageOf(id); stg != domain.StagePlan {
 		t.Fatalf("feature at %s, want Spec (parked on the failed interview)", stg)
 	}
 	st.mu.Lock()

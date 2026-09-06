@@ -152,7 +152,7 @@ func (c *mcpChild) call(section string, args string) (text string, isErr bool) {
 func mcpE2ESetup(t *testing.T) (*Engine, string, *Session) {
 	t.Helper()
 	e := newEngine(t, &fakeNoTools{agent.NewFake("ack")})
-	f := feature(1, "Dark mode", domain.StageSpec)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(context.Background(), f)
 	if err != nil {
@@ -346,7 +346,7 @@ func mcpE2EReadonlySetup(t *testing.T) (*Engine, string, *Session) {
 	fk := agent.NewFake("ack")
 	fk.Caps.ReadOnlyEnforce = true
 	e := newEngine(t, &fakeNoTools{fk})
-	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f := feature(1, "rs investigate", domain.StageImplement)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	seedDraft(t, e, f)

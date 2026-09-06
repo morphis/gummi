@@ -113,21 +113,20 @@ func researchWorkspace(t *testing.T, ag agent.Agent, stage domain.Stage) (*Shell
 // auto-continued. Every investigate ends with a critique now, so there is
 // no loop to be inside or outside of.
 func TestRSInvestigateRoutesIntoTheCritiqueLoop(t *testing.T) {
-	if _, ok := engine.CritiqueRoundKind(domain.StageInvestigate); !ok {
+	if _, ok := engine.CritiqueRoundKind(domain.StagePlan); !ok {
 		t.Fatal("investigate declares no critique round counter, so it can run no critique")
 	}
 	ag := verdictAgent(func(agent.SessionOpts) string { return "investigated" })
 	// research stages run read-only in the main checkout; only a backend
 	// that can structurally enforce that is allowed to drive them.
 	ag.Caps.ReadOnlyEnforce = true
-	m, _ := researchWorkspace(t, ag, domain.StageInvestigate)
+	m, _ := researchWorkspace(t, ag, domain.StagePlan)
 
-	handled, _ := m.onAutonomousDone("RS-001", domain.StageInvestigate)
+	handled, _ := m.onAutonomousDone("RS-001", domain.StagePlan)
 	if !handled {
 		t.Fatal("an investigate completion was not claimed by the critique loop — it would raise the generic gate instead")
 	}
 }
-
 
 // decomposeProposer answers a decompose pass with a fixed two-feature
 // proposal set, in the same propose_features shape a real architect
@@ -263,7 +262,7 @@ func rsCardShell(t *testing.T, repo string) (*Shell, domain.Feature) {
 	slug, _ := domain.Slugify("research card")
 	f := domain.Feature{
 		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
-		Stage: domain.StageInvestigate, Repo: repo, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		Stage: domain.StagePlan, Repo: repo, CreatedAt: fixedTime, UpdatedAt: fixedTime,
 	}
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -660,7 +659,7 @@ func TestRS_BoardBindings_OmitsWorktreeKeys(t *testing.T) {
 	rid, _ := domain.NewID(domain.KindResearch, 1)
 	fid, _ := domain.NewFeatureID(2)
 	m.rows = []featureRow{
-		{F: domain.Feature{ID: rid, Num: 1, Kind: domain.KindResearch, Title: "research", Stage: domain.StageInvestigate, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
+		{F: domain.Feature{ID: rid, Num: 1, Kind: domain.KindResearch, Title: "research", Stage: domain.StagePlan, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
 		{F: domain.Feature{ID: fid, Num: 2, Title: "feature", Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
 	}
 
@@ -688,7 +687,7 @@ func TestRS_HelpOverlay_OmitsWorktreeKeysOnRS(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	rid, _ := domain.NewID(domain.KindResearch, 1)
 	m.rows = []featureRow{
-		{F: domain.Feature{ID: rid, Num: 1, Kind: domain.KindResearch, Title: "research", Stage: domain.StageInvestigate, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
+		{F: domain.Feature{ID: rid, Num: 1, Kind: domain.KindResearch, Title: "research", Stage: domain.StagePlan, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
 	}
 	m.sel = 0
 	dlg := m.helpOverlay()
@@ -706,8 +705,8 @@ func TestRS_NextSteps_HintsMatchKind(t *testing.T) {
 		in   nextInput
 	}{
 		{"todo", nextInput{stage: domain.StageTodo, kind: domain.KindResearch}},
-		{"investigate", nextInput{stage: domain.StageInvestigate, kind: domain.KindResearch}},
-		{"shape", nextInput{stage: domain.StageShape, kind: domain.KindResearch}},
+		{"investigate", nextInput{stage: domain.StagePlan, kind: domain.KindResearch}},
+		{"shape", nextInput{stage: domain.StagePlan, kind: domain.KindResearch}},
 		{"review", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate}},
 		{"verify_pass", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate, verdict: verdictPass}},
 		{"verify_fail", nextInput{stage: domain.StageVerify, kind: domain.KindResearch, attn: attnGate, verdict: verdictFail}},

@@ -379,33 +379,32 @@ func TestStoreTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := s.Transition(ctx, f.ID, domain.StageBrainstorm, "user")
-	if err != nil || got.Stage != domain.StageBrainstorm {
+	got, err := s.Transition(ctx, f.ID, domain.StagePlan, "user")
+	if err != nil || got.Stage != domain.StagePlan {
 		t.Fatalf("transition: %+v, %v", got.Stage, err)
 	}
 
-	// illegal jump: brainstorm → implement
-	if _, err := s.Transition(ctx, f.ID, domain.StageImplement, "user"); err == nil {
+	// illegal jump: plan → done
+	if _, err := s.Transition(ctx, f.ID, domain.StageDone, "user"); err == nil {
 		t.Fatal("illegal transition accepted")
 	}
 	// stage unchanged after rejection
 	cur, _ := s.GetFeature(ctx, f.ID)
-	if cur.Stage != domain.StageBrainstorm {
+	if cur.Stage != domain.StagePlan {
 		t.Fatalf("stage moved despite rejection: %s", cur.Stage)
 	}
 
 	// skip flag honored
 	g := feat(2, "Tiny tweak")
-	g.Skip = domain.SkipFlags{Brainstorm: true, Plan: true}
 	if err := s.CreateFeature(ctx, g); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Transition(ctx, g.ID, domain.StageSpec, "user"); err != nil {
+	if _, err := s.Transition(ctx, g.ID, domain.StagePlan, "user"); err != nil {
 		t.Fatalf("skip-brainstorm transition rejected: %v", err)
 	}
 
 	// unknown feature
-	if _, err := s.Transition(ctx, "FD-999", domain.StageBrainstorm, "user"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Transition(ctx, "FD-999", domain.StagePlan, "user"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err=%v, want ErrNotFound", err)
 	}
 
@@ -414,7 +413,7 @@ func TestStoreTransition(t *testing.T) {
 		t.Fatalf("history = %+v, err=%v", hist, err)
 	}
 	h := hist[0]
-	if h.From != domain.StageTodo || h.To != domain.StageBrainstorm || h.Actor != "user" || h.At.IsZero() {
+	if h.From != domain.StageTodo || h.To != domain.StagePlan || h.Actor != "user" || h.At.IsZero() {
 		t.Errorf("bad history record: %+v", h)
 	}
 }

@@ -1,14 +1,12 @@
 
 FD-042 · dark mode   [thrifty]   autopilot: off
 
-todo ─ brainstorm ─ spec ─ plan ─  implement  ─ verify ─ done
+todo ─ plan ─  implement  ─ verify ─ done
 
 ⌄ spec · Implementation notes ────────────────────────────────────────────────────────── alt+s
 
 ── autopilot took over ────────────────────────────────────────────────────────────── 23:40 ──
-spec · architect · 1 turn · 180 credits ────────────────────────────────────────────── ✓ 23:46
-  ✓ autopilot crossed spec → plan                                                       23:46
-plan · architect · 180 credits ─────────────────────────────────────────────────────── ✓ 00:04
+plan · architect · 1 turn · 180 credits ────────────────────────────────────────────── ✓ 00:04
   ✓ autopilot answered “q?” — stream rows, don't buffer                                 00:00
   ✓ autopilot crossed plan → implement                                                  00:04
 
@@ -24,6 +22,8 @@ plan · architect · 180 credits ───────────────�
     hold on, I want to look at the diff first
   implementer
     sure — nothing else is running.
+
+
 
 
 

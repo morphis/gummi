@@ -173,7 +173,7 @@ func (e *Engine) CardProfiles(stage domain.Stage) []BoardProfile {
 	if len(names) == 0 {
 		return nil
 	}
-	role, _ := roleForStage(stage)
+	role, _ := roleForStage(domain.Feature{Stage: stage})
 	out := make([]BoardProfile, 0, len(names))
 	for _, name := range names {
 		rc, backend := e.resolveRole(name, role)

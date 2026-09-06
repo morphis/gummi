@@ -70,13 +70,12 @@ func (p BugProvenance) Empty() bool { return p.Source == "" && p.ExternalRef == 
 // no coverage map because sources yield discrete, already-separated bugs
 // rather than one document to decompose.
 type BugProposal struct {
-	Title       string    // → Feature.Title (and, slugified, its ID's slug)
-	OneLiner    string    // → Feature.OneLiner
-	Source      string    // source name, e.g. "github" / "manual"
-	ExternalRef string    // → Feature.ExternalRef; dedup key + provenance
-	Number      int       // GitHub issue number; 0 when not applicable (e.g. ManualSource)
-	Severity    Severity  // impact, seeded into the report header
-	Skip        SkipFlags // suggested skip flags (Triage/Diagnose)
+	Title       string   // → Feature.Title (and, slugified, its ID's slug)
+	OneLiner    string   // → Feature.OneLiner
+	Source      string   // source name, e.g. "github" / "manual"
+	ExternalRef string   // → Feature.ExternalRef; dedup key + provenance
+	Number      int      // GitHub issue number; 0 when not applicable (e.g. ManualSource)
+	Severity    Severity // impact, seeded into the report header
 	Report      BugReport
 }
 

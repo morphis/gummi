@@ -152,34 +152,33 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Fatalf("bad feature: %+v", m.rows[0].F)
 	}
 
-	// advance: todo → brainstorm → spec (no worktree yet)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageSpec {
-		t.Fatalf("stage = %s, want spec", m.rows[0].F.Stage)
-	}
-	if m.rows[0].HasWorktree {
-		t.Fatal("worktree exists before spec approval")
-	}
-
-	// advance out of spec → worktree + branch created (DESIGN §10.11)
+	// advance: todo → plan, the design stage (no worktree yet — nothing
+	// has run, and a hand-walked card gets its tree at the design gate)
 	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
 	}
+	if m.rows[0].HasWorktree {
+		t.Fatal("worktree exists before the design gate")
+	}
+
+	// advance out of the design stage → worktree + branch created
+	// (DESIGN §10.11)
+	m = pressAdvance(t, m)
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
+	}
 	if !m.rows[0].HasWorktree {
-		t.Fatal("worktree missing after spec approval")
+		t.Fatal("worktree missing after the design gate")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", "FD-001", "README.md")); err != nil {
 		t.Fatalf("worktree not checked out: %v", err)
 	}
 
-	// walk to verify: plan→implement→review→verify
-	for _, want := range []domain.Stage{domain.StageImplement, domain.StageVerify} {
-		m = pressAdvance(t, m)
-		if m.rows[0].F.Stage != want {
-			t.Fatalf("stage = %s, want %s", m.rows[0].F.Stage, want)
-		}
+	// walk to verify: implement→verify
+	m = pressAdvance(t, m)
+	if m.rows[0].F.Stage != domain.StageVerify {
+		t.Fatalf("stage = %s, want verify", m.rows[0].F.Stage)
 	}
 	commitWork(t, root, "FD-001")
 
@@ -205,11 +204,10 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Fatal("done advanced somewhere")
 	}
 
-	// history is the full audit trail — six transitions now that Review is
-	// a pass rather than a stage of its own (todo→brainstorm→spec→plan→
-	// implement→verify→done)
-	if len(m.rows[0].History) != 6 {
-		t.Fatalf("history has %d records, want 6", len(m.rows[0].History))
+	// history is the full audit trail — four transitions on the one graph
+	// (todo→plan→implement→verify→done)
+	if len(m.rows[0].History) != 4 {
+		t.Fatalf("history has %d records, want 4", len(m.rows[0].History))
 	}
 
 	// D → confirm → y deletes record, worktree, branch. Uppercase: x is
@@ -248,23 +246,23 @@ func TestBugLifecycleFlow(t *testing.T) {
 		t.Fatalf("bad bug: %+v", m.rows[0].F)
 	}
 
-	// advance: todo → triage → diagnose (interactive; no worktree yet)
+	// advance: todo → plan, the bug's design stage (no worktree yet)
 	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageDiagnose {
-		t.Fatalf("stage = %s, want diagnose", m.rows[0].F.Stage)
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
 	}
 	if m.rows[0].HasWorktree {
-		t.Fatal("worktree exists before diagnosis approval")
+		t.Fatal("worktree exists before the design gate")
 	}
 
-	// advance out of diagnose → worktree + branch created, report promoted
+	// advance out of the design stage → worktree + branch created,
+	// report promoted
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageFix {
-		t.Fatalf("stage = %s, want fix", m.rows[0].F.Stage)
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
 	}
 	if !m.rows[0].HasWorktree {
-		t.Fatal("worktree missing after diagnosis approval")
+		t.Fatal("worktree missing after the design gate")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".gummi", "bugs", "BG-001-login-loops.md")); err != nil {
 		t.Fatalf("bug report not at its workspace home: %v", err)
@@ -309,10 +307,10 @@ func TestBugBouncesReviewToFix(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
 	m = typeString(t, m, "Crash on nil")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 3 { // todo→triage→diagnose→fix
+	for range 2 { // todo→plan→implement
 		m = pressAdvance(t, m)
 	}
-	if m.rows[0].F.Stage != domain.StageFix {
+	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want fix", m.rows[0].F.Stage)
 	}
 	// forward g from the work stage goes straight to verify — Review is a
@@ -323,7 +321,7 @@ func TestBugBouncesReviewToFix(t *testing.T) {
 	}
 	// b from verify bounces back to fix (the bug work stage), not implement
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
-	if m.rows[0].F.Stage != domain.StageFix {
+	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("bounce: stage = %s, want fix", m.rows[0].F.Stage)
 	}
 }
@@ -334,7 +332,7 @@ func TestBounceFromReview(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 5 { // todo→brainstorm→spec→plan→implement→verify
+	for range 3 { // todo→plan→implement→verify
 		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != domain.StageVerify {
@@ -362,17 +360,15 @@ func TestBounceFromReview(t *testing.T) {
 }
 
 func TestBounceFromPlanRefused(t *testing.T) {
-	// plan → implement is a legal *forward* edge; b must refuse it —
-	// and critically, a skip-plan feature in spec must not reach
-	// implement via b without its worktree (DESIGN §10.11).
+	// plan → implement is a legal *forward* edge; b must refuse it. The
+	// design stage has nothing behind it to rewind to, so b there is
+	// always an error — never a quiet forward crossing (DESIGN §10.11).
 	m, _ := newWorkspace(t)
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "No shortcut")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 3 { // → brainstorm → spec → plan
-		m = pressAdvance(t, m)
-	}
+	m = pressAdvance(t, m) // todo → plan
 	m = press(t, m, tea.KeyPressMsg{Code: 'b', Text: "b"})
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("b from plan moved feature to %s", m.rows[0].F.Stage)
@@ -441,7 +437,7 @@ func TestBounceFromEscalatedPlan(t *testing.T) {
 		t.Errorf("bounce from an escalated plan gate produced an error notice: %q", m.notice.text)
 	}
 
-	m = drainEngineLoop(t, m) // let the fresh architect turn the bounce kicked off actually run
+	drainEngineLoop(t, m) // let the fresh architect turn the bounce kicked off actually run
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -467,12 +463,9 @@ func TestSkipFlagsChangeRoute(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.rows[0].F.Skip.Brainstorm || !m.rows[0].F.Skip.Plan {
-		t.Fatalf("skip flags not set: %+v", m.rows[0].F.Skip)
-	}
 	// todo → spec directly, then spec → implement directly
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageSpec {
+	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("stage = %s, want spec (brainstorm skipped)", m.rows[0].F.Stage)
 	}
 	m = pressAdvance(t, m)

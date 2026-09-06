@@ -27,7 +27,7 @@ func TestBG078PinnedArtifactHintFiresFromTheCardPage(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m.Attach(store, wt, ws)
 
-	f := mkFeature(t, store, 4, "file pull truncation", domain.StageSpec)
+	f := mkFeature(t, store, 4, "file pull truncation", domain.StagePlan)
 	r := featureRow{F: f}
 	m.rows = []featureRow{r}
 	m.sel = 0

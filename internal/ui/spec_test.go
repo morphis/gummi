@@ -207,8 +207,7 @@ func TestSpecCommentFlow(t *testing.T) {
 
 func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
 	m := specWorkspace(t)
-	// advance to spec, open the draft, annotate it
-	m = pressAdvance(t, m)
+	// advance to the design stage, open the draft, annotate it
 	m = pressAdvance(t, m)
 	m = openSpecFor(t, m)
 	draftPath := m.spec.path
@@ -222,7 +221,7 @@ func TestSpecPromotesToWorkspaceAtApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	// approve the spec (leave Spec) → worktree + promoted spec
+	// cross the design gate → worktree + promoted spec
 	m = pressAdvance(t, m)
 	m = openSpecFor(t, m)
 	if m.spec.path == draftPath {
@@ -274,7 +273,7 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 		"%% @architect: is that the right default?\n"
 	id, _ := domain.NewFeatureID(1)
 	sv := &specView{
-		f:       domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StageSpec},
+		f:       domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan},
 		path:    "p.md",
 		content: content,
 		doc:     spec.Parse(content),
@@ -379,10 +378,9 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	m := specWorkspace(t)
 	ctx := context.Background()
 	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
 	f, _ := m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StageSpec {
-		t.Fatalf("setup: feature at %s, want spec", f.Stage)
+	if f.Stage != domain.StagePlan {
+		t.Fatalf("setup: feature at %s, want plan", f.Stage)
 	}
 	m = openSpecFor(t, m)
 	m = pressAdvance(t, m)
@@ -390,14 +388,13 @@ func TestSpecApproveFromSurface(t *testing.T) {
 		t.Fatal("g did not close the spec surface")
 	}
 	f, _ = m.store.GetFeature(ctx, "FD-001")
-	if f.Stage != domain.StagePlan {
-		t.Errorf("A did not advance the gate: stage = %s, want plan", f.Stage)
+	if f.Stage != domain.StageImplement {
+		t.Errorf("A did not advance the gate: stage = %s, want implement", f.Stage)
 	}
 
 	// with an open @user marker the surface still closes but the gate
 	// stays shut and the blocking notice surfaces.
 	m2 := specWorkspace(t)
-	m2 = pressAdvance(t, m2)
 	m2 = pressAdvance(t, m2)
 	m2 = openSpecFor(t, m2)
 	m2 = press(t, m2, tea.KeyPressMsg{Code: 'c', Text: "c"})
@@ -408,8 +405,8 @@ func TestSpecApproveFromSurface(t *testing.T) {
 		t.Fatal("A should close the surface even when blocked")
 	}
 	f2, _ := m2.store.GetFeature(ctx, "FD-001")
-	if f2.Stage != domain.StageSpec {
-		t.Errorf("open marker did not hold the gate: stage = %s, want spec", f2.Stage)
+	if f2.Stage != domain.StagePlan {
+		t.Errorf("open marker did not hold the gate: stage = %s, want plan", f2.Stage)
 	}
 	if !strings.Contains(m2.notice.text, "block approval") {
 		t.Errorf("blocked notice = %q, want a blocking message", m2.notice.text)

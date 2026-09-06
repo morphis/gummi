@@ -26,7 +26,6 @@ import (
 	"github.com/morphis/gummi/internal/ui/overlay"
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -1868,34 +1867,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case chatAttachedMsg:
-		// the attach ran in a command (spawning the backend can take
-		// seconds). The card page is the conversation's surface now, so
-		// arrival means landing on it with the composer ready — the pane
-		// this message used to open is gone (DESIGN §10.5: retired into
-		// the thread).
-		if msg.err != nil {
-			m.notice = noticeMsg{text: cardLockedNotice(msg.feature.ID, msg.err), isErr: true}
-			return m, nil
-		}
-		m.inbox.remove(msg.feature.ID)
-		if r, ok := m.selected(); !ok || r.F.ID != msg.feature.ID {
-			// the board moved on while the backend spawned. The page is
-			// the selected card's, so there is nowhere honest to land the
-			// arrival: the session is live and the card shows it the next
-			// time it is opened.
-			return m, nil
-		}
-		var open tea.Cmd
-		if !m.cardOpen {
-			// openCard also kicks the event-log load the thread's folded
-			// receipts read — dropping its command would leave the page
-			// showing a live session over an empty history.
-			open = m.openCard()
-		}
-		m.focusThreadInput()
-		return m, open
-
 	case lastSeenMsg:
 		// Merge rather than replace: a card can be opened and marked read
 		// (markSeen, into pendingSeen while lastSeen is still nil) before
@@ -2679,10 +2650,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return m.setRepo(r.F.ID, repo)
 			}))
 		}
-	case "P":
-		if r, ok := m.selected(); ok {
-			return m.routeViaPlan(r.F.ID)
-		}
 	case "r":
 		if r, ok := m.selected(); ok {
 			if n := branchVerbRefusal(r, "rebase"); n != nil {
@@ -3083,9 +3050,9 @@ func (m *Shell) noticeInBand() bool {
 	return m.notice.text != "" && m.notice.isErr && len(m.notice.text) > noticeThreshold
 }
 
-// attachOrRun handles `enter`: interactive stages attach the agent into
-// the card's thread (the conversation's surface); autonomous stages
-// start (or watch) an autonomous run.
+// attachOrRun handles `enter`: it starts (or watches) the stage's run.
+// Every stage runs an agent now, so the only card this can refuse is one
+// sitting somewhere with no agent action at all — todo or done.
 func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	// another process owns this card: the only thing this board can
 	// honestly do with enter is watch it.
@@ -3096,50 +3063,11 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
 		return nil
 	}
-	switch {
-	case workflow.Interactive(f.Stage):
-		// brainstorm/spec for features, triage/diagnose for bugs
-		return m.attachChat(f)
-	case autonomousStage(f.Stage):
-		return m.runStage(f)
-	default:
+	if !autonomousStage(f.Stage) {
 		m.notice = noticeMsg{text: string(f.ID) + " is in " + string(f.Stage) + " — nothing to run", isErr: true}
 		return nil
 	}
-}
-
-// attachChat attaches a feature's engine session, starting (or reusing)
-// it. Attach spawns the agent backend, which can take seconds, so it
-// runs in a command (never in Update — see the no-IO-in-Update contract
-// above). The card page is the conversation's surface — chatAttachedMsg
-// lands on it with the composer ready; the pane this used to open is
-// retired into the thread (DESIGN §10.5).
-func (m *Shell) attachChat(f domain.Feature) tea.Cmd {
-	return func() tea.Msg {
-		s, err := m.engine.Attach(context.Background(), f)
-		return chatAttachedMsg{feature: f, session: s, err: err}
-	}
-}
-
-// attachChatWith attaches the interactive stage's session and delivers
-// the composer's line as the conversation's first turn — the prose aimed
-// at the decision's run answer. Attach runs in a command (the backend
-// can take seconds to spawn), so the line rides the same closure, the
-// way the review-comments path attaches-then-sends (annotate.go); the
-// card page shows the conversation when chatAttachedMsg lands, exactly
-// as a plain attach's does.
-func (m *Shell) attachChatWith(f domain.Feature, opening string) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		s, err := m.engine.Attach(ctx, f)
-		if err != nil {
-			return chatAttachedMsg{feature: f, session: s, err: err}
-		}
-		if err := m.engine.Send(ctx, f.ID, opening); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return chatAttachedMsg{feature: f, session: s}
-	}
+	return m.runStage(f)
 }
 
 // seedRounds hydrates the in-memory round counter for kind from the store
@@ -3192,8 +3120,8 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	// any of those can be the resume landing point, so seed the counter on
 	// each of them. Investigate is research's work leg — a resume landing
 	// on the RS work leg must not re-grant the review budget either.
-	if f.Stage == domain.StageImplement || f.Stage == domain.StageFix ||
-		f.Stage == domain.StageInvestigate {
+	if f.Stage == domain.StageImplement ||
+		f.Stage == domain.StagePlan {
 		if err := m.seedRounds(f, domain.RoundKindReview); err != nil {
 			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
 			m.raiseAttention(f.ID, attnFailure, sanitize(err.Error()))
@@ -3253,7 +3181,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	// the next one rather than being silently dropped.
 	if note == "" {
 		if stashed, ok := m.bounceNotes[f.ID]; ok &&
-			(f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
+			(f.Stage == domain.StageImplement) {
 			delete(m.bounceNotes, f.ID)
 			note = stashed
 		}
@@ -3500,7 +3428,7 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 // (as opposed to interactive chat or no agent).
 func autonomousStage(s domain.Stage) bool {
 	switch s {
-	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageInvestigate, domain.StageVerify:
+	case domain.StagePlan, domain.StageImplement, domain.StageVerify:
 		return true
 	default:
 		return false

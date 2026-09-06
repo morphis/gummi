@@ -12,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -132,8 +131,8 @@ func TestAdvanceRecordsGateEvent(t *testing.T) {
 	if err := json.Unmarshal([]byte(gates[0].Payload), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.From != string(domain.StageTodo) || p.To != string(domain.StageBrainstorm) || p.Actor != "auto" {
-		t.Errorf("gate payload = %+v, want from=%s to=%s actor=auto", p, domain.StageTodo, domain.StageBrainstorm)
+	if p.From != string(domain.StageTodo) || p.To != string(domain.StagePlan) || p.Actor != "auto" {
+		t.Errorf("gate payload = %+v, want from=%s to=%s actor=auto", p, domain.StageTodo, domain.StagePlan)
 	}
 }
 
@@ -191,52 +190,67 @@ func TestAdvanceNoopWritesNoGateEvent(t *testing.T) {
 // A feature walks the full forward floor; leaving Spec creates the
 // worktree and promotes the artifact to its workspace home.
 func TestAdvanceForwardWalkFeature(t *testing.T) {
-	e, _, store, wt := advanceEngine(t)
+	e, ws, store, wt := advanceEngine(t)
 	ctx := context.Background()
 	f := feature(1, "dark mode", domain.StageTodo)
 	putFeature(t, store, f)
 
-	// todo → brainstorm → spec: no worktree yet
-	for _, want := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec} {
-		res := mustAdvance(t, e, f.ID)
-		if res.Status != StatusAdvanced || res.To != want {
-			t.Fatalf("advance to %s: status=%d to=%s", want, res.Status, res.To)
-		}
-		if res.EnteredWorktree {
-			t.Fatalf("worktree created before spec approval (at %s)", want)
-		}
-	}
-	if ok, _ := wt.Exists(ctx, &f); ok {
-		t.Fatal("worktree exists before spec approval")
-	}
-
-	// spec → plan: the approval gate creates the worktree + promotes the spec
+	// todo → plan: the kickoff hop, no worktree yet
 	res := mustAdvance(t, e, f.ID)
 	if res.Status != StatusAdvanced || res.To != domain.StagePlan {
-		t.Fatalf("spec approval: status=%d to=%s", res.Status, res.To)
+		t.Fatalf("todo kickoff: status=%d to=%s", res.Status, res.To)
+	}
+	if res.EnteredWorktree {
+		t.Fatal("worktree created at the todo kickoff")
+	}
+	if ok, _ := wt.Exists(ctx, &f); ok {
+		t.Fatal("worktree exists before the design gate")
+	}
+
+	// the design gate owes both of the merged stage's sections
+	fillPromotedSection2 := func(section, body string) {
+		draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+		raw, err := os.ReadFile(draft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, _, err := spec.ReplaceSection(string(raw), section, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(draft, []byte(updated), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := spec.EnsureDraft(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)), &f); err != nil {
+		t.Fatal(err)
+	}
+	fillPromotedSection2("Chosen approach", "\nA settings toggle.\n\n")
+	fillPromotedSection2("Implementation notes", "\nAdd a settings toggle; persist per-device.\n\n")
+
+	// plan → implement: the approval gate cuts the worktree and promotes
+	// the artifact to its workspace home
+	res = mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageImplement {
+		t.Fatalf("design approval: status=%d to=%s", res.Status, res.To)
 	}
 	if !res.EnteredWorktree {
-		t.Fatal("spec approval did not report EnteredWorktree")
+		t.Fatal("design approval did not report EnteredWorktree")
 	}
 	if ok, _ := wt.Exists(ctx, &f); !ok {
-		t.Fatal("worktree missing after spec approval")
+		t.Fatal("worktree missing after the design gate")
 	}
 	if _, err := os.Stat(filepath.Join(wt.Root(), f.ArtifactPath())); err != nil {
-		t.Fatalf("spec not promoted to its workspace home: %v", err)
+		t.Fatalf("artifact not promoted to its workspace home: %v", err)
 	}
-	// the plan→implement gate expects Implementation notes drafted — the
-	// blank template promoted above leaves it empty.
-	fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
 
-	// plan → implement → verify: no further worktree creation
-	for _, want := range []domain.Stage{domain.StageImplement, domain.StageVerify} {
-		res := mustAdvance(t, e, f.ID)
-		if res.Status != StatusAdvanced || res.To != want {
-			t.Fatalf("advance to %s: status=%d to=%s", want, res.Status, res.To)
-		}
-		if res.EnteredWorktree {
-			t.Fatalf("worktree re-created leaving into %s", want)
-		}
+	// implement → verify: no further worktree creation
+	res = mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageVerify {
+		t.Fatalf("advance to verify: status=%d to=%s", res.Status, res.To)
+	}
+	if res.EnteredWorktree {
+		t.Fatal("worktree re-created leaving into verify")
 	}
 }
 
@@ -249,7 +263,7 @@ func TestAdvanceBugWorktreeGate(t *testing.T) {
 	f.Kind = domain.KindBug
 	putFeature(t, store, f)
 
-	for _, want := range []domain.Stage{domain.StageTriage, domain.StageDiagnose, domain.StageFix} {
+	for _, want := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusAdvanced || res.To != want {
 			t.Fatalf("advance to %s: status=%d to=%s", want, res.Status, res.To)
@@ -261,30 +275,9 @@ func TestAdvanceBugWorktreeGate(t *testing.T) {
 }
 
 // Skip flags route todo → spec → implement directly, still creating the
-// worktree when the item first enters a work stage.
-func TestAdvanceSkipEdges(t *testing.T) {
-	e, _, store, wt := advanceEngine(t)
-	f := feature(1, "tiny fix", domain.StageTodo)
-	f.Skip = domain.SkipFlags{Brainstorm: true, Plan: true}
-	putFeature(t, store, f)
-
-	if res := mustAdvance(t, e, f.ID); res.To != domain.StageSpec {
-		t.Fatalf("todo skip-edge to %s, want spec", res.To)
-	}
-	res := mustAdvance(t, e, f.ID)
-	if res.To != domain.StageImplement || !res.EnteredWorktree {
-		t.Fatalf("spec skip-edge: to=%s entered=%v, want implement+worktree", res.To, res.EnteredWorktree)
-	}
-	if ok, _ := wt.Exists(context.Background(), &f); !ok {
-		t.Fatal("worktree missing after skip-plan spec approval")
-	}
-}
-
-// Unresolved user %% threads in the artifact block the gate — no
-// transition, a typed blocked status with the open count.
 func TestAdvanceBlockedByQuestions(t *testing.T) {
 	e, ws, store, _ := advanceEngine(t)
-	f := feature(1, "gated", domain.StageSpec)
+	f := feature(1, "gated", domain.StagePlan)
 	putFeature(t, store, f)
 
 	// seed a draft carrying one open @user question
@@ -301,7 +294,7 @@ func TestAdvanceBlockedByQuestions(t *testing.T) {
 	if res.Status != StatusBlockedQuestions || res.Blockers != 1 {
 		t.Fatalf("status=%d blockers=%d, want blocked-questions/1", res.Status, res.Blockers)
 	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageSpec {
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StagePlan {
 		t.Fatalf("blocked gate still transitioned to %s", got.Stage)
 	}
 }
@@ -331,7 +324,7 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 	// branch ahead → NeedsMerge, no transition
 	t.Run("ahead needs merge", func(t *testing.T) {
 		e, _, store, wt := advanceEngine(t)
-		f := feature(1, "ship it", domain.StageSpec)
+		f := feature(1, "ship it", domain.StagePlan)
 		putFeature(t, store, f)
 		mustAdvance(t, e, f.ID) // spec → plan, creates the worktree
 		// the plan→implement gate expects Implementation notes drafted.
@@ -381,9 +374,9 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 	// no branch commits → straight to Done
 	t.Run("empty branch to done", func(t *testing.T) {
 		e, _, store, wt := advanceEngine(t)
-		f := feature(2, "nothing to land", domain.StageSpec)
+		f := feature(2, "nothing to land", domain.StagePlan)
 		putFeature(t, store, f)
-		for stage := domain.StageSpec; stage != domain.StageVerify; {
+		for stage := domain.StagePlan; stage != domain.StageVerify; {
 			res := mustAdvance(t, e, f.ID)
 			if res.Status != StatusAdvanced {
 				t.Fatalf("walk to verify: status=%d at %s, want advanced", res.Status, stage)
@@ -555,7 +548,7 @@ func TestEstimateEnvelopeFromHistory(t *testing.T) {
 	if err := store.AddSpend(ctx, done.ID, 100, 0, 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	f := feature(2, "new", domain.StageSpec)
+	f := feature(2, "new", domain.StagePlan)
 	putFeature(t, store, f)
 
 	credits, samples := e.estimateEnvelope(ctx, &f)
@@ -578,7 +571,7 @@ func TestEstimateEnvelopeRespectsExplicit(t *testing.T) {
 	done := feature(1, "prior", domain.StageDone)
 	putFeature(t, store, done)
 	_ = store.AddSpend(ctx, done.ID, 120, 0, 0, 0)
-	f := feature(2, "new", domain.StageSpec)
+	f := feature(2, "new", domain.StagePlan)
 	f.Budget.Envelope = 200
 	putFeature(t, store, f)
 
@@ -597,7 +590,7 @@ func TestEstimateEnvelopeNoHistory(t *testing.T) {
 	wip := feature(1, "wip", domain.StageImplement)
 	putFeature(t, store, wip)
 	_ = store.AddSpend(ctx, wip.ID, 50, 0, 0, 0)
-	f := feature(2, "new", domain.StageSpec)
+	f := feature(2, "new", domain.StagePlan)
 	putFeature(t, store, f)
 
 	credits, samples := e.estimateEnvelope(ctx, &f)
@@ -688,49 +681,6 @@ func TestAdvanceDependencyMet(t *testing.T) {
 }
 
 // Skip edges into the coding stage are gated too: Spec (plan skipped) →
-// Implement, and a bug's Diagnose → Fix.
-func TestAdvanceDependencyGateSkipEdges(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("feature spec skip-plan", func(t *testing.T) {
-		e, _, store, _ := advanceEngine(t)
-		f := feature(1, "dependent", domain.StageSpec)
-		f.Skip = domain.SkipFlags{Plan: true}
-		putFeature(t, store, f)
-		dep := feature(2, "dep", domain.StageImplement)
-		putFeature(t, store, dep)
-		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
-			t.Fatal(err)
-		}
-		res := mustAdvance(t, e, f.ID)
-		if res.Status != StatusBlockedDependency {
-			t.Fatalf("status=%d, want blocked-dependency on skip edge", res.Status)
-		}
-	})
-
-	t.Run("bug diagnose", func(t *testing.T) {
-		e, _, store, _ := advanceEngine(t)
-		f := feature(1, "bug", domain.StageDiagnose)
-		f.ID = domain.FeatureID("BG-001")
-		f.Kind = domain.KindBug
-		putFeature(t, store, f)
-		dep := feature(2, "dep", domain.StageImplement)
-		putFeature(t, store, dep)
-		if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
-			t.Fatal(err)
-		}
-		res := mustAdvance(t, e, f.ID)
-		if res.Status != StatusBlockedDependency {
-			t.Fatalf("status=%d, want blocked-dependency on bug diagnose", res.Status)
-		}
-	})
-}
-
-// DependencyBlockers is the badge half of the Advance gate: at the coding
-// stage it withholds an unmet dep (matching StatusBlockedDependency); in
-// brainstorm/spec (next step not the coding stage) it returns nil even with
-// the same unmet dep; and once the dep reaches Done it returns nil. The
-// badge and the gate thus share one definition and can never disagree.
 func TestDependencyBlockers(t *testing.T) {
 	ctx := context.Background()
 
@@ -754,7 +704,7 @@ func TestDependencyBlockers(t *testing.T) {
 
 	t.Run("stage-aware: design stage not blocked", func(t *testing.T) {
 		e, _, store, _ := advanceEngine(t)
-		f := feature(1, "designing", domain.StageBrainstorm)
+		f := feature(1, "designing", domain.StagePlan)
 		putFeature(t, store, f)
 		dep := feature(2, "dep", domain.StageImplement)
 		putFeature(t, store, dep)
@@ -765,8 +715,10 @@ func TestDependencyBlockers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(deps) != 0 {
-			t.Fatalf("design-stage DependencyBlockers = %+v, want nil", deps)
+		// the design gate IS the coding-stage entry now: one design stage
+		// means plan → implement is both, so a dependency blocks here.
+		if len(deps) != 1 {
+			t.Fatalf("design-stage DependencyBlockers = %+v, want the unmet dep", deps)
 		}
 	})
 
@@ -803,53 +755,9 @@ func TestAdvanceDependencyGateNotCoding(t *testing.T) {
 	}
 
 	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusAdvanced || res.To != domain.StageBrainstorm {
+	if res.Status != StatusAdvanced || res.To != domain.StagePlan {
 		t.Fatalf("status=%d to=%s, want advanced/brainstorm (design edge not gated)", res.Status, res.To)
 	}
-}
-
-// The invariant: every forward path into the coding stage resolves through
-// nextStage to the coding stage, so the Advance gate can never be bypassed.
-// Review/Verify rerun edges are excluded — nextStage takes the forward edge
-// (nexts[0]) there, never the coding rerun.
-func TestNextStageCoversEveryCodingEntry(t *testing.T) {
-	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
-		work := workflow.WorkStage(kind)
-		for _, from := range domain.Stages {
-			if from == domain.StageVerify {
-				continue // rerun edges are bounces, not forward moves
-			}
-			for _, skip := range skipCombos() {
-				f := feature(1, "invariant", from)
-				f.Kind = kind
-				f.Skip = skip
-				enters := false
-				for _, n := range workflow.Next(kind, from, skip) {
-					if n == work {
-						enters = true
-					}
-				}
-				if enters && (&Engine{}).nextStage(f) != work {
-					t.Fatalf("kind=%s from=%s skip=%+v: a forward path enters %s but nextStage resolves to %s — the Advance gate is bypassed",
-						kind, from, skip, work, (&Engine{}).nextStage(f))
-				}
-			}
-		}
-	}
-}
-
-func skipCombos() []domain.SkipFlags {
-	var out []domain.SkipFlags
-	for _, b := range []bool{false, true} {
-		for _, p := range []bool{false, true} {
-			for _, tr := range []bool{false, true} {
-				for _, dg := range []bool{false, true} {
-					out = append(out, domain.SkipFlags{Brainstorm: b, Plan: p, Triage: tr, Diagnose: dg})
-				}
-			}
-		}
-	}
-	return out
 }
 
 // --- research workflow (worktree-less routing) ---
@@ -867,7 +775,7 @@ func TestAdvanceResearchNoWorktree(t *testing.T) {
 	putFeature(t, store, f)
 
 	for _, want := range []domain.Stage{
-		domain.StageInvestigate, domain.StageShape, domain.StageVerify, domain.StageDone,
+		domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone,
 	} {
 		res := mustAdvance(t, e, f.ID)
 		if res.Status != StatusAdvanced || res.To != want {
@@ -888,12 +796,12 @@ func TestAdvanceResearchNoWorktree(t *testing.T) {
 // reached from StatusNeedsMerge) is never entered.
 func TestAdvanceResearchVerifyDoneNoMerge(t *testing.T) {
 	e, _, store, _ := advanceEngine(t)
-	f := feature(1, "research no land", domain.StageInvestigate)
+	f := feature(1, "research no land", domain.StagePlan)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	putFeature(t, store, f)
 
-	for stage := domain.StageInvestigate; stage != domain.StageVerify; {
+	for stage := domain.StagePlan; stage != domain.StageVerify; {
 		res := mustAdvance(t, e, f.ID)
 		stage = res.To
 	}
@@ -975,16 +883,40 @@ func TestRequiredSections(t *testing.T) {
 		to   domain.Stage
 		want []string
 	}{
-		{"feature leaving spec", domain.KindFeature, domain.StageSpec, domain.StagePlan, []string{"Chosen approach"}},
-		{"feature leaving spec via skip edge", domain.KindFeature, domain.StageSpec, domain.StageImplement, []string{"Chosen approach"}},
-		{"bug leaving diagnose", domain.KindBug, domain.StageDiagnose, domain.StageFix, []string{"Root cause"}},
-		{"feature plan to implement", domain.KindFeature, domain.StagePlan, domain.StageImplement, []string{"Implementation notes"}},
-		{"feature to done", domain.KindFeature, domain.StageVerify, domain.StageDone, []string{"Verification plan"}},
-		{"bug to done", domain.KindBug, domain.StageVerify, domain.StageDone, []string{"Verification"}},
-		{"research to done exempt", domain.KindResearch, domain.StageVerify, domain.StageDone, nil},
-		{"research leaving spec-shaped stage", domain.KindResearch, domain.StageSpec, domain.StagePlan, nil},
-		{"plan to implement wrong to-stage", domain.KindFeature, domain.StagePlan, domain.StageVerify, nil},
-		{"bug leaving triage", domain.KindBug, domain.StageTriage, domain.StageDiagnose, nil},
+		{
+			"feature's design gate owes both sections", domain.KindFeature,
+			domain.StagePlan, domain.StageImplement,
+			[]string{"Chosen approach", "Implementation notes"},
+		},
+		{
+			"bug's design gate owes the root cause", domain.KindBug,
+			domain.StagePlan, domain.StageImplement,
+			[]string{"Root cause"},
+		},
+		{
+			"feature to done", domain.KindFeature, domain.StageVerify, domain.StageDone,
+			[]string{"Verification plan"},
+		},
+		{
+			"bug to done", domain.KindBug, domain.StageVerify, domain.StageDone,
+			[]string{"Verification"},
+		},
+		{
+			"research to done exempt", domain.KindResearch, domain.StageVerify,
+			domain.StageDone, nil,
+		},
+		{
+			"research's design gate is exempt too", domain.KindResearch,
+			domain.StagePlan, domain.StageImplement, nil,
+		},
+		{
+			"the todo kickoff owes nothing", domain.KindFeature, domain.StageTodo,
+			domain.StagePlan, nil,
+		},
+		{
+			"implement to verify owes nothing", domain.KindFeature,
+			domain.StageImplement, domain.StageVerify, nil,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1025,7 +957,7 @@ func writeDraftBody(t *testing.T, ws state.Workspace, f domain.Feature, body str
 // undraftedBlockingGate directly.
 func TestAdvanceBlockedByUndraftedChosenApproach(t *testing.T) {
 	e, ws, store, _ := advanceEngine(t)
-	f := feature(1, "dark mode", domain.StageSpec)
+	f := feature(1, "dark mode", domain.StagePlan)
 	f.GateApproval = domain.GateAutopilot
 	putFeature(t, store, f)
 
@@ -1036,10 +968,12 @@ func TestAdvanceBlockedByUndraftedChosenApproach(t *testing.T) {
 	if res.Status != StatusBlockedUndrafted {
 		t.Fatalf("status=%d, want StatusBlockedUndrafted", res.Status)
 	}
-	if len(res.Undrafted) != 1 || res.Undrafted[0] != "Chosen approach" {
-		t.Fatalf("Undrafted = %v, want [Chosen approach]", res.Undrafted)
+	// both design sections: the merged stage owns what spec and plan each
+	// owned before, so its gate owes both
+	if len(res.Undrafted) != 2 || res.Undrafted[0] != "Chosen approach" {
+		t.Fatalf("Undrafted = %v, want [Chosen approach Implementation notes]", res.Undrafted)
 	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageSpec {
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StagePlan {
 		t.Fatalf("blocked undrafted gate still transitioned to %s", got.Stage)
 	}
 }
@@ -1048,15 +982,16 @@ func TestAdvanceBlockedByUndraftedChosenApproach(t *testing.T) {
 // passes and the crossing proceeds normally.
 func TestAdvanceNotBlockedWhenChosenApproachDrafted(t *testing.T) {
 	e, ws, store, _ := advanceEngine(t)
-	f := feature(1, "dark mode", domain.StageSpec)
+	f := feature(1, "dark mode", domain.StagePlan)
 	putFeature(t, store, f)
 
 	writeDraftBody(t, ws, f, "# Spec\n\n## Problem\n\nToggle needed.\n\n"+
-		"## Chosen approach\n\nStore the preference per-device.\n")
+		"## Chosen approach\n\nStore the preference per-device.\n\n"+
+		"## Implementation notes\n\nAdd the toggle; persist per-device.\n")
 
 	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusAdvanced || res.To != domain.StagePlan {
-		t.Fatalf("status=%d to=%s, want advanced/plan", res.Status, res.To)
+	if res.Status != StatusAdvanced || res.To != domain.StageImplement {
+		t.Fatalf("status=%d to=%s, want advanced/implement", res.Status, res.To)
 	}
 }
 
@@ -1065,7 +1000,7 @@ func TestAdvanceNotBlockedWhenChosenApproachDrafted(t *testing.T) {
 func TestAdvanceBlockedByUndraftedRootCause(t *testing.T) {
 	e, ws, store, _ := advanceEngine(t)
 	f := bugFeature("crash on empty input")
-	f.Stage = domain.StageDiagnose
+	f.Stage = domain.StagePlan
 	putFeature(t, store, f)
 
 	writeDraftBody(t, ws, f, "# Report\n\n## Summary\n\nCrashes on empty input.\n\n"+
@@ -1078,7 +1013,7 @@ func TestAdvanceBlockedByUndraftedRootCause(t *testing.T) {
 	if len(res.Undrafted) != 1 || res.Undrafted[0] != "Root cause" {
 		t.Fatalf("Undrafted = %v, want [Root cause]", res.Undrafted)
 	}
-	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageDiagnose {
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StagePlan {
 		t.Fatalf("blocked undrafted gate still transitioned to %s", got.Stage)
 	}
 }
@@ -1088,11 +1023,11 @@ func TestAdvanceBlockedByUndraftedRootCause(t *testing.T) {
 // proves a missing artifact can never wedge a gate shut permanently.
 func TestAdvanceUndraftedGateFallsThroughOnMissingArtifact(t *testing.T) {
 	e, _, store, _ := advanceEngine(t)
-	f := feature(1, "no artifact yet", domain.StageSpec)
+	f := feature(1, "no artifact yet", domain.StagePlan)
 	putFeature(t, store, f)
 
 	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusAdvanced || res.To != domain.StagePlan {
-		t.Fatalf("status=%d to=%s, want advanced/plan (missing artifact must fall through)", res.Status, res.To)
+	if res.Status != StatusAdvanced || res.To != domain.StageImplement {
+		t.Fatalf("status=%d to=%s, want advanced/implement (missing artifact must fall through)", res.Status, res.To)
 	}
 }

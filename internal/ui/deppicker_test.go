@@ -193,7 +193,7 @@ func TestPickRemovalOnly(t *testing.T) {
 	}
 	// move the source to a coding stage after the edge exists — an
 	// at-coding card can't take on a new dependency.
-	toStage(t, m, "FD-001", domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement)
+	toStage(t, m, "FD-001", domain.StagePlan, domain.StageImplement)
 	m = openDepsPick(t, m)
 
 	if !m.deps.removeOnly {
@@ -336,7 +336,7 @@ func TestBuildCandsRemovalOnly(t *testing.T) {
 	if err := m.store.AddDependency(ctx, "FD-001", "FD-002"); err != nil {
 		t.Fatal(err)
 	}
-	toStage(t, m, "FD-001", domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement)
+	toStage(t, m, "FD-001", domain.StagePlan, domain.StageImplement)
 	dp := &depPicker{}
 	if err := dp.buildCands(ctx, m.store, *mustFeature(t, m, "FD-001")); err != nil {
 		t.Fatal(err)

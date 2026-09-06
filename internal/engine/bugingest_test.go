@@ -123,7 +123,6 @@ func TestMaterializeBugsCreatesSeededBugs(t *testing.T) {
 	props := []domain.BugProposal{{
 		Title: "Login loops", Source: "github", ExternalRef: "https://x/42",
 		Severity: domain.SeverityHigh,
-		Skip:     domain.SkipFlags{Triage: true},
 		Report:   domain.BugReport{Description: "SSO bounce", Reproduction: "1. log in"},
 	}}
 	created, err := e.MaterializeBugs(ctx, props, MaterializeOpts{Profile: "thrifty", Envelope: 150})
@@ -137,7 +136,7 @@ func TestMaterializeBugsCreatesSeededBugs(t *testing.T) {
 	if b.Kind != domain.KindBug || !strings.HasPrefix(string(b.ID), "BG-") {
 		t.Errorf("want a BG-* bug, got %s / kind %s", b.ID, b.Kind)
 	}
-	if b.Stage != domain.StageTodo || b.Profile != "thrifty" || b.Budget.Envelope != 150 || !b.Skip.Triage || b.ExternalRef != "https://x/42" {
+	if b.Stage != domain.StageTodo || b.Profile != "thrifty" || b.Budget.Envelope != 150 || b.ExternalRef != "https://x/42" {
 		t.Errorf("bug fields wrong: %+v", b)
 	}
 
@@ -229,8 +228,8 @@ func TestMaterializeBugsNamesRepo(t *testing.T) {
 	ctx := context.Background()
 	props := []domain.BugProposal{{
 		Title: "Crash on nil", Source: "manual", ExternalRef: "https://x/7",
-		Severity: domain.SeverityHigh, Skip: domain.SkipFlags{Triage: true},
-		Report: domain.BugReport{Description: "panic"},
+		Severity: domain.SeverityHigh,
+		Report:   domain.BugReport{Description: "panic"},
 	}}
 
 	created, err := e.MaterializeBugs(ctx, props, MaterializeOpts{Repo: "b"})
@@ -321,8 +320,8 @@ func TestMaterializeBugsReposOnlyNamedRepo(t *testing.T) {
 	ctx := context.Background()
 	props := []domain.BugProposal{{
 		Title: "Multi-repo crash", Source: "manual", ExternalRef: "https://x/9",
-		Severity: domain.SeverityHigh, Skip: domain.SkipFlags{Triage: true},
-		Report: domain.BugReport{Description: "explodes"},
+		Severity: domain.SeverityHigh,
+		Report:   domain.BugReport{Description: "explodes"},
 	}}
 
 	created, err := e.MaterializeBugs(ctx, props, MaterializeOpts{Repo: "a"})

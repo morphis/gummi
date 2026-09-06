@@ -101,7 +101,7 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 		}
 		f := domain.Feature{
 			ID: id, Num: num, Kind: domain.KindBug, Title: p.Title, OneLiner: p.OneLiner,
-			Slug: slugs[i], Stage: workflow.Initial(domain.KindBug), Skip: p.Skip,
+			Slug: slugs[i], Stage: workflow.Initial(),
 			Profile: opts.Profile, Budget: domain.Budget{Envelope: opts.Envelope},
 			ExternalRef: p.ExternalRef, Severity: p.Severity, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
 		}

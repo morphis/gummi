@@ -82,7 +82,7 @@ func bugFeature(title string) domain.Feature {
 	slug, _ := domain.Slugify(title)
 	now := time.Now()
 	return domain.Feature{
-		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: domain.StageFix,
+		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug, Stage: domain.StageImplement,
 		CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -178,7 +178,7 @@ func TestInteractiveRoundTrip(t *testing.T) {
 	e := newEngine(t, agent.NewFake("Here are two approaches."))
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
+	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +509,7 @@ func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
 
 func TestDropStopsSession(t *testing.T) {
 	e := newEngine(t, agent.NewFake("hi"))
-	if _, err := e.Attach(context.Background(), feature(1, "x", domain.StageBrainstorm)); err != nil {
+	if _, err := e.Attach(context.Background(), feature(1, "x", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventStarted)
@@ -585,7 +585,7 @@ func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	if _, err := e.Attach(context.Background(), f); err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +689,7 @@ func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
 			e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 			t.Cleanup(func() { e.Close() })
 
-			f := feature(1, "x", domain.StageSpec)
+			f := feature(1, "x", domain.StagePlan)
 			if _, err := e.Attach(context.Background(), f); err != nil {
 				t.Fatal(err)
 			}
@@ -777,7 +777,7 @@ func TestNestedArtifactJoinsResolveUnderWorkspace(t *testing.T) {
 		t.Errorf("Worktrees.RepoRoot() = %q, want repo root %q", got, ws.RepoRoot)
 	}
 
-	f := feature(99, "Nested artifact", domain.StageSpec)
+	f := feature(99, "Nested artifact", domain.StagePlan)
 	// the artifact workspace-home join must resolve under the workspace
 	// root, never the repo root.
 	got := filepath.Join(eng.cfg.Worktrees.Root(), f.ArtifactPath())

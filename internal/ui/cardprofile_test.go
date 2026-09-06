@@ -231,7 +231,7 @@ func TestConfirmCardProfileChangeAsksWhenLive(t *testing.T) {
 	t.Cleanup(func() { eng.Close() })
 
 	ctx := context.Background()
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "x", Slug: "x", Stage: domain.StageBrainstorm, Profile: "alpha"}
+	f := domain.Feature{ID: "FD-001", Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan, Profile: "alpha"}
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}

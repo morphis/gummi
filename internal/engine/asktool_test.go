@@ -59,7 +59,7 @@ func TestAskUserSurfacesAndResolves(t *testing.T) {
 	e := newEngine(t, ag)
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
+	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestParallelAsksBounceExtras(t *testing.T) {
 	e := newEngine(t, ag)
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
+	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 	e.now = fixedNow // deterministic marker date
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	})
 	e := newEngine(t, clientToolFake(args))
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventQuestion)
@@ -248,7 +248,7 @@ func TestConventionAskPath(t *testing.T) {
 	e := newEngine(t, ag)
 	ctx := context.Background()
 
-	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StageBrainstorm))
+	s, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestSpecAnnotateWritesMarker(t *testing.T) {
 	e.now = fixedNow
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	if _, err := e.Attach(ctx, f); err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestAllowedVerdictsPerStage(t *testing.T) {
 		// borrows — that is what folding Review into a pass means.
 		{"plan critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
 		{"work-stage critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StageImplement}}, []string{"pass", "changes"}},
-		{"research critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StageInvestigate}}, []string{"pass", "changes"}},
+		{"research critique", &Session{Critique: true, Feature: domain.Feature{Stage: domain.StagePlan}}, []string{"pass", "changes"}},
 		{"implement (no verdict tool)", &Session{Feature: domain.Feature{Stage: domain.StageImplement}}, nil},
 	}
 	for _, tc := range cases {
@@ -652,7 +652,7 @@ func TestUnknownClientToolAutoResolves(t *testing.T) {
 	}
 	e := newEngine(t, ag)
 	ctx := context.Background()
-	s, err := e.Attach(ctx, feature(1, "x", domain.StageBrainstorm))
+	s, err := e.Attach(ctx, feature(1, "x", domain.StagePlan))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +727,7 @@ type toolResolver interface {
 // alongside ask_user and spec_annotate.
 func TestArchitectStageToolSurface(t *testing.T) {
 	want := []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"}
-	for _, st := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose} {
+	for _, st := range []domain.Stage{domain.StagePlan, domain.StagePlan, domain.StagePlan, domain.StagePlan} {
 		var names []string
 		for _, td := range stageTools(st, flavorStage) {
 			names = append(names, td.Name)
@@ -748,7 +748,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 	if got := stageTools(domain.StageImplement, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
 		t.Errorf("implement tools changed: %+v", got)
 	}
-	if got := stageTools(domain.StageFix, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
+	if got := stageTools(domain.StageImplement, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
 		t.Errorf("fix tools changed: %+v", got)
 	}
 }
@@ -760,7 +760,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 // agent has to fall back to raw file access, which a caged backend
 // cannot reach and reacts to with a blocked verdict.
 func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
-	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageVerify, domain.StageVerify, domain.StagePlan} {
+	for _, st := range []domain.Stage{domain.StageImplement, domain.StageImplement, domain.StageVerify, domain.StageVerify, domain.StagePlan} {
 		names := map[string]bool{}
 		for _, td := range stageTools(st, flavorStage) {
 			names[td.Name] = true
@@ -774,16 +774,16 @@ func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
 // TestFilterReadOnlyTools: a read-only research session's gummi-mediated
 // surface strips the artifact-rewriting tools (spec_replace_section,
 // spec_annotate) while keeping the read/nav and gummi-state tools. A
-// non-read-only session is unchanged. Investigate and review both keep
-// spec_view; review keeps submit_verdict; investigate keeps
-// resolve_annotation.
+// non-read-only session is unchanged. Every stage keeps spec_view;
+// implement keeps resolve_annotation and verify keeps submit_verdict.
 func TestFilterReadOnlyTools(t *testing.T) {
 	for _, tc := range []struct {
 		stage    domain.Stage
 		kept     []string
 		stripped []string
 	}{
-		{domain.StageInvestigate, []string{"resolve_annotation", "spec_view"}, []string{"spec_replace_section"}},
+		{domain.StageImplement, []string{"resolve_annotation", "spec_view"}, []string{"spec_replace_section"}},
+		{domain.StagePlan, []string{"ask_user", "spec_view"}, []string{"spec_replace_section", "spec_annotate"}},
 		{domain.StageVerify, []string{"submit_verdict", "spec_view"}, []string{"spec_replace_section"}},
 	} {
 		names := map[string]bool{}
@@ -803,7 +803,7 @@ func TestFilterReadOnlyTools(t *testing.T) {
 	}
 	// a non-read-only session is unchanged: the filter is a no-op.
 	names := map[string]bool{}
-	for _, td := range filterReadOnlyTools(stageTools(domain.StageInvestigate, flavorStage), false) {
+	for _, td := range filterReadOnlyTools(stageTools(domain.StagePlan, flavorStage), false) {
 		names[td.Name] = true
 	}
 	if !names[specReplaceSectionToolName] {
@@ -819,7 +819,7 @@ func researchReadonlySession(t *testing.T) (*Engine, *Session) {
 	fk := agent.NewFake("ack")
 	fk.Caps.ReadOnlyEnforce = true
 	e := newEngine(t, &fakeNoTools{fk})
-	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f := feature(1, "rs investigate", domain.StageImplement)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	seedDraft(t, e, f)
@@ -861,7 +861,7 @@ func TestReadonlyDispatchRefusesSpecReplace(t *testing.T) {
 }
 
 func TestArchitectToolHintMentionsSpecTools(t *testing.T) {
-	hint := toolHint(domain.StageBrainstorm, flavorStage)
+	hint := toolHint(domain.StagePlan, flavorStage)
 	for _, want := range []string{"spec_view", "spec_replace_section"} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("hint missing %s:\n%s", want, hint)
@@ -875,7 +875,7 @@ func TestArchitectToolHintMentionsSpecTools(t *testing.T) {
 func TestSpecViewReturnsSection(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{"section":"Problem"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
@@ -907,7 +907,7 @@ func TestSpecViewReturnsSection(t *testing.T) {
 func TestSpecViewWholeDoc(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
@@ -935,7 +935,7 @@ func TestSpecViewWholeDoc(t *testing.T) {
 func TestSpecViewUnknownSection(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_view", json.RawMessage(`{"section":"Nope"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
@@ -956,7 +956,7 @@ func TestSpecViewUnknownSection(t *testing.T) {
 func TestSpecReplaceSectionWritesBody(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"%% @user: keep me\nnew problem body.\n"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
@@ -993,7 +993,7 @@ func TestSpecReplaceSectionWritesBody(t *testing.T) {
 func TestSpecReplaceSectionOtherSectionsUntouched(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"changed.\n"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	if _, err := e.Attach(ctx, f); err != nil {
 		t.Fatal(err)
@@ -1016,7 +1016,7 @@ func TestSpecReplaceSectionOtherSectionsUntouched(t *testing.T) {
 func TestSpecReplaceSectionCanonicalTitleInActivity(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"problem","body":"new.\n"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
@@ -1046,7 +1046,7 @@ func TestSpecReplaceSectionCanonicalTitleInActivity(t *testing.T) {
 func TestSpecReplaceSectionRejectsHeadingInBody(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Problem","body":"## Injected\nboom\n"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	before, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
@@ -1078,7 +1078,7 @@ func TestSpecReplaceSectionRejectsHeadingInBody(t *testing.T) {
 func TestSpecReplaceSectionUnknownSection(t *testing.T) {
 	e := newEngine(t, toolCallFake("spec_replace_section", json.RawMessage(`{"section":"Nope","body":"x\n"}`)))
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	before, err := os.ReadFile(specDraftPath(e, f))
 	if err != nil {
@@ -1111,7 +1111,7 @@ func TestSpecReplaceSectionUnknownSection(t *testing.T) {
 // the same result as a native one. spec_view resolves immediately.
 func TestDispatchClientToolSpecView(t *testing.T) {
 	e := newEngine(t, agent.NewFake("ack"))
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(context.Background(), f)
 	if err != nil {
@@ -1135,7 +1135,7 @@ func TestDispatchClientToolSpecView(t *testing.T) {
 // and DispatchClientTool's ask_user blocks until Answer delivers.
 func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 	e := newEngine(t, toolCallFake("", nil))
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(context.Background(), f)
 	if err != nil {
@@ -1180,7 +1180,7 @@ func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 // late answer after the caller gave up is a no-op, not an orphaned waiter.
 func TestDispatchClientToolContextCancel(t *testing.T) {
 	e := newEngine(t, agent.NewFake("ack"))
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(context.Background(), f)
 	if err != nil {
@@ -1228,7 +1228,7 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 func TestDeathMidAskClearsLiveness(t *testing.T) {
 	ctx := context.Background()
 	e := newEngine(t, agent.NewFake("ack"))
-	f := feature(1, "Dark mode", domain.StageSpec)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	seedDraft(t, e, f)
 	s, err := e.Attach(ctx, f)
 	if err != nil {
@@ -1277,7 +1277,7 @@ func TestDeathMidAskClearsLiveness(t *testing.T) {
 // uses, plus the defensive buffer-full arm.
 func TestAnswerAbandonedResolverMustNotReturnNilSilently(t *testing.T) {
 	ctx := context.Background()
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 
 	run := func(t *testing.T, abandon func(s *Session)) {
 		e := newEngine(t, agent.NewFake("ack"))
@@ -1378,7 +1378,7 @@ func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 		ws, store, wt := newRepo(t)
 		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
 
-		f := feature(1, "Dark mode", domain.StageBrainstorm)
+		f := feature(1, "Dark mode", domain.StagePlan)
 		f.GateApproval = c.gate
 		putFeature(t, store, f) // the event log's FK needs the row to exist
 		if _, err := e.Attach(context.Background(), f); err != nil {
@@ -1448,7 +1448,7 @@ func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
 		ws, store, wt := newRepo(t)
 		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 
-		f := feature(1, "x", domain.StageSpec)
+		f := feature(1, "x", domain.StagePlan)
 		f.GateApproval = c.gate
 		if _, err := e.Attach(context.Background(), f); err != nil {
 			e.Close()
@@ -1542,7 +1542,7 @@ func TestGateAskHintOnlyWhereAGateStops(t *testing.T) {
 		t.Error("an autopilot card was told to ask a question it would answer itself")
 	}
 
-	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix, domain.StageInvestigate} {
+	for _, st := range []domain.Stage{domain.StageImplement} {
 		f := feature(1, "x", st)
 		if gateAskHint(f) != "" {
 			t.Errorf("%s's critique was told to ask a gate question; its pass advances in the floor", st)

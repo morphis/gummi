@@ -64,7 +64,7 @@ func parkRows(t *testing.T, h *harness, id domain.FeatureID) []state.ParkPayload
 // past todo's pure kickoff hop).
 func TestUnattendedRunLogsTookOver(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -126,8 +126,8 @@ func TestUnattendedRunLogsTookOver(t *testing.T) {
 		if p.Event != state.AutopilotTookOver {
 			continue
 		}
-		if ev.Stage != domain.StageSpec {
-			t.Fatalf("took-over stage = %q, want %q (the flow's first real stage, not todo)", ev.Stage, domain.StageSpec)
+		if ev.Stage != domain.StagePlan {
+			t.Fatalf("took-over stage = %q, want %q (the flow's first real stage, not todo)", ev.Stage, domain.StagePlan)
 		}
 	}
 }
@@ -137,8 +137,14 @@ func TestUnattendedRunLogsTookOver(t *testing.T) {
 // history exists specifically so it never claims otherwise.
 func TestAttendedRunLogsNoTookOver(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 

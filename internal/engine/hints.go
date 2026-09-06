@@ -6,7 +6,6 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The artifact section lists the contract states so an agent never has
@@ -106,12 +105,17 @@ rather than silently complying or silently ignoring the repo.`
 // artifact, and the verdict it produces is the landing gate — the
 // scribe tier is reserved for the cheap one-shot passes (estimation,
 // check discovery). Stages with no agent action return ok=false.
-func roleForStage(s domain.Stage) (agent.Role, bool) {
-	switch s {
-	case domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
-		domain.StageTriage, domain.StageDiagnose, domain.StageInvestigate, domain.StageShape:
+func roleForStage(f domain.Feature) (agent.Role, bool) {
+	switch f.Stage {
+	case domain.StagePlan:
 		return agent.RoleArchitect, true
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement:
+		// A research card's build stage gathers evidence and writes it
+		// up: architect work, read-only, no code. One graph does not mean
+		// one contract — the kind still decides what the stage IS.
+		if f.Kind == domain.KindResearch {
+			return agent.RoleArchitect, true
+		}
 		return agent.RoleImplementer, true
 	case domain.StageVerify:
 		return agent.RoleReviewer, true
@@ -120,17 +124,15 @@ func roleForStage(s domain.Stage) (agent.Role, bool) {
 	}
 }
 
-// interactiveStage reports whether a stage is a gummi-native chat (you
-// talk to the agent) rather than autonomous. Delegates to the workflow
-// package so the engine and the UI's worktree gate share one definition.
-func interactiveStage(s domain.Stage) bool { return workflow.Interactive(s) }
-
 // researchReadOnly reports whether a research feature's stage is an
 // autonomous pass that must never mutate the main checkout (it runs in
-// the repo root with no worktree): investigate and review-of-research
-// yes, shape no — shape is the single interactive gated-write seam.
+// the repo root with no worktree).
+//
+// Keyed on the stage past design: the design stage writes the research
+// document through gummi's mediated spec tools and must not be stripped
+// of them, while everything after it only reads.
 func researchReadOnly(f domain.Feature) bool {
-	return f.Kind == domain.KindResearch && !interactiveStage(f.Stage)
+	return f.Kind == domain.KindResearch && f.Stage != domain.StagePlan
 }
 
 // stageHints builds the system instructions for a feature's stage: the
@@ -153,183 +155,17 @@ func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	case flavorRebase:
 		return []string{contractHint(f, specPath, agent.RoleImplementer), rebaseHint()}
 	}
-	role, _ := roleForStage(f.Stage)
+	role, _ := roleForStage(f)
 	hints := []string{contractHint(f, specPath, role)}
 	if f.Kind == domain.KindResearch {
 		hints = append(hints, researchWorkingDirGuard)
 	}
 
 	switch f.Stage {
-	case domain.StageBrainstorm:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Brainstorm (interactive; the user is in gummi's chat pane).
-Your job: interview the user, and write what you learn into the spec —
-a sharp Problem section, scope boundaries under Out of scope as they
-surface, and two or more candidate approaches with tradeoffs under
-Considered approaches. Approaches must be structurally different —
-different seam placement, different architecture — not variations on
-one shape. Lead the interview: ask exactly one question per turn, with
-your recommended answer attached so the user can accept it in a word,
-and walk decisions in dependency order (upstream decisions first). If
-a fact can be found by exploring the repo, look it up instead of
-asking; the decisions are the user's — put each one to them. Keep
-turns short (no monologues), update the spec incrementally as answers
-arrive, and flag every unresolved decision as its own marker thread.
-Do not converge on one approach — convergence is the Spec stage's
-job.`))
-	case domain.StageSpec:
-		hints = append(hints, specHint(f.Skip.Quick))
 	case domain.StagePlan:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Plan (autonomous). Derive a concrete implementation plan from
-the approved spec and write it into the spec's Implementation notes as
-numbered steps — one line per step, so review markers can anchor to
-it — each step naming the files and functions it touches and the tests
-that prove it. Order the steps as tracer bullets: the first step cuts
-a thin complete path through the system, later steps widen it. Aim
-for ≤15 numbered steps: if the feature genuinely needs more, stop and
-put the scope back to the user (what to cut, what to split into a
-follow-up FD) rather than shipping an oversized plan — an oversized
-plan is a spec problem, not a plan problem.
-
-End the plan with `+planClaimsRubric+` (e.g. "SIGHUP arrives before
-checkpoint flushes").
-
-Then add `+fileManifestRubric+`
-
-Then, ONLY when the spec makes them relevant, add these closure
-subsections. Each is a bounded table the critique reads directly
-instead of re-deriving from source; skip a subsection entirely when
-its trigger does not apply, and do not manufacture rows to fill it:
-  - `+"`Reference mapping`"+` — when the spec cites ADRs, RFCs, or
-    other normative documents by name (e.g. ADR-0014, RFC-9110, an
-    internal SLO or API doc). For each cited document, enumerate its
-    rules once and map each rule to a plan step, or mark it "not
-    applicable — <reason>" (e.g. deferred to a follow-up FD named in
-    Out of scope). Every rule gets a row. Walk the doc yourself
-    before shipping — an unmapped rule is a plan defect, not a
-    critique finding.
-  - `+"`Skip-gate ledger`"+` — when the spec names tests, scenarios,
-    or property checks currently gated on a pending flag (e.g.
-    `+"`t.Skip()`"+` calls guarded by a `+"`pendingXxx`"+` sentinel, a
-    feature-flag check that fences a harness). One row per gate: the
-    gate, the step that lifts it, and the value it asserts (with a
-    one-line trace if it is a golden).
-  - `+"`Downstream handoffs`"+` — when the spec names other features
-    or systems that consume this feature's output (e.g. another FD
-    in this workspace by ID, or a named external service or API).
-    One row per consumer: the shape (type/contract) it receives and
-    the step that produces it.
-  - `+"`Out-of-scope confirmations`"+` — when an Out-of-scope item lives
-    at a seam the plan does touch (e.g. the plan adds a hook where
-    the deferred behavior would naturally hang). One row per such
-    item; a spec whose Out-of-scope items are far from any plan step
-    needs no confirmation.
-
-Before you end, walk each table you shipped once, top to bottom, and
-confirm every row is supported by a plan step above. Fix any gap
-yourself — the critique exists to spot-check your audit, not to
-perform it.
-
-Stop when the plan is written; the user approves it.`))
+		hints = append(hints, designHints(f)...)
 	case domain.StageImplement:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Implement (autonomous). Implement the feature in this worktree
-using the spec and plan as context. When the kickoff carries the plan's
-file manifest, start there rather than searching the repo for where the
-work goes — the plan already located it. Treat it as a starting point,
-not a boundary: change whatever else the work genuinely needs, and add
-a line to Progress naming any file the manifest missed, so the next
-round inherits the correction rather than the guess. If the kickoff
-carries no manifest, find your own way in as before.
-The spec's Out of scope section is
-binding — build nothing past it. Make focused edits, run the
-relevant checks as you go, and keep changes reviewable. Commit your
-work to this branch with focused git commits as you complete each
-coherent piece — describe what and why in the commit body (bodies
-survive the squash as the merge commit's description) — the branch
-lands on main as a single squash commit when the user accepts the
-feature, and gummi checkpoint-commits anything you leave uncommitted
-when the stage ends. Keep the
-spec's Progress section current: what's done, what's left, where to
-resume. If your changes alter how the repo is built, tested, or linted,
-update the gummi-checks block in the Verification plan — the Verify
-stage runs exactly those commands. If you are addressing review findings, resolve each thread in
-the Review section with how you fixed it. If you need a decision or
-hit a blocker, stop and say so clearly rather than guessing.`))
-	case domain.StageTriage:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Triage (interactive; the user is in gummi's chat pane). Your job:
-confirm the bug is real and reproduce it. Verify the claim first: try
-to reproduce it from the report, the repo, and the environment gummi
-described in your instructions before interviewing, and tell the user
-what you found — reproduced, could not reproduce, or insufficient
-detail. Treat the described environment as a first-class input, not as
-a reason to defer. Then pin down exact reproduction steps, the expected
-vs actual behavior, the environment, and a severity, and write them
-into the bug report (Reproduction, Expected vs actual, Environment).
-Ask exactly one question per turn — specific and actionable, with your
-recommended answer attached — and keep turns short. Flag anything still
-uncertain as its own marker thread. Do NOT diagnose the root cause yet
-— that is the Diagnose stage's job.`))
-	case domain.StageDiagnose:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Diagnose (interactive; the user is in gummi's chat pane). Your
-job: find and confirm the root cause, working from the reproduction, and
-record it in the bug report's Root cause section — where in the code,
-why it happens, and the shape of the fix (not the fix itself). Build
-the feedback loop first: before any hypothesizing, produce one
-red-capable command — run it at least once and keep the output — that
-asserts the user's exact symptom, deterministically, in seconds, and
-write it into the Reproduction section (Verify reruns it). If the
-symptom needs an environment you cannot create locally, still write a
-live reproduction step and tag it [env: <prereq>] using a prerequisite
-name from the environment gummi described in your instructions. A prose
-deferral such as "cannot be exercised in this environment" is a contract
-violation, not an acceptable outcome. If you genuinely cannot build a
-red-capable command or a tagged live step, stop and tell the user what
-you tried and what you need (a captured artifact, environment access, or
-permission to add temporary instrumentation).
-Then rank 3-5 falsifiable hypotheses — "if X is the cause, changing Y
-makes the bug disappear" — and put the ranking to the user before
-testing them. Probe one variable at a time, and tag any temporary
-debug logs with [DEBUG-xxxx] so cleanup is a single grep. Put open
-questions to the user one decision at a time — recommended answer
-attached — and resolve each thread as they decide.
-Alongside the shape of the fix, add `+fileManifestRubric+`
-The user approves the diagnosis to advance — do not start fixing.`))
-	case domain.StageFix:
-		hints = append(hints, strings.TrimSpace(`
-Stage: Fix (autonomous). Implement the fix in this worktree, guided by
-the bug report's Root cause. When the kickoff carries the diagnosis's
-file manifest, start there instead of re-locating the code; it is a
-starting point, not a boundary, so touch what the fix genuinely needs
-and note in Progress any file the manifest missed.
-Make the smallest change that resolves the
-bug, and add a regression test at a correct seam — one that exercises
-the real bug pattern as it occurs at its call site — failing before
-your change and passing after; the Verify stage requires it. If no
-correct seam exists, record that in the Fix section: the missing seam
-is itself a finding, and it stands in for the test. Commit your work
-to this branch with git as you go, stating the confirmed root cause in
-the commit message body — the branch lands on main as a single squash
-commit when the user accepts the fix, and gummi checkpoint-commits
-anything you leave uncommitted when the stage ends. Keep the report's
-Fix section current: what you changed and why. Before you finish, grep
-the worktree for the literal string [DEBUG- (use `+"`grep -rF '[DEBUG-'`"+`
-or `+"`rg -F '[DEBUG-'`"+` so the [ is not read as a regex character
-class) and delete any temporary logs. If you are addressing review
-findings, resolve each thread in the Review section with how you fixed
-it. If you hit a blocker or need a decision, stop and say so rather than
-guessing.`))
-	case domain.StageInvestigate:
-		if f.Kind == domain.KindResearch {
-			hints = append(hints, investigateHint())
-		}
-	case domain.StageShape:
-		if f.Kind == domain.KindResearch {
-			hints = append(hints, shapeHint())
-		}
+		hints = append(hints, buildHints(f)...)
 	case domain.StageVerify:
 		hints = append(hints, verifyHint(f.Kind))
 	}
@@ -361,44 +197,18 @@ entry to keep it a live gate. Judge each command against the current
 branch, not the finished feature; a check that runs today needs no such
 marker)`
 
-// specHint is the Spec stage contract. The quick flavor is the whole
-// design phase in one conversation: no brainstorm preceded it and no
-// plan follows, so the agent drafts the complete spec — implementation
-// steps included — in one pass and refines it with the user, instead of
-// converging decision-by-decision on a prior brainstorm.
-func specHint(quick bool) string {
-	if quick {
-		return strings.TrimSpace(`
-Stage: Spec (interactive, quick route; the user is in gummi's chat
-pane). This item skips brainstorm and plan: this one conversation
-takes it from a one-line description to an implementable spec, and
-approval goes straight to implementation. Your job: draft the complete
-spec in one pass, then refine it with the user. Explore the repo for
-facts first — ask at most two or three clarifying questions up front,
-only where the answer genuinely changes the design, each with your
-recommended answer attached so the user can accept it in a word. Then
-write the whole spec: a sharp Problem; Out of scope (what this feature
-deliberately won't do — implementer and reviewer treat it as binding);
-Considered approaches kept brief — the alternatives you rejected and
-why, a line or two each; Chosen approach as behavior and contracts —
-types, signatures, invariants — never file paths or line numbers,
-which go stale; Implementation notes as the implementation plan
-itself, since no Plan stage follows — numbered steps, one line per
-step, each naming the files and functions it touches and the tests
-that prove it, ordered as tracer bullets (the first step cuts a thin
-complete path, later steps widen it); and ` + verificationPlanHint + `.
-End the Implementation notes with ` + planClaimsRubric + `.
-This subsection is what a fresh reader (and any later review) uses to
-spot-check the plan — an unstated claim is one the reader cannot
-verify.
-Then add ` + fileManifestRubric + `
-Flag anything you are genuinely unsure about as its own %% marker
-thread with a recommended answer, rather than interviewing the user
-decision by decision. The user approves the spec to advance — do not
-start implementing.`)
-	}
+// specHint is the design stage's convergence contract: pick one approach
+// and write the spec that follows from it.
+//
+// It used to have a "quick" flavor for a card that skipped brainstorm and
+// plan — the whole design phase in one conversation. That is what every
+// card does now, so the flavor is gone along with the skip flags that
+// selected it; the surrounding designHints supply the exploration and the
+// plan this text converges between.
+func specHint() string {
 	return strings.TrimSpace(`
-Stage: Spec (interactive; the user is in gummi's chat pane). Your job:
+Stage: Plan — phase 2 of 3: converge (interactive; the user is in
+gummi's chat pane). Your job:
 first verify the Considered approaches are structurally distinct —
 if the alternatives collapse into variants of one shape (same seam
 placement, same architecture, only local variations), name the
@@ -407,8 +217,8 @@ to the user before converging. Then converge with the user on
 exactly one approach, and complete the spec: Chosen approach, Out
 of scope (what this feature deliberately won't do — implementer and
 reviewer treat it as binding), and ` + verificationPlanHint + `.
-Do not draft Implementation notes here — that is the Plan stage's
-job; leave the section for it. The test
+Leave Implementation notes for phase 3, which derives them from the
+approach this phase settles. The test
 surface is a decision: put to the user which
 interfaces the tests will exercise, preferring seams the repo already
 has. Work the open marker threads one decision at a time — recommend
@@ -462,14 +272,15 @@ If your verdict is changes, do not ask — the loop is not finished.`)
 // RunCritique refuses any stage CritiqueRoundKind does not know, so this
 // never has to invent a contract for one.
 func critiqueHint(f domain.Feature) string {
-	switch f.Stage {
-	case domain.StageImplement, domain.StageFix:
-		return reviewHint(f.Kind)
-	case domain.StageInvestigate:
+	if f.Kind == domain.KindResearch {
+		// a research critique judges a document at either stage, and is
+		// read-only at both
 		return researchCritiqueHint()
-	default:
-		return planCritiqueHint()
 	}
+	if f.Stage == domain.StageImplement {
+		return reviewHint(f.Kind)
+	}
+	return planCritiqueHint()
 }
 
 // planCritiqueHint is the plan-critique pass contract: Review's shape
@@ -599,7 +410,7 @@ your final message explaining which conflict and why.`)
 // navigate to it.
 func investigateHint() string {
 	return strings.TrimSpace(`
-Stage: Investigate (autonomous, read-only). Survey the research
+Stage: Implement — investigate (autonomous, read-only). Survey the research
 question against this repo. You run in the main checkout with no
 worktree: every tool that can write or commit is unavailable, so the
 survey is read-only by construction — do not expect to modify anything.
@@ -614,7 +425,7 @@ question or names what blocks it.`)
 // the converged draft in place behind per-action confirmation.
 func shapeHint() string {
 	return strings.TrimSpace(`
-Stage: Shape (interactive; the user is in gummi's chat pane). Converge
+Stage: Plan (interactive; the user is in gummi's chat pane). Converge
 the surveyed options to exactly one, working with the user. You run in
 the main checkout with no worktree; the research document is yours to
 update, and one-off writes happen behind per-action confirmation —
@@ -827,8 +638,8 @@ to remove. The ` + short + ` as it reads now, amendments included, is
 the contract you work from.
 
 All of this vocabulary is gummi-internal. NEVER reference gummi, its
-stages or phases (brainstorm, spec, plan, implement, review, verify),
-review rounds, %% markers, or the ` + short + ` in anything committed
+stages or phases (plan, implement, verify), its critique passes,
+its rounds, %% markers, or the ` + short + ` in anything committed
 to the repo outside the ` + short + ` file itself — not in code, code
 comments, identifiers, commit messages, test names, or docs. Committed
 work must read as if a developer wrote it for the repo with no
@@ -836,4 +647,202 @@ knowledge of gummi.
 
 ` + repoInstructionsPrecedenceHint)
 	return b.String()
+}
+
+// designHints are the design stage's contract, by kind.
+//
+// One stage, three contracts. The three workflows used to spell this slot
+// with five stages between them — brainstorm/spec/plan for a feature,
+// triage/diagnose for a bug, investigate/shape for research — and each
+// had its own hint. Merging the graphs merges the stages, not the work:
+// a feature's design stage still explores, converges and plans, and it is
+// told all three things because it does all three. What differs between
+// the kinds is the CONTRACT, which is why this switches on kind where the
+// old code switched on stage.
+func designHints(f domain.Feature) []string {
+	switch f.Kind {
+	case domain.KindBug:
+		return []string{
+			strings.TrimSpace(`
+Stage: Plan — phase 1 of 2: triage (interactive; the user is in
+gummi's chat pane). Your job:
+confirm the bug is real and reproduce it. Verify the claim first: try
+to reproduce it from the report, the repo, and the environment gummi
+described in your instructions before interviewing, and tell the user
+what you found — reproduced, could not reproduce, or insufficient
+detail. Treat the described environment as a first-class input, not as
+a reason to defer. Then pin down exact reproduction steps, the expected
+vs actual behavior, the environment, and a severity, and write them
+into the bug report (Reproduction, Expected vs actual, Environment).
+Ask exactly one question per turn — specific and actionable, with your
+recommended answer attached — and keep turns short. Flag anything still
+uncertain as its own marker thread. Do NOT diagnose the root cause yet
+— that is phase 2's job.`),
+			strings.TrimSpace(`
+Stage: Plan — phase 2 of 2: diagnose (interactive; the user is in
+gummi's chat pane). Your job: find and confirm the root cause, working from the reproduction, and
+record it in the bug report's Root cause section — where in the code,
+why it happens, and the shape of the fix (not the fix itself). Build
+the feedback loop first: before any hypothesizing, produce one
+red-capable command — run it at least once and keep the output — that
+asserts the user's exact symptom, deterministically, in seconds, and
+write it into the Reproduction section (Verify reruns it). If the
+symptom needs an environment you cannot create locally, still write a
+live reproduction step and tag it [env: <prereq>] using a prerequisite
+name from the environment gummi described in your instructions. A prose
+deferral such as "cannot be exercised in this environment" is a contract
+violation, not an acceptable outcome. If you genuinely cannot build a
+red-capable command or a tagged live step, stop and tell the user what
+you tried and what you need (a captured artifact, environment access, or
+permission to add temporary instrumentation).
+Then rank 3-5 falsifiable hypotheses — "if X is the cause, changing Y
+makes the bug disappear" — and put the ranking to the user before
+testing them. Probe one variable at a time, and tag any temporary
+debug logs with [DEBUG-xxxx] so cleanup is a single grep. Put open
+questions to the user one decision at a time — recommended answer
+attached — and resolve each thread as they decide.
+Alongside the shape of the fix, add ` + fileManifestRubric + `
+The user approves the diagnosis to advance — do not start fixing.`),
+		}
+	case domain.KindResearch:
+		// The design stage shapes the question and the direction; the
+		// evidence is gathered at implement, which is read-only for a
+		// research card (researchReadOnly) exactly as investigate was.
+		return []string{
+			shapeHint(),
+		}
+	default:
+		return []string{
+			strings.TrimSpace(`
+Stage: Plan — phase 1 of 3: explore (interactive; the user is in
+gummi's chat pane). Your job: interview the user, and write what you learn into the spec —
+a sharp Problem section, scope boundaries under Out of scope as they
+surface, and two or more candidate approaches with tradeoffs under
+Considered approaches. Approaches must be structurally different —
+different seam placement, different architecture — not variations on
+one shape. Lead the interview: ask exactly one question per turn, with
+your recommended answer attached so the user can accept it in a word,
+and walk decisions in dependency order (upstream decisions first). If
+a fact can be found by exploring the repo, look it up instead of
+asking; the decisions are the user's — put each one to them. Keep
+turns short (no monologues), update the spec incrementally as answers
+arrive, and flag every unresolved decision as its own marker thread.
+Do not converge on one approach — convergence is phase 2's job.`),
+			specHint(),
+			strings.TrimSpace(`
+Stage: Plan — phase 3 of 3: the implementation plan. Derive it from
+the approved spec and write it into the spec's Implementation notes as
+numbered steps — one line per step, so review markers can anchor to
+it — each step naming the files and functions it touches and the tests
+that prove it. Order the steps as tracer bullets: the first step cuts
+a thin complete path through the system, later steps widen it. Aim
+for ≤15 numbered steps: if the feature genuinely needs more, stop and
+put the scope back to the user (what to cut, what to split into a
+follow-up FD) rather than shipping an oversized plan — an oversized
+plan is a spec problem, not a plan problem.
+
+End the plan with ` + planClaimsRubric + ` (e.g. "SIGHUP arrives before
+checkpoint flushes").
+
+Then add ` + fileManifestRubric + `
+
+Then, ONLY when the spec makes them relevant, add these closure
+subsections. Each is a bounded table the critique reads directly
+instead of re-deriving from source; skip a subsection entirely when
+its trigger does not apply, and do not manufacture rows to fill it:
+  - ` + "`Reference mapping`" + ` — when the spec cites ADRs, RFCs, or
+    other normative documents by name (e.g. ADR-0014, RFC-9110, an
+    internal SLO or API doc). For each cited document, enumerate its
+    rules once and map each rule to a plan step, or mark it "not
+    applicable — <reason>" (e.g. deferred to a follow-up FD named in
+    Out of scope). Every rule gets a row. Walk the doc yourself
+    before shipping — an unmapped rule is a plan defect, not a
+    critique finding.
+  - ` + "`Skip-gate ledger`" + ` — when the spec names tests, scenarios,
+    or property checks currently gated on a pending flag (e.g.
+    ` + "`t.Skip()`" + ` calls guarded by a ` + "`pendingXxx`" + ` sentinel, a
+    feature-flag check that fences a harness). One row per gate: the
+    gate, the step that lifts it, and the value it asserts (with a
+    one-line trace if it is a golden).
+  - ` + "`Downstream handoffs`" + ` — when the spec names other features
+    or systems that consume this feature's output (e.g. another FD
+    in this workspace by ID, or a named external service or API).
+    One row per consumer: the shape (type/contract) it receives and
+    the step that produces it.
+  - ` + "`Out-of-scope confirmations`" + ` — when an Out-of-scope item lives
+    at a seam the plan does touch (e.g. the plan adds a hook where
+    the deferred behavior would naturally hang). One row per such
+    item; a spec whose Out-of-scope items are far from any plan step
+    needs no confirmation.
+
+Before you end, walk each table you shipped once, top to bottom, and
+confirm every row is supported by a plan step above. Fix any gap
+yourself — the critique exists to spot-check your audit, not to
+perform it.
+
+Stop when the plan is written; the user approves it.`),
+		}
+	}
+}
+
+// buildHints are the build stage's contract, by kind. Implement and Fix
+// were one slot spelled two ways; the difference was never the stage, it
+// was whether the card is a feature or a bug.
+func buildHints(f domain.Feature) []string {
+	if f.Kind == domain.KindResearch {
+		return []string{investigateHint()}
+	}
+	if f.Kind == domain.KindBug {
+		return []string{
+			strings.TrimSpace(`
+Stage: Implement — the fix (autonomous). Implement it in this worktree, guided by
+the bug report's Root cause. When the kickoff carries the diagnosis's
+file manifest, start there instead of re-locating the code; it is a
+starting point, not a boundary, so touch what the fix genuinely needs
+and note in Progress any file the manifest missed.
+Make the smallest change that resolves the
+bug, and add a regression test at a correct seam — one that exercises
+the real bug pattern as it occurs at its call site — failing before
+your change and passing after; the Verify stage requires it. If no
+correct seam exists, record that in the Fix section: the missing seam
+is itself a finding, and it stands in for the test. Commit your work
+to this branch with git as you go, stating the confirmed root cause in
+the commit message body — the branch lands on main as a single squash
+commit when the user accepts the fix, and gummi checkpoint-commits
+anything you leave uncommitted when the stage ends. Keep the report's
+Fix section current: what you changed and why. Before you finish, grep
+the worktree for the literal string [DEBUG- (use ` + "`grep -rF '[DEBUG-'`" + `
+or ` + "`rg -F '[DEBUG-'`" + ` so the [ is not read as a regex character
+class) and delete any temporary logs. If you are addressing review
+findings, resolve each thread in the Review section with how you fixed
+it. If you hit a blocker or need a decision, stop and say so rather than
+guessing.`),
+		}
+	}
+	return []string{
+		strings.TrimSpace(`
+Stage: Implement (autonomous). Implement the feature in this worktree
+using the spec and plan as context. When the kickoff carries the plan's
+file manifest, start there rather than searching the repo for where the
+work goes — the plan already located it. Treat it as a starting point,
+not a boundary: change whatever else the work genuinely needs, and add
+a line to Progress naming any file the manifest missed, so the next
+round inherits the correction rather than the guess. If the kickoff
+carries no manifest, find your own way in as before.
+The spec's Out of scope section is
+binding — build nothing past it. Make focused edits, run the
+relevant checks as you go, and keep changes reviewable. Commit your
+work to this branch with focused git commits as you complete each
+coherent piece — describe what and why in the commit body (bodies
+survive the squash as the merge commit's description) — the branch
+lands on main as a single squash commit when the user accepts the
+feature, and gummi checkpoint-commits anything you leave uncommitted
+when the stage ends. Keep the
+spec's Progress section current: what's done, what's left, where to
+resume. If your changes alter how the repo is built, tested, or linted,
+update the gummi-checks block in the Verification plan — the Verify
+stage runs exactly those commands. If you are addressing review findings, resolve each thread in
+the Review section with how you fixed it. If you need a decision or
+hit a blocker, stop and say so clearly rather than guessing.`),
+	}
 }

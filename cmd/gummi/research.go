@@ -36,7 +36,7 @@ func runResearch(args []string) error {
 
 	// validate --until against RS's route before any work begins, so a bad
 	// stop target fails as a plain usage error, not mid-run.
-	if err := driver.ValidateUntil(domain.Stage(*rv.until), domain.KindResearch, domain.SkipFlags{}); err != nil {
+	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
 		return err
 	}
 	opts, err := driverOptions(*rv.envelope, *rv.profile, false, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, "", "", *rv.repo)

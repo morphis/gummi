@@ -20,7 +20,7 @@ import (
 // the feature never advances to Done (gummi never merges).
 func TestQuickRouteToVerified(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -91,7 +91,7 @@ func TestQuickRouteEmptyBranchToDone(t *testing.T) {
 // non-zero exit; resume --answer continues to a verified branch.
 func TestSpecQuestionThenResume(t *testing.T) {
 	h := newHarness(t, false, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
 			if n == 0 {
 				return convAsk(o.Model, "Include a schema header?", "no (recommended)", "yes")
 			}
@@ -148,7 +148,7 @@ func TestSpecQuestionThenResume(t *testing.T) {
 // --autonomous auto-takes the recommended option instead of checkpointing.
 func TestAutonomousAutoAnswers(t *testing.T) {
 	h := newHarness(t, false, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
 			if n == 0 {
 				return convAsk(o.Model, "Schema header?", "no (recommended)", "yes")
 			}
@@ -182,7 +182,7 @@ func TestAutonomousAutoAnswers(t *testing.T) {
 // event must say who answered, explicitly.
 func TestAutonomousAnswerRecordsItsOwnActor(t *testing.T) {
 	h := newHarness(t, false, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
 			if n == 0 {
 				return convAsk(o.Model, "Schema header?", "no (recommended)", "yes")
 			}
@@ -236,7 +236,7 @@ func TestAutonomousAnswerRecordsItsOwnActor(t *testing.T) {
 // re-reviews; a subsequent pass reaches a verified branch.
 func TestReviewChangesThenPass(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -259,12 +259,14 @@ func TestReviewChangesThenPass(t *testing.T) {
 	if out.Status != StatusDone {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
-	// two review stages were entered (the bounce re-reviewed).
-	if h.calls[stageCritique] != 2 {
-		t.Fatalf("review entered %d times, want 2", h.calls[stageCritique])
+	// three critiques: the design stage's, then implement's two (the
+	// bounce re-critiqued). The design stage runs one now too — that is
+	// the merge, not a regression.
+	if h.calls[stageCritique] != 3 {
+		t.Fatalf("critique entered %d times, want 3", h.calls[stageCritique])
 	}
-	if d := lastEvent(h, "done"); d == nil || d["review_rounds"].(float64) != 2 {
-		t.Fatalf("done review_rounds = %v, want 2", d)
+	if d := lastEvent(h, "done"); d == nil || d["review_rounds"].(float64) != 3 {
+		t.Fatalf("done review_rounds = %v, want 3 (the design critique plus implement's two)", d)
 	}
 }
 
@@ -274,7 +276,7 @@ func TestReviewChangesThenPass(t *testing.T) {
 // fields.
 func TestDoneEventCarriesLinkedPR(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -314,7 +316,7 @@ func TestDoneEventCarriesLinkedPR(t *testing.T) {
 // the wire shape identical to before this feature.
 func TestDoneEventOmitsPRWhenUnlinked(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -342,7 +344,7 @@ func TestDoneEventOmitsPRWhenUnlinked(t *testing.T) {
 // Review still requesting changes past the cap escalates (non-zero exit).
 func TestReviewCapEscalates(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -377,7 +379,7 @@ func TestVerifyFailEscalates(t *testing.T) {
 	} {
 		t.Run(tc.verdict, func(t *testing.T) {
 			h := newHarness(t, true, map[domain.Stage]stageFn{
-				domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 					return msgIdle(o.Model, "Spec.")
 				},
 				stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -414,7 +416,7 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 	var implementCalls []string
 	var implementRuns int
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
@@ -483,7 +485,7 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 // bounce edge from anywhere else) rather than silently transitioning.
 func TestResumeBounceRefusesOffStage(t *testing.T) {
 	h := newHarness(t, true, nil)
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -497,7 +499,7 @@ func TestResumeBounceRefusesOffStage(t *testing.T) {
 		t.Fatalf("status = %q, want error", out.Status)
 	}
 	// the feature must not have moved off Spec.
-	if st := h.stageOf(f.ID); st != domain.StageSpec {
+	if st := h.stageOf(f.ID); st != domain.StagePlan {
 		t.Fatalf("Spec advanced to %s despite a refused bounce", st)
 	}
 }
@@ -507,11 +509,17 @@ func TestResumeBounceRefusesOffStage(t *testing.T) {
 // orphan gummi before following `next` (which would hit ErrLocked).
 func TestBudgetExhausted(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
 			return []agent.Event{{Kind: agent.EventBudgetExhausted}}
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	out, err := h.driver(Options{}).Run(context.Background(), "feature")
@@ -539,7 +547,7 @@ func TestBudgetExhausted(t *testing.T) {
 // branch — the tail a `resume` re-runs after an envelope top-up.
 func happyResumeScript() map[domain.Stage]stageFn {
 	return map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -560,7 +568,7 @@ func happyResumeScript() map[domain.Stage]stageFn {
 // floor: it lifts the envelope and emits an `envelope` event.
 func TestResumeEnvelopeRaisesBudget(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	f := feature(1, domain.StageSpec) // Budget.Envelope == 500
+	f := feature(1, domain.StagePlan) // Budget.Envelope == 500
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -593,7 +601,7 @@ func TestResumeEnvelopeRaisesBudget(t *testing.T) {
 // shrinks an in-flight envelope, and emits no envelope event.
 func TestResumeEnvelopeFloorNoOp(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	f := feature(1, domain.StageSpec) // Budget.Envelope == 500
+	f := feature(1, domain.StagePlan) // Budget.Envelope == 500
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -617,12 +625,18 @@ func TestResumeEnvelopeFloorNoOp(t *testing.T) {
 // An open user %% thread in the artifact blocks the design gate.
 func TestBlockedGate(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	// create the feature at Spec with a draft carrying one open @user thread.
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	putDraft(t, h, &f, "# Spec\nThe toggle persists.\n%% @user(2026-01-01): per-device or synced?\n")
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -698,9 +712,15 @@ func TestStageTimeout(t *testing.T) {
 	block := make(chan struct{})
 	t.Cleanup(func() { close(block) })
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
 			<-block // never returns events → no activity
 			return nil
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	out, err := h.driver(Options{StageTimeout: 150 * time.Millisecond}).Run(context.Background(), "feature")
@@ -716,7 +736,7 @@ func TestStageTimeout(t *testing.T) {
 // resume --approve crosses it and drives to a verified branch.
 func TestCallerGateApproveResume(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -760,8 +780,14 @@ func TestCallerGateApproveResume(t *testing.T) {
 // checkpoint the first run produced — instantly, with no turn and no timeout.
 func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "feature")
@@ -789,7 +815,7 @@ func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 	if g := lastEvent(h, "gate"); g == nil || g["to"] != string(domain.StageImplement) {
 		t.Fatalf("gate event = %v, want to=implement", g)
 	}
-	if h.stageOf(domain.FeatureID(out.ID)) != domain.StageSpec {
+	if h.stageOf(domain.FeatureID(out.ID)) != domain.StagePlan {
 		t.Fatalf("feature advanced past spec on a bare resume; want it parked at the gate")
 	}
 }
@@ -800,7 +826,7 @@ func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 // through it to a verified branch, not park a turn-less session.
 func TestResumeCompletedAutoGateAdvances(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	out, err := h.driver(Options{Until: domain.StageSpec}).Run(context.Background(), "feature")
+	out, err := h.driver(Options{Until: domain.StagePlan}).Run(context.Background(), "feature")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -829,7 +855,7 @@ func TestResumeCompletedAutoGateAdvances(t *testing.T) {
 // not a phantom backend outage.
 func TestTimeoutHintTracksSentTurn(t *testing.T) {
 	h := newHarness(t, true, nil)
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 
 	d := h.driver(Options{})
 	d.sentTurn = true
@@ -851,7 +877,7 @@ func TestTimeoutHintTracksSentTurn(t *testing.T) {
 // and can probe for an orphan gummi before retrying.
 func TestTimeoutCarriesStageTimeoutUsedAndCheckRunning(t *testing.T) {
 	h := newHarness(t, true, nil)
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 
 	d := h.driver(Options{StageTimeout: 7 * time.Minute})
 	d.sentTurn = true
@@ -877,7 +903,7 @@ func TestTimeoutCarriesStageTimeoutUsedAndCheckRunning(t *testing.T) {
 // rather than lying with a "0s" number a caller might try to tune.
 func TestTimeoutOmitsUsedWhenDisabled(t *testing.T) {
 	h := newHarness(t, true, nil)
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 
 	// build the driver directly so the harness's 5s fallback for a zero
 	// StageTimeout doesn't mask the disabled case.
@@ -900,8 +926,14 @@ func TestTimeoutOmitsUsedWhenDisabled(t *testing.T) {
 func TestNextCommandSelfDocumentsResume(t *testing.T) {
 	t.Run("question names --answer", func(t *testing.T) {
 		h := newHarness(t, false, map[domain.Stage]stageFn{
-			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 				return convAsk(o.Model, "Include a schema header?", "no (recommended)", "yes")
+			},
+
+			// the merged design stage ends with a critique; a drive that is
+			// not about the critique still needs it to pass.
+			stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return toolVerdict(o.Model, "pass")
 			},
 		})
 		out, err := h.driver(Options{}).Run(context.Background(), "add export")
@@ -916,8 +948,14 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 
 	t.Run("caller gate names --approve", func(t *testing.T) {
 		h := newHarness(t, true, map[domain.Stage]stageFn{
-			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 				return msgIdle(o.Model, "Spec drafted.")
+			},
+
+			// the merged design stage ends with a critique; a drive that is
+			// not about the critique still needs it to pass.
+			stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return toolVerdict(o.Model, "pass")
 			},
 		})
 		out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "feature")
@@ -932,7 +970,7 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 
 	t.Run("--until stop names --approve", func(t *testing.T) {
 		h := newHarness(t, true, happyResumeScript())
-		out, err := h.driver(Options{Until: domain.StageSpec}).Run(context.Background(), "feature")
+		out, err := h.driver(Options{Until: domain.StagePlan}).Run(context.Background(), "feature")
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -944,11 +982,17 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 
 	t.Run("exhausted names --envelope doubled when spend is low", func(t *testing.T) {
 		h := newHarness(t, true, map[domain.Stage]stageFn{
-			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 				return msgIdle(o.Model, "Spec.")
 			},
 			domain.StageImplement: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
 				return []agent.Event{{Kind: agent.EventBudgetExhausted}}
+			},
+
+			// the merged design stage ends with a critique; a drive that is
+			// not about the critique still needs it to pass.
+			stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return toolVerdict(o.Model, "pass")
 			},
 		})
 		out, err := h.driver(Options{Envelope: 500}).Run(context.Background(), "feature")
@@ -968,7 +1012,7 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 	// recorded spend plus headroom, not just double the old envelope.
 	t.Run("exhausted names an envelope above spend when spend exceeds double the envelope", func(t *testing.T) {
 		h := newHarness(t, true, map[domain.Stage]stageFn{
-			domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 				return msgIdle(o.Model, "Spec.")
 			},
 			domain.StageImplement: func(_ *harness, _ int, _ agent.SessionOpts, _ string) []agent.Event {
@@ -976,6 +1020,12 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 					{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 34.3}},
 					{Kind: agent.EventBudgetExhausted, Usage: agent.Usage{Credits: 34.3}},
 				}
+			},
+
+			// the merged design stage ends with a critique; a drive that is
+			// not about the critique still needs it to pass.
+			stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return toolVerdict(o.Model, "pass")
 			},
 		})
 		out, err := h.driver(Options{Envelope: 15}).Run(context.Background(), "feature")
@@ -987,12 +1037,12 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 			t.Fatal("no exhausted event")
 		}
 		spent, _ := e["spent_credits"].(float64)
-		if spent != 35.3 {
-			t.Fatalf("spent_credits = %v, want 35.3", spent)
+		if spent != 36.3 {
+			t.Fatalf("spent_credits = %v, want 36.3", spent)
 		}
-		want := "gummi resume " + out.ID + " --envelope 43" // ceil(35.3 * 1.2) = 43, above the 30 that doubling would give
+		want := "gummi resume " + out.ID + " --envelope 44" // ceil(36.3 * 1.2) = 43, above the 30 that doubling would give
 		if e["next"] != want {
-			t.Fatalf("exhausted next = %v, want %q (doubling alone would give --envelope 30, below spend 35.3)", e["next"], want)
+			t.Fatalf("exhausted next = %v, want %q (doubling alone would give --envelope 30, below spend 36.3)", e["next"], want)
 		}
 	})
 
@@ -1069,7 +1119,7 @@ func TestErrorEventResumable(t *testing.T) {
 // it as a decision boundary.
 func TestTripwireNotTimeout(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec.")
 		},
 		domain.StageImplement: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -1082,6 +1132,12 @@ func TestTripwireNotTimeout(t *testing.T) {
 				t.Fatalf("writing main checkout: %v", err)
 			}
 			return msgIdle(o.Model, "Implemented.")
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	start := time.Now()
@@ -1116,8 +1172,14 @@ func TestTripwireNotTimeout(t *testing.T) {
 // fake then kills.)
 func TestSilentDeathNotTimeout(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	h.fake.DieAfter = 2
@@ -1154,7 +1216,7 @@ func feature(num int, stage domain.Stage) domain.Feature {
 	now := time.Now()
 	return domain.Feature{
 		ID: id, Num: num, Kind: domain.KindFeature, Title: "gated feature", Slug: slug,
-		Stage: stage, Skip: domain.QuickRoute(), Budget: domain.Budget{Envelope: 500},
+		Stage: stage, Budget: domain.Budget{Envelope: 500},
 		CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -1197,7 +1259,6 @@ func putDraft(t *testing.T, h *harness, f *domain.Feature, body string) {
 func TestBlockedByDependency(t *testing.T) {
 	h := newHarness(t, true, planApproveScript())
 	f := feature(1, domain.StagePlan)
-	f.Skip = domain.SkipFlags{}
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -1241,14 +1302,13 @@ func TestBlockedByDependency(t *testing.T) {
 func TestCallerGatePreCheckDependency(t *testing.T) {
 	h := newHarness(t, true, planApproveScript())
 	f := feature(1, domain.StagePlan)
-	f.Skip = domain.SkipFlags{}
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.wt.Create(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	dep := feature(2, domain.StageSpec)
+	dep := feature(2, domain.StagePlan)
 	if err := h.store.CreateFeature(context.Background(), &dep); err != nil {
 		t.Fatal(err)
 	}
@@ -1331,7 +1391,7 @@ func TestResumeRejudgesLostCritiqueVerdict(t *testing.T) {
 	if h.stageOf(f.ID) == domain.StagePlan {
 		t.Fatalf("feature stuck re-judging the lost critique verdict; status=%s stream=%v", out.Status, h.eventKinds())
 	}
-	if h.calls[domain.StagePlan] == 0 {
+	if h.calls[stageCritique] == 0 {
 		t.Fatal("no fresh critique session was spawned on resume")
 	}
 }
@@ -1371,7 +1431,6 @@ func TestDriverEscalationRecordsAPark(t *testing.T) {
 	t.Fatal("escalation logged no gave-up park carrying its reason")
 }
 
-
 // TestUndraftedSpecBlocksTheHeadlessGate is the measured failure this floor
 // exists to stop, asserted on the path it was measured on: a spec stage
 // that runs, says something, and writes nothing into `Chosen approach`.
@@ -1381,7 +1440,7 @@ func TestDriverEscalationRecordsAPark(t *testing.T) {
 func TestUndraftedSpecBlocksTheHeadlessGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
 	h.noDraft = true // the stage produces nothing, which is the point
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	putDraft(t, h, &f, spec.Template(&f)) // every section still its %% prompt
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
@@ -1394,7 +1453,7 @@ func TestUndraftedSpecBlocksTheHeadlessGate(t *testing.T) {
 	if out.Status != StatusBlocked {
 		t.Fatalf("status = %q, want blocked; stream=%v", out.Status, h.eventKinds())
 	}
-	if got := h.stageOf(f.ID); got != domain.StageSpec {
+	if got := h.stageOf(f.ID); got != domain.StagePlan {
 		t.Fatalf("an undrafted spec crossed its gate: stage = %s, want spec", got)
 	}
 	ev := lastEvent(h, "blocked")
@@ -1402,7 +1461,7 @@ func TestUndraftedSpecBlocksTheHeadlessGate(t *testing.T) {
 		t.Fatalf("no blocked event; stream=%v", h.eventKinds())
 	}
 	names, _ := ev["undrafted"].([]any)
-	if len(names) != 1 || names[0] != "Chosen approach" {
-		t.Fatalf("blocked undrafted = %v, want [Chosen approach]", ev["undrafted"])
+	if len(names) != 2 || names[0] != "Chosen approach" {
+		t.Fatalf("blocked undrafted = %v, want the design gate's two sections", ev["undrafted"])
 	}
 }

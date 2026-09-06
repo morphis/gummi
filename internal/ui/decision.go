@@ -12,7 +12,6 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 type decisionKind string
@@ -698,9 +697,6 @@ func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, tex
 	switch d.actions[i].id {
 	case "run":
 		m.threadInput.Reset()
-		if workflow.Interactive(r.F.Stage) {
-			return m.attachChatWith(r.F, text)
-		}
 		return m.runStageWithNote(r.F, text)
 	case "bounce":
 		m.threadInput.Reset()

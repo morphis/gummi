@@ -184,7 +184,7 @@ func Decide(in Input) Outcome {
 	}
 
 	switch in.Stage {
-	case domain.StagePlan, domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StagePlan, domain.StageImplement:
 		// a stage's own critique pass — what the Review stage used to be,
 		// judged without a transition of its own
 		return decideCritique(in)

@@ -28,10 +28,7 @@ const rsShapeSlicesBody = "```yaml\n" +
 func rsFullRouteScript(t *testing.T, prompts *[]string, replies []json.RawMessage) map[domain.Stage]stageFn {
 	t.Helper()
 	return map[domain.Stage]stageFn{
-		domain.StageInvestigate: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Investigated.")
-		},
-		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			args, _ := json.Marshal(map[string]string{"section": "Slices", "body": rsShapeSlicesBody})
 			return []agent.Event{
 				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "s", Name: "spec_replace_section", Args: args}},
@@ -175,15 +172,12 @@ func TestCreateResearchRequestChangesRerunsDecompose(t *testing.T) {
 // loop cleanly right after investigate, at the sole pre-decompose stop on
 // RS's route — the existing `d.opts.Until != "" && f.Stage == d.opts.Until`
 // guard in crossGate (driver.go) requires no KindResearch-specific change.
-func TestDriveResearchUntilShapeStops(t *testing.T) {
+func TestDriveResearchUntilPlanStops(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageInvestigate: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Investigated.")
 		},
-		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Shaped.")
-		},
-	
+
 		// investigate ends with a critique now; a drive that is not about
 		// the critique still needs it to pass.
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -192,7 +186,7 @@ func TestDriveResearchUntilShapeStops(t *testing.T) {
 	})
 	h.fake.Caps.ReadOnlyEnforce = true
 
-	d := h.driver(Options{Until: domain.StageShape})
+	d := h.driver(Options{Until: domain.StagePlan})
 	ctx := context.Background()
 	f, err := d.Create(ctx, domain.KindResearch, "a research topic")
 	if err != nil {
@@ -206,14 +200,14 @@ func TestDriveResearchUntilShapeStops(t *testing.T) {
 		t.Fatalf("status = %q, want stopped; stream=%v", out.Status, h.eventKinds())
 	}
 	stopped := lastEvent(h, "stopped")
-	if stopped == nil || stopped["stage"] != "shape" {
-		t.Fatalf("stopped event = %v, want stage shape", stopped)
+	if stopped == nil || stopped["stage"] != "plan" {
+		t.Fatalf("stopped event = %v, want stage plan", stopped)
 	}
 	got, err := h.store.GetFeature(ctx, f.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Stage != domain.StageShape {
+	if got.Stage != domain.StagePlan {
 		t.Fatalf("RS card stage = %v, want shape", got.Stage)
 	}
 	if !got.VerifiedAt.IsZero() {

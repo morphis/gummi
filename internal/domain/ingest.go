@@ -21,11 +21,10 @@ type DraftSeed struct {
 // FeatureProposal is one candidate FD the ingest pass emits — a slice of
 // the source with everything needed to mint a feature and seed its draft.
 type FeatureProposal struct {
-	Title      string    // → Feature.Title (and, slugified, its ID's slug)
-	OneLiner   string    // → Feature.OneLiner
-	SourceRefs []string  // section headings / ranges this slice came from
-	DependsOn  []string  // titles of other proposals this one needs; resolved to enforced feature_deps edges by Materialize
-	Skip       SkipFlags // the pass's suggested skip flags for this slice
+	Title      string   // → Feature.Title (and, slugified, its ID's slug)
+	OneLiner   string   // → Feature.OneLiner
+	SourceRefs []string // section headings / ranges this slice came from
+	DependsOn  []string // titles of other proposals this one needs; resolved to enforced feature_deps edges by Materialize
 	Draft      DraftSeed
 }
 

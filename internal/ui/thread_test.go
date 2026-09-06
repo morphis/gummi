@@ -28,59 +28,22 @@ var downScrollMarker = regexp.MustCompile(`↓ \d+ more`)
 var upScrollMarker = regexp.MustCompile(`↑ \d+ more`)
 
 // TestStageSequence checks that the thread's stage strip is derived from
-// the workflow package rather than a hardcoded string, and that it
-// differs correctly across kinds and skip flags.
+// the workflow package rather than a hardcoded string. One graph serves
+// every kind now, so the sequence is one spine and takes no card at all —
+// the kinds differ in what each stage does, not in which stages exist.
 func TestStageSequence(t *testing.T) {
-	cases := []struct {
-		name string
-		f    domain.Feature
-		want []domain.Stage
-	}{
-		{
-			"feature, no skips",
-			domain.Feature{Kind: domain.KindFeature},
-			[]domain.Stage{
-				domain.StageTodo, domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
-				domain.StageImplement, domain.StageVerify, domain.StageDone,
-			},
-		},
-		{
-			"feature, brainstorm and plan skipped",
-			domain.Feature{Kind: domain.KindFeature, Skip: domain.SkipFlags{Brainstorm: true, Plan: true}},
-			[]domain.Stage{
-				domain.StageTodo, domain.StageSpec, domain.StageImplement,
-				domain.StageVerify, domain.StageDone,
-			},
-		},
-		{
-			"bug, no skips",
-			domain.Feature{Kind: domain.KindBug},
-			[]domain.Stage{
-				domain.StageTodo, domain.StageTriage, domain.StageDiagnose, domain.StageFix,
-				domain.StageVerify, domain.StageDone,
-			},
-		},
-		{
-			"research",
-			domain.Feature{Kind: domain.KindResearch},
-			[]domain.Stage{
-				domain.StageTodo, domain.StageInvestigate, domain.StageShape,
-				domain.StageVerify, domain.StageDone,
-			},
-		},
+	want := []domain.Stage{
+		domain.StageTodo, domain.StagePlan, domain.StageImplement,
+		domain.StageVerify, domain.StageDone,
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := stageSequence(c.f)
-			if len(got) != len(c.want) {
-				t.Fatalf("stageSequence() = %v, want %v", got, c.want)
-			}
-			for i := range got {
-				if got[i] != c.want[i] {
-					t.Errorf("stageSequence()[%d] = %s, want %s (full: %v)", i, got[i], c.want[i], got)
-				}
-			}
-		})
+	got := stageSequence()
+	if len(got) != len(want) {
+		t.Fatalf("stageSequence() = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("stageSequence()[%d] = %s, want %s (full: %v)", i, got[i], want[i], got)
+		}
 	}
 }
 
@@ -116,27 +79,27 @@ func TestStageSegmentsReconstructsHistory(t *testing.T) {
 	t0 := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	events := []state.CardEvent{
 		{
-			Kind: state.EventStageEnter, Stage: domain.StageBrainstorm, At: t0,
+			Kind: state.EventStageEnter, Stage: domain.StagePlan, At: t0,
 			Payload: `{"role":"architect","model":"fake-model"}`,
 		},
 		{
-			Kind: state.EventMessage, Stage: domain.StageBrainstorm, At: t0.Add(time.Minute),
+			Kind: state.EventMessage, Stage: domain.StagePlan, At: t0.Add(time.Minute),
 			Payload: `{"author":"you","content":"hi"}`,
 		},
 		{
-			Kind: state.EventMessage, Stage: domain.StageBrainstorm, At: t0.Add(2 * time.Minute),
+			Kind: state.EventMessage, Stage: domain.StagePlan, At: t0.Add(2 * time.Minute),
 			Payload: `{"author":"architect","content":"ok"}`,
 		},
 		{
-			Kind: state.EventStageExit, Stage: domain.StageBrainstorm, At: t0.Add(4 * time.Minute),
+			Kind: state.EventStageExit, Stage: domain.StagePlan, At: t0.Add(4 * time.Minute),
 			Payload: `{"verdict":"","credits":6}`,
 		},
 		{
-			Kind: state.EventStageEnter, Stage: domain.StageSpec, At: t0.Add(5 * time.Minute),
+			Kind: state.EventStageEnter, Stage: domain.StagePlan, At: t0.Add(5 * time.Minute),
 			Payload: `{"role":"architect","model":"fake-model"}`,
 		},
 		{
-			Kind: state.EventTool, Stage: domain.StageSpec, At: t0.Add(6 * time.Minute), Status: state.StatusOK,
+			Kind: state.EventTool, Stage: domain.StagePlan, At: t0.Add(6 * time.Minute), Status: state.StatusOK,
 			Payload: `{"label":"edit spec.md"}`,
 		},
 	}
@@ -145,14 +108,14 @@ func TestStageSegmentsReconstructsHistory(t *testing.T) {
 		t.Fatalf("stageSegments() = %d segments, want 2: %+v", len(segs), segs)
 	}
 	first := segs[0]
-	if first.stage != domain.StageBrainstorm || !first.exited || first.credits != 6 {
+	if first.stage != domain.StagePlan || !first.exited || first.credits != 6 {
 		t.Errorf("first segment wrong: %+v", first)
 	}
 	if got := len(first.events); got != 2 {
 		t.Errorf("first segment carries %d events, want 2 (the two messages)", got)
 	}
 	second := segs[1]
-	if second.stage != domain.StageSpec || second.exited {
+	if second.stage != domain.StagePlan || second.exited {
 		t.Errorf("second segment should be the open (live) one: %+v", second)
 	}
 	if len(second.events) != 1 {
@@ -164,7 +127,7 @@ func TestStageSegmentsReconstructsHistory(t *testing.T) {
 // finished stage carried, it renders as exactly one line.
 func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 	seg := stageSegment{
-		stage: domain.StageBrainstorm, role: "architect", exited: true,
+		stage: domain.StagePlan, role: "architect", exited: true,
 		credits: 6, exitAt: time.Date(2026, 8, 1, 12, 4, 0, 0, time.UTC),
 		events: []state.CardEvent{
 			{Kind: state.EventMessage}, {Kind: state.EventMessage}, {Kind: state.EventTool},
@@ -174,22 +137,21 @@ func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 	if strings.Contains(line, "\n") {
 		t.Fatalf("folded receipt spans more than one line: %q", line)
 	}
-	for _, want := range []string{"brainstorm", "architect", "2 turns", "6 credits", "12:04"} {
+	for _, want := range []string{"plan", "architect", "2 turns", "6 credits", "12:04"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("folded receipt %q missing %q", line, want)
 		}
 	}
 }
 
-// TestFoldedReceiptFallsBackToEnterTime is BG-047: the interactive
-// stages (brainstorm, spec, triage, diagnose, shape) never earn a
-// stage_exit on an ordinary approval, so seg.exitAt stays zero and the
+// TestFoldedReceiptFallsBackToEnterTime is BG-047: a design stage
+// crossed by an ordinary approval never earns a stage_exit, so seg.exitAt stays zero and the
 // receipt used to end on a bare "·" with no time at all. It should fall
 // back to the segment's enterAt instead, labeled as a start rather than
 // an end so it isn't mistaken for when the stage finished.
 func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
 	seg := stageSegment{
-		stage: domain.StageBrainstorm, role: "architect", exited: false,
+		stage: domain.StagePlan, role: "architect", exited: false,
 		enterAt: time.Date(2026, 8, 1, 20, 35, 0, 0, time.UTC),
 		events: []state.CardEvent{
 			{Kind: state.EventMessage}, {Kind: state.EventMessage},
@@ -205,7 +167,7 @@ func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
 // (section) and its open-%%-count badge.
 func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
 	r := featureRow{
-		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StageSpec},
+		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan},
 		OpenSpecQs: 2,
 	}
 	line := ansi.Strip(pinnedSpecLine(m0Styles(), r, 80))
@@ -268,7 +230,7 @@ func TestThreadViewDegradesWithoutEvents(t *testing.T) {
 	if !strings.Contains(view, "FD-042") {
 		t.Errorf("thread view missing the card identity:\n%s", view)
 	}
-	if strings.Contains(view, "brainstorm ·") {
+	if strings.Contains(view, "plan ·") {
 		t.Errorf("thread view rendered a folded receipt with no events loaded:\n%s", view)
 	}
 }
@@ -292,7 +254,7 @@ func TestOpenCardLoadsEventsIntoTheThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := domain.Feature{
-		ID: id, Num: 1, Title: "dark mode", Slug: "dark-mode", Stage: domain.StageSpec,
+		ID: id, Num: 1, Title: "dark mode", Slug: "dark-mode", Stage: domain.StagePlan,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	if err := store.CreateFeature(ctx, &f); err != nil {
@@ -302,15 +264,15 @@ func TestOpenCardLoadsEventsIntoTheThread(t *testing.T) {
 	t0 := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	seed := []state.CardEvent{
 		{
-			Feature: id, Kind: state.EventStageEnter, Stage: domain.StageBrainstorm, At: t0,
+			Feature: id, Kind: state.EventStageEnter, Stage: domain.StagePlan, At: t0,
 			Payload: `{"role":"architect","model":"fake-model"}`,
 		},
 		{
-			Feature: id, Kind: state.EventStageExit, Stage: domain.StageBrainstorm, At: t0.Add(3 * time.Minute),
+			Feature: id, Kind: state.EventStageExit, Stage: domain.StagePlan, At: t0.Add(3 * time.Minute),
 			Payload: `{"verdict":"","credits":4}`,
 		},
 		{
-			Feature: id, Kind: state.EventStageEnter, Stage: domain.StageSpec, At: t0.Add(4 * time.Minute),
+			Feature: id, Kind: state.EventStageEnter, Stage: domain.StagePlan, At: t0.Add(4 * time.Minute),
 			Payload: `{"role":"architect","model":"fake-model"}`,
 		},
 	}
@@ -334,8 +296,8 @@ func TestOpenCardLoadsEventsIntoTheThread(t *testing.T) {
 	}
 
 	view := ansi.Strip(m.View().Content)
-	if !strings.Contains(view, "brainstorm ·") {
-		t.Errorf("thread view missing the folded brainstorm receipt once events loaded:\n%s", view)
+	if !strings.Contains(view, "plan ·") {
+		t.Errorf("thread view missing the folded plan receipt once events loaded:\n%s", view)
 	}
 }
 
@@ -387,9 +349,9 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 // read as 53.5 (whatever the rollup happened to be) four times over.
 // Each segment must show its own payload instead.
 func TestFoldedReceiptPerSessionSpendDiffers(t *testing.T) {
-	rollup := map[domain.Stage]float64{domain.StageFix: 53.5} // the misleading stage total
-	first := stageSegment{stage: domain.StageFix, exited: true, credits: 12}
-	second := stageSegment{stage: domain.StageFix, exited: true, credits: 34}
+	rollup := map[domain.Stage]float64{domain.StageImplement: 53.5} // the misleading stage total
+	first := stageSegment{stage: domain.StageImplement, exited: true, credits: 12}
+	second := stageSegment{stage: domain.StageImplement, exited: true, credits: 34}
 
 	l1 := ansi.Strip(foldedReceiptLine(m0Styles(), first, rollup, 2, 80))
 	l2 := ansi.Strip(foldedReceiptLine(m0Styles(), second, rollup, 2, 80))
@@ -431,8 +393,10 @@ func TestFoldedReceiptVerdictMarker(t *testing.T) {
 		{"verify pass is a check", domain.StageVerify, "reviewer", "pass", "check"},
 		{"verify fail is a cross", domain.StageVerify, "reviewer", "fail", "cross"},
 		{"critique pass is a check", domain.StageImplement, "reviewer", "pass", "check"},
-		{"the work stage's own writer still checks on exit despite empty verdict",
-			domain.StageImplement, "implementer", "", "check"},
+		{
+			"the work stage's own writer still checks on exit despite empty verdict",
+			domain.StageImplement, "implementer", "", "check",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -891,9 +855,9 @@ func TestPlainMessageRoutesToConsultWithNoLiveSession(t *testing.T) {
 // path, reaches the card's live engine session exactly like the chat
 // pane's own send did — against a fake agent, never the network.
 func TestThreadInputSendsToLiveSession(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("sure, got it"))
+	m, eng := agentWorkspace(t, liveFake("sure, got it"))
 	m = openAndAttach(t, m) // opens the card page, attaches the conversation, kicks off a turn
-	settleChat(t, eng)
+	waitForTurns(t, eng, 2)
 	m = toKeys(t, m) // the accelerator layer; the session and the card page stay
 	if m.threadInput.Focused() {
 		t.Fatal("toKeys did not blur the thread input")
@@ -910,7 +874,7 @@ func TestThreadInputSendsToLiveSession(t *testing.T) {
 	}
 	m = typeString(t, m, "quick note from the thread")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	settleChat(t, eng)
+	waitForTurns(t, eng, 4)
 
 	if m.threadInput.Value() != "" {
 		t.Fatalf("input not cleared after sending: %q", m.threadInput.Value())
@@ -938,13 +902,27 @@ func threadWithHistory(t *testing.T) *Shell {
 	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "m"})
 	exit, _ := json.Marshal(map[string]any{"verdict": "pass"})
 
+	// a card that ran the whole road and bounced back out of verify, so
+	// the folded history holds three receipts with three different roles
+	// — the oldest ("plan · architect") is nameable on its own, which is
+	// what the scroll tests below assert against.
+	roles := []struct {
+		stage domain.Stage
+		role  string
+	}{
+		{domain.StagePlan, "architect"},
+		{domain.StageImplement, "implementer"},
+		{domain.StageVerify, "reviewer"},
+	}
 	var evs []state.CardEvent
-	for _, st := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan} {
+	for _, r := range roles {
+		payload, _ := json.Marshal(map[string]string{"role": r.role, "model": "m"})
 		evs = append(evs,
-			state.CardEvent{Stage: st, Kind: state.EventStageEnter, At: at, Payload: string(enter)},
-			state.CardEvent{Stage: st, Kind: state.EventStageExit, At: at, Payload: string(exit)},
+			state.CardEvent{Stage: r.stage, Kind: state.EventStageEnter, At: at, Payload: string(payload)},
+			state.CardEvent{Stage: r.stage, Kind: state.EventStageExit, At: at, Payload: string(exit)},
 		)
 	}
+	// the bounce back into implement is the open (live) stage
 	evs = append(evs, state.CardEvent{
 		Stage: domain.StageImplement, Kind: state.EventStageEnter, At: at, Payload: string(enter),
 	})
@@ -998,7 +976,7 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 	if !upScrollMarker.MatchString(out) {
 		t.Error("expected the fixture's uncapped history to overflow the window and show an up-scroll marker")
 	}
-	if strings.Contains(out, "brainstorm · architect") {
+	if strings.Contains(out, "plan · architect") {
 		t.Error("the oldest folded receipt is still on screen — the body was not anchored to its end")
 	}
 }
@@ -1022,7 +1000,7 @@ func TestPagingUpReachesTheLiveStageBoundary(t *testing.T) {
 	if !strings.Contains(out, "fresh context") {
 		t.Errorf("pgup did not reach the live stage's boundary rule:\n%s", out)
 	}
-	if !strings.Contains(out, "brainstorm · architect") {
+	if !strings.Contains(out, "plan · architect") {
 		t.Error("pgup did not also reach the oldest folded receipt")
 	}
 }
@@ -1051,7 +1029,7 @@ func TestThreadScrollsWithPageKeys(t *testing.T) {
 		t.Errorf("threadScroll = %d after paging up, want the clamp %d", m.threadScroll, m.maxThreadScroll(w, h))
 	}
 	up := ansi.Strip(m.threadView(w, h))
-	if !strings.Contains(up, "brainstorm · architect") {
+	if !strings.Contains(up, "plan · architect") {
 		t.Error("paging up never reached the oldest receipt")
 	}
 
@@ -1167,9 +1145,7 @@ func TestParkVerbPausesRatherThanOpeningDeps(t *testing.T) {
 			}
 		}}
 		m, eng := agentWorkspace(t, ag)
-		m = pressAdvance(t, m)
-		m = pressAdvance(t, m)
-		m = pressAdvance(t, m)
+		m = advanceTo(t, m, domain.StageImplement)
 		m = openAndAttach(t, m)
 		waitForActivity(t, eng)
 
@@ -1282,7 +1258,7 @@ func TestVerbKeysLandOnMatchingHandler(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Stage != domain.StageBrainstorm {
+		if got.Stage != domain.StagePlan {
 			t.Fatalf("stage after approve = %s, want brainstorm — approve means advance the stage", got.Stage)
 		}
 	})
@@ -1351,9 +1327,9 @@ func TestStageEventLineClosedVocabulary(t *testing.T) {
 // produces.
 func TestStageSegmentsConsumesEnterExit(t *testing.T) {
 	events := []state.CardEvent{
-		{Kind: state.EventStageEnter, Stage: domain.StageSpec, Payload: `{"role":"architect"}`},
-		{Kind: state.EventMessage, Stage: domain.StageSpec, Payload: `{"author":"user","content":"hi"}`},
-		{Kind: state.EventStageExit, Stage: domain.StageSpec, Payload: `{"verdict":"ok"}`},
+		{Kind: state.EventStageEnter, Stage: domain.StagePlan, Payload: `{"role":"architect"}`},
+		{Kind: state.EventMessage, Stage: domain.StagePlan, Payload: `{"author":"user","content":"hi"}`},
+		{Kind: state.EventStageExit, Stage: domain.StagePlan, Payload: `{"verdict":"ok"}`},
 	}
 	segs := stageSegments(events)
 	if len(segs) != 1 {
@@ -1457,15 +1433,19 @@ func TestAutopilotEventLine(t *testing.T) {
 		}
 	})
 	t.Run("took-over boundary is drawn as a rule, not a line", func(t *testing.T) {
-		ev := state.CardEvent{Kind: state.EventAutopilot,
-			Payload: `{"event":"took-over","reason":"idle","mode":"full"}`}
+		ev := state.CardEvent{
+			Kind:    state.EventAutopilot,
+			Payload: `{"event":"took-over","reason":"idle","mode":"full"}`,
+		}
 		if got := stageEventLine(s, ev, 80, "", answered); got != "" {
 			t.Errorf("took-over boundary rendered %q, want empty (later phase's job)", got)
 		}
 	})
 	t.Run("handed-back boundary is drawn as a rule, not a line", func(t *testing.T) {
-		ev := state.CardEvent{Kind: state.EventAutopilot,
-			Payload: `{"event":"handed-back","mode":"full"}`}
+		ev := state.CardEvent{
+			Kind:    state.EventAutopilot,
+			Payload: `{"event":"handed-back","mode":"full"}`,
+		}
 		if got := stageEventLine(s, ev, 80, "", answered); got != "" {
 			t.Errorf("handed-back boundary rendered %q, want empty (later phase's job)", got)
 		}

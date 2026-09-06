@@ -36,7 +36,7 @@ func researchFeature() Feature {
 	now := time.Now()
 	return Feature{
 		ID: "RS-007", Num: 7, Kind: KindResearch, Title: "Widget perf",
-		OneLiner: "study", Slug: "my-topic", Stage: StageInvestigate,
+		OneLiner: "study", Slug: "my-topic", Stage: StagePlan,
 		Profile: "thrifty", CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -73,21 +73,6 @@ func TestResearchValidate(t *testing.T) {
 	}
 }
 
-// TestNoResearchSkipFlag locks the absence of a quick/one-pass route over
-// investigate: SkipFlags carries exactly the five creation flags, none of
-// them named Investigate.
-func TestNoResearchSkipFlag(t *testing.T) {
-	rt := reflect.TypeOf(SkipFlags{})
-	if n := rt.NumField(); n != 5 {
-		t.Errorf("SkipFlags has %d fields, want 5 (brainstorm, plan, triage, diagnose, quick)", n)
-	}
-	for i := 0; i < rt.NumField(); i++ {
-		if rt.Field(i).Name == "Investigate" {
-			t.Error("SkipFlags must not gain an Investigate field — no quick one-pass research route")
-		}
-	}
-}
-
 // TestResearchIDDistinct locks the shared monotonic counter: RS ids draw
 // the same number space as FD/BG, so RS-NNN never collides with FD-NNN or
 // BG-NNN for the same n.
@@ -119,7 +104,7 @@ func renderResearchSurface(f Feature) string {
 	fmt.Fprintf(&b, "id: %s\n", f.ID)
 	fmt.Fprintf(&b, "prefix: %s\n", f.ID.Kind().prefix())
 	fmt.Fprintf(&b, "artifact: %s\n", f.ArtifactPath())
-	fmt.Fprintf(&b, "stages: %s %s\n", StageInvestigate, StageShape)
+	fmt.Fprintf(&b, "stages: %s %s\n", StagePlan, StagePlan)
 	fmt.Fprintf(&b, "superstate: %s\n", f.Stage.SuperState())
 	return b.String()
 }

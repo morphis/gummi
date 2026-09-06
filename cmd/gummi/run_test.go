@@ -116,8 +116,9 @@ func TestDriverOptionsGateValidation(t *testing.T) {
 // internal/driver/steer_test.go's TestUntilStops family.
 func TestRunUntilValidation(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "100")
-	// quick route (default, no --full): --until plan is off-route → rejected.
-	if err := runRun([]string{"--until", "plan", "a feature"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
+	// a real stage that is not a stop on the route → rejected. The design
+	// gate is the one stop, so every other stage lands here.
+	if err := runRun([]string{"--until", "implement", "a feature"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
 		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
 	}
 	// an unknown stage is always rejected.

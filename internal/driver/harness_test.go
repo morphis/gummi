@@ -86,7 +86,22 @@ func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]sta
 			h.draftRequiredSections(f)
 		}
 		fn := script[stage]
+		if fn == nil && stage == stageCritique {
+			// A script that tells its writer from its critique by
+			// opts.Role instead of by this key keeps working: fall back to
+			// the stage's own entry and let it branch.
+			if own := script[h.stageFromWorkDir(opts.WorkDir)]; own != nil {
+				fn = own
+			}
+		}
 		if fn == nil {
+			if stage == stageCritique {
+				// A drive that is not ABOUT the critique still has to get
+				// past it: every agent stage ends with one now, so an
+				// unscripted critique defaults to passing rather than to a
+				// verdictless message the loop would escalate.
+				return toolVerdict(opts.Model, "pass")
+			}
 			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
 		}
 		h.mu.Lock()
@@ -161,7 +176,22 @@ func newMultiRepoHarness(t *testing.T, script map[domain.Stage]stageFn) *harness
 			h.draftRequiredSections(f)
 		}
 		fn := script[stage]
+		if fn == nil && stage == stageCritique {
+			// A script that tells its writer from its critique by
+			// opts.Role instead of by this key keeps working: fall back to
+			// the stage's own entry and let it branch.
+			if own := script[h.stageFromWorkDir(opts.WorkDir)]; own != nil {
+				fn = own
+			}
+		}
 		if fn == nil {
+			if stage == stageCritique {
+				// A drive that is not ABOUT the critique still has to get
+				// past it: every agent stage ends with one now, so an
+				// unscripted critique defaults to passing rather than to a
+				// verdictless message the loop would escalate.
+				return toolVerdict(opts.Model, "pass")
+			}
 			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: opts.Model}}, {Kind: agent.EventIdle}}
 		}
 		h.mu.Lock()
@@ -365,11 +395,10 @@ func (h *harness) draftRequiredSections(f domain.Feature) {
 	}
 	var want []string
 	switch {
-	case f.Kind == domain.KindFeature && f.Stage == domain.StageSpec:
-		want = []string{"Chosen approach"}
 	case f.Kind == domain.KindFeature && f.Stage == domain.StagePlan:
-		want = []string{"Implementation notes"}
-	case f.Kind == domain.KindBug && f.Stage == domain.StageDiagnose:
+		// the merged design stage owes what spec and plan each owed
+		want = []string{"Chosen approach", "Implementation notes"}
+	case f.Kind == domain.KindBug && f.Stage == domain.StagePlan:
 		want = []string{"Root cause"}
 	case f.Kind == domain.KindFeature && f.Stage == domain.StageVerify:
 		want = []string{"Verification plan"}
@@ -426,16 +455,18 @@ const stageCritique domain.Stage = "critique"
 // critiques, so the card's stored stage cannot tell it apart from the
 // stage's own writer. A script answers the critique under stageCritique.
 //
-// The plan critique is deliberately NOT routed here: plan scripts have
-// always told the writer and the critique apart by opts.Role themselves,
-// and rerouting them would break that.
+// Every critique routes here, the plan's included: with one design stage
+// there is no script that can tell a writer from its critique by stage
+// alone, so the sentinel is the only honest key. A script that branched
+// on opts.Role instead still works — it simply never sees the reviewer
+// session, and the default below answers it.
 func (h *harness) scriptStage(opts agent.SessionOpts) domain.Stage {
 	stage := h.stageFromWorkDir(opts.WorkDir)
 	if opts.Role != agent.RoleReviewer {
 		return stage
 	}
 	switch stage {
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StageImplement, domain.StagePlan:
 		return stageCritique
 	}
 	return stage

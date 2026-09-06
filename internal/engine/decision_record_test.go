@@ -23,7 +23,7 @@ func TestAskOpensItsDecisionRow(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	putFeature(t, store, f)
 	if _, err := e.Attach(context.Background(), f); err != nil {
 		e.Close()
@@ -42,7 +42,7 @@ func TestAskOpensItsDecisionRow(t *testing.T) {
 	if list[0].ID == "" {
 		t.Fatal("decision_open row carries no id")
 	}
-	if list[0].Stage != domain.StageBrainstorm {
+	if list[0].Stage != domain.StagePlan {
 		t.Errorf("decision stage = %q, want the stage it was asked in", list[0].Stage)
 	}
 	e.Close()
@@ -61,7 +61,7 @@ func TestAskDecisionClosesOnAnswer(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	putFeature(t, store, f)
 	if _, err := e.Attach(context.Background(), f); err != nil {
 		e.Close()
@@ -131,19 +131,18 @@ func TestGateCrossingCorrelatesToItsOpenDecision(t *testing.T) {
 	_, store, _ := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StageSpec)
-	f.Skip = domain.QuickRoute() // spec → implement: a legal crossing
+	f := feature(1, "Dark mode", domain.StagePlan) // spec → implement: a legal crossing
 	putFeature(t, store, f)
 
 	decisionID := "gate:spec->implement:1788093491271089319"
-	if err := store.OpenDecision(ctx, f.ID, domain.StageSpec, state.DecisionPayload{
+	if err := store.OpenDecision(ctx, f.ID, domain.StagePlan, state.DecisionPayload{
 		ID: decisionID, Kind: state.DecisionKindGate,
 		Question: "spec is ready for your decision.",
 	}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := store.Transition(ctx, "FD-001", domain.StagePlan, "caller"); err != nil {
+	if _, err := store.Transition(ctx, "FD-001", domain.StageImplement, "caller"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -153,7 +152,7 @@ func TestGateCrossingCorrelatesToItsOpenDecision(t *testing.T) {
 	}
 	var gate *state.GatePayload
 	for _, ev := range evs {
-		if ev.Kind != state.EventGate || ev.Stage != domain.StageSpec {
+		if ev.Kind != state.EventGate || ev.Stage != domain.StagePlan {
 			continue
 		}
 		var p state.GatePayload
@@ -188,11 +187,10 @@ func TestCrossingWithoutOpenDecisionIsUncorrelated(t *testing.T) {
 	_, store, _ := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StageSpec)
-	f.Skip = domain.QuickRoute()
+	f := feature(1, "Dark mode", domain.StagePlan)
 	putFeature(t, store, f)
 
-	if _, err := store.Transition(ctx, "FD-001", domain.StagePlan, "auto"); err != nil {
+	if _, err := store.Transition(ctx, "FD-001", domain.StageImplement, "auto"); err != nil {
 		t.Fatal(err)
 	}
 	evs, err := store.Events(ctx, "FD-001")
@@ -200,7 +198,7 @@ func TestCrossingWithoutOpenDecisionIsUncorrelated(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ev := range evs {
-		if ev.Kind != state.EventGate || ev.Stage != domain.StageSpec {
+		if ev.Kind != state.EventGate || ev.Stage != domain.StagePlan {
 			continue
 		}
 		var p state.GatePayload

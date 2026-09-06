@@ -4,7 +4,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The status bar answers "what keys exist"; this file answers "what
@@ -36,7 +35,6 @@ type nextInput struct {
 	stage  domain.Stage
 	kind   domain.Kind
 	landed bool
-	quick  bool // the quick route: one-pass spec, approval goes straight to implement
 	// hasWorktree is whether the card's worktree exists on disk right
 	// now — the same question cardactions' own attach row asks, and the
 	// only thing that makes attaching a raw agent CLI possible.
@@ -80,11 +78,10 @@ type nextInput struct {
 // from the transitions table, so the count survives restarts. Verify
 // re-runs without a bounce leave no transition, making this a floor —
 // it can undercount, never over-warn.
-func verifyBounces(hist []state.TransitionRecord, kind domain.Kind) int {
-	work := workflow.WorkStage(kind)
+func verifyBounces(hist []state.TransitionRecord) int {
 	n := 0
 	for _, tr := range hist {
-		if tr.From == domain.StageVerify && tr.To == work {
+		if tr.From == domain.StageVerify && tr.To == domain.StageImplement {
 			n++
 		}
 	}
@@ -99,9 +96,8 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		kind:             r.F.Kind,
 		landed:           r.Landed,
 		hasWorktree:      r.HasWorktree,
-		quick:            r.F.Skip.Quick,
 		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),
-		verifyBounces:    verifyBounces(r.History, r.F.Kind),
+		verifyBounces:    verifyBounces(r.History),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
 		pullRequest:      r.F.PullRequest,
@@ -242,7 +238,7 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 	if in.pullRequest.Empty() {
 		return acts
 	}
-	if in.stage != domain.StageImplement && in.stage != domain.StageFix && in.stage != domain.StageVerify {
+	if in.stage != domain.StageImplement && in.stage != domain.StageVerify {
 		return acts
 	}
 	return append(acts, nextStep("prpull", "", "pull PR review", "read the PR's review comments back onto the diff"))
@@ -332,83 +328,43 @@ func stageActions(in nextInput) []nextAction {
 		return []nextAction{nextStep("run", "enter", "attach & answer", "the agent asked a question and is waiting")}
 	}
 
-	work := workflow.WorkStage(in.kind) // implement (feature) or fix (bug)
+	work := domain.StageImplement // one work stage now, whatever the kind
 	finished := in.attn == attnGate || in.sess == engine.StateDone
 
 	switch in.stage {
 	case domain.StageTodo:
 		return []nextAction{nextStep("advance", "g", "start", "advance into the design flow")}
 
-	case domain.StageInvestigate:
-		return append(
-			talkAction(in, "the researcher", "explore the question and shape the doc"),
-			nextStep("advance", "g", "advance", "move on to "+string(domain.StageShape)),
-		)
-
-	case domain.StageShape:
-		return append(
-			talkAction(in, "the researcher", "converge the findings into the answer"),
-			nextStep("advance", "g", "advance", "move on to "+string(domain.StageVerify)),
-		)
-
-	case domain.StageBrainstorm, domain.StageTriage:
-		return append(
-			talkAction(in, "the architect", "explore the problem and candidate approaches"),
-			nextStep("advance", "g", "advance", "converged? move on to the "+artifactNoun(in.kind)),
-		)
-
-	case domain.StageSpec, domain.StageDiagnose:
-		acts := talkAction(in, "the architect", "shape the "+artifactNoun(in.kind)+" until it convinces you")
-		if in.quick && len(acts) > 0 {
-			acts[0].why = "quick route — it drafts the whole spec in one pass; steer and refine"
-		}
+	case domain.StagePlan:
+		// The design stage. It absorbed brainstorm, spec and plan for a
+		// feature (and triage/diagnose, investigate/shape for the other
+		// kinds), so it offers what all of them offered: talk it through,
+		// read what it wrote, send it back, or approve.
+		acts := talkAction(in, designPartner(in.kind), "shape the "+artifactNoun(in.kind)+" until it convinces you")
 		if b := blockedGate(in); b != nil {
 			return append([]nextAction{*b}, acts...)
 		}
-		gate := nextStep("advance", "g", "approve", "hands the card to the agent stages")
-		if in.quick {
-			gate.why = "starts implementing — P first if it outgrew quick"
-		}
-		acts = append(acts, gate)
+		acts = append(acts, nextStep("advance", "g", "approve", "hands the card to the agent stages"))
 		// Sending it back is an answer in its own right, not just
 		// something typing happens to do. It is the option that consumes
 		// the composer's words (decision.go's wordConsumer), so typing
 		// aims at it and enter delivers the line as the turn that asks
-		// for the changes. Only worth offering while the architect is
-		// here to receive it — with no session the "start" row above is
-		// the way in.
+		// for the changes. Only worth offering while the agent is here to
+		// receive it — with no session the "start" row above is the way in.
 		if in.live {
 			acts = append(acts, nextStep("changes", "", "request changes",
 				"send it back with what's wrong — your line goes with it"))
 		}
 		// reading the thing you are about to approve is an option in its
-		// own right, the same way the plan stage offers reading the plan.
-		// It goes after the gate rather than before it: the recommendation
-		// leads, and this is what you reach for when you are not ready to
-		// take it yet.
+		// own right. It goes after the gate rather than before it: the
+		// recommendation leads, and this is what you reach for when you
+		// are not ready to take it yet.
 		acts = append(acts, nextStep("spec", "s", "read the "+artifactNoun(in.kind)+" first",
 			"it is what approving signs off on"))
 		acts = append(acts, designDiffAction(in)...)
 		return append(acts, autopilotAction("gates cross themselves from here"))
 
-	case domain.StagePlan:
-		if !finished {
-			return []nextAction{nextStep("run", "enter", "run the planner", "no active run — writes the line-level plan into the spec")}
-		}
-		acts := []nextAction{nextStep("spec", "s", "read the plan", "it lives in the spec's Implementation notes")}
-		acts = append(acts, designDiffAction(in)...)
-		if b := blockedGate(in); b != nil {
-			return append(acts, *b)
-		}
-		why := "plan critiqued clean — start implementing"
-		if in.escalated {
-			why = "the critique loop gave up — judge the plan yourself before approving"
-			acts = append(acts, nextStep("bounce", "b", "bounce for another plan round",
-				"send it back for a fresh, human-triggered replan round"))
-		}
-		return append(acts, nextStep("advance", "g", "approve & "+string(work), why))
-
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement:
 		if !finished {
 			return []nextAction{nextStep("run", "enter", "run "+string(in.stage), "no active run — start (or restart) the stage")}
 		}
@@ -515,4 +471,14 @@ func noun(k domain.Kind) string {
 		return "bug"
 	}
 	return "feature"
+}
+
+// designPartner names who the design stage's chat is with, by kind. One
+// stage, but a research topic is shaped by a researcher and a feature by
+// an architect, and the row should say which.
+func designPartner(kind domain.Kind) string {
+	if kind == domain.KindResearch {
+		return "the researcher"
+	}
+	return "the architect"
 }

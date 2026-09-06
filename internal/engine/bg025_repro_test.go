@@ -15,7 +15,7 @@ import (
 // generation's already-answered "mcp-1" row and is silently deduped away.
 func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	_ = wt
 	ctx := context.Background()
 	if err := store.CreateFeature(ctx, &f); err != nil {

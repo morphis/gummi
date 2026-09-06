@@ -831,9 +831,6 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 		budget = headerGap + s.Faint.Render(featureSpend(f.Spend))
 	}
 	skips := ""
-	if sk := skipSummary(f); sk != "" {
-		skips = headerGap + s.Faint.Render("skips "+sk)
-	}
 	round := ""
 	if rl := roundLabel(m, f); rl != "" {
 		round = headerGap + s.Faint.Render(rl)
@@ -962,7 +959,7 @@ func roundLabel(m *Shell, f domain.Feature) string {
 // exists to route around, but is safe here because the pill's own text
 // is always its first (and often only) content.
 func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
-	seq := stageSequence(f)
+	seq := stageSequence()
 	cur := 0
 	for i, st := range seq {
 		if st == f.Stage {
@@ -1007,34 +1004,27 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 	return pill
 }
 
-// stageSequence derives the ordered list of stages this exact card's
-// workflow offers it — a bug's, a feature's and a skip-flagged card's
-// differ — from the workflow package rather than a hardcoded string. At
-// each stage it picks the same edge engine.Engine.nextStage
-// (advance.go) would resolve g into, since a skip flag only ever adds an
-// extra legal edge rather than removing the primary one: workflow.Next
-// lists the primary forward edge first and an active skip edge after it
-// in the underlying table, so the *last* entry is the one actually taken
-// — except leaving review/verify, whose last entry is the rerun bounce
-// back to the work stage rather than the forward move, so there the
-// first entry is the one to take.
-func stageSequence(f domain.Feature) []domain.Stage {
-	kind := f.Kind
-	cur := workflow.Initial(kind)
+// stageSequence derives the ordered stage list a card walks, read out of
+// the workflow package rather than written down as a string. One graph
+// serves every kind now, so the sequence no longer varies by card — it
+// takes no feature and callers pass none. At each stage it picks the
+// same edge engine.Engine.nextStage (advance.go) would resolve g into:
+// workflow.Next lists the primary forward edge first and the rerun
+// bounces after it, so the first entry is always the one to take.
+func stageSequence() []domain.Stage {
+	cur := workflow.Initial()
 	seq := []domain.Stage{cur}
 	// A backward edge picked here would walk in a circle, and this runs
 	// on every frame: stop the first time a stage repeats rather than
 	// trusting the edge tables to stay acyclic under this rule.
 	seen := map[domain.Stage]bool{cur: true}
-	for !workflow.Terminal(kind, cur) {
-		nexts := workflow.Next(kind, cur, f.Skip)
+	for !workflow.Terminal(cur) {
+		nexts := workflow.Next(cur)
 		if len(nexts) == 0 {
 			break
 		}
-		next := nexts[len(nexts)-1]
-		if cur == domain.StageVerify {
-			next = nexts[0]
-		}
+		// nexts[0] is the forward edge; the rerun bounces follow it.
+		next := nexts[0]
 		if seen[next] {
 			break
 		}
@@ -1053,31 +1043,28 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 	switch kind {
 	case domain.KindBug:
 		switch stage {
-		case domain.StageTriage:
-			return "Reproduction"
-		case domain.StageDiagnose:
+		case domain.StagePlan:
 			return "Root cause"
-		case domain.StageFix:
+		case domain.StageImplement:
 			return "Fix"
 		case domain.StageVerify:
 			return "Verification"
 		}
 	case domain.KindResearch:
 		switch stage {
-		case domain.StageInvestigate:
-			return "Findings"
-		case domain.StageShape:
+		case domain.StagePlan:
 			return "Direction"
 		case domain.StageVerify:
 			return "Verification plan"
 		}
 	default:
 		switch stage {
-		case domain.StageBrainstorm:
-			return "Problem"
-		case domain.StageSpec:
+		case domain.StagePlan:
+			// the design stage writes Problem, Considered approaches and
+			// Chosen approach on its way here; Chosen approach is the one
+			// it ENDS at, and the section its gate is judged on.
 			return "Chosen approach"
-		case domain.StagePlan, domain.StageImplement:
+		case domain.StageImplement:
 			return "Implementation notes"
 		case domain.StageVerify:
 			return "Verification plan"

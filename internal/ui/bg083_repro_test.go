@@ -55,7 +55,7 @@ func TestBG083ResearchCardRowShowsItsGlyph(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m.Attach(store, wt, ws)
 
-	f := mkFeature(t, store, 6, "a topic being investigated", domain.StageInvestigate)
+	f := mkFeature(t, store, 6, "a topic being investigated", domain.StagePlan)
 	f.Kind = domain.KindResearch
 	r := featureRow{F: f}
 	m.rows = []featureRow{r}

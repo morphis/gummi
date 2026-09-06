@@ -28,14 +28,6 @@ func TestDecide(t *testing.T) {
 			want: Outcome{Action: Advance, Stage: domain.StageVerify, Reason: "critique-pass"},
 		},
 		{
-			name: "research's critique passes to shape, not verify",
-			in: Input{
-				Stage: domain.StageInvestigate, Forward: domain.StageShape, Kind: domain.KindResearch,
-				Verdict: verdict.Pass, WorkStage: domain.StageInvestigate,
-			},
-			want: Outcome{Action: Advance, Stage: domain.StageShape, Reason: "critique-pass"},
-		},
-		{
 			name: "the plan critique raises its human gate instead of advancing",
 			in: Input{
 				Stage: domain.StagePlan, Forward: domain.StageImplement, Kind: domain.KindFeature,
@@ -95,7 +87,7 @@ func TestDecide(t *testing.T) {
 			name: "research verify pass still raises the gate, never auto-mints",
 			in: Input{
 				Stage: domain.StageVerify, Kind: domain.KindResearch,
-				Verdict: verdict.Pass, WorkStage: domain.StageInvestigate,
+				Verdict: verdict.Pass, WorkStage: domain.StagePlan,
 			},
 			want: Outcome{Action: RaiseGate, Stage: domain.StageVerify, Reason: "verify-pass"},
 		},
@@ -223,13 +215,12 @@ func TestDecide(t *testing.T) {
 		{
 			name: "a stage Decide doesn't drive parks",
 			in: Input{
-				// spec is interactive and runs no critique, so Decide has
-				// no rule for it. Plan is no longer an example: its
-				// critique routes through decideCritique now.
-				Stage: domain.StageSpec, Kind: domain.KindFeature,
+				// todo runs no agent at all, so Decide has no rule for
+				// it. Plan and implement both have critiques now.
+				Stage: domain.StageTodo, Kind: domain.KindFeature,
 				Verdict: verdict.Pass, WorkStage: workStage,
 			},
-			want: Outcome{Action: Park, Stage: domain.StageSpec, Reason: "unhandled-stage"},
+			want: Outcome{Action: Park, Stage: domain.StageTodo, Reason: "unhandled-stage"},
 		},
 	}
 

@@ -38,7 +38,6 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // stretchClose names how a period ended, which is the whole of what the
@@ -119,11 +118,7 @@ func (st autopilotStretch) decidedNothing() bool {
 // autopilotStretches walks a card's event log once and returns every
 // period it ran itself, in order. events must be in seq order, which is
 // what Store.Events returns.
-//
-// f is needed only to tell a period that finished from one that parked:
-// "finished" means the card reached the last decision on its own
-// workflow, and which stage that is depends on the card.
-func autopilotStretches(f domain.Feature, events []state.CardEvent) []autopilotStretch {
+func autopilotStretches(events []state.CardEvent) []autopilotStretch {
 	var out []autopilotStretch
 	cur := -1 // index into out of the open period, -1 when none
 
@@ -173,7 +168,7 @@ func autopilotStretches(f domain.Feature, events []state.CardEvent) []autopilotS
 			_ = json.Unmarshal([]byte(ev.Payload), &p)
 			how := stretchParked
 			verdict, ran := stageExitVerdict(events[:i], ev.Stage)
-			if landingGate(f, ev.Stage) && ran && verdict != state.StatusFail &&
+			if landingGate(ev.Stage) && ran && verdict != state.StatusFail &&
 				p.Reason != state.ParkReasonGaveUp {
 				// It got the card as far as a card is allowed to go on its
 				// own. Both guards matter, and they answer different
@@ -292,10 +287,10 @@ func closeOrphaned(stretches []autopilotStretch, events []state.CardEvent, live 
 // every stage the reader went on to work by hand (BG-085).
 //
 // Ordered before the liveness judgement by liveStretches, because it is
-// the more specific answer: a card resting at an interactive stage got
-// there by being handed over, whether or not the driver has since gone.
+// the more specific answer: a card resting at the design stage got there
+// by being handed over, whether or not the driver has since gone.
 func closeHandedOver(f domain.Feature, stretches []autopilotStretch, events []state.CardEvent) []autopilotStretch {
-	if len(stretches) == 0 || !workflow.Interactive(f.Stage) {
+	if len(stretches) == 0 || f.Stage != domain.StagePlan {
 		return stretches
 	}
 	last := &stretches[len(stretches)-1]
@@ -328,7 +323,7 @@ func closeHandedOver(f domain.Feature, stretches []autopilotStretch, events []st
 // now; a process killed mid-run writes nothing on its way out, so the
 // log can never say this by itself (BG-059).
 func liveStretches(f domain.Feature, events []state.CardEvent, ws state.Workspace) []autopilotStretch {
-	sts := closeHandedOver(f, autopilotStretches(f, events), events)
+	sts := closeHandedOver(f, autopilotStretches(events), events)
 	return closeOrphaned(sts, events, state.CardIsLive(ws, f.ID))
 }
 
@@ -343,13 +338,13 @@ func askedBy(p state.AskPayload) string {
 	return p.Actor
 }
 
-// landingGate reports whether stage is the last decision on this card's
-// own workflow — the one autopilot never crosses, because landing on
-// main stays a person's call under every mode. It is read from the
-// card's own sequence rather than hardcoded to verify, since a bug and a
-// research card end somewhere else.
-func landingGate(f domain.Feature, stage domain.Stage) bool {
-	seq := stageSequence(f)
+// landingGate reports whether stage is the last decision on the
+// workflow — the one autopilot never crosses, because landing on main
+// stays a person's call under every mode. It is read from the graph's
+// own sequence rather than hardcoded to verify, so moving the last stage
+// moves this with it.
+func landingGate(stage domain.Stage) bool {
+	seq := stageSequence()
 	for len(seq) > 0 && seq[len(seq)-1] == domain.StageDone {
 		seq = seq[:len(seq)-1]
 	}

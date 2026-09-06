@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,7 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // userOpenThreads returns the open annotation threads that carry a
@@ -67,19 +65,9 @@ func (m *Shell) requestSpecChanges(sv *specView) tea.Cmd {
 	}
 	f := sv.f
 	n := len(userOpenThreads(sv.doc))
-	if !workflow.Interactive(f.Stage) {
-		return m.sendChangesToAutonomous(f, turn, n)
-	}
-	return func() tea.Msg {
-		ctx := context.Background()
-		if _, err := m.engine.Attach(ctx, f); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		if err := m.engine.Send(ctx, f.ID, turn); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		}
-		return noticeMsg{text: string(f.ID) + ": sent " + strconv.Itoa(n) + " review comment(s) to the architect", reload: true}
-	}
+	// Every stage is autonomous now; a chat is a session the user opened
+	// against one, not a stage state. Changes go to the running session.
+	return m.sendChangesToAutonomous(f, turn, n)
 }
 
 // sendChangesToAutonomous delivers review comments to an autonomous
@@ -93,7 +81,10 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 		ctx := context.Background()
 		if s := m.engine.Get(f.ID); s != nil {
 			switch s.State() {
-			case engine.StateRunning:
+			case engine.StateRunning, engine.StateInteractive:
+				// a session the user attached takes the turn in-context too:
+				// Send accepts both states, and re-running a stage the user
+				// is sitting in front of would throw its context away.
 				if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}

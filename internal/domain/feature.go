@@ -233,10 +233,9 @@ type Feature struct {
 	OneLiner string // short description from the creation form
 	Slug     string // allowlist-sanitized, used in branch and file names
 	Stage    Stage
-	Skip     SkipFlags
 	Profile  string // profile name mapping roles to agent configs
-	// GateApproval is who crosses this feature's design gates on an
-	// unattended resume: GateAttended, GateAttended (default), or GateAutopilot.
+	// GateApproval is who crosses this card's gates on an unattended
+	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
 	// --gate-approval inherits the run's choice rather than reverting to
 	// the default. Empty reads as GateAttended.

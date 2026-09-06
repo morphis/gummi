@@ -70,7 +70,7 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 		}
 		f := domain.Feature{
 			ID: id, Num: num, Title: p.Title, OneLiner: p.OneLiner, Slug: slugs[i],
-			Kind: domain.KindFeature, Stage: workflow.Initial(domain.KindFeature), Skip: p.Skip, Profile: opts.Profile,
+			Kind: domain.KindFeature, Stage: workflow.Initial(), Profile: opts.Profile,
 			Budget: domain.Budget{Envelope: opts.Envelope}, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		feats[i] = f

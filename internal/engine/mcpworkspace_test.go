@@ -242,7 +242,7 @@ func TestWorkspaceMCPCardStatus(t *testing.T) {
 func TestWorkspaceMCPCardSpec(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	ctx := context.Background()
-	f := feature(1, "one", domain.StageSpec)
+	f := feature(1, "one", domain.StagePlan)
 	if err := e.cfg.Store.CreateFeature(ctx, &f); err != nil {
 		t.Fatal(err)
 	}
@@ -323,13 +323,16 @@ func TestWorkspaceMCPCardRun(t *testing.T) {
 	}
 	waitState(t, e, "FD-001", StateDone)
 
-	// an interactive stage has no agent-driven run to kick off over MCP.
-	f2 := feature(2, "spec", domain.StageBrainstorm)
+	// todo has no agent action at all, so there is nothing to kick off.
+	// Every other stage is autonomous now — chat is a session you open
+	// against one, not a stage state — so there is no "interactive stage"
+	// left for card_run to refuse.
+	f2 := feature(2, "backlog", domain.StageTodo)
 	if err := store.CreateFeature(context.Background(), &f2); err != nil {
 		t.Fatal(err)
 	}
 	if _, errMsg := callWorkspaceTool(t, path, "card_run", map[string]any{"id": "FD-002"}); errMsg == "" {
-		t.Fatal("card_run on an interactive stage should error")
+		t.Fatal("card_run on a stage with no agent action should error")
 	}
 }
 

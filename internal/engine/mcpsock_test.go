@@ -87,7 +87,7 @@ func (c *sockConn) nextID() string {
 // the returned path succeeds synchronously before any child spawns.
 func TestMCPSockBindOrderingDial(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestMCPSockBindOrderingDial(t *testing.T) {
 // closes the connection rather than serving it.
 func TestMCPSockHandshakeFeatureMismatch(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestMCPSockHandshakeFeatureMismatch(t *testing.T) {
 // the feature's stage, in order.
 func TestMCPSockListTools(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +202,7 @@ func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
 // call_tool with no live session for the feature answers an error.
 func TestMCPSockCallToolNoSession(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestMCPSockCallToolNoSession(t *testing.T) {
 // human. The session is registered directly with a real spec file.
 func TestMCPSockCallToolInterleave(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	specBody := "# FD-001\n\n## Problem\n\nsome problem\n"
@@ -313,7 +313,7 @@ func TestMCPSockCallToolInterleave(t *testing.T) {
 // teardown removes the socket file and leaves the accept loop done.
 func TestMCPSockTeardown(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 	path, teardown, err := e.startMCPEndpoint(context.Background(), f, flavorStage, false)
 	if err != nil {
 		t.Fatal(err)

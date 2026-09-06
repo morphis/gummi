@@ -58,7 +58,7 @@ func TestBG089AttachIsNotRecommendedWithoutAWorktree(t *testing.T) {
 func TestBG089AttachSurvivesWhereItWorks(t *testing.T) {
 	for _, in := range []nextInput{
 		{sess: engine.StatePaused, kind: domain.KindFeature, stage: domain.StageImplement, hasWorktree: true},
-		{attn: attnFailure, kind: domain.KindBug, stage: domain.StageFix, hasWorktree: true},
+		{attn: attnFailure, kind: domain.KindBug, stage: domain.StageImplement, hasWorktree: true},
 	} {
 		if !hasAttach(nextActions(in)) {
 			t.Errorf("%v: attach dropped on a card that has a worktree", in.stage)

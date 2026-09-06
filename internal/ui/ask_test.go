@@ -67,9 +67,12 @@ func TestAskWithRemainderArmsAndDelivers(t *testing.T) {
 // attached stage session exists for the same card — arming overrides
 // steering, which is the whole point of the channel.
 func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("architect reply"))
+	m, eng := agentWorkspace(t, liveFake("architect reply"))
 	m = openAndAttach(t, m) // a live, attached architect session on FD-001
-	settleChat(t, eng)
+	waitLive(t, eng, "FD-001")
+	// let the kickoff's own reply land before the count is taken, or it
+	// races the assertion below and reads as a steered turn.
+	waitForTurn(t, eng, "FD-001", "architect reply")
 	if !eng.Get("FD-001").Live() {
 		t.Fatal("setup: want a live, attached stage session")
 	}
@@ -104,9 +107,9 @@ func TestAskFollowUpReachesConsultNotLiveStage(t *testing.T) {
 // (draft kept) and a subsequent plain line goes back to steering the
 // live stage session.
 func TestAskEscDisarmsAndRestoresSteering(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("architect reply"))
+	m, eng := agentWorkspace(t, liveFake("architect reply"))
 	m = openAndAttach(t, m)
-	settleChat(t, eng)
+	waitLive(t, eng, "FD-001")
 
 	m = typeString(t, m, "/ask")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // arm
@@ -120,7 +123,7 @@ func TestAskEscDisarmsAndRestoresSteering(t *testing.T) {
 
 	m = typeString(t, m, "please add a loading spinner")
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	settleChat(t, eng)
+	waitForTurn(t, eng, "FD-001", "please add a loading spinner")
 
 	var steered bool
 	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
@@ -204,9 +207,7 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	m = drainEngineLoop(t, m)

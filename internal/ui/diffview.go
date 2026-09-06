@@ -284,7 +284,7 @@ func (dv *diffView) bindings() []binding {
 // It is inserted rather than filtered so the shedding order both tables
 // document survives: g leads when it exists, and the way out stays last.
 func withGateKey(f domain.Feature, bs []binding) []binding {
-	if workflow.Terminal(f.Kind, f.Stage) {
+	if workflow.Terminal(f.Stage) {
 		return bs
 	}
 	g := binding{key: "g", label: "approve", help: "cross the gate — the same g as the board", bar: true}

@@ -177,7 +177,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// forward edge's target is the item's coding stage), and only on this
 	// call, read-on-Advance like every other blocker. The stored stage is
 	// left unchanged.
-	if e.nextStage(f) == workflow.WorkStage(f.Kind) {
+	if e.nextStage(f) == domain.StageImplement {
 		if deps, err := e.unmetDeps(ctx, id); err != nil {
 			return res, err
 		} else if len(deps) > 0 {
@@ -248,8 +248,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// (review/verify → work) leaves a non-interactive stage, so it never
 	// re-triggers discovery the way a worktree-existence test would have
 	// had to be taught not to.
-	if f.Kind != domain.KindResearch &&
-		workflow.Interactive(f.Stage) && !workflow.Interactive(next) && next != domain.StageTodo {
+	if f.Kind != domain.KindResearch && f.Stage == domain.StagePlan && next == domain.StageImplement {
 		res.EnteredWorktree = true
 		// Ensure, not Create: the card has almost certainly been running in
 		// its worktree since its first design stage, in which case this is
@@ -272,12 +271,11 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		if werr := e.promoteDraft(&f); werr != nil {
 			return res, werr
 		}
-		// plan-time estimation is feature-specific (spec approval): size the
-		// spend-plan envelope from what completed features cost, before
-		// budgeted autonomous work begins (DESIGN §5.1).
-		if f.Stage == domain.StageSpec {
-			res.EstimatedCredits, res.EstimateSamples = e.estimateEnvelope(ctx, &f)
-		}
+		// plan-time estimation: size the spend-plan envelope from what
+		// completed cards cost, before budgeted autonomous work begins
+		// (DESIGN §5.1). This is the design→work crossing, which is the
+		// only place it was ever owed.
+		res.EstimatedCredits, res.EstimateSamples = e.estimateEnvelope(ctx, &f)
 	}
 
 	// Leaving the work stage hands the diff to something that judges it —
@@ -316,17 +314,19 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 // the rerun, which is a bounce Advance doesn't make). Returns the stage
 // unchanged when the item is terminal.
 func (e *Engine) nextStage(f domain.Feature) domain.Stage {
-	nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
+	nexts := workflow.Next(f.Stage)
 	if len(nexts) == 0 {
 		return f.Stage
 	}
-	next := nexts[len(nexts)-1]
-	if f.Stage == domain.StageVerify {
-		// the last edge out of verify is a rerun (→ the work stage), a
-		// bounce, not a forward move; Advance always goes forward.
-		next = nexts[0]
-	}
-	return next
+	// nexts[0], always: the graph lists a stage's forward edge first and
+	// its rerun edges after it, and Advance only ever goes forward.
+	//
+	// This used to take the LAST entry, because a skip edge was appended
+	// after the forward one and a skipped stage meant the later edge was
+	// the one to take. Skip edges went with SkipFlags, so the last entry
+	// is now the rerun bounce — implement → plan, verify → implement —
+	// and taking it would walk the card backwards forever.
+	return nexts[0]
 }
 
 // unmetDeps returns each direct dependency of id still short of Done — its
@@ -365,7 +365,7 @@ func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpe
 	}
 	specOpen = e.openQuestionsBlockingGate(f)
 	diffOpen = e.openDiffCommentsBlockingGate(ctx, id)
-	if e.nextStage(f) == workflow.WorkStage(f.Kind) {
+	if e.nextStage(f) == domain.StageImplement {
 		if deps, err = e.unmetDeps(ctx, id); err != nil {
 			return 0, 0, nil, err
 		}
@@ -387,7 +387,7 @@ func (e *Engine) DependencyBlockers(ctx context.Context, id domain.FeatureID) ([
 	if err != nil {
 		return nil, err
 	}
-	if e.nextStage(f) != workflow.WorkStage(f.Kind) {
+	if e.nextStage(f) != domain.StageImplement {
 		return nil, nil
 	}
 	return e.unmetDeps(ctx, id)
@@ -507,12 +507,17 @@ func fileMap(root string, paths []string) map[string][]string {
 // edge produces a section this predicate should hold open.
 func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	switch {
-	case kind == domain.KindFeature && from == domain.StageSpec:
-		return []string{"Chosen approach"}
-	case kind == domain.KindBug && from == domain.StageDiagnose:
-		return []string{"Root cause"}
+	// The design gate. Its row grew from one section to two when the
+	// GATES shrank from two to one: a feature used to cross spec→plan
+	// owing "Chosen approach" and plan→implement owing "Implementation
+	// notes", and merging those stages merged their gates. This is the
+	// same coverage collapsed, not the completeness checklist 0a warned
+	// against — each section is still one stage's own output, there is
+	// just one stage now where there were three.
 	case kind == domain.KindFeature && from == domain.StagePlan && to == domain.StageImplement:
-		return []string{"Implementation notes"}
+		return []string{"Chosen approach", "Implementation notes"}
+	case kind == domain.KindBug && from == domain.StagePlan && to == domain.StageImplement:
+		return []string{"Root cause"}
 	case kind == domain.KindFeature && to == domain.StageDone:
 		return []string{"Verification plan"}
 	case kind == domain.KindBug && to == domain.StageDone:

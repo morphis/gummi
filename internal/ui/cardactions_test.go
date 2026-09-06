@@ -174,7 +174,7 @@ func TestCardActionsForResearchExclusions(t *testing.T) {
 	// appear, matching keymap.go's status-bar/help filter — "not shown"
 	// and "not available" are the same fact here.
 	stages := []domain.Stage{
-		domain.StageTodo, domain.StageInvestigate, domain.StageShape,
+		domain.StageTodo, domain.StagePlan, domain.StagePlan,
 		domain.StageVerify, domain.StageDone,
 	}
 	excluded := []string{"diff", "rebase", "merge", "clean"}
@@ -451,48 +451,6 @@ func TestCardActionListViewUnfocusedKeepsMarker(t *testing.T) {
 	}
 }
 
-func TestCardActionsForAddPlanGate(t *testing.T) {
-	f := domain.Feature{Kind: domain.KindFeature, Stage: domain.StageSpec}
-	f.Skip.Plan = true
-	r := featureRow{F: f}
-	in := nextInput{stage: domain.StageSpec, kind: domain.KindFeature, quick: true}
-	acts := cardActionsFor(in, r)
-	found := false
-	for _, a := range acts {
-		if a.id == "addplan" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected addplan on a spec-stage feature with Skip.Plan set")
-	}
-
-	// a bug never routes through plan at all — addplan must not appear
-	// even with the flag set (routeViaPlan itself refuses on kind).
-	fb := domain.Feature{Kind: domain.KindBug, Stage: domain.StageTriage}
-	fb.Skip.Plan = true
-	rb := featureRow{F: fb}
-	inb := nextInput{stage: domain.StageTriage, kind: domain.KindBug}
-	actsb := cardActionsFor(inb, rb)
-	for _, a := range actsb {
-		if a.id == "addplan" {
-			t.Error("addplan should never appear on a bug")
-		}
-	}
-
-	// past spec, the plan stage is already behind the feature.
-	fp := domain.Feature{Kind: domain.KindFeature, Stage: domain.StageImplement}
-	fp.Skip.Plan = true
-	rp := featureRow{F: fp}
-	inp := nextInput{stage: domain.StageImplement, kind: domain.KindFeature}
-	actsp := cardActionsFor(inp, rp)
-	for _, a := range actsp {
-		if a.id == "addplan" {
-			t.Error("addplan should not appear once a feature is past spec")
-		}
-	}
-}
-
 func TestCardActionsForSessionState(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -531,7 +489,7 @@ func TestCardActionsForSessionState(t *testing.T) {
 
 func TestCardActionsForBounceGate(t *testing.T) {
 	stages := []domain.Stage{
-		domain.StageTodo, domain.StageBrainstorm, domain.StageSpec, domain.StagePlan,
+		domain.StageTodo, domain.StagePlan, domain.StagePlan, domain.StagePlan,
 		domain.StageImplement, domain.StageVerify, domain.StageDone,
 	}
 	for _, stage := range stages {

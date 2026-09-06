@@ -74,18 +74,6 @@ func spendSummary(snap engine.Snapshot) string {
 	return ""
 }
 
-// skipSummary names the stages this feature was created to skip.
-func skipSummary(f domain.Feature) string {
-	var parts []string
-	if f.Skip.Brainstorm {
-		parts = append(parts, "brainstorm")
-	}
-	if f.Skip.Plan {
-		parts = append(parts, "plan")
-	}
-	return strings.Join(parts, ", ")
-}
-
 // budgetSummary formats the budget: spend against the envelope plus
 // what's left — every stage draws from the same pool, so one remainder
 // is the whole story. A top-up raises the envelope itself (durably, in

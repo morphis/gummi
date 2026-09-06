@@ -7,10 +7,8 @@ import "testing"
 // is orthogonal — one list covers both feature and bug stages.
 func TestAtOrPastCoding(t *testing.T) {
 	at := map[Stage]bool{
-		StageTodo:        false,
-		StageInvestigate: false, StageShape: false,
-		StageBrainstorm: false, StageSpec: false, StagePlan: false,
-		StageTriage: false, StageDiagnose: false,
+		StageTodo: false,
+		StagePlan: false,
 	}
 	for st, want := range at {
 		if got := AtOrPastCoding(st); got != want {

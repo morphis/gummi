@@ -26,9 +26,7 @@ func TestRunAutonomousStage(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
 	}
@@ -66,9 +64,7 @@ func TestRunAutonomousStage(t *testing.T) {
 
 func TestPauseStopsRun(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("working…"))
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m) // run
 	settleChat(t, eng)
 	if m.sessionFor("FD-001") == nil {
@@ -86,17 +82,6 @@ func TestPauseStopsRun(t *testing.T) {
 	}
 }
 
-func TestRunRejectsInteractiveViaRunPath(t *testing.T) {
-	// enter on a brainstorm feature attaches the conversation, it does
-	// not start a run — the thread is the interactive surface
-	m, _ := agentWorkspace(t, agent.NewFake("hi"))
-	m = openAndAttach(t, m)
-	s := m.sessionFor("FD-001")
-	if s == nil || !s.Interactive {
-		t.Fatal("brainstorm enter should attach an interactive session, not run")
-	}
-}
-
 // selectRow points the board selection at a feature by ID.
 func selectRow(t *testing.T, m *Shell, id domain.FeatureID) {
 	t.Helper()
@@ -109,33 +94,27 @@ func selectRow(t *testing.T, m *Shell, id domain.FeatureID) {
 	t.Fatalf("row %s not found in %d rows", id, len(m.rows))
 }
 
-func TestBugInteractiveStagesAttachConversation(t *testing.T) {
-	// enter on a bug at its interactive stages (triage/diagnose) attaches
-	// the architect conversation in the thread, exactly like brainstorm
-	// and spec for features.
-	m, _ := agentWorkspace(t, agent.NewFake("Can you reproduce it?"))
+// TestBugDesignStageRuns: a bug's design stage is the same autonomous
+// stage a feature's is — one graph, one route — so enter on a bug card
+// starts its run exactly the way it does on a feature.
+func TestBugDesignStageRuns(t *testing.T) {
+	m, eng := agentWorkspace(t, agent.NewFake("Can you reproduce it?"))
 	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
 	m = typeString(t, m, "Login loops")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	selectRow(t, m, "BG-002")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	for _, stage := range []domain.Stage{domain.StageTriage, domain.StageDiagnose} {
-		selectRow(t, m, "BG-002")
-		// the card page is open, so its composer holds the keyboard; the
-		// next stage's attach runs from the action list instead, because
-		// the composer blur is where esc leaves you
-		m = toKeys(t, m)
-		m = pressAdvance(t, m)
-		if m.rows[m.sel].F.Stage != stage {
-			t.Fatalf("setup: stage = %s, want %s", m.rows[m.sel].F.Stage, stage)
-		}
-		selectRow(t, m, "BG-002")
-		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-		s := m.sessionFor("BG-002")
-		if s == nil || !s.Interactive {
-			t.Fatalf("enter at %s did not attach an interactive session (notice: %q)", stage, m.notice.text)
-		}
+	m = toKeys(t, m)
+	m = pressAdvance(t, m) // todo → plan, the design stage
+	if got := m.rows[m.sel].F.Stage; got != domain.StagePlan {
+		t.Fatalf("setup: stage = %s, want plan", got)
+	}
+	selectRow(t, m, "BG-002")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // answer "run it"
+	settleCard(t, eng, "BG-002")
+	if m.sessionFor("BG-002") == nil {
+		t.Fatalf("enter at the bug's design stage started no run (notice: %q)", m.notice.text)
 	}
 }
 
@@ -155,9 +134,7 @@ func TestWatchAttachesRunningSession(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 
 	// first enter answers the idle decision and starts the run — the
 	// thread shows it live, no pane to open
@@ -242,9 +219,7 @@ func TestThreadActivityGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	// settleChat only waits on Busy/Transcript, not the session's own
@@ -298,9 +273,7 @@ func TestCardBusyStateRunning(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 
@@ -344,9 +317,7 @@ func TestCardLineGlyphSelectionGate(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 
@@ -370,17 +341,25 @@ func TestCardLineGlyphSelectionGate(t *testing.T) {
 	}
 }
 
-// TestCardBusyStateInteractive is FD-029's core repro for the chat-session
-// half: a StateInteractive session mid-reply never satisfied the old
-// inline switch (it only matched StateRunning), so a busy chat card sat
-// dead on the board while its own thread view spun for it.
+// TestCardBusyStateInteractive is FD-029's core repro for the attached-
+// session half: a StateInteractive session mid-reply never satisfied the
+// old inline switch (it only matched StateRunning), so a busy attached
+// card sat dead on the board while its own thread view spun for it.
+//
+// The board no longer opens such a session itself — every stage runs
+// autonomously now — but the engine still hands one out (Engine.Attach,
+// which the headless driver's attended mode uses), so a card the board
+// is only watching can be in exactly this state and must still read as
+// busy. The session is therefore made through the engine directly.
 func TestCardBusyStateInteractive(t *testing.T) {
 	// no trailing idle event: the architect stays busy mid-reply.
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "thinking out loud"}}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = openAndAttach(t, m)
+	if _, err := eng.Attach(context.Background(), m.rows[0].F); err != nil {
+		t.Fatal(err)
+	}
 	waitForBusy(t, eng)
 
 	r := m.rows[0]

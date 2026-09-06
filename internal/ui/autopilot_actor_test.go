@@ -62,7 +62,7 @@ func TestAutopilotStepRecordsAutopilotActor(t *testing.T) {
 	m := oneCardWorkspace(t)
 	id := m.rows[0].F.ID
 
-	m = pump(t, m, m.autoStepStage(id, domain.StageBrainstorm, "entering brainstorm", state.ActorAutopilot))
+	m = pump(t, m, m.autoStepStage(id, domain.StagePlan, "entering brainstorm", state.ActorAutopilot))
 
 	if got := newestGateActor(t, m, id); got != state.ActorAutopilot {
 		t.Fatalf("crossing actor = %q, want %q — a handover recorded as the review loop's own work",
@@ -80,7 +80,7 @@ func TestReviewLoopKeepsItsOwnActor(t *testing.T) {
 	m := oneCardWorkspace(t)
 	id := m.rows[0].F.ID
 
-	m = pump(t, m, m.autoStepStage(id, domain.StageBrainstorm, "re-shaping", "review"))
+	m = pump(t, m, m.autoStepStage(id, domain.StagePlan, "re-shaping", "review"))
 
 	if got := newestGateActor(t, m, id); got != "review" {
 		t.Fatalf("review loop crossing actor = %q, want \"review\"", got)

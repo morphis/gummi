@@ -166,7 +166,7 @@ func TestStaleChecksDoNotSurviveStageTransition(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.sel = 1 // FD-042, currently at implement
 	m.openCard()
-	m.checks["FD-042"] = stagedChecks{stage: domain.StageBrainstorm, results: fakeResults()}
+	m.checks["FD-042"] = stagedChecks{stage: domain.StagePlan, results: fakeResults()}
 	view := ansi.Strip(m.View().Content)
 	if strings.Contains(view, "golangci-lint run") {
 		t.Fatalf("stale verify summary from an earlier stage still rendered:\n%s", view)

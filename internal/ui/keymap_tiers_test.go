@@ -25,7 +25,7 @@ func openSurfaces(t *testing.T) map[string]*Shell {
 	t.Helper()
 	content := "## Problem\n\nA line to sit on.\n%% @user(2026-07-14): really?\n"
 	id, _ := domain.NewFeatureID(1)
-	f := domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StageSpec}
+	f := domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan}
 
 	withSpec := populatedShell(100, 30)
 	withSpec.spec = &specView{f: f, path: "p.md", content: content, doc: spec.Parse(content), cursor: 1}
@@ -164,7 +164,7 @@ func TestTabCycleReachesEveryOpenSurface(t *testing.T) {
 func TestNoSurfaceRebindsTab(t *testing.T) {
 	m := populatedShell(100, 30)
 	id, _ := domain.NewFeatureID(1)
-	f := domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StageSpec}
+	f := domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan}
 	content := "## Problem\n\nA line.\n"
 	tables := map[string][]binding{
 		"board":  m.boardBindings(),

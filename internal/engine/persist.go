@@ -181,7 +181,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 		if err != nil || f.Stage != snap.Stage {
 			continue // stale session for a since-advanced feature
 		}
-		role, ok := roleForStage(f.Stage)
+		role, ok := roleForStage(f)
 		if !ok {
 			continue
 		}
@@ -219,7 +219,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 		s := &Session{
 			Feature:     f,
 			Role:        role,
-			Interactive: interactiveStage(f.Stage),
+			Interactive: restoredState(snap.State) == StateInteractive,
 			Critique:    critique,
 			Rebase:      rebase,
 			state:       restoredState(snap.State),

@@ -84,11 +84,11 @@ func agentWorkspaceProfiles(t *testing.T, ag agent.Agent, profiles config.Profil
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = model.(*Shell)
 
-	// create a brainstorm feature
+	// create a card and walk it to its design stage
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Dark mode")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	// advance todo → brainstorm
+	// advance todo → plan, the design stage every card starts its work in
 	m = pressAdvance(t, m)
 	return m, eng
 }
@@ -164,12 +164,15 @@ func openAndAttach(t *testing.T, m *Shell) *Shell {
 }
 
 // TestThreadAttachAndSend is the retirement's core contract: the card
-// page is the conversation. Attach starts the architect, the composer
-// sends a turn, the thread shows the whole exchange, and esc — which
-// used to detach a separate pane — now just leaves the page while the
-// session keeps running, with the conversation waiting where it was.
+// page is the conversation. Enter starts the stage's agent, the composer
+// steers it, the thread shows the whole exchange, and esc — which used
+// to detach a separate pane — now just leaves the page while the session
+// keeps running, with the conversation waiting where it was.
 func TestThreadAttachAndSend(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("Two options: localStorage or synced account."))
+	// the agent stays live between turns (no idle event): steering a
+	// session is what the composer does, and a finished run has nothing
+	// to steer.
+	m, eng := agentWorkspace(t, liveFake("Two options: localStorage or synced account."))
 
 	// enter opens the card page, enter again answers the idle decision's
 	// "start the architect"; gummi's kickoff turn runs first
@@ -177,13 +180,13 @@ func TestThreadAttachAndSend(t *testing.T) {
 	if m.sessionFor("FD-001") == nil {
 		t.Fatal("enter did not attach a session")
 	}
-	settleChat(t, eng) // kickoff reply lands
+	waitForTurns(t, eng, 2) // kickoff reply lands
 
 	// type and send from the composer, exactly as the bare composer
 	// always routed prose
 	m = typeString(t, m, "how should it persist?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	settleChat(t, eng)
+	waitForTurns(t, eng, 4)
 
 	// kickoff (system) + reply, then the user turn + reply
 	snap := m.sessionFor("FD-001").Snapshot()
@@ -226,27 +229,16 @@ func TestThreadAttachAndSend(t *testing.T) {
 	// reopening the card found the composer focused, as it always is
 	m = typeString(t, m, "synced, then")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	settleChat(t, eng)
+	waitForTurns(t, eng, 6)
 	if s := m.sessionFor("FD-001"); s == nil || len(s.Snapshot().Transcript) != 6 {
 		t.Fatalf("talking again did not continue the same session: %+v", m.sessionFor("FD-001"))
 	}
 
-	// and now that the architect has stopped, the thread offers the way
-	// on: a decision with the stage's own legal set (DESIGN §10.19 — a
-	// bare composer means an agent is working, so an idle one must not be
-	// bare). It offers no "start the architect" row, because the
-	// architect is already here.
-	d := m.openDecision(m.rows[m.sel])
-	if d == nil {
-		t.Fatal("a finished interactive stage offered nothing to continue with")
-	}
-	for _, a := range d.actions {
-		if a.id == "run" {
-			t.Errorf("offered to start a conversation that is already live: %+v", d.actions)
-		}
-	}
-	if len(d.actions) == 0 {
-		t.Error("the decision carried no options")
+	// and while the agent is still working the thread offers no decision
+	// at all — DESIGN §10.19's rule read the other way round: a bare
+	// composer means an agent is working, so nothing is pinned over it.
+	if d := m.openDecision(m.rows[m.sel]); d != nil {
+		t.Errorf("a live session was offered a decision to answer: %+v", d.actions)
 	}
 }
 
@@ -255,36 +247,36 @@ func TestThreadAttachAndSend(t *testing.T) {
 // promise (the spec carries context between stages, not the transcript).
 func TestThreadAttachRespectsStage(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("hi"))
-	// attach at brainstorm, note the session, blur
+	// attach at the design stage, note the session, blur
 	m = openAndAttach(t, m)
-	brainstormSess := m.sessionFor("FD-001")
-	if brainstormSess == nil {
-		t.Fatal("no brainstorm session")
+	planSess := m.sessionFor("FD-001")
+	if planSess == nil {
+		t.Fatal("no plan session")
 	}
 	m = toKeys(t, m)
 
-	// advance brainstorm → spec while the composer is blurred
+	// advance plan → implement while the composer is blurred
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageSpec {
-		t.Fatalf("stage = %s, want spec", m.rows[0].F.Stage)
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)
 	}
 
-	// re-attach: must NOT reuse the brainstorm session for a spec stage
+	// re-attach: must NOT reuse the plan session for the work stage
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.sessionFor("FD-001") == nil {
 		t.Fatal("re-attach failed")
 	}
-	if m.sessionFor("FD-001") == brainstormSess {
-		t.Error("reused the stale brainstorm session for the spec stage")
+	if m.sessionFor("FD-001") == planSess {
+		t.Error("reused the stale plan session for the work stage")
 	}
-	if a := eng.Get("FD-001"); a == nil || a.Feature.Stage != domain.StageSpec {
-		t.Errorf("active session stage = %v, want spec", a)
+	if a := eng.Get("FD-001"); a == nil || a.Feature.Stage != domain.StageImplement {
+		t.Errorf("active session stage = %v, want implement", a)
 	}
 }
 
 // TestThreadConversationGolden is the thread's conversation review
-// surface: after a real two-turn brainstorm the card page carries every
+// surface: after a real two-turn design pass the card page carries every
 // turn, the kickoff labelled gummi and the user turn labelled you, with
 // the composer ready below.
 func TestThreadConversationGolden(t *testing.T) {
@@ -294,6 +286,11 @@ func TestThreadConversationGolden(t *testing.T) {
 	m = typeString(t, m, "per-device or synced?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	settleChat(t, eng)
+	// settleChat waits on Busy, which the engine clears on EventIdle well
+	// before finishRunning marks the session done — so without draining
+	// the engine's own idle event the masthead races between "running"
+	// and not. drainEngineLoop is what processes that event.
+	m = drainEngineLoop(t, m)
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
@@ -398,7 +395,7 @@ func TestThreadDecisionDigitJumpsAndAnswers(t *testing.T) {
 	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
 		t.Fatal("digit 1 alone answered the ask before enter")
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
 	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
 		select {
@@ -424,17 +421,14 @@ func TestThreadDecisionDigitJumpsAndAnswers(t *testing.T) {
 // open any pane, because there is no pane anymore (DESIGN §10.5).
 func TestThreadRunStartsOnAutonomousStage(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("x"))
-	// advance brainstorm → spec → plan (needs worktree at spec approval)
-	m = pressAdvance(t, m) // brainstorm→spec
-	m = pressAdvance(t, m) // spec→plan (worktree created)
-	if m.rows[0].F.Stage != domain.StagePlan {
-		t.Fatalf("stage = %s, want plan", m.rows[0].F.Stage)
-	}
+	// implement, the work stage past the design gate (the worktree is
+	// created crossing into it)
+	m = advanceTo(t, m, domain.StageImplement)
 	// enter on the page answers the idle decision and starts the run
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 	if m.sessionFor("FD-001") == nil {
-		t.Error("enter on plan did not start an autonomous run")
+		t.Error("enter on implement did not start an autonomous run")
 	}
 }
 
@@ -605,19 +599,22 @@ func stripANSI(s string) string {
 // This is the capability that made the pane irreplaceable and the whole
 // point of retiring it.
 func TestThreadShowsTheFullTranscript(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("Persist per-device via localStorage; account sync is a follow-up."))
+	m, eng := agentWorkspace(t, liveFake("Persist per-device via localStorage; account sync is a follow-up."))
 	m = openAndAttach(t, m)
-	settleChat(t, eng)
+	waitForTurns(t, eng, 2)
 	m = typeString(t, m, "per-device or synced?")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	settleChat(t, eng)
+	waitForTurns(t, eng, 4)
 	m = typeString(t, m, "account sync later then")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	settleChat(t, eng)
+	waitForTurns(t, eng, 6)
 
 	// the whole exchange is in the body: the kickoff, both user turns
-	// and both replies — labelled gummi/you like the pane labelled them
-	view := ansi.Strip(m.threadView(100, 30))
+	// and both replies — labelled gummi/you like the pane labelled them.
+	// A taller frame than 30 rows: six turns plus the stage rail and the
+	// live footer no longer fit, and a scrolled-off kickoff would make
+	// this measure the viewport rather than the transcript.
+	view := ansi.Strip(m.threadView(100, 44))
 	for _, want := range []string{
 		"gummi",
 		"per-device or synced?",
@@ -654,10 +651,7 @@ func TestThreadFailureTailShowsWithoutExpansion(t *testing.T) {
 	// no critique and keeps its session, which is what this test needs —
 	// the subject is the failure tail's rendering, not which stage it
 	// happened in.
-	m = pressAdvance(t, m) // brainstorm→spec
-	m = pressAdvance(t, m) // spec→plan
-	m = pressAdvance(t, m) // plan→implement
-	m = pressAdvance(t, m) // implement→verify
+	m = advanceTo(t, m, domain.StageVerify)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
@@ -691,9 +685,7 @@ func TestThreadAltOExpandsToolOutput(t *testing.T) {
 			}
 		},
 	})
-	m = pressAdvance(t, m) // brainstorm→spec
-	m = pressAdvance(t, m) // spec→plan
-	m = pressAdvance(t, m) // plan→implement
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
 
@@ -831,15 +823,15 @@ func TestOpenThreadNeverExpandsAFoldedReceipt(t *testing.T) {
 	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "m"})
 	exit, _ := json.Marshal(map[string]any{"verdict": "pass"})
-	// a finished brainstorm carries a real conversation; the implement
+	// a finished design stage carries a real conversation; the implement
 	// stage is the open (current) one
 	m.cardEvents[id] = []state.CardEvent{
-		{Kind: state.EventStageEnter, Stage: domain.StageBrainstorm, At: at, Payload: string(enter)},
+		{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: at, Payload: string(enter)},
 		{
-			Kind: state.EventMessage, Stage: domain.StageBrainstorm, At: at,
+			Kind: state.EventMessage, Stage: domain.StagePlan, At: at,
 			Payload: `{"author":"architect","content":"persist per-device, sync later"}`,
 		},
-		{Kind: state.EventStageExit, Stage: domain.StageBrainstorm, At: at, Payload: string(exit)},
+		{Kind: state.EventStageExit, Stage: domain.StagePlan, At: at, Payload: string(exit)},
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: at, Payload: string(enter)},
 	}
 	for i := 0; i < 2; i++ {
@@ -851,8 +843,8 @@ func TestOpenThreadNeverExpandsAFoldedReceipt(t *testing.T) {
 		if strings.Contains(view, "persist per-device, sync later") {
 			t.Errorf("folded receipt exposed its conversation with no expanded view left to reach it:\n%s", view)
 		}
-		if !strings.Contains(view, "brainstorm ·") {
-			t.Errorf("thread view missing the folded brainstorm receipt:\n%s", view)
+		if !strings.Contains(view, "plan ·") {
+			t.Errorf("thread view missing the folded plan receipt:\n%s", view)
 		}
 	}
 }

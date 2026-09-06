@@ -566,12 +566,6 @@ func bugProposalTags(p domain.BugProposal) string {
 	if p.Severity != "" {
 		tags = append(tags, string(p.Severity))
 	}
-	if p.Skip.Triage {
-		tags = append(tags, "skip triage")
-	}
-	if p.Skip.Diagnose {
-		tags = append(tags, "skip diagnose")
-	}
 	if len(tags) == 0 {
 		return ""
 	}

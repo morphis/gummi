@@ -41,10 +41,7 @@ func TestBG088CheckpointSaysNothingOnAWorktreeLessStage(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	for _, stage := range domain.Stages {
-		if false { // research never takes a branch worktree
-			t.Fatalf("%s: a research card is never supposed to need a worktree", stage)
-		}
-		if interactiveStage(stage) || stage == domain.StageDone {
+		if stage == domain.StageTodo || stage == domain.StageDone {
 			continue // never reaches checkpoint
 		}
 		f := researchFeature(stage)

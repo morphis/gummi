@@ -83,7 +83,7 @@ func TestSessionPersistAndRestore(t *testing.T) {
 	ctx := context.Background()
 
 	// an interactive feature with a persisted conversation
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	createFeature(t, store, f)
 
 	e1 := persistEngine(t, agent.NewFake("Two approaches, per-device vs synced."), ws, store, wt)
@@ -286,7 +286,7 @@ func TestRestoreSkipsStaleStage(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "x", domain.StageBrainstorm)
+	f := feature(1, "x", domain.StagePlan)
 	createFeature(t, store, f)
 	e1 := persistEngine(t, agent.NewFake("hi"), ws, store, wt)
 	if _, err := e1.Attach(ctx, f); err != nil {
@@ -296,7 +296,7 @@ func TestRestoreSkipsStaleStage(t *testing.T) {
 	e1.Close()
 
 	// the feature advanced past brainstorm since the session was saved
-	if _, err := store.Transition(ctx, f.ID, domain.StageSpec, "user"); err != nil {
+	if _, err := store.Transition(ctx, f.ID, domain.StageImplement, "user"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -312,7 +312,7 @@ func TestRestoreSkipsStaleStage(t *testing.T) {
 func TestDropDeletesPersistedSession(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
-	f := feature(1, "x", domain.StageBrainstorm)
+	f := feature(1, "x", domain.StagePlan)
 	createFeature(t, store, f)
 
 	e := persistEngine(t, agent.NewFake("hi"), ws, store, wt)

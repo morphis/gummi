@@ -271,28 +271,26 @@ func TestVerifyBounces(t *testing.T) {
 	cases := []struct {
 		name string
 		hist []state.TransitionRecord
-		kind domain.Kind
 		want int
 	}{
-		{"no history", nil, domain.KindFeature, 0},
+		{"no history", nil, 0},
 		{"forward only", []state.TransitionRecord{
 			tr(domain.StageImplement, domain.StageVerify),
 			tr(domain.StageVerify, domain.StageVerify),
-		}, domain.KindFeature, 0},
+		}, 0},
 		{"two verify bounces", []state.TransitionRecord{
 			tr(domain.StageVerify, domain.StageImplement),
 			tr(domain.StageImplement, domain.StageVerify),
 			tr(domain.StageVerify, domain.StageImplement),
-		}, domain.KindFeature, 2},
-		{"bug bounces target fix", []state.TransitionRecord{
-			tr(domain.StageVerify, domain.StageFix),
-		}, domain.KindBug, 1},
-		{"kind mismatch doesn't count", []state.TransitionRecord{
-			tr(domain.StageVerify, domain.StageFix),
-		}, domain.KindFeature, 0},
+		}, 2},
+		// one graph, one work stage: a bug's bounce is the same edge a
+		// feature's is, and counts the same way.
+		{"a bug's bounce counts too", []state.TransitionRecord{
+			tr(domain.StageVerify, domain.StageImplement),
+		}, 1},
 	}
 	for _, tc := range cases {
-		if got := verifyBounces(tc.hist, tc.kind); got != tc.want {
+		if got := verifyBounces(tc.hist); got != tc.want {
 			t.Errorf("%s: verifyBounces = %d, want %d", tc.name, got, tc.want)
 		}
 	}
@@ -983,11 +981,10 @@ func draftRequiredSections(t *testing.T, m *Shell) {
 	f := m.rows[0].F
 	var want []string
 	switch {
-	case f.Kind == domain.KindFeature && f.Stage == domain.StageSpec:
-		want = []string{"Chosen approach"}
 	case f.Kind == domain.KindFeature && f.Stage == domain.StagePlan:
-		want = []string{"Implementation notes"}
-	case f.Kind == domain.KindBug && f.Stage == domain.StageDiagnose:
+		// the merged design stage owes what spec and plan each owed
+		want = []string{"Chosen approach", "Implementation notes"}
+	case f.Kind == domain.KindBug && f.Stage == domain.StagePlan:
 		want = []string{"Root cause"}
 	case f.Kind == domain.KindFeature && f.Stage == domain.StageVerify:
 		want = []string{"Verification plan"}

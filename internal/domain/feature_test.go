@@ -206,7 +206,7 @@ func TestGateApprovalRetiredSpellingsMigrate(t *testing.T) {
 	for in, want := range map[string]string{
 		"off": GateAttended, "caller": GateAttended,
 		"gates": GateAttended, "auto": GateAttended,
-		"full": GateAutopilot,
+		"full":       GateAutopilot,
 		GateAttended: GateAttended, GateAutopilot: GateAutopilot,
 		"": "",
 	} {
@@ -235,18 +235,11 @@ func TestDerivedPaths(t *testing.T) {
 
 func TestStageSuperState(t *testing.T) {
 	want := map[Stage]SuperState{
-		StageTodo:        SuperTodo,
-		StageInvestigate: SuperResearch,
-		StageShape:       SuperResearch,
-		StageBrainstorm:  SuperInProgress,
-		StageSpec:        SuperInProgress,
-		StagePlan:        SuperInProgress,
-		StageTriage:      SuperInProgress,
-		StageDiagnose:    SuperInProgress,
-		StageFix:         SuperInProgress,
-		StageImplement:   SuperInProgress,
-		StageVerify:      SuperReviewVerify,
-		StageDone:        SuperDone,
+		StageTodo:      SuperTodo,
+		StagePlan:      SuperInProgress,
+		StageImplement: SuperInProgress,
+		StageVerify:    SuperReviewVerify,
+		StageDone:      SuperDone,
 	}
 	if len(want) != len(Stages) {
 		t.Fatalf("test table covers %d stages, domain has %d", len(want), len(Stages))

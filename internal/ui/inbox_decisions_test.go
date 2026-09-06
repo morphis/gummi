@@ -59,7 +59,7 @@ func TestSeedInboxFromOpenGateDecision(t *testing.T) {
 func TestSeedInboxFromOpenAskDecision(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
-	f := mkFeature(t, store, 1, "dark mode", domain.StageBrainstorm)
+	f := mkFeature(t, store, 1, "dark mode", domain.StagePlan)
 	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
 		ID: "ask:1", Kind: state.DecisionKindAsk, Question: "persist where?", FreeForm: true,
 	}, time.Now()); err != nil {
@@ -192,7 +192,7 @@ func TestSeedInboxSkipsAbandonedDecision(t *testing.T) {
 func TestInitSeedsDecisionsWithoutAnEngine(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	ctx := context.Background()
-	f := mkFeature(t, store, 1, "parked by a headless run", domain.StageSpec)
+	f := mkFeature(t, store, 1, "parked by a headless run", domain.StagePlan)
 	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
 		ID: "gate:headless", Kind: state.DecisionKindGate,
 		Question: "spec is ready for your decision.",

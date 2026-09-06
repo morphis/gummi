@@ -498,12 +498,6 @@ func (iv *ingestView) renderCoverage(s *theme.Styles, w int) string {
 // proposalTags summarizes a proposal's flags for the list line.
 func proposalTags(p domain.FeatureProposal) string {
 	var tags []string
-	if p.Skip.Brainstorm {
-		tags = append(tags, "skip bs")
-	}
-	if p.Skip.Plan {
-		tags = append(tags, "skip plan")
-	}
 	if n := len(p.Draft.OpenQuestions); n > 0 {
 		tags = append(tags, fmt.Sprintf("%d?", n))
 	}

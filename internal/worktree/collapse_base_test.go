@@ -41,7 +41,7 @@ func advanceMain(t *testing.T, root, content string) {
 // need to set up.
 func dependentFeature(num int, title string) *domain.Feature {
 	f := feature(num, title)
-	f.Stage = domain.StageSpec
+	f.Stage = domain.StagePlan
 	return f
 }
 

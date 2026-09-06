@@ -63,7 +63,7 @@ func clamp(v, min, max int) int {
 
 // selectCycleDelta maps a keypress to a step for a left/right-style select
 // field: -1/+1, or ok=false if the key doesn't drive one. Every creation
-// dialog's cycle fields (repo, profile, severity, route) share this so a
+// dialog's cycle fields (repo, profile, severity) share this so a
 // field never needs a memorized letter to operate — arrows, vi h/l, and
 // space (a generic "next") all just work.
 func selectCycleDelta(key string) (delta int, ok bool) {
@@ -78,7 +78,7 @@ func selectCycleDelta(key string) (delta int, ok bool) {
 
 // fieldRow renders one stacked field line: a cursor marker and the label,
 // styled by focus — the shared look for every tab-stop field (repo,
-// profile, severity, route) across the creation dialogs.
+// profile, severity) across the creation dialogs.
 //
 // The focused field wears the same band a selected list row does, so
 // "where am I" answers the same way on every surface. It bands the label
@@ -216,24 +216,6 @@ func (p *repoPicker) cycle(delta int) {
 	p.idx = ((p.idx+delta)%total + total) % total
 }
 
-// featureRoute is one state of the workflow-route field: a display label
-// paired with the domain.SkipFlags it selects. The five states are the
-// same combinations featureForm has always supported (independently
-// toggled Brainstorm/Plan, plus the Quick preset) — collapsed into one
-// cycling field instead of three letter-keyed toggles.
-type featureRoute struct {
-	label string
-	skip  domain.SkipFlags
-}
-
-var featureRoutes = []featureRoute{
-	{"full workflow", domain.SkipFlags{}},
-	{"skip brainstorm", domain.SkipFlags{Brainstorm: true}},
-	{"skip plan", domain.SkipFlags{Plan: true}},
-	{"skip brainstorm+plan", domain.SkipFlags{Brainstorm: true, Plan: true}},
-	{"quick — spec in one pass, then implement", domain.QuickRoute()},
-}
-
 // feature form fields, in tab order. fieldRepo is skipped when the repo
 // picker has nothing to choose (see advanceFocus) — the row itself may
 // still render read-only there, see repoPicker.shown; fieldButtons is the
@@ -243,7 +225,6 @@ const (
 	featureFieldDesc
 	featureFieldEnvelope
 	featureFieldProfile
-	featureFieldRoute
 	featureFieldButtons
 	featureFieldCount
 )
@@ -251,7 +232,7 @@ const (
 // featureForm is the new-feature dialog: a free-form description — the
 // first line becomes the card title, anything beyond it seeds the
 // draft's Problem section for the brainstorm stage to develop. Every
-// other choice (repo, profile, route) is its own tab stop, cycled with
+// other choice (repo, profile) is its own tab stop, cycled with
 // ←/→ — no mnemonic keys.
 type featureForm struct {
 	desc     textarea.Model
@@ -259,7 +240,6 @@ type featureForm struct {
 	profiles []string
 	profile  int
 	repo     repoPicker
-	route    int
 	focus    int
 	errText  string
 	buttons  *buttonRow
@@ -339,7 +319,6 @@ func (d *featureForm) submit() (bool, tea.Cmd) {
 	res := formResult{
 		Desc:     desc,
 		Profile:  d.profiles[d.profile],
-		Skip:     featureRoutes[d.route].skip,
 		Envelope: env,
 		Repo:     d.repo.name(),
 	}
@@ -395,11 +374,6 @@ func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			n := len(d.profiles)
 			d.profile = ((d.profile+delta)%n + n) % n
 		}
-	case featureFieldRoute:
-		if delta, ok := selectCycleDelta(key.String()); ok {
-			n := len(featureRoutes)
-			d.route = ((d.route+delta)%n + n) % n
-		}
 	case featureFieldDesc:
 		d.desc, _ = d.desc.Update(key)
 		d.errText = ""
@@ -448,7 +422,7 @@ func (d *featureForm) setFocus(f int) {
 // View implements overlay.Dialog.
 func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-desc(1),
-	// envelope+blank(2), profile+route(2), blank+buttons(2), blank+hint(2);
+	// envelope+blank(2), profile(1), blank+buttons(2), blank+hint(2);
 	// +2 more when the repo field renders (repo+blank).
 	staticRows := 11
 	if d.repo.shown() {
@@ -466,7 +440,6 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(d.desc.View() + "\n\n")
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == featureFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
-	b.WriteString(fieldRow(s, d.focus == featureFieldRoute, "route: "+featureRoutes[d.route].label) + "\n")
 	b.WriteString("\n" + d.buttons.View(s, d.focus == featureFieldButtons) + "\n")
 
 	if d.errText != "" {

@@ -15,11 +15,12 @@ import (
 )
 
 // foldedStagesShell is a card page whose thread carries several finished
-// stages above its current one — the shape every real card has after a
-// few sessions, and the one no golden covered until this file. The plan
-// stage deliberately records no message turns: an artifact written and
-// critiqued has no conversation to count, and its receipt must say
-// nothing about turns rather than "0 turns".
+// sessions above its current stage — the shape every real card has after
+// a few runs, and the one no golden covered until this file. The design
+// stage ran three times (a conversation, a rewrite, then a re-run), and
+// the last of those deliberately records no message turns: an artifact
+// written and critiqued has no conversation to count, and its receipt
+// must say nothing about turns rather than "0 turns".
 func foldedStagesShell(t *testing.T, w, h int) *Shell {
 	t.Helper()
 	m := populatedShell(w, h)
@@ -36,16 +37,16 @@ func foldedStagesShell(t *testing.T, w, h int) *Shell {
 		return string(p)
 	}
 	m.cardEvents[id] = []state.CardEvent{
-		{Kind: state.EventStageEnter, Stage: domain.StageBrainstorm, At: at, Payload: enter("architect")},
-		{Kind: state.EventMessage, Stage: domain.StageBrainstorm, At: at, Payload: msg("user", "where should it live?")},
-		{Kind: state.EventMessage, Stage: domain.StageBrainstorm, At: at, Payload: msg("architect", "at the theme layer.")},
-		{Kind: state.EventStageExit, Stage: domain.StageBrainstorm, At: at.Add(7 * time.Minute), Payload: string(exit)},
+		{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: at, Payload: enter("architect")},
+		{Kind: state.EventMessage, Stage: domain.StagePlan, At: at, Payload: msg("user", "where should it live?")},
+		{Kind: state.EventMessage, Stage: domain.StagePlan, At: at, Payload: msg("architect", "at the theme layer.")},
+		{Kind: state.EventStageExit, Stage: domain.StagePlan, At: at.Add(7 * time.Minute), Payload: string(exit)},
 
-		{Kind: state.EventStageEnter, Stage: domain.StageSpec, At: at.Add(8 * time.Minute), Payload: enter("architect")},
-		{Kind: state.EventMessage, Stage: domain.StageSpec, At: at.Add(8 * time.Minute), Payload: msg("architect", "spec written.")},
-		{Kind: state.EventStageExit, Stage: domain.StageSpec, At: at.Add(11 * time.Minute), Payload: string(exit)},
+		{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: at.Add(8 * time.Minute), Payload: enter("architect")},
+		{Kind: state.EventMessage, Stage: domain.StagePlan, At: at.Add(8 * time.Minute), Payload: msg("architect", "spec written.")},
+		{Kind: state.EventStageExit, Stage: domain.StagePlan, At: at.Add(11 * time.Minute), Payload: string(exit)},
 
-		// a plan stage with no message turns at all: the receipt must not
+		// a design run with no message turns at all: the receipt must not
 		// claim "0 turns"
 		{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: at.Add(12 * time.Minute), Payload: enter("architect")},
 		{Kind: state.EventStageExit, Stage: domain.StagePlan, At: at.Add(15 * time.Minute), Payload: string(exit)},

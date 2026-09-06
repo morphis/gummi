@@ -85,7 +85,7 @@ func TestThreadDecisionAdvancesIdleTodo(t *testing.T) {
 		t.Fatalf("todo card has no idle decision to answer: %+v", d)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // answer it
-	if m.rows[m.sel].F.Stage != domain.StageBrainstorm {
+	if m.rows[m.sel].F.Stage != domain.StagePlan {
 		t.Fatalf("answering the idle decision left the card at %s, want brainstorm", m.rows[m.sel].F.Stage)
 	}
 }
@@ -368,7 +368,7 @@ func verifyGateWorkspace(t *testing.T) *Shell {
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 5 { // todo→brainstorm→spec→plan→implement→verify
+	for range 3 { // todo→plan→implement→verify
 		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != domain.StageVerify {
@@ -385,7 +385,7 @@ func reviewGateWorkspace(t *testing.T) *Shell {
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Bouncy")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	for range 4 { // todo→brainstorm→spec→plan→implement
+	for range 2 { // todo→plan→implement
 		m = pressAdvance(t, m)
 	}
 	// the work stage IS the review gate now — its critique is what Review
@@ -451,9 +451,7 @@ func TestThreadDecisionTypingIsChoosing(t *testing.T) {
 func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 	m, eng := chatWorkspace(t, agent.NewFake("on it"))
 	// advance to implement: the work stage a bounce rewinds to
-	for range 3 { // brainstorm→spec→plan→implement
-		m = pressAdvance(t, m)
-	}
+	m = advanceTo(t, m, domain.StageImplement)
 	if m.rows[m.sel].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want implement", m.rows[m.sel].F.Stage)
 	}
@@ -483,9 +481,7 @@ func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 // the word-eater is the run — typed prose re-runs the stage with the line
 // appended to its kickoff.
 func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
-	m, eng := chatWorkspace(t, agent.NewFake("on it"))
-	m = pressAdvance(t, m) // brainstorm→spec
-	m = pressAdvance(t, m) // spec→plan
+	m, eng := chatWorkspace(t, agent.NewFake("on it")) // the card is at plan
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
 
@@ -496,7 +492,7 @@ func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
 
 	m = typeString(t, m, "focus the plan on the retry path")
 	out := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(out, "run the planner with your words") {
+	if !strings.Contains(out, "start the architect with your words") {
 		t.Errorf("typing did not relabel the run:\n%s", out)
 	}
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -598,7 +594,7 @@ func TestThreadDecisionStructuredAskLabelsEnterSend(t *testing.T) {
 
 	// confirm the routing itself is untouched (DESIGN §6.3): enter really
 	// does send a turn, and the ask is still open behind it
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
 	for {
 		snap := eng.Get("FD-001").Snapshot()
@@ -706,9 +702,7 @@ func TestThreadDecisionDigitSelectsWorkflowOption(t *testing.T) {
 // prose — a budget stop offers top-up and park, not a listener — the
 // line sends as a turn, always safe (DESIGN §6.3), and the bar says so.
 func TestThreadDecisionProseNothingConsumesSends(t *testing.T) {
-	m, _ := chatWorkspace(t, agent.NewFake("on it"))
-	m = pressAdvance(t, m) // brainstorm→spec
-	m = pressAdvance(t, m) // spec→plan
+	m, _ := chatWorkspace(t, agent.NewFake("on it")) // the card is at plan
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m.raiseAttention("FD-001", attnBudget, "the plan stage reached its envelope")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page

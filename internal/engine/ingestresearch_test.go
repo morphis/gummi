@@ -22,7 +22,7 @@ func researchCard(num int, title string) domain.Feature {
 	now := time.Now()
 	return domain.Feature{
 		ID: id, Num: num, Kind: domain.KindResearch, Title: title, Slug: slug,
-		Stage: domain.StageShape, CreatedAt: now, UpdatedAt: now,
+		Stage: domain.StagePlan, CreatedAt: now, UpdatedAt: now,
 	}
 }
 

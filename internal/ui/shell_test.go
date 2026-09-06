@@ -205,6 +205,65 @@ func waitLive(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
 	}
 }
 
+// liveFake is a fake agent whose stage turns never emit EventIdle, so
+// the session it drives stays running — and therefore Live() — for the
+// test to steer, arm a consult against, or inspect mid-turn. The scribe
+// role still idles, or the discovery pass the setup runs would never
+// resolve.
+func liveFake(reply string) agent.Agent {
+	return &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: reply}}
+	}}
+}
+
+// waitForTurn waits until a card's session transcript carries text. It
+// is settleChat's counterpart for a liveFake session, which never goes
+// idle and so never "settles".
+func waitForTurn(t *testing.T, eng *engine.Engine, id domain.FeatureID, text string) {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for {
+		if s := eng.Get(id); s != nil {
+			for _, msg := range s.Snapshot().Transcript {
+				if strings.Contains(msg.Content, text) {
+					return
+				}
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%s never carried a turn containing %q", id, text)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// waitForTurns waits until FD-001's session transcript holds n entries.
+// It is settleChat's counterpart for a liveFake session, which never
+// goes idle and so never "settles" — and like settleChat it is pinned to
+// FD-001, the subject every conversation fixture creates.
+func waitForTurns(t *testing.T, eng *engine.Engine, n int) {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for {
+		if s := eng.Get("FD-001"); s != nil && len(s.Snapshot().Transcript) >= n {
+			return
+		}
+		select {
+		case <-deadline:
+			got := 0
+			if s := eng.Get("FD-001"); s != nil {
+				got = len(s.Snapshot().Transcript)
+			}
+			t.Fatalf("FD-001's transcript stopped at %d entries, want %d", got, n)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func TestShellZeroSizeSafe(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0")
 	if v := m.View(); v.Content != "" {

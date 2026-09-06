@@ -960,7 +960,7 @@ func (f *doctorFixture) feature() domain.Feature {
 	now := time.Now()
 	feat := domain.Feature{
 		ID: id, Num: 1, Kind: domain.KindFeature, Title: "Drift me", Slug: slug,
-		Stage: domain.StageSpec, CreatedAt: now, UpdatedAt: now,
+		Stage: domain.StagePlan, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := f.store.CreateFeature(context.Background(), &feat); err != nil {
 		panic(err)

@@ -12,7 +12,7 @@ import (
 func researchCard() *domain.Feature {
 	return &domain.Feature{
 		ID: "RS-007", Num: 7, Kind: domain.KindResearch, Title: "Widget perf",
-		OneLiner: "study", Slug: "widget-perf", Stage: domain.StageInvestigate,
+		OneLiner: "study", Slug: "widget-perf", Stage: domain.StagePlan,
 	}
 }
 

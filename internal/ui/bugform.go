@@ -13,20 +13,6 @@ import (
 )
 
 // bugRoute is one state of the bug workflow-route field, mirroring
-// featureRoute: a display label paired with the domain.SkipFlags it
-// selects.
-type bugRoute struct {
-	label string
-	skip  domain.SkipFlags
-}
-
-var bugRoutes = []bugRoute{
-	{"full workflow", domain.SkipFlags{}},
-	{"skip triage", domain.SkipFlags{Triage: true}},
-	{"skip diagnose", domain.SkipFlags{Diagnose: true}},
-	{"skip triage+diagnose", domain.SkipFlags{Triage: true, Diagnose: true}},
-}
-
 // bugSeverityChoices are the severities the form cycles through; the
 // first ("") means unset — triage classifies it later.
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
@@ -41,7 +27,6 @@ const (
 	bugFieldEnvelope
 	bugFieldProfile
 	bugFieldSeverity
-	bugFieldRoute
 	bugFieldButtons
 	bugFieldCount
 )
@@ -58,7 +43,6 @@ type bugForm struct {
 	profile  int
 	sev      int
 	repo     repoPicker
-	route    int
 	focus    int
 	errText  string
 	buttons  *buttonRow
@@ -129,7 +113,6 @@ func (d *bugForm) submit() (bool, tea.Cmd) {
 		Seed:     seed,
 		Severity: bugSeverityChoices[d.sev],
 		Profile:  d.profiles[d.profile],
-		Skip:     bugRoutes[d.route].skip,
 		Envelope: env,
 		Repo:     d.repo.name(),
 	})
@@ -188,11 +171,6 @@ func (d *bugForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		if delta, ok := selectCycleDelta(key.String()); ok {
 			n := len(bugSeverityChoices)
 			d.sev = ((d.sev+delta)%n + n) % n
-		}
-	case bugFieldRoute:
-		if delta, ok := selectCycleDelta(key.String()); ok {
-			n := len(bugRoutes)
-			d.route = ((d.route+delta)%n + n) % n
 		}
 	case bugFieldDesc:
 		d.desc, _ = d.desc.Update(key)
@@ -268,7 +246,6 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == bugFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 	b.WriteString(fieldRow(s, d.focus == bugFieldSeverity, d.sevLabel()) + "\n")
-	b.WriteString(fieldRow(s, d.focus == bugFieldRoute, "route: "+bugRoutes[d.route].label) + "\n")
 	b.WriteString("\n" + d.buttons.View(s, d.focus == bugFieldButtons) + "\n")
 
 	if d.errText != "" {

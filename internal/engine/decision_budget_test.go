@@ -78,11 +78,11 @@ func TestOpenAskSurvivesItsStageRunningAgain(t *testing.T) {
 	_, store, _ := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	putFeature(t, store, f)
 
-	enterStage(t, store, f.ID, domain.StageBrainstorm, "gen-1")
-	if err := store.OpenDecision(ctx, f.ID, domain.StageBrainstorm, state.DecisionPayload{
+	enterStage(t, store, f.ID, domain.StagePlan, "gen-1")
+	if err := store.OpenDecision(ctx, f.ID, domain.StagePlan, state.DecisionPayload{
 		ID: "call-1", Kind: state.DecisionKindAsk,
 		Question: "Persist where?", FreeForm: true,
 	}, time.Now()); err != nil {
@@ -91,7 +91,7 @@ func TestOpenAskSurvivesItsStageRunningAgain(t *testing.T) {
 
 	// the restore: a fresh session on the same stage, which is exactly
 	// where the re-armed question has to still be waiting
-	enterStage(t, store, f.ID, domain.StageBrainstorm, "gen-2")
+	enterStage(t, store, f.ID, domain.StagePlan, "gen-2")
 
 	opens, err := store.OpenDecisions(ctx)
 	if err != nil {
@@ -174,7 +174,7 @@ func TestBudgetDecisionSurvivesABorrowedStageRun(t *testing.T) {
 // way to make anything move again looked like sending a message.
 func TestAnswerResumesTheWorkingFlag(t *testing.T) {
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
-	f := domain.Feature{ID: "FD-001", Stage: domain.StageBrainstorm, Profile: "default"}
+	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
 	s := &Session{
 		Feature: f, Role: agent.RoleArchitect, Interactive: true,
 		state: StateInteractive, done: make(chan struct{}),

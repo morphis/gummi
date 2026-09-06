@@ -172,6 +172,10 @@ func TestAutopilotCrossesCleanPlanCritique(t *testing.T) {
 
 	m = openAndAttach(t, m) // run plan
 	settleChat(t, eng)
+	// the scripted agent talks but never writes the artifact; stand in for
+	// it before the gate is judged, or the undrafted-sections gate holds
+	// the crossing shut and autopilot correctly parks instead.
+	draftRequiredSections(t, m)
 	m = drainEngineLoop(t, m)
 
 	if m.rows[0].F.Stage == domain.StagePlan {
@@ -256,6 +260,7 @@ func TestAutopilotCrossedGateClosesItsDecisionRow(t *testing.T) {
 
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
+	draftRequiredSections(t, m) // stand in for the scripted agent's artifact
 	m = drainEngineLoop(t, m)
 
 	if m.rows[0].F.Stage == domain.StagePlan {
@@ -421,36 +426,38 @@ func TestAutopilotAdvanceErrorParksTheCard(t *testing.T) {
 }
 
 // TestHandoverAtADesignGateCrossesAndStarts is the answer to "why is it
-// just a setting": picking "let autopilot finish" at a spec gate has to
-// cross that gate and start what is behind it. The switch used to read
-// such a card as already underway — a design stage leaves no inbox item,
-// which was the only thing its gate detection looked at — so it wrote
-// the mode, moved nothing, and said so in a dialog sitting under a row
-// promising that gates cross themselves from here.
+// just a setting": picking "let autopilot finish" at a design gate has
+// to cross that gate and start what is behind it. The switch used to
+// read such a card as already underway — its gate detection looked only
+// at the inbox — so it wrote the mode, moved nothing, and said so in a
+// dialog sitting under a row promising that gates cross themselves from
+// here.
 func TestHandoverAtADesignGateCrossesAndStarts(t *testing.T) {
 	m, eng := agentWorkspace(t, agent.NewFake("the approach is a token swap."))
-	m = advanceTo(t, m, domain.StageSpec)
+	m = advanceTo(t, m, domain.StagePlan)
 	m = pump(t, m, m.loadRows)
 
-	// attach the architect and let it finish a turn: the state the thread
-	// renders a spec gate in, with nothing in the inbox
+	// run the design stage to completion: a finished stage with nothing
+	// working on it is the state the thread renders a gate in
 	m = openAndAttach(t, m)
 	settleChat(t, eng)
-	if hasInboxKind(m, attnGate) {
-		t.Fatal("fixture parked an inbox gate; this test is about the case with none")
-	}
-
-	// the architect answered in chat but never wrote the spec; stand in for
+	// the architect answered but never wrote the artifact; stand in for
 	// it, or the undrafted-sections gate holds this crossing shut.
 	draftRequiredSections(t, m)
+	m = drainEngineLoop(t, m)
+
+	// and the subject is the card that has no inbox item to read: the
+	// gate has to come from the card's own state. Whatever the run
+	// parked is dropped here so the detection has nothing to lean on.
+	m.inbox.remove("FD-001")
 
 	f := m.rows[0].F
 	plan := m.planAutopilot(f)
 	if plan.bucket != "gate" {
 		t.Fatalf("a finished spec conversation read as %q, want a gate to cross", plan.bucket)
 	}
-	if plan.to != domain.StagePlan {
-		t.Errorf("plan.to = %s, want plan", plan.to)
+	if plan.to != domain.StageImplement {
+		t.Errorf("plan.to = %s, want implement", plan.to)
 	}
 
 	msg := m.startAutopilot(f, domain.GateAutopilot, plan)()
@@ -468,7 +475,7 @@ func TestHandoverAtADesignGateCrossesAndStarts(t *testing.T) {
 	if got.GateApproval != domain.GateAutopilot {
 		t.Errorf("gate approval = %q, want autopilot", got.GateApproval)
 	}
-	if got.Stage == domain.StageSpec {
+	if got.Stage == domain.StagePlan {
 		t.Fatal("the handover wrote the mode but never crossed the gate")
 	}
 	if eng.Get(f.ID) == nil {

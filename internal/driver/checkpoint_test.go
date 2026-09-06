@@ -17,7 +17,7 @@ import (
 // stream keeps going past it instead of ending there.
 func TestCheckpointFailureWarnsWithoutStopping(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {

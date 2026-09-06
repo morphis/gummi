@@ -156,28 +156,16 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 func (d *Driver) Create(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
 	// validate --until against the route this run will take before minting a
 	// feature, so a bad stop target never leaves a stray FD in the backlog.
-	skip := domain.QuickRoute()
-	if d.opts.Full {
-		skip = domain.SkipFlags{}
-	}
-	if kind == domain.KindResearch {
-		skip = domain.SkipFlags{}
-	}
-	if err := ValidateUntil(d.opts.Until, kind, skip); err != nil {
+	if err := ValidateUntil(d.opts.Until); err != nil {
 		return domain.Feature{}, err
 	}
 	f, err := d.createFeature(ctx, kind, desc)
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	// the route the card was actually created with, not the flag the
-	// caller passed: research forces the full flags a dozen lines up
-	// regardless of --full, and reporting the caller's flag announced
-	// "quick" for a kind that has no quick one-pass route.
+	// One workflow, so one route. The field survives on the wire for a
+	// consumer that still reads it; it can no longer vary.
 	route := "full"
-	if skip.Quick {
-		route = "quick"
-	}
 	// a branch only where one will exist: a research card is
 	// worktree-less at every stage and never gets one.
 	branch := ""
@@ -228,7 +216,7 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 	if err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	if err := ValidateUntil(d.opts.Until, f.Kind, f.Skip); err != nil {
+	if err := ValidateUntil(d.opts.Until); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
 
@@ -317,9 +305,9 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		if f.Stage != domain.StageVerify {
 			return d.fail(ctx, string(id),
 				fmt.Errorf("%s is at %s; --bounce only rewinds verify to %s",
-					id, f.Stage, workflow.WorkStage(f.Kind)))
+					id, f.Stage, domain.StageImplement))
 		}
-		back := workflow.WorkStage(f.Kind)
+		back := domain.StageImplement
 		if _, err := d.store.Transition(ctx, id, back, d.actor); err != nil {
 			return d.fail(ctx, string(id), err)
 		}
@@ -667,7 +655,7 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 		if err != nil {
 			return d.fail(ctx, string(id), err)
 		}
-		if f.Stage == domain.StageDone || workflow.Terminal(f.Kind, f.Stage) {
+		if f.Stage == domain.StageDone || workflow.Terminal(f.Stage) {
 			return d.done(ctx, f)
 		}
 		if !tookOver && f.Stage != domain.StageTodo {
@@ -686,14 +674,14 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 		}
 
 		var out Outcome
-		switch {
-		case f.Stage == domain.StageTodo:
+		switch f.Stage {
+		case domain.StagePlan:
+			out, err = d.driveDesign(ctx, f)
+		case domain.StageTodo:
 			// todo is a pure kickoff gate (no agent action): advance into the
 			// flow's first real stage. This is "start", not a design decision,
 			// so it always auto-crosses regardless of --gate-approval.
 			out, err = d.autoAdvance(ctx, f)
-		case workflow.Interactive(f.Stage):
-			out, err = d.driveInteractive(ctx, f)
 		default:
 			out, err = d.driveAutonomous(ctx, f)
 		}
@@ -711,9 +699,28 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 // the agent leads, ask_user questions become the `question` checkpoint
 // (or, under --autonomous, auto-take the recommended option), and a
 // finished turn with no open question is the design gate.
-func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcome, error) {
+// driveDesign drives the design stage — the one that converses. It is
+// keyed on the stage rather than on an "interactive" flag because the
+// flag is gone: chat is a session you open, not a state a stage is in.
+// What is true of THIS stage is that it can stop for an answer, and the
+// headless driver has to present that stop rather than await a turn that
+// will never come.
+//
+// It ends by handing the finished conversation to the stage's critique
+// (designComplete), not straight to the gate: every agent stage ends
+// with one now, and the design stage is no exception.
+func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, error) {
 	d.enterStage(f.Stage)
-	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage)})
+	// Seed the loop's round counter from the persisted value so a resume
+	// honours (and reports) the rounds already burned. A failed read
+	// aborts entry: the count is the budget.
+	if err := d.seedRounds(ctx, f, domain.RoundKindPlan); err != nil {
+		return Outcome{}, err
+	}
+	d.out.emit(stageEvent{
+		Event: "stage", ID: string(f.ID), Stage: string(f.Stage),
+		Round: d.round(f.ID, domain.RoundKindPlan),
+	})
 
 	// A bare resume that lands on an interactive stage already driven to its
 	// gate has no turn to send: the restored/live session carries the
@@ -754,8 +761,13 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 			})
 			d.logPark(f, state.ParkReasonNeedsYou, open.Question)
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
+		} else if out, handled, err := d.resumeCritiqueLoop(ctx, f); handled || err != nil {
+			// the loop stopped mid-critique, or awaiting the judge: put
+			// the resume back there rather than restarting the
+			// conversation from the top.
+			return out, err
 		} else if d.reattachSilent(f) {
-			return d.crossGate(ctx, f)
+			return d.designComplete(ctx, f)
 		}
 	}
 
@@ -801,7 +813,7 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 			ask := d.pendingAsk(f.ID)
 			if ask == nil {
 				// no question actually pending — treat as a finished turn.
-				return d.crossGate(ctx, f)
+				return d.designComplete(ctx, f)
 			}
 			if d.opts.Autonomous {
 				rec := engine.RecommendedOption(ask)
@@ -828,13 +840,31 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 			d.logPark(f, state.ParkReasonNeedsYou, ask.Question)
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 		case endIdle:
-			// a finished turn with no open question: the design gate.
+			// a finished conversation with no open question: hand it to
+			// the critique, which decides whether the gate is reached.
 			if d.pendingAsk(f.ID) != nil {
 				continue
 			}
-			return d.crossGate(ctx, f)
+			return d.designComplete(ctx, f)
 		}
 	}
+}
+
+// designComplete ends the design stage: critique what the conversation
+// produced, then let the verdict decide. A pass reaches the human gate
+// (judgeCritique's RaiseGate arm), a changes verdict re-runs the stage.
+//
+// A session that is already the critique is judged rather than
+// re-critiqued — the conversation loop can land here more than once.
+func (d *Driver) designComplete(ctx context.Context, f domain.Feature) (Outcome, error) {
+	if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage && snap.Critique {
+		return d.judgeCritique(ctx, f, snap)
+	}
+	if err := d.dispatchCritique(f, ""); err != nil {
+		return Outcome{}, err
+	}
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "critiquing"})
+	return d.awaitCritique(ctx, f)
 }
 
 // driveAutonomous drives an autonomous stage (plan/implement/review/
@@ -843,21 +873,17 @@ func (d *Driver) driveInteractive(ctx context.Context, f domain.Feature) (Outcom
 func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome, error) {
 	d.enterStage(f.Stage)
 	round := 0
+	// Seed the loop's round counter from the persisted value so a resume
+	// honours (and reports) the rounds already burned this cycle. A failed
+	// read aborts stage entry: the count is the budget. Which counter is
+	// the stage's own business (engine.CritiqueRoundKind).
 	switch f.Stage {
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
-		// the work leg of the review loop can be the resume landing point,
-		// so seed it too — the review-round budget must survive the fresh
-		// process, not just a review-stage entry. Investigate is research's
-		// work leg (workflow.WorkStage(KindResearch)), exactly as Implement
-		// and Fix are for features and bugs.
+	case domain.StageImplement:
 		if err := d.seedRounds(ctx, f, domain.RoundKindReview); err != nil {
 			return Outcome{}, err
 		}
 		round = d.round(f.ID, domain.RoundKindReview)
 	case domain.StagePlan:
-		// seed the in-memory counter from the persisted value so a resume
-		// honors (and reports) the rounds already burned this cycle. A
-		// failed read aborts plan-stage entry: the count is the budget.
 		if err := d.seedRounds(ctx, f, domain.RoundKindPlan); err != nil {
 			return Outcome{}, err
 		}
@@ -876,65 +902,8 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	// starts/restarts the writer below. The snapshot's feature stage is the
 	// guard, so a leftover done session from a prior stage is never mistaken
 	// for a resume of this one.
-	if kind, ok := engine.CritiqueRoundKind(f.Stage); ok {
-		if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage {
-			if snap.State == engine.StateDone && !snap.Critique {
-				// the revised plan is on disk: critique it, using the
-				// re-critique kickoff when a prior round was burned.
-				kickoff := ""
-				result := "critiquing"
-				if d.round(f.ID, kind) > 0 {
-					kickoff = verdict.ReCritiqueNote
-					result = "re-critiquing"
-				}
-				if err := d.dispatchCritique(f, kickoff); err != nil {
-					return Outcome{}, err
-				}
-				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: result})
-				return d.awaitCritique(ctx, f)
-			}
-			if snap.State == engine.StateDone && snap.Critique {
-				// awaiting replan/approval: the judge decides (replan writer
-				// on changes, gate on pass). Never re-run the critique —
-				// unless its verdict is unrecoverable: a session judged in
-				// a prior process whose structured verdict never persisted
-				// re-derives Unclear from an empty field, and re-judging
-				// that dead snapshot would escalate identically forever.
-				// Run a fresh critique instead so the loop recovers.
-				if verdict.SessionVerdict(snap) == verdict.Unclear {
-					if err := d.dispatchCritique(f, verdict.ReCritiqueNote); err != nil {
-						return Outcome{}, err
-					}
-					d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "re-critiquing"})
-					return d.awaitCritique(ctx, f)
-				}
-				return d.judgeCritique(ctx, f, snap)
-			}
-			if snap.State == engine.StatePaused && snap.Critique {
-				// the critique session died mid-turn and was restored
-				// paused: re-dispatch it instead of awaiting a pass that
-				// already ended (the bug this guards against: awaiting
-				// forever burns the whole --stage-timeout with nothing
-				// dispatched). Mirrors the TUI's StatePaused+Critique
-				// branch (internal/ui/shell.go:1279-1286).
-				if err := d.dispatchCritique(f, ""); err != nil {
-					return Outcome{}, err
-				}
-				d.sentTurn = true
-				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "resuming " + string(f.Stage) + " critique"})
-				return d.awaitCritique(ctx, f)
-			}
-			if snap.State != engine.StatePaused {
-				// still in flight (running/queued): keep awaiting the
-				// running pass, spawn nothing.
-				return d.awaitCritique(ctx, f)
-			}
-			// a restored paused writer (!Critique): the writer died
-			// mid-turn before producing a plan to critique. Fall through
-			// to the fresh-writer dispatch below — mirrors the TUI's
-			// paused/non-critique fallthrough to engine.Run
-			// (internal/ui/shell.go:1279-1296).
-		}
+	if out, handled, err := d.resumeCritiqueLoop(ctx, f); handled || err != nil {
+		return out, err
 	}
 
 	// a --bounce resume stashed a kickoff note for the first work-stage run
@@ -942,7 +911,7 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	// reaches the reborn implement/fix as an addendum to the kickoff (the
 	// same path Engine.RunWith takes for the diff surface's request-changes).
 	var err error
-	if d.bounceNote != "" && (f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
+	if d.bounceNote != "" && (f.Stage == domain.StageImplement) {
 		note := d.bounceNote
 		d.bounceNote = ""
 		err = d.eng.RunWith(f, note)
@@ -1020,7 +989,7 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			Stage:     domain.StageVerify,
 			Kind:      f.Kind,
 			Verdict:   v,
-			WorkStage: workflow.WorkStage(f.Kind),
+			WorkStage: domain.StageImplement,
 			// verify never auto-bounces here: a failed verify always
 			// escalates today (gatepolicy documents the eligible-to-bounce
 			// rule as dormant; this keeps it switched off).
@@ -1039,21 +1008,10 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			return d.escalation(f, "verify finished with no clear verdict"), nil
 		}
 
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StageImplement, domain.StagePlan:
 		if !snap.Critique {
-			// the work was just written: critique it before the gate. This
-			// is what the Review stage did, minus the transition.
-			if err := d.dispatchCritique(f, ""); err != nil {
-				return Outcome{}, err
-			}
-			d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "critiquing"})
-			return d.awaitCritique(ctx, f)
-		}
-		return d.judgeCritique(ctx, f, snap)
-
-	case domain.StagePlan:
-		if !snap.Critique {
-			// the plan was just written: critique it before the approval gate.
+			// the stage's output was just written: critique it before the
+			// gate. This is what the Review stage did, minus the transition.
 			if err := d.dispatchCritique(f, ""); err != nil {
 				return Outcome{}, err
 			}
@@ -1114,7 +1072,7 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		Verdict:       v,
 		Corrective:    d.round(f.ID, kind),
 		CorrectiveMax: max,
-		WorkStage:     workflow.WorkStage(f.Kind),
+		WorkStage:     domain.StageImplement,
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
@@ -1204,7 +1162,7 @@ func (d *Driver) awaitRework(ctx context.Context, f domain.Feature) (Outcome, er
 // its own reporting.
 func (d *Driver) dispatchCritique(f domain.Feature, note string) error {
 	switch f.Stage {
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StageImplement, domain.StagePlan:
 		d.reviewsRun++
 	}
 	return d.eng.RunCritique(f, note)
@@ -1770,7 +1728,7 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 		// reported) must not suppress the resumability lookup — the card is
 		// exactly what a caller needs to know survives.
 		if f, gerr := d.store.GetFeature(context.WithoutCancel(ctx), domain.FeatureID(id)); gerr == nil {
-			ev.Resumable = !workflow.Terminal(f.Kind, f.Stage)
+			ev.Resumable = !workflow.Terminal(f.Stage)
 			ev.Stage = string(f.Stage)
 			if ev.Resumable {
 				ev.Next = resumeCmd(id)
@@ -1876,45 +1834,22 @@ func (d *Driver) emitResult(f domain.Feature, v verdict.Verdict) {
 }
 
 // UntilStops lists the stages --until may name for an item's route: the
-// design-side stages actually present on it (Interactive stages plus a
-// feature's Plan), in workflow order. These are the deliberate
-// pre-implementation boundaries where stopping is meaningful and
-// unambiguous (unlike the implement↔review rerun loop). A skipped stage
-// is not on the route, so it is never a valid stop — on the quick route
-// (brainstorm + plan skipped) only Spec remains.
-func UntilStops(kind domain.Kind, skip domain.SkipFlags) []domain.Stage {
-	var out []domain.Stage
-	if kind == domain.KindResearch {
-		return []domain.Stage{domain.StageShape}
-	}
-	if kind == domain.KindBug {
-		if !skip.Triage {
-			out = append(out, domain.StageTriage)
-		}
-		if !skip.Diagnose {
-			out = append(out, domain.StageDiagnose)
-		}
-		return out
-	}
-	if !skip.Brainstorm {
-		out = append(out, domain.StageBrainstorm)
-	}
-	out = append(out, domain.StageSpec)
-	if !skip.Plan {
-		out = append(out, domain.StagePlan)
-	}
-	return out
+// UntilStops are the stages `--until` may name: the design gate, the one
+// deliberate pre-implementation boundary where stopping is meaningful
+// and unambiguous.
+//
+// It used to be a per-kind, per-skip list because each workflow had two
+// or three design stages and a skipped one was not on the route. There
+// is one design stage now and nothing to skip, so there is one stop.
+func UntilStops() []domain.Stage {
+	return []domain.Stage{domain.StagePlan}
 }
 
-// ValidateUntil accepts an empty Until (run to verified) or a stage that is
-// a legal stop on the item's route (UntilStops); anything else — an
-// off-route stage (e.g. --until plan on the quick route) or an unknown
-// stage — is a usage error naming the valid choices.
-func ValidateUntil(until domain.Stage, kind domain.Kind, skip domain.SkipFlags) error {
+func ValidateUntil(until domain.Stage) error {
 	if until == "" {
 		return nil
 	}
-	stops := UntilStops(kind, skip)
+	stops := UntilStops()
 	for _, s := range stops {
 		if s == until {
 			return nil
@@ -1930,15 +1865,18 @@ func ValidateUntil(until domain.Stage, kind domain.Kind, skip domain.SkipFlags) 
 // forwardEdge is the primary forward stage out of f's current stage, for
 // labeling a caller-gate's `to`. It mirrors Advance's edge choice.
 func forwardEdge(f domain.Feature) domain.Stage {
-	nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
+	nexts := workflow.Next(f.Stage)
 	if len(nexts) == 0 {
 		return f.Stage
 	}
-	return nexts[len(nexts)-1]
+	// nexts[0]: forward edges are listed before rerun edges, and this
+	// names the forward one. See Engine.nextStage for why it is no longer
+	// the last entry.
+	return nexts[0]
 }
 
-// firstErr returns a if non-nil, else fallback — for turning an optional error
-// detail into a guaranteed non-nil error.
+// firstErr returns a if non-nil, else fallback — for turning an optional
+// error detail into a guaranteed non-nil error.
 func firstErr(a, fallback error) error {
 	if a != nil {
 		return a
@@ -2059,4 +1997,87 @@ func (d *Driver) emitActivity(id domain.FeatureID) {
 	if len(act) > d.activityCur {
 		d.activityCur = len(act)
 	}
+}
+
+// resumeCritiqueLoop puts a resume back where the stage's loop actually
+// stopped, rather than restarting the stage's writer from the top.
+//
+// handled is false when there is nothing to resume — no restored session
+// for this stage, or a paused writer that died before producing anything
+// to critique — and the caller starts the stage normally.
+//
+// Shared by both drive paths: the design stage converses and the work
+// stage does not, but both end with a critique, and a resume must land in
+// the same place either way.
+func (d *Driver) resumeCritiqueLoop(ctx context.Context, f domain.Feature) (Outcome, bool, error) {
+	kind, ok := engine.CritiqueRoundKind(f.Stage)
+	if !ok {
+		return Outcome{}, false, nil
+	}
+	{
+		if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage {
+			if snap.State == engine.StateDone && !snap.Critique {
+				// the revised plan is on disk: critique it, using the
+				// re-critique kickoff when a prior round was burned.
+				kickoff := ""
+				result := "critiquing"
+				if d.round(f.ID, kind) > 0 {
+					kickoff = verdict.ReCritiqueNote
+					result = "re-critiquing"
+				}
+				if err := d.dispatchCritique(f, kickoff); err != nil {
+					return Outcome{}, true, err
+				}
+				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: result})
+				out, err := d.awaitCritique(ctx, f)
+				return out, true, err
+			}
+			if snap.State == engine.StateDone && snap.Critique {
+				// awaiting replan/approval: the judge decides (replan writer
+				// on changes, gate on pass). Never re-run the critique —
+				// unless its verdict is unrecoverable: a session judged in
+				// a prior process whose structured verdict never persisted
+				// re-derives Unclear from an empty field, and re-judging
+				// that dead snapshot would escalate identically forever.
+				// Run a fresh critique instead so the loop recovers.
+				if verdict.SessionVerdict(snap) == verdict.Unclear {
+					if err := d.dispatchCritique(f, verdict.ReCritiqueNote); err != nil {
+						return Outcome{}, true, err
+					}
+					d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "re-critiquing"})
+					out, err := d.awaitCritique(ctx, f)
+					return out, true, err
+				}
+				out, err := d.judgeCritique(ctx, f, snap)
+				return out, true, err
+			}
+			if snap.State == engine.StatePaused && snap.Critique {
+				// the critique session died mid-turn and was restored
+				// paused: re-dispatch it instead of awaiting a pass that
+				// already ended (the bug this guards against: awaiting
+				// forever burns the whole --stage-timeout with nothing
+				// dispatched). Mirrors the TUI's StatePaused+Critique
+				// branch (internal/ui/shell.go:1279-1286).
+				if err := d.dispatchCritique(f, ""); err != nil {
+					return Outcome{}, true, err
+				}
+				d.sentTurn = true
+				d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "resuming " + string(f.Stage) + " critique"})
+				out, err := d.awaitCritique(ctx, f)
+				return out, true, err
+			}
+			if snap.State != engine.StatePaused {
+				// still in flight (running/queued): keep awaiting the
+				// running pass, spawn nothing.
+				out, err := d.awaitCritique(ctx, f)
+				return out, true, err
+			}
+			// a restored paused writer (!Critique): the writer died
+			// mid-turn before producing a plan to critique. Fall through
+			// to the fresh-writer dispatch below — mirrors the TUI's
+			// paused/non-critique fallthrough to engine.Run
+			// (internal/ui/shell.go:1279-1296).
+		}
+	}
+	return Outcome{}, false, nil
 }

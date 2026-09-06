@@ -13,7 +13,6 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The `A` dialog: point autopilot at a card and the card runs — not at
@@ -90,12 +89,8 @@ func autopilotForward(f domain.Feature) (domain.Stage, bool) {
 	switch f.Stage {
 	case domain.StagePlan:
 		return domain.StageImplement, true
-	case domain.StageDiagnose:
-		return domain.StageFix, true
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement:
 		return domain.StageVerify, true
-	case domain.StageInvestigate:
-		return domain.StageShape, true
 	default:
 		return "", false
 	}
@@ -124,7 +119,7 @@ func autopilotHandoverEdge(f domain.Feature) (domain.Stage, bool) {
 	case domain.StageVerify, domain.StageDone, domain.StageTodo:
 		return "", false
 	}
-	seq := stageSequence(f)
+	seq := stageSequence()
 	for i, st := range seq {
 		if st != f.Stage {
 			continue
@@ -137,12 +132,12 @@ func autopilotHandoverEdge(f domain.Feature) (domain.Stage, bool) {
 	return "", false
 }
 
-// remainingStages is stageSequence's (thread.go) ordered stage list for
-// f's own workflow, truncated to start at `from` (inclusive) and to
-// exclude domain.StageDone — the one stop a non-off mode never carries a
-// card into by itself.
-func remainingStages(f domain.Feature, from domain.Stage) []domain.Stage {
-	seq := stageSequence(f)
+// remainingStages is stageSequence's (thread.go) ordered stage list,
+// truncated to start at `from` (inclusive) and to exclude
+// domain.StageDone — the one stop a non-off mode never carries a card
+// into by itself.
+func remainingStages(from domain.Stage) []domain.Stage {
+	seq := stageSequence()
 	idx := -1
 	for i, st := range seq {
 		if st == from {
@@ -172,9 +167,9 @@ func (m *Shell) planAutopilot(f domain.Feature) autopilotPlan {
 		// next stop on f's own sequence (thread.go's stageSequence),
 		// which already resolves brainstorm vs. spec vs. plan for a
 		// skip-flagged card the same way advanceStage does.
-		if seq := stageSequence(f); len(seq) > 1 {
+		if seq := stageSequence(); len(seq) > 1 {
 			to := seq[1]
-			return autopilotPlan{bucket: "todo", to: to, remaining: remainingStages(f, to)}
+			return autopilotPlan{bucket: "todo", to: to, remaining: remainingStages(to)}
 		}
 		return autopilotPlan{bucket: "todo"}
 	}
@@ -187,7 +182,7 @@ func (m *Shell) planAutopilot(f domain.Feature) autopilotPlan {
 	// and moved nothing, directly under a row promising that gates cross
 	// themselves from here.
 	if to, ok := autopilotHandoverEdge(f); ok && m.atGate(f.ID) {
-		return autopilotPlan{bucket: "gate", to: to, remaining: remainingStages(f, to)}
+		return autopilotPlan{bucket: "gate", to: to, remaining: remainingStages(to)}
 	}
 	return autopilotPlan{bucket: "running", working: m.sessionWorking(f.ID)}
 }
@@ -315,27 +310,12 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 	if f.Budget.Envelope > 0 {
 		envelope = fmt.Sprintf(", inside a %d credit envelope", f.Budget.Envelope)
 	}
-	// The stages ahead split in two, and naming them as one list was a
-	// promise the switch could not keep. Autopilot never runs a stage
-	// that needs a person: it crosses into one and hands the card
-	// straight back (autoStepStage, and closeHandedOver's own reading of
-	// it). A card started from todo always meets one of those first —
-	// brainstorm, triage, shape — so the old single list opened by naming
-	// the stage the run was about to stop at as one it would run.
-	var runs, stops []domain.Stage
-	for _, st := range plan.remaining {
-		if workflow.Interactive(st) {
-			stops = append(stops, st)
-		} else {
-			runs = append(runs, st)
-		}
-	}
+	// Every remaining stage is one autopilot may run: no stage needs a
+	// person by nature any more, so the list that used to split in two —
+	// the stages it runs, and the ones it would only open and hand back —
+	// is one list again.
+	runs := plan.remaining
 	var out []string
-	if len(stops) > 0 {
-		// first, because it happens first: this is the sentence someone
-		// starting a card from todo needs before they walk away.
-		out = append(out, fmt.Sprintf("it never runs %s on its own — it opens each one and stops for you.", englishList(stops)))
-	}
 	switch {
 	case len(runs) == 0:
 		// nothing it may run unattended, so no promise about running one

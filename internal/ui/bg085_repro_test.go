@@ -36,16 +36,16 @@ func TestBG085PeriodClosesWhenAutopilotHandsOver(t *testing.T) {
 	// and stops, because shape is interactive.
 	f := aFeature()
 	f.Kind = domain.KindResearch
-	f.Stage = domain.StageShape
+	f.Stage = domain.StagePlan
 
 	events := []state.CardEvent{
 		evTookOver(domain.GateAttended, at(0)),
-		evGate(domain.StageInvestigate, domain.StageShape, state.ActorAutopilot, at(6)),
+		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
 
 	// live: the TUI that ran the stage is still up and still holds the
 	// card's live file, which is the case the defect lived in.
-	st := onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(f, events), events), events, true))
+	st := onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(events), events), events, true))
 	if st.running() {
 		t.Fatal("the period is still open while the card waits at an interactive stage")
 	}
@@ -80,14 +80,14 @@ func TestBG085AutonomousStageKeepsThePeriodOpen(t *testing.T) {
 		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(6)),
 	}
-	st := onlyStretch(t, closeHandedOver(f, autopilotStretches(f, events), events))
+	st := onlyStretch(t, closeHandedOver(f, autopilotStretches(events), events))
 	if !st.running() {
 		t.Fatalf("closed = %q, want the period still open — implement is autopilot's to drive", st.closed)
 	}
 
 	// and with the driver gone, that same period still reads as orphaned,
 	// so BG-059's judgement is not shadowed by this one
-	st = onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(f, events), events), events, false))
+	st = onlyStretch(t, closeOrphaned(closeHandedOver(f, autopilotStretches(events), events), events, false))
 	if st.closed != stretchOrphaned {
 		t.Errorf("closed = %q, want %q for a dead driver mid-route", st.closed, stretchOrphaned)
 	}
@@ -100,14 +100,14 @@ func TestBG085AutonomousStageKeepsThePeriodOpen(t *testing.T) {
 func TestBG085AlreadyClosedPeriodIsLeftAlone(t *testing.T) {
 	f := aFeature()
 	f.Kind = domain.KindResearch
-	f.Stage = domain.StageShape
+	f.Stage = domain.StagePlan
 
 	events := []state.CardEvent{
 		evTookOver(domain.GateAttended, at(0)),
-		evGate(domain.StageInvestigate, domain.StageShape, state.ActorAutopilot, at(6)),
-		evPark(domain.StageShape, "stopped early at --until shape, as requested", at(8)),
+		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, at(6)),
+		evPark(domain.StagePlan, "stopped early at --until shape, as requested", at(8)),
 	}
-	st := onlyStretch(t, closeHandedOver(f, autopilotStretches(f, events), events))
+	st := onlyStretch(t, closeHandedOver(f, autopilotStretches(events), events))
 	if st.closed != stretchParked {
 		t.Errorf("closed = %q, want %q — the log's own ending wins", st.closed, stretchParked)
 	}
@@ -129,7 +129,7 @@ func TestBG085HandoverRuleIsActuallyDrawn(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m.Attach(store, wt, ws)
 
-	f := mkFeature(t, store, 7, "snapshot retention across backends", domain.StageShape)
+	f := mkFeature(t, store, 7, "snapshot retention across backends", domain.StagePlan)
 	f.Kind = domain.KindResearch
 	m.rows = []featureRow{{F: f}}
 	m.sel = 0
@@ -141,14 +141,14 @@ func TestBG085HandoverRuleIsActuallyDrawn(t *testing.T) {
 	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "Done."})
 	exit, _ := json.Marshal(map[string]any{"verdict": "", "credits": 18})
 	cross, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageInvestigate), To: string(domain.StageShape), Actor: state.ActorAutopilot,
+		From: string(domain.StagePlan), To: string(domain.StagePlan), Actor: state.ActorAutopilot,
 	})
 	if err := store.AppendEvents(ctx, []state.CardEvent{
-		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventAutopilot, At: stamp, Payload: string(took), Dedupe: "took"},
-		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventStageEnter, At: stamp, Payload: string(enter), Dedupe: "enter"},
-		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventMessage, At: stamp.Add(time.Minute), Payload: string(says), Dedupe: "said"},
-		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventStageExit, At: stamp.Add(time.Minute), Payload: string(exit), Dedupe: "exit"},
-		{Feature: f.ID, Stage: domain.StageInvestigate, Kind: state.EventGate, At: stamp.Add(2 * time.Minute), Payload: string(cross), Dedupe: "cross"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventAutopilot, At: stamp, Payload: string(took), Dedupe: "took"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageEnter, At: stamp, Payload: string(enter), Dedupe: "enter"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventMessage, At: stamp.Add(time.Minute), Payload: string(says), Dedupe: "said"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageExit, At: stamp.Add(time.Minute), Payload: string(exit), Dedupe: "exit"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventGate, At: stamp.Add(2 * time.Minute), Payload: string(cross), Dedupe: "cross"},
 	}); err != nil {
 		t.Fatal(err)
 	}

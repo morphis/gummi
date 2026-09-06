@@ -372,7 +372,6 @@ func decodeProposal(data []byte) (domain.IngestResult, error) {
 			OneLiner:   strings.TrimSpace(f.OneLiner),
 			SourceRefs: trimNonEmpty(f.SourceRefs),
 			DependsOn:  trimNonEmpty(f.DependsOn),
-			Skip:       domain.SkipFlags{Brainstorm: f.Skip.Brainstorm, Plan: f.Skip.Plan},
 			Draft: domain.DraftSeed{
 				Problem:       strings.TrimSpace(f.Problem),
 				Constraints:   strings.TrimSpace(f.Constraints),

@@ -200,10 +200,10 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	// offer it there or from a stage with a legal edge to it
 	// (review/verify), so it never tears down a running session for a
 	// transition that will just be rejected.
-	workStage := workflow.WorkStage(dv.f.Kind)
+	workStage := domain.StageImplement
 	atWork := dv.f.Stage == workStage
 	if !atWork {
-		if err := workflow.CanTransition(dv.f.Kind, dv.f.Stage, workStage, dv.f.Skip); err != nil {
+		if err := workflow.CanTransition(dv.f.Stage, workStage); err != nil {
 			m.notice = noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}
 			return nil
 		}

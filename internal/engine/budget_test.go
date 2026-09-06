@@ -85,7 +85,7 @@ func TestBudgetNoCapForInteractive(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 
-	s, err := e.Attach(context.Background(), feature(1, "x", domain.StageBrainstorm))
+	s, err := e.Attach(context.Background(), feature(1, "x", domain.StagePlan))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,7 +44,7 @@ func TestEnvironmentCardAbsent(t *testing.T) {
 	e := newEngine(t, rec)
 
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "x", domain.StageSpec)); err != nil {
+	if _, err := e.Attach(ctx, feature(1, "x", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle)
@@ -64,7 +64,7 @@ func TestEnvironmentCardIsFirstHint(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "x", domain.StageSpec)); err != nil {
+	if _, err := e.Attach(ctx, feature(1, "x", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle)
@@ -86,7 +86,7 @@ func TestEnvironmentCardStageAgnostic(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	// Triage is an interactive bug stage: the card should still be first.
-	f := bugFeatureAt(1, "x", domain.StageTriage)
+	f := bugFeatureAt(1, "x", domain.StagePlan)
 	ctx := context.Background()
 	if _, err := e.Attach(ctx, f); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestEnvironmentCardNotInOneShot(t *testing.T) {
 		t.Cleanup(func() { e.Close() })
 
 		// Use an interactive stage so no worktree is required.
-		f := feature(1, "x", domain.StageBrainstorm)
+		f := feature(1, "x", domain.StagePlan)
 		if _, err := e.Estimate(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +196,7 @@ func TestEnvironmentCardOversizeSurfacesOnNextSession(t *testing.T) {
 	// Trigger the lazy read (and warning) without a session that flushes.
 	_ = e.environmentCard()
 
-	f := feature(1, "x", domain.StageSpec)
+	f := feature(1, "x", domain.StagePlan)
 	s, err := e.Attach(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestEnvironmentCardAppendsInstructions(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "x", domain.StageSpec)); err != nil {
+	if _, err := e.Attach(ctx, feature(1, "x", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle)
@@ -320,7 +320,7 @@ func TestEnvironmentCardOversizeSurfacesAfterDiscoverChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sf := feature(2, "x", domain.StageSpec)
+	sf := feature(2, "x", domain.StagePlan)
 	s, err := e.Attach(context.Background(), sf)
 	if err != nil {
 		t.Fatal(err)

@@ -79,7 +79,7 @@ func writeAt(t *testing.T, root, rel string, body ...string) {
 func TestTripNewTrackedWrite(t *testing.T) {
 	r := newTripRig(t)
 	r.write("cmd/gummi/main.go")
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	ev := waitFor(t, r.e, EventTripwire)
@@ -97,7 +97,7 @@ func TestTripNewTrackedWrite(t *testing.T) {
 func TestTripMultiPathSorted(t *testing.T) {
 	r := newTripRig(t)
 	r.write("b.go", "a.go")
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	ev := waitFor(t, r.e, EventTripwire)
@@ -110,7 +110,7 @@ func TestTripMultiPathSorted(t *testing.T) {
 func TestTripGummiInvisible(t *testing.T) {
 	r := newTripRig(t)
 	r.write(".gummi/scratch.txt")
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, r.e, EventIdle) // completes normally; a trip would emit EventTripwire instead
@@ -122,7 +122,7 @@ func TestTripPreexistingDirtyNoTrip(t *testing.T) {
 	r := newTripRig(t)
 	writeAt(t, r.root, "README.md", "operator dirty\n") // operator dirt present before the turn
 	r.write("README.md")                                // agent re-edits the same path during the turn
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, r.e, EventIdle)
@@ -134,7 +134,7 @@ func TestTripNewDirtOnDirty(t *testing.T) {
 	r := newTripRig(t)
 	writeAt(t, r.root, "README.md", "operator dirty\n") // operator dirt
 	r.write("NEWFILE.md")
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	ev := waitFor(t, r.e, EventTripwire)
@@ -151,7 +151,7 @@ func TestTripGitignoreQuiet(t *testing.T) {
 	gitOut(t, r.root, "add", "-A")
 	gitOut(t, r.root, "commit", "-qm", "add gitignore")
 	r.write("build.tmp")
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, r.e, EventIdle)
@@ -163,7 +163,7 @@ func TestTripGitignoreQuiet(t *testing.T) {
 func TestTripSessionHalted(t *testing.T) {
 	r := newTripRig(t)
 	r.write("cmd/gummi/main.go")
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, r.e, EventTripwire)
@@ -199,7 +199,7 @@ func TestTripPreTurnErrorDoesNotSpuriouslyTrip(t *testing.T) {
 		return real(ctx)
 	}
 
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, r.e, EventIdle) // no trip; EventTripwire would have replaced it
@@ -240,7 +240,7 @@ func TestCloseCancelsInFlightTripSnapshot(t *testing.T) {
 	r.ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
-	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StageBrainstorm)); err != nil {
+	if _, err := r.e.Attach(context.Background(), feature(1, "Dark mode", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -282,7 +282,7 @@ func TestTripwireDisarmedOnOff(t *testing.T) {
 		return real(ctx)
 	}
 
-	if _, err := e.Attach(context.Background(), feature(1, "Z", domain.StageBrainstorm)); err != nil {
+	if _, err := e.Attach(context.Background(), feature(1, "Z", domain.StagePlan)); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventIdle) // a trip would replace this with EventTripwire and hang the wait
@@ -304,7 +304,7 @@ func TestResearchPreExistingDirtStartsAnyway(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f := feature(1, "rs investigate", domain.StageImplement)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
@@ -329,7 +329,7 @@ func TestResearchPreExistingDirtStartsAnyway(t *testing.T) {
 func TestResearchMidRunTripwire(t *testing.T) {
 	r := newTripRig(t)
 	r.ag.Caps.ReadOnlyEnforce = true
-	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f := feature(1, "rs investigate", domain.StageImplement)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	if err := r.e.cfg.Store.CreateFeature(context.Background(), &f); err != nil {

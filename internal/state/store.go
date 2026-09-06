@@ -285,6 +285,10 @@ func OpenStore(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
+	if err := migrateMergedStages(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -577,10 +581,13 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			pr_repo, pr_number, pr_url, pr_head_sha)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
-		f.Skip.Brainstorm, f.Skip.Plan, f.Profile,
+		// the two false values are skip_brainstorm/skip_plan: vestigial
+		false, false, f.Profile,
 		f.Budget.Envelope,
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
-		string(kind), f.ExternalRef, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.GateApproval, string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.Repo,
+		// the three false values are skip_triage/skip_diagnose/quick: vestigial
+		string(kind), f.ExternalRef, false, false, false, f.GateApproval,
+		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
@@ -617,13 +624,18 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, severity string
+	// The five skip_* columns are vestigial: SkipFlags went with the
+	// three-graph era (there is one graph and nothing left to skip), but
+	// the columns stay so an older gummi can still read the database and
+	// so no rebuild is needed to drop them. Scanned into a bin.
+	var vestigialSkips [5]bool
 	err := r.Scan(&id, &f.Num, &f.Title, &f.OneLiner, &f.Slug, &stage,
-		&f.Skip.Brainstorm, &f.Skip.Plan, &f.Profile,
+		&vestigialSkips[0], &vestigialSkips[1], &f.Profile,
 		&f.Budget.Envelope,
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &f.Skip.Triage, &f.Skip.Diagnose, &f.Skip.Quick, &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
+		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA)
 	if err != nil {
 		return f, err
@@ -1170,12 +1182,10 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	}
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
-		UPDATE features SET title=?, one_liner=?, slug=?,
-			skip_brainstorm=?, skip_plan=?, skip_triage=?, skip_diagnose=?, quick=?, profile=?,
+		UPDATE features SET title=?, one_liner=?, slug=?, profile=?,
 			budget_envelope=?, repo=?, updated_at=?
 		WHERE id=?`,
-		f.Title, f.OneLiner, f.Slug,
-		f.Skip.Brainstorm, f.Skip.Plan, f.Skip.Triage, f.Skip.Diagnose, f.Skip.Quick, f.Profile,
+		f.Title, f.OneLiner, f.Slug, f.Profile,
 		f.Budget.Envelope, f.Repo,
 		now.Format(timeFmt), string(f.ID))
 	if err != nil {
@@ -1227,7 +1237,7 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	if err != nil {
 		return f, err
 	}
-	if err := workflow.CanTransition(f.Kind, f.Stage, to, f.Skip); err != nil {
+	if err := workflow.CanTransition(f.Stage, to); err != nil {
 		return f, fmt.Errorf("%s: %w", id, err)
 	}
 	now := time.Now().UTC()
@@ -1331,4 +1341,49 @@ func migrateReviewStage(db *sql.DB) error {
 	_, err := db.ExecContext(context.Background(),
 		`UPDATE features SET stage = 'verify' WHERE stage = 'review'`)
 	return err
+}
+
+// migrateMergedStages maps every card off the thirteen-stage era onto the
+// five stages that replaced it.
+//
+// The plan for this change called for wipe-and-reseed, on the grounds
+// that the mapping is lossy: "a card at brainstorm and one at plan are
+// not the same state". That was true when brainstorm, spec and plan were
+// three stages. Collapsing them into one IS the change — the two cards
+// genuinely are in the same state afterwards, and calling that data loss
+// confuses the semantics of the merge with corruption. So this migrates
+// rather than destroys: nobody has to throw away a board to take an
+// upgrade.
+//
+// The design stages all become plan: brainstorm/spec/plan for a feature,
+// triage/diagnose for a bug, investigate/shape for research. They were
+// one slot spelled three ways, which is the whole thesis of the merge.
+// Fix becomes implement for the same reason. Todo, verify and done are
+// unchanged, and review was already retired by migrateReviewStage.
+//
+// Research is the one kind whose order changed rather than collapsed:
+// the old graph surveyed (investigate) and then converged (shape), while
+// the merged one converges at the design stage and gathers the evidence
+// at implement. An old investigate card therefore lands at plan, not at
+// implement — behind its design gate rather than past it, which is the
+// direction a migration is allowed to be wrong in.
+//
+// A card mid-design loses which sub-stage it was in, and that is the only
+// thing lost. It is the fact the merge deliberately stops tracking; the
+// artifact it wrote, its worktree, its branch, its events and its spend
+// all survive untouched.
+//
+// Idempotent by construction: every UPDATE is a no-op once its rows are
+// gone, so re-running on a migrated or fresh database does nothing.
+func migrateMergedStages(db *sql.DB) error {
+	for _, stmt := range []string{
+		`UPDATE features SET stage = 'plan' WHERE stage IN
+			('brainstorm', 'spec', 'triage', 'diagnose', 'investigate', 'shape')`,
+		`UPDATE features SET stage = 'implement' WHERE stage = 'fix'`,
+	} {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

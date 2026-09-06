@@ -19,7 +19,7 @@ func reviewLoopScript(verdicts ...string) map[domain.Stage]stageFn {
 	var reviews int
 	var implements int
 	return map[domain.Stage]stageFn{
-		domain.StageSpec: idleTurn,
+		domain.StagePlan: idleTurn,
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleScribe {
 				return msgIdle(o.Model, "Implemented.")
@@ -33,7 +33,12 @@ func reviewLoopScript(verdicts ...string) map[domain.Stage]stageFn {
 			}
 			return []agent.Event{{Kind: agent.EventBudgetExhausted}}
 		},
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			// the design stage has a critique too now; this script is
+			// about the WORK stage's, so let the design one pass.
+			if h.stageOf(h.only()) == domain.StagePlan {
+				return toolVerdict(o.Model, "pass")
+			}
 			mu.Lock()
 			n := reviews
 			reviews++
@@ -98,12 +103,17 @@ func TestReviewRoundsClearedOnPassGate(t *testing.T) {
 	var mu sync.Mutex
 	var reviews int
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec:      idleTurn,
+		domain.StagePlan:      idleTurn,
 		domain.StageImplement: idleTurn,
 		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return prosePass(o.Model)
 		},
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		stageCritique: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			// the design stage has a critique too now; this script is
+			// about the WORK stage's, so let the design one pass.
+			if h.stageOf(h.only()) == domain.StagePlan {
+				return toolVerdict(o.Model, "pass")
+			}
 			mu.Lock()
 			n := reviews
 			reviews++
@@ -177,21 +187,21 @@ func firstWorkStageRound(h *harness) int {
 // feature adds: a research card that was bounced review→investigate (one
 // review round already burned) parks/resumes at Investigate with the
 // review counter seeded from the store — round 1, not a fresh grant — and
-// the driver's applyVerdict investigate case steps it forward to Shape
-// (the existing investigate→shape forward edge), rather than hitting the
-// "unexpected autonomous stage investigate" default.
+// the driver steps a research card's work stage forward to verify like
+// any other card's, rather than hitting an "unexpected autonomous stage"
+// default. One graph means research has no special leg to land on.
 func TestRSReviewLegLanding(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageInvestigate: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Investigated further.")
 		},
-		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Shaped.")
-		},
-	
-		// investigate ends with a critique now; a drive that is not about
-		// the critique still needs it to pass.
+
+		// the work stage ends with a critique now; a drive that is not
+		// about the critique still needs it to pass.
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return toolVerdict(o.Model, "pass")
 		},
 	})
@@ -206,7 +216,7 @@ func TestRSReviewLegLanding(t *testing.T) {
 	now := time.Now()
 	f := domain.Feature{
 		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
-		Stage: domain.StageInvestigate, CreatedAt: now, UpdatedAt: now,
+		Stage: domain.StageImplement, CreatedAt: now, UpdatedAt: now,
 	}
 	putDraft(t, h, &f, "# RS-001: research card\n\n## Findings\n\nNothing yet.\n")
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
@@ -217,18 +227,19 @@ func TestRSReviewLegLanding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := h.driver(Options{Until: domain.StageShape}).drive(context.Background(), f.ID)
+	_, err = h.driver(Options{}).drive(context.Background(), f.ID)
 	if err != nil {
 		t.Fatalf("drive: %v", err)
 	}
-	if out.Status != StatusStopped {
-		t.Fatalf("status = %q, want stopped; stream=%v", out.Status, h.eventKinds())
-	}
-	if got := h.stageOf(f.ID); got != domain.StageShape {
-		t.Fatalf("feature at %s, want Shape (investigate stepped forward)", got)
+	// The card walks its work leg forward and lands on research's own
+	// decompose gate, which this fixture has no proposals for — that gate
+	// is decompose's business, tested there. What matters here is that the
+	// leg moved at all and carried its burned round with it.
+	if got := h.stageOf(f.ID); got == domain.StageImplement {
+		t.Fatalf("feature stuck at %s; the work leg never stepped forward", got)
 	}
 	if r := investigateStageRound(h); r != 1 {
-		t.Fatalf("investigate stage-event round = %d, want 1 (the burned round, not a fresh grant)", r)
+		t.Fatalf("work-stage event round = %d, want 1 (the burned round, not a fresh grant)", r)
 	}
 }
 
@@ -236,7 +247,7 @@ func TestRSReviewLegLanding(t *testing.T) {
 // in the stream, or -1 if none was emitted.
 func investigateStageRound(h *harness) int {
 	for _, e := range h.events() {
-		if e["event"] == "stage" && e["stage"] == "investigate" {
+		if e["event"] == "stage" && e["stage"] == "implement" {
 			if r, ok := e["round"].(float64); ok {
 				return int(r)
 			}

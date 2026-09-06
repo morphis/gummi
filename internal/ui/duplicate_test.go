@@ -28,8 +28,7 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	src := domain.Feature{
 		ID: "FD-001", Num: 1, Title: "Add a healthz endpoint",
 		OneLiner: "So the load balancer can check liveness.",
-		Slug:     "add-a-healthz-endpoint", Stage: domain.StageTodo,
-		Skip: domain.SkipFlags{Brainstorm: true}, Profile: "fast",
+		Slug:     "add-a-healthz-endpoint", Stage: domain.StageTodo, Profile: "fast",
 		Budget:      domain.Budget{Envelope: 500},
 		ExternalRef: "https://github.com/o/r/issues/42",
 		CreatedAt:   now, UpdatedAt: now,
@@ -40,7 +39,7 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	if err := store.AddSpend(ctx, src.ID, 12.5, 0, 1000, 2000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Transition(ctx, src.ID, domain.StageSpec, "user"); err != nil {
+	if _, err := store.Transition(ctx, src.ID, domain.StagePlan, "user"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -60,8 +59,8 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	if dup.Stage != domain.StageTodo {
 		t.Errorf("copy stage = %q, want todo", dup.Stage)
 	}
-	if !dup.Skip.Brainstorm || dup.Profile != "fast" {
-		t.Errorf("copy lost run settings: skip=%+v profile=%q", dup.Skip, dup.Profile)
+	if dup.Profile != "fast" {
+		t.Errorf("copy lost run settings: profile=%q", dup.Profile)
 	}
 	if dup.Budget.Envelope != 500 {
 		t.Errorf("copy budget = %+v, want the envelope with nothing spent", dup.Budget)
@@ -77,7 +76,7 @@ func TestDuplicateFeatureFreshCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if orig.Stage != domain.StageSpec || orig.Spend.Zero() || orig.ExternalRef == "" {
+	if orig.Stage != domain.StagePlan || orig.Spend.Zero() || orig.ExternalRef == "" {
 		t.Errorf("original changed by duplicate: stage=%q spend=%+v ref=%q", orig.Stage, orig.Spend, orig.ExternalRef)
 	}
 }

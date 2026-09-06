@@ -29,19 +29,21 @@ func TestResearchEnvelopeFallback(t *testing.T) {
 	}
 }
 
-// --until is validated against RS's route (only "shape" is a legal stop)
-// before any workspace work begins, exactly like runRun's until check.
+// --until is validated against the route (the design stage is the only
+// legal stop) before any workspace work begins, exactly like runRun's
+// until check. A research card runs the same graph every other card
+// does, so the stop it names is the same one.
 func TestResearchUntilValidation(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "100")
-	for _, until := range []string{"brainstorm", "spec", "plan", "banana"} {
+	for _, until := range []string{"brainstorm", "spec", "implement", "banana"} {
 		err := runResearch([]string{"--until", until, "a research brief"})
-		if err == nil || !strings.Contains(err.Error(), "not a valid stop") || !strings.Contains(err.Error(), "shape") {
-			t.Fatalf("--until %s: err = %v, want a rejection naming shape as the only valid stop", until, err)
+		if err == nil || !strings.Contains(err.Error(), "not a valid stop") || !strings.Contains(err.Error(), "plan") {
+			t.Fatalf("--until %s: err = %v, want a rejection naming plan as the only valid stop", until, err)
 		}
 	}
 }
 
-// RS has no brainstorm/plan and no Verification-plan section to seed, so
+// RS seeds no Verification-plan section and has no route to widen, so
 // its flag surface deliberately omits --full and --acceptance.
 func TestResearchRejectsFullAndAcceptance(t *testing.T) {
 	fs := flag.NewFlagSet("research", flag.ContinueOnError)

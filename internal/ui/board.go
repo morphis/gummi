@@ -29,8 +29,6 @@ func stageGlyph(s domain.Stage) string {
 		return "○"
 	case domain.SuperInProgress:
 		return "●"
-	case domain.SuperResearch:
-		return "◇"
 	case domain.SuperReviewVerify:
 		return "◐"
 	case domain.SuperDone:
@@ -360,8 +358,6 @@ func formatCount(super domain.SuperState, n int) string {
 		return c + " todo"
 	case domain.SuperInProgress:
 		return c + " active"
-	case domain.SuperResearch:
-		return c + " research"
 	case domain.SuperReviewVerify:
 		return c + " in review"
 	case domain.SuperDone:

@@ -164,13 +164,11 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 	if kind == "" {
 		kind = domain.KindFeature
 	}
+	// One workflow, so one route. The field stays on the wire for a
+	// consumer that still reads it; it can no longer vary.
 	route := ""
 	if kind == domain.KindFeature {
-		if f.Skip.Quick {
-			route = "quick"
-		} else {
-			route = "full"
-		}
+		route = "full"
 	}
 	sq, dq := gateBlockers(ctx, store, wt, ws, f)
 	return statusView{

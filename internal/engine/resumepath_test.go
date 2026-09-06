@@ -199,7 +199,7 @@ func TestInteractiveReattachAfterRestartContinuesTranscript(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
 
-	f := feature(1, "Dark mode", domain.StageBrainstorm)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	createFeature(t, store, f)
 
 	ag1 := &resumeStubAgent{Fake: agent.NewFake("Two approaches, per-device vs synced.")}

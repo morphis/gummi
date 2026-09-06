@@ -45,9 +45,6 @@ func readSeq(t *testing.T, path string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// TestMintFeatureQuickRoute: a plain feature description with overflow
-// text mints on the quick route, splits title/one-liner/seed, and seeds a
-// draft with the overflow as the Problem section.
 func TestMintFeatureQuickRoute(t *testing.T) {
 	store, ws := newTestWorkspace(t)
 	ctx := context.Background()
@@ -65,9 +62,6 @@ func TestMintFeatureQuickRoute(t *testing.T) {
 	}
 	if f.Kind != domain.KindFeature {
 		t.Errorf("kind = %q", f.Kind)
-	}
-	if f.Skip != domain.QuickRoute() {
-		t.Errorf("skip = %+v, want quick route", f.Skip)
 	}
 	if f.GateApproval != domain.GateAttended {
 		t.Errorf("gate approval = %q, want empty-default %q", f.GateApproval, domain.GateAttended)
@@ -122,21 +116,6 @@ func TestMintBugSeedsBugTemplate(t *testing.T) {
 	}
 }
 
-// TestMintFeatureFullRoute: Full opts a feature into brainstorm+plan
-// (empty SkipFlags) instead of the quick route.
-func TestMintFeatureFullRoute(t *testing.T) {
-	store, ws := newTestWorkspace(t)
-	f, err := Mint(context.Background(), store, ws, Input{
-		Kind: domain.KindFeature, Description: "A full-route feature", Envelope: 2400, Full: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Skip != (domain.SkipFlags{}) {
-		t.Errorf("skip = %+v, want empty (full route)", f.Skip)
-	}
-}
-
 // TestMintNoOverflowNoDraft: a title-only description (nothing beyond the
 // first line) with no Acceptance text seeds no draft at all.
 func TestMintNoOverflowNoDraft(t *testing.T) {
@@ -187,9 +166,6 @@ func TestMintResearch(t *testing.T) {
 	}
 	if f.Kind != domain.KindResearch {
 		t.Errorf("kind = %q", f.Kind)
-	}
-	if f.Skip != (domain.SkipFlags{}) {
-		t.Errorf("skip = %+v, want empty (research has no quick route)", f.Skip)
 	}
 	artifact := filepath.Join(ws.Root, f.ArtifactPath())
 	raw, err := os.ReadFile(artifact)

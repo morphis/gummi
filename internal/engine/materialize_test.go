@@ -18,8 +18,8 @@ func sampleResult() domain.IngestResult {
 		Proposals: []domain.FeatureProposal{
 			{
 				Title: "Payment webhooks", OneLiner: "receive callbacks",
-				SourceRefs: []string{"Payments"}, Skip: domain.SkipFlags{Brainstorm: true},
-				Draft: domain.DraftSeed{Problem: "We miss async state.", Acceptance: "Signed event flips order.", OpenQuestions: []string{"which providers?"}},
+				SourceRefs: []string{"Payments"},
+				Draft:      domain.DraftSeed{Problem: "We miss async state.", Acceptance: "Signed event flips order.", OpenQuestions: []string{"which providers?"}},
 			},
 			{
 				Title: "Webhook retries", OneLiner: "retry failed",
@@ -54,7 +54,7 @@ func TestMaterializeCreatesFeaturesAndDrafts(t *testing.T) {
 		t.Fatalf("store has %d features, want 2", len(all))
 	}
 	f0 := created[0]
-	if f0.Stage != domain.StageTodo || f0.Profile != "thrifty" || f0.Budget.Envelope != 200 || !f0.Skip.Brainstorm {
+	if f0.Stage != domain.StageTodo || f0.Profile != "thrifty" || f0.Budget.Envelope != 200 {
 		t.Errorf("feature[0] fields wrong: %+v", f0)
 	}
 

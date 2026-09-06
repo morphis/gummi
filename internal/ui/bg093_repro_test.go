@@ -50,7 +50,7 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "demo-architect", "flavor": "stage"})
 	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "SHAPED-IT"})
 	gate, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageShape), To: string(domain.StageVerify), Actor: state.ActorUser,
+		From: string(domain.StagePlan), To: string(domain.StageVerify), Actor: state.ActorUser,
 	})
 	park, _ := json.Marshal(state.ParkPayload{Reason: "needs-you", Detail: refusal})
 	// exactly what the engine leaves behind: the shape session, the
@@ -58,9 +58,9 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 	// park — with no stage_enter for review, because no session was ever
 	// created for it.
 	if err := store.AppendEvents(ctx, []state.CardEvent{
-		{Feature: f.ID, Stage: domain.StageShape, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "shape:enter"},
-		{Feature: f.ID, Stage: domain.StageShape, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says), Dedupe: "said"},
-		{Feature: f.ID, Stage: domain.StageShape, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(gate), Dedupe: "gate:1"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "shape:enter"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says), Dedupe: "said"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(gate), Dedupe: "gate:1"},
 		{Feature: f.ID, Stage: domain.StageVerify, Kind: state.EventPark, At: at.Add(3 * time.Minute), Payload: string(park), Dedupe: "park:1"},
 	}); err != nil {
 		t.Fatal(err)
@@ -136,12 +136,12 @@ func TestBG093SameStageEventsStayInOneBlock(t *testing.T) {
 	enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "demo", "flavor": "stage"})
 	says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "hi"})
 	gate, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageSpec), To: string(domain.StagePlan), Actor: state.ActorUser,
+		From: string(domain.StagePlan), To: string(domain.StagePlan), Actor: state.ActorUser,
 	})
 	segs := stageSegments([]state.CardEvent{
-		{Stage: domain.StageSpec, Kind: state.EventStageEnter, At: at, Payload: string(enter)},
-		{Stage: domain.StageSpec, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says)},
-		{Stage: domain.StageSpec, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(gate)},
+		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: at, Payload: string(enter)},
+		{Stage: domain.StagePlan, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says)},
+		{Stage: domain.StagePlan, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(gate)},
 	})
 	if len(segs) != 1 {
 		t.Fatalf("one stage session produced %d segments", len(segs))
@@ -158,7 +158,7 @@ func TestBG093SameStageEventsStayInOneBlock(t *testing.T) {
 func TestBG093EventsBeforeAnyStageAreStillDropped(t *testing.T) {
 	at := time.Date(2026, 9, 4, 5, 52, 0, 0, time.UTC)
 	gate, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageTodo), To: string(domain.StageInvestigate), Actor: "caller",
+		From: string(domain.StageTodo), To: string(domain.StagePlan), Actor: "caller",
 	})
 	segs := stageSegments([]state.CardEvent{
 		{Stage: domain.StageTodo, Kind: state.EventGate, At: at, Payload: string(gate)},

@@ -39,18 +39,20 @@ func TestNextActionsByState(t *testing.T) {
 		// into (BG-089).
 		{"paused offers a re-run", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter a"},
 		{"failure offers retry and CLI", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter a"},
-		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StageSpec, kind: feat, sess: engine.StatePaused}, "enter"},
+		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StatePaused}, "enter"},
 		{"budget stop routes to the inbox", nextInput{stage: domain.StageImplement, kind: feat, attn: attnBudget}, "i"},
-		{"question routes to attach", nextInput{stage: domain.StageSpec, kind: feat, attn: attnQuestion}, "enter"},
+		{"question routes to attach", nextInput{stage: domain.StagePlan, kind: feat, attn: attnQuestion}, "enter"},
 		{"todo starts the flow", nextInput{stage: domain.StageTodo, kind: feat}, "g"},
-		{"brainstorm chats first", nextInput{stage: domain.StageBrainstorm, kind: feat}, "enter g"},
-		// s reads the spec you are about to sign off on, the way the plan
-		// stage already offers reading the plan
-		{"spec clean offers approve", nextInput{stage: domain.StageSpec, kind: feat}, "enter g s A"},
-		{"spec with open questions blocks approve", nextInput{stage: domain.StageSpec, kind: feat, openSpecQs: 2}, "s enter"},
-		{"plan idle runs the planner", nextInput{stage: domain.StagePlan, kind: feat}, "enter"},
-		{"plan gate reads then approves", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "s g"},
-		{"escalated plan gate offers a replan bounce, not just override", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, escalated: true}, "s b g"},
+		// the design stage: talk it through, approve, then read what you
+		// are signing off on. s comes after g because the recommendation
+		// leads and reading is what you reach for when you aren't ready
+		// to take it.
+		{"design stage talks, approves, reads", nextInput{stage: domain.StagePlan, kind: feat}, "enter g s A"},
+		// the design gate is that same approval, so a gate raised on it
+		// offers the same row — there is no separate "read the plan"
+		// stage behind it any more.
+		{"design gate offers the same approval", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "enter g s A"},
+		{"design stage with open questions blocks approve", nextInput{stage: domain.StagePlan, kind: feat, openSpecQs: 2}, "s enter"},
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
 		{"implement gate diffs, advances, or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g "},
 		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
@@ -91,10 +93,10 @@ func TestNextActionsCapAndRanking(t *testing.T) {
 }
 
 func TestNextActionsProseDetails(t *testing.T) {
-	// bounce targets name the kind's work stage
+	// bounce targets name the work stage they rewind to
 	acts := nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindBug, attn: attnGate})
-	if !strings.Contains(acts[2].label, "fix") {
-		t.Errorf("bug bounce label = %q, want the fix stage named", acts[2].label)
+	if !strings.Contains(acts[2].label, "implement") {
+		t.Errorf("bug bounce label = %q, want the work stage named", acts[2].label)
 	}
 	// a failed manual check is named in the why
 	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "unit tests"})
@@ -102,7 +104,7 @@ func TestNextActionsProseDetails(t *testing.T) {
 		t.Errorf("failed-check why = %q, want the check named", acts[0].why)
 	}
 	// open comment counts surface in the blocker why
-	acts = nextActions(nextInput{stage: domain.StageSpec, kind: domain.KindFeature, openSpecQs: 2})
+	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, openSpecQs: 2})
 	if !strings.Contains(acts[0].why, "2 open") {
 		t.Errorf("blocked-gate why = %q, want the count", acts[0].why)
 	}
@@ -150,7 +152,7 @@ func TestNextInputForAssembly(t *testing.T) {
 // looking at, and spends a row of the one block whose job is to tell you
 // something you did not already know.
 func TestNextCardDropsTheChatActionWhenTheChatIsLive(t *testing.T) {
-	for _, stage := range []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StageInvestigate} {
+	for _, stage := range []domain.Stage{domain.StagePlan, domain.StagePlan, domain.StagePlan} {
 		live := nextActions(nextInput{stage: stage, kind: domain.KindFeature, sess: engine.StateInteractive, live: true})
 		for _, a := range live {
 			if a.key == "enter" {
@@ -234,7 +236,7 @@ func TestNextActionsRanksPullReview(t *testing.T) {
 	// nudges toward only exists once there is a diff. Review is no longer
 	// one of those stages, so the work stage is: its critique is what
 	// review was, and a PR's comments belong on the diff it just produced.
-	acts := nextActions(nextInput{stage: domain.StageSpec, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
+	acts := nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate, pullRequest: linked})
 	if strings.Contains(nextActionIDs(acts), "prpull") {
 		t.Errorf("spec linked: ids = %q, want no prpull before there is a diff", nextActionIDs(acts))
 	}

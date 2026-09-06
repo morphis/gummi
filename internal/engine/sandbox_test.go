@@ -143,7 +143,7 @@ func TestRunPermitsWarnWithGap(t *testing.T) {
 func TestAttachRefusesEnforceWithGap(t *testing.T) {
 	e := newSandboxEngine(t, "enforce", sandboxProfiles())
 	f := implFeature(4)
-	f.Stage = domain.StageBrainstorm
+	f.Stage = domain.StagePlan
 	_, err := e.Attach(context.Background(), f)
 	var ref *sandbox.RefusalError
 	if !errors.As(err, &ref) {

@@ -35,17 +35,17 @@ func populatedShell(w, h int) *Shell {
 	m.rows = []featureRow{
 		row(51, "rate limits", domain.StageTodo, "thrifty", false),
 		row(42, "dark mode", domain.StageImplement, "thrifty", true),
-		row(47, "csv export", domain.StageBrainstorm, "premium", false),
-		row(49, "auth fix", domain.StageSpec, "thrifty", false),
+		row(47, "csv export", domain.StagePlan, "premium", false),
+		row(49, "auth fix", domain.StagePlan, "thrifty", false),
 		row(44, "search", domain.StageVerify, "local-heavy", true),
 		row(39, "onboarding", domain.StageDone, "premium", false),
-		row(46, "billing sync", domain.StageFix, "thrifty", false),
+		row(46, "billing sync", domain.StageImplement, "thrifty", false),
 	}
 	m.rows[6].AutopilotDriving = true
 	m.rows[1].History = []state.TransitionRecord{
-		{FeatureID: "FD-042", From: domain.StageTodo, To: domain.StageBrainstorm, Actor: "user", At: fixedTime},
-		{FeatureID: "FD-042", From: domain.StageBrainstorm, To: domain.StageSpec, Actor: "user", At: fixedTime},
-		{FeatureID: "FD-042", From: domain.StageSpec, To: domain.StagePlan, Actor: "user", At: fixedTime},
+		{FeatureID: "FD-042", From: domain.StageTodo, To: domain.StagePlan, Actor: "user", At: fixedTime},
+		{FeatureID: "FD-042", From: domain.StagePlan, To: domain.StagePlan, Actor: "user", At: fixedTime},
+		{FeatureID: "FD-042", From: domain.StagePlan, To: domain.StagePlan, Actor: "user", At: fixedTime},
 		{FeatureID: "FD-042", From: domain.StagePlan, To: domain.StageImplement, Actor: "user", At: fixedTime},
 	}
 	m.rows[1].F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}
@@ -257,9 +257,7 @@ func TestCardLinePausedMarker(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 
@@ -294,8 +292,8 @@ func TestCardLinePausedMarker(t *testing.T) {
 // being overwritten by the spinner.
 func TestCardLineBaselineBusyWithNoSession(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	idle := row(1, "idle card", domain.StageSpec, "", false)
-	baselining := row(2, "checking card", domain.StageSpec, "", false)
+	idle := row(1, "idle card", domain.StagePlan, "", false)
+	baselining := row(2, "checking card", domain.StagePlan, "", false)
 	m.baselining[baselining.F.ID] = true
 
 	idleLine := m.cardLine(idle, 1, false, true, 80)
@@ -412,8 +410,6 @@ func TestCardLineNarrowWidthGolden(t *testing.T) {
 func TestFormOverlay(t *testing.T) {
 	m := populatedShell(100, 30)
 	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
-	form.route = 1 // "skip brainstorm"
-	form.focus = featureFieldRoute
 	form.desc.SetValue("dark mode toggle")
 	form.desc.Blur()
 	m.Overlay.Push(form)
@@ -506,7 +502,7 @@ func TestBoardBlockedBadgeGolden(t *testing.T) {
 	blocked.DepBlocked = true
 	met := row(2, "deps met", domain.StagePlan, "", true)
 	met.DepBlocked = false
-	design := row(3, "design card", domain.StageBrainstorm, "", false)
+	design := row(3, "design card", domain.StagePlan, "", false)
 	design.DepBlocked = false
 	m.rows = []featureRow{blocked, met, design}
 	var b strings.Builder
@@ -552,8 +548,8 @@ func TestBoardCardLineSeverity(t *testing.T) {
 // (m.baselining) and the two non-busy cases (idle, queued) side by side.
 func TestBoardBusyMarkersGolden(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
-	idle := row(1, "idle card", domain.StageSpec, "", false)
-	checking := row(2, "checking card", domain.StageSpec, "", false)
+	idle := row(1, "idle card", domain.StagePlan, "", false)
+	checking := row(2, "checking card", domain.StagePlan, "", false)
 	m.baselining[checking.F.ID] = true
 
 	var b strings.Builder
@@ -577,9 +573,7 @@ func TestBoardAttentionAndPausedGolden(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m = openAndAttach(t, m)
 	waitForActivity(t, eng)
 	pausedRow := m.rows[0]
@@ -743,9 +737,7 @@ func TestBG038QueuedNoticeNotLeftBehind(t *testing.T) {
 		}
 	}}
 	m, eng := agentWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("setup: want FD-001 at implement, got %s", m.rows[0].F.Stage)
 	}

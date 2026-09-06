@@ -18,7 +18,7 @@ func TestEnsureScratchDetachedAndIdempotent(t *testing.T) {
 	root := newRepo(t)
 	m := newManager(t, root)
 	f := feature(1, "Dark mode")
-	f.Stage = domain.StageSpec
+	f.Stage = domain.StagePlan
 
 	p, err := m.EnsureScratch(ctx, f)
 	if err != nil {

@@ -55,13 +55,9 @@ func runRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	// validate --until against the route --full selects, before any work
-	// begins (so a bad target fails as a plain usage error, not mid-run).
-	skip := domain.QuickRoute()
-	if *rv.full {
-		skip = domain.SkipFlags{}
-	}
-	if err := driver.ValidateUntil(domain.Stage(*rv.until), domain.KindFeature, skip); err != nil {
+	// validate --until before any work begins, so a bad target fails as a
+	// plain usage error rather than mid-run.
+	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
 		return err
 	}
 	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.full, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo)

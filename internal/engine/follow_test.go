@@ -95,7 +95,7 @@ func TestFollowerReconstructsTranscript(t *testing.T) {
 // The header's stage and backend identity reach the follower, which has
 // only the store's copy of the card to start from.
 func TestFollowerTakesIdentityFromHeader(t *testing.T) {
-	f := domain.Feature{ID: "FD-101", Stage: domain.StageSpec, Title: "identity"}
+	f := domain.Feature{ID: "FD-101", Stage: domain.StagePlan, Title: "identity"}
 	path := filepath.Join(t.TempDir(), "FD-101.jsonl")
 	// the live session is further along than the store's copy the
 	// follower was seeded with.
@@ -155,7 +155,7 @@ func TestFollowerResetsOnNewSession(t *testing.T) {
 // A watcher sees the agent's open question, but only as a question: it
 // carries no options, because a follower can never answer one.
 func TestFollowerShowsAskReadOnly(t *testing.T) {
-	f := domain.Feature{ID: "FD-103", Stage: domain.StageSpec}
+	f := domain.Feature{ID: "FD-103", Stage: domain.StagePlan}
 	path := filepath.Join(t.TempDir(), "FD-103.jsonl")
 	s := newLiveSession(t, path, f)
 	s.setPendingAsk(&Ask{CallID: "ask-1", Question: "Postgres or SQLite?", Options: []AskOption{{Label: "Postgres"}}})
@@ -184,7 +184,7 @@ func TestFollowerShowsAskReadOnly(t *testing.T) {
 // replayed onto the live file, so a follower joining later sees the whole
 // conversation rather than only what arrives next.
 func TestBindLiveReplaysCarriedTranscript(t *testing.T) {
-	f := domain.Feature{ID: "FD-104", Stage: domain.StageSpec}
+	f := domain.Feature{ID: "FD-104", Stage: domain.StagePlan}
 	path := filepath.Join(t.TempDir(), "FD-104.jsonl")
 
 	s := &Session{Feature: f, Role: agent.RoleArchitect, done: make(chan struct{})}

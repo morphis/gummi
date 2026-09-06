@@ -124,15 +124,15 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 		return nil
 	}
 	switch stage {
-	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
-		domain.StageShape:
+	case domain.StagePlan:
+		// the design stage: it converges with the user and writes the
+		// artifact, so it keeps ask_user and the annotation tools the
+		// three design stages used to share between them.
 		return []agent.ToolDef{askUserTool(), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageVerify:
 		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StageImplement:
 		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
-	case domain.StagePlan:
-		return []agent.ToolDef{specViewTool(), specReplaceSectionTool()}
 	default:
 		return nil
 	}
@@ -378,8 +378,7 @@ to drive gummi's critique→replan loop, instead of writing a VERDICT:
 line.`
 	}
 	switch stage {
-	case domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
-		domain.StageShape:
+	case domain.StagePlan:
 		return `You have four gummi tools. ask_user: put a decision to the user as a
 few options and get their choice back — prefer it over asking in prose
 (faster for the user, cheaper); lead with your recommended option,
@@ -401,12 +400,6 @@ heading and the next; re-emit any %% @user: marker lines yourself), then
 call the submit_verdict tool exactly once at the end (verdict "pass",
 "fail", or "blocked") instead of writing a VERDICT: line — gummi gates
 on it.`
-	case domain.StagePlan:
-		return `Write the plan into the design artifact with spec_view (pass a
-section heading for one section's body, omit it for the whole document)
-and spec_replace_section: rewrite the Implementation notes section body
-between its ## heading and the next, and re-emit any %% @user: marker
-lines yourself. Each replan round rewrites the section wholesale.`
 	default:
 		return ""
 	}

@@ -24,7 +24,7 @@ func TestBG079BugCardNamesItsReportEverywhere(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m.Attach(store, wt, ws)
 
-	f := mkFeature(t, store, 4, "file pull truncation", domain.StageDiagnose)
+	f := mkFeature(t, store, 4, "file pull truncation", domain.StagePlan)
 	f.Kind = domain.KindBug
 	r := featureRow{F: f}
 	m.rows = []featureRow{r}

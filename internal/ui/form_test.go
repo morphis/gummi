@@ -169,11 +169,11 @@ func TestFormEnvelopeEmpty(t *testing.T) {
 }
 
 // TestFormEnvelopeTabOrder: tab walks every field in order — description,
-// envelope, profile, route — and wraps back to description, skipping the
+// envelope, profile — and wraps back to description, skipping the
 // repo stop since no repos are configured (nothing to choose there).
 func TestFormEnvelopeTabOrder(t *testing.T) {
 	form := newFeatureForm(nil, nil, false, 0, func(formResult) tea.Cmd { return nil })
-	for _, want := range []int{featureFieldDesc, featureFieldEnvelope, featureFieldProfile, featureFieldRoute, featureFieldButtons, featureFieldDesc} {
+	for _, want := range []int{featureFieldDesc, featureFieldEnvelope, featureFieldProfile, featureFieldButtons, featureFieldDesc} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}

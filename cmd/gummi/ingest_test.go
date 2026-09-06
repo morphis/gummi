@@ -10,7 +10,7 @@ import (
 func TestRenderProposalFlagsUnmapped(t *testing.T) {
 	res := domain.IngestResult{
 		Proposals: []domain.FeatureProposal{
-			{Title: "Auth", OneLiner: "log in", SourceRefs: []string{"Security"}, Skip: domain.SkipFlags{Brainstorm: true}, Draft: domain.DraftSeed{OpenQuestions: []string{"sso?"}}},
+			{Title: "Auth", OneLiner: "log in", SourceRefs: []string{"Security"}, Draft: domain.DraftSeed{OpenQuestions: []string{"sso?"}}},
 			{Title: "Billing", DependsOn: []string{"Auth"}},
 		},
 		Coverage: []domain.CoverageEntry{
@@ -27,7 +27,6 @@ func TestRenderProposalFlagsUnmapped(t *testing.T) {
 		"1. Auth",
 		"from: Security",
 		"needs: Auth",
-		"skip brainstorm",
 		"1 open question(s)",
 		"Coverage: 1 mapped · 1 out-of-scope · 1 unmapped",
 		"! UNMAPPED: gdpr export — unclear owner",

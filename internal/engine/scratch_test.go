@@ -24,7 +24,7 @@ func TestDesignStageRunsInTheCardsWorktree(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "Dark mode", domain.StageSpec)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestDesignStageWritesDoNotTripMain(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "Dark mode", domain.StageSpec)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestDesignStageEditsSurviveTheApprovalGate(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "Dark mode", domain.StageSpec)
+	f := feature(1, "Dark mode", domain.StagePlan)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +126,7 @@ func TestDesignStageEditsSurviveTheApprovalGate(t *testing.T) {
 	// undrafted-sections gate holds the approval shut before this test's
 	// own question is reached
 	fillPromotedSection(t, wt, f, "Chosen approach", "\nA settings toggle.\n\n")
+	fillPromotedSection(t, wt, f, "Implementation notes", "\nAdd the toggle.\n\n")
 
 	res := mustAdvance(t, e, f.ID)
 	if !res.EnteredWorktree {

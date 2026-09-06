@@ -49,7 +49,7 @@ func nestedGitRepo(t *testing.T) (ws, repo string) {
 func TestNestedLayoutEndToEnd(t *testing.T) {
 	ws, repo := nestedGitRepo(t)
 	h := newHarnessRoots(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {

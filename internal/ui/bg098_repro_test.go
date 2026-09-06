@@ -29,7 +29,7 @@ import (
 // that pair on the page in the opposite order to the log.
 //
 // The fixture is the seed board's own shape, which is where the drive
-// found it: a headless run that stopped at --until spec, then the switch
+// found it: a headless run that stopped at --until plan, then the switch
 // pressed on the card where it parked.
 func TestBG098TwoPeriodsReadInTheOrderTheyHappened(t *testing.T) {
 	ctx := context.Background()
@@ -51,29 +51,30 @@ func TestBG098TwoPeriodsReadInTheOrderTheyHappened(t *testing.T) {
 		Event: state.AutopilotTookOver, Reason: "the headless run is driving it unattended", Mode: domain.GateAttended,
 	})
 	stopped, _ := json.Marshal(state.ParkPayload{
-		Reason: state.ParkReasonNeedsYou, Detail: "stopped early at --until spec, as requested.",
+		Reason: state.ParkReasonNeedsYou, Detail: "stopped early at --until plan, as requested.",
 	})
 	second, _ := json.Marshal(state.AutopilotPayload{
 		Event: state.AutopilotTookOver, Reason: "you handed it to autopilot", Mode: domain.GateAutopilot,
 	})
 	crossed, _ := json.Marshal(state.GatePayload{
-		From: string(domain.StageSpec), To: string(domain.StagePlan), Actor: state.ActorAutopilot,
+		From: string(domain.StagePlan), To: string(domain.StageImplement), Actor: state.ActorAutopilot,
 	})
+	work, _ := json.Marshal(map[string]string{"role": "implementer", "model": "demo", "flavor": "stage"})
 
 	// The takeover the headless run writes lands before the stage it goes
 	// on to open, which is why the first rule belongs above the receipt
-	// and the second one — pressed on a card whose spec had already run —
+	// and the second one — pressed on a card whose design stage had run —
 	// does not.
 	if err := store.AppendEvents(ctx, []state.CardEvent{
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventAutopilot, At: at, Payload: string(first), Dedupe: "ap:1"},
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "spec:enter"},
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventMessage, At: at, Payload: string(says), Dedupe: "spec:said"},
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventStageExit, At: at, Payload: string(exit), Dedupe: "spec:exit"},
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventPark, At: at, Payload: string(stopped), Dedupe: "spec:park"},
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventAutopilot, At: later, Payload: string(second), Dedupe: "ap:2"},
-		{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventGate, At: later, Payload: string(crossed), Dedupe: "ap:gate"},
-		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageEnter, At: later, Payload: string(enter), Dedupe: "plan:enter"},
-		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventMessage, At: later, Payload: string(says), Dedupe: "plan:said"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventAutopilot, At: at, Payload: string(first), Dedupe: "ap:1"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "plan:enter"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventMessage, At: at, Payload: string(says), Dedupe: "plan:said"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageExit, At: at, Payload: string(exit), Dedupe: "plan:exit"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventPark, At: at, Payload: string(stopped), Dedupe: "plan:park"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventAutopilot, At: later, Payload: string(second), Dedupe: "ap:2"},
+		{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventGate, At: later, Payload: string(crossed), Dedupe: "ap:gate"},
+		{Feature: f.ID, Stage: domain.StageImplement, Kind: state.EventStageEnter, At: later, Payload: string(work), Dedupe: "implement:enter"},
+		{Feature: f.ID, Stage: domain.StageImplement, Kind: state.EventMessage, At: later, Payload: string(says), Dedupe: "implement:said"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func TestBG098TwoPeriodsReadInTheOrderTheyHappened(t *testing.T) {
 	// and the crossing the second run made belongs under the rule saying
 	// the card changed hands, not above it
 	handover := strings.LastIndex(body, "autopilot took over")
-	crossing := strings.Index(body, "crossed spec → plan")
+	crossing := strings.Index(body, "crossed plan → implement")
 	if crossing < 0 {
 		t.Fatalf("the second run's crossing is missing from the page\n%s", body)
 	}

@@ -20,11 +20,8 @@ import (
 // so the script drives an investigate turn and a shape turn per round.
 func TestRSReviewCapEscalates(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageInvestigate: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Investigated.")
-		},
-		domain.StageShape: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Shaped.")
 		},
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Issues.\nVERDICT: changes")
@@ -41,7 +38,7 @@ func TestRSReviewCapEscalates(t *testing.T) {
 	now := time.Now()
 	f := domain.Feature{
 		ID: id, Num: 1, Kind: domain.KindResearch, Title: "research card", Slug: slug,
-		Stage: domain.StageInvestigate, CreatedAt: now, UpdatedAt: now,
+		Stage: domain.StagePlan, CreatedAt: now, UpdatedAt: now,
 	}
 	putDraft(t, h, &f, "# RS-001: research card\n\n## Findings\n\nNothing yet.\n")
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
@@ -56,8 +53,8 @@ func TestRSReviewCapEscalates(t *testing.T) {
 	if out.Status != StatusEscalation {
 		t.Fatalf("status = %q, want escalation; stream=%v", out.Status, h.eventKinds())
 	}
-	max := verdict.MaxRounds(domain.RoundKindReview)
-	want := fmt.Sprintf("investigate critique still requesting changes after %d rounds", max)
+	max := verdict.MaxRounds(domain.RoundKindPlan)
+	want := fmt.Sprintf("plan critique still requesting changes after %d rounds", max)
 	esc := lastEvent(h, "escalation")
 	if esc == nil || esc["reason"] != want {
 		t.Fatalf("escalation reason = %v, want %q", esc, want)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/morphis/gummi/internal/workflow"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -39,7 +38,7 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 	// went missing is a thing to recover, not a licence to re-home the
 	// card into a different repository.
 	locked := f.Kind != domain.KindResearch &&
-		f.Stage != domain.StageTodo && !workflow.Interactive(f.Stage)
+		(f.Stage == domain.StageImplement || f.Stage == domain.StageVerify || f.Stage == domain.StageDone)
 	if !locked {
 		if ok, err := e.pool.Exists(ctx, &f); err == nil && ok {
 			locked = true

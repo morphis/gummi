@@ -38,8 +38,10 @@ func implementKickoff(t *testing.T, body string) string {
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{
+		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+	})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "build it", domain.StageImplement)
@@ -117,40 +119,33 @@ func TestImplementKickoffWithoutUsableManifest(t *testing.T) {
 	}
 }
 
-// The three stages that draft a plan all state the manifest's shape, and
-// the two that act on one know it may arrive — one constant, so they
-// cannot drift apart.
+// The design stage states the manifest's shape for every kind, and the
+// work stage that acts on one knows it may arrive — one constant, so
+// they cannot drift apart.
 func TestPlanningStagesRequireTheFileManifest(t *testing.T) {
 	for _, tc := range []struct {
 		stage domain.Stage
 		kind  domain.Kind
-		quick bool
 	}{
-		{domain.StagePlan, domain.KindFeature, false},
-		{domain.StageSpec, domain.KindFeature, true},
-		{domain.StageDiagnose, domain.KindBug, false},
+		{domain.StagePlan, domain.KindFeature},
+		{domain.StagePlan, domain.KindBug},
 	} {
 		f := feature(1, "x", tc.stage)
 		f.Kind = tc.kind
-		if tc.quick {
-			f.Skip = domain.QuickRoute()
-		}
 		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
 		if !strings.Contains(h, unwrap("```gummi-files")) {
-			t.Errorf("%s (quick=%v) hint does not ask for a file manifest", tc.stage, tc.quick)
+			t.Errorf("%s/%s hint does not ask for a file manifest", tc.stage, tc.kind)
 		}
 	}
-	for _, st := range []domain.Stage{domain.StageImplement, domain.StageFix} {
-		f := feature(1, "x", st)
-		if st == domain.StageFix {
-			f.Kind = domain.KindBug
-		}
+	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
+		f := feature(1, "x", domain.StageImplement)
+		f.Kind = kind
 		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
 		if !strings.Contains(h, "file manifest") {
-			t.Errorf("%s hint never mentions the manifest it may be handed", st)
+			t.Errorf("implement/%s hint never mentions the manifest it may be handed", kind)
 		}
 		if !strings.Contains(h, "starting point, not a boundary") {
-			t.Errorf("%s hint does not say the manifest is not exhaustive", st)
+			t.Errorf("implement/%s hint does not say the manifest is not exhaustive", kind)
 		}
 	}
 }

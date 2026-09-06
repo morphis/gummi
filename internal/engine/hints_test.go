@@ -24,18 +24,20 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		kind  domain.Kind
 		want  []string
 	}{
-		{domain.StageBrainstorm, domain.KindFeature, []string{
+		{domain.StagePlan, domain.KindFeature, []string{
 			"one question per turn", "recommended answer", "structurally different",
 		}},
-		{domain.StageSpec, domain.KindFeature, []string{
+		{domain.StagePlan, domain.KindFeature, []string{
 			"Out of scope", "test surface is a decision", "runs without erroring",
 			"[env: <prereq>]", "[CI-only]",
 			"Tags belong on prose live-check lines only",
 			"never inside the gummi-checks block",
-			// F1: Spec must hand off Implementation notes to the Plan stage.
-			// The section was drafted twice (Spec, then Plan overwrote it) —
-			// dead work at best, competing prose at worst.
-			"Do not draft Implementation notes here",
+			// F1: the converge phase hands Implementation notes to the
+			// plan phase. The section used to be drafted twice (spec, then
+			// plan overwrote it) — dead work at best, competing prose at
+			// worst — and the two are one stage's phases now, which makes
+			// the handoff a paragraph rather than a stage boundary.
+			"Leave Implementation notes for phase 3",
 			// F14: Spec gates convergence on approach diversity —
 			// Brainstorm required "structurally different" approaches,
 			// but no downstream stage verified until now.
@@ -65,21 +67,21 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			// Fix hint, which already tells the agent this.
 			"describe what and why in the commit body",
 		}},
-		{domain.StageTriage, domain.KindBug, []string{
+		{domain.StagePlan, domain.KindBug, []string{
 			"Verify the claim first", "one question per turn",
 			// F19: Triage must use the described environment as a first-class
 			// input instead of treating an unfamiliar environment as grounds
 			// to defer.
 			"environment gummi described",
 		}},
-		{domain.StageDiagnose, domain.KindBug, []string{
+		{domain.StagePlan, domain.KindBug, []string{
 			"red-capable command", "falsifiable hypotheses", "[DEBUG-",
 			// F20: Diagnose must write a live reproduction tagged [env: ...]
 			// when the agent lacks the environment locally; a prose deferral
 			// is a contract violation.
 			"[env:", "contract violation",
 		}},
-		{domain.StageFix, domain.KindBug, []string{
+		{domain.StageImplement, domain.KindBug, []string{
 			"correct seam", "root cause in the commit message",
 			// F10: `[` in an unescaped grep is a regex character class,
 			// so a naked `grep -r "[DEBUG-"` silently misses matches on
@@ -125,10 +127,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"resolved threads from a prior round", "VERDICT: pass", "VERDICT: changes",
 			"requirements, not creep",
 		}},
-		{domain.StageFix, domain.KindBug, []string{
+		{domain.StageImplement, domain.KindBug, []string{
 			"smallest change that resolves the bug", "bounce back to fix",
 		}},
-		{domain.StageInvestigate, domain.KindResearch, []string{
+		{domain.StagePlan, domain.KindResearch, []string{
 			"critique what the investigation gathered", "submit_verdict",
 		}},
 	} {
@@ -170,10 +172,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 			"resolved threads from a prior round", "VERDICT: pass", "VERDICT: changes",
 			"requirements, not creep",
 		}},
-		{domain.StageFix, domain.KindBug, []string{
+		{domain.StageImplement, domain.KindBug, []string{
 			"smallest change that resolves the bug", "bounce back to fix",
 		}},
-		{domain.StageInvestigate, domain.KindResearch, []string{
+		{domain.StagePlan, domain.KindResearch, []string{
 			"critique what the investigation gathered", "submit_verdict",
 		}},
 	} {
@@ -191,12 +193,12 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
 		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
-		if tc.stage != domain.StageTriage && tc.stage != domain.StageDiagnose {
+		if tc.stage != domain.StagePlan {
 			if strings.Contains(joined, "environment gummi described") {
 				t.Errorf("%s/%s hint leaked Triage/Diagnose environment-contract language", tc.stage, tc.kind)
 			}
 		}
-		if tc.stage != domain.StageDiagnose {
+		if tc.stage != domain.StagePlan {
 			if strings.Contains(joined, "contract violation") {
 				t.Errorf("%s/%s hint leaked Diagnose contract-violation language", tc.stage, tc.kind)
 			}
@@ -213,33 +215,29 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	if strings.Contains(reviewHints, "overwrite or resolve them") {
 		t.Error("review contractHint carried the writer-role instruction")
 	}
-	specStd := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageSpec), "spec.md", flavorStage), "\n"))
+	specStd := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorStage), "\n"))
 	if !strings.Contains(specStd, "overwrite or resolve them") {
 		t.Error("spec contractHint lost the writer-role instruction")
 	}
 
-	// F1: standard Spec must not carry the quick-spec's plan-drafting
-	// instruction — Implementation notes are Plan's job when a Plan stage
-	// follows, and drafting them twice was dead work.
-	stdSpec := unwrap(strings.Join(stageHints(feature(1, "Dark mode", domain.StageSpec), "spec.md", flavorStage), "\n"))
-	if strings.Contains(stdSpec, "Implementation notes as the implementation plan") {
-		t.Error("standard Spec leaked the quick-spec plan-drafting instruction")
+	// the design stage's own three phases arrive as one prompt, and the
+	// last of them is what writes Implementation notes — the section its
+	// gate is judged on. The converge phase must hand that section on
+	// rather than claim it.
+	stdSpec := unwrap(strings.Join(stageHints(feature(1, "Dark mode", domain.StagePlan), "spec.md", flavorStage), "\n"))
+	if !strings.Contains(stdSpec, "Leave Implementation notes for phase 3") {
+		t.Error("the converge phase no longer hands Implementation notes to the plan phase")
+	}
+	if !strings.Contains(stdSpec, "Implementation notes as numbered steps") {
+		t.Error("the design hint lost the phase that writes the implementation plan")
 	}
 
 	// The interactive working-directory guard is gone with the scratch
 	// tree: a design stage now runs in the card's own branch worktree, so
 	// there is no throwaway checkout to warn about and nothing that has to
 	// be fenced off from committing. No stage carries it any more.
-	for _, st := range []domain.Stage{
-		domain.StageBrainstorm, domain.StageSpec, domain.StageTriage, domain.StageDiagnose,
-		domain.StageImplement,
-	} {
-		kind := domain.KindFeature
-		if st == domain.StageTriage || st == domain.StageDiagnose {
-			kind = domain.KindBug
-		}
+	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
 		f := feature(1, "x", st)
-		f.Kind = kind
 		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
 		if strings.Contains(h, "scratch checkout of main") {
 			t.Errorf("%s still carries the retired scratch-tree guard", st)
@@ -277,36 +275,10 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		}
 	}
 
-	// the quick spec flavor: one-pass drafting with the plan folded into
-	// Implementation notes, and the same verification-plan rubric as the
-	// standard flavor — the route trades gates, never artifact rigor
-	qf := feature(1, "Dark mode", domain.StageSpec)
-	qf.Skip = domain.QuickRoute()
-	quick := unwrap(strings.Join(stageHints(qf, "spec.md", flavorStage), "\n"))
-	for _, want := range []string{
-		"quick route", "one pass", "two or three clarifying questions",
-		"Implementation notes as the implementation plan",
-		"runs without erroring", "[env: <prereq>]", "[CI-only]",
-		"never inside the gummi-checks block",
-		"do not start implementing",
-		// the Plan claims shape must stay synchronized with the standard
-		// planHint's — the two branches forked once and cost a critique
-		// contract of truth. Keep them pinned to the same required shapes.
-		"helper <name>: keyed by <field>",
-		"golden <name> =",
-		"invariant, ordering rule, or error-path",
-	} {
-		if !strings.Contains(quick, unwrap(want)) {
-			t.Errorf("quick spec hint missing %q", want)
-		}
-	}
 	// and the standard flavor's convergence contract must not leak in
-	if strings.Contains(quick, "converge with the user on exactly one approach") {
-		t.Error("quick spec hint carries the standard convergence contract")
-	}
 
 	// the contract's section list matches the template's new shape
-	joined := strings.Join(stageHints(feature(1, "x", domain.StageBrainstorm), "spec.md", flavorStage), "\n")
+	joined := strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorStage), "\n")
 	if !strings.Contains(joined, "Problem · Out of scope · Considered approaches") {
 		t.Error("contract hint section list missing Out of scope")
 	}
@@ -323,10 +295,10 @@ func TestResearchStageHints(t *testing.T) {
 		stage domain.Stage
 		want  []string
 	}{
-		{domain.StageInvestigate, []string{
+		{domain.StageImplement, []string{
 			"read-only", "path:line citation", "no worktree",
 		}},
-		{domain.StageShape, []string{
+		{domain.StagePlan, []string{
 			"Converge", "exactly one", "behind per-action confirmation",
 			"scratch checkout of main",
 		}},
@@ -345,7 +317,7 @@ func TestResearchStageHints(t *testing.T) {
 	// research's critique judges a document, so it must not carry the
 	// worktree-diff contract: it is read-only and has no
 	// spec_replace_section to record findings with.
-	rf := feature(1, "RS topic", domain.StageInvestigate)
+	rf := feature(1, "RS topic", domain.StagePlan)
 	rf.Kind = domain.KindResearch
 	critique := unwrap(strings.Join(stageHints(rf, "research.md", flavorCritique), "\n"))
 	for _, want := range []string{"read-only", "submit_verdict", "critique"} {
@@ -384,19 +356,6 @@ func TestRebaseHintCarriesBuildCheck(t *testing.T) {
 	}
 }
 
-// TestInteractiveKickoffPanicsOnUnknown: F18 — the default clause was
-// "the brainstorm chat" copy, so any future interactive stage would
-// silently ship the wrong opener. Every interactive stage is
-// enumerated; an unknown one must panic.
-func TestInteractiveKickoffPanicsOnUnknown(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic on unknown interactive stage")
-		}
-	}()
-	interactiveKickoff(feature(1, "x", domain.StageImplement))
-}
-
 // TestContractHintStatesBoundary pins the artifact/worktree boundary the
 // stage contract now states: the artifact is gummi-managed and located
 // outside the working directory (its path kept visible for opening), a
@@ -432,31 +391,36 @@ func TestContractHintStatesBoundary(t *testing.T) {
 }
 
 // TestInteractiveKickoffQuickSpec: the spec-chat opener flips with the
-// route — a quick card's agent leads by drafting, a standard card's by
 // converging the open threads.
 func TestInteractiveKickoffQuickSpec(t *testing.T) {
-	f := feature(1, "Dark mode", domain.StageSpec)
-	if got := interactiveKickoff(f); !strings.Contains(got, "drive convergence") {
+	f := feature(1, "Dark mode", domain.StagePlan)
+	if got := designKickoff(f); !strings.Contains(got, "drive convergence") {
 		t.Errorf("standard spec kickoff = %q, want the convergence opener", got)
-	}
-	f.Skip = domain.QuickRoute()
-	if got := interactiveKickoff(f); !strings.Contains(got, "draft the complete spec") {
-		t.Errorf("quick spec kickoff = %q, want the one-pass opener", got)
 	}
 }
 
 // Research investigate/shape are architect work (exploring and converging
 // a research topic), and shape is a gated interactive chat that must have
 // its own opener — a missing case panics in interactiveKickoff.
-func TestResearchRolesAndShapeKickoff(t *testing.T) {
-	for _, st := range []domain.Stage{domain.StageInvestigate, domain.StageShape} {
-		if role, ok := roleForStage(st); !ok || role != agent.RoleArchitect {
-			t.Errorf("roleForStage(%s) = %s/%v, want architect", st, role, ok)
+func TestResearchRolesAndKickoff(t *testing.T) {
+	// a research card is architect work at BOTH agent stages: its design
+	// stage shapes the question, and its build stage gathers evidence and
+	// writes it up — there is no code either side of the gate.
+	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
+		f := feature(1, "RS", st)
+		f.Kind = domain.KindResearch
+		if role, ok := roleForStage(f); !ok || role != agent.RoleArchitect {
+			t.Errorf("roleForStage(research, %s) = %s/%v, want architect", st, role, ok)
 		}
 	}
-	f := feature(1, "RS", domain.StageShape)
-	if got := interactiveKickoff(f); !strings.Contains(got, "shape") {
-		t.Errorf("shape kickoff = %q, want the shape opener", got)
+	// and a feature's build stage is still implementer work
+	if role, _ := roleForStage(feature(1, "FD", domain.StageImplement)); role != agent.RoleImplementer {
+		t.Errorf("roleForStage(feature, implement) = %s, want implementer", role)
+	}
+	f := feature(1, "RS", domain.StagePlan)
+	f.Kind = domain.KindResearch
+	if got := designKickoff(f); !strings.Contains(got, "research") {
+		t.Errorf("research kickoff = %q, want the research opener", got)
 	}
 }
 
@@ -468,17 +432,4 @@ func TestResearchRolesAndShapeKickoff(t *testing.T) {
 // it, and must scope it to checks that cannot run on the branch as it
 // stands (or every check acquires the marker defensively).
 func TestSpecHintTeachesBaselineOptOut(t *testing.T) {
-	for _, quick := range []bool{false, true} {
-		h := unwrap(specHint(quick))
-		for _, want := range []string{
-			"set baseline: false on that entry",
-			"written off as pre-existing at Verify",
-			"target does not exist yet on the branch as it stands",
-			"a check that runs today needs no such marker",
-		} {
-			if !strings.Contains(h, want) {
-				t.Errorf("quick=%v: spec hint missing %q", quick, want)
-			}
-		}
-	}
 }

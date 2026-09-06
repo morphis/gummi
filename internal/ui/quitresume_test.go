@@ -89,8 +89,7 @@ func TestQuitWithGateAttendedLiveSessionKeepsOriginalWording(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
 	m.rows[0].F.GateApproval = domain.GateAttended // set before the run starts, matching the session's own snapshot
 	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
@@ -103,7 +102,7 @@ func TestQuitWithGateAttendedLiveSessionKeepsOriginalWording(t *testing.T) {
 	if !ok || d.id != "confirm-quit" {
 		t.Fatalf("top overlay = %v, want the confirm-quit dialog", m.Overlay.Top())
 	}
-	if d.question != "quit with live sessions FD-001 (plan)?" {
+	if d.question != "quit with live sessions FD-001 (implement)?" {
 		t.Errorf("question = %q, want the unchanged plain-session wording", d.question)
 	}
 	if d.confirmLabel != "Quit" || d.cancelLabel != "Stay" {

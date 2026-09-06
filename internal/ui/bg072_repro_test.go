@@ -27,8 +27,8 @@ func TestBG072SpecOpensAtTheSectionTheCardPointsAt(t *testing.T) {
 
 	// the section the thread's pinned line promises for this stage
 	section := currentSpecSection(f.Kind, f.Stage)
-	if section != "Implementation notes" {
-		t.Fatalf("precondition: the plan stage pins %q", section)
+	if section != "Chosen approach" {
+		t.Fatalf("precondition: the design stage pins %q", section)
 	}
 	want, ok := spec.HeadingLine(doc, section)
 	if !ok {
@@ -54,5 +54,4 @@ func TestBG072SpecOpensAtTheSectionTheCardPointsAt(t *testing.T) {
 	if got := model.(*Shell).spec.cursor; got != 1 {
 		t.Errorf("a document without the section opened at line %d, want 1", got)
 	}
-
 }

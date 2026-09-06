@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -32,10 +33,9 @@ func TestCompileOpenQuestions(t *testing.T) {
 
 func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	m := specWorkspace(t)
-	m = pressAdvance(t, m) // todo → brainstorm
-	m = pressAdvance(t, m) // brainstorm → spec
-	if m.rows[0].F.Stage != domain.StageSpec {
-		t.Fatalf("setup: stage = %s, want spec", m.rows[0].F.Stage)
+	m = pressAdvance(t, m) // todo → plan (the design stage)
+	if m.rows[0].F.Stage != domain.StagePlan {
+		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
 	}
 	// open the spec and add a user annotation
 	m = openSpecFor(t, m)
@@ -46,7 +46,7 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 
 	// approving is blocked while the annotation is open
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageSpec {
+	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("open user annotation did not block approval (stage=%s)", m.rows[0].F.Stage)
 	}
 	if !strings.Contains(m.notice.text, "open question") {
@@ -60,7 +60,7 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StagePlan {
+	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("resolving the annotation did not unblock approval (stage=%s)", m.rows[0].F.Stage)
 	}
 }
@@ -72,12 +72,11 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 // whose required section has been written and checks it crosses cleanly.
 func TestTemplatePromptsDoNotBlockAsQuestions(t *testing.T) {
 	m := specWorkspace(t)
-	m = pressAdvance(t, m) // todo → brainstorm
-	m = pressAdvance(t, m) // brainstorm → spec
+	m = pressAdvance(t, m) // todo → plan (the design stage)
 	m = openSpecFor(t, m)  // creates the draft with @gummi prompts
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = pressAdvance(t, m) // approve spec → plan
-	if m.rows[0].F.Stage != domain.StagePlan {
+	m = pressAdvance(t, m) // cross the design gate
+	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("template @gummi prompts blocked approval (stage=%s)", m.rows[0].F.Stage)
 	}
 }
@@ -90,14 +89,13 @@ func TestTemplatePromptsDoNotBlockAsQuestions(t *testing.T) {
 // implement started from a stub, and the run still finished verified.
 func TestUndraftedSectionBlocksSpecApproval(t *testing.T) {
 	m := specWorkspace(t)
-	m = pressAdvance(t, m) // todo → brainstorm
-	m = pressAdvance(t, m) // brainstorm → spec
+	m = pressAdvance(t, m) // todo → plan (the design stage)
 	m = openSpecFor(t, m)  // creates the draft, every section undrafted
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// press g WITHOUT drafting: the stage produced nothing
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
-	if m.rows[0].F.Stage != domain.StageSpec {
+	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("an undrafted spec crossed its gate (stage=%s)", m.rows[0].F.Stage)
 	}
 	if !strings.Contains(m.notice.text, "Chosen approach") {
@@ -105,17 +103,13 @@ func TestUndraftedSectionBlocksSpecApproval(t *testing.T) {
 	}
 }
 
-func TestUserAnnotationBlocksPlanGate(t *testing.T) {
-	// the plan gate (plan → implement) blocks on open user annotations
-	// just like spec approval — the worktree already exists here, so the
-	// check must read the worktree copy of the spec, not the retired draft.
+func TestUserAnnotationBlocksWorkStageGate(t *testing.T) {
+	// the gate out of a work stage blocks on open user annotations just
+	// like the design gate — and past the design gate the artifact has
+	// been promoted into the worktree, so this is the case where the
+	// check must read the worktree copy, not the retired draft.
 	m := specWorkspace(t)
-	for range 3 { // todo → brainstorm → spec → plan (worktree created)
-		m = pressAdvance(t, m)
-	}
-	if m.rows[0].F.Stage != domain.StagePlan {
-		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
-	}
+	m = advanceTo(t, m, domain.StageImplement) // the worktree exists from here
 	m = openSpecFor(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "the plan misses the migration step")
@@ -123,8 +117,8 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StagePlan {
-		t.Fatalf("open user annotation did not block the plan gate (stage=%s)", m.rows[0].F.Stage)
+	if m.rows[0].F.Stage != domain.StageImplement {
+		t.Fatalf("open user annotation did not block the work gate (stage=%s)", m.rows[0].F.Stage)
 	}
 	if !strings.Contains(m.notice.text, "open question") {
 		t.Errorf("notice = %q, want a blocking message", m.notice.text)
@@ -137,17 +131,15 @@ func TestUserAnnotationBlocksPlanGate(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageImplement {
+	if m.rows[0].F.Stage != domain.StageVerify {
 		t.Fatalf("resolving the annotation did not unblock the gate (stage=%s)", m.rows[0].F.Stage)
 	}
 }
 
 func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
-	// R at an autonomous stage (plan) has no chat to send to: it re-runs
-	// the stage with the compiled comments appended to the kickoff.
+	// R with no session running has no chat to send to: it re-runs the
+	// stage with the compiled comments appended to the kickoff.
 	m, eng := chatWorkspace(t, agent.NewFake("Tightened the plan."))
-	m = pressAdvance(t, m) // → spec
-	m = pressAdvance(t, m) // → plan (worktree created)
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("setup: stage = %s, want plan", m.rows[0].F.Stage)
 	}
@@ -176,35 +168,42 @@ func TestRequestChangesRerunsAutonomousStage(t *testing.T) {
 }
 
 func TestRequestChangesSendsToAgent(t *testing.T) {
-	// chatWorkspace wires an engine; its FD-001 is at brainstorm
-	m, eng := chatWorkspace(t, agent.NewFake("I'll address those."))
-	m = pressAdvance(t, m) // → spec (interactive)
+	// with a session live on the card, R hands the compiled comments to
+	// it as a turn rather than re-running the stage under it — the user
+	// is sitting in front of that context and it must not be thrown away.
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		// no idle event: the session stays running, which is the state
+		// that makes R a live turn instead of a re-run.
+		return []agent.Event{{Kind: agent.EventMessage, Text: "I'll address those."}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = openAndAttach(t, m)
+	waitLive(t, eng, "FD-001")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // back to the board
+
 	m = openSpecFor(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "please reconsider the storage choice")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	// R compiles the open questions and sends them to the architect
-	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
-	settleChat(t, eng)
-	s := m.engine.Get("FD-001")
-	if s == nil {
-		t.Fatal("request-changes did not start an architect session")
-	}
-	// the compiled turn is the first user-authored message (a fresh
-	// session opens with gummi's system kickoff before it)
-	snap := s.Snapshot()
-	var compiled string
-	for _, msg := range snap.Transcript {
-		if msg.Author == engine.AuthorUser {
-			compiled = msg.Content
-			break
+	press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	deadline := time.After(testWaitTimeout)
+	for {
+		s := eng.Get("FD-001")
+		if s != nil {
+			for _, msg := range s.Snapshot().Transcript {
+				if msg.Author == engine.AuthorUser && strings.Contains(msg.Content, "reconsider the storage choice") {
+					return
+				}
+			}
 		}
-	}
-	if compiled == "" {
-		t.Fatalf("no compiled turn sent: %+v", snap.Transcript)
-	}
-	if !strings.Contains(compiled, "reconsider the storage choice") {
-		t.Errorf("compiled turn missing the annotation:\n%s", compiled)
+		select {
+		case <-deadline:
+			t.Fatalf("the comments never reached the live session as a user turn: %+v", eng.Get("FD-001").Snapshot().Transcript)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

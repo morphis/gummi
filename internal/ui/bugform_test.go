@@ -201,16 +201,3 @@ func TestBugFormEnvelopeEmpty(t *testing.T) {
 		t.Fatalf("Envelope = %v, want nil (use default)", got)
 	}
 }
-
-// TestBugFormEnvelopeTabOrder: tab walks every field in order —
-// description, envelope, profile, severity, route — and wraps back to
-// description, skipping the repo stop since no repos are configured.
-func TestBugFormEnvelopeTabOrder(t *testing.T) {
-	form := newBugForm(nil, nil, false, 0, func(bugFormResult) tea.Cmd { return nil })
-	for _, want := range []int{bugFieldDesc, bugFieldEnvelope, bugFieldProfile, bugFieldSeverity, bugFieldRoute, bugFieldButtons, bugFieldDesc} {
-		if form.focus != want {
-			t.Fatalf("focus = %d, want %d", form.focus, want)
-		}
-		form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	}
-}

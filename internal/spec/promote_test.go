@@ -13,7 +13,7 @@ func promoteFixture(t *testing.T) (f *domain.Feature, artifact, draft, legacy st
 	t.Helper()
 	root := t.TempDir()
 	id, _ := domain.NewFeatureID(1)
-	f = &domain.Feature{ID: id, Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageSpec}
+	f = &domain.Feature{ID: id, Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StagePlan}
 	artifact = filepath.Join(root, f.ArtifactPath())
 	draft = filepath.Join(root, ".gummi", "state", "drafts", DraftFilename(f))
 	legacy = filepath.Join(root, f.WorktreePath(), f.ArtifactPath())

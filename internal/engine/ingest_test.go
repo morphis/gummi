@@ -58,7 +58,7 @@ func assertSampleResult(t *testing.T, res domain.IngestResult) {
 		t.Fatalf("got %d proposals, want 2 (blank-title one dropped)", len(res.Proposals))
 	}
 	p0 := res.Proposals[0]
-	if p0.Title != "Payment webhooks" || !p0.Skip.Brainstorm || p0.Skip.Plan {
+	if p0.Title != "Payment webhooks" {
 		t.Errorf("proposal[0] fields wrong: %+v", p0)
 	}
 	if len(p0.SourceRefs) != 2 || p0.Draft.Problem == "" || len(p0.Draft.OpenQuestions) != 1 {

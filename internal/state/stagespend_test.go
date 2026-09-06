@@ -166,7 +166,7 @@ func TestRecordStageSpendEmptyModel(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageFix, "implementer", "", 5, 0, 10, 0, 20); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, domain.StageImplement, "implementer", "", 5, 0, 10, 0, 20); err != nil {
 		t.Fatal(err)
 	}
 	bd, err := s.StageBreakdown(ctx, f.ID)

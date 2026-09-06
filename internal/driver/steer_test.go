@@ -17,7 +17,7 @@ import (
 // parked at Spec with no branch created (nothing implemented).
 func TestUntilSpecStopsBeforeImplement(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		// implement/review/verify are scripted but must never run.
@@ -25,9 +25,15 @@ func TestUntilSpecStopsBeforeImplement(t *testing.T) {
 			t.Error("implement ran despite --until spec")
 			return msgIdle(o.Model, "Implemented.")
 		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
 	})
 
-	out, err := h.driver(Options{Until: domain.StageSpec}).Run(context.Background(), "add a json export")
+	out, err := h.driver(Options{Until: domain.StagePlan}).Run(context.Background(), "add a json export")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -35,7 +41,7 @@ func TestUntilSpecStopsBeforeImplement(t *testing.T) {
 		t.Fatalf("status = %q, want stopped; stream=%v", out.Status, h.eventKinds())
 	}
 	id := domain.FeatureID(out.ID)
-	if st := h.stageOf(id); st != domain.StageSpec {
+	if st := h.stageOf(id); st != domain.StagePlan {
 		t.Fatalf("feature at %s, want Spec (stopped before crossing the gate)", st)
 	}
 	kinds := h.eventKinds()
@@ -65,7 +71,7 @@ func TestUntilSpecStopsBeforeImplement(t *testing.T) {
 // to a verified branch (the B3 stop-early-then-approve flow).
 func TestUntilSpecThenResumeToVerified(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -76,7 +82,7 @@ func TestUntilSpecThenResumeToVerified(t *testing.T) {
 		},
 	})
 
-	out, err := h.driver(Options{Until: domain.StageSpec}).Run(context.Background(), "add export")
+	out, err := h.driver(Options{Until: domain.StagePlan}).Run(context.Background(), "add export")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -94,38 +100,18 @@ func TestUntilSpecThenResumeToVerified(t *testing.T) {
 	}
 }
 
-// --until validates against the route: plan is off-route on the quick route
-// (plan is skipped), so a quick run with --until plan fails loud without
-// minting a feature.
-func TestUntilPlanRejectedOnQuickRoute(t *testing.T) {
-	h := newHarness(t, true, nil)
-	out, err := h.driver(Options{Until: domain.StagePlan}).Run(context.Background(), "add export")
-	if err == nil {
-		t.Fatal("--until plan accepted on the quick route")
-	}
-	if out.Status != StatusError {
-		t.Fatalf("status = %q, want error", out.Status)
-	}
-	// no feature should have been created.
-	feats, _ := h.store.ListFeatures(context.Background())
-	if len(feats) != 0 {
-		t.Fatalf("a feature was minted despite the invalid --until: %d", len(feats))
-	}
-}
+// The quick route is gone with SkipFlags, so there is no off-route stage
+// for --until to reject: plan is the only stop and it is always on the
+// route. TestUntilStops covers what remains.
 
-// UntilStops enumerates the design-side stops per route.
+// TestUntilStops: one design stage, so one stop. It used to be a
+// per-kind, per-skip list — the quick route stopped only at spec, a full
+// feature at brainstorm/spec/plan, a bug at triage/diagnose — and all of
+// that collapsed with the graphs.
 func TestUntilStops(t *testing.T) {
-	quick := UntilStops(domain.KindFeature, domain.QuickRoute())
-	if len(quick) != 1 || quick[0] != domain.StageSpec {
-		t.Fatalf("quick stops = %v, want [spec]", quick)
-	}
-	full := UntilStops(domain.KindFeature, domain.SkipFlags{})
-	if len(full) != 3 || full[0] != domain.StageBrainstorm || full[1] != domain.StageSpec || full[2] != domain.StagePlan {
-		t.Fatalf("full stops = %v, want [brainstorm spec plan]", full)
-	}
-	bug := UntilStops(domain.KindBug, domain.SkipFlags{})
-	if len(bug) != 2 || bug[0] != domain.StageTriage || bug[1] != domain.StageDiagnose {
-		t.Fatalf("bug stops = %v, want [triage diagnose]", bug)
+	stops := UntilStops()
+	if len(stops) != 1 || stops[0] != domain.StagePlan {
+		t.Fatalf("stops = %v, want [plan]", stops)
 	}
 }
 

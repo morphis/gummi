@@ -11,7 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The dashboard's "next" block (nextsteps.go) is read-only guidance; this
@@ -213,7 +212,7 @@ var foreignBlockedKeys = map[string]bool{
 // diverge the way they used to when the handler answered a key the
 // table didn't advertise.
 func cardActionsFor(in nextInput, r featureRow) []cardAction {
-	work := workflow.WorkStage(in.kind)
+	work := domain.StageImplement
 	research := in.kind == domain.KindResearch
 	doneStage := in.stage == domain.StageDone
 	// carries a branch: everything but a research card, once it has left
@@ -247,7 +246,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	specs := []actionSpec{
 		{
 			"run", "enter", runLabel, runWhy, false,
-			r.DrivenAbroad || workflow.Interactive(in.stage) || autonomousStage(in.stage),
+			r.DrivenAbroad || autonomousStage(in.stage),
 		},
 		// the gate must stay in lockstep with boardVerb's `p`, which pauses
 		// whenever a non-interactive session exists — including a finished
@@ -293,11 +292,6 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"bounce", "b", "bounce", bounceWhy, false,
 			in.stage == domain.StageVerify ||
 				(in.stage == domain.StagePlan && in.escalated),
-		},
-		{
-			"addplan", "P", "add plan", "restore the plan stage on a quick/skip-plan feature (design phase only)", false,
-			in.kind != domain.KindBug && r.F.Skip.Plan &&
-				(in.stage == domain.StageTodo || in.stage == domain.StageBrainstorm || in.stage == domain.StageSpec),
 		},
 		{
 			"verify", "v", "verify", "run verify checks", false,
@@ -481,8 +475,6 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 // override wins.
 func runLabelWhy(in nextInput) (label, why string) {
 	switch {
-	case workflow.Interactive(in.stage):
-		return "chat", "talk through the draft with the agent"
 	case in.hasAsk:
 		return "answer the agent", "it asked a question and is blocked on your reply"
 	case in.sess == engine.StateRunning:

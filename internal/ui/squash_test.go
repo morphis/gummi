@@ -173,7 +173,7 @@ func TestSquashBindingOmittedForResearchCards(t *testing.T) {
 	rid, _ := domain.NewID(domain.KindResearch, 1)
 	fid, _ := domain.NewFeatureID(2)
 	m.rows = []featureRow{
-		{F: domain.Feature{ID: rid, Num: 1, Kind: domain.KindResearch, Title: "research", Stage: domain.StageInvestigate, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
+		{F: domain.Feature{ID: rid, Num: 1, Kind: domain.KindResearch, Title: "research", Stage: domain.StagePlan, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
 		{F: domain.Feature{ID: fid, Num: 2, Title: "feature", Stage: domain.StageImplement, CreatedAt: fixedTime, UpdatedAt: fixedTime}},
 	}
 

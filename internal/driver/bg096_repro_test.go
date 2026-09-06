@@ -15,7 +15,7 @@ import (
 // worktree-less, so the name announced was one nothing would ever
 // create. The route came from the caller's own --full flag, while Create
 // overrides the flags for research a dozen lines earlier, so it reported
-// "quick" for a kind whose own doc comment says it has no quick one-pass
+// "full" for a kind whose own doc comment says it has no quick one-pass
 // route.
 //
 // Driven through Create so the assertion is on the line a caller really
@@ -27,9 +27,9 @@ func TestBG096CreatedEventDescribesTheKindItCreated(t *testing.T) {
 		full bool
 		want string // expected route
 	}{
-		{domain.KindFeature, false, "quick"},
+		{domain.KindFeature, false, "full"},
 		{domain.KindFeature, true, "full"},
-		{domain.KindBug, false, "quick"},
+		{domain.KindBug, false, "full"},
 		{domain.KindResearch, false, "full"},
 		{domain.KindResearch, true, "full"},
 	}

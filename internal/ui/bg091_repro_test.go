@@ -35,7 +35,7 @@ func TestBG091TerminalCardOffersNoGateCrossing(t *testing.T) {
 		}
 		for _, st := range domain.Stages {
 			f := domain.Feature{ID: id, Kind: k, Stage: st}
-			want := !workflow.Terminal(k, st)
+			want := !workflow.Terminal(st)
 			sv := &specView{f: f}
 			if got := hasKey(sv.bindings(), "g"); got != want {
 				t.Errorf("%s at %s: document surface offers g = %v, want %v", k, st, got, want)
@@ -76,7 +76,7 @@ func TestBG091EscapeHatchStaysLast(t *testing.T) {
 // give it — the fix narrows when the row appears, not where.
 func TestBG091GateLeadsWhereItApplies(t *testing.T) {
 	id, _ := domain.NewID(domain.KindFeature, 9)
-	f := domain.Feature{ID: id, Kind: domain.KindFeature, Stage: domain.StageSpec}
+	f := domain.Feature{ID: id, Kind: domain.KindFeature, Stage: domain.StagePlan}
 	for name, bs := range map[string][]binding{
 		"document": (&specView{f: f}).bindings(),
 		"diff":     (&diffView{f: f}).bindings(),

@@ -139,10 +139,6 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err != nil {
 		return domain.Feature{}, err
 	}
-	skip := domain.QuickRoute()
-	if in.Full || in.Kind == domain.KindResearch {
-		skip = domain.SkipFlags{}
-	}
 	gate := in.GateApproval
 	if gate == "" {
 		gate = domain.GateAttended
@@ -150,7 +146,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	now := time.Now()
 	f := domain.Feature{
 		ID: id, Num: num, Kind: in.Kind, Title: title, OneLiner: oneLiner,
-		Slug: slug, Stage: workflow.Initial(in.Kind), Skip: skip,
+		Slug: slug, Stage: workflow.Initial(),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,

@@ -24,8 +24,6 @@ func TestPausedPlanWriterResumeReDispatches(t *testing.T) {
 		resumed bool
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleScribe {
 				return msgIdle(o.Model, "Plan written.")
@@ -84,8 +82,6 @@ func TestPausedPlanCritiqueResumeReDispatches(t *testing.T) {
 		resumed   bool
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleReviewer {
 				st.mu.Lock()
@@ -138,8 +134,6 @@ func TestPausedPlanCritiqueResumeReDispatches(t *testing.T) {
 func TestPausedPlanCritiqueResumeThenStallHintsStalled(t *testing.T) {
 	var resumed bool
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleReviewer {
 				if !resumed {

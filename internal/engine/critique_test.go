@@ -68,7 +68,7 @@ func TestRunCritiqueOnlyWhereARoundCounterIsDeclared(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	// declared: the plan stage and the work stages
-	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageFix} {
+	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageImplement} {
 		if _, ok := CritiqueRoundKind(stage); !ok {
 			t.Errorf("%s should declare a critique round counter", stage)
 		}
@@ -76,14 +76,14 @@ func TestRunCritiqueOnlyWhereARoundCounterIsDeclared(t *testing.T) {
 	if k, _ := CritiqueRoundKind(domain.StagePlan); k != domain.RoundKindPlan {
 		t.Errorf("the plan critique burns %q, want the plan counter", k)
 	}
-	for _, stage := range []domain.Stage{domain.StageImplement, domain.StageFix} {
+	for _, stage := range []domain.Stage{domain.StageImplement} {
 		if k, _ := CritiqueRoundKind(stage); k != domain.RoundKindReview {
 			t.Errorf("%s's critique burns %q, want the review counter it inherited from the Review stage", stage, k)
 		}
 	}
 
 	// undeclared: refused outright rather than run on a default budget
-	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageSpec, domain.StageVerify, domain.StageTodo} {
+	for _, stage := range []domain.Stage{domain.StageVerify, domain.StageTodo, domain.StageDone} {
 		if err := e.RunCritique(feature(1, "x", stage), ""); err == nil {
 			t.Errorf("critique allowed on %s, which declares no round counter", stage)
 		}

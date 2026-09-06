@@ -9,8 +9,8 @@ import (
 	"github.com/morphis/gummi/internal/verify"
 )
 
-// Spec approval chains discovery → baseline: a check that fails on the
-// fresh branch is flagged to the user right away (loud notice, row
+// Crossing the design gate chains discovery → baseline: a check that
+// fails on the fresh branch is flagged to the user right away (loud notice, row
 // counter), instead of surfacing as the feature's fault at verify.
 func TestApprovalRunsBaselineAndFlagsFailure(t *testing.T) {
 	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
@@ -24,7 +24,7 @@ func TestApprovalRunsBaselineAndFlagsFailure(t *testing.T) {
 		}
 	}}
 	m, _ := chatWorkspace(t, ag)
-	m = advanceTo(t, m, domain.StagePlan) // spec approval: worktree + discovery + baseline
+	m = advanceTo(t, m, domain.StageImplement) // the design gate: worktree + discovery + baseline
 
 	if len(m.baselining) != 0 {
 		t.Errorf("baseline still marked in flight: %+v", m.baselining)

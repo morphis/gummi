@@ -169,7 +169,7 @@ func TestChangeProfileRestartsLiveInteractiveSession(t *testing.T) {
 	})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "brainstorm", domain.StageBrainstorm)
+	f := feature(1, "brainstorm", domain.StagePlan)
 	f.Profile = "alpha"
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)

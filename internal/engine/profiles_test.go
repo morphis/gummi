@@ -108,7 +108,7 @@ func TestResolveRoleFallback(t *testing.T) {
 // Verify is reviewer work (adversarial judgment gating the landing) —
 // pin the mapping and that a profile's reviewer model carries over.
 func TestVerifyStageUsesReviewerRole(t *testing.T) {
-	if role, ok := roleForStage(domain.StageVerify); !ok || role != agent.RoleReviewer {
+	if role, ok := roleForStage(domain.Feature{Stage: domain.StageVerify}); !ok || role != agent.RoleReviewer {
 		t.Fatalf("roleForStage(verify) = %s/%v, want reviewer", role, ok)
 	}
 

@@ -6,265 +6,120 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// edge is one (from, to) pair; the tests build the full expected legal
-// set per kind + skip-flag combination and check every (from, to) triple
-// against domain.Stages, so the tables are exhaustive across both graphs.
+// edge is one from→to pair, for the exhaustive table below.
 type edge struct{ from, to domain.Stage }
 
-// --- feature workflow expectations ---
-
-var featureAlways = []edge{
-	{domain.StageTodo, domain.StageBrainstorm},
-	{domain.StageBrainstorm, domain.StageSpec},
-	{domain.StageSpec, domain.StagePlan},
-	{domain.StagePlan, domain.StageImplement},
-	{domain.StageImplement, domain.StageVerify},
-	{domain.StageVerify, domain.StageDone},
-	{domain.StageVerify, domain.StageImplement},
+// legal is every transition the one workflow allows. Three tables became
+// one when three graphs did: they were the same shape wearing three sets
+// of names, so a table per kind was three copies of this.
+var legal = map[edge]bool{
+	{domain.StageTodo, domain.StagePlan}:        true,
+	{domain.StagePlan, domain.StageImplement}:   true,
+	{domain.StageImplement, domain.StageVerify}: true,
+	{domain.StageVerify, domain.StageDone}:      true,
+	{domain.StageImplement, domain.StagePlan}:   true, // the plan was wrong
+	{domain.StageVerify, domain.StageImplement}: true, // checks failed
 }
 
-func legalForFeature(skip domain.SkipFlags) map[edge]bool {
-	m := map[edge]bool{}
-	for _, e := range featureAlways {
-		m[e] = true
-	}
-	if skip.Brainstorm {
-		m[edge{domain.StageTodo, domain.StageSpec}] = true
-	}
-	if skip.Plan {
-		m[edge{domain.StageSpec, domain.StageImplement}] = true
-	}
-	return m
-}
-
-// --- bug workflow expectations ---
-
-var bugAlways = []edge{
-	{domain.StageTodo, domain.StageTriage},
-	{domain.StageTriage, domain.StageDiagnose},
-	{domain.StageDiagnose, domain.StageFix},
-	{domain.StageFix, domain.StageVerify},
-	{domain.StageVerify, domain.StageDone},
-	{domain.StageVerify, domain.StageFix},
-}
-
-func legalForBug(skip domain.SkipFlags) map[edge]bool {
-	m := map[edge]bool{}
-	for _, e := range bugAlways {
-		m[e] = true
-	}
-	if skip.Triage {
-		m[edge{domain.StageTodo, domain.StageDiagnose}] = true
-	}
-	if skip.Diagnose {
-		m[edge{domain.StageTriage, domain.StageFix}] = true
-	}
-	if skip.Triage && skip.Diagnose {
-		m[edge{domain.StageTodo, domain.StageFix}] = true
-	}
-	return m
-}
-
-// --- research workflow expectations ---
-
-// research has no skip edges: every edge is always legal and no skip flag
-// can open one, so legalForResearch ignores the skip combo entirely.
-var researchAlways = []edge{
-	{domain.StageTodo, domain.StageInvestigate},
-	{domain.StageInvestigate, domain.StageShape},
-	{domain.StageShape, domain.StageVerify},
-	{domain.StageVerify, domain.StageDone},
-	{domain.StageVerify, domain.StageInvestigate},
-}
-
-func legalForResearch(skip domain.SkipFlags) map[edge]bool {
-	m := map[edge]bool{}
-	for _, e := range researchAlways {
-		m[e] = true
-	}
-	return m
-}
-
-func allSkipCombos() []domain.SkipFlags {
-	return []domain.SkipFlags{
-		{},
-		{Brainstorm: true},
-		{Plan: true},
-		{Brainstorm: true, Plan: true},
-		// the quick route: the same two skips plus the marker, which must
-		// not change the legal edge set (it only flavors the Spec stage)
-		domain.QuickRoute(),
-		{Triage: true},
-		{Diagnose: true},
-		{Triage: true, Diagnose: true},
-	}
-}
-
+// TestTransitionTableExhaustive checks every from×to pair against the
+// table, so an edge added or lost anywhere shows up here rather than in
+// whichever loop happened to walk it.
 func TestTransitionTableExhaustive(t *testing.T) {
-	kinds := []struct {
-		kind  domain.Kind
-		legal func(domain.SkipFlags) map[edge]bool
-	}{
-		{domain.KindFeature, legalForFeature},
-		{domain.KindBug, legalForBug},
-		{domain.KindResearch, legalForResearch},
-	}
-	for _, k := range kinds {
-		for _, skip := range allSkipCombos() {
-			legal := k.legal(skip)
-			for _, from := range domain.Stages {
-				for _, to := range domain.Stages {
-					err := CanTransition(k.kind, from, to, skip)
-					want := legal[edge{from, to}]
-					if want && err != nil {
-						t.Errorf("%s skip=%+v: %s → %s should be legal, got %v", k.kind, skip, from, to, err)
-					}
-					if !want && err == nil {
-						t.Errorf("%s skip=%+v: %s → %s should be illegal, got nil", k.kind, skip, from, to)
-					}
+	for _, from := range domain.Stages {
+		for _, to := range domain.Stages {
+			err := CanTransition(from, to)
+			if legal[edge{from, to}] {
+				if err != nil {
+					t.Errorf("%s → %s should be legal, got %v", from, to, err)
 				}
+				continue
+			}
+			if err == nil {
+				t.Errorf("%s → %s should be illegal, got nil", from, to)
 			}
 		}
 	}
 }
 
-// TestQuickRouteTwoGates: a quick feature runs todo → spec → implement —
-// one design conversation, one approval — and then the verify tail.
-func TestQuickRouteTwoGates(t *testing.T) {
-	quick := domain.QuickRoute()
-	path := []domain.Stage{
-		domain.StageTodo, domain.StageSpec, domain.StageImplement,
-		domain.StageVerify, domain.StageDone,
-	}
-	for i := 1; i < len(path); i++ {
-		if err := CanTransition(domain.KindFeature, path[i-1], path[i], quick); err != nil {
-			t.Errorf("quick route: %s → %s should be legal, got %v", path[i-1], path[i], err)
-		}
-	}
-	// clearing the plan skip (the P escalation) closes the spec → implement
-	// shortcut and re-opens the plan gate
-	loosened := quick
-	loosened.Plan, loosened.Quick = false, false
-	if err := CanTransition(domain.KindFeature, domain.StageSpec, domain.StageImplement, loosened); err == nil {
-		t.Error("spec → implement still legal after the plan skip was cleared")
-	}
-	if err := CanTransition(domain.KindFeature, domain.StageSpec, domain.StagePlan, loosened); err != nil {
-		t.Errorf("spec → plan should be legal after escalation, got %v", err)
-	}
-}
-
+// TestVerifyNeverSkippable: the only way into Done is Verify, the only
+// way into Verify is Implement, and the only way out of Implement is
+// Verify or back to Plan. Nothing may jump the quality floor — and with
+// no skip flags left there is nothing that could try.
 func TestVerifyNeverSkippable(t *testing.T) {
-	// In BOTH workflows, the only way into Verify is the work stage, the
-	// only way into Done is Verify, and the only way out of the work stage
-	// is Verify — no skip combo may jump the quality floor. Review is not
-	// on this path any more: the critique that guarded it is the pass the
-	// work stage ends with, so the floor is one edge shorter without being
-	// one check weaker.
-	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
-		work := WorkStage(kind)
-		for _, skip := range allSkipCombos() {
-			for _, from := range domain.Stages {
-				if from != domain.StageVerify {
-					if err := CanTransition(kind, from, domain.StageDone, skip); err == nil {
-						t.Errorf("%s skip=%+v: %s → done must be illegal", kind, skip, from)
-					}
-				}
-				if from != work {
-					if err := CanTransition(kind, from, domain.StageVerify, skip); err == nil {
-						t.Errorf("%s skip=%+v: %s → verify must be illegal", kind, skip, from)
-					}
-				}
+	for _, from := range domain.Stages {
+		if from != domain.StageVerify {
+			if err := CanTransition(from, domain.StageDone); err == nil {
+				t.Errorf("%s → done must be illegal", from)
 			}
-			for _, to := range domain.Stages {
-				if to != domain.StageVerify {
-					if err := CanTransition(kind, work, to, skip); err == nil {
-						t.Errorf("%s skip=%+v: %s → %s must be illegal", kind, skip, work, to)
-					}
-				}
+		}
+		if from != domain.StageImplement {
+			if err := CanTransition(from, domain.StageVerify); err == nil {
+				t.Errorf("%s → verify must be illegal", from)
 			}
+		}
+	}
+	for _, to := range domain.Stages {
+		if to == domain.StageVerify || to == domain.StagePlan {
+			continue
+		}
+		if err := CanTransition(domain.StageImplement, to); err == nil {
+			t.Errorf("implement → %s must be illegal", to)
 		}
 	}
 }
 
 func TestUnknownStages(t *testing.T) {
-	if err := CanTransition(domain.KindFeature, "bogus", domain.StageSpec, domain.SkipFlags{}); err == nil {
-		t.Error("unknown from-stage accepted")
+	if err := CanTransition("nope", domain.StagePlan); err == nil {
+		t.Error("an unknown from-stage was accepted")
 	}
-	if err := CanTransition(domain.KindFeature, domain.StageTodo, "bogus", domain.SkipFlags{}); err == nil {
-		t.Error("unknown to-stage accepted")
-	}
-}
-
-func TestNextFeature(t *testing.T) {
-	got := Next(domain.KindFeature, domain.StageTodo, domain.SkipFlags{})
-	if len(got) != 1 || got[0] != domain.StageBrainstorm {
-		t.Errorf("Next(todo, none) = %v, want [brainstorm]", got)
-	}
-	got = Next(domain.KindFeature, domain.StageTodo, domain.SkipFlags{Brainstorm: true})
-	if len(got) != 2 || got[0] != domain.StageBrainstorm || got[1] != domain.StageSpec {
-		t.Errorf("Next(todo, skip-brainstorm) = %v, want [brainstorm spec]", got)
-	}
-	got = Next(domain.KindFeature, domain.StageImplement, domain.SkipFlags{})
-	if len(got) != 1 || got[0] != domain.StageVerify {
-		t.Errorf("Next(implement) = %v, want [verify]", got)
-	}
-	got = Next(domain.KindFeature, domain.StageVerify, domain.SkipFlags{})
-	if len(got) != 2 || got[0] != domain.StageDone || got[1] != domain.StageImplement {
-		t.Errorf("Next(verify) = %v, want [done implement]", got)
+	if err := CanTransition(domain.StagePlan, "nope"); err == nil {
+		t.Error("an unknown to-stage was accepted")
 	}
 }
 
-func TestNextBug(t *testing.T) {
-	got := Next(domain.KindBug, domain.StageTodo, domain.SkipFlags{})
-	if len(got) != 1 || got[0] != domain.StageTriage {
-		t.Errorf("Next(bug todo) = %v, want [triage]", got)
-	}
-	// both skips open triage, plus the combined todo→fix bypass.
-	got = Next(domain.KindBug, domain.StageTodo, domain.SkipFlags{Triage: true, Diagnose: true})
-	if len(got) != 3 || got[0] != domain.StageTriage || got[1] != domain.StageDiagnose || got[2] != domain.StageFix {
-		t.Errorf("Next(bug todo, skip both) = %v, want [triage diagnose fix]", got)
-	}
-	got = Next(domain.KindBug, domain.StageFix, domain.SkipFlags{})
-	if len(got) != 1 || got[0] != domain.StageVerify {
-		t.Errorf("Next(bug fix) = %v, want [verify]", got)
-	}
-	got = Next(domain.KindBug, domain.StageVerify, domain.SkipFlags{})
-	if len(got) != 2 || got[0] != domain.StageDone || got[1] != domain.StageFix {
-		t.Errorf("Next(bug verify) = %v, want [done fix]", got)
-	}
-}
-
-func TestInitialTerminalAndWorkStage(t *testing.T) {
-	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
-		if Initial(kind) != domain.StageTodo {
-			t.Errorf("Initial(%s) = %s, want todo", kind, Initial(kind))
+// TestNext walks the forward path and the two backward edges. Next lists
+// in table order, so the forward edge comes first everywhere; the rerun
+// edges follow it.
+func TestNext(t *testing.T) {
+	for _, tc := range []struct {
+		from domain.Stage
+		want []domain.Stage
+	}{
+		{domain.StageTodo, []domain.Stage{domain.StagePlan}},
+		{domain.StagePlan, []domain.Stage{domain.StageImplement}},
+		{domain.StageImplement, []domain.Stage{domain.StageVerify, domain.StagePlan}},
+		{domain.StageVerify, []domain.Stage{domain.StageDone, domain.StageImplement}},
+		{domain.StageDone, nil},
+	} {
+		got := Next(tc.from)
+		if len(got) != len(tc.want) {
+			t.Errorf("Next(%s) = %v, want %v", tc.from, got, tc.want)
+			continue
 		}
-		if !Terminal(kind, domain.StageDone) {
-			t.Errorf("Terminal(%s, done) should be true", kind)
-		}
-		if Terminal(kind, domain.StageTodo) {
-			t.Errorf("Terminal(%s, todo) should be false", kind)
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("Next(%s) = %v, want %v", tc.from, got, tc.want)
+				break
+			}
 		}
 	}
-	if WorkStage(domain.KindFeature) != domain.StageImplement {
-		t.Error("feature work stage should be implement")
-	}
-	if WorkStage(domain.KindBug) != domain.StageFix {
-		t.Error("bug work stage should be fix")
-	}
-	if WorkStage(domain.KindResearch) != domain.StageInvestigate {
-		t.Error("research work stage should be investigate")
-	}
 }
 
-// shape is the research gate: interactive (a chat stage), while investigate
-// is the autonomous work stage.
-func TestResearchInteractiveShape(t *testing.T) {
-	if !Interactive(domain.StageShape) {
-		t.Error("shape should be interactive")
+// TestInitialAndTerminal: every card starts at todo and ends at done, and
+// neither answer depends on the kind any more — which is the merge.
+func TestInitialAndTerminal(t *testing.T) {
+	if Initial() != domain.StageTodo {
+		t.Errorf("Initial() = %s, want todo", Initial())
 	}
-	if Interactive(domain.StageInvestigate) {
-		t.Error("investigate should not be interactive")
+	if !Terminal(domain.StageDone) {
+		t.Error("done should be terminal")
+	}
+	for _, s := range domain.Stages {
+		if s == domain.StageDone {
+			continue
+		}
+		if Terminal(s) {
+			t.Errorf("%s should not be terminal", s)
+		}
 	}
 }
-

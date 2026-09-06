@@ -16,7 +16,6 @@ func bug(num int, title, ref string) *domain.Feature {
 	return &domain.Feature{
 		ID: id, Num: num, Kind: domain.KindBug, Title: title, Slug: slug,
 		Stage: domain.StageTodo, ExternalRef: ref,
-		Skip:      domain.SkipFlags{Triage: true},
 		CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -38,9 +37,6 @@ func TestStoreRoundTripsBugFields(t *testing.T) {
 	}
 	if got.ExternalRef != b.ExternalRef {
 		t.Errorf("external_ref = %q, want %q", got.ExternalRef, b.ExternalRef)
-	}
-	if !got.Skip.Triage {
-		t.Error("skip.Triage did not round-trip")
 	}
 }
 
@@ -68,23 +64,11 @@ func TestFeatureByExternalRef(t *testing.T) {
 	}
 }
 
-func TestBugFollowsBugWorkflow(t *testing.T) {
-	s := openStore(t)
-	ctx := context.Background()
-
-	// Skip.Triage is set, so todo → diagnose is legal but todo → triage
-	// is still the primary edge; todo → brainstorm (a feature edge) is not.
-	b := bug(1, "Panic on nil", "")
-	if err := s.CreateFeature(ctx, b); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Transition(ctx, b.ID, domain.StageBrainstorm, "user"); err == nil {
-		t.Error("bug should not accept a feature-workflow transition (todo → brainstorm)")
-	}
-	if _, err := s.Transition(ctx, b.ID, domain.StageDiagnose, "user"); err != nil {
-		t.Errorf("bug todo → diagnose (triage skipped) should be legal: %v", err)
-	}
-}
+// A bug used to have its own workflow graph; there is one graph now, so
+// what used to distinguish a bug's transitions from a feature's is gone
+// along with the test that pinned the difference. The kind still selects
+// the card's CONTRACT (its artifact template, its stage hints) — that is
+// covered where those live, not here.
 
 // TestStoreRoundTripsRepo: the repo column round-trips; an empty value
 // (the default) reads back empty, and a named repo persists.

@@ -25,7 +25,7 @@ func TestBG071ReviewSurfacesKeepTheWayOutAndTheGate(t *testing.T) {
 	// a real card at a stage it can still cross: the gate row this test
 	// is about only exists on one (BG-091), and a zero-value feature is
 	// at no stage of no kind.
-	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageSpec}
+	f := domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StagePlan}
 	surfaces := map[string][]binding{
 		"spec": (&specView{f: f}).bindings(),
 		"diff": (&diffView{f: f}).bindings(),

@@ -43,24 +43,24 @@ func TestBG080SecondCrossingAfterAnsweredGateIsRecorded(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Transition(ctx, id, domain.StageInvestigate, "auto"); err != nil {
+	if _, err := s.Transition(ctx, id, domain.StagePlan, "auto"); err != nil {
 		t.Fatal(err)
 	}
 
-	// investigate parks on its gate, so a decision is open when the
+	// the design stage parks on its gate, so a decision is open when the
 	// crossing out of it lands: that crossing correlates to and answers it.
-	const gateID = "gate:RS-001:investigate:1"
-	if err := s.OpenDecision(ctx, id, domain.StageInvestigate, DecisionPayload{
+	const gateID = "gate:RS-001:plan:1"
+	if err := s.OpenDecision(ctx, id, domain.StagePlan, DecisionPayload{
 		ID: gateID, Kind: DecisionKindGate, Question: "investigate is done — move on to shape?",
 	}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Transition(ctx, id, domain.StageShape, "autopilot"); err != nil {
+	if _, err := s.Transition(ctx, id, domain.StageImplement, "autopilot"); err != nil {
 		t.Fatal(err)
 	}
 
-	// shape is the interactive stage: the user advances out of it by hand,
-	// and nothing opens a gate decision for that crossing to answer.
+	// the next crossing opens no gate decision of its own, so there is
+	// nothing for it to answer.
 	if _, err := s.Transition(ctx, id, domain.StageVerify, "user"); err != nil {
 		t.Fatal(err)
 	}
@@ -82,9 +82,9 @@ func TestBG080SecondCrossingAfterAnsweredGateIsRecorded(t *testing.T) {
 	}
 
 	want := [][2]string{
-		{string(domain.StageTodo), string(domain.StageInvestigate)},
-		{string(domain.StageInvestigate), string(domain.StageShape)},
-		{string(domain.StageShape), string(domain.StageVerify)},
+		{string(domain.StageTodo), string(domain.StagePlan)},
+		{string(domain.StagePlan), string(domain.StageImplement)},
+		{string(domain.StageImplement), string(domain.StageVerify)},
 	}
 	if len(crossings) != len(want) {
 		t.Fatalf("the card's history holds %d crossings, want %d — a stage change with no receipt behind it:\n got %v\nwant %v",
@@ -108,7 +108,7 @@ func TestBG080SecondCrossingAfterAnsweredGateIsRecorded(t *testing.T) {
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
 			t.Fatal(err)
 		}
-		if p.From == string(domain.StageInvestigate) {
+		if p.From == string(domain.StagePlan) {
 			answered = p.ID
 		}
 	}

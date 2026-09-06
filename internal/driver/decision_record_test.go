@@ -17,7 +17,7 @@ import (
 // it with the same id — after --approve, nothing reads as waiting.
 func TestCallerGateRecordsItsDecision(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -129,7 +129,7 @@ func TestCallerGateRecordsItsDecision(t *testing.T) {
 // stored mode.
 func TestSpecQuestionThenResumeCorrelatesItsDecision(t *testing.T) {
 	h := newHarness(t, false, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
 			if n == 0 {
 				return convAsk(o.Model, "Include a schema header?", "no (recommended)", "yes")
 			}
@@ -208,7 +208,7 @@ func TestSpecQuestionThenResumeCorrelatesItsDecision(t *testing.T) {
 // the card is waiting on, and it names which verb this stop takes.
 func TestResumeAnswerWithoutOpenQuestionIsATypedUsageError(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -244,7 +244,7 @@ func TestResumeAnswerWithoutOpenQuestionIsATypedUsageError(t *testing.T) {
 // for. The next --answer still lands through engine.Answer.
 func TestBareResumeRePresentsAnOpenAsk(t *testing.T) {
 	h := newHarness(t, false, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, n int, o agent.SessionOpts, _ string) []agent.Event {
 			if n == 0 {
 				return convAsk(o.Model, "Include a schema header?", "no (recommended)", "yes")
 			}

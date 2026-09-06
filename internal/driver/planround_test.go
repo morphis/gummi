@@ -26,8 +26,6 @@ func planLoopScript(verdicts ...string) map[domain.Stage]stageFn {
 	var mu sync.Mutex
 	var critiques int
 	return map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleReviewer {
 				mu.Lock()
@@ -56,8 +54,6 @@ func TestPlanRoundsResumeSurvivesFreshDriver(t *testing.T) {
 		resumed   bool
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleScribe {
 				return msgIdle(o.Model, "Plan written.")
@@ -186,9 +182,13 @@ func (f *failRoundStore) ClearRounds(context.Context, domain.FeatureID, domain.R
 func TestPlanRoundsStoreFailureFailsClosed(t *testing.T) {
 	t.Run("read aborts plan entry", func(t *testing.T) {
 		h := newHarness(t, true, map[domain.Stage]stageFn{
-			domain.StageBrainstorm: idleTurn,
-			domain.StageSpec:       idleTurn,
-			domain.StagePlan:       idleTurn,
+			domain.StagePlan: idleTurn,
+
+			// the merged design stage ends with a critique; a drive that is
+			// not about the critique still needs it to pass.
+			stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+				return toolVerdict(o.Model, "pass")
+			},
 		})
 		d := h.driver(Options{Full: true})
 		d.roundStore = &failRoundStore{failLoad: true}
@@ -243,8 +243,6 @@ func TestPlanRoundsResumeReCritiquesRevisedPlan(t *testing.T) {
 		resumeKickoff   string
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
 			if o.Role == agent.RoleScribe {
 				return msgIdle(o.Model, "Plan written.")
@@ -328,8 +326,6 @@ func TestPlanRoundsResumeCritiquesFreshPlan(t *testing.T) {
 		kickoff   string
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
 			if o.Role == agent.RoleScribe {
 				return msgIdle(o.Model, "Plan written.")
@@ -393,8 +389,6 @@ func TestPlanRoundsResumeFinishedCritiqueReplans(t *testing.T) {
 		replanMsg  string
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
 			if o.Role == agent.RoleScribe {
 				return msgIdle(o.Model, "Plan written.")
@@ -466,8 +460,6 @@ func TestPlanRoundsResumeRunningSessionNoOp(t *testing.T) {
 		reviewers  int
 	}{}
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageBrainstorm: idleTurn,
-		domain.StageSpec:       idleTurn,
 		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			if o.Role == agent.RoleReviewer {
 				st.mu.Lock()

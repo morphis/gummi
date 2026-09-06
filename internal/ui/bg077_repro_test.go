@@ -35,9 +35,9 @@ import (
 func TestBG077GateCrossingRefreshesOpenThreadHistory(t *testing.T) {
 	at := time.Date(2026, 9, 3, 16, 18, 0, 0, time.UTC)
 
-	// open renders a card page whose log holds one finished-looking stage
-	// and the crossing that ended it, then appends a second crossing —
-	// the one made with nothing running — without telling the page.
+	// open renders a card page whose log holds a stage that has run and
+	// said something, then appends the crossing that ends it — the one
+	// made with nothing running — without telling the page.
 	open := func(t *testing.T) (*Shell, domain.Feature, func() string) {
 		t.Helper()
 		ctx := context.Background()
@@ -52,11 +52,9 @@ func TestBG077GateCrossingRefreshesOpenThreadHistory(t *testing.T) {
 
 		enter, _ := json.Marshal(map[string]string{"role": "architect", "model": "demo", "flavor": "stage"})
 		says, _ := json.Marshal(map[string]string{"author": string(engine.AuthorAssistant), "content": "SHAPED-THE-WORK"})
-		first, _ := json.Marshal(state.GatePayload{From: string(domain.StageBrainstorm), To: string(domain.StageSpec), Actor: state.ActorUser})
 		if err := store.AppendEvents(ctx, []state.CardEvent{
-			{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "spec:enter"},
-			{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says), Dedupe: "said"},
-			{Feature: f.ID, Stage: domain.StageSpec, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(first), Dedupe: "gate:1"},
+			{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventStageEnter, At: at, Payload: string(enter), Dedupe: "plan:enter"},
+			{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says), Dedupe: "said"},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -66,20 +64,20 @@ func TestBG077GateCrossingRefreshesOpenThreadHistory(t *testing.T) {
 			w, h := m.threadSize()
 			return ansi.Strip(m.threadView(w, h))
 		}
-		if !strings.Contains(body(), "brainstorm → spec") {
-			t.Fatalf("precondition: the first crossing is not in the thread\n%s", body())
+		if !strings.Contains(body(), "SHAPED-THE-WORK") {
+			t.Fatalf("precondition: the finished stage is not in the thread\n%s", body())
 		}
 
 		// the crossing under test: the engine has written it to the log and
 		// moved the card, exactly as engine.Advance does, and the page has
 		// not been told.
-		second, _ := json.Marshal(state.GatePayload{From: string(domain.StageSpec), To: string(domain.StagePlan), Actor: state.ActorUser})
+		crossing, _ := json.Marshal(state.GatePayload{From: string(domain.StagePlan), To: string(domain.StageImplement), Actor: state.ActorUser})
 		if err := store.AppendEvents(ctx, []state.CardEvent{
-			{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventGate, At: at.Add(3 * time.Minute), Payload: string(second), Dedupe: "gate:2"},
+			{Feature: f.ID, Stage: domain.StagePlan, Kind: state.EventGate, At: at.Add(3 * time.Minute), Payload: string(crossing), Dedupe: "gate:1"},
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(body(), "spec → plan") {
+		if strings.Contains(body(), "plan → implement") {
 			t.Fatal("precondition: the page already shows the crossing before its outcome was delivered")
 		}
 		return m, f, body
@@ -88,19 +86,19 @@ func TestBG077GateCrossingRefreshesOpenThreadHistory(t *testing.T) {
 	t.Run("plain crossing", func(t *testing.T) {
 		m, f, body := open(t)
 		model, cmd := m.Update(noticeMsg{
-			text: string(f.ID) + " → plan", reload: true, clearInbox: f.ID,
+			text: string(f.ID) + " → implement", reload: true, clearInbox: f.ID,
 		})
-		m = pump(t, model.(*Shell), cmd)
-		if got := body(); !strings.Contains(got, "spec → plan") {
+		pump(t, model.(*Shell), cmd)
+		if got := body(); !strings.Contains(got, "plan → implement") {
 			t.Errorf("the crossing left no receipt in the open thread:\n%s", got)
 		}
 	})
 
 	t.Run("crossing into a worktree", func(t *testing.T) {
 		m, f, body := open(t)
-		model, cmd := m.Update(worktreeEnteredMsg{id: f.ID, note: string(f.ID) + " → plan"})
-		m = pump(t, model.(*Shell), cmd)
-		if got := body(); !strings.Contains(got, "spec → plan") {
+		model, cmd := m.Update(worktreeEnteredMsg{id: f.ID, note: string(f.ID) + " → implement"})
+		pump(t, model.(*Shell), cmd)
+		if got := body(); !strings.Contains(got, "plan → implement") {
 			t.Errorf("the approval that entered a worktree left no receipt in the open thread:\n%s", got)
 		}
 	})

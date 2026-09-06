@@ -60,11 +60,8 @@ func TestAutopilotConfirmLabelPerBucket(t *testing.T) {
 // decision) rather than a mechanical next step.
 func TestAutopilotForwardEdges(t *testing.T) {
 	safe := map[domain.Stage]domain.Stage{
-		domain.StagePlan:        domain.StageImplement,
-		domain.StageDiagnose:    domain.StageFix,
-		domain.StageImplement:   domain.StageVerify,
-		domain.StageFix:         domain.StageVerify,
-		domain.StageInvestigate: domain.StageShape,
+		domain.StagePlan:      domain.StageImplement,
+		domain.StageImplement: domain.StageVerify,
 	}
 	for from, to := range safe {
 		got, ok := autopilotForward(domain.Feature{Stage: from})
@@ -72,11 +69,10 @@ func TestAutopilotForwardEdges(t *testing.T) {
 			t.Errorf("autopilotForward(%s) = (%s, %v), want (%s, true)", from, got, ok, to)
 		}
 	}
-	excluded := []domain.Stage{
-		domain.StageVerify, domain.StageTodo,
-		domain.StageBrainstorm, domain.StageSpec, domain.StageShape,
-		domain.StageTriage, domain.StageDone,
-	}
+	// verify and done are never autopilot's to cross: landing on main
+	// stays a person's act. todo is the kickoff hop, which autoAdvance
+	// takes without a plan.
+	excluded := []domain.Stage{domain.StageVerify, domain.StageTodo, domain.StageDone}
 	for _, from := range excluded {
 		if _, ok := autopilotForward(domain.Feature{Stage: from}); ok {
 			t.Errorf("autopilotForward(%s) should refuse to cross on its own", from)
@@ -88,8 +84,8 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo, Budget: domain.Budget{Envelope: 2400}}
 	plan := autopilotPlan{
 		bucket:    "todo",
-		to:        domain.StageBrainstorm,
-		remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageVerify},
+		to:        domain.StagePlan,
+		remaining: []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify},
 	}
 	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
 
@@ -98,12 +94,10 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		t.Fatalf("test assumes the corrective cap is 5 (sourced from verdict.MaxRounds); it is now %d — update the test's expectation, not the source", wantCorrective)
 	}
 	for _, want := range []string{
-		// only the stages it actually runs. brainstorm and spec need a
-		// person, and autopilot crosses into one and hands the card back
-		// rather than running it, so naming them here was the switch
-		// promising work it never does (BG-099).
+		// every stage ahead is one autopilot may run — one graph, no
+		// stage that needs a person by nature — so the list is the whole
+		// remainder and nothing is named as a stage it will only open.
 		"plan, implement and verify",
-		"it never runs brainstorm and spec on its own",
 		"5 corrections",
 		"2400 credit envelope",
 		"parks to the inbox if it can't finish",
@@ -120,7 +114,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 // Envelope > 0) — DESIGN's own "0 = no cap" reading.
 func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
-	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm}}
+	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan}}
 	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
 	if strings.Contains(body, "credit envelope") {
 		t.Errorf("body mentions a credit envelope for an uncapped card: %q", body)
@@ -132,7 +126,7 @@ func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 // nothing starts — the text-level counterpart of requirement 6.
 func TestAutopilotBodyOffNeverStarts(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
-	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm}}
+	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan}}
 	body := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")
 	if strings.Contains(body, "corrections") || strings.Contains(body, "runs brainstorm") {
 		t.Errorf("off's body should not describe a run: %q", body)
@@ -205,10 +199,10 @@ func TestAutopilotPlanTodoCard(t *testing.T) {
 	if plan.bucket != "todo" {
 		t.Fatalf("bucket = %q, want todo", plan.bucket)
 	}
-	if plan.to != domain.StageBrainstorm {
-		t.Fatalf("to = %s, want brainstorm", plan.to)
+	if plan.to != domain.StagePlan {
+		t.Fatalf("to = %s, want plan", plan.to)
 	}
-	want := []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan, domain.StageImplement, domain.StageVerify}
+	want := []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify}
 	if !stagesEqual(plan.remaining, want) {
 		t.Fatalf("remaining = %v, want %v", plan.remaining, want)
 	}
@@ -263,6 +257,15 @@ func TestAutopilotStartTodoCardEntersInitialStage(t *testing.T) {
 	ws, store, wt := uiRepo(t)
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.Attach(store, wt, ws)
+	// every stage runs an agent now, the design stage included, so the
+	// crossing out of todo needs an engine behind it — there is no stage
+	// left that a card can be walked into with nothing configured.
+	eng := engine.New(engine.Config{
+		Agents: singleAgent(agent.NewFake("shaping it")), Store: store,
+		Pool: wt, Workspace: ws, Model: "fake-model",
+	})
+	t.Cleanup(func() { eng.Close() })
+	m.AttachEngine(eng)
 
 	f := domain.Feature{ID: "FD-001", Num: 1, Title: "todo card", Slug: "todo-card", Stage: domain.StageTodo}
 	if err := store.CreateFeature(ctx, &f); err != nil {
@@ -283,12 +286,10 @@ func TestAutopilotStartTodoCardEntersInitialStage(t *testing.T) {
 	if got.GateApproval != domain.GateAutopilot {
 		t.Errorf("gate approval = %q, want %q", got.GateApproval, domain.GateAutopilot)
 	}
-	// brainstorm is interactive (workflow.Interactive): entering it needs
-	// no engine, so the todo card visibly leaves todo even though nothing
-	// is running yet — the same "clears the way; a plain enter opens it"
-	// contract autoStepStage documents.
-	if got.Stage != domain.StageBrainstorm {
-		t.Errorf("stage = %s, want brainstorm", got.Stage)
+	// the todo card visibly leaves todo — the same "clears the way, then
+	// starts what is behind it" contract autoStepStage documents.
+	if got.Stage != domain.StagePlan {
+		t.Errorf("stage = %s, want plan", got.Stage)
 	}
 }
 
@@ -532,7 +533,7 @@ func TestAutopilotBodyDistinguishesAttendedFromAutopilot(t *testing.T) {
 	// the tail has to hold a stage autopilot may actually run: the two
 	// modes differ in how they run one, so a card with nothing runnable
 	// ahead of it is the one case where neither promise is made.
-	plan := autopilotPlan{bucket: "todo", to: domain.StageBrainstorm, remaining: []domain.Stage{domain.StageBrainstorm, domain.StageSpec, domain.StagePlan}}
+	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan, domain.StagePlan, domain.StagePlan}}
 
 	autopilot := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
 	attended := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")

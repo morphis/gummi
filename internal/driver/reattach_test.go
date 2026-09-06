@@ -16,8 +16,14 @@ import (
 // inherit it (the mode is not re-derived from the flag every invocation).
 func TestRunPersistsGateApproval(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
+		},
+
+		// the merged design stage ends with a critique; a drive that is
+		// not about the critique still needs it to pass.
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
 		},
 	})
 	out, err := h.driver(Options{GateApproval: GateAttended}).Run(context.Background(), "a feature")
@@ -38,7 +44,7 @@ func TestRunPersistsGateApproval(t *testing.T) {
 // caller still checkpoints its design gate on a bare resume.
 func TestResumeInheritsPersistedGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	f.GateApproval = domain.GateAttended
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
@@ -64,7 +70,7 @@ func TestResumeInheritsPersistedGate(t *testing.T) {
 // branch, and the stored mode is updated so subsequent resumes inherit auto.
 func TestResumeOverridesPersistedGate(t *testing.T) {
 	h := newHarness(t, true, happyResumeScript())
-	f := feature(1, domain.StageSpec)
+	f := feature(1, domain.StagePlan)
 	f.GateApproval = domain.GateAttended
 	putDraft(t, h, &f, stubSpecDraft)
 	if err := h.store.CreateFeature(context.Background(), &f); err != nil {
@@ -95,7 +101,7 @@ func TestResumeOverridesPersistedGate(t *testing.T) {
 // a later crash mid-verify has nothing to cheaply re-attach to.
 func TestHeadlessAdvanceBaselinesChecksAtWorktreeEntry(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -143,7 +149,7 @@ func TestHeadlessAdvanceBaselinesChecksAtWorktreeEntry(t *testing.T) {
 // leave the gummi-checks block absent and let the drive continue.
 func TestHeadlessAdvanceSurvivesDiscoveryBudgetExhaustion(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -198,7 +204,7 @@ func TestHeadlessAdvanceSurvivesDiscoveryBudgetExhaustion(t *testing.T) {
 // gummi-checks block absent, and lets the drive continue.
 func TestHeadlessAdvanceSurvivesDiscoveryStall(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
@@ -387,7 +393,7 @@ func TestBackendHint(t *testing.T) {
 func driveToVerified(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StageSpec: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
 			return msgIdle(o.Model, "Spec drafted.")
 		},
 		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {

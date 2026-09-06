@@ -6,57 +6,30 @@ package domain
 type Stage string
 
 const (
-	// StageTodo is the backlog: the feature exists but no work has started.
+	// StageTodo is the backlog: the card exists but no work has started.
 	StageTodo Stage = "todo"
-	// StageInvestigate explores a research topic and gathers evidence;
-	// mandatory, never skippable (role: architect).
-	StageInvestigate Stage = "investigate"
-	// StageShape converges a research topic into a shaped artifact; gated
-	// on human approval (interactive, role: architect). Mandatory, never
-	// skippable.
-	StageShape Stage = "shape"
-	// StageBrainstorm explores the problem and candidate approaches
-	// (interactive, role: architect). Skippable at creation.
-	StageBrainstorm Stage = "brainstorm"
-	// StageSpec converges on one approach; gated on human approval of
-	// the spec (interactive, role: architect).
-	StageSpec Stage = "spec"
-	// StagePlan derives a line-level implementation plan from the spec;
-	// gated on human approval. Skippable at creation.
+	// StagePlan is the design stage: explore the problem, converge on an
+	// approach, and write the plan. It replaces the five stages the three
+	// workflows used to spell this in — brainstorm/spec/plan for a
+	// feature, triage/diagnose for a bug, investigate/shape for research
+	// — which were one slot wearing three sets of names. Its artifact is
+	// the card's design document, and it ends at a human gate.
 	StagePlan Stage = "plan"
-	// StageTriage confirms and reproduces a bug and records severity +
-	// repro steps (interactive, role: architect). Skippable at creation.
-	// The bug workflow's analog of Brainstorm.
-	StageTriage Stage = "triage"
-	// StageDiagnose converges on the root cause; gated on human approval of
-	// the diagnosis (interactive, role: architect). Skippable at creation.
-	// The bug workflow's analog of Spec.
-	StageDiagnose Stage = "diagnose"
-	// StageFix is the autonomous fix in the worktree (role: implementer).
-	// The bug workflow's analog of Implement.
-	StageFix Stage = "fix"
-	// StageImplement is the autonomous implementation in the worktree.
+	// StageImplement is the autonomous implementation in the card's
+	// worktree. It replaces implement and fix.
 	StageImplement Stage = "implement"
-	// StageVerify runs the repo checks plus the spec's verification
+	// StageVerify runs the repo checks plus the artifact's verification
 	// plan. Never skippable.
 	StageVerify Stage = "verify"
 	// StageDone is terminal: a verified branch handed to the user.
 	StageDone Stage = "done"
 )
 
-// Stages lists every stage across all three workflows, in workflow order:
-// the shared entry (todo), the feature-specific stages, the bug-specific
-// stages, then the shared tail (the work stages converge into verify →
-// done). There is no Review: the critique it performed is the pass each
-// work stage ends with, judged without a stage of its own.
-var Stages = []Stage{
-	StageTodo,
-	StageInvestigate, StageShape,
-	StageBrainstorm, StageSpec, StagePlan,
-	StageTriage, StageDiagnose,
-	StageFix, StageImplement,
-	StageVerify, StageDone,
-}
+// Stages lists every stage, in workflow order. One list, because there is
+// one workflow: the three graphs were the same shape wearing three sets
+// of names, and the kind now selects the stage's CONTRACT (which hints it
+// gets, which artifact it writes) rather than its own graph.
+var Stages = []Stage{StageTodo, StagePlan, StageImplement, StageVerify, StageDone}
 
 // Valid reports whether s is one of the compiled-in stages.
 func (s Stage) Valid() bool {
@@ -74,24 +47,24 @@ type SuperState string
 const (
 	SuperTodo         SuperState = "todo"
 	SuperInProgress   SuperState = "in progress"
-	SuperResearch     SuperState = "research"
 	SuperReviewVerify SuperState = "review / verify"
 	SuperDone         SuperState = "done"
 )
 
 // SuperStates lists the kanban groups in display order.
-var SuperStates = []SuperState{SuperTodo, SuperInProgress, SuperResearch, SuperReviewVerify, SuperDone}
+// SuperStates are the board's columns. There is no research column: a
+// research card occupies the same positions as any other now, and the
+// board already names its kind on the card itself (the RS- prefix). A
+// column per kind would put back the per-kind concept the merge removes.
+var SuperStates = []SuperState{SuperTodo, SuperInProgress, SuperReviewVerify, SuperDone}
 
 // SuperState returns the kanban group s belongs to.
 func (s Stage) SuperState() SuperState {
 	switch s {
 	case StageTodo:
 		return SuperTodo
-	case StageBrainstorm, StageSpec, StagePlan, StageImplement,
-		StageTriage, StageDiagnose, StageFix:
+	case StagePlan, StageImplement:
 		return SuperInProgress
-	case StageInvestigate, StageShape:
-		return SuperResearch
 	case StageVerify:
 		return SuperReviewVerify
 	case StageDone:
@@ -107,35 +80,8 @@ func (s Stage) SuperState() SuperState {
 // picker share this single definition.
 func AtOrPastCoding(st Stage) bool {
 	switch st {
-	case StageImplement, StageFix, StageVerify, StageDone:
+	case StageImplement, StageVerify, StageDone:
 		return true
 	}
 	return false
-}
-
-// SkipFlags are the only per-item workflow flexibility, set at creation.
-// Brainstorm/Plan gate the feature workflow; Triage/Diagnose gate the bug
-// workflow; each workflow ignores the other's flags. Verify has no flag
-// in any workflow: it can never be skipped.
-//
-// Quick is not a skip of its own but a route marker: a quick feature is
-// created with Brainstorm and Plan both skipped (QuickRoute), and the
-// marker tells the Spec stage to draft the whole design in one pass
-// instead of converging on a prior brainstorm. Skip flags may loosen
-// after creation in one direction only: clearing a flag (restoring a
-// stage) is always safe, setting one mid-flight is not.
-type SkipFlags struct {
-	Brainstorm bool // feature
-	Plan       bool // feature
-	Triage     bool // bug
-	Diagnose   bool // bug
-	Quick      bool // feature: one-pass spec route
-}
-
-// QuickRoute is the quick feature route: brainstorm and plan skipped,
-// with the marker that selects the one-pass spec flavor. Creators use
-// this instead of assembling the trio by hand, so a Quick flag never
-// exists without the skips it implies.
-func QuickRoute() SkipFlags {
-	return SkipFlags{Brainstorm: true, Plan: true, Quick: true}
 }

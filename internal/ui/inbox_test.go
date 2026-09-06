@@ -133,8 +133,7 @@ func TestGateBlockedKeepsInboxItem(t *testing.T) {
 	// no clearInbox, so the entry survives until the gate is actually
 	// attended to.
 	m := specWorkspace(t)
-	m = pressAdvance(t, m) // todo → brainstorm
-	m = pressAdvance(t, m) // brainstorm → spec
+	m = pressAdvance(t, m) // todo → plan (the design stage)
 	m = openSpecFor(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
 	m = typeString(t, m, "is this the right approach?")
@@ -144,7 +143,7 @@ func TestGateBlockedKeepsInboxItem(t *testing.T) {
 	m.inbox.add("FD-001", attnGate, "spec approval pending")
 	// approving is blocked while the annotation is open
 	m = pressAdvance(t, m)
-	if m.rows[0].F.Stage != domain.StageSpec {
+	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("blocked advance moved the stage to %s, want spec", m.rows[0].F.Stage)
 	}
 	if m.inbox.len() != 1 {

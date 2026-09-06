@@ -89,18 +89,9 @@ type noticeMsg struct {
 	clearInbox domain.FeatureID
 }
 
-// chatAttachedMsg carries the result of an interactive Attach that ran in
-// a command (backend spawn is slow); the Update loop opens the pane.
-type chatAttachedMsg struct {
-	feature domain.Feature
-	session *engine.Session
-	err     error
-}
-
 // boardOpenedMsg carries the result of engine.OpenBoard — boardthread.go's
-// ensureBoardSession dispatches it in a command for the same reason
-// chatAttachedMsg's Attach runs in one: spawning the backend can take
-// seconds, so it must not block Update.
+// ensureBoardSession dispatches it in a command because spawning the
+// backend can take seconds, so it must not block Update.
 type boardOpenedMsg struct {
 	session *engine.BoardSession
 	err     error
@@ -193,7 +184,6 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 type formResult struct {
 	Desc     string
 	Profile  string
-	Skip     domain.SkipFlags
 	Envelope *int
 	Repo     string
 }
@@ -227,7 +217,7 @@ func (m *Shell) createFeature(res formResult) tea.Cmd {
 		}
 		f := domain.Feature{
 			ID: id, Num: num, Title: title, OneLiner: oneLiner,
-			Slug: slug, Stage: workflow.Initial(domain.KindFeature), Skip: res.Skip,
+			Slug: slug, Stage: workflow.Initial(),
 			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
 			Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
 		}
@@ -261,7 +251,6 @@ type bugFormResult struct {
 	Seed     string
 	Severity domain.Severity
 	Profile  string
-	Skip     domain.SkipFlags
 	Envelope *int
 	Repo     string
 }
@@ -291,7 +280,7 @@ func (m *Shell) createBug(res bugFormResult) tea.Cmd {
 		}
 		f := domain.Feature{
 			ID: id, Num: num, Kind: domain.KindBug, Title: res.Title, OneLiner: res.OneLiner,
-			Slug: slug, Stage: workflow.Initial(domain.KindBug), Skip: res.Skip,
+			Slug: slug, Stage: workflow.Initial(),
 			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
 			Severity: res.Severity, Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
 		}
@@ -346,7 +335,7 @@ func (m *Shell) createResearch(res rsFormResult) tea.Cmd {
 		now := m.now()
 		f := domain.Feature{
 			ID: id, Num: num, Kind: domain.KindResearch, Title: title, OneLiner: oneLiner,
-			Slug: slug, Stage: workflow.Initial(domain.KindResearch),
+			Slug: slug, Stage: workflow.Initial(),
 			Profile: res.Profile, Budget: domain.Budget{Envelope: *res.Envelope},
 			Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
 		}
@@ -396,7 +385,7 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 		now := m.now()
 		f := domain.Feature{
 			ID: newID, Num: num, Kind: src.Kind, Title: src.Title, OneLiner: src.OneLiner,
-			Slug: src.Slug, Stage: workflow.Initial(src.Kind), Skip: src.Skip,
+			Slug: src.Slug, Stage: workflow.Initial(),
 			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
 			CreatedAt: now, UpdatedAt: now,
 		}
@@ -404,41 +393,6 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s created — fresh copy of %s", newID, id), reload: true}
-	}
-}
-
-// routeViaPlan restores the Plan stage on a feature created with it
-// skipped (the quick route, or an explicit plan skip): the escalation
-// path when the spec reveals the work is bigger than the route assumed.
-// Loosening a skip only ever adds a stage back, so it is safe after
-// creation — the reverse (skipping a stage mid-flight) never is.
-// Clearing Quick with it keeps the flag invariant (quick implies both
-// skips): the card simply becomes a skip-brainstorm feature, and a
-// fresh spec session picks up the standard convergence contract.
-func (m *Shell) routeViaPlan(id domain.FeatureID) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if f.Kind == domain.KindBug {
-			return noticeMsg{text: fmt.Sprintf("%s: plan is a feature stage — bugs route triage → diagnose → fix", id), isErr: true}
-		}
-		if !f.Skip.Plan {
-			return noticeMsg{text: fmt.Sprintf("%s already routes through plan", id), isErr: true}
-		}
-		// past Spec the plan stage is already behind the feature; there is
-		// nothing left to restore it in front of.
-		if f.Stage != domain.StageTodo && f.Stage != domain.StageBrainstorm && f.Stage != domain.StageSpec {
-			return noticeMsg{text: fmt.Sprintf("%s is in %s — the plan stage is already behind it", id, f.Stage), isErr: true}
-		}
-		f.Skip.Plan = false
-		f.Skip.Quick = false
-		if err := m.store.UpdateFeature(ctx, &f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		return noticeMsg{text: fmt.Sprintf("%s will route through plan — spec approval now leads there", id), reload: true}
 	}
 }
 
@@ -583,7 +537,7 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 		// wins, so the UI default gates it here, not the engine).
 		note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
 		discover := res.EnteredWorktree
-		est := res.From == domain.StageSpec && m.envelope == 0
+		est := res.From == domain.StagePlan && m.envelope == 0
 		continueTo := domain.Stage("")
 		if actor == state.ActorAutopilot && autonomousStage(res.To) {
 			continueTo = res.To
@@ -947,7 +901,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 			return noticeMsg{text: text, reload: true, clearInbox: id}
 		}
 	}
-	if f.Stage != domain.StageImplement && f.Stage != domain.StageFix && f.Stage != domain.StageVerify {
+	if f.Stage != domain.StageImplement && f.Stage != domain.StageVerify {
 		text := fmt.Sprintf("%s is in %s — only review/verify/plan can bounce back", id, f.Stage)
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
@@ -957,7 +911,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 		}
 		m.bounceNotes[id] = note
 	}
-	back := workflow.WorkStage(f.Kind)
+	back := domain.StageImplement
 	m.dropSession(id)
 	return func() tea.Msg {
 		if _, err := m.store.Transition(ctx, id, back, "user"); err != nil {

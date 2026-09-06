@@ -162,12 +162,6 @@ func renderProposal(w io.Writer, res domain.IngestResult) {
 			fmt.Fprintf(w, "      needs: %s\n", clean(strings.Join(p.DependsOn, ", ")))
 		}
 		var tags []string
-		if p.Skip.Brainstorm {
-			tags = append(tags, "skip brainstorm")
-		}
-		if p.Skip.Plan {
-			tags = append(tags, "skip plan")
-		}
 		if n := len(p.Draft.OpenQuestions); n > 0 {
 			tags = append(tags, fmt.Sprintf("%d open question(s)", n))
 		}

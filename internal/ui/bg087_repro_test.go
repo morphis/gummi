@@ -23,7 +23,7 @@ func TestBG087NoticeDoesNotOutliveItsSurface(t *testing.T) {
 		m := populatedShell(140, 40)
 		ws, store, wt := uiRepo(t)
 		m.Attach(store, wt, ws)
-		a := mkFeature(t, store, 1, "the card it is about", domain.StageSpec)
+		a := mkFeature(t, store, 1, "the card it is about", domain.StagePlan)
 		b := mkFeature(t, store, 2, "a different card", domain.StageImplement)
 		m.rows = []featureRow{{F: a}, {F: b}}
 		m.sel = 0
@@ -79,7 +79,7 @@ func TestBG087ErrorAboutTheSelectedCardIsStillKept(t *testing.T) {
 	m := populatedShell(140, 40)
 	ws, store, wt := uiRepo(t)
 	m.Attach(store, wt, ws)
-	a := mkFeature(t, store, 1, "the card it is about", domain.StageSpec)
+	a := mkFeature(t, store, 1, "the card it is about", domain.StagePlan)
 	b := mkFeature(t, store, 2, "a different card", domain.StageImplement)
 	m.rows = []featureRow{{F: a}, {F: b}}
 	m.sel = 0

@@ -63,7 +63,7 @@ func TestRunRefusesCardHeldElsewhere(t *testing.T) {
 // real process in the worktree) never happens on a card we don't hold.
 func TestAttachRefusesCardHeldElsewhere(t *testing.T) {
 	e, ws := lockingEngine(t, agent.NewFake("hi"))
-	f := feature(1, "held", domain.StageSpec)
+	f := feature(1, "held", domain.StagePlan)
 
 	release := foreignHold(t, ws, f.ID)
 	if _, err := e.Attach(context.Background(), f); !errors.Is(err, state.ErrLocked) {
@@ -80,7 +80,7 @@ func TestAttachRefusesCardHeldElsewhere(t *testing.T) {
 // the other half of the exclusion, and the half the board never had.
 func TestDrivingHoldsTheCardLock(t *testing.T) {
 	e, ws := lockingEngine(t, agent.NewFake("hi"))
-	f := feature(1, "mine", domain.StageSpec)
+	f := feature(1, "mine", domain.StagePlan)
 
 	if _, err := e.Attach(context.Background(), f); err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestReplacingASessionKeepsTheCardLock(t *testing.T) {
 func TestNoCardLockingByDefault(t *testing.T) {
 	e := newEngine(t, agent.NewFake("hi"))
 	ws := e.cfg.Workspace
-	f := feature(1, "unlocked", domain.StageSpec)
+	f := feature(1, "unlocked", domain.StagePlan)
 
 	// the caller holds the card, exactly as cmd/gummi does around a drive.
 	release := foreignHold(t, ws, f.ID)

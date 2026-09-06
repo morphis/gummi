@@ -29,7 +29,7 @@ func TestResearchReadOnlyRefusedOnNonEnforcingBackend(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "rs investigate", domain.StageInvestigate)
+	f := feature(1, "rs investigate", domain.StageImplement)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {

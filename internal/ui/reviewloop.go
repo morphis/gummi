@@ -55,7 +55,7 @@ func (m *Shell) onAutonomousDone(id domain.FeatureID, stage domain.Stage) (bool,
 		return true, m.onCritiqueStageDone(id, stage)
 	case domain.StageVerify:
 		return true, m.onVerifyDone(id)
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StageImplement:
 		// the work stage ends with its own critique pass — what the Review
 		// stage used to be, minus the transition.
 		return true, m.onCritiqueStageDone(id, stage)
@@ -84,7 +84,7 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		Stage:     domain.StageVerify,
 		Kind:      id.Kind(),
 		Verdict:   sessionVerdict(s.Snapshot()),
-		WorkStage: workflow.WorkStage(id.Kind()),
+		WorkStage: domain.StageImplement,
 		// verify never auto-bounces here: a failed verify always escalates
 		// to a human today (gatepolicy documents the eligible-to-bounce
 		// rule as dormant; this keeps it switched off).
@@ -103,7 +103,7 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		bounces := 0
 		for _, r := range m.rows {
 			if r.F.ID == id {
-				bounces = verifyBounces(r.History, r.F.Kind)
+				bounces = verifyBounces(r.History)
 				break
 			}
 		}
@@ -178,7 +178,7 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		Verdict:       sessionVerdict(snap),
 		Corrective:    m.round(id, kind),
 		CorrectiveMax: maxRounds,
-		WorkStage:     workflow.WorkStage(id.Kind()),
+		WorkStage:     domain.StageImplement,
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
@@ -198,12 +198,6 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 			return m.writeHalt(id, err)
 		}
 		m.setRound(id, kind, 0)
-		// Shape is interactive, so research's crossing steps the stage and
-		// stops rather than running what is behind it; every other forward
-		// edge here lands on an autonomous stage that may start at once.
-		if workflow.Interactive(out.Stage) {
-			return m.autoStepStage(id, out.Stage, "critique passed → "+string(out.Stage), "review")
-		}
 		return m.autoStep(id, out.Stage, "critique passed → "+string(out.Stage), "review")
 	case gatepolicy.BounceToWork:
 		// persist the burned round before it lands in the fast path, so a
@@ -232,11 +226,8 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 // critiqueNoun names what a stage's critique is judging, for the notices
 // and inbox lines the reader sees.
 func critiqueNoun(stage domain.Stage) string {
-	switch stage {
-	case domain.StagePlan:
+	if stage == domain.StagePlan {
 		return "plan"
-	case domain.StageInvestigate:
-		return "investigation"
 	}
 	return "diff"
 }
@@ -370,9 +361,12 @@ func verifyGateReason(k domain.Kind) string {
 // rather than along a stage hardcoded here, because the answer differs by
 // kind: implement passes to verify, investigate passes to shape.
 func forwardEdge(f domain.Feature) domain.Stage {
-	nexts := workflow.Next(f.Kind, f.Stage, f.Skip)
+	nexts := workflow.Next(f.Stage)
 	if len(nexts) == 0 {
 		return f.Stage
 	}
-	return nexts[len(nexts)-1]
+	// nexts[0]: forward edges are listed before rerun edges, and this
+	// names the forward one. See Engine.nextStage for why it is no longer
+	// the last entry.
+	return nexts[0]
 }

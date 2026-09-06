@@ -77,7 +77,7 @@ func (f *readFixture) mkFeature(t *testing.T, ref string) domain.Feature {
 	now := time.Now()
 	feat := domain.Feature{
 		ID: id, Num: num, Kind: domain.KindFeature, Title: "JSON export", Slug: slug,
-		Stage: domain.StageSpec, Skip: domain.QuickRoute(), Budget: domain.Budget{Envelope: 500},
+		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 500},
 		ExternalRef: ref, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := f.store.CreateFeature(f.ctx, &feat); err != nil {
@@ -124,11 +124,13 @@ func TestBuildStatusBlockersAndRoute(t *testing.T) {
 	f.putDraft(t, &feat, "# Spec\nThe toggle persists.\n%% @user(2026-01-01): per-device or synced?\n")
 
 	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
-	if v.Stage != string(domain.StageSpec) {
-		t.Fatalf("stage = %q, want spec", v.Stage)
+	if v.Stage != string(domain.StagePlan) {
+		t.Fatalf("stage = %q, want plan", v.Stage)
 	}
-	if v.Route != "quick" {
-		t.Fatalf("route = %q, want quick", v.Route)
+	// one workflow, so one route: the field is a constant for a feature
+	// now and stays on the wire only for a consumer that still reads it.
+	if v.Route != "full" {
+		t.Fatalf("route = %q, want full", v.Route)
 	}
 	if v.Blockers.OpenQuestions != 1 || v.Blockers.OpenDiff != 0 {
 		t.Fatalf("blockers = %+v, want 1 open question / 0 diff", v.Blockers)
@@ -155,7 +157,7 @@ func (f *readFixture) mkVerifyFeature(t *testing.T) domain.Feature {
 	now := time.Now()
 	feat := domain.Feature{
 		ID: id, Num: num, Kind: domain.KindFeature, Title: "JSON export", Slug: slug,
-		Stage: domain.StageVerify, Skip: domain.QuickRoute(), Budget: domain.Budget{Envelope: 500},
+		Stage: domain.StageVerify, Budget: domain.Budget{Envelope: 500},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := f.store.CreateFeature(f.ctx, &feat); err != nil {

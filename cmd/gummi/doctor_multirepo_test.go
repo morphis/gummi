@@ -78,7 +78,7 @@ func TestDoctorMultiRepoForkDrift(t *testing.T) {
 		slug, _ := domain.Slugify(title)
 		f := domain.Feature{
 			ID: id, Num: num, Title: title, Slug: slug,
-			Stage: domain.StageSpec, Repo: repo, CreatedAt: now, UpdatedAt: now,
+			Stage: domain.StagePlan, Repo: repo, CreatedAt: now, UpdatedAt: now,
 		}
 		if err := st.CreateFeature(ctx, &f); err != nil {
 			t.Fatal(err)

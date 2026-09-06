@@ -7,7 +7,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/gatepolicy"
 	"github.com/morphis/gummi/internal/verdict"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // TestBG090ResearchVerifyGateDoesNotOfferToLand: a passing verify puts
@@ -73,7 +72,7 @@ func TestBG090GatePolicyStillRaisesTheGate(t *testing.T) {
 		Stage:     domain.StageVerify,
 		Kind:      domain.KindResearch,
 		Verdict:   verdict.Pass,
-		WorkStage: workflow.WorkStage(domain.KindResearch),
+		WorkStage: domain.StageImplement,
 	})
 	if out.Action != gatepolicy.RaiseGate {
 		t.Fatalf("a clean research verify took the %v arm, not RaiseGate", out.Action)

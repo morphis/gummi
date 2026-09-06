@@ -14,7 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// stretchThread is a card whose spec and plan stages ran on autopilot,
+// stretchThread is a card whose design stage ran on autopilot,
 // which then parked at implement — and where a person came back and
 // started talking. It is the shape the whole change exists for: the
 // period is over, and everything after it belongs to the reader.
@@ -38,12 +38,10 @@ func stretchThread(t *testing.T) *Shell {
 
 	m.cardEvents[id] = []state.CardEvent{
 		evTookOver(domain.GateAutopilot, tt(0)),
-		{Kind: state.EventStageEnter, Stage: domain.StageSpec, At: tt(1), Payload: enter("architect")},
-		{Kind: state.EventMessage, Stage: domain.StageSpec, At: tt(2), Payload: msg("architect", "spec written.")},
-		{Kind: state.EventStageExit, Stage: domain.StageSpec, At: tt(6), Payload: string(exit)},
-		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, tt(6)),
+		evGate(domain.StageTodo, domain.StagePlan, state.ActorAutopilot, tt(1)),
 
-		{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: tt(7), Payload: enter("architect")},
+		{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: tt(1), Payload: enter("architect")},
+		{Kind: state.EventMessage, Stage: domain.StagePlan, At: tt(2), Payload: msg("architect", "spec written.")},
 		evAsk("stream rows, don't buffer", state.ActorAutopilot, tt(20)),
 		{Kind: state.EventStageExit, Stage: domain.StagePlan, At: tt(24), Payload: string(exit)},
 		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, tt(24)),
@@ -90,7 +88,6 @@ func TestStretchKeepsDecisionsWithTheirStage(t *testing.T) {
 
 	for _, want := range []string{
 		"── autopilot took over",
-		"autopilot crossed spec → plan",
 		"autopilot answered",
 		"autopilot crossed plan → implement",
 		"── autopilot parked it",
@@ -102,9 +99,9 @@ func TestStretchKeepsDecisionsWithTheirStage(t *testing.T) {
 		}
 	}
 
-	specReceipt := strings.Index(out, "spec · architect")
-	specCrossing := strings.Index(out, "autopilot crossed spec → plan")
-	if specReceipt < 0 || specCrossing < specReceipt {
+	planReceipt := strings.Index(out, "plan · architect")
+	planCrossing := strings.Index(out, "autopilot crossed plan → implement")
+	if planReceipt < 0 || planCrossing < planReceipt {
 		t.Errorf("a stage's decisions print under the receipt that names the stage, not above it:\n%s", out)
 	}
 }
@@ -122,9 +119,9 @@ func TestLegacyCardKeepsTheActorsOwnName(t *testing.T) {
 	enter, _ := json.Marshal(map[string]string{"role": "reviewer"})
 	exit, _ := json.Marshal(map[string]any{"verdict": "pass"})
 	m.cardEvents[id] = []state.CardEvent{
-		{Kind: state.EventStageEnter, Stage: domain.StageFix, At: base, Payload: string(enter)},
-		evGate(domain.StageFix, domain.StageVerify, "review", base.Add(time.Minute)),
-		{Kind: state.EventStageExit, Stage: domain.StageFix, At: base.Add(2 * time.Minute), Payload: string(exit)},
+		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base, Payload: string(enter)},
+		evGate(domain.StageImplement, domain.StageVerify, "review", base.Add(time.Minute)),
+		{Kind: state.EventStageExit, Stage: domain.StageImplement, At: base.Add(2 * time.Minute), Payload: string(exit)},
 		{Kind: state.EventStageEnter, Stage: domain.StageVerify, At: base.Add(3 * time.Minute), Payload: string(enter)},
 	}
 	m.cardOpen = true
@@ -133,7 +130,7 @@ func TestLegacyCardKeepsTheActorsOwnName(t *testing.T) {
 	if strings.Contains(out, "autopilot took over") {
 		t.Errorf("a card nobody handed over grew a period:\n%s", out)
 	}
-	if !strings.Contains(out, "review crossed fix → verify") {
+	if !strings.Contains(out, "review crossed implement → verify") {
 		t.Errorf("the loop's own crossing lost its name:\n%s", out)
 	}
 }
@@ -161,7 +158,7 @@ func TestRunningStretchHasNoClose(t *testing.T) {
 	m.cardEvents[id] = []state.CardEvent{
 		evTookOver(domain.GateAutopilot, base),
 		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base.Add(time.Minute), Payload: string(enter)},
-		evGate(domain.StageSpec, domain.StagePlan, state.ActorAutopilot, base.Add(2*time.Minute)),
+		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, base.Add(2*time.Minute)),
 	}
 	m.cardOpen = true
 	out := ansi.Strip(m.threadView(96, 30))
@@ -210,10 +207,14 @@ func TestPeriodBeforeAnyStageDrawsBothRules(t *testing.T) {
 	}{
 		{name: "one stage", after: nil},
 		{name: "two stages", after: []state.CardEvent{
-			{Kind: state.EventStageExit, Stage: domain.StageSpec, At: base.Add(20 * time.Minute),
-				Payload: `{"verdict":"pass"}`},
-			{Kind: state.EventStageEnter, Stage: domain.StagePlan, At: base.Add(21 * time.Minute),
-				Payload: string(enter)},
+			{
+				Kind: state.EventStageExit, Stage: domain.StagePlan, At: base.Add(20 * time.Minute),
+				Payload: `{"verdict":"pass"}`,
+			},
+			{
+				Kind: state.EventStageEnter, Stage: domain.StagePlan, At: base.Add(21 * time.Minute),
+				Payload: string(enter),
+			},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -223,8 +224,10 @@ func TestPeriodBeforeAnyStageDrawsBothRules(t *testing.T) {
 			events := []state.CardEvent{
 				evTookOver(domain.GateAutopilot, base),
 				evHandedBack("you turned autopilot off", base.Add(time.Minute)),
-				{Kind: state.EventStageEnter, Stage: domain.StageSpec, At: base.Add(10 * time.Minute),
-					Payload: string(enter)},
+				{
+					Kind: state.EventStageEnter, Stage: domain.StagePlan, At: base.Add(10 * time.Minute),
+					Payload: string(enter),
+				},
 			}
 			m.cardEvents[id] = append(events, tc.after...)
 			m.cardOpen = true

@@ -137,7 +137,7 @@ func TestLocateInteractiveStageIgnoresDrift(t *testing.T) {
 	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "interactive ignore", domain.StageBrainstorm)
+	f := feature(1, "interactive ignore", domain.StagePlan)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestLocateResearchScratchTree(t *testing.T) {
 	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "locate rs", domain.StageInvestigate)
+	f := feature(1, "locate rs", domain.StagePlan)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
@@ -205,7 +205,7 @@ func TestRunResearchInvestigateSpawnsArchitectNoWorktree(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "run rs investigate", domain.StageInvestigate)
+	f := feature(1, "run rs investigate", domain.StageImplement)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
@@ -272,7 +272,7 @@ func TestAttachResearchShapeNotReadOnly(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(3, "run rs shape", domain.StageShape)
+	f := feature(3, "run rs shape", domain.StagePlan)
 	f.ID = domain.FeatureID("RS-003")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
@@ -311,7 +311,7 @@ func TestAttachResearchShapeUsesRealArtifactNotDraft(t *testing.T) {
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(3, "run rs shape", domain.StageShape)
+	f := feature(3, "run rs shape", domain.StagePlan)
 	f.ID = domain.FeatureID("RS-003")
 	f.Kind = domain.KindResearch
 	if err := store.CreateFeature(context.Background(), &f); err != nil {

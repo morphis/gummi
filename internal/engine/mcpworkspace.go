@@ -504,7 +504,7 @@ func (e *Engine) cardSpec(ctx context.Context, args json.RawMessage) (string, er
 	}
 	path := e.artifactFile(&f)
 	if path == "" {
-		return "", fmt.Errorf("%s has no spec yet — it is created when the spec/brainstorm stage first runs", f.ID)
+		return "", fmt.Errorf("%s has no spec yet — it is created when the design stage first runs", f.ID)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -792,8 +792,8 @@ func cardRunTool() agent.ToolDef {
 			"only safe way to drive a card from here. Do not shell out to `gummi run`/`gummi " +
 			"resume`: that spawns a second gummi process, which contends for this card's " +
 			"per-card lock and fails outright since this process already holds it while its TUI " +
-			"is open. Errors if the card's current stage is interactive (brainstorm/spec/plan's " +
-			"human turn) — those need a human at the board, not this tool.",
+			"is open. Errors if the card is somewhere with no agent action to start (todo " +
+			"or done) — moving it on from there is a human's call at the board.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

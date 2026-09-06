@@ -101,44 +101,31 @@ func parseFlavor(s string) (critique, rebase bool) {
 	return false, false
 }
 
-// interactiveKickoff opens a fresh interactive session with the agent
-// leading — the user shouldn't have to know what to say to start an
-// interview (DESIGN §3: brainstorm develops a one-line description).
-func interactiveKickoff(f domain.Feature) string {
-	switch f.Stage {
-	case domain.StageSpec:
-		if f.Skip.Quick {
-			return "The user just opened the quick spec chat. Read the spec draft, explore the " +
-				"repo, and either put your few design-changing clarifying questions to the user " +
-				"(recommended answers attached) or — if the description already decides them — " +
-				"draft the complete spec now and present it for review. Keep chat turns short; " +
-				"the detail belongs in the spec."
-		}
-		return "The user just opened the spec chat. Read the spec and its open %% threads, " +
-			"then drive convergence: recommend one approach with your reasoning, and put the " +
-			"most consequential open question to the user first. Keep it short."
-	case domain.StageTriage:
-		return "The user just opened the triage chat. Read the bug report, try to reproduce " +
-			"the bug from it, and report what you found. Then ask the single question you most " +
-			"need to reproduce it (steps, environment, expected vs actual), with your " +
-			"recommended answer. Keep it short."
-	case domain.StageDiagnose:
-		return "The user just opened the diagnose chat. Read the bug report and its " +
-			"reproduction, then drive toward root cause: state your leading hypothesis with your " +
-			"reasoning, and put the most consequential open question to the user first. Keep it short."
-	case domain.StageBrainstorm:
-		return "The user just opened the brainstorm chat. Read the spec draft, then open the " +
-			"interview: state the problem as you understand it in a sentence or two and ask the " +
-			"single highest-leverage question, with your recommended answer. Keep it short."
-	case domain.StageShape:
-		return "The user just opened the shape chat. Read the research artifact at its workspace " +
-			"home, then drive convergence: recommend how the topic should be shaped into its " +
-			"final form, and put the most consequential open question to the user first. Keep it short."
+// designKickoff opens a fresh design session with the agent leading — the
+// user shouldn't have to know what to say to start (DESIGN §3).
+//
+// One opener where there were five. Brainstorm, spec, triage, diagnose
+// and shape each had their own because each was its own stage; they are
+// one stage now, and what differs between a feature, a bug and a research
+// topic is the KIND, which the opener names rather than the stage.
+func designKickoff(f domain.Feature) string {
+	switch f.Kind {
+	case domain.KindBug:
+		return "The user just opened the design chat on a bug. Read the report, try to " +
+			"reproduce it, and report what you found. Then drive toward root cause: state your " +
+			"leading hypothesis with your reasoning, and put the most consequential open " +
+			"question to the user first, with your recommended answer. Keep it short."
+	case domain.KindResearch:
+		return "The user just opened the design chat on a research topic. Read the research " +
+			"artifact at its workspace home, then drive convergence: recommend how the topic " +
+			"should be shaped into its final form, and put the most consequential open " +
+			"question to the user first. Keep it short."
 	default:
-		// Every interactive stage is enumerated above; a fall-through
-		// means a new interactive stage landed without a kickoff opener,
-		// and the model would otherwise get a wrong-stage copy.
-		panic(fmt.Sprintf("interactiveKickoff: unknown interactive stage %s", f.Stage))
+		return "The user just opened the design chat. Read the spec draft and its open %% " +
+			"threads, then drive convergence: state the problem as you understand it, " +
+			"recommend one approach with your reasoning, and put the most consequential open " +
+			"question to the user first, with your recommended answer. Keep chat turns short; " +
+			"the detail belongs in the spec."
 	}
 }
 
@@ -508,14 +495,10 @@ func (e *Engine) LaneCounts() LaneCounts {
 // Attach starts (or reuses) an interactive chat session for a feature's
 // current stage. Interactive sessions hold no attention slot.
 func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error) {
-	role, ok := roleForStage(f.Stage)
+	role, ok := roleForStage(f)
 	if !ok {
 		return nil, fmt.Errorf("stage %s has no agent action", f.Stage)
 	}
-	if !interactiveStage(f.Stage) {
-		return nil, fmt.Errorf("stage %s is autonomous; use Run", f.Stage)
-	}
-
 	// A run whose profile resolves to enforce must not start while any role
 	// names a backend without tool coverage — feature-level, before any
 	// session, queue slot, or engine event.
@@ -578,7 +561,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	}
 
 	// interactive chat is human-paced: no budget cap.
-	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage)
+	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage, true)
 	if err != nil {
 		cancel()
 		unlock()
@@ -610,7 +593,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	go func() { defer e.wg.Done(); e.pump(s) }()
 	var ko string
 	if fresh {
-		ko = interactiveKickoff(f)
+		ko = designKickoff(f)
 		s.appendSystem(ko)
 		s.setBusy(true)
 	}
@@ -677,7 +660,7 @@ func CritiqueRoundKind(stage domain.Stage) (domain.RoundKind, bool) {
 	switch stage {
 	case domain.StagePlan:
 		return domain.RoundKindPlan, true
-	case domain.StageImplement, domain.StageFix, domain.StageInvestigate:
+	case domain.StageImplement:
 		return domain.RoundKindReview, true
 	}
 	return "", false
@@ -709,7 +692,7 @@ func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string
 // run is the shared autonomous-run path behind RunWith, RunCritique,
 // and RunRebase.
 func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
-	role, ok := roleForStage(f.Stage)
+	role, ok := roleForStage(f)
 	if !ok {
 		return fmt.Errorf("stage %s has no agent action", f.Stage)
 	}
@@ -718,13 +701,6 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		role = agent.RoleReviewer
 	case flavorRebase:
 		role = agent.RoleImplementer
-	}
-	if interactiveStage(f.Stage) && flavor != flavorCritique {
-		// The guard is about running the STAGE unattended. A critique is
-		// never the stage — it is a fresh reviewer session that borrows
-		// the card without advancing it — so an interactive stage may
-		// still have one.
-		return fmt.Errorf("stage %s is interactive; use Attach", f.Stage)
 	}
 
 	// Feature-level refusal at session start: enforce + any coverage gap
@@ -827,7 +803,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	budget := e.stageBudget(s.Feature, rate)
 	// a budgeted feature with nothing left must not run uncapped (a 0
 	// budget elsewhere means "unbudgeted"): gate it immediately.
-	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !interactiveStage(s.Feature.Stage) {
+	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !s.Interactive {
 		e.exhaust(s)
 		return
 	}
@@ -843,7 +819,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	// transcript left at the derived path belongs to an unrelated earlier
 	// attempt and must not leak into this one.
 	e.clearResumeTranscript(s, s.flavor())
-	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor())
+	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor(), s.Interactive)
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -914,7 +890,7 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 	// MORE than an agent working blind, despite a spec that had already
 	// located every file. The architect knew; the answer was prose the
 	// implementer re-derived from the repo.
-	if (s.Feature.Stage == domain.StageImplement || s.Feature.Stage == domain.StageFix) && !s.Rebase {
+	if (s.Feature.Stage == domain.StageImplement) && !s.Rebase {
 		if pre := e.fileManifestPreamble(s); pre != "" {
 			msg = pre + "\n\n" + msg
 		}
@@ -1331,7 +1307,13 @@ func (e *Engine) trackAgentPID(id domain.FeatureID, sess agent.Session) {
 // backend cannot call client tools — the MCP inbound-endpoint teardown
 // stub, so the caller can bind it to the Session's lifecycle before the
 // child inherits GUMMI_MCP_SOCK.
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor) (agent.Session, string, func(), error) {
+// newAgentSession builds the backend session for a stage run. attached
+// reports that this is a chat the user opened (Attach) rather than an
+// autonomous pass: a chat is not budgeted against the card's envelope and
+// is told the ask convention, which is the whole of what "interactive"
+// used to mean. It is a property of the SESSION, not of the stage — chat
+// is available against any stage now, and no stage is a chat by nature.
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor, attached bool) (agent.Session, string, func(), error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, "", nil, err
@@ -1370,7 +1352,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// (bounce from the diff surface's "request changes") addresses each
 	// (DESIGN §6.1). The store is the source of truth, so this reaches
 	// every implement run, not just the one that triggered it.
-	if flavor == flavorStage && (f.Stage == domain.StageImplement || f.Stage == domain.StageFix) {
+	if flavor == flavorStage && (f.Stage == domain.StageImplement) {
 		hints = append(hints, e.diffReviewHints(ctx, f.ID, ag.Capabilities().ClientTools)...)
 	}
 	var maxCredits float64
@@ -1378,7 +1360,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// chat is human-paced, so it isn't capped). Envelope-derived budgets
 	// arrive already floored at one turn's reserve (stageBudget), so the
 	// enforced cap is never an un-holdable sliver.
-	if budget > 0 && !interactiveStage(f.Stage) {
+	if budget > 0 && !attached {
 		maxCredits = budget * capHeadroom
 		// Read-mostly stages don't edit files: critique judges the plan,
 		// verify runs the artifact's checks. The write-focused hint
@@ -1406,7 +1388,11 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		if h := toolHint(f.Stage, flavor); h != "" && !readOnly {
 			hints = append(hints, h)
 		}
-	} else if interactiveStage(f.Stage) {
+	} else {
+		// No client tools: the agent asks through the fenced-block
+		// convention instead. Every stage gets this now — the design
+		// stage is autonomous, and a stage that cannot ask is a stage
+		// that guesses.
 		hints = append(hints, askConventionHint)
 	}
 	// A card left to run alone answers its own questions, so the agent is
@@ -1522,7 +1508,7 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	if err != nil {
 		return "", "", err
 	}
-	if !hadWT && !interactiveStage(f.Stage) && f.Stage != domain.StageTodo {
+	if !hadWT && (f.Stage == domain.StageImplement || f.Stage == domain.StageVerify) {
 		// A work stage with no worktree is not a first run — it is a tree
 		// that went missing under a card already past its design gate.
 		// Recover it from the branch rather than silently cutting a fresh
@@ -2295,7 +2281,7 @@ func (e *Engine) settle(s *Session) error {
 // completion path (not the exhaustion gate, which never advances a
 // stage) must fail the run rather than let it read as a clean finish.
 func (e *Engine) checkpoint(s *Session) error {
-	if s.Interactive || interactiveStage(s.Feature.Stage) {
+	if s.Interactive {
 		// A design chat runs in the card's own worktree now, so anything it
 		// writes survives to implement without a hand-off — but it is a
 		// conversation, not work, and checkpointing every turn of one would
@@ -2408,7 +2394,7 @@ func (e *Engine) send(ev Event) {
 // critique judges a document and has no diff to be handed.
 func workStageCritique(stage domain.Stage) bool {
 	switch stage {
-	case domain.StageImplement, domain.StageFix:
+	case domain.StageImplement:
 		return true
 	}
 	return false
