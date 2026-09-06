@@ -2,7 +2,8 @@
 # Builds the demo workspace the recording runs against: a shallow clone of
 # canonical/lxd with a .gummi workspace, a headless profile pointed at
 # scripts/demo-agent.py, and a board seeded with cards at four different
-# stages. The hero card is NOT seeded -- the recording creates it live.
+# points on the one workflow. The hero card is NOT seeded -- the recording
+# creates it live.
 #
 # Usage: scripts/demo-setup.sh [workdir]   (default: /tmp/gummi-demo)
 set -euo pipefail
@@ -89,21 +90,20 @@ cd "$repo"
 seed() { # seed <until> <description>
     local until="$1"; shift
     echo "  seeding (--until $until): $1"
-    "$bin" run --full --gate-approval gates --until "$until" "$@" \
+    "$bin" run --gate-approval attended --until "$until" "$@" \
         >/dev/null 2>&1 || echo "    (stopped early -- fine for a seed)"
 }
 
 echo "seeding the board…"
 
-# A card still in the design conversation.
-seed spec "lxc storage volume: --format json misses snapshot expiry"
-
-# A card with an approved spec, a worktree and a plan on the table.
+# Two cards parked at the design gate -- plan is the one stop --until
+# accepts now that there is one workflow.
+seed plan "lxc storage volume: --format json misses snapshot expiry"
 seed plan "Warn when a profile is applied across projects"
 
 # A card already at a verified branch, so the board shows the far end.
 echo "  seeding (full run to done): cluster failure domain column"
-"$bin" run --full --gate-approval full --autonomous \
+"$bin" run --gate-approval autopilot --autonomous \
     "lxc cluster list: show each member's failure domain" >/dev/null 2>&1 || \
     echo "    (stopped early -- fine for a seed)"
 
