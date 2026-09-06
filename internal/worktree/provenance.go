@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -79,18 +80,33 @@ const (
 	draftDiffstatMax = 4000
 )
 
+// draftStyleLogWindow, styleSubjectCap, and styleSubjectBytesMax bound the
+// main-history style examples in the draft feed: a comfortable git-log
+// window is trimmed newest-first to at most styleSubjectCap subjects
+// totaling at most styleSubjectBytesMax bytes — enough to show the repo's
+// scope vocabulary and subject shape without doubling the prompt size.
+const (
+	draftStyleLogWindow  = 50
+	styleSubjectCap      = 15
+	styleSubjectBytesMax = 1200
+)
+
 // DraftFeed is the branch material the scribe reads to compose a landing
-// commit message: the branch's own commit messages (capped) and a bounded
-// diffstat against main. Both are bounded here, beside the git plumbing.
+// commit message: the branch's own commit messages (capped), a bounded
+// diffstat against main, and the repo's recent landing-commit subjects
+// (capped) as the style examples the message should imitate. All are
+// bounded here, beside the git plumbing.
 type DraftFeed struct {
-	Commits  []Commit
-	Diffstat string
+	Commits       []Commit
+	Diffstat      string
+	StyleSubjects []string
 }
 
-// BranchDraftFeed returns the branch commits (first draftCommitCap) and a
-// bounded diffstat (merge base..tip) for the landing-message pass. The
-// diffstat is advisory: a failure yields an empty stat, never a hard
-// error, so an unusable stat still lets the pass run.
+// BranchDraftFeed returns the branch commits (first draftCommitCap), a
+// bounded diffstat (merge base..tip), and main's recent landing-commit
+// subjects for the landing-message pass. The diffstat and style subjects
+// are advisory: a failure yields an empty field, never a hard error, so
+// an unusable stat or history still lets the pass run.
 func (m *Manager) BranchDraftFeed(ctx context.Context, f *domain.Feature) (*DraftFeed, error) {
 	commits, err := m.BranchCommits(ctx, f)
 	if err != nil {
@@ -103,7 +119,41 @@ func (m *Manager) BranchDraftFeed(ctx context.Context, f *domain.Feature) (*Draf
 	if len(stat) > draftDiffstatMax {
 		stat = stat[:draftDiffstatMax]
 	}
-	return &DraftFeed{Commits: commits, Diffstat: stat}, nil
+	return &DraftFeed{
+		Commits:       commits,
+		Diffstat:      stat,
+		StyleSubjects: m.mainStyleSubjects(ctx),
+	}, nil
+}
+
+// mainStyleSubjects returns the main checkout's most recent commit
+// subjects, newest first, capped at styleSubjectCap subjects and
+// styleSubjectBytesMax bytes total. They are the landing-style examples
+// the scribe imitates — always current, derived from the repo's own
+// history at draft time, never configured. Advisory like the diffstat:
+// any git failure returns nil, so a sparse or unreadable history simply
+// omits the style examples and the prompt degrades to the generic
+// Conventional Commits floor instead of failing the pass.
+func (m *Manager) mainStyleSubjects(ctx context.Context) []string {
+	out, err := runGit(ctx, m.repo, "log", "-n", strconv.Itoa(draftStyleLogWindow),
+		"--format=%s", "HEAD")
+	if err != nil {
+		return nil
+	}
+	var subjects []string
+	total := 0
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(subjects) == styleSubjectCap || total+len(line)+1 > styleSubjectBytesMax {
+			continue
+		}
+		subjects = append(subjects, line)
+		total += len(line) + 1
+	}
+	return subjects
 }
 
 // branchDiffstat returns the diffstat of the feature branch's commits

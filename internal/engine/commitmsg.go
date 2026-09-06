@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -14,18 +16,20 @@ import (
 )
 
 // commitmsgPrompt builds the scribe prompt for a squash-merge landing
-// commit message. The branch's own commits and its diffstat are the only
-// inputs beyond the spec (passed as the artifact); everything else is a
-// hard contract on the reply's shape.
-func commitmsgPrompt(feed *worktree.DraftFeed) string {
+// commit message. Everything the scribe needs travels inline — the spec's
+// digest, the branch's own commits, a diffstat against main, and the
+// repo's recent landing subjects as the style to imitate — because the
+// pass is a single zero-tool turn: nothing asks the scribe to read a
+// file. Everything beyond the inlined inputs is a hard contract on the
+// reply's shape.
+func commitmsgPrompt(feed *worktree.DraftFeed, digest string) string {
 	var b strings.Builder
 	b.WriteString(`Compose the squash-merge landing commit for a feature about to land on
 main. This is the only message that stays in main's history, so it must
 carry the work's rationale, not a hurried summary.
 
-Read the feature's spec first — it is the authoritative context. Also
-below: the branch's own commit subjects and bodies, and a diffstat
-against main.
+Inlined below: the spec's digest — the authoritative context — plus the
+branch's own commit subjects and bodies, and a diffstat against main.
 
 Read-only: do not modify any files, run nothing, and do not invent a
 merge. This branch is verified and awaiting a human landing.
@@ -66,15 +70,96 @@ feat(scope): summary
 - bullet one
 - bullet two
 ` + "```" + `
-
-## Branch commits
 `)
+	if digest != "" {
+		b.WriteString("\n## Spec digest\n\n")
+		b.WriteString(digest)
+		b.WriteString("\n")
+	}
+	if len(feed.StyleSubjects) > 0 {
+		b.WriteString(`
+## This repo's landing style
+
+Compose this message in this repository's established landing style, as
+shown by these recent subjects from its history (newest first). Match
+their type and scope usage; the Conventional Commits shape above stays
+the floor when the history is thin or mixed.
+`)
+		for _, s := range feed.StyleSubjects {
+			fmt.Fprintf(&b, "- %s\n", s)
+		}
+	}
+	b.WriteString("\n## Branch commits\n")
 	for _, c := range feed.Commits {
 		fmt.Fprintf(&b, "%s\t%s\n", c.Hash, c.Body)
 	}
 	b.WriteString("\n## Diffstat against main\n")
 	b.WriteString(feed.Diffstat)
 	return b.String()
+}
+
+// commitmsgDigestCap bounds the inlined spec digest. Beside the provenance
+// feed caps (50 commit bodies, 4000-char diffstat) it keeps the whole
+// draft prompt in the same few-KB envelope, so a long feature can never
+// push a backend against its output_token_max.
+const commitmsgDigestCap = 4000
+
+// commitmsgDigestTruncMarker is appended, visibly, when the digest cap
+// bites — a clipped digest must never pass as whole.
+const commitmsgDigestTruncMarker = "\n\n[spec digest truncated]"
+
+// commitmsgDigest distills a spec markdown document into the digest that
+// travels in the landing-message prompt: the title line plus the Problem
+// and Chosen approach sections — the two a landing message must serve.
+// "%%" marker lines are collaboration scaffolding, not context, and are
+// dropped. The result is capped at commitmsgDigestCap bytes; when the cap
+// bites, the digest ends with commitmsgDigestTruncMarker.
+func commitmsgDigest(specText string) string {
+	var title, problem, chosen strings.Builder
+	section := ""
+	for _, line := range strings.Split(specText, "\n") {
+		switch {
+		case strings.HasPrefix(line, "## ") && !strings.HasPrefix(line, "### "):
+			if name := strings.TrimSpace(line[3:]); name == "Problem" || name == "Chosen approach" {
+				section = name
+			} else {
+				section = ""
+			}
+		case strings.HasPrefix(line, "# ") && !strings.HasPrefix(line, "## "):
+			if title.Len() == 0 {
+				title.WriteString(strings.TrimSpace(line[2:]))
+			}
+			section = ""
+		case strings.HasPrefix(line, "%%"):
+			continue
+		default:
+			switch section {
+			case "Problem":
+				problem.WriteString(line + "\n")
+			case "Chosen approach":
+				chosen.WriteString(line + "\n")
+			}
+		}
+	}
+	var b strings.Builder
+	if t := strings.TrimSpace(title.String()); t != "" {
+		b.WriteString(t + "\n\n")
+	}
+	if p := strings.TrimSpace(problem.String()); p != "" {
+		b.WriteString("## Problem\n\n" + p + "\n\n")
+	}
+	if c := strings.TrimSpace(chosen.String()); c != "" {
+		b.WriteString("## Chosen approach\n\n" + c)
+	}
+	digest := strings.TrimRight(b.String(), "\n")
+	if len(digest) > commitmsgDigestCap {
+		cut := commitmsgDigestCap - len(commitmsgDigestTruncMarker)
+		for cut > 0 && !utf8.RuneStart(digest[cut]) {
+			cut--
+		}
+		digest = digest[:cut] + commitmsgDigestTruncMarker
+	}
+	return digest
 }
 
 // parseGummiCommit extracts the landing-message draft from the scribe's
@@ -246,6 +331,9 @@ func wrapBodyLines(s string, width int) string {
 // merge: the dialog opens before the pass starts, esc cancels the
 // in-flight context, and an arriving draft only fills an unmodified
 // textarea — so a longer bound can never delay, block, or clobber a merge.
+// The pass is a single zero-tool turn — the spec digest travels in the
+// prompt, so no read round trip is ever paid — which is where the measured
+// latency's headroom under the bound comes from.
 const commitDraftTimeout = 120 * time.Second
 
 // CommitDraftGuardError marks a deliberate draft rejection — a
@@ -264,9 +352,12 @@ func NewCommitDraftGuardError(reason string) *CommitDraftGuardError {
 }
 
 // DraftCommitMessage runs a best-effort, read-only scribe pass that
-// drafts a squash-merge landing commit message for the feature: the spec,
-// the branch's own commits, and its diffstat in, a candidate landing
-// message out. The transient session is never tracked on the board.
+// drafts a squash-merge landing commit message for the feature: the spec's
+// digest, the branch's own commits, and its diffstat in, a candidate
+// landing message out. Everything travels in the initial prompt, so the
+// pass is a single zero-tool turn — no artifact path, no read allows, no
+// read hint — and a slow backend can no longer spend its bound on a read
+// round trip. The transient session is never tracked on the board.
 //
 // Best-effort only: a failure never blocks or delays the merge, and the
 // draft is scrubbed for agent attribution before it returns; the human
@@ -294,27 +385,28 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 	if err != nil {
 		return "", fmt.Errorf("scribe could not gather the branch draft feed: %w", err)
 	}
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		return "", fmt.Errorf("scribe could not read the spec for its digest: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, commitDraftTimeout)
 	defer cancel()
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:      workDir,
-		ArtifactPath: specPath,
-		Role:         agent.RoleScribe,
-		Model:        rc.Model,
-		Provider:     rc.Provider,
-		Think:        rc.Think,
-		Permission:   e.cfg.Permission,
+		WorkDir:    workDir,
+		Role:       agent.RoleScribe,
+		Model:      rc.Model,
+		Provider:   rc.Provider,
+		Think:      rc.Think,
+		Permission: e.cfg.Permission,
 		SystemHints: []string{
-			fmt.Sprintf("The feature's spec is at %s; read it first.", specPath),
 			"You are composing a commit message read-only; do not modify any files.",
 		},
-		ExtraReadAllows: []string{specPath},
 	})
 	if err != nil {
 		return "", fmt.Errorf("scribe session could not open: %w", err)
 	}
 	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, commitmsgPrompt(feed)); err != nil {
+	if err := sess.Send(ctx, commitmsgPrompt(feed, commitmsgDigest(string(raw)))); err != nil {
 		return "", fmt.Errorf("scribe failed to start the draft: %w", err)
 	}
 	var text assistantText

@@ -3,11 +3,10 @@ package engine
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -108,10 +107,23 @@ func TestDraftCommitMsgRunsScribe(t *testing.T) {
 	}
 }
 
-func TestDraftCommitMsgCarriesArtifactPath(t *testing.T) {
-	// a fenced reply so the pass yields a clean draft (the scribe would
-	// otherwise be guard-rejected for the unparseable "ok" echo).
-	rec := &recorder{Fake: agent.NewFake("```gummi-commit\nfeat(ui): prefill the merge dialog\n\n- drafts from the spec\n```")}
+// TestDraftCommitMsgZeroToolSession proves the draft pass is a single
+// self-sufficient model turn: the session carries no artifact path, no
+// extra read allows, and no read hint, and the outgoing prompt embeds the
+// spec's digest as the authoritative context instead of instructing the
+// scribe to read the file. The read round trip was the dominant latency a
+// slow backend blew the draft bound on.
+func TestDraftCommitMsgZeroToolSession(t *testing.T) {
+	var prompt string
+	rec := &recorder{Fake: &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		prompt = msg
+		// a fenced reply so the pass yields a clean draft (the scribe would
+		// otherwise be guard-rejected for the unparseable "ok" echo).
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "```gummi-commit\nfeat(ui): prefill the merge dialog\n\n- drafts from the spec\n```"},
+			{Kind: agent.EventIdle},
+		}
+	}}}
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
@@ -120,12 +132,25 @@ func TestDraftCommitMsgCarriesArtifactPath(t *testing.T) {
 	if _, err := e.DraftCommitMessage(context.Background(), f); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(wt.Root(), f.ArtifactPath())
-	if rec.opts().ArtifactPath != want {
-		t.Errorf("ArtifactPath = %s, want %s", rec.opts().ArtifactPath, want)
+	opts := rec.opts()
+	if opts.ArtifactPath != "" {
+		t.Errorf("ArtifactPath = %q, want empty: the pass is a zero-tool turn", opts.ArtifactPath)
 	}
-	if got := rec.opts().ExtraReadAllows; !reflect.DeepEqual(got, []string{want}) {
-		t.Errorf("ExtraReadAllows = %v, want [%s]", got, want)
+	if got := opts.ExtraReadAllows; len(got) != 0 {
+		t.Errorf("ExtraReadAllows = %v, want none: nothing may re-add a read round trip", got)
+	}
+	for _, h := range opts.SystemHints {
+		if strings.Contains(h, "spec") {
+			t.Errorf("SystemHint %q sends the scribe to the spec file; the digest travels in the prompt", h)
+		}
+	}
+	if !strings.Contains(prompt, "FD-001: impl") {
+		t.Errorf("prompt lacks the spec digest's title content:\n%.300s", prompt)
+	}
+	for _, banned := range []string{"Read the feature's spec", "read it first"} {
+		if strings.Contains(prompt, banned) {
+			t.Errorf("prompt still instructs the scribe to %q", banned)
+		}
 	}
 }
 
@@ -206,7 +231,7 @@ func TestDraftCommitMsgScrubsAttribution(t *testing.T) {
 
 func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 	feed := &worktree.DraftFeed{}
-	p := commitmsgPrompt(feed)
+	p := commitmsgPrompt(feed, "")
 	for _, want := range []string{
 		// every body line, including each "- " bullet, stays at or under 72.
 		"stays at or under 72",
@@ -224,6 +249,94 @@ func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 			t.Errorf("commitmsgPrompt missing %q", want)
 		}
 	}
+
+	// the inlined digest travels as the authoritative context; no surviving
+	// instruction may send the scribe to read a file.
+	digest := commitmsgDigest("# FD-009: land me\n\n## Problem\n\nThe draft times out.\n\n## Chosen approach\n\nOne zero-tool turn.\n")
+	pd := commitmsgPrompt(&worktree.DraftFeed{}, digest)
+	if !strings.Contains(pd, "## Spec digest") || !strings.Contains(pd, "One zero-tool turn.") {
+		t.Errorf("commitmsgPrompt does not embed the digest:\n%.400s", pd)
+	}
+	for _, banned := range []string{"Read the feature's spec", "read it first"} {
+		if strings.Contains(pd, banned) {
+			t.Errorf("commitmsgPrompt still tells the scribe to %q", banned)
+		}
+	}
+	// an empty digest omits the section instead of shipping a hole.
+	if strings.Contains(commitmsgPrompt(&worktree.DraftFeed{}, ""), "## Spec digest") {
+		t.Errorf("empty digest still emits a Spec digest section")
+	}
+
+	// a history with landing subjects teaches the repo's style; the
+	// Conventional Commits shape stays the floor beneath it.
+	styled := &worktree.DraftFeed{StyleSubjects: []string{
+		"feat(engine,ui): one graph, five stages",
+		"fix(ui): stop the cursor blink",
+	}}
+	pst := commitmsgPrompt(styled, "")
+	if !strings.Contains(pst, "established landing style") {
+		t.Errorf("commitmsgPrompt lacks the style-match instruction")
+	}
+	for _, s := range styled.StyleSubjects {
+		if !strings.Contains(pst, s) {
+			t.Errorf("commitmsgPrompt lacks style subject %q", s)
+		}
+	}
+	if !strings.Contains(pst, "a Conventional Commits subject: type(scope): summary") {
+		t.Errorf("commitmsgPrompt lost the Conventional Commits floor instruction")
+	}
+	// a sparse history omits the style section entirely; the floor alone.
+	bare := commitmsgPrompt(&worktree.DraftFeed{}, "")
+	if strings.Contains(bare, "established landing style") {
+		t.Errorf("sparse-history prompt still carries the style section")
+	}
+}
+
+func TestCommitmsgDigest(t *testing.T) {
+	spec := "# FD-009: land me\n\n> one-liner\n\n" +
+		"## Problem\n\nThe landing draft times out.\n\n- detail one\n\n" +
+		"%% @gummi: a marker line is scaffolding, not context\n\n" +
+		"## Out of scope\n\nNo auto-retry.\n\n" +
+		"## Chosen approach\n\nOne zero-tool turn with an inlined digest.\n\n" +
+		"## Progress\n\nnothing here yet\n"
+	d := commitmsgDigest(spec)
+	for _, want := range []string{
+		"FD-009: land me",
+		"The landing draft times out.",
+		"One zero-tool turn with an inlined digest.",
+	} {
+		if !strings.Contains(d, want) {
+			t.Errorf("commitmsgDigest missing %q:\n%s", want, d)
+		}
+	}
+	for _, unwanted := range []string{"No auto-retry.", "nothing here yet", "%% @gummi"} {
+		if strings.Contains(d, unwanted) {
+			t.Errorf("commitmsgDigest carries out-of-digest content %q:\n%s", unwanted, d)
+		}
+	}
+
+	t.Run("cap", func(t *testing.T) {
+		// multibyte body, so a byte cut can only stay valid if the
+		// truncation respects rune boundaries.
+		big := "# T\n\n## Problem\n\n" + strings.Repeat("wörd ", 1000)
+		d := commitmsgDigest(big)
+		if len(d) > commitmsgDigestCap {
+			t.Errorf("digest is %d bytes, want <= %d", len(d), commitmsgDigestCap)
+		}
+		if !strings.HasSuffix(d, commitmsgDigestTruncMarker) {
+			t.Errorf("oversized digest lacks the truncation marker, ends: %q", d[max(0, len(d)-60):])
+		}
+		if !utf8.ValidString(d) {
+			t.Error("truncated digest is not valid UTF-8")
+		}
+	})
+
+	t.Run("under-cap-whole", func(t *testing.T) {
+		d := commitmsgDigest("# T\n\n## Problem\n\nsmall\n")
+		if strings.Contains(d, commitmsgDigestTruncMarker) {
+			t.Errorf("under-cap digest carries the truncation marker: %q", d)
+		}
+	})
 }
 
 func TestIsDiffDump(t *testing.T) {
