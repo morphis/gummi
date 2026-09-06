@@ -524,6 +524,14 @@ var migrations = []string{
 	`ALTER TABLE diff_annotations ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS diff_annotations_source_ref ON diff_annotations(feature_id, source_ref) WHERE source_ref != ''`,
 	`ALTER TABLE sessions ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`,
+	// The ask-answerer stamp on a user-authored transcript echo: who
+	// chose an ask_user answer's text when no person typed it. The
+	// card-event mirror skips that echo (the ask event beside it is the
+	// durable record and already carries the true answerer), and without
+	// the stamp surviving save/load the first save after a restart would
+	// mirror it again as a plain user message. Empty reads as "not
+	// stamped", so legacy rows mirror as they always did.
+	`ALTER TABLE session_messages ADD COLUMN answered_by TEXT NOT NULL DEFAULT ''`,
 	// The verdict floor and its reason: gummi's own deterministic judgement
 	// on a stage, which outranks whatever the agent reported. The verdict it
 	// floors was already persisted; the floor was not, so after a restart a

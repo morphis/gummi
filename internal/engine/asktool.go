@@ -928,8 +928,13 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		return fmt.Errorf("empty answer")
 	}
 
-	// record the exchange so the transcript and any restore read cleanly
-	s.appendUser(answer)
+	// record the exchange so the transcript and any restore read cleanly.
+	// appendUserAs rather than appendUser: the echo carries who answered,
+	// so the card-event mirror can leave a machine-taken answer out of
+	// the log the stretch derivation reads (an unattributed echo lands
+	// there as a user message and reads as a person taking the card
+	// back). A human's answer is stamped with ActorUser and mirrors on.
+	s.appendUserAs(answer, by)
 	// best-effort card-event log capture, actor included, so the decision
 	// receipt can tell an autopilot-taken answer from a typed one; recorded
 	// unconditionally, before delivery is attempted, the same way the

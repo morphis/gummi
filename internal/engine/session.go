@@ -132,6 +132,16 @@ type Message struct {
 	ToolStatus ToolStatus
 	ToolOutput string
 	callID     string // backend call id awaiting its result; cleared on resolve
+
+	// AnsweredBy names who chose this user-authored turn's text when a
+	// person did not type it: state.ActorAutopilot when the unattended
+	// loop answered its own ask_user question. Stamped only by
+	// appendUserAs — every plain typed send stays empty — and carried
+	// through persistence, so the card-event mirror can tell the echo
+	// of a machine-taken answer apart from a turn a person typed no
+	// matter how many restarts the transcript survives. Empty on legacy
+	// rows and every message that is not an ask echo.
+	AnsweredBy string
 }
 
 // Snapshot is an immutable view of a session's state, safe to render.
@@ -476,6 +486,20 @@ func (s *Session) appendUser(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text})
+	s.err = nil
+	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
+}
+
+// appendUserAs records a user-authored turn no person typed: the echo of
+// an ask_user answer, stamped with who actually chose its text (by is
+// state.ActorAutopilot when the unattended loop answered its own
+// question). The transcript keeps reading as a conversation on restore;
+// the stamp is what lets the card-event mirror tell this echo apart from
+// a turn a person typed, on every save including ones after a restart.
+func (s *Session) appendUserAs(text, by string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, AnsweredBy: by})
 	s.err = nil
 	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
 }

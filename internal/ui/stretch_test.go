@@ -538,3 +538,39 @@ func TestAutopilotDriving(t *testing.T) {
 		})
 	}
 }
+
+// TestAutopilotAnsweredAskKeepsStretchOpen: the ask event is the record
+// of the exchange and already says who answered it. AnswerAs also echoes
+// the answer text into the transcript as a user-authored message — the
+// same shape a typed turn has — and the transcript mirror used to file
+// that echo in the log verbatim, where the stretch rule could only read
+// it as a person taking the card back: the period closed the same second
+// autopilot answered its own question, and everything the run decided
+// afterwards fell outside it. The mirror now leaves that echo out (the
+// engine-side mirror test pins the contract, across a restart), so the
+// log a period is derived from carries the ask row and nothing echoed
+// under the user's name — the shape this builds — and the period runs on
+// through the answer with the tally counting it. Only a turn a person
+// actually typed closes it (TestStretchClosers' typed-turn case).
+func TestAutopilotAnsweredAskKeepsStretchOpen(t *testing.T) {
+	events := []state.CardEvent{
+		evTookOver(domain.GateAutopilot, at(0)),
+		evAsk("Yes, move on", state.ActorAutopilot, at(4)),
+		// no message row here: the mirror skips the echo of a
+		// machine-taken answer, so the ask event above is the log's
+		// whole record of the exchange.
+		// the unattended run carries on and crosses the gate.
+		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(10)),
+	}
+	st := onlyStretch(t, autopilotStretches(events))
+	if !st.running() {
+		t.Fatalf("closed = %q at %s, want still running — autopilot answering its own ask is not a person taking over",
+			st.closed, st.closedAt)
+	}
+	if len(st.answers) != 1 || st.answers[0].answer != "Yes, move on" {
+		t.Fatalf("answers = %+v, want the one answer autopilot took", st.answers)
+	}
+	if len(st.gates) != 1 || st.gates[0].from != domain.StagePlan {
+		t.Fatalf("gates = %+v, want the crossing that followed the answer", st.gates)
+	}
+}

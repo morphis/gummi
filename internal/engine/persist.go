@@ -66,6 +66,11 @@ func (e *Engine) persist(s *Session) {
 		rec.Transcript = append(rec.Transcript, state.SessionMessage{
 			Author: string(m.Author), Content: m.Content,
 			ToolStatus: string(m.ToolStatus), ToolOutput: m.ToolOutput,
+			// the ask-answerer stamp rides the round trip: an echo
+			// skipped here but unstamped after restore would be
+			// mirrored by the first post-restore save, reintroducing
+			// the user-message row this stamp exists to keep out.
+			AnsweredBy: m.AnsweredBy,
 		})
 	}
 	_ = e.cfg.Store.SaveSession(context.Background(), rec)
@@ -118,6 +123,23 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 			continue
 		}
 		if m.Streaming {
+			continue
+		}
+		// The echo of an answer the unattended loop took by itself:
+		// AnswerAs records the exchange in the transcript as a
+		// user-authored turn so a restored session reads as a
+		// conversation, but mirrored verbatim it lands here as a plain
+		// user message — and a user message is what the stretch
+		// derivation reads as a person taking the card back, closing the
+		// autopilot period the same second the machine answered its own
+		// question. The ask event beside it is the durable record of the
+		// exchange and already carries the true answerer, so the echo is
+		// not mirrored at all: the transcript keeps it, this log does
+		// not. Only the autopilot stamp is skipped — a person's answer
+		// still mirrors, and its echo closing a period is harmless (the
+		// ask row filed under the user's name already closed it) — and a
+		// plain typed send is never stamped in the first place.
+		if m.Author == AuthorUser && m.AnsweredBy == state.ActorAutopilot {
 			continue
 		}
 		payload, _ := json.Marshal(map[string]string{
@@ -232,6 +254,10 @@ func (e *Engine) Restore(ctx context.Context) error {
 			s.transcript = append(s.transcript, Message{
 				Author: Author(m.Author), Content: m.Content,
 				ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
+				// the stamp comes back with the echo it rides on, so
+				// the mirror's skip holds across the restart instead
+				// of failing open on the first post-restore save.
+				AnsweredBy: m.AnsweredBy,
 			})
 		}
 		s.activity = append(s.activity, snap.Activity...)

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // TestMirrorEventsIdempotentAcrossRepeatedPersist is the regression that
@@ -276,5 +278,137 @@ func TestMirrorTwoGenerationsDoNotCollide(t *testing.T) {
 	}
 	if msgs != 2 || !sawFirst || !sawSecond {
 		t.Fatalf("message events across generations = %d (first=%v second=%v), want both distinct", msgs, sawFirst, sawSecond)
+	}
+}
+
+// answeredAsk drives one real ask_user round trip: a client-tool fake
+// raises the question on the kickoff turn, and AnswerAs resolves it with
+// "Yes, move on" declared by by (the unattended loop's ActorAutopilot, or
+// the composer's ActorUser). The persisting engine means the exchange is
+// durably written by the time AnswerAs returns.
+func answeredAsk(t *testing.T, by string) (e *Engine, store *state.Store, ws state.Workspace, wt *worktree.Manager, f domain.Feature) {
+	t.Helper()
+	args := askArgs(t, Ask{
+		Question: "Proceed with the plan?",
+		Options:  []AskOption{{Label: "Yes, move on"}, {Label: "revise"}},
+	})
+	ws, store, wt = newRepo(t)
+	e = persistEngine(t, clientToolFake(args), ws, store, wt)
+	f = feature(1, "Dark mode", domain.StagePlan)
+	createFeature(t, store, f)
+	if _, err := e.Attach(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventQuestion)
+	if err := e.AnswerAs(context.Background(), f.ID, "Yes, move on", by); err != nil {
+		t.Fatal(err)
+	}
+	return e, store, ws, wt, f
+}
+
+// userEchoRows returns the content of every mirrored user-authored
+// message row in the card's event log.
+func userEchoRows(t *testing.T, store *state.Store, id domain.FeatureID) []string {
+	t.Helper()
+	evs, err := store.Events(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, ev := range evs {
+		if ev.Kind != state.EventMessage {
+			continue
+		}
+		var p struct {
+			Author  string `json:"author"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Author == string(AuthorUser) {
+			out = append(out, p.Content)
+		}
+	}
+	return out
+}
+
+// findEcho returns the user-authored transcript entry carrying text, or
+// nil when there is none.
+func findEcho(snap Snapshot, text string) *Message {
+	for i := range snap.Transcript {
+		m := &snap.Transcript[i]
+		if m.Author == AuthorUser && m.Content == text {
+			return m
+		}
+	}
+	return nil
+}
+
+// TestMirrorSkipsAutopilotAnswerEcho pins the mirror contract the stretch
+// derivation depends on. AnswerAs records a machine-taken ask_user answer
+// in the transcript as a user-authored echo — deliberately, so a restored
+// session reads as a conversation — stamped with who answered. Mirrored
+// verbatim, that echo would land in the card's event log as an ordinary
+// user message, and a user message is exactly what closes an autopilot
+// period as "you took back control"; the ask event beside it already
+// carries the true answerer. So the echo must stay in the transcript and
+// out of the log, and the stamp must survive the full persistence round
+// trip: an echo skipped live but unstamped after restore would be
+// mirrored by the first post-restore save — reintroducing the bug on
+// exactly the run→resume path unattended runs take.
+func TestMirrorSkipsAutopilotAnswerEcho(t *testing.T) {
+	e, store, ws, wt, f := answeredAsk(t, state.ActorAutopilot)
+	ctx := context.Background()
+
+	// the echo is in the live transcript, stamped with the answerer
+	echo := findEcho(e.Get(f.ID).Snapshot(), "Yes, move on")
+	if echo == nil {
+		t.Fatal("answer echo not found in the live transcript")
+	}
+	if echo.AnsweredBy != state.ActorAutopilot {
+		t.Fatalf("echo AnsweredBy = %q, want %q", echo.AnsweredBy, state.ActorAutopilot)
+	}
+	// and it is not in the log
+	if rows := userEchoRows(t, store, f.ID); len(rows) != 0 {
+		t.Fatalf("mirrored user messages = %q, want none — the echo of autopilot's own answer is not a person taking the card back", rows)
+	}
+	e.Close()
+
+	// the restart: a fresh engine restores the session, stamp intact.
+	e2 := persistEngine(t, agent.NewFake("x"), ws, store, wt)
+	if err := e2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := e2.Get(f.ID)
+	if s == nil {
+		t.Fatal("session not restored")
+	}
+	restored := findEcho(s.Snapshot(), "Yes, move on")
+	if restored == nil {
+		t.Fatal("answer echo lost across the restart")
+	}
+	if restored.AnsweredBy != state.ActorAutopilot {
+		t.Fatalf("restored echo AnsweredBy = %q, want %q — unstamped, the next save mirrors the echo as a user message and closes the stretch",
+			restored.AnsweredBy, state.ActorAutopilot)
+	}
+	// the first save after the restart: the skip still holds.
+	e2.persist(s)
+	if rows := userEchoRows(t, store, f.ID); len(rows) != 0 {
+		t.Fatalf("after restore + resave, mirrored user messages = %q, want none", rows)
+	}
+}
+
+// TestMirrorKeepsHumanAnswerEcho: the skip is scoped to the autopilot
+// stamp. A person answering the open ask through the composer produces
+// the same transcript echo, and it still mirrors: its ask row says the
+// user answered and already closed the period, so the echo's mirror row
+// is harmless — and the replayed history should read as a conversation.
+func TestMirrorKeepsHumanAnswerEcho(t *testing.T) {
+	e, store, _, _, f := answeredAsk(t, state.ActorUser)
+	defer e.Close()
+	rows := userEchoRows(t, store, f.ID)
+	if len(rows) != 1 || rows[0] != "Yes, move on" {
+		t.Fatalf("mirrored user messages = %q, want [Yes, move on]", rows)
 	}
 }

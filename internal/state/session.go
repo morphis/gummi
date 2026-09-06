@@ -17,6 +17,14 @@ type SessionMessage struct {
 	// and its captured output, so the evidence survives a restart.
 	ToolStatus string
 	ToolOutput string
+	// AnsweredBy carries the ask-answerer stamp on a user-authored turn
+	// that is the echo of an ask_user answer rather than a typed message
+	// ("autopilot" when the unattended loop answered its own question).
+	// It must survive save/load or the card-event mirror's skip of that
+	// echo silently fails on the first save after a restart. Empty for
+	// every turn a person typed and for all legacy rows, both of which
+	// read as "not stamped" and mirror as today.
+	AnsweredBy string
 }
 
 // SessionSnapshot is the durable record of a feature's agent session,
@@ -106,9 +114,9 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 	}
 	for i, m := range snap.Transcript {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output)
-			VALUES (?,?,?,?,?,?)`,
-			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput); err != nil {
+			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output, answered_by)
+			VALUES (?,?,?,?,?,?,?)`,
+			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput, m.AnsweredBy); err != nil {
 			return err
 		}
 	}
@@ -167,7 +175,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 
 func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]SessionMessage, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT author, content, tool_status, tool_output
+		`SELECT author, content, tool_status, tool_output, answered_by
 		FROM session_messages WHERE feature_id = ? ORDER BY ord`, string(id))
 	if err != nil {
 		return nil, err
@@ -176,7 +184,7 @@ func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]Sessio
 	var out []SessionMessage
 	for rows.Next() {
 		var m SessionMessage
-		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput); err != nil {
+		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput, &m.AnsweredBy); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
