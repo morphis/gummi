@@ -216,7 +216,7 @@ func TestNoClassifierKeepsTheRowsFixedRoute(t *testing.T) {
 	m := verifyCard(t, classifyingAgent("requirement_missing"))
 	f := m.rows[0].F
 	m = pump(t, m, m.applyReentry(reentryClassifiedMsg{
-		f: f, note: "send this back", fallback: "bounce", err: engine.ErrNoClassifier,
+		f: f, note: "send this back", fallback: "bounce", err: engine.ErrNoScribe,
 	}))
 	m = pump(t, m, m.loadRows)
 	if got := m.rows[0].F.Stage; got != domain.StageImplement {

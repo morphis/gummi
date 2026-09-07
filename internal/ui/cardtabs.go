@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -157,6 +159,100 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// cardCitationKey answers alt+1..alt+9 — the citation chords.
+//
+// It lives beside cardTabKey and is called from the same places for the
+// same reason: the chords must work from all three surfaces, or a
+// citation opened from the thread would be unopenable from the artifact
+// it just landed on. The digit is the number printed in the narration,
+// so a card with fewer citations than that simply does not answer —
+// silently, because an unmarked number is not a key the reader was
+// offered.
+func (m *Shell) cardCitationKey(key string) (tea.Cmd, bool) {
+	n, ok := citationChord(key)
+	if !ok {
+		return nil, false
+	}
+	r, ok := m.selected()
+	if !ok {
+		return nil, false
+	}
+	cmd := m.openCitation(r, n)
+	// Answered either way: the chord belongs to this tier, and letting an
+	// unmatched one fall through would type an alt-digit into the
+	// composer instead of doing nothing.
+	return cmd, true
+}
+
+// reservedChords are the card page's alt letters that mean something
+// else: the three tabs, the card step, and the tool-output toggle. A
+// citation must not be able to name one of them.
+//
+// The tab tier is answered before the citation tier, so an overlap would
+// today be harmless — the tab would simply win. That is exactly why it
+// is excluded here instead: a collision saved only by the ORDER of two
+// handlers is a bug waiting for someone to reorder them, and it would
+// present as a mark the reader can see and cannot open.
+const reservedChords = "tsdjko"
+
+// citationLetters are the marks, in order: the first nine letters that
+// are not reserved.
+//
+// LETTERS, not digits, and not alt+digits either — alt+1/2/3 are the
+// shell's own board/inbox/agent tabs and are answered above this tier,
+// so a numbered chord would have switched tab instead of opening a
+// citation. Footnote letters are the convention anyway, and this leaves
+// the whole digit row to the picker (F14).
+var citationLetters = firstFreeLetters(9)
+
+// firstFreeLetters takes n letters from the alphabet, skipping the
+// reserved chords.
+func firstFreeLetters(n int) string {
+	var out []byte
+	for c := byte('a'); c <= 'z' && len(out) < n; c++ {
+		if strings.IndexByte(reservedChords, c) < 0 {
+			out = append(out, c)
+		}
+	}
+	return string(out)
+}
+
+// citationMark is the mark printed beside claim n (1-based), including
+// the key that opens it.
+func citationMark(n int) string {
+	if n < 1 || n > len(citationLetters) {
+		return ""
+	}
+	return "alt+" + string(citationLetters[n-1])
+}
+
+// citationRange spells the chord range for n citations — "a" for one,
+// "a/b" for two, "a-d" beyond that — so the bar names keys that exist
+// rather than a range with dead letters in it.
+func citationRange(n int) string {
+	n = min(n, len(citationLetters))
+	switch {
+	case n <= 1:
+		return "a"
+	case n == 2:
+		return "a/b"
+	default:
+		return "a-" + string(citationLetters[n-1])
+	}
+}
+
+// citationChord reads alt+<letter> into the 1-based citation number.
+func citationChord(key string) (int, bool) {
+	rest, ok := strings.CutPrefix(key, "alt+")
+	if !ok || len(rest) != 1 {
+		return 0, false
+	}
+	if i := strings.IndexByte(citationLetters, rest[0]); i >= 0 {
+		return i + 1, true
+	}
+	return 0, false
+}
+
 // cardTabFor resolves a chord to its tab.
 func cardTabFor(key string) (cardTab, bool) {
 	for t, k := range cardTabKeys {
@@ -183,15 +279,36 @@ func noDiffReason(r featureRow) string {
 // refuses is the drift keymap.go's research-card filter already exists
 // to prevent.
 func (m *Shell) cardTabBindings() []binding {
-	bs := []binding{
-		{key: "alt+t", label: "thread", help: "the card's conversation — where you answer the decision"},
-		{key: "alt+s", label: "artifact", help: "the document the stage wrote — comment, resolve and approve in place"},
+	var bs []binding
+	r, haveCard := m.selected()
+	// The citation chords lead the tier, and the order is the point: the
+	// bar sheds hints from the second-to-last backwards, so whatever is
+	// earliest here outlives the rest of the tier. alt+t/s/d are already
+	// printed on screen by the tab bar itself, and this chord is printed
+	// nowhere but the marks it opens — so it is the one of the four
+	// worth keeping when the bar runs out of room.
+	//
+	// Listed only when the narration actually prints marks: a key table
+	// naming alt+1 above a paragraph with no [alt+1] in it is the same
+	// drift the diff row's own filter exists to prevent.
+	if haveCard {
+		if n := len(citedClaims(m.cardNarration(m.nextInputFor(r), r))); n > 0 {
+			bs = append(bs, binding{
+				key: "alt+" + citationRange(n), label: "open cited",
+				help: "open what a numbered claim above cites — the check, the hunk, the section, or the moment in the thread",
+				bar:  true,
+			})
+		}
 	}
-	if r, ok := m.selected(); ok {
+	bs = append(bs,
+		binding{key: "alt+t", label: "thread", help: "the card's conversation — where you answer the decision"},
+		binding{key: "alt+s", label: "artifact", help: "the document the stage wrote — comment, resolve and approve in place"},
+	)
+	if haveCard {
+		bs[len(bs)-1].help = "the " + artifactNoun(r.F.Kind) + " — comment, resolve and approve in place"
 		if !cardHasDiff(r) {
 			return bs
 		}
-		bs[1].help = "the " + artifactNoun(r.F.Kind) + " — comment, resolve and approve in place"
 	}
 	return append(bs, binding{key: "alt+d", label: "diff", help: "the card's diff — comment, resolve and approve in place"})
 }

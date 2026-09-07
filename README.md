@@ -172,6 +172,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `space` | open the command menu (everything that belongs to no card); type to filter |
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / toggle the thread's transcript view — every stage's events laid out inline instead of one folded receipt each (from the backlog it opens the card page with the view on) |
 | `alt+o` | expand the captured tool outputs in the thread — a failed call always shows its tail without it; not text, so it works mid-draft as well as from the accelerators |
+| `alt+a`, `alt+b`, … | open what a narration claim cites — the marks printed beside the sentences above the decision (`[alt+a]`) name their own key, and each one opens the check, hunk, artifact section or moment in the thread that backs it |
 | `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `g` crosses the gate |
 | `g` / `b` | advance a gate / bounce back one rerun edge (implement → plan, verify → implement) |
 | `A` | autopilot: hand the card over so it crosses its own gates, and start it from wherever it sits |
@@ -198,6 +199,27 @@ to spend on its detail. There is only ever one list on screen, so `↑↓`
 never have to be aimed. `esc` returns to the list in one press;
 `alt+j`/`alt+k` step to the previous/next card without going back. Every
 card verb (`g`, `v`, `m`, `d`, …) works from either level.
+
+Above the answers, a short paragraph says why the card stopped, what it
+did unattended, and — at a stop where you are being asked to approve
+something — what the branch actually does against what its plan asked
+for. The first two are read out of the card's own event log and cost
+nothing. The third is written by a cheap model pass, once per card
+state, and it ships under a contract: every claim carries a citation to
+a real check, hunk, artifact section or logged moment, marked `[alt+a]`
+in the text and opened with that key. A claim citing something that does
+not exist is thrown away rather than shown, so the paragraph cannot
+present evidence the card does not have.
+
+Typing at a stop is always safe, and it reaches further than a re-run. A
+sentence aimed at "send it back" is read for what KIND of change it asks
+for: a missed requirement is written into the artifact and the card
+walks back to the design stage (with a confirm, since it moves); a
+missing check goes into the verification plan and the checks run again
+in place; work that is not this card's opens a new card seeded with your
+line. A sentence nothing can place is delivered as a message and says
+so. Nothing typed can produce a move the workflow does not already
+declare.
 
 That card page is a thread. When the card needs a decision, the question
 and its regenerated legal answers stay pinned directly above the composer;

@@ -763,6 +763,18 @@ def scribe(ctx, prompt):
         usage(6, 4300, 210, ctx["model"])
         idle()
         return True
+    if "CLAIM: <your one sentence>" in prompt:
+        # The code-vs-plan pass. Scripted like the rest, and deliberately
+        # citing a section the seeded artifact really has: the citation
+        # is resolved against the live card before the sentence is
+        # rendered, so an invented anchor here would silently produce a
+        # board with no third sentence and look like a bug in the TUI.
+        say("CLAIM: the branch adds the column but nothing in it reads the "
+            "pool-reported total the plan named as its source\n"
+            "ANCHOR: spec:Verification plan", pace=0.4)
+        usage(2, 3100, 40, ctx["model"])
+        idle()
+        return True
     if "INTENT: <one of the words above>" in prompt:
         # The re-entry classifier. Scripted, like everything else here:
         # the demo has no model, so the intent is read off keywords in

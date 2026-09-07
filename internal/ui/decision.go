@@ -593,13 +593,32 @@ func (m *Shell) narrationBlock(s *theme.Styles, d *threadDecision, r featureRow,
 	if d == nil || d.ask != nil {
 		return nil
 	}
-	sentences := m.cardNarration(m.nextInputFor(r), r)
-	if len(sentences) == 0 {
+	claims := m.cardNarration(m.nextInputFor(r), r)
+	if len(claims) == 0 {
 		return nil
 	}
 	var out []string
-	for _, sentence := range sentences {
-		for _, l := range strings.Split(wrapText(sanitize(sentence), max(width-1, 8)), "\n") {
+	n := 0
+	for _, c := range claims {
+		text := sanitize(c.text)
+		// The bracketed number is the citation, and it is only printed
+		// for a claim that carries one: numbering every sentence would
+		// promise a key for evidence that does not exist. alt+<n> opens
+		// it (narration.go's own note on why not the bare digit).
+		if !c.a.empty() {
+			n++
+			// The mark names its own key rather than a bare number.
+			// "[1]" would be shorter and is what the design's mock drew,
+			// but the chord that opens it is a status-bar hint, and on a
+			// board-width terminal the bar has room for about three of
+			// those — so the number would routinely appear above nothing
+			// that says what to press. A footnote that carries its key is
+			// the same information with no dependency on the bar having
+			// spare columns. (The key is a letter, not a digit: cardtabs
+			// .go says why.)
+			text += " [" + citationMark(n) + "]"
+		}
+		for _, l := range strings.Split(wrapText(text, max(width-1, 8)), "\n") {
 			out = append(out, " "+s.Base.Render(l))
 		}
 	}

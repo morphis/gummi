@@ -103,7 +103,7 @@ func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
 	}
 	if msg.err != nil {
 		why := "could not read the card"
-		if errors.Is(msg.err, engine.ErrNoClassifier) {
+		if errors.Is(msg.err, engine.ErrNoScribe) {
 			why = "no agent to read the card with"
 		}
 		m.notice = noticeMsg{text: string(msg.f.ID) + ": " + why + " — sending it back the usual way"}

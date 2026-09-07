@@ -227,8 +227,8 @@ func TestVerifyFailEscalates(t *testing.T) {
 		t.Fatalf("fail suggestions = %q, want b g p", keysOf(nextActions(in)))
 	}
 	narr := m.cardNarration(in, m.rows[0])
-	if len(narr) == 0 || !strings.Contains(narr[0], "failure") {
-		t.Errorf("the narration does not say verify failed: %q", narr)
+	if len(narr) == 0 || !strings.Contains(narr[0].text, "failure") {
+		t.Errorf("the narration does not say verify failed: %+v", narr)
 	}
 }
 
@@ -257,8 +257,8 @@ func TestVerifyBlockedEscalatesWithoutBounce(t *testing.T) {
 	}
 	// the blocker itself is the narration's job now
 	narr := m.cardNarration(in, m.rows[0])
-	if len(narr) == 0 || !strings.Contains(narr[0], "Verify") {
-		t.Errorf("the narration does not say verify could not run: %q", narr)
+	if len(narr) == 0 || !strings.Contains(narr[0].text, "Verify") {
+		t.Errorf("the narration does not say verify could not run: %+v", narr)
 	}
 }
 
@@ -278,8 +278,8 @@ func TestVerifyUnclearVerdictEscalates(t *testing.T) {
 		t.Fatalf("unclear suggestions = %q, want b g p", keysOf(nextActions(in)))
 	}
 	narr := m.cardNarration(in, m.rows[0])
-	if len(narr) == 0 || !strings.Contains(narr[0], "no clear verdict") {
-		t.Errorf("the narration does not explain the missing verdict: %q", narr)
+	if len(narr) == 0 || !strings.Contains(narr[0].text, "no clear verdict") {
+		t.Errorf("the narration does not explain the missing verdict: %+v", narr)
 	}
 }
 
@@ -379,8 +379,8 @@ func TestVerifyLoopBreakerWarnsOnSecondFailure(t *testing.T) {
 		t.Fatalf("second-failure suggestions = %q, want b g p", keysOf(nextActions(in)))
 	}
 	narr := m.cardNarration(in, m.rows[0])
-	if len(narr) == 0 || !strings.Contains(narr[0], "2 times") {
-		t.Errorf("the second failure's narration does not count it: %q", narr)
+	if len(narr) == 0 || !strings.Contains(narr[0].text, "2 times") {
+		t.Errorf("the second failure's narration does not count it: %+v", narr)
 	}
 }
 

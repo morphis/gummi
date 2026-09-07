@@ -356,7 +356,24 @@ type Shell struct {
 	// and the answer is always "nothing unread". Carrying the decision is
 	// what stops the two halves disagreeing about a question only one of
 	// them is still in a position to answer.
-	anchorFrom   int
+	anchorFrom int
+
+	// narration caches the one model-written claim a card's narration can
+	// carry, keyed by the card state it describes (citations.go). It is
+	// per-process and per-card: a card this process never drove has no
+	// entry, which is exactly what "render cached only" means for a card
+	// another process owns. narrating holds the key of a pass in flight,
+	// so a re-render while a model is thinking cannot start a second one.
+	narration map[domain.FeatureID]narrationEntry
+	narrating map[domain.FeatureID]string
+
+	// specJump/diffJump are pending citation targets: where the surface
+	// a citation opens should land once its content arrives. Both are
+	// consumed by the load handlers and cleared there, because a jump is
+	// something that happens on arrival, not a position the page holds
+	// (thread.go's anchorTo makes the same argument for the third).
+	specJump     string
+	diffJump     diffTarget
 	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
 	profileNames []string         // profile names for the new-feature form
 	repoNames    []string         // configured managed-repo names for the new-card forms
@@ -1433,6 +1450,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the action cursor belongs to whichever card is selected, so it
 		// resyncs whether or not the selection survived.
 		m.syncActionFocus()
+		// A row reload can move the gate's blocking counts without
+		// touching the log — a comment resolved, a section drafted —
+		// and those are half the narration's cache key, so the pass is
+		// re-checked here too. The other half, and the moment a card
+		// page first has a log to key on at all, is cardEventsMsg.
+		if r, ok := m.selected(); ok {
+			return m, m.ensureNarration(r)
+		}
 		return m, nil
 
 	case openDecisionsMsg:
@@ -1694,6 +1719,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reentryClassifiedMsg:
 		return m, m.applyReentry(msg)
 
+	case narrationDoneMsg:
+		m.applyNarration(msg)
+		return m, nil
+
 	case scribeEstimateDoneMsg:
 		m.scribeSettled(msg.id)
 		if msg.blended == 0 {
@@ -1730,13 +1759,27 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reader hunt for the thing they were just pointed at, in a
 		// document long enough that the hunt is the work. A document
 		// without that heading (a fresh draft) keeps the top.
-		if line, ok := spec.HeadingLine(msg.content, currentSpecSection(msg.f.Kind, msg.f.Stage)); ok {
+		// A citation outranks the stage's own section: the reader asked
+		// for a specific place and is owed that place, not the one the
+		// page would have chosen for them. Consumed here and cleared,
+		// because a jump happens on arrival rather than being a position
+		// the page holds.
+		want := currentSpecSection(msg.f.Kind, msg.f.Stage)
+		jumped := false
+		if m.specJump != "" {
+			want, jumped = m.specJump, true
+			m.specJump = ""
+		}
+		if line, ok := spec.HeadingLine(msg.content, want); ok {
 			sv.cursor = line
 		}
-		if m.spec != nil && m.spec.path == msg.path {
+		if m.spec != nil && m.spec.path == msg.path && !jumped {
 			// reload in place: keep the cursor, clamped in case the doc
 			// shrank. The window follows the cursor, so that is the whole
-			// of the position to carry over.
+			// of the position to carry over. A citation is the exception —
+			// it is a deliberate move to somewhere else, and carrying the
+			// old cursor over it would make the key do nothing on the
+			// surface it was already looking at.
 			sv.cursor = min(m.spec.cursor, len(sv.doc.Lines))
 		}
 		m.spec = sv
@@ -1752,6 +1795,18 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		dv := newDiffView(msg.f, msg.diff, msg.anns)
+		if !m.diffJump.empty() {
+			// the same rule the artifact's citation follows: the reader
+			// asked for a hunk, so land on it and forget where the
+			// surface was before.
+			target := m.diffJump
+			m.diffJump = diffTarget{}
+			if line := diffLineFor(msg.diff, target); line > 0 {
+				dv.setCursor(line)
+				m.diff = dv
+				return m, nil
+			}
+		}
 		if m.diff != nil && m.diff.f.ID == msg.f.ID {
 			// reload in place: keep the cursor, clamped in case the diff
 			// shrank (e.g. after a fix-up run). The window follows the
@@ -1928,7 +1983,19 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// racing behind the current selection.
 		if msg.err == nil {
 			m.cardEvents[msg.id] = msg.events
-			return m, m.markSeen(msg.id, msg.events)
+			// The code-vs-plan pass is dispatched here, and this is the
+			// only seam where it can be: its cache key is built from the
+			// log, and the log only exists in memory from this moment on
+			// (citations.go). It is also exactly the right moment —
+			// this fires when a card page opens and again whenever the
+			// card's log moves, which is the whole of "the state a claim
+			// describes has changed". ensureNarration's own key makes
+			// every repeat free.
+			cmds := []tea.Cmd{m.markSeen(msg.id, msg.events)}
+			if r, ok := m.rowByID(msg.id); ok {
+				cmds = append(cmds, m.ensureNarration(r))
+			}
+			return m, tea.Batch(cmds...)
 		}
 		return m, nil
 
@@ -2239,6 +2306,12 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		// they switch between gets the key (cardtabs.go)
 		if m.cardOpen {
 			if cmd, ok := m.cardTabKey(key); ok {
+				return cmd
+			}
+			// the narration's citations, in the same tier and for the
+			// same reason: a claim opened from the thread must still be
+			// openable from the surface it just landed on.
+			if cmd, ok := m.cardCitationKey(key); ok {
 				return cmd
 			}
 		}

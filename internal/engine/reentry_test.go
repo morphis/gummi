@@ -126,7 +126,7 @@ func TestClassifyReentryWithNoBackend(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "dark mode", domain.StageVerify)
 	if _, err := e.ClassifyReentry(context.Background(), f, "the toggle never persists"); err == nil {
-		t.Fatal("want ErrNoClassifier, got nil")
+		t.Fatal("want ErrNoScribe, got nil")
 	}
 }
 
@@ -196,5 +196,94 @@ func TestApplyReentryEditWritesTheArtifact(t *testing.T) {
 	// edit call this unconditionally.
 	if err := e.ApplyReentryEdit(f, reentry.Edit{}); err != nil {
 		t.Errorf("empty edit: %v", err)
+	}
+}
+
+// A one-shot pass costs real credits, and until now none of them were
+// booked: Estimate and DiscoverChecks each spend and neither records, so
+// a card's masthead reported less than the card cost. Every pass through
+// oneShot books its usage against the card's stage under the scribe
+// role, which is what makes the envelope on screen the money spent.
+func TestOneShotSpendIsMeteredAgainstTheStage(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 3, Model: "fake-model", InputTokens: 1200, OutputTokens: 40}},
+			{Kind: agent.EventMessage, Text: "INTENT: plan_wrong"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{
+		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", MaxActive: 1, Persist: true,
+	})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "dark mode", domain.StageVerify)
+	withWorktree(t, wt, f)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.ClassifyReentry(context.Background(), f, "the approach cannot work offline"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spend.Credits != 3 {
+		t.Errorf("card spend = %v credits, want 3", got.Spend.Credits)
+	}
+	rows, err := store.StageBreakdown(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, row := range rows {
+		if row.Stage == domain.StageVerify && row.Role == string(agent.RoleScribe) && row.Credits == 3 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no verify/scribe row carrying the pass's credits: %+v", rows)
+	}
+}
+
+func TestParseCodeVsPlan(t *testing.T) {
+	claim, anchor := parseCodeVsPlan("CLAIM: nothing persists the choice\nANCHOR: spec:Verification plan")
+	if claim != "nothing persists the choice" || anchor != "spec:Verification plan" {
+		t.Errorf("parse = %q / %q", claim, anchor)
+	}
+	// An anchor with a space in it is the common case, not the corner:
+	// section headings and check names both have them.
+	if _, a := parseCodeVsPlan("CLAIM: x\nANCHOR: check:go vet"); a != "check:go vet" {
+		t.Errorf("anchor = %q, want the whole name", a)
+	}
+	// Both lines or neither.
+	for _, in := range []string{
+		"CLAIM: none",
+		"CLAIM: NONE\nANCHOR: spec:Problem",
+		"CLAIM: something is off",
+		"ANCHOR: spec:Problem",
+		"the diff looks fine to me",
+		"",
+	} {
+		if c, a := parseCodeVsPlan(in); c != "" || a != "" {
+			t.Errorf("parseCodeVsPlan(%q) = %q / %q, want nothing", in, c, a)
+		}
+	}
+}
+
+// The prompt must tell the model the contract it is judged by: the
+// anchor kinds it may use, and that citing something imaginary throws
+// the sentence away. A prompt that asked for evidence without saying it
+// is checked would be asking politely.
+func TestCodeVsPlanPromptStatesTheContract(t *testing.T) {
+	p := codeVsPlanPrompt(feature(1, "dark mode", domain.StageVerify))
+	for _, want := range []string{"diff:", "spec:", "check:", "DISCARDS", "CLAIM: none"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt does not carry %q", want)
+		}
 	}
 }

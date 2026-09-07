@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // The narration is the short paragraph above the answer set: what a
@@ -29,27 +31,105 @@ import (
 // §6.3). A sentence that disagrees with the rows below it is a bug in
 // this file, never a reason to re-rank them.
 //
-// Citations: the design's contract is that every claim carries a
-// resolvable anchor (check:<name>, event:<id>, diff:<file>:<line>,
-// spec:<anchor>) and that the bracketed number opens it. That contract
-// arrives with the model-written sentence, and it needs a key that is
-// not a digit — the digits already select the picker's options, and
-// deliberately so (a digit used to fire an answer outright, with no
-// confirm and no undo). The sentences here name their evidence in words
-// instead: the check by its own name, the count of crossings, the
-// blocker verbatim. Every one of them is one keystroke from the tab that
-// shows it.
+// CITATIONS. Every claim may carry one anchor naming something openable
+// — check:<name>, event:<seq>, diff:<path>:<line>, spec:<section> — and
+// a rendered narration may not contain an anchor that resolves to
+// nothing (citations.go, invariant 3). That is what makes the one
+// generated thing on the page the one thing with a machine-checkable
+// contract: hallucinated evidence is discarded by the code that admits
+// evidence, not by asking a model nicely.
+//
+// The mark is a lettered alt chord — [alt+a], [alt+b] — and each of
+// those three words is load-bearing. It is an ALT chord because the card
+// page's composer owns every printable key, which is why alt+s, alt+d
+// and alt+j/k are chords too. It is not a bare DIGIT because digits
+// select the picker's options, deliberately: a digit used to fire an
+// answer outright with no confirm and no undo, and digit-selects-option
+// was the fix (F14, threadinput.go). And it is not an alt+digit either,
+// because alt+1/2/3 are the shell's own board/inbox/agent tabs and are
+// answered above the card's tier — a numbered chord would have switched
+// tab instead of opening the citation. Letters are the footnote
+// convention anyway.
+//
+// The mark carries its key rather than a bare number because the chord
+// is a status-bar hint, and a board-width bar has room for about three
+// of those.
+//
+// A claim without an anchor is still a claim. The deterministic
+// sentences name their evidence in words as well — the check by its own
+// name, the blocker verbatim — so they read correctly with the numbers
+// stripped, on the board line and on a page too short for the marks.
+
+// anchor names something a claim cites, in the design's four kinds. It
+// is a value rather than a string so a malformed one cannot be built by
+// accident — parseAnchor is the only way in from a model's reply.
+type anchor struct {
+	kind string // "check", "event", "diff", "spec"
+	ref  string // the check name, event seq, "<path>:<line>", or section
+}
+
+// anchorKinds is the closed set. A kind outside it is not an anchor
+// gummi can resolve, so it is not an anchor at all.
+var anchorKinds = map[string]bool{"check": true, "event": true, "diff": true, "spec": true}
+
+func (a anchor) empty() bool { return a.kind == "" }
+
+// String round-trips an anchor back to its wire spelling, for notices
+// and test failure output.
+func (a anchor) String() string {
+	if a.empty() {
+		return ""
+	}
+	return a.kind + ":" + a.ref
+}
+
+// parseAnchor reads a model's anchor string. Everything about it is
+// fail-closed: an unknown kind, a missing reference, or no colon at all
+// is (anchor{}, false), and a claim whose anchor did not parse is
+// discarded exactly like one whose anchor did not resolve.
+func parseAnchor(s string) (anchor, bool) {
+	s = strings.TrimSpace(strings.Trim(strings.TrimSpace(s), "`\"'"))
+	kind, ref, ok := strings.Cut(s, ":")
+	if !ok {
+		return anchor{}, false
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	ref = strings.TrimSpace(ref)
+	if !anchorKinds[kind] || ref == "" {
+		return anchor{}, false
+	}
+	return anchor{kind: kind, ref: ref}, true
+}
+
+// claim is one sentence of the narration, with the evidence that backs
+// it. Most claims are free and carry the anchor their own source
+// already knows; the code-vs-plan claim is model-written and carries
+// whichever anchor it cited, checked before it is admitted.
+type claim struct {
+	text string
+	a    anchor
+}
+
+// sentence builds a claim citing nothing — the ordinary case for a
+// sentence whose evidence is the card's own state.
+func sentence(text string) claim { return claim{text: text} }
+
+// cite builds a claim carrying an anchor.
+func cite(text, kind, ref string) claim {
+	if text == "" {
+		return claim{}
+	}
+	return claim{text: text, a: anchor{kind: kind, ref: ref}}
+}
 
 // narrationStop reports whether the card is genuinely parked for a
 // human — the only state a narration is generated in.
 //
-// This is invariant 4 ("free at rest") stated as a predicate rather than
-// as a cache: a running, queued or done card has nothing to narrate and
-// asks for nothing, so there is no work to skip and no staleness to
-// guard against. When the model-written sentence lands it will need the
-// real cache key (the newest event id, plus the gate's blocking counts);
-// until then the honest implementation of "never regenerated" is "never
-// generated".
+// This is invariant 4 ("free at rest") stated as a predicate: a running,
+// queued or done card has nothing to narrate and asks for nothing. It
+// gates BOTH halves of the invariant — the free sentences below are not
+// built for such a card, and citations.go refuses to spend a model turn
+// on one, since ensureNarration asks this first.
 func narrationStop(in nextInput) bool {
 	if in.landed || in.stage == domain.StageDone {
 		return false
@@ -68,13 +148,28 @@ func narrationStop(in nextInput) bool {
 // cardNarration builds the paragraph for a stop. Empty is the ordinary
 // answer for a card with nothing to say — an idle card in todo has not
 // stopped for a reason, and has done nothing unattended.
-func (m *Shell) cardNarration(in nextInput, r featureRow) []string {
+func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 	if !narrationStop(in) {
 		return nil
 	}
-	var out []string
+	// The log is read from m.cardEvents rather than from r.Events, and
+	// the difference matters: featureRow.Events is filled at RENDER time
+	// (thread.go) and is nil on a row handed straight out of m.selected,
+	// so a caller outside the render path — openCitation counting the
+	// marks, ensureNarration keying the cache — would see a different
+	// paragraph from the one on screen and number it differently. One
+	// source, and it is the durable one.
+	events := m.cardEvents[r.F.ID]
+	var out []claim
 	if s := whyItStopped(in); s != "" {
-		out = append(out, s)
+		// The failing check is the claim's own evidence and the anchor is
+		// free: in.failedCheck comes from m.checksFor, so a check named
+		// here is by construction a check that ran.
+		if in.failedCheck != "" && in.stage == domain.StageVerify {
+			out = append(out, cite(s, "check", in.failedCheck))
+		} else {
+			out = append(out, sentence(s))
+		}
 	}
 	// liveStretches, not autopilotStretches: a period the driving process
 	// abandoned, or one autopilot ended by carrying the card into a stage
@@ -82,10 +177,45 @@ func (m *Shell) cardNarration(in nextInput, r featureRow) []string {
 	// than by any row in the log (stretch.go). Reading the raw stretches
 	// here would report a period as still running while the card sits in
 	// front of you waiting.
-	if s := unattendedSentence(liveStretches(r.F, r.Events, m.ws)); s != "" {
-		out = append(out, s)
+	if c := unattendedClaim(liveStretches(r.F, events, m.ws), events); c.text != "" {
+		out = append(out, c)
+	}
+	// The third question, and the only one that costs anything. It is
+	// read from the cache and never generated here: rendering must stay
+	// free and side-effect-free, so the turn that fills the cache is
+	// dispatched from the Update loop (citations.go's ensureNarration).
+	if c, ok := m.cachedCodeVsPlan(in, r); ok {
+		out = append(out, c)
 	}
 	return out
+}
+
+// approveShaped reports whether this stop is one where "what does the
+// code do against what the plan promised" is a question worth paying
+// for: implement finished, the verify gate, the landing gate.
+//
+// Everywhere else the sentence would be noise or worse. A failure, an
+// exhausted envelope and a blocked ask are stops about themselves, and
+// a reader answering one is not weighing a diff against a plan. Nothing
+// has been built at the design stage to compare. And a RESEARCH card
+// has no diff at all — it never gets a branch — so the claim is
+// undefined for it; its verify is the deterministic document floor
+// (DESIGN §13.4), which already reports shape and citations without a
+// model.
+func approveShaped(in nextInput) bool {
+	if !narrationStop(in) || in.kind == domain.KindResearch {
+		return false
+	}
+	if in.hasAsk || in.attn == attnQuestion || in.attn == attnFailure || in.attn == attnBudget {
+		return false
+	}
+	if in.sess == engine.StatePaused {
+		return false
+	}
+	if in.stage != domain.StageImplement && in.stage != domain.StageVerify {
+		return false
+	}
+	return in.attn == attnGate || in.sess == engine.StateDone
 }
 
 // whyItStopped is the first sentence. Its order of precedence is the
@@ -199,9 +329,9 @@ func loopBreaker(in nextInput) string {
 // without bound and stop being about the stop you are looking at, and
 // the older ones are already drawn where they happened, bracketed among
 // the history (stretch.go).
-func unattendedSentence(stretches []autopilotStretch) string {
+func unattendedClaim(stretches []autopilotStretch, events []state.CardEvent) claim {
 	if len(stretches) == 0 {
-		return ""
+		return claim{}
 	}
 	st := stretches[len(stretches)-1]
 	if st.decidedNothing() {
@@ -209,7 +339,7 @@ func unattendedSentence(stretches []autopilotStretch) string {
 		// history, but it is not worth a sentence at the stop: the folded
 		// receipt above already says which stage ran, and a sentence that
 		// reports two zeroes is noise where the reader is deciding.
-		return ""
+		return claim{}
 	}
 	var parts []string
 	if n := len(st.gates); n > 0 {
@@ -222,7 +352,16 @@ func unattendedSentence(stretches []autopilotStretch) string {
 	if st.running() {
 		lead = "Autopilot has the card and has "
 	}
-	return lead + strings.Join(parts, " and ") + " without you."
+	text := lead + strings.Join(parts, " and ") + " without you."
+	// The period's OPENING event is the citation: it is the row in the
+	// thread where the stretch begins, and from there the crossings the
+	// sentence counts are drawn in order below it. st.from indexes the
+	// same slice autopilotStretches walked, so the seq is always a real
+	// event on this card.
+	if st.from >= 0 && st.from < len(events) {
+		return cite(text, "event", itoa64(events[st.from].Seq))
+	}
+	return sentence(text)
 }
 
 // isAre agrees a verb with a count, so the sentences above read as
@@ -233,3 +372,6 @@ func isAre(n int) string {
 	}
 	return "are"
 }
+
+// itoa64 formats an event sequence for an anchor.
+func itoa64(n int64) string { return strconv.FormatInt(n, 10) }

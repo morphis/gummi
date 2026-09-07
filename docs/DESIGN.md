@@ -1087,12 +1087,49 @@ Rules that make the control safe:
   always accepted and always safe: it becomes a turn, never an action
   nobody offered. This is what makes the thread a guide through the
   workflow rather than a prompt that can be talked out of it.
-- **The guide is deterministic.** The voice that poses a workflow
-  decision is gummi's own (`AuthorSystem`), rendering `workflow` and
-  `nextsteps` in sentences. It is not a fourth role and costs no
-  credits — a model-backed conductor would be a new way to spend money to
-  be told what the compiled-in workflow already knows, and a thing the
-  user could argue with.
+- **The options are deterministic; the narration is not.** A model may
+  describe the situation and may route a typed sentence to a stage. It
+  may never add, remove, or reorder an option. Prose is always accepted
+  and always safe: it becomes a turn or a routed re-entry, never an
+  action nobody offered.
+
+  That last sentence is the safety property stated a row above, and it
+  is what the split protects. The option rows are `stageActions(in)` — a
+  pure function of card state, table-tested, free, and still regenerated
+  every render, so "options are never stored" holds unchanged. Above
+  them sits a short paragraph that a model may write, and a typed line
+  that a model may classify; neither can reach the rows.
+
+  Three things keep that true rather than merely intended:
+
+  - **The narration yields first.** It is the first region of the
+    decision's own block to give up its rows on a short terminal, ahead
+    of the unfocused options and well ahead of the highlighted answer
+    (`fitNarration`). A page too short for both simply has no
+    paragraph — the description is what is optional, never the choice.
+  - **Every claim carries a resolvable citation.** A generated sentence
+    may only assert what it can anchor to a real check, a real event, a
+    real hunk, or a real artifact section, and the anchor is resolved
+    against the card before the sentence is admitted. An anchor that
+    resolves to nothing discards its claim. Hallucinated evidence is
+    therefore refused by the code that admits evidence rather than
+    prevented by prompting.
+  - **Routing walks declared edges only.** A classified sentence is
+    routed by `internal/reentry` — compiled in and pure, like
+    `gatepolicy` — and every move it can produce is an edge
+    `internal/workflow` already declares. An intent that reaches no edge
+    becomes a turn. A rewind additionally refuses to happen at all
+    unless the miss is first written into the artifact, where an
+    unresolved `%%` marker then holds the gate shut until somebody
+    answers it.
+
+  What is still refused is a model-backed *conductor*: something that
+  decides what a card may do next, or that a user could argue out of the
+  workflow. Describing a stop and placing a sentence are not that. The
+  spend is bounded to match — one cheap scribe turn at a stop, cached
+  against the card's newest event id and its blocking counts, metered to
+  the card's own stage, and never bought at all for a card another
+  process is driving.
 - **An open ask survives the process that asked it, or dies honestly.**
   Durability without an answer path would be worse than the evaporation
   it replaces — after a restart the blocked tool call, its id and its

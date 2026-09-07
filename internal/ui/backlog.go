@@ -233,11 +233,15 @@ func (m *Shell) boardNarrationLine(r featureRow) string {
 	if _, waiting := m.inbox.get(r.F.ID); !waiting {
 		return ""
 	}
-	sentences := m.cardNarration(m.nextInputFor(r), r)
-	if len(sentences) == 0 {
+	claims := m.cardNarration(m.nextInputFor(r), r)
+	if len(claims) == 0 {
 		return ""
 	}
-	return sentences[0]
+	// The text alone, with no citation mark: the board has no key that
+	// opens one, and a bracketed number nothing answers is a promise the
+	// row cannot keep. The card page prints the same sentence with its
+	// mark, where alt+<n> is live.
+	return claims[0].text
 }
 
 // backlogView renders the full-width backlog: cards grouped by

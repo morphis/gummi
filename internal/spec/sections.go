@@ -57,6 +57,20 @@ func HeadingLine(content, name string) (line int, ok bool) {
 	return 0, false
 }
 
+// Headings lists the document's top-level `## ` section titles, trimmed,
+// in document order. It is the set HeadingLine can resolve, which is
+// what makes it the honest answer to "does this document have a section
+// called X" for a caller checking a name it did not choose itself.
+func Headings(content string) []string {
+	var out []string
+	for _, l := range strings.Split(content, "\n") {
+		if isHeading(l) {
+			out = append(out, strings.TrimSpace(l[len("## "):]))
+		}
+	}
+	return out
+}
+
 // ReplaceSection replaces the named section's body — the lines between
 // its `## ` heading and the next top-level `## ` heading or EOF — with
 // body verbatim. The heading line itself is never touched. matchedTitle

@@ -6,6 +6,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // The card surface's invariants, asserted rather than described.
@@ -204,8 +205,52 @@ func TestInvariantFreeAtRest(t *testing.T) {
 		{stage: domain.StageVerify, kind: domain.KindFeature, landed: true, attn: attnGate, verdict: verdictFail},
 	} {
 		if got := m.cardNarration(in, row); len(got) != 0 {
-			t.Errorf("%+v: narrated a quiet card: %q", in, got)
+			t.Errorf("%+v: narrated a quiet card: %+v", in, got)
 		}
+	}
+}
+
+// TestInvariantFreeAtRestRegeneration — invariant 4's OTHER half, which
+// Phase 0 could only state vacuously (nothing was generated, so nothing
+// could be regenerated). Now that one claim costs a model turn, "never
+// regenerated while the newest event id and the blocking counts are
+// unchanged" is a real property with a real cache behind it, and this is
+// where it is stated. The behavioural half — a pass is dispatched once
+// per state and not once per frame — is TestNarrationNotRegeneratedFor-
+// TheSameState; this pins the key itself, because a key that ignored one
+// of its inputs would pass that test while pinning a stale sentence to a
+// card that has moved on.
+func TestInvariantFreeAtRestRegeneration(t *testing.T) {
+	m := attachedBoard(t, 120, 34)
+	id := m.rows[m.sel].F.ID
+	base := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate}
+
+	same := m.narrationKey(base, id)
+	if again := m.narrationKey(base, id); again != same {
+		t.Fatalf("the same state keyed twice: %q then %q", same, again)
+	}
+
+	// Every input the design names must move the key. A blocker resolved
+	// appends nothing to the log but changes what the stop MEANS, which
+	// is exactly why the counts are in the key beside the log's newest
+	// seq.
+	for name, mutate := range map[string]func(*nextInput){
+		"an open spec thread":     func(in *nextInput) { in.openSpecQs = 1 },
+		"an open diff comment":    func(in *nextInput) { in.openDiffComments = 1 },
+		"an undrafted section":    func(in *nextInput) { in.undrafted = []string{"Verification plan"} },
+		"the card's stage moving": func(in *nextInput) { in.stage = domain.StageImplement },
+	} {
+		in := base
+		mutate(&in)
+		if got := m.narrationKey(in, id); got == same {
+			t.Errorf("%s does not move the cache key (%q)", name, got)
+		}
+	}
+
+	// and the log itself, which is the version stamp the design names
+	m.cardEvents[id] = append(m.cardEvents[id], state.CardEvent{Feature: id, Seq: 9999})
+	if got := m.narrationKey(base, id); got == same {
+		t.Errorf("a new event does not move the cache key (%q)", got)
 	}
 }
 

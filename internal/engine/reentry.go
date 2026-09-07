@@ -2,13 +2,11 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 
-	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/reentry"
@@ -23,21 +21,6 @@ import (
 // TUI, the web surface and the headless driver (DESIGN §6.3: the
 // options are deterministic even when the narration and the
 // classification are not).
-
-// ErrNoClassifier reports that there is no backend to run the
-// classification turn on at all — no agent configured, or none the
-// profile's scribe role resolves to.
-//
-// It is deliberately distinct from a reply that classified nothing. A
-// caller must tell the two apart: an unreadable SENTENCE becomes a turn
-// (DESIGN §6.3's safety property — prose is always accepted and always
-// safe), but an unreachable CLASSIFIER is not a statement about the
-// sentence at all, and turning "send it back" into a chat message
-// because a model was offline would silently drop an answer the screen
-// had already offered. On this error a caller falls back to the fixed
-// route its own row declares, which is what the surface did before this
-// existed.
-var ErrNoClassifier = errors.New("no agent backend available to classify the re-entry")
 
 // classifyIntro opens the classification turn. The sentence itself is
 // appended verbatim, fenced, so a line that happens to contain the word
@@ -125,76 +108,25 @@ func parseIntentReply(text string) (reentry.Intent, bool) {
 // It is the only model call the re-entry makes, and it is deliberately
 // the smallest one available: the scribe tier is the cheap one-shot
 // tier a profile can point at a small model (hints.go), the session is
-// read-only, and the reply is one word. The transient session is not
-// tracked on the board, exactly like Estimate and DiscoverChecks.
+// read-only, and the reply is one word. Its spend is booked against the
+// card's current stage like any other one-shot pass (oneshot.go).
 //
 // The two failure modes are different answers, not one:
 //
 //   - ("", nil) — the turn ran and classified nothing. The sentence is
 //     unreadable, and the caller sends it as a turn.
 //   - ("", err) — the turn could not run. The caller falls back to the
-//     route its own row declares; see ErrNoClassifier.
+//     route its own row declares; see ErrNoScribe.
 func (e *Engine) ClassifyReentry(ctx context.Context, f domain.Feature, sentence string) (reentry.Intent, error) {
 	if strings.TrimSpace(sentence) == "" {
 		return "", nil
 	}
-	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
-	ag := e.agentFor(backend)
-	if ag == nil {
-		return "", ErrNoClassifier
-	}
-	workDir, specPath, err := e.locate(ctx, f)
+	text, err := e.oneShot(ctx, f, classifyPrompt(f, sentence))
 	if err != nil {
 		return "", err
 	}
-	sess, err := ag.NewSession(ctx, agent.SessionOpts{
-		WorkDir:      workDir,
-		ArtifactPath: specPath,
-		Role:         agent.RoleScribe,
-		Model:        rc.Model,
-		Provider:     rc.Provider,
-		Think:        rc.Think,
-		Permission:   e.cfg.Permission,
-		SystemHints: []string{
-			"You are classifying one sentence read-only; do not modify any file.",
-			fmt.Sprintf("The card's artifact is at %s.", specPath),
-		},
-		ExtraReadAllows: []string{specPath},
-	})
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, classifyPrompt(f, sentence)); err != nil {
-		return "", err
-	}
-	var text assistantText
-	for {
-		select {
-		case ev, ok := <-sess.Events():
-			if !ok {
-				intent, _ := parseIntentReply(text.String())
-				return intent, nil
-			}
-			switch ev.Kind {
-			case agent.EventTextDelta:
-				text.delta(ev.Text)
-			case agent.EventMessage:
-				text.message(ev.Text)
-			case agent.EventIdle, agent.EventBudgetExhausted:
-				// Budget exhaustion is a soft stop here for the same
-				// reason it is in DiscoverChecks: the in-flight reply is
-				// done and no further turn will run, so waiting for an
-				// idle that is not coming would hang the caller.
-				intent, _ := parseIntentReply(text.String())
-				return intent, nil
-			case agent.EventError:
-				return "", ev.Err
-			}
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-	}
+	intent, _ := parseIntentReply(text)
+	return intent, nil
 }
 
 // ApplyReentryEdit writes a re-entry's artifact edit into the card's
