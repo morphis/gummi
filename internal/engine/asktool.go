@@ -57,6 +57,28 @@ type AskOption struct {
 	Detail string `json:"detail"`
 }
 
+// UnmarshalJSON accepts an option written as a bare string as well as the
+// documented {label, detail} object. The tool schema asks for objects, but
+// a model (or a scripted backend) that sends ["yes", "no"] is asking a
+// perfectly clear question, and rejecting it at the boundary is the worst
+// outcome available: the tool error goes back to the agent, the agent
+// carries on without the answer, and the person at the keyboard never
+// sees that a question was asked at all. A bare string is the label.
+func (o *AskOption) UnmarshalJSON(b []byte) error {
+	var label string
+	if err := json.Unmarshal(b, &label); err == nil {
+		o.Label, o.Detail = label, ""
+		return nil
+	}
+	type plain AskOption
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*o = AskOption(p)
+	return nil
+}
+
 // RecommendedOption picks the option the agent flagged as recommended —
 // by convention it marks that option's label ("… (recommended)") — and
 // falls back to the first option when none is marked. It is the single

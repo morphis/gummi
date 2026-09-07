@@ -463,12 +463,23 @@ def fd001_implement(ctx, turn):
                     "absolute column) has no such guard -- it prints a size "
                     "whenever `Usage > 0`. Should I leave `-c D` alone?"
                 ),
+                # gummi's ask_user shape: options are {label, detail}
+                # objects, the recommended one says so in its label, and
+                # spec_anchor names the spec line the answer is recorded
+                # under. Bare strings and invented fields were bounced at
+                # the boundary, and the question never reached the screen.
                 "options": [
-                    "Leave -c D untouched -- out of scope",
-                    "Add the same guard to -c D too",
+                    {
+                        "label": "Leave -c D untouched -- out of scope (recommended)",
+                        "detail": "the absolute column's behaviour is not this card's",
+                    },
+                    {
+                        "label": "Add the same guard to -c D too",
+                        "detail": "one rule for both columns",
+                    },
                 ],
-                "recommendation": "Leave -c D untouched -- out of scope",
-                "anchor": "Out of scope",
+                "allow_free_form": True,
+                "spec_anchor": "Out of scope",
             },
         })
         return

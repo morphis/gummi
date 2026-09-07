@@ -1488,6 +1488,35 @@ func TestParseAskRejectsUnlabelledOption(t *testing.T) {
 	}
 }
 
+// TestParseAskAcceptsBareStringOptions: an option sent as a bare string
+// is its own label. The demo agent asked this way and the engine bounced
+// the call with a tool error, so the agent carried on and no picker was
+// ever drawn — a question the person never saw is worse than one with
+// a thin option, which is why the boundary tolerates the shape.
+func TestParseAskAcceptsBareStringOptions(t *testing.T) {
+	body := `{"question":"leave -c D alone?","options":["Leave it (recommended)",{"label":"Guard it","detail":"same guard"}]}`
+	a, err := parseAsk("c1", json.RawMessage(body))
+	if err != nil {
+		t.Fatalf("parseAsk rejected bare string options: %v", err)
+	}
+	want := []AskOption{{Label: "Leave it (recommended)"}, {Label: "Guard it", Detail: "same guard"}}
+	if len(a.Options) != len(want) {
+		t.Fatalf("options = %+v, want %+v", a.Options, want)
+	}
+	for i := range want {
+		if a.Options[i] != want[i] {
+			t.Errorf("option %d = %+v, want %+v", i, a.Options[i], want[i])
+		}
+	}
+	if got := RecommendedOption(a); got != "Leave it (recommended)" {
+		t.Errorf("RecommendedOption = %q", got)
+	}
+	// a blank string is still an unlabelled option
+	if _, err := parseAsk("c1", json.RawMessage(`{"question":"q","options":["  "]}`)); err == nil {
+		t.Errorf("a blank string option was accepted")
+	}
+}
+
 // TestGateAskOptionsAreGummisNotTheModels: a gate's options are replaced
 // with gummi's own, whatever the model sent. What "yes" means at a gate
 // has to be reliable, and a model-authored option list is not — so the
