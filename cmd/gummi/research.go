@@ -96,6 +96,6 @@ func registerResearchFlags(fs *flag.FlagSet) *researchFlagValues {
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
 		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)"),
-		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this stage (only \"shape\" is a valid stop on RS's route)"),
+		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this stage (only \"plan\" is a valid stop)"),
 	}
 }

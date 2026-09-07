@@ -3,13 +3,18 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-// readmeEnvVars parses the first column of every row in the README
-// "Environment variables" table.
-func readmeEnvVars(t *testing.T) map[string]bool {
+// envTableVars parses the first column of every row in the
+// docs/CONFIGURATION.md "Environment variables" table. The README carries
+// only the handful a first user meets and points here for the rest, so this
+// table is the one that must stay complete. A cell may name several
+// variables (`GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, …); each backticked
+// span counts on its own.
+func envTableVars(t *testing.T) map[string]bool {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
@@ -25,40 +30,45 @@ func readmeEnvVars(t *testing.T) map[string]bool {
 		}
 		dir = parent
 	}
-	s, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	s, err := os.ReadFile(filepath.Join(dir, "docs", "CONFIGURATION.md"))
 	if err != nil {
-		t.Fatalf("read README: %v", err)
+		t.Fatalf("read docs/CONFIGURATION.md: %v", err)
 	}
 	inTable := false
 	seen := map[string]bool{}
 	for _, line := range strings.Split(string(s), "\n") {
 		if strings.HasPrefix(line, "## ") {
-			inTable = false
-		}
-		if strings.HasPrefix(line, "Environment variables") {
-			inTable = true
+			inTable = strings.TrimLeft(line, "# ") == "Environment variables"
 			continue
 		}
 		if !inTable || !strings.HasPrefix(line, "|") {
 			continue
 		}
-		cell := strings.TrimSpace(strings.Split(strings.Trim(line, "|"), "|")[0])
-		seen[strings.Trim(cell, "`")] = true
+		cell := strings.Split(strings.Trim(line, "|"), "|")[0]
+		for _, m := range envCellRe.FindAllStringSubmatch(cell, -1) {
+			seen[m[1]] = true
+		}
 	}
 	return seen
 }
 
+var envCellRe = regexp.MustCompile("`(GUMMI_[A-Z0-9_]+)`")
+
 // operatorVars is the curated set of operator-facing GUMMI_ vars that
-// cmd/gummi reads. Every one must be documented in the README env table so
-// the hand-written table cannot drift from what the binary actually reads.
-// Dev-only/_TEST and internal socket vars are intentionally excluded.
+// gummi reads. Every one must be documented in the configuration doc's env
+// table so the hand-written table cannot drift from what the binary
+// actually reads. Dev-only/_TEST and internal socket vars are intentionally
+// excluded.
 var operatorVars = []string{
 	"GUMMI_AGENT",
 	"GUMMI_AGENT_CMD",
 	"GUMMI_CLAUDE_BIN",
 	"GUMMI_CODEX_BIN",
 	"GUMMI_OPENCODE_BIN",
+	"GUMMI_ZZ_BIN",
 	"GUMMI_HEADLESS_CREDITS_PER_1K",
+	"GUMMI_ZZ_CREDITS_PER_1K",
+	"GUMMI_ZZ_MAX_TURNS",
 	"GUMMI_MODEL",
 	"GUMMI_MAX_ACTIVE",
 	"GUMMI_ENVELOPE",
@@ -70,13 +80,17 @@ var operatorVars = []string{
 	"GUMMI_ATTACH_CMD",
 }
 
-// TestReadmeEnvCoversOperatorVars proves every operator-facing GUMMI_ var
-// the binary reads appears in the README environment table.
-func TestReadmeEnvCoversOperatorVars(t *testing.T) {
-	readme := readmeEnvVars(t)
+// TestConfigDocEnvCoversOperatorVars proves every operator-facing GUMMI_
+// var the binary reads appears in the docs/CONFIGURATION.md environment
+// table.
+func TestConfigDocEnvCoversOperatorVars(t *testing.T) {
+	documented := envTableVars(t)
+	if len(documented) == 0 {
+		t.Fatal("no environment table found in docs/CONFIGURATION.md; the heading moved or the table is gone")
+	}
 	for _, v := range operatorVars {
-		if !readme[v] {
-			t.Errorf("operator-facing env var %s is missing from the README environment table", v)
+		if !documented[v] {
+			t.Errorf("operator-facing env var %s is missing from the docs/CONFIGURATION.md environment table", v)
 		}
 	}
 }

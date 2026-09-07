@@ -1,110 +1,78 @@
 # gummi
 
 > A meta-harness for coding agents. Drive a fleet of agents through a
-> spec-driven workflow across git worktrees — from one TUI, or headlessly
+> spec-driven workflow across git worktrees, from one board or headlessly
 > from your own agents and CI.
 
 ![the gummi board: cards at four stages, a new feature created from one form, and the architect interviewing you about it](docs/assets/demo.gif)
 
 **The bottleneck in agentic coding isn't the agents anymore. It's you.**
 
-One coding agent is a pair programmer. Five are a management problem:
-a pile of terminals, worktrees you have to keep straight in your head,
-and an agent that has been silently blocked on a question for the last
-twenty minutes. Meanwhile every step burns frontier-model tokens whether
-it needs frontier intelligence or not, and nothing stops an agent from
-jumping straight to code without a spec or shipping unreviewed work.
+One coding agent is a pair programmer. Five are a management problem: a
+pile of terminals, worktrees you keep straight in your head, and an agent
+that has been silently waiting on a question for twenty minutes. Every
+step burns frontier-model tokens whether it needs them or not, and nothing
+stops an agent from skipping the spec or shipping unreviewed work.
 
-gummi replaces the pile of terminals with one board. Every unit of work
-is a card moving through a fixed workflow; every card gets its own git
-worktree and branch; every stage is performed by an agent whose model
-*you* choose. gummi's job ends at a **verified branch** — land it with
-the built-in one-key squash-merge or however you like; PRs and releasing
-stay in your hands.
+gummi replaces the pile of terminals with one board. Every piece of work
+is a card. Every card gets its own git worktree and branch and walks the
+same fixed workflow. Every stage is done by an agent whose model you
+choose. gummi's job ends at a **verified branch**. Landing it on main is
+your keypress, always.
 
 ## Three ideas
 
-**You are the scarce resource.** gummi's parallelism is attention-based,
-not throughput-based. Autonomous runs compete for one of two lane pools:
-one **attended** lane, for a card you've told to stop at every gate
-(`off`) and so keep watching yourself, and by default two **autopilot**
-lanes for everything left to run on its own (`gates` or `full`, the
-everyday default). An attended card always gets its lane immediately —
-it never queues behind autopilot work — while excess autopilot runs
-queue and start as lanes free. Everything that needs a human — gates,
-agent questions, failures, exhausted budgets — lands in a single
-needs-attention inbox. The point isn't to run ten agents at once; it's
-to make context-switching between features cheap and to never leave an
-agent waiting on you without you knowing.
+**Your attention is the scarce resource.** The point is not to run ten
+agents at once. It is to make switching between features cheap, and to
+never leave an agent waiting on you without you knowing. Everything that
+needs a human, a gate, a question, a failure, an empty budget, lands in
+one inbox.
 
-**The process is fixed; only the spend is yours to choose.** The
-workflow is compiled in, never configurable: no implementation without
-an approved design, no merge without review and verification. There are
-no routes and no skips — every card walks the same four stages, and the
-only automatic movement is the rerun edges (a wrong plan bounces back to
-plan, a failed verify back to implement). You can't accidentally
-configure the quality floor away, because there is no configuration.
+**The process is fixed. Only the spend is yours.** The workflow is
+compiled in. No implementation without an approved plan, no merge without
+review and verification. You cannot configure the quality floor away,
+because there is no configuration for it.
 
-**Frontier models only where they earn it.** Stages are performed by
-*roles* (`architect`, `implementer`, `reviewer`, `scribe`), and a
-*profile* maps roles to concrete models — a frontier model for design
-and review, a cheap or local model for mechanical steps. Each feature
-carries a credit envelope every stage draws from, with a human top-up
-gate when it runs dry. Same process every time; spend chosen per
-feature.
+**Frontier models only where they earn it.** Stages are done by roles:
+architect, implementer, reviewer, scribe. A profile maps each role to a
+model, a strong one for design and review, a cheap or local one for
+mechanical steps. Each card carries a credit envelope, and you top it up
+when it runs dry.
 
 ## The workflow
-
-Three kinds of work item share one workflow:
 
 ```
 todo → plan → implement → verify → done
 
-feature  FD-NNN   design the change, build it, prove it
-bug      BG-NNN   same stages: reproduce and diagnose, fix, prove
-research RS-NNN   same stages: shape the question, gather evidence
-                  (read-only, no worktree), check the citations
+feature   FD-NNN   design the change, build it, prove it
+bug       BG-NNN   reproduce and diagnose, fix, prove
+research  RS-NNN   shape the question, gather evidence, check the citations
 ```
 
-The kind does not change the route — it changes each stage's *contract*:
-which artifact it writes, what its agent is told, and which sections its
-gate demands.
+All three kinds walk the same stages. The kind changes what each stage
+writes and what its gate demands, not the route.
 
-- **Design is a conversation.** Plan is where the thinking happens: the
-  architect explores the problem with you in the card's thread, converges
-  on one approach, and writes the implementation plan. You can steer it
-  at any point, and the durable artifact is a markdown spec in the repo's
-  `.gummi` workspace. The spec — not the transcript — is the context
-  carrier between stages, which keeps token windows small.
-- **Every stage ends with an adversarial read.** Before a stage reaches
-  its gate, a fresh-context reviewer (ideally a different model) critiques
-  what it produced — the plan for security, correctness and completeness;
-  the diff against the spec it was meant to satisfy. Findings land as
-  `%%` threads anchored to the lines they indict, and serious ones re-run
-  the stage automatically, capped before it escalates to you. Review is
-  a pass, not a stage: it iterates the work in place.
-- **A stage that wrote nothing does not cross its gate.** Each gate names
-  the sections its stage owed; a section holding only its template prompt
-  holds the gate shut, so a stalled agent can't be waved through.
-- **Implementation runs alone.** Implement runs autonomously in the
-  card's worktree, streaming activity to the card. Agents can ask you
-  bounded questions mid-turn via a built-in `ask_user` tool — the
-  question renders as an inline picker, the blocked turn spends no
-  tokens while it waits, and answers anchored to a spec line are written
-  back into the spec.
-- **Verify proves it.** Verify runs the repo's checks plus the spec's own
-  verification plan, and a failure bounces the work back to implement.
-  Landing on main is always your keypress, under every mode.
-- **Research is a document, not a branch.** A research card runs the same
-  stages, read-only and worktree-less: plan shapes the question and the
-  direction, implement gathers evidence grounded in `path:line` citations,
-  and verify is a deterministic citation + coverage check that spends no
-  tokens. Crossing `done` decomposes the approved document into
-  pre-seeded features with first-class dependency edges.
+- **Plan is a conversation.** The architect works the problem through
+  with you in the card's thread and writes the plan as a markdown spec.
+  The spec, not the transcript, carries context between stages.
+- **Every stage ends with an adversarial read.** A fresh-context reviewer
+  critiques the plan, or the diff against the plan, before the stage
+  reaches its gate. Findings are `%%` threads anchored to the lines they
+  indict. Serious ones re-run the stage; the rest wait for you.
+- **A stage that wrote nothing does not cross its gate.** A section still
+  holding its template prompt keeps the gate shut.
+- **Implement runs alone** in the card's worktree. The agent can ask you a
+  bounded question mid-turn through the built-in `ask_user` tool, and the
+  turn spends nothing while it waits.
+- **Verify proves it.** The repo's checks and the spec's own verification
+  plan run. A failure sends the work back to implement.
+- **Research writes a document, not a branch.** Its verify is a citation
+  check that spends no tokens. Crossing `done` turns the approved document
+  into pre-seeded feature cards with dependency edges.
 
 ## Install
 
-gummi is a single binary. There are no releases yet — install with the
+gummi is a single binary. There are no releases yet, so install with the
 Go toolchain (Go 1.26+):
 
 ```sh
@@ -116,11 +84,10 @@ or build from a clone:
 ```sh
 git clone https://github.com/morphis/gummi
 cd gummi
-make build        # → bin/gummi   (or: go build ./cmd/gummi)
+make build        # → bin/gummi
 ```
 
-For the default agent backend you also need the GitHub Copilot CLI,
-authenticated:
+The default agent backend is the GitHub Copilot CLI, authenticated:
 
 ```sh
 curl -fsSL https://gh.io/copilot-install | bash
@@ -128,518 +95,197 @@ curl -fsSL https://gh.io/copilot-install | bash
 
 ## Quick start
 
-Run `gummi` with no arguments from the root of a git repository:
-
 ```sh
 cd your-repo
 gummi
 ```
 
-First run creates the `.gummi/` workspace lazily — state directory
-(0700), starter `config.yaml` and `profiles.yaml`, worktrees directory,
-and the ignore rules that keep it all out of your repo's history. Then:
+The first run creates `.gummi/`: state, a starter `config.yaml` and
+`profiles.yaml`, a worktrees directory, and the ignore rules that keep it
+out of your repo's history. `gummi init` does the same without opening
+the board. Then:
 
-1. Press `n` and describe the feature — that's the whole creation form;
-   the design stage develops the rest. The first line becomes the card
-   title; write (or paste) as much as you know past it and it seeds the
-   spec's Problem section, so the architect starts from your words
-   instead of a blank page (`alt+enter` for a newline). Profile and
-   envelope sit on a quiet options row.
-2. Open the card and design it with the architect directly in its
-   thread. Open questions are tracked as a `%%` checklist in the
-   spec (`s` to view it, `c` to comment on the line under the cursor,
-   `x` to resolve a thread).
-3. Press `g` to cross the design gate: it creates the worktree and
-   branch, settles the spec into `.gummi/specs/`, and launches the
-   autonomous implementer.
-4. Watch the running agent (`↑`, then `enter`), review the diff (`d`), and let
-   the critique/verify loop run. `b` bounces work back with your annotations.
-5. Done means a verified branch. Press `m` to squash-merge it into main:
-   the dialog drafts a suggested landing message from the spec and the
-   branch's commits; you review, edit, and approve it — nothing is
-   committed until you confirm. Or merge outside gummi — either way it
-   detects the landing (merge or squash-merge) and offers cleanup (`c`).
+1. Press `n` and describe the feature. The first line is the title.
+   Anything after it seeds the spec, so the architect starts from your
+   words (`alt+enter` for a newline). The envelope defaults to 2000
+   credits.
+2. Press `enter` to open the card and design it with the architect in
+   its thread. `s` shows the spec; `c` comments on a line, `x` resolves a
+   thread.
+3. Press `g` to approve the plan. The implementer starts in the card's
+   worktree.
+4. Watch it work. `d` shows the diff. `b` bounces the work back with
+   your notes.
+5. Done means a verified branch. Press `m` to squash-merge it into main.
+   gummi drafts the landing message from the spec; you edit and approve
+   it. Or merge outside gummi: it notices either way and offers cleanup
+   with `c`.
 
-Key surfaces on the board (press `?` anywhere for the full table):
+The keys you need first:
 
-| key | action |
+| key | does |
 |---|---|
-| `j/k`, `pgup/pgdn`, `1..9` | select / jump to a card, or to the first / last card |
-| `enter` | open the selected card's page (full width); in its composer, deliver the typed line — to the card's open decision, when an option takes prose (the words ride the bounce, or open the run they're aimed at) — and to the agent otherwise; an empty line answers the highlighted option, and does nothing when none is open |
-| `↑` | on a card page with an empty composer and no decision open, open the action pop-over (`↑↓` moves, `enter` runs); while a decision is open, `↑↓` choose its options instead |
-| `esc` | back to the backlog list, in one press — the composer keeps the keyboard for as long as the card page is open, and the unsent draft survives leaving it. It cancels whatever is visibly pending first: a confirm chip, or a free-form answer armed with `o` |
-| `J`/`K`, `alt+j`/`alt+k` | step to the previous or next card without leaving the page — the alt pair from inside the composer, where `J`/`K` are letters you are typing |
-| `space` | open the command menu (everything that belongs to no card); type to filter |
-| `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / toggle the thread's transcript view — every stage's events laid out inline instead of one folded receipt each (from the backlog it opens the card page with the view on) |
-| `alt+o` | expand the captured tool outputs in the thread — a failed call always shows its tail without it; not text, so it works mid-draft as well as from the accelerators |
-| `alt+a`, `alt+b`, … | open what a narration claim cites — the marks printed beside the sentences above the decision (`[alt+a]`) name their own key, and each one opens the check, hunk, artifact section or moment in the thread that backs it |
-| `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `g` crosses the gate |
-| `g` / `b` | advance a gate / bounce back one rerun edge (implement → plan, verify → implement) |
-| `A` | autopilot: hand the card over so it crosses its own gates, and start it from wherever it sits |
-| `v` | run the verify checks |
-| `u` | set the budget envelope (credits; 0 = uncapped) |
-| `o` | change the card's managed repository (before worktree); with a live free-form question open, arms an empty composer as the answer channel — the picker digits stand down and `enter` delivers the typed line verbatim |
-| `S` | toggle severity sort (todo only) |
-| `tab` / `alt+1/2/3` | cycle the tabs (board, inbox, agent) / jump straight to one — both work from inside any view |
-| `ctrl+g` | lock the input to the agent tab's hosted CLI, so `tab`, `alt+1/2/3` and the mouse reach it too; `ctrl+g` again unlocks |
-| `alt+/` | the help table, from anywhere — including the places `?` is a character you are typing (the composer, filters, the hosted CLI) |
-| `i` | open the needs-attention inbox |
-| `n` / `B` / `R` | new feature / new bug / new research card |
-| `I` / `G` | ingest a spec doc / import bugs from GitHub issues |
-| `a` | raw-attach the agent CLI in the worktree (escape hatch) |
-| `r` / `m` / `z` | rebase onto main (conflicts hand off to an agent session; verify re-runs after) / squash-merge into main (drafts the message; review & approve, or edit) / squash in place (collapse the branch to one commit on its fork point) |
-| duplicate | a fresh copy starts over in todo, the original stays — no key: reach it from the card page's action list (`enter` opens it) or the command menu (`space`), since `y` is "yes" in the confirm it raises |
-| `c` / `D` | clean up a landed branch / delete the card (uppercase: it destroys work, and `x` is the reversible key everywhere else) |
+| `n` / `B` / `R` | new feature / bug / research card |
+| `enter` | open the selected card; in the card, send what you typed |
+| `↑` | the card's actions, when nothing is typed |
+| `s` / `d` | spec / diff, with comments in place |
+| `g` / `b` | cross the gate / bounce back one stage |
+| `A` | run this card on autopilot |
+| `m` / `c` | squash-merge into main / clean up a landed branch |
+| `i` | the needs-attention inbox |
+| `tab`, `alt+1/2/3` | the board, inbox and agent tabs |
+| `?` or `alt+/` | the full key table |
 
-### One board, tabbed
+### The card page
 
-The board is a single full-width backlog, grouped by super-state; `enter`
-opens the selected card on a page of its own, with roughly twice the width
-to spend on its detail. There is only ever one list on screen, so `↑↓`
-never have to be aimed. `esc` returns to the list in one press;
-`alt+j`/`alt+k` step to the previous/next card without going back. Every
-card verb (`g`, `v`, `m`, `d`, …) works from either level.
+A card is a thread. When it stops for you, a short paragraph says why,
+what it did unattended, and, at an approval, what the branch actually
+does against what the plan asked for. Every sentence there cites
+something real: a check, a hunk, a spec section, a moment in the log.
+The mark beside it (`[alt+a]`) is the key that opens it. A claim citing
+nothing is dropped, not shown.
 
-Above the answers, a short paragraph says why the card stopped, what it
-did unattended, and — at a stop where you are being asked to approve
-something — what the branch actually does against what its plan asked
-for. The first two are read out of the card's own event log and cost
-nothing. The third is written by a cheap model pass, once per card
-state, and it ships under a contract: every claim carries a citation to
-a real check, hunk, artifact section or logged moment, marked `[alt+a]`
-in the text and opened with that key. A claim citing something that does
-not exist is thrown away rather than shown, so the paragraph cannot
-present evidence the card does not have.
+**Typing at a stop is always safe.** gummi reads your line for what it
+asks. A missed requirement goes into the spec and the card walks back to
+plan. A missing check goes into the verification plan and the checks run
+again. Work that is not this card's opens a new card. "go on" approves
+whatever the stop is offering, and a question gets answered. Anything
+that moves the card or spends credits shows you first: `enter` confirms
+a move, `y` a spend, `esc` sends the line as a plain message instead.
+Nothing you type can produce a move the workflow does not already have.
 
-Typing at a stop is always safe, and it reaches further than a re-run.
-Every line you type while a card is parked is read for what it asks
-for, and you never pick an action: a missed requirement is written into
-the artifact and the card walks back to the design stage; a missing
-check goes into the verification plan and the checks run again; work
-that is not this card's opens a new card seeded with your line; "go on"
-approves, advances or runs whatever the stop is offering; a question is
-answered. Anything that moves the card or spends credits first shows
-what it is about to do, in the picker's place, with your line still in
-the composer — `enter` goes for a move, `y` goes for a spend, `esc`
-sends the line as a plain message instead. A sentence nothing can place
-is delivered as a message and says so. Nothing typed can produce a move
-the workflow does not already declare, and a line typed at a running
-stage simply steers it.
+The **agent tab** hosts your own coding CLI, picked once on the first
+visit. `ctrl+g` locks the keyboard to it when you want its own `tab`
+completion, and `ctrl+g` unlocks.
 
-That card page is a thread. When the card needs a decision, the question
-and its regenerated legal answers stay pinned directly above the composer;
-once answered, the result becomes ordinary chronological history. When no
-decision is open, the composer stands alone — and says so, its placeholder
-pointing at `↑` for the card's actions, which is where the single-letter
-verbs live now that the composer never gives the keyboard back.
+## Attended or autopilot
 
-The board sits behind gummi's own tab bar alongside the needs-attention
-inbox and a hosted agent pane — `tab` cycles all three, `alt+1/2/3` jumps
-straight to one. Both are answered above whatever holds the keyboard, so
-they work from inside a thread, a spec or a diff without escaping out
-first.
+Every card runs in one of two modes. `A` sets it and starts the card
+from wherever it sits.
 
-On the agent tab gummi keeps only those tab switches and hands the CLI
-everything else, so you can type at it the moment you arrive. When you
-want the CLI's own `tab` completion, `ctrl+g` **locks** the keyboard to
-it — every key goes to the CLI, and the tab, the bar and the status
-pill all show `⬤ locked` until `ctrl+g` unlocks. `ctrl+g` is the one key
-gummi never gives away, so the lock is always one keystroke from over.
-
-You don't have to know that in advance: gummi says `ctrl+g hands tab,
-alt+N + mouse to the agent` when you land on the tab, and — if `tab`
-moves you when you meant completion — `tab left the agent, ctrl+g keeps
-it there`. Use the lock once and it stops mentioning it.
-
-The mouse follows the same lock. Unlocked, gummi never captures it, so
-your terminal's own click-drag selection keeps working for copying agent
-output; locked, clicks, drags and the wheel go to the CLI (if it asked
-for them).
-
-## Autopilot
-
-`A` on any card sets how far it runs on its own, and starts it from
-wherever it currently sits — a card in todo runs from the beginning, a
-card parked at a gate crosses it and carries on. There are three stops:
-
-| stop | what it does |
+| mode | what happens |
 |---|---|
-| `off` | every gate stops for you |
-| `gates` | design gates cross themselves; it still stops whenever the agent needs an answer |
-| `full` | it runs to a verified branch on its own |
+| attended | every gate and every question waits for you |
+| autopilot | the card crosses its own gates, answers its own questions, reworks a failed verify, and stops at a verified branch |
 
-On `full` a card crosses its own design gates, answers its own questions
-(the agent is told its recommendation will be taken unread, so it has to
-be defensible), bounces a failed verify back for rework, and hands a
-rebase conflict to an agent. All of that is the same work done again,
-bounded by one corrective budget shared across every kind of retry.
+On autopilot the agent is told its recommendation will be taken unread,
+so it has to be defensible. All retries share one corrective budget.
+What autopilot never does is widen its own reach. A tool asking to act
+outside the sandbox parks the card. A research card parks before its
+document becomes new cards. **It never lands on main.** When it cannot
+finish, it parks to the inbox and notifies you.
 
-What it never does is widen its own reach. A tool asking to act outside
-the sandbox always parks — the one refusal. Research cards park at
-`decompose`, because minting new cards is creating work rather than
-redoing it. **It never lands on main**, and it never softens the floor:
-no implementation without an approved spec, no merge without review and
-verify, at every stop. If it cannot finish, it parks to the inbox and
-notifies you.
+An attended card always gets a lane at once. Autopilot cards share two
+lanes by default and queue behind each other.
 
-Autopilot cards run inside the board process, so quitting stops them —
-the quit dialog names them and says so, since "leave it running
-overnight" means leaving the terminal open. Reopening asks once whether
-to pick them up, naming the same cards and what each was doing. Nothing
-resumes itself unless you say so.
-
-The headless driver has always had this: `gummi run --gate-approval
-full` is the same three stops from a script.
+Autopilot runs inside the board process, so quitting stops it. The quit
+dialog names the running cards, and reopening asks once whether to pick
+them up.
 
 ## Bringing in existing work
 
-Work rarely starts from a blank line. Two ingestion paths pre-seed the
-board, both gated on your review before anything is created:
+- **Spec ingestion** (`I`, or `gummi ingest <file>`): an architect agent
+  decomposes a PRD or design doc into PR-sized proposals with a coverage
+  map. You edit, merge or drop them, then approve. Each becomes a card in
+  todo.
+- **Bug import** (`G`, or `gummi bugs ingest --issue N`): agent-free
+  import of one GitHub issue at a time through `gh`. Re-importing skips
+  bugs already on the board. `gummi bugs new` adds one by hand.
 
-- **Spec ingestion** (`I` on the board, or `gummi ingest <spec-file>`) —
-  an architect-role agent decomposes a PRD or design doc into PR-sized
-  feature proposals with a coverage map showing where every requirement
-  went. You rename, edit, merge, or drop proposals, then approve;
-  each one materializes as a pre-seeded draft in todo.
-- **Bug import** (`G`, or `gummi bugs ingest`) — deterministic,
-  agent-free import of GitHub issues via `gh`: a searchable picker opens
-  with the filter focused, typing narrows the list live, and `enter`
-  imports exactly the highlighted issue — one issue per pass, never a
-  whole repo at once. External refs are remembered, so re-importing
-  skips bugs already on the board. `gummi bugs ingest --issue N` gives
-  the same single-issue import headlessly (the CLI's batch flags still
-  work unchanged for scripted imports). `gummi bugs new` adds a single
-  bug by hand.
+## Headless
 
-## Running headlessly (driving gummi from an agent)
-
-The board is one way in; the other is a **non-interactive driver** that runs
-the same engine and the same quality floor with no human at the keyboard.
-Each `gummi run` ships **one PR-sized feature to a verified branch**, streams
-milestone + decision NDJSON on stdout, and exits with a **typed status** — so
-a calling agent (or a script) can drive it and branch on the result. It
-changes *who approves a gate*, not *whether* review and verify run.
-`run`/`resume` never merge — they stop at a verified branch; landing is the
-separate `gummi merge` verb below.
+The same engine runs with nobody at the keyboard. `gummi run` drives one
+feature to a verified branch, streams NDJSON milestones and decisions on
+stdout, and exits with a typed status your script or agent branches on.
+It changes who approves a gate, never whether review and verify run.
 
 ```sh
 gummi run --envelope 500 "Add a --format=json flag to the export command"
+gummi run --envelope 500 --gate-approval autopilot "..."    # cross its own gates
+gummi research --envelope 300 "Where does the exporter buffer, and why?"
 ```
 
-An envelope is required (`--envelope N`, or `GUMMI_ENVELOPE`) and an agent
-backend must be configured — both fail loud before any work begins. The
-requirement is a headless one: the board's creation dialogs open on a
-prefilled 2000 credits you can edit, so only unattended runs must name a
-number nobody is there to read. By default a run is attended: it stops at the design gate and hands the
-decision back to you via `resume`. `--gate-approval=autopilot` lets it
-cross its own gates and run to a verified branch unattended — landing on
-main is still always yours.
+An envelope is required headlessly. `--until plan` stops before
+implementation for a human design review. `--autonomous` takes the
+agent's recommended answer instead of stopping on a question.
 
-| command | purpose |
+| verb | |
 |---|---|
-| `gummi run [flags] "<description>"` | create and drive one feature to a verified branch |
-| `gummi resume <id\|ref> [--answer … \| --approve \| --request-changes …]` | apply a decision and drive on |
-| `gummi resume <id\|ref> --say "<line>"` | read a line the way the card page would and print what it would do (a `say` event), without acting |
-| `gummi status <id\|ref> [--json]` | read-only: stage, blockers, spend, branch state |
-| `gummi spec <id\|ref>` | read-only: the current spec/report markdown |
-| `gummi diff <id\|ref>` | read-only: the worktree diff |
-| `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit (message required) |
-| `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
-| `gummi pr link\|unlink\|status\|comments <id> [flags]` | link/unlink a card to a PR, or read its linked-PR status and review comments |
-| `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place (message required) |
-| `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch (message required) |
-| `gummi deps add\|rm <dependent> <depends-on>` / `gummi deps list <id>` | manage a card's direct dependency edges |
-| `gummi doctor [--json] [--deep]` | readiness: repo, backend, auth, profile, envelope, lock, per-role reach (`--deep`) |
-| `gummi skill show\|install\|list` | generate and install the calling-agent skill |
+| `run`, `research` | create and drive a feature or research card |
+| `resume <id> --approve` / `--request-changes …` / `--answer …` / `--bounce` | apply a decision and drive on |
+| `resume <id> --say "<line>"` | report how the card page would read a line, without acting |
+| `status`, `watch`, `spec`, `diff` | read-only; they take no lock |
+| `verify <id>` | re-run the checks on a verified branch |
+| `merge <id> -m <msg\|->` | land the branch as one squash commit |
+| `squash`, `commit`, `clean` | collapse the branch, commit stray changes, remove a landed worktree |
+| `pr link\|unlink\|status\|comments` | land through a PR you opened; gummi never writes to GitHub |
+| `deps add\|rm\|list` | dependency edges between cards |
+| `ingest`, `bugs ingest\|new` | bring in existing work |
+| `init`, `doctor`, `skill` | set up, check readiness, install the calling-agent skill |
 
-`status`/`spec`/`diff` take no lock, so you can inspect a feature while a run
-is live. A run holds an exclusive `.gummi` lock, so a headless run and the TUI
-never touch the same workspace at once. So do `gummi merge`, `gummi squash`,
-`gummi commit`, and `gummi clean`, which mutate the workspace (and, for
-`merge`, main).
-
-### Landing and cleanup without the TUI
-
-A run stops at a **verified branch** — it deliberately never merges, because
-the squash-merge landing commit is a review decision. The headless way to make
-that decision is `gummi merge`, which takes the landing message explicitly and
-lands it:
-
-```sh
-gummi merge FD-042 -m "feat(export): add a --format=json flag"
-gummi merge FD-042 -m - <<'EOF'     # or read the message from stdin
-feat(export): add a --format=json flag
-
-The flag writes NDJSON to stdout instead of the table layout.
-EOF
-```
-
-`gummi merge` requires the card to be at a **verified branch** (the same
-`verified:true` state a run stops at), takes no other input, and is stricter
-than the TUI's dialog: the message must be a Conventional Commits
-`type(scope): summary` with no diff dump or agent attribution, or the command
-refuses with a non-zero exit before touching git. On success it emits a
-`merged` NDJSON event carrying the landed commit's sha and moves the card to
-`done`.
-
-`gummi clean <id>` is the headless counterpart of the board's `c` key: it
-removes a landed card's worktree and branch, keeping the card as a done entry.
-It refuses anything that has not actually landed, or that carries tracked-dirty
-rework. Both verbs stream their NDJSON and exit with the same typed statuses as
-a run (`done` = 0, `error` = 1).
-
-`status --json` carries two distinct terminal signals. `verified:true` means
-the verify gate passed and the branch is **ready to land** — the state a
-headless run stops at, and the flag a CI caller polls for. `done:true` means
-the branch was actually **squash-merged** into main (the TUI's `m`, `gummi
-merge`, or a manual land sets it) — so after a headless run, expect
-`verified:true` with `done:false` until you merge.
-
-Every `run`/`resume` ends on a typed exit the caller branches on:
-
-| exit | status | caller action |
+| exit | status | meaning |
 |---|---|---|
-| `0` | `done` | verified branch ready — report it, stop |
-| `0` | `stopped` | `--until` reached its clean stop — `resume --approve` to continue |
-| `0` | `said` | `--say` reported a reading and acted on nothing |
-| `2` | `question` | a delegated question or caller gate — `resume --answer`/`--approve`/`--request-changes` |
-| `3` | `blocked` | open `%%`/diff threads block a gate (resolve, or `resume --request-changes`), or an unmet dependency blocks coding-stage entry (`blocking_deps` on the event — wait for it to land, or edit the edge with `gummi deps rm`) |
-| `4` | `escalation` | a rerun/critique cap or unclear verdict — report to a human; resumable |
-| `5` | `exhausted` | envelope dry — raise it, then `resume` |
-| `6` | `timeout` | a stage went quiet (likely hang) — report; resumable |
-| `1` | `error` | setup/agent failure — nothing partial landed |
+| `0` | `done` / `stopped` / `said` | verified branch, `--until` stop, or `--say` reading |
+| `2` | `question` | a question or gate waits: `resume` with the matching flag |
+| `3` | `blocked` | open threads or an unmet dependency block a gate |
+| `4` | `escalation` | a retry cap or unclear verdict; a human should look |
+| `5` | `exhausted` | envelope dry: `resume --envelope N` |
+| `6` | `timeout` | a stage went quiet; resumable |
+| `1` | `error` | setup or agent failure; nothing partial landed |
 
-`gummi resume` carries one decision flag at a time. `--answer` resolves a
-**delegated ask_user question**: the durable decision record says one is
-open, the answer rides through the same ask round trip the board's picker
-rides (recorded in the card's history with who answered and which option
-was chosen), and the stream's `question` event names that decision's id.
-When the run parked at an ask, `--answer` is the verb; at a caller design
-gate it is `--approve`/`--request-changes`, and `--answer` is refused with
-a usage error naming which verb this stop actually takes — the record
-replaces the guess. When more than one decision is open on a card, the
-newest one is the one an answer resolves.
+`status --json` says `verified:true` when the branch is ready to land and
+`done:true` once it is merged. A headless run stops at the first.
 
-Useful `run` flags: `--ref <id>` correlates a feature with your own tracker
-(and lets `status`/`resume` look it up by that id), `--acceptance <file|->`
-seeds the spec's verification plan, `--until spec` stops cleanly for a human
-design review before implementation burns tokens, and `--autonomous`
-auto-takes the recommended answer instead of checkpointing questions — an
-unattended answer is told apart from a typed one in the card's own history,
-so an unattended run's receipt counts what it ran.
+**Let your agent drive gummi.** `gummi skill install` writes a `SKILL.md`
+for Claude Code, Copilot CLI, Codex and opencode, generated from the
+binary's real flags so it cannot drift. `gummi doctor` checks backend,
+auth, profile and envelope. The full reference, PR landing loop included,
+is in [docs/HEADLESS.md](docs/HEADLESS.md).
 
-### Landing through a PR
+## Backends and configuration
 
-Some repos land a card by opening a PR on GitHub instead of running `gummi
-merge`. On that route gummi still never writes to GitHub — it only names
-and reads the PR you already opened. The loop is four commands:
+Stages run on one of six backends. `GUMMI_AGENT` picks the default, and a
+role's `backend:` in `profiles.yaml` overrides it, so one profile can mix
+them.
 
-```sh
-gummi pr link FD-042 --auto                        # or a URL/number instead of --auto
-gummi pr comments FD-042 --ingest                   # unresolved review threads land as diff annotations
-gummi resume FD-042 --bounce --note "address review" # rewinds to fix the annotated lines
-git push                                            # push the fix onto the open PR
-```
+- **copilot** (default): the Copilot CLI through its Go SDK.
+- **claude**: the Claude Code CLI. Needs `permissions: allow-all`.
+- **codex**: the Codex CLI. Needs `permissions: allow-all`.
+- **opencode**: the opencode CLI.
+- **headless**: any binary speaking a small stdio JSON protocol.
+- **zz**: a small Rust agent for any OpenAI-compatible endpoint, local
+  llama.cpp included. Cannot run read-only research roles.
 
-What you do before that first push depends on the repo's merge setting:
-
-| merge method | before you push |
-|---|---|
-| squash merge | nothing — GitHub already collapses the branch to one commit |
-| merge commit / rebase merge | `gummi squash <id> -m <message\|->` first, so the branch lands as one commit either way; later fix rounds can keep their own commits or `squash` again, as long as no review thread is open |
-
-`squash` refuses outright while the worktree carries uncommitted changes,
-by design — folding them silently into the collapsed commit would hide what
-changed. If a PR-linked card has stray worktree changes (say, a fix made by
-hand rather than through `resume`), commit them first with `gummi commit`,
-then squash:
-
-```sh
-gummi commit FD-042 -m "fix(export): tighten the empty-array case"
-gummi squash FD-042 -m "feat(export): add a --format=json flag"
-```
-
-`gummi commit <id\|ref> -m <message\|->` commits exactly the target card's own
-uncommitted worktree changes onto its own branch, using the caller-supplied
-message — no PR, remote, or main-checkout interaction, and no stage
-transition. It has no PR-linked or stage precondition, so it works
-regardless of what `merge`/`squash` would otherwise require; a clean
-worktree is a no-op, reported as such, not an error.
-
-### Dependencies between cards
-
-A card can declare a direct dependency on another with `gummi deps add
-<dependent> <depends-on>` (`gummi deps rm`/`list` remove or read them back).
-A dependency counts as met only once the target reaches `done` — its branch
-is verified and landed — so anything short of that blocks the dependent
-card's entry into its coding stage (`Implement`/`Fix`) with a `blocked`
-status naming the outstanding card(s). The TUI exposes the same edges via the
-`p` key's dependency picker (on a card with nothing running) and shows live
-per-dependency status on the board and spec view. `gummi ingest` also seeds
-edges automatically when a decomposed spec calls one proposal out as
-depending on another.
-
-### The calling-agent skill
-
-gummi generates its own **skill** — a `SKILL.md` documenting this loop — and
-installs it where Claude Code, GitHub Copilot CLI, Codex, and opencode read it:
-
-```sh
-gummi skill install          # project scope: shared .claude/skills + Codex .agents/skills
-gummi doctor                 # then check the backend/auth/envelope are ready
-```
-
-A **project-scope** install writes `.claude/skills/gummi/SKILL.md` for Claude,
-Copilot, and opencode, plus `.agents/skills/gummi/SKILL.md` for Codex.
-`--scope user` writes to each detected agent's home instead, and `--agent`
-targets one (`$HOME/.agents/skills` for Codex). The doc's command grammar and
-exit table are generated from the binary's real flags, so they can't drift;
-the frontmatter is version-stamped,
-so `install`/`list` detect a stale or edited file and refuse to overwrite it
-without `--force`. `gummi skill show` prints the rendered doc.
-
-`gummi doctor` is the readiness check the skill's first-run setup runs (`--json`
-for the machine-readable checklist). It **reports**; it never repairs auth or
-writes secrets — a backend needing login is surfaced as the exact command for
-a human to run. Provider config (endpoints, API keys) lives in each backend's
-native store (Claude Code login, `codex login`, `opencode auth`, environment for headless),
-never in `profiles.yaml`.
-
-## Agent backends
-
-The agent layer is pluggable. `GUMMI_AGENT` selects the default backend;
-a `profiles.yaml` role can pick a specific backend via its `backend:`
-field (see Configuration below) so one session can mix providers — e.g.
-copilot for implement, claude for review.
-
-- **copilot** *(default)* — the official Copilot SDK for Go, driving the
-  `copilot` CLI in server mode. Full duplex: streaming, tool-call
-  visibility, client tools, session resume.
-- **claude** — the Claude Code CLI in streaming print mode
-  (`GUMMI_CLAUDE_BIN` overrides the binary). Requires
-  `permissions: allow-all` — guarded mode is rejected because the CLI's
-  default permission mode silently auto-denies tools. Claude Code
-  manages its own endpoint routing via its native config
-  (`ANTHROPIC_BASE_URL`, Claude Code login).
-- **opencode** — the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
-  binary). Provider/model config is owned by opencode itself
-  (`opencode auth`, `opencode.json`).
-- **codex** — the Codex CLI (`GUMMI_CODEX_BIN` overrides the binary), using
-  stable `codex exec --json` JSONL turns and `codex exec resume` while the
-  gummi session remains live. Codex owns authentication (`codex login`) and
-  provider configuration; gummi passes the profile's model through Codex's
-  native `-m` flag and never copies credentials or writes Codex config. This backend requires
-  `permissions: allow-all`: the stable exec stream cannot service guarded
-  approval callbacks. Messages appear when Codex completes each message item,
-  while command, file-change, and MCP activity remains visible as tool events.
-- **headless** — a generic subprocess adapter for any agent binary
-  speaking a small stdio JSON protocol (`GUMMI_AGENT_CMD` is its
-  command line). The child inherits gummi's environment and reads its
-  own provider config from there. Set `GUMMI_HEADLESS_CREDITS_PER_1K`
-  to price a local endpoint's token spend into credits so it meters
-  against the same budget envelope.
-- **zz** — the zz CLI (`GUMMI_ZZ_BIN` overrides the binary), a small Rust
-  coding agent that fronts any OpenAI-compatible endpoint (local
-  llama.cpp, OpenRouter, a self-hosted gateway). zz's `-p ask` mode is
-  process-per-turn with no stdin form, so gummi resumes a session via a
-  `--session` transcript file rather than an in-process handle. zz owns
-  provider selection through its own `~/.config/zz/config.toml`; a
-  role's `provider:` field in `profiles.yaml` names one of that file's
-  `[providers.<name>]` stanzas and gummi forwards it as `--provider`, so
-  different roles under one zz binary can hit different endpoints. A
-  role's `think:` field is forwarded as `--think <level>`, an opaque
-  value declared by the provider stanza (an architect wants a high
-  level, a scribe wants none). This backend requires `permissions:
-  allow-all` (zz has no approval callback) and cannot run a read-only
-  research session (zz has no flag to disable its write/edit/bash
-  tools) — point those roles at `claude` or `opencode` instead. Its
-  prompt travels as a positional argv string, so a single turn is
-  bounded well under Linux's 128 KiB argv limit. Every invocation also
-  carries `--max-turns` (default 200, override with
-  `GUMMI_ZZ_MAX_TURNS`) as a runaway-loop backstop — gummi's real spend
-  limiter is the credit envelope, not a turn count, so this only exists
-  to catch a session that never converges; hitting it ends the turn
-  with an actionable error naming the cap and the env knob that raises
-  it. Set `GUMMI_ZZ_CREDITS_PER_1K` to price its token spend into
-  credits, the same escape hatch headless uses.
-
-  zz also offers `--no-skills` and `--no-agents-md`; gummi passes
-  neither. gummi suppresses OPERATOR-level config that could hijack a
-  stage (codex gets `--ignore-user-config`, claude gets
-  `--strict-mcp-config` and a scrubbed session env), but it does not
-  suppress REPO-level agent instructions — no adapter disables
-  AGENTS.md, CLAUDE.md, or project skills, because those are the
-  repository's own guidance for agents working in it. zz follows the
-  same rule and sees the same repo context every other backend sees.
-
-No usable agent just leaves the board static — creation, specs,
-worktrees, and gates all still work.
-
-## Configuration
+Each backend owns its own login and provider config. gummi never copies
+credentials or writes them to a file it manages.
 
 Two files in `.gummi/`, both scaffolded on first run:
 
-- **`config.yaml`** — the permission mode: `allow-all` (default — gummi
-  assumes it runs in a sandbox) or `guarded` (agent tool calls need
-  approval through the inbox). The per-profile `sandbox: enforce|warn|off`
-  confinement and the main-checkout tripwire back the allow-all default;
-  see DESIGN §4.4. The
-  Verify stage's check commands are not configured here: gummi
-  auto-discovers the repo's build/test/lint commands at approval into
-  each spec's Verification plan (a `gummi-checks` block), where you
-  review and edit them — and the TUI still surfaces the exact commands
-  before running them. `agent:` (`copilot` | `claude` | `codex` |
-  `opencode` | `zz`) picks which installed CLI hosts the TUI's **agent
-  tab** — a pty running your own coding assistant. It has nothing to do
-  with the engine's own per-role backend routing below; the TUI's
-  first-run picker (`A` on the board, or shown once automatically when
-  nothing is configured) writes this key back without disturbing
-  anything else in the file. `autopilot_lanes:` (default 2) sizes the
-  autopilot attention pool; the attended pool is sized separately by
-  `GUMMI_MAX_ACTIVE` (default 1) — see below.
-- **`profiles.yaml`** — role → `{backend, model}` maps per profile
-  (`premium`, `thrifty`, …) with a declared default. `backend:` is
-  optional (`copilot` | `claude` | `codex` | `opencode` | `headless` | `zz`); omitted, the
-  role uses whatever `GUMMI_AGENT` selects. This lets a single profile
-  mix providers — e.g. `implementer: copilot`, `reviewer: claude` — and
-  keeps all provider config (endpoints, keys, credit rates) out of the
-  repo-committed file. A role also takes two optional zz-only fields:
-  `provider:` names a `[providers.<name>]` stanza in the operator's own
-  `~/.config/zz/config.toml`, so one zz binary can serve different
-  endpoints per role, and `think:` forwards a thinking level (opaque to
-  gummi — whatever the provider stanza declares) —
-  `architect: { backend: zz, model: gpt-5, provider: hosted-gateway,
-  think: high }` alongside `implementer: { backend: zz, model:
-  qwen2.5-coder-32b, provider: local-llama-cpp }`.
+- **`config.yaml`**: `permissions` (`allow-all` or `guarded`), `sandbox`,
+  `autopilot_lanes`, `repo` and `repos` when `.gummi` sits above the
+  repository, `checks.default` to fix the verify commands instead of
+  discovering them, `env` prerequisites the verification plan can cite,
+  `instructions` files, and `agent` for the agent tab.
+- **`profiles.yaml`**: named profiles mapping each role to
+  `{backend, model}`, and which one is the default.
 
-Environment variables:
+The environment variables you meet first:
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default) · `claude` · `codex` · `opencode` · `headless` · `zz` |
-| `GUMMI_AGENT_CMD` | headless adapter's command line |
-| `GUMMI_CLAUDE_BIN` | claude backend's binary (default `claude` on PATH) |
-| `GUMMI_CODEX_BIN` | codex backend's binary (default `codex` on PATH) |
-| `GUMMI_OPENCODE_BIN` | opencode backend's binary (default `opencode` on PATH) |
-| `GUMMI_ZZ_BIN` | zz backend's binary (default `zz` on PATH) |
-| `GUMMI_HEADLESS_CREDITS_PER_1K` | headless adapter's token→credit rate for a local endpoint (llama.cpp, vLLM); 0 uses the engine default |
-| `GUMMI_ZZ_CREDITS_PER_1K` | zz adapter's token→credit rate; 0 uses the engine default |
-| `GUMMI_ZZ_MAX_TURNS` | zz adapter's runaway-turn backstop (default 200); a session that hits the cap ends with an actionable error |
-| `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
-| `GUMMI_MAX_ACTIVE` | cap on the **attended** lane pool (default 1) — a card whose autopilot mode is `off`. The autopilot pool (default 2 lanes) is sized by `autopilot_lanes` in `config.yaml`, not this variable |
-| `GUMMI_ENVELOPE` | default credit envelope for new features; also a floor under the estimated envelope — the scribe/history blend may raise it, never undercut it. Unset, the board's creation dialogs prefill 2000 credits (editable per card); headless runs have no default and refuse to start |
-| `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
-| `GUMMI_TURN_RESERVE` | one turn's credits — the floor under envelope-derived stage budgets (default `domain.TurnReserveCredits`; override for unusual models) |
-| `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (on by default; needs an authenticated `gh` CLI to show anything) |
-| `GUMMI_THEME` | `dark` (default) · `light` · `neon` |
-| `GUMMI_NOTIFY` | needs-attention hook: `bell` (default) · `desktop` · `off` |
-| `GUMMI_MOTION` | `off` freezes every activity glyph to a static mark and stops the shared clock's tick loop (on by default) |
-| `GUMMI_ATTACH_CMD` | command for raw-attach (default: selected backend's CLI); also the agent tab's top-priority override, ahead of `GUMMI_AGENT` and the picker's `agent:` choice |
+| `GUMMI_AGENT` | default backend |
+| `GUMMI_ENVELOPE` | default credit envelope for new cards |
+| `GUMMI_MAX_ACTIVE` | attended lanes (default 1) |
+| `GUMMI_THEME` | `dark`, `light`, `neon` |
+| `GUMMI_NOTIFY` | `bell`, `desktop`, `off` |
+
+Every backend's specifics, every config key and the full environment
+table are in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Try it without your repo
 
 ```sh
-make demo   # creates a throwaway repo with gummi initialized
+make demo   # a throwaway repo with gummi initialized
 make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 ```
 
@@ -653,11 +299,9 @@ make golden-update  # regenerate UI golden files
 make ci             # build + test + lint
 ```
 
-`docs/DESIGN.md` is the design document — its Decisions list is binding.
-
-`scripts/record-demo.sh` regenerates the README demo GIF (needs tmux,
-[vhs](https://github.com/charmbracelet/vhs), ttyd, and ffmpeg): it seeds
-a throwaway repo through the real TUI and records a scripted drive.
+`docs/DESIGN.md` is the design document; its Decisions list is binding.
+`scripts/record-demo.sh` regenerates the demo GIF (needs tmux,
+[vhs](https://github.com/charmbracelet/vhs), ttyd and ffmpeg).
 
 ## License
 

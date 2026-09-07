@@ -84,7 +84,7 @@ gummi research [flags] "<brief>"
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
     --repo string             managed repository to create the card in (a configured repos: name; required when repos: is configured)
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
-    --until string            stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)
+    --until string            stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
     --verbose                 add per-tool-call activity lines to the stream
 
 gummi resume <id|ref> [decision]
