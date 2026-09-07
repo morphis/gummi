@@ -548,3 +548,36 @@ func TestMastheadSaysWhenAutopilotIsRunning(t *testing.T) {
 		t.Fatalf("autopilotField(off) = %q, want no running claim", got)
 	}
 }
+
+// TestMastheadSaysWhenAutopilotIsQueued is the queued half of P6's
+// now-state. A queued autopilot card has been handed over just as much
+// as a running one, but it must say queued: folding every live state
+// into "· running" had the masthead claiming a turn was in flight while
+// the card sat in the lane queue. The running claim itself is asserted
+// on the card that actually holds the slot, which the older test — built
+// on a shell with no engine — cannot reach.
+func TestMastheadSaysWhenAutopilotIsQueued(t *testing.T) {
+	m, _, _ := queuedWorkspace(t)
+	s := m0Styles()
+	var queued, running domain.Feature
+	for _, r := range m.rows {
+		switch r.F.ID {
+		case "FD-001":
+			queued = r.F
+		case "FD-002":
+			running = r.F
+		}
+	}
+	if queued.ID == "" || running.ID == "" {
+		t.Fatalf("setup: fixture rows missing (%+v)", m.rows)
+	}
+	if got := ansi.Strip(autopilotField(s, m, queued)); !strings.Contains(got, "autopilot: on · queued") {
+		t.Fatalf("autopilotField = %q, want the queued now-state", got)
+	}
+	if got := ansi.Strip(autopilotField(s, m, queued)); strings.Contains(got, "· running") {
+		t.Fatalf("autopilotField = %q, a queued card must not claim to be running", got)
+	}
+	if got := ansi.Strip(autopilotField(s, m, running)); !strings.Contains(got, "autopilot: on · running") {
+		t.Fatalf("autopilotField = %q, want the running claim kept on the card that holds the slot", got)
+	}
+}

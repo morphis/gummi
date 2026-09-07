@@ -113,6 +113,19 @@ func (m *Shell) cardBusyWord(r featureRow) string {
 	return ""
 }
 
+// queuedLabel names the queued state everywhere the UI speaks it: the
+// why the card actions offer on a queued card (cardactions.go's
+// runLabelWhy) and the wait line the thread's live stage block shows for
+// the same state both draw from here, so a card's board-row vocabulary
+// and its thread-detail vocabulary can never disagree — the same
+// contract runningLabel carries for the busy word. A queued session is
+// never busy (the engine sets busy only around an in-flight turn), but
+// every surface still checks queued before busy, so its reading does
+// not depend on arm order.
+func queuedLabel() string {
+	return "queued — waiting for a free slot"
+}
+
 // runningLabel names what a busy session is doing next to the activity
 // spinner. The plan loop's legs are invisible to the stage machine, so
 // the label carries them; everything else just says "running".

@@ -433,3 +433,14 @@ func TestCardBusyPlanCritique(t *testing.T) {
 		t.Errorf("busy critique card line missing the critiquing-plan word: %q", line)
 	}
 }
+
+// TestQueuedLabelMatchesRunWhy pins the shared vocabulary: the wait word
+// the thread's live stage block shows for a queued card must be
+// byte-identical to the why the card actions offer on the same state, so
+// a card's board-row word and its thread-detail word cannot drift apart.
+func TestQueuedLabelMatchesRunWhy(t *testing.T) {
+	_, why := runLabelWhy(nextInput{sess: engine.StateQueued})
+	if got := queuedLabel(); got != why {
+		t.Errorf("queuedLabel() = %q, want runLabelWhy's queued why %q", got, why)
+	}
+}

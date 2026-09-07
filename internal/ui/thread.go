@@ -885,9 +885,11 @@ func correctiveLabel(m *Shell, f domain.Feature) string {
 }
 
 // autopilotField is the masthead's autopilot cell: the stored mode, and
-// — while the card is genuinely running under a mode that is not off —
-// the fact that it is running right now, at Info weight rather than
-// Faint.
+// — while a mode that is not off has the card — the scheduling state of
+// that work right now, at Info weight rather than Faint: running names
+// a turn in flight, queued names the wait for a free attention slot.
+// Queued is named, not folded into running; a parked card claiming a
+// turn was in flight is the one misleading thing this field could say.
 //
 // This is the only thing about autopilot that stays pinned, and it is
 // pinned because it is the one autopilot fact that is about *now*. What
@@ -907,12 +909,17 @@ func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
 	}
 	// Queued counts: the card has been handed over and is waiting on a
 	// lane, which is autopilot working on it as much as a turn in flight
-	// is. Paused and done do not — a mode is what those cards carry, not
-	// what they are doing.
-	if st := sess.State(); st != engine.StateRunning && st != engine.StateQueued {
+	// is — but it says so, rather than borrowing running's claim. Paused
+	// and done do not — a mode is what those cards carry, not what they
+	// are doing.
+	switch sess.State() {
+	case engine.StateQueued:
+		return s.Info.Render(label + " · queued")
+	case engine.StateRunning:
+		return s.Info.Render(label + " · running")
+	default:
 		return s.Faint.Render(label)
 	}
-	return s.Info.Render(label + " · running")
 }
 
 // autopilotLabel names the card's gate-approval mode for a field already
@@ -1338,8 +1345,10 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // rule naming the stage, role, model and "fresh context" — every stage
 // session starts one, since the spec (not a transcript) is what carries
 // context between stages, so the label is never conditional — then that
-// stage's whole conversation, then, while an agent is mid-turn, the
-// streaming activity line. It prefers a live engine.Session's Snapshot
+// stage's whole conversation, then a status line for the state the
+// session is in right now: the streaming activity line while an agent
+// is mid-turn, the queued wait while it sits in the lane queue. It
+// prefers a live engine.Session's Snapshot
 // (freshest, and the only place an open ask_user question lives); a
 // watched card another process drives renders its followed stream
 // read-only instead; with neither, the last reconstructed segment from
@@ -1415,7 +1424,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// put it above the turns that preceded it, which is the error this
 		// change exists to remove. It is left undrawn until the session
 		// ends and the log renders it in its own place — and meanwhile the
-		// masthead already says the card is running under autopilot.
+		// masthead already names the card's autopilot now-state.
 		if len(segs) > 0 {
 			for _, st := range liveOpens {
 				if st.running() && st.from < segs[len(segs)-1].enterIdx {
@@ -1437,11 +1446,15 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 				lines = append(lines, "  "+s.Error.Render(l))
 			}
 		}
+		// The status switch names the session's now-state: queued checked
+		// before busy, as on the board — a queued session is never busy, but
+		// the order keeps the reading deterministic. Both lines are
+		// live-computed per frame, so neither outlives the state it names.
 		switch {
+		case snap.State == engine.StateQueued:
+			lines = append(lines, "  "+s.Faint.Render("◔ "+queuedLabel()))
 		case snap.Busy:
 			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.runningLabel(snap)))
-		case len(lines) == 1:
-			lines = append(lines, "  "+s.Faint.Render("starting…"))
 		}
 		// A period that ended in this stage still says so. The session
 		// object outlives the run that filled it — the engine keeps a
