@@ -872,19 +872,21 @@ func (m *Shell) undraftedGate(f domain.Feature) []string {
 	return engine.UndraftedGateSections(f.Kind, f.Stage, forwardEdge(f), string(raw))
 }
 
-// bounceStage sends a feature back for rework. Review/Verify bounce via
-// the domain transition into Implement/Fix (the rerun edge) — the edge
-// into Implement is normally a forward move belonging to g, so only
-// those two stages take it backward. Plan bounces without leaving the
-// stage: it sits *before* the work stage, so there is no stage to
-// transition back to — instead it resets the critique loop's round
-// counter and re-runs the same in-stage replan onPlanDone's automatic
-// path already uses, giving the human a fresh capped budget instead of
-// g's silent override of an unresolved "changes needed" verdict. Only
-// legal once the loop has actually escalated — see the attnGate check
-// below; a plan that hasn't hit that gate has nothing to bounce.
+// bounceStage sends a feature back for rework. Implement and Verify
+// bounce via the domain transition into Plan/Implement (the rerun
+// edges) — the edges into Implement and Plan are normally forward moves
+// belonging to g, so only those two stages take them backward. Plan
+// bounces without leaving the stage: it sits *before* the work stage,
+// so there is no stage to transition back to — instead it resets the
+// critique loop's round counter and re-runs the same in-stage replan
+// onPlanDone's automatic path already uses, giving the human a fresh
+// capped budget instead of g's silent override of an unresolved
+// "changes needed" verdict. Only legal once the loop has actually
+// escalated — see the attnGate check below; a plan that hasn't hit that
+// gate has nothing to bounce.
+
 // note is the prose the composer aimed at the bounce: for
-// Review/Verify it rides the reborn work stage's kickoff when that run
+// Implement/Verify it rides the reborn stage's kickoff when that run
 // starts (shell.go's bounceNotes); for Plan there is no later kickoff
 // to catch it, so it is appended to the replan kickoff directly. Empty
 // for the plain b key either way.
@@ -930,8 +932,12 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 			return noticeMsg{text: text, reload: true, clearInbox: id}
 		}
 	}
-	if f.Stage != domain.StageImplement && f.Stage != domain.StageVerify {
-		text := fmt.Sprintf("%s is in %s — only review/verify/plan can bounce back", id, f.Stage)
+	// each stage takes its own rerun edge backward: verify rewinds the
+	// work stage, implement rewinds the plan that produced it. The
+	// escalated-plan branch above re-runs in place and is not an edge.
+	back, ok := workflow.RerunTarget(f.Stage)
+	if !ok {
+		text := fmt.Sprintf("%s is in %s — only plan/implement/verify can bounce back", id, f.Stage)
 		return func() tea.Msg { return noticeMsg{text: text, isErr: true} }
 	}
 	if note != "" {
@@ -940,7 +946,6 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 		}
 		m.bounceNotes[id] = note
 	}
-	back := domain.StageImplement
 	m.dropSession(id)
 	return func() tea.Msg {
 		if _, err := m.store.Transition(ctx, id, back, "user"); err != nil {

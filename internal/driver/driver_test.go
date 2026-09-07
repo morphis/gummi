@@ -480,9 +480,77 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 	}
 }
 
-// A --bounce landing on a stage that is neither review nor verify is a
-// usage error: the driver refuses to rewind (there is no forward-facing
-// bounce edge from anywhere else) rather than silently transitioning.
+// An implement-stage card whose plan turned out wrong is rewound by
+// `resume --bounce` to plan — the rerun edge the TUI's `b` key takes from
+// the work stage. The card is parked at implement by exhausting its
+// budget on the first implement run, so plan has already run once before
+// the bounce: the --note must ride only the reborn plan kickoff (the
+// second), never the first. The plan that follows drives on through its
+// gate to a verified branch.
+func TestResumeBounceFromImplementRewindsToPlan(t *testing.T) {
+	var planCalls []string
+	var implementRuns int
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			planCalls = append(planCalls, msg)
+			return msgIdle(o.Model, "Spec redone.")
+		},
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, msg string) []agent.Event {
+			// the worktree-entry discovery pass runs a scribe session
+			// under the implement stage before the first real kickoff
+			if o.Role == agent.RoleScribe {
+				return msgIdle(o.Model, "```gummi-checks\n- name: smoke\n  cmd: \"true\"\n```")
+			}
+			implementRuns++
+			if implementRuns == 1 {
+				return []agent.Event{{Kind: agent.EventBudgetExhausted}}
+			}
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+	out, err := h.driver(Options{}).Run(context.Background(), "feature")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Status != StatusExhausted {
+		t.Fatalf("initial status = %q, want exhausted (implement run 0 parks the card); stream=%v",
+			out.Status, h.eventKinds())
+	}
+
+	note := "the plan ignored the streaming constraint"
+	out, err = h.driver(Options{}).Resume(context.Background(), domain.FeatureID(out.ID), ResumeInput{Bounce: &note})
+	if err != nil {
+		t.Fatalf("Resume(bounce) at implement: %v", err)
+	}
+	if out.Status != StatusDone {
+		t.Fatalf("resume status = %q, want done (bounce → plan → implement → verify pass); stream=%v",
+			out.Status, h.eventKinds())
+	}
+	if st := h.stageOf(domain.FeatureID(out.ID)); st != domain.StageVerify {
+		t.Fatalf("stage = %s, want Verify (stop-at-verified)", st)
+	}
+	if len(planCalls) != 2 {
+		t.Fatalf("plan entered %d times, want 2 (the rewind should re-run it)", len(planCalls))
+	}
+	if strings.Contains(planCalls[0], note) {
+		t.Fatalf("first plan kickoff already carried the bounce note:\n%s", planCalls[0])
+	}
+	if !strings.Contains(planCalls[1], note) {
+		t.Fatalf("replan kickoff missing the --note addendum:\n%s", planCalls[1])
+	}
+}
+
+// A --bounce landing on a stage that is neither verify nor implement is a
+// usage error: the driver refuses to rewind (a plan has no earlier stage
+// to rewind to — the TUI's escalated-plan bounce re-runs in place) rather
+// than silently transitioning.
 func TestResumeBounceRefusesOffStage(t *testing.T) {
 	h := newHarness(t, true, nil)
 	f := feature(1, domain.StagePlan)

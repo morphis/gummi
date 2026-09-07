@@ -57,8 +57,9 @@ func TestNextActionsByState(t *testing.T) {
 		// a gate blocked on a section the stage never drafted leads with
 		// the writer re-run that unblocks it, not with approve
 		{"design gate with a blank section leads with the redraft", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter enter"},
-		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
-		{"implement gate diffs, advances, or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g "},
+		{"implement idle runs the stage, or rewinds to plan", nextInput{stage: domain.StageImplement, kind: feat}, "enter b"},
+		{"implement gate diffs, advances, sends back, or rewinds", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g  b"},
+
 		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
 		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g d b"},
 		{"verify fail verdict reads evidence first", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true, verdict: verdictFail}, "s b g"},
@@ -101,6 +102,11 @@ func TestNextActionsProseDetails(t *testing.T) {
 	acts := nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindBug, attn: attnGate})
 	if !strings.Contains(acts[2].label, "implement") {
 		t.Errorf("bug bounce label = %q, want the work stage named", acts[2].label)
+	}
+	// the implement bounce names the plan it rewinds to
+	acts = nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindFeature})
+	if !strings.Contains(acts[1].label, "plan") {
+		t.Errorf("implement idle bounce label = %q, want the plan named", acts[1].label)
 	}
 	// a failed manual check is named in the why
 	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "unit tests"})

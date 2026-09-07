@@ -22,7 +22,7 @@ import (
 // instead of the window, and the bar's own "pgup/pgdn scroll" row is one
 // of the first things width pressure sheds.
 func TestBG075ThreadScrollMarkerNamesItsKey(t *testing.T) {
-	m := populatedShell(90, 20)
+	m := populatedShell(90, 21)
 	m.cardOpen = true
 	id := m.rows[m.sel].F.ID
 

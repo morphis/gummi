@@ -241,6 +241,9 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	if in.stage == domain.StagePlan {
 		bounceWhy = "send it back for a fresh, human-triggered replan round"
 	}
+	if in.stage == domain.StageImplement {
+		bounceWhy = "send it back to " + string(domain.StagePlan) + " — the plan was wrong"
+	}
 
 	specs := []actionSpec{
 		{
@@ -290,6 +293,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		{
 			"bounce", "b", "bounce", bounceWhy, false,
 			in.stage == domain.StageVerify ||
+				in.stage == domain.StageImplement ||
 				(in.stage == domain.StagePlan && in.escalated),
 		},
 		{

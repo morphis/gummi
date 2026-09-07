@@ -173,7 +173,7 @@ Key surfaces on the board (press `?` anywhere for the full table):
 | `p` / `t` | pause the running agent, or open the dependency picker on a card with none running / toggle the thread's transcript view — every stage's events laid out inline instead of one folded receipt each (from the backlog it opens the card page with the view on) |
 | `alt+o` | expand the captured tool outputs in the thread — a failed call always shows its tail without it; not text, so it works mid-draft as well as from the accelerators |
 | `s` / `d` | spec / diff view — one view each: `c` comments on the cursor line, `x` resolves, `n`/`p` jump between annotations, `g` crosses the gate |
-| `g` / `b` | advance a gate / bounce back to implement |
+| `g` / `b` | advance a gate / bounce back one rerun edge (implement → plan, verify → implement) |
 | `A` | autopilot: hand the card over so it crosses its own gates, and start it from wherever it sits |
 | `v` | run the verify checks |
 | `u` | set the budget envelope (credits; 0 = uncapped) |

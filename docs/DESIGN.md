@@ -1823,6 +1823,9 @@ caller must decide, then exits.
   card to implement and drives the critique→verify tail again — the CLI counterpart of the TUI's `b` key (§10 review floor's rerun
   edge). The `--note` becomes an addendum to the reborn implement kickoff,
   alongside any open `%%` diff/spec annotations the engine already folds in.
+  The same flag takes the graph's other rerun edge: a card still at
+  implement — the plan itself turned out wrong — rewinds to plan, and the
+  note rides the replan kickoff.
 - **Dependency gate** — a card cannot enter its coding stage while a direct
   dependency (§11.4a) is unmet; `Advance` returns `StatusBlockedDependency`,
   which the driver reports as the same `blocked` event as an open `%%`/diff

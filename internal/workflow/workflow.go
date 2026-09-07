@@ -12,9 +12,13 @@ import (
 // carry skip edges on their design-side stages, while research does not.
 // The kind on a work item selects its graph.
 
-// transition is one legal edge in the workflow graph.
+// transition is one legal edge in the workflow graph. rerun marks the
+// graph's backward edges — a stage returning to the stage that produced
+// it — which the manual rewind surfaces take (the TUI's bounce action,
+// the headless --bounce).
 type transition struct {
 	from, to domain.Stage
+	rerun    bool
 }
 
 // graph is the workflow: its start stage and its legal edges.
@@ -52,8 +56,8 @@ var theGraph = graph{
 		{from: domain.StageVerify, to: domain.StageDone},
 
 		// rerun edges
-		{from: domain.StageImplement, to: domain.StagePlan},
-		{from: domain.StageVerify, to: domain.StageImplement},
+		{from: domain.StageImplement, to: domain.StagePlan, rerun: true},
+		{from: domain.StageVerify, to: domain.StageImplement, rerun: true},
 	},
 }
 
@@ -93,6 +97,20 @@ func Next(from domain.Stage) []domain.Stage {
 		}
 	}
 	return out
+}
+
+// RerunTarget reports where a manual rewind from s lands: the target of
+// the rerun edge the graph declares from s, and whether one exists. The
+// TUI's bounce action and the headless --bounce take exactly these edges,
+// so each rewind target is defined once here, beside the edge itself,
+// rather than re-enumerated per surface.
+func RerunTarget(s domain.Stage) (domain.Stage, bool) {
+	for _, t := range theGraph.table {
+		if t.from == s && t.rerun {
+			return t.to, true
+		}
+	}
+	return "", false
 }
 
 // Terminal reports whether s has no outgoing transitions.

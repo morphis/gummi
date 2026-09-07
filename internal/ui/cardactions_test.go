@@ -487,6 +487,10 @@ func TestCardActionsForSessionState(t *testing.T) {
 	}
 }
 
+// bounce is the rerun-edge action: at verify it rewinds the work stage,
+// at implement it rewinds the plan that produced it. Plan offers it only
+// once its critique loop has escalated — this table's plan rows carry no
+// escalation, so they see none (a fresh plan has nothing to bounce).
 func TestCardActionsForBounceGate(t *testing.T) {
 	stages := []domain.Stage{
 		domain.StageTodo, domain.StagePlan, domain.StagePlan, domain.StagePlan,
@@ -496,7 +500,7 @@ func TestCardActionsForBounceGate(t *testing.T) {
 		in := nextInput{stage: stage, kind: domain.KindFeature}
 		r := cardRow(domain.KindFeature, stage, false, true)
 		acts := cardActionsFor(in, r)
-		want := stage == domain.StageVerify
+		want := stage == domain.StageVerify || stage == domain.StageImplement
 		got := false
 		for _, a := range acts {
 			if a.id == "bounce" {

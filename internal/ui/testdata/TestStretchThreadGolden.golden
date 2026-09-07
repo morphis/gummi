@@ -26,9 +26,9 @@ plan · architect · 1 turn · 180 credits ────────────�
 
 
 
-
 gummi  nothing is running — choose what happens next.
 ▸ 1. run implement — no active run — start (or restart) the stage
-  2. pull PR review — read the PR's review comments back onto the diff
+  2. bounce to plan — the plan was wrong — rewind to it for a fresh one
+  3. pull PR review — read the PR's review comments back onto the diff
 
 ┃ message the agent, /approve /verify /diff…, or ↑ for actions                              

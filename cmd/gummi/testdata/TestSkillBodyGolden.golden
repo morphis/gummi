@@ -91,10 +91,10 @@ gummi resume <id|ref> [decision]
     --answer string           answer a delegated ask_user question
     --approve                 approve a caller design gate
     --autonomous              auto-take the recommended answer instead of checkpointing questions
-    --bounce                  rewind a verify/review-fail escalation to the work stage and continue (the TUI's b key)
+    --bounce                  rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)
     --envelope int            raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)
     --gate-approval string    who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)
-    --note string             addendum to the reborn implement/fix kickoff (used with --bounce)
+    --note string             addendum to the reborn stage's kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
     --request-changes string  send a caller design gate back with a note
     --stage-timeout duration  per-stage inactivity timeout (0 disables)

@@ -991,7 +991,7 @@ func TestThreadOpensAtTheNewestEvent(t *testing.T) {
 // this file unnoticed.
 func TestPagingUpReachesTheLiveStageBoundary(t *testing.T) {
 	m := threadWithHistory(t)
-	m.width, m.height = 80, 25
+	m.width, m.height = 80, 26
 	for range 6 { // more pages than the body has, to prove the clamp
 		m.scrollThread(true)
 	}

@@ -3219,7 +3219,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	// the next one rather than being silently dropped.
 	if note == "" {
 		if stashed, ok := m.bounceNotes[f.ID]; ok &&
-			(f.Stage == domain.StageImplement) {
+			(f.Stage == domain.StageImplement || f.Stage == domain.StagePlan) {
 			delete(m.bounceNotes, f.ID)
 			note = stashed
 		}

@@ -184,6 +184,10 @@ func (m *Shell) boardBindings() []binding {
 			pause.bar = true
 		}
 	}
+	bounce := binding{key: "b", label: "bounce", help: "bounce back to implement"}
+	if r, ok := m.selected(); ok && r.F.Stage == domain.StageImplement {
+		bounce.help = "bounce back to plan"
+	}
 	bs := []binding{
 		{key: "j/k ↓↑", label: "select", help: "select feature"},
 		{key: "space", label: "commands", help: "open the command menu — everything that belongs to no card", bar: true},
@@ -197,7 +201,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "s", label: "spec", help: "spec — comment, resolve and approve in place"},
 		{key: "d", label: "diff", help: "diff — comment, resolve and approve in place"},
 		advance,
-		{key: "b", label: "bounce", help: "bounce back to implement"},
+		bounce,
 		{key: "v", label: "verify", help: "run verify checks"},
 		{key: "u", label: "envelope", help: "set the budget envelope (credits; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},

@@ -387,12 +387,22 @@ func stageActions(in nextInput) []nextAction {
 		return append(acts, autopilotAction("gates cross themselves from here"))
 
 	case domain.StageImplement:
+		// bounce takes the graph's implement→plan rerun edge: the one
+		// arm that reaches upstream of the work instead of re-running
+		// it. Worth offering in every state the panel exists — a card
+		// parked mid-stage can need a different plan just as much as a
+		// gated one.
+		bounce := nextStep("bounce", "b", "bounce to "+string(domain.StagePlan),
+			"the plan was wrong — rewind to it for a fresh one")
 		if !finished {
-			return []nextAction{nextStep("run", "enter", "run "+string(in.stage), "no active run — start (or restart) the stage")}
+			return []nextAction{
+				nextStep("run", "enter", "run "+string(in.stage), "no active run — start (or restart) the stage"),
+				bounce,
+			}
 		}
 		acts := []nextAction{nextStep("diff", "d", "review the diff", "spot-check what the "+string(in.stage)+" run produced")}
 		if b := blockedGate(in); b != nil {
-			return append(acts, *b)
+			return append(acts, *b, bounce)
 		}
 		acts = append(acts, nextStep("advance", "g", "advance to verify", "the critique passed — run the checks"))
 		// Sending it back is an answer in its own right, and it is the
@@ -400,9 +410,12 @@ func stageActions(in nextInput) []nextAction {
 		// in place rather than rewinding to it: the work stage's critique
 		// iterates the stage, so there is no edge to take. This is where
 		// the review gate's bounce went when Review stopped being a stage,
-		// and it is the same act the diff surface's R performs.
-		return append(acts, nextStep("run", "", "send it back with changes",
-			"re-runs "+string(in.stage)+" with what's wrong — your line goes with it"))
+		// and it is the same act the diff surface's R performs. The bounce
+		// beside it is the bigger hammer: the whole plan, not this pass.
+		return append(acts,
+			nextStep("run", "", "send it back with changes",
+				"re-runs "+string(in.stage)+" with what's wrong — your line goes with it"),
+			bounce)
 
 	case domain.StageVerify:
 		if !finished {

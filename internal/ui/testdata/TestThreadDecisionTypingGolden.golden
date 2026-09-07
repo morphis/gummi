@@ -21,11 +21,11 @@
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m                                                                                                                        [m
-[48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mimplement is ready for your decision.[39m                                                                          [m
 [48;2;32;31;38m  [38;2;247;246;251m  1. review the diff[38;2;96;95;107m — spot-check what the implement run produced[39m                                                     [m
 [48;2;32;31;38m  [38;2;247;246;251m  2. advance to verify[38;2;96;95;107m — the critique passed — run the checks[39m                                                         [m
 [48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m3. send it back with changes with your words[38;2;96;95;107m — re-runs implement with what's wrong — your line goes with it[39m         [m
+[48;2;32;31;38m  [38;2;247;246;251m  4. bounce to plan[38;2;96;95;107m — the plan was wrong — rewind to it for a fresh one[39m                                               [m
 [48;2;32;31;38m                                                                                                                        [m
 [48;2;32;31;38m  [38;2;191;188;200m┃ [39mthe contrast is off in dark mode[38;2;107;80;255;7m [39;27m                                                                                   [m
 [48;2;32;31;38m                                                                                                                        [m

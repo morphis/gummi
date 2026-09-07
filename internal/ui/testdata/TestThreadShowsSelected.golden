@@ -22,9 +22,9 @@
 
 
 
-
 [38;2;133;131;146mgummi[m  [38;2;247;246;251mnothing is running — choose what happens next.[m
 [1;38;2;255;96;255m[38;2;191;188;200m▸ [m1. run implement[38;2;96;95;107m — no active run — start (or restart) the stage[m[m
-[38;2;247;246;251m  2. pull PR review[38;2;96;95;107m — read the PR's review comments back onto the…[m[m
+[38;2;247;246;251m  2. bounce to plan[38;2;96;95;107m — the plan was wrong — rewind to it for a fre…[m[m
+[38;2;247;246;251m  3. pull PR review[38;2;96;95;107m — read the PR's review comments back onto the…[m[m
 
 [38;2;96;95;107m┃ [m[38;2;96;95;107mm[m[38;2;96;95;107message the agent, /approve /verify /diff…, or ↑ for actions[m    

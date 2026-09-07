@@ -76,7 +76,7 @@ type Driver struct {
 	// (which records the ask's round trip and closes the decision) rather
 	// than Send (a plain turn, what --request-changes sends).
 	openingIsAnswer bool
-	bounceNote      string       // one-shot addendum to the next implement/fix kickoff after a --bounce resume
+	bounceNote      string       // one-shot addendum to the next plan/implement kickoff after a --bounce resume
 	curStage        domain.Stage // stage currently being driven (for verbose activity lines)
 	activityCur     int          // cursor into the live session's activity feed
 	sentTurn        bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
@@ -187,11 +187,12 @@ func (d *Driver) Drive(ctx context.Context, f domain.Feature) (Outcome, error) {
 
 // ResumeInput carries a resume's decision. Exactly one field is set:
 // Answer resolves a delegated ask_user; Approve/RequestChanges resolve a
-// caller design gate; Bounce sends a verify-failed (or review-failed)
-// feature back to the work stage — the headless counterpart of the TUI's
-// `b` key — with the (possibly empty) string carried as an addendum to the
-// next implement/fix kickoff; all-zero re-runs the parked stage (after an
-// exhaustion top-up, a timeout, or an escalation).
+// caller design gate; Bounce rewinds a card one rerun edge — a
+// verify-failed feature back to the work stage, an implement-stage one
+// back to the plan that produced it — the headless counterpart of the
+// TUI's `b` key, with the (possibly empty) string carried as an addendum
+// to the reborn stage's kickoff; all-zero re-runs the parked stage (after
+// an exhaustion top-up, a timeout, or an escalation).
 //
 // There is no decision-id field: when more than one decision is open on a
 // card (a verify gate and a budget stop can co-exist, DESIGN §6.3's R2),
@@ -297,20 +298,21 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 		}
 	case in.Bounce != nil:
 		// A verify-fail (or review-fail) escalation is un-parked by rewinding
-		// the feature to its work stage — the same rerun edge the TUI's `b`
+		// the feature to its work stage, and a card whose plan turned out
+		// wrong by rewinding it to plan — the same rerun edges the TUI's `b`
 		// key takes via bounceStage. The optional note becomes an addendum to
-		// the reborn implement/fix kickoff, alongside any open diff/spec
+		// the reborn stage's kickoff, alongside any open diff/spec
 		// annotations the engine folds in independently.
-		if f.Stage != domain.StageVerify {
+		back, ok := workflow.RerunTarget(f.Stage)
+		if !ok {
 			return d.fail(ctx, string(id),
-				fmt.Errorf("%s is at %s; --bounce only rewinds verify to %s",
-					id, f.Stage, domain.StageImplement))
+				fmt.Errorf("%s is at %s; --bounce only rewinds verify to %s or implement to %s",
+					id, f.Stage, domain.StageImplement, domain.StagePlan))
 		}
-		back := domain.StageImplement
 		if _, err := d.store.Transition(ctx, id, back, d.actor); err != nil {
 			return d.fail(ctx, string(id), err)
 		}
-		d.eng.Drop(id) // the stale review/verify session must not restart
+		d.eng.Drop(id) // the stale implement/verify session must not restart
 		d.bounceNote = *in.Bounce
 	case in.RequestChanges != nil:
 		d.opening = *in.RequestChanges
@@ -770,11 +772,22 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 		}
 	}
 
-	if _, err := d.eng.Attach(ctx, f); err != nil {
+	// A rewind's note (--bounce from the work stage) rides the fresh
+	// plan session's kickoff — the same delivery Engine.RunWith gives the
+	// work stage's reborn run. The stash is one-shot and this stage's
+	// dispatch is fresh by construction (Resume dropped the rewound
+	// session), so consume it here rather than sending it as a turn.
+	if note := d.bounceNote; note != "" {
+		d.bounceNote = ""
+		if err := d.eng.RunWith(f, note); err != nil {
+			return Outcome{}, err
+		}
+	} else if _, err := d.eng.Attach(ctx, f); err != nil {
 		return Outcome{}, err
 	}
-	// past the guard a turn is always dispatched — a fresh Attach kicks off
-	// the stage, and a resume seeds the answer / change note below.
+	// past the guard a turn is always dispatched — a fresh Attach (or
+	// RunWith) kicks off the stage, and a resume seeds the answer / change
+	// note below.
 	d.sentTurn = true
 	if d.opening != "" {
 		msg := d.opening
@@ -908,7 +921,9 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	// a --bounce resume stashed a kickoff note for the first work-stage run
 	// that follows the rewind; consume it on that exact dispatch so it
 	// reaches the reborn implement/fix as an addendum to the kickoff (the
-	// same path Engine.RunWith takes for the diff surface's request-changes).
+	// same path Engine.RunWith takes for the diff surface's request-changes;
+	// a plan rewind's note is consumed by driveDesign, which dispatches the
+	// design stage).
 	var err error
 	if d.bounceNote != "" && (f.Stage == domain.StageImplement) {
 		note := d.bounceNote

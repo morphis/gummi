@@ -105,6 +105,28 @@ func TestNext(t *testing.T) {
 	}
 }
 
+// TestRerunTarget: the rewind surfaces (the TUI's bounce action, the
+// headless --bounce) take their target from here, so exactly the two
+// backward edges have one, and each names the stage that produced it.
+func TestRerunTarget(t *testing.T) {
+	for _, tc := range []struct {
+		from domain.Stage
+		want domain.Stage
+		ok   bool
+	}{
+		{domain.StageImplement, domain.StagePlan, true},
+		{domain.StageVerify, domain.StageImplement, true},
+		{domain.StageTodo, "", false},
+		{domain.StagePlan, "", false},
+		{domain.StageDone, "", false},
+	} {
+		got, ok := RerunTarget(tc.from)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("RerunTarget(%s) = (%q, %v), want (%q, %v)", tc.from, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 // TestInitialAndTerminal: every card starts at todo and ends at done, and
 // neither answer depends on the kind any more — which is the merge.
 func TestInitialAndTerminal(t *testing.T) {
