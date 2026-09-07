@@ -66,7 +66,13 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	}
 
 	in := m.nextInputFor(r)
-	actions := nextActions(in)
+	// stageActions, not nextActions: the picker renders the ANSWER SET —
+	// the workflow answers to "what now" — while nextActions is the
+	// action inventory's ranking feed and carries the per-card nudges
+	// (the PR-review pull) that are reading surfaces rather than answers.
+	// Rendering those here is what made the control a flat list of
+	// equal-weight options in the first place (nextsteps.go's own doc).
+	actions := stageActions(in)
 	if len(actions) == 0 || in.landed || in.stage == domain.StageDone {
 		return nil
 	}
@@ -549,8 +555,88 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	// it onto its own when it will not sit beside the title), so the
 	// window has to be told rather than assuming one.
 	head := len(pickerHead(s, title, d.question, width))
-	windowed := windowDecisionBlock(s, lines, head, len(options), m.decisionCursor, maxRows)
-	return expandHighlighted(s, windowed, lines, head, options, m.decisionCursor, m.decisionPicked, multi, width, maxRows, armed)
+
+	// The narration takes its rows out of the decision's own budget, and
+	// it is the first thing in the region to yield: the paragraph is what
+	// a reader wants when there is room for it, and the question plus the
+	// highlighted answer is what they cannot do without (DESIGN §6.3's
+	// yield order). Reserving here rather than after windowing is what
+	// makes that true — spent afterwards, the rows would already have
+	// gone to expandHighlighted's detail wrap.
+	narr := m.narrationBlock(s, d, r, width)
+	rows := maxRows
+	if maxRows > 0 {
+		narr = fitNarration(narr, maxRows-head-1)
+		rows = max(maxRows-len(narr), 1)
+	}
+
+	windowed := windowDecisionBlock(s, lines, head, len(options), m.decisionCursor, rows)
+	block := expandHighlighted(s, windowed, lines, head, options, m.decisionCursor, m.decisionPicked, multi, width, rows, armed)
+	if len(block) == 0 {
+		// F21: no room for an answer the reader can see. A paragraph
+		// explaining a stop, with no way to answer it, is the same
+		// unanswerable control with more words.
+		return nil
+	}
+	return append(narr, block...)
+}
+
+// narrationBlock renders the stop's paragraph — the rows that sit above
+// the answers — or nil when there is nothing to say.
+//
+// A live ask gets none. The question IS the narration there, printed as
+// the control's own head, and a sentence saying "the agent asked a
+// question" directly above the question would be the page explaining
+// itself to itself. It is also the settled answer to whether a pending
+// ask keeps the full answer set: it replaces it, narration included.
+func (m *Shell) narrationBlock(s *theme.Styles, d *threadDecision, r featureRow, width int) []string {
+	if d == nil || d.ask != nil {
+		return nil
+	}
+	sentences := m.cardNarration(m.nextInputFor(r), r)
+	if len(sentences) == 0 {
+		return nil
+	}
+	var out []string
+	for _, sentence := range sentences {
+		for _, l := range strings.Split(wrapText(sanitize(sentence), max(width-1, 8)), "\n") {
+			out = append(out, " "+s.Base.Render(l))
+		}
+	}
+	// the blank that separates the paragraph from the answers. It is part
+	// of the narration's cost, so it is shed with the sentence it follows
+	// rather than surviving as a stray row above the picker.
+	return append(out, "")
+}
+
+// fitNarration sheds the paragraph from the END until it fits budget,
+// dropping whole rows rather than truncating a sentence mid-word — a
+// half-claim about why a card stopped is worse than no claim.
+//
+// budget is what is left once the picker's head and its highlighted
+// answer are paid for, so a page too short for both simply has no
+// paragraph. It never returns a lone trailing blank: shedding down to
+// just the separator would spend a row on the gap between a paragraph
+// that is not there and the answers.
+func fitNarration(narr []string, budget int) []string {
+	blank := func(l string) bool { return strings.TrimSpace(ansi.Strip(l)) == "" }
+	body := narr
+	for len(body) > 0 && blank(body[len(body)-1]) {
+		body = body[:len(body)-1]
+	}
+	// budget-1, not budget: the separator below the paragraph is a row
+	// the block will occupy, so trimming to the full budget and then
+	// appending it would put the block one row over what it was given.
+	if len(body) > budget-1 {
+		body = body[:max(budget-1, 0)]
+	}
+	for len(body) > 0 && blank(body[len(body)-1]) {
+		body = body[:len(body)-1]
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return append(body, "")
 }
 
 // expandHighlighted spends any vertical budget windowDecisionBlock left

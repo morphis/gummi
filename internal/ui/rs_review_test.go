@@ -729,7 +729,7 @@ func TestRS_NextSteps_VerifyPass_TwoRows(t *testing.T) {
 	got := nextActions(in)
 	want := []nextAction{
 		nextStep("advance", "g", "mark done", "verify passed — advance to done"),
-		nextStep("bounce", "b", "bounce to implement", "not convinced — send it back with comments"),
+		nextStep("bounce", "b", "send it back", "not convinced — your line goes back with it"),
 	}
 	if len(got) != len(want) {
 		t.Fatalf("nextActions = %#v, want %#v", got, want)

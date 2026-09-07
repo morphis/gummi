@@ -146,6 +146,34 @@ func (m *Shell) globalCommands() []command {
 // borrow — runCommand answers those two by id, the same functions
 // runCardAction already calls for them, so there is still exactly one
 // place each performs its action.
+// cardCommandNames gives a card action the words a reader types for it
+// after a "/" on the CARD page. It is the inverse of threadinput.go's
+// verbActionIDs, and it exists for the same reason: a verb the answer
+// set is not currently offering degrades to the "/" menu pre-filtered by
+// the word, so the word has to find the row. A label alone cannot be
+// trusted to — several of them adapt to card state ("hand to autopilot"
+// / "take back the gates"), and one of the two wordings would always
+// miss.
+//
+// These land in command.alias, not command.name: name is what the BOARD
+// thread's slash vocabulary is built from, and a card's actions have no
+// business there (boardCommandRows' own filter).
+var cardCommandNames = map[string]string{
+	"advance": "approve land",
+	"bounce":  "bounce",
+	"changes": "changes",
+	"pause":   "park pause",
+	"verify":  "verify",
+	"rebase":  "rebase",
+	"merge":   "land merge",
+	"squash":  "squash",
+	"clean":   "clean",
+	"gate":    "autopilot",
+	"spec":    "spec",
+	"diff":    "diff",
+	"ask":     "ask",
+}
+
 func (m *Shell) cardCommands(existing []command) []command {
 	r, ok := m.selected()
 	if !ok {
@@ -166,7 +194,7 @@ func (m *Shell) cardCommands(existing []command) []command {
 			}
 			id = a.key
 		}
-		out = append(out, command{id: id, label: a.label, key: a.key, available: true})
+		out = append(out, command{id: id, alias: cardCommandNames[a.id], label: a.label, key: a.key, available: true})
 	}
 	return out
 }
@@ -194,6 +222,26 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
 		return nil
+	case "run":
+		// The keyless run is the implement stage's "send it back": it
+		// re-runs the stage in place with the composer's line riding as
+		// the note (decision.go's deliverDecisionWords, which is what
+		// handles it when there IS a line). The ordinary run action wears
+		// enter and never reaches this switch at all.
+		//
+		// Reached with nothing typed, there is nothing to send back — so
+		// it says what it wants rather than answering with silence. The
+		// bar named the row, so enter owes a response; this is the same
+		// answer "changes" gives one row away, for the same reason.
+		m.notice = noticeMsg{text: "type what should change — your line rides the re-run"}
+		return nil
+	case "topup":
+		// the same act the inbox's u performs, reached from the stop
+		// itself: raise the envelope and let the stage pick up where it
+		// stopped (shell.go's topUpBudget).
+		if r, ok := m.selected(); ok {
+			return m.topUpBudget(r.F.ID)
+		}
 	case "duplicate":
 		return m.confirmDuplicate()
 	case "gate":

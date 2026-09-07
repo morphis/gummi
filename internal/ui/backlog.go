@@ -188,6 +188,10 @@ type backlogEntry struct {
 	card     bool
 	row      int // index into m.rows
 	shortcut int // 1-based, the printed jump number
+	// note is the one line a waiting card carries under itself: the
+	// narration's first sentence, saying why it stopped. Empty on every
+	// other entry, and on a card that is not waiting for anyone.
+	note string
 }
 
 // backlogEntries flattens the display order into headers, spacers and
@@ -204,8 +208,36 @@ func (m *Shell) backlogEntries() []backlogEntry {
 			last = super
 		}
 		out = append(out, backlogEntry{card: true, row: idx, shortcut: i + 1})
+		if note := m.boardNarrationLine(m.rows[idx]); note != "" {
+			out = append(out, backlogEntry{note: note})
+		}
 	}
 	return out
+}
+
+// boardNarrationLine is the sentence a waiting card carries on the
+// board: the first sentence of the very same narration its card page
+// prints above the answers, not a second thing generated for the list.
+//
+// Only a card that is actually waiting for a person gets one. A badge
+// on every row is not a badge, and the queue of cards that need you is
+// exactly what the board is for scanning — a card mid-run has nothing to
+// say that its spinner does not already say better.
+//
+// The second sentence — what the card did unattended — cannot appear
+// here and is not missing: it is folded out of the card's event log, and
+// featureRow.Events is populated for the selected card only (msgs.go),
+// deliberately, so that drawing the board never costs a read per row.
+// The board asks for the first sentence and gets exactly it.
+func (m *Shell) boardNarrationLine(r featureRow) string {
+	if _, waiting := m.inbox.get(r.F.ID); !waiting {
+		return ""
+	}
+	sentences := m.cardNarration(m.nextInputFor(r), r)
+	if len(sentences) == 0 {
+		return ""
+	}
+	return sentences[0]
 }
 
 // backlogView renders the full-width backlog: cards grouped by
@@ -276,6 +308,13 @@ func (m *Shell) backlogView(w, h int) string {
 	}
 	for _, e := range entries[start:end] {
 		if !e.card {
+			if e.note != "" {
+				// indented past the cursor, the number and the stage glyph,
+				// so it reads as belonging to the card above it rather than
+				// as a row of its own you could select.
+				line("      " + s.Faint.Render(sanitize(e.note)))
+				continue
+			}
 			if e.header == "" {
 				line("")
 				continue
@@ -354,7 +393,18 @@ func (m *Shell) cardPageView(w, h int) string {
 	if m.threadInput.Focused() {
 		step = "alt+j/k"
 	}
-	crumb := " " + s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
+	// The page's tabs lead this row and the way out follows them, on one
+	// chrome line rather than two. Two chrome-coloured rows stacked read
+	// as one control (the same reason the composer keeps a blank above
+	// it), and the row this would have cost is a row of the conversation.
+	//
+	// The order is the yield order: truncation eats the tail, and the
+	// tail is the way back out — which esc answers whether or not
+	// anything says so (DESIGN §6.3's own argument for dropping the crumb
+	// before the strip). What survives a narrow terminal is the tabs,
+	// which have no other sign of themselves on the page.
+	crumb := m.cardTabBar(cardTabThread, w) + "   " +
+		s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
 		"  " + s.KeyHint.Render(step) + s.Faint.Render(" prev/next card")
 	line := ansi.Truncate(crumb, w, "…")
@@ -412,10 +462,13 @@ func (m *Shell) cardPageBindings() []binding {
 	out := []binding{
 		{key: "esc", label: "backlog", help: "back to the backlog list", bar: true},
 		{key: "J/K", label: "prev/next", help: "previous / next card without leaving the page", bar: true},
+	}
+	out = append(out, m.cardTabBindings()...)
+	out = append(out, []binding{
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread — it opens on the newest event", bar: true},
 		{key: "/", label: "compose", help: "focus the thread input — a message, or a leading verb/command", bar: true},
 		{key: "A", label: "autopilot", help: "open the autopilot switch — off/gates/full, and it starts the card"},
-	}
+	}...)
 	out = append(out, m.threadOutputsBinding())
 	for _, b := range m.boardBindings() {
 		switch b.key {

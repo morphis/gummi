@@ -35,40 +35,57 @@ func TestNextActionsByState(t *testing.T) {
 		{"queued run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateQueued}, ""},
 		{"busy run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, busy: true}, ""},
 		{"blocking ask interrupts the run", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, hasAsk: true}, "enter p"},
-		// hasWorktree: a feature card at review/verify always has one, and
-		// the CLI row is offered only where there is something to attach
-		// into (BG-089).
-		{"paused offers a re-run", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter a"},
-		{"failure offers retry and CLI", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter a"},
+		// attach is plumbing, not an answer: it is in the inventory and
+		// answers /attach, and it no longer takes a row in the set beside
+		// the one thing the card is actually waiting to be told.
+		{"paused picks the stage back up", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter"},
+		{"failure retries", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter"},
 		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StatePaused}, "enter"},
-		{"budget stop routes to the inbox", nextInput{stage: domain.StageImplement, kind: feat, attn: attnBudget}, "i"},
+		// the budget stop's two answers are keyless: top up (no
+		// accelerator — u is the envelope dialog) and, with no session to
+		// stop, nothing else.
+		{"budget stop tops up", nextInput{stage: domain.StageImplement, kind: feat, attn: attnBudget}, ""},
 		{"question routes to attach", nextInput{stage: domain.StagePlan, kind: feat, attn: attnQuestion}, "enter"},
 		{"todo starts the flow", nextInput{stage: domain.StageTodo, kind: feat}, "g"},
-		// the design stage: talk it through, approve, then read what you
-		// are signing off on. s comes after g because the recommendation
-		// leads and reading is what you reach for when you aren't ready
-		// to take it.
-		{"design stage talks, approves, reads", nextInput{stage: domain.StagePlan, kind: feat}, "enter g s A"},
-		// the design gate is that same approval, so a gate raised on it
-		// offers the same row — there is no separate "read the plan"
-		// stage behind it any more.
-		{"design gate offers the same approval", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "enter g s A"},
+		// the design stage: get the conversation going, then approve.
+		// Reading the artifact is the page's own tab, and the autopilot
+		// switch is a card setting — neither is an answer to "what now",
+		// and both used to take a row here.
+		{"design stage talks and approves", nextInput{stage: domain.StagePlan, kind: feat}, "enter g"},
+		{"design gate offers the same approval", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "enter g"},
+		// "send it back" appears at the design stage only while the
+		// architect is live to receive the turn that carries it.
+		{"live design stage can send it back", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StateInteractive, live: true}, "g "},
 		{"design stage with open questions blocks approve", nextInput{stage: domain.StagePlan, kind: feat, openSpecQs: 2}, "s enter"},
 		// a gate blocked on a section the stage never drafted leads with
 		// the writer re-run that unblocks it, not with approve
 		{"design gate with a blank section leads with the redraft", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter enter"},
-		{"implement idle runs the stage, or rewinds to plan", nextInput{stage: domain.StageImplement, kind: feat}, "enter b"},
-		{"implement gate diffs, advances, sends back, or rewinds", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "d g  b"},
+		// nothing has been produced yet, so there is nothing to send back:
+		// the rewind to plan is /bounce, in the inventory.
+		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
+		// advance, then the merged send-it-back (keyless: at implement it
+		// re-runs the stage in place with the line as its note).
+		{"implement gate advances or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "g "},
 
-		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g d b"},
-		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g d b"},
-		{"verify fail verdict reads evidence first", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true, verdict: verdictFail}, "s b g"},
-		{"escalated verify without a session reads first", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true}, "s b g"},
-		{"verify gate with failed check re-checks", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, failedCheck: "unit tests"}, "v enter b"},
+		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g b"},
+		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g b"},
+		// send it back leads, land-anyway follows. Reading the evidence is
+		// the artifact tab, and the repeated-failure guard is a sentence in
+		// the narration now rather than a re-ranking of these two rows.
+		{"verify fail verdict sends it back", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true, verdict: verdictFail}, "b g"},
+		{"escalated verify without a session sends it back", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, escalated: true}, "b g"},
+		// re-running the checks alone is /verify: it re-evaluates the gate
+		// rather than answering it.
+		{"verify gate with failed check sends it back", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, failedCheck: "unit tests"}, "b g"},
 		{"verify gate with open comments resolves", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, openDiffComments: 1}, "d b"},
-		{"cleared inbox still reads as finished", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StateDone}, "g d b"},
-		{"bug verify bounces to fix", nextInput{stage: domain.StageVerify, kind: bug, attn: attnGate}, "g d b"},
-		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g d b "},
+		// a settled session is one "stop here" can still park, so this is
+		// the one verify row that carries the third answer.
+		{"cleared inbox still reads as finished", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StateDone}, "g b p"},
+		{"bug verify sends it back", nextInput{stage: domain.StageVerify, kind: bug, attn: attnGate}, "g b"},
+		// the trailing empty key is prpull, which nextActions appends for a
+		// linked card. It is not in the answer set — stageActions does not
+		// return it — but it still rides above the fold in the inventory.
+		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g b "},
 	}
 	for _, c := range cases {
 		if got := keysOf(nextActions(c.in)); got != c.want {
@@ -98,20 +115,44 @@ func TestNextActionsCapAndRanking(t *testing.T) {
 }
 
 func TestNextActionsProseDetails(t *testing.T) {
-	// bounce targets name the work stage they rewind to
-	acts := nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindBug, attn: attnGate})
-	if !strings.Contains(acts[2].label, "implement") {
-		t.Errorf("bug bounce label = %q, want the work stage named", acts[2].label)
+	// find returns the action with this id, so the assertions name what
+	// they are about rather than indexing a list whose order is exactly
+	// the thing most likely to change under them.
+	find := func(acts []nextAction, id string) nextAction {
+		t.Helper()
+		for _, a := range acts {
+			if a.id == id {
+				return a
+			}
+		}
+		t.Fatalf("no %q action in %v", id, keysOf(acts))
+		return nextAction{}
 	}
-	// the implement bounce names the plan it rewinds to
-	acts = nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindFeature})
-	if !strings.Contains(acts[1].label, "plan") {
-		t.Errorf("implement idle bounce label = %q, want the plan named", acts[1].label)
+
+	// the merged answer wears one label wherever it appears, whichever
+	// edge it happens to take underneath
+	for _, in := range []nextInput{
+		{stage: domain.StageVerify, kind: domain.KindBug, attn: attnGate},
+		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictFail},
+		{stage: domain.StageImplement, kind: domain.KindFeature, attn: attnGate},
+	} {
+		acts := nextActions(in)
+		var back int
+		for _, a := range acts {
+			if a.label == "send it back" {
+				back++
+			}
+		}
+		if back != 1 {
+			t.Errorf("%s/%s: %d rows labelled \"send it back\", want exactly 1 — bounce, changes and re-run-with-note are one answer now (keys %q)",
+				in.stage, in.verdict, back, keysOf(acts))
+		}
 	}
-	// a failed manual check is named in the why
-	acts = nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "unit tests"})
-	if !strings.Contains(acts[0].why, "unit tests") {
-		t.Errorf("failed-check why = %q, want the check named", acts[0].why)
+
+	// a failed manual check is named in the why of the answer it argues for
+	acts := nextActions(nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, failedCheck: "unit tests"})
+	if !strings.Contains(find(acts, "bounce").why, "implementation's fault") {
+		t.Errorf("failed-check send-it-back why = %q", find(acts, "bounce").why)
 	}
 	// open comment counts surface in the blocker why
 	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, openSpecQs: 2})

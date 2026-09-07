@@ -24,7 +24,17 @@ type command struct {
 	// command is simply not part of the slash vocabulary — which is how
 	// the card-scoped entries cardCommands appends stay out of the board
 	// thread's popup without a second list to keep in step.
-	name      string
+	name string
+	// alias is extra filter words, matched by commandMatches and by
+	// nothing else. It is deliberately NOT name: name is the word a
+	// command answers to on the BOARD thread's slash line, and
+	// boardCommandRows uses "has a name" as the test for what belongs in
+	// that vocabulary at all — a card's own actions must never reach it
+	// ("/park" on a board conversation would park a card on a tab that is
+	// not even visible). The card verbs need to be findable in THIS menu,
+	// which is a different surface with a different filter, so they get a
+	// different field.
+	alias     string
 	available bool // false renders dimmed and cannot be run — visible but not offered
 }
 
@@ -58,14 +68,27 @@ func newCommandMenu(cmds []command, onRun func(id string) tea.Cmd) *commandMenu 
 func (m *commandMenu) ID() string { return "command-menu" }
 
 // commandMatches reports whether a command matches the (already
-// lowercased) filter query — an empty query matches everything. Matches on
-// both the label (what the user reads) and the id (what they might recall
-// typing before) so either can narrow the set.
+// lowercased) filter query — an empty query matches everything. Matches
+// on the label (what the user reads), the id (what they might recall
+// typing before), the name (the word the command answers to after a "/"
+// on the board thread) and the alias (extra words a card action answers
+// to in this filter only), so any of the four can narrow the set.
+//
+// The name is what makes the on-screen rule's degradation land
+// (threadinput.go): "/autopilot" opens this menu with "autopilot" in the
+// filter, and the card action it means wears the label "hand to
+// autopilot" — or, on a card already handed over, "take back the gates",
+// which shares not one letter with the word that was typed. Matching the
+// name is what keeps the pre-filtered menu one enter from firing rather
+// than empty.
 func commandMatches(c command, q string) bool {
 	if q == "" {
 		return true
 	}
-	return strings.Contains(strings.ToLower(c.label), q) || strings.Contains(strings.ToLower(c.id), q)
+	return strings.Contains(strings.ToLower(c.label), q) ||
+		strings.Contains(strings.ToLower(c.id), q) ||
+		strings.Contains(strings.ToLower(c.name), q) ||
+		strings.Contains(strings.ToLower(c.alias), q)
 }
 
 // visible returns the indices (into cmds) of commands matching the current

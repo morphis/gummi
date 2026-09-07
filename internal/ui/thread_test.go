@@ -654,10 +654,9 @@ func TestFocusThreadInputGrantedForDrivenAbroad(t *testing.T) {
 func TestSubmitThreadInputRoutesFreeVerbImmediately(t *testing.T) {
 	m := populatedShell(120, 34)
 	m.rows[m.sel].F.Kind = domain.KindResearch // boardVerb("d")'s guard fires a synchronous, storeless notice
-	f := m.rows[m.sel].F
 	m.threadInput.SetValue("/diff")
 
-	cmd := m.submitThreadInput(f)
+	cmd := m.submitThreadInput(m.rows[m.sel])
 	pump(t, m, cmd)
 	if m.threadInput.Value() != "" {
 		t.Fatalf("input not cleared after an immediate fire: %q", m.threadInput.Value())
@@ -667,25 +666,73 @@ func TestSubmitThreadInputRoutesFreeVerbImmediately(t *testing.T) {
 	}
 }
 
-// TestNotWiredVerbsCarryTheirRemainder: changes, bounce and autopilot are
-// parsed and reported, remainder included, rather than silently dropped
-// or given invented engine behaviour.
-func TestNotWiredVerbsCarryTheirRemainder(t *testing.T) {
-	m := populatedShell(120, 34)
-	for _, verb := range []string{"changes", "bounce", "autopilot"} {
+// TestSendItBackVerbsCarryTheirRemainder: changes and bounce are the two
+// verbs for the merged "send it back" answer, and the remainder is the
+// whole point of typing one instead of pressing the row — it is what is
+// wrong, and it has to ride along.
+//
+// Both used to land on notWiredVerb, which reported that the word was
+// parsed but not wired to anything. They reach the same delivery the
+// highlighted row performs now (deliverDecisionWords' own two cases), so
+// the vocabulary no longer contains two words that do nothing.
+func TestSendItBackVerbsCarryTheirRemainder(t *testing.T) {
+	for _, verb := range []string{"changes", "bounce"} {
 		t.Run(verb, func(t *testing.T) {
+			m := attachedBoard(t, 120, 34)
 			m.notice = noticeMsg{}
-			cmd := m.fireVerb(verb, "because the CI flake is fixed")
-			if cmd != nil {
-				t.Fatalf("%s should have no engine effect yet", verb)
-			}
-			if !strings.Contains(m.notice.text, verb) || !strings.Contains(m.notice.text, "not wired") && !strings.Contains(m.notice.text, "isn't wired") {
-				t.Fatalf("%s notice = %q, want it to name the verb and say it isn't wired", verb, m.notice.text)
-			}
-			if !strings.Contains(m.notice.text, "because the CI flake is fixed") {
-				t.Fatalf("%s notice dropped the remainder: %q", verb, m.notice.text)
+			pump(t, m, m.fireVerb(verb, "the contrast check was never in the spec"))
+			if strings.Contains(m.notice.text, "wired") {
+				t.Errorf("/%s still reports itself unwired: %q", verb, m.notice.text)
 			}
 		})
+	}
+
+	// typed bare, each says what it wants rather than sending an empty
+	// complaint
+	for _, verb := range []string{"changes", "bounce"} {
+		t.Run(verb+" bare", func(t *testing.T) {
+			m := attachedBoard(t, 120, 34)
+			m.notice = noticeMsg{}
+			if cmd := m.fireVerb(verb, ""); cmd != nil {
+				t.Errorf("bare /%s sent something with nothing to say", verb)
+			}
+			if !strings.Contains(m.notice.text, "change") {
+				t.Errorf("bare /%s notice = %q, want it to ask for the line", verb, m.notice.text)
+			}
+		})
+	}
+}
+
+// TestAutopilotVerbDegradesToTheMenu: the autopilot switch is a card
+// SETTING, not one of the four answers to "what now" — the proposal's own
+// table files it under housekeeping — so it never appears in the answer
+// set and the on-screen rule always sends it to the "/" menu, where the
+// card's inventory carries it. It must find something there: a
+// pre-filtered menu with no rows is a worse dead end than the "isn't
+// wired to an action yet" notice it replaced.
+func TestAutopilotVerbDegradesToTheMenu(t *testing.T) {
+	m := populatedShell(120, 34)
+	m.cardOpen = true
+	r := m.rows[m.sel]
+
+	if m.verbOnScreen(r, "autopilot") {
+		t.Fatal("the autopilot switch is in the answer set — it is a card setting, not an answer")
+	}
+	if !m.verbDegrades(r, "autopilot") {
+		t.Fatal("/autopilot does not degrade to the menu")
+	}
+
+	m.threadInput.SetValue("/autopilot")
+	m.submitThreadInput(r)
+	cm, ok := m.Overlay.Top().(*commandMenu)
+	if !ok {
+		t.Fatalf("/autopilot did not open the command menu: %T", m.Overlay.Top())
+	}
+	if cm.filter.Value() != "autopilot" {
+		t.Fatalf("menu filter = %q, want the verb", cm.filter.Value())
+	}
+	if len(cm.visible()) == 0 {
+		t.Error("the pre-filtered menu is empty — the degradation is a dead end")
 	}
 }
 
@@ -695,10 +742,9 @@ func TestNotWiredVerbsCarryTheirRemainder(t *testing.T) {
 // space key does, and "/foo" pre-filters it.
 func TestVerbMenuOpensCommandMenuPreFiltered(t *testing.T) {
 	m := populatedShell(120, 34)
-	f := m.rows[m.sel].F
 
 	m.threadInput.SetValue("/")
-	m.submitThreadInput(f)
+	m.submitThreadInput(m.rows[m.sel])
 	cm, ok := m.Overlay.Top().(*commandMenu)
 	if !ok {
 		t.Fatalf("bare / did not open the command menu: %T", m.Overlay.Top())
@@ -712,7 +758,7 @@ func TestVerbMenuOpensCommandMenuPreFiltered(t *testing.T) {
 	m.Overlay.Pop()
 
 	m.threadInput.SetValue("/appro")
-	m.submitThreadInput(f)
+	m.submitThreadInput(m.rows[m.sel])
 	cm, ok = m.Overlay.Top().(*commandMenu)
 	if !ok {
 		t.Fatalf("/appro did not open the command menu: %T", m.Overlay.Top())
@@ -722,13 +768,17 @@ func TestVerbMenuOpensCommandMenuPreFiltered(t *testing.T) {
 	}
 }
 
-// TestSlashVerbResolvesLikeBareVerb is the regression for the finding:
-// "/" and a bare verb used to be two different vocabularies. The command
-// vocabulary lived in two places. The sigil rule settles it from the
-// other end: a bare word is never a verb, so there is only one way to
-// reach one. For every word in verbs, "/" + that word routes the verb
-// and never opens the menu, and the bare word is prose — it reaches
-// sendThreadMessage instead, and the two outcomes must differ.
+// TestSlashVerbFiresAndBareWordIsProse is the regression for the
+// finding: "/" and a bare verb used to be two different vocabularies.
+// The sigil rule settles it from one end — a bare word is never a verb,
+// so there is only one way to reach one.
+//
+// What "/" + a verb DOES is the on-screen rule (threadinput.go's
+// verbDegrades): it fires when the card is offering that answer, and
+// otherwise opens the "/" menu pre-filtered to it, one enter from
+// firing. Both are the verb landing somewhere. What must never happen is
+// the third thing — the word doing nothing at all — and what must never
+// change is that the bare word is prose.
 func TestSlashVerbFiresAndBareWordIsProse(t *testing.T) {
 	for verb := range verbs {
 		t.Run(verb, func(t *testing.T) {
@@ -737,28 +787,41 @@ func TestSlashVerbFiresAndBareWordIsProse(t *testing.T) {
 			// pool unconditionally, which panics on a detached shell.
 			slash := attachedBoard(t, 120, 34)
 			// Research: exercises the worktree-gated verbs' (diff, rebase,
-			// land, squash, clean) own "no X" notice uniformly.
+			// land, squash, clean) own "no X" notice uniformly — those are
+			// not valid on such a card at all, so they must route to that
+			// refusal rather than degrading into an empty menu.
 			slash.rows[slash.sel].F.Kind = domain.KindResearch
-			sf := slash.rows[slash.sel].F
+			// the composer only exists on a card page, and the "/" menu
+			// only carries the card's inventory there (globalCommands)
+			slash.cardOpen = true
 			slash.threadInput.SetValue("/" + verb)
-			pump(t, slash, slash.submitThreadInput(sf))
+			pump(t, slash, slash.submitThreadInput(slash.rows[slash.sel]))
 
-			if _, opened := slash.Overlay.Top().(*commandMenu); opened {
-				t.Fatalf("/%s opened the command menu instead of routing the verb", verb)
+			if cm, opened := slash.Overlay.Top().(*commandMenu); opened {
+				if cm.filter.Value() != verb {
+					t.Fatalf("/%s opened the menu unfiltered (%q) — the degradation has to land on the verb",
+						verb, cm.filter.Value())
+				}
+				if len(cm.visible()) == 0 {
+					t.Fatalf("/%s degraded to a menu with no rows — a dead end", verb)
+				}
+			} else if slash.threadInput.Value() != "" {
+				t.Fatalf("/%s neither fired nor opened the menu; the line is still %q",
+					verb, slash.threadInput.Value())
 			}
 
 			bare := attachedBoard(t, 120, 34)
 			bare.rows[bare.sel].F.Kind = domain.KindResearch
-			bf := bare.rows[bare.sel].F
+			bare.cardOpen = true
 			bare.threadInput.SetValue(verb)
-			pump(t, bare, bare.submitThreadInput(bf))
+			pump(t, bare, bare.submitThreadInput(bare.rows[bare.sel]))
 
 			if _, opened := bare.Overlay.Top().(*commandMenu); opened {
 				t.Fatalf("bare %q opened the command menu — a bare word is prose", verb)
 			}
 			// prose with nowhere to go leaves the line in the composer and
-			// says so; a fired verb clears it. Whatever each does, they
-			// must not be the same thing.
+			// says so; a fired or degraded verb clears it. Whatever each
+			// does, they must not be the same thing.
 			if bare.notice.text == slash.notice.text && bare.threadInput.Value() == slash.threadInput.Value() {
 				t.Fatalf("bare %q and /%s did the same thing (%q) — the sigil is not separating them",
 					verb, verb, bare.notice.text)
@@ -777,10 +840,9 @@ func TestSlashVerbFiresAndBareWordIsProse(t *testing.T) {
 func TestSlashMenuIncludesCardActionsOnCardPage(t *testing.T) {
 	m := populatedShell(120, 34)
 	m.cardOpen = true
-	f := m.rows[m.sel].F
 
 	m.threadInput.SetValue("/envelope")
-	m.submitThreadInput(f)
+	m.submitThreadInput(m.rows[m.sel])
 	cm, ok := m.Overlay.Top().(*commandMenu)
 	if !ok {
 		t.Fatalf("/envelope did not open the command menu: %T", m.Overlay.Top())
@@ -839,9 +901,8 @@ func TestSlashMenuOmitsCardActionsOffTheCardPage(t *testing.T) {
 // there afterwards rather than vanishing along with the notice.
 func TestPlainMessageRoutesToConsultWithNoLiveSession(t *testing.T) {
 	m := populatedShell(120, 34)
-	f := m.rows[m.sel].F
 	m.threadInput.SetValue("looks good, but verify the padding")
-	m.submitThreadInput(f)
+	m.submitThreadInput(m.rows[m.sel])
 	if !strings.Contains(m.notice.text, "no agent configured") {
 		t.Fatalf("notice = %q, want the no-agent-configured notice from sendConsultMessage", m.notice.text)
 	}

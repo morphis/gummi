@@ -174,7 +174,7 @@ var promotedActions = map[string]bool{}
 // (new card, ingest, inbox, navigation) are not card verbs and are not
 // listed — they never touch the driven card.
 var foreignSafeActions = map[string]bool{
-	"run": true, "transcript": true, "spec": true, "diff": true,
+	"run": true, "spec": true, "diff": true,
 	"inbox": true, "duplicate": true, "ask": true,
 }
 
@@ -254,23 +254,22 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// whenever a non-interactive session exists — including a finished
 		// one, which p parks. Only the wording varies: "pause the running
 		// agent" was a lie on a session that had already stopped.
+		// the two halves of boardVerb's p, split on exactly the test that
+		// handler makes. It pauses a non-interactive session — running,
+		// queued, or a finished one it parks — and otherwise opens the
+		// dependency picker. The split used to be "any session at all"
+		// versus "none", which put a pause row on a live design chat where
+		// p actually opens the picker: the list naming one act and the key
+		// performing another is the divergence foreignBlockedKeys exists
+		// to prevent, and it was reachable on any card with the architect
+		// attached.
 		{
 			"pause", "p", pauseLabel, pauseWhy, false,
-			in.sess != "",
+			in.sess != "" && in.sess != engine.StateInteractive,
 		},
 		{
 			"deps", "p", "dependencies", "open the dependency picker for this card", false,
-			in.sess == "",
-		},
-		{
-			// t opens the card's thread from the board. There is no
-			// separate transcript view any more — the thread IS the
-			// transcript, tool calls and outputs included — so from the
-			// card page this row could only re-open the page the reader
-			// is already on, which is the same row talkAction withholds
-			// when the conversation is already on screen.
-			"transcript", "t", "open the thread", "read this card's session — the thread is the transcript", false,
-			in.sess != "" && !in.cardOpen,
+			in.sess == "" || in.sess == engine.StateInteractive,
 		},
 		{
 			// the label is the interface, so it takes the card's own noun
@@ -333,6 +332,15 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"inbox", "i", "inbox", "open the needs-you inbox", false,
 			in.attn != "",
 		},
+		// no accelerator: u is the envelope DIALOG on the board, and this
+		// is the one-keystroke top-up-and-resume the inbox reaches with
+		// its own u — the same engine.TopUp, offered at the stop instead
+		// of behind a pointer to another tab. Only a card actually stopped
+		// on its envelope has anything to top up.
+		{
+			"topup", "", "top up", "raise the envelope and pick the stage back up", false,
+			in.attn == attnBudget,
+		},
 		{
 			"attach", "a", "attach", "raw-attach the agent CLI in the worktree", false,
 			r.HasWorktree,
@@ -343,6 +351,10 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"merge", "m", "merge", "squash-merge branch into main (review & approve the drafted message)", false,
+			needsWT && r.HasWorktree && !r.Landed,
+		},
+		{
+			"squash", "z", "squash", "collapse the branch to one commit in place (review & approve the drafted message)", false,
 			needsWT && r.HasWorktree && !r.Landed,
 		},
 		{

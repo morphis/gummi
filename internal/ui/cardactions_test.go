@@ -46,9 +46,9 @@ func cardRow(kind domain.Kind, stage domain.Stage, landed, hasWorktree bool) fea
 }
 
 func TestCardActionsForOrdering(t *testing.T) {
-	// StageVerify with a failed check: nextActions ranks v, enter, b —
-	// none of them canonically adjacent in the fixed action table, so a
-	// literal reordering only happens if the "seed the ordering from
+	// StageVerify with a failed check: the answer set ranks bounce then
+	// advance — the reverse of their order in the fixed action table, so
+	// a literal reordering only happens if the "seed the ordering from
 	// nextActions" contract actually holds.
 	in := nextInput{
 		stage:       domain.StageVerify,
@@ -60,16 +60,17 @@ func TestCardActionsForOrdering(t *testing.T) {
 
 	acts := cardActionsFor(in, r)
 	got := idsOf(acts)
-	// The promoted tier is exactly the three ranked entries in
-	// nextActions' order; the fold holds the rest in board order. Inbox is
-	// in there because attn is set: it is the surface the gate
-	// recommendation (keyed i) lands on.
-	want := "verify run bounce " +
-		"deps spec diff advance envelope gate ask inbox attach rebase merge prlink duplicate delete"
+	// The promoted tier is exactly the ranked entries in nextActions'
+	// order; the fold holds the rest in board order. Reading surfaces
+	// (spec, diff) and plumbing (verify, attach, the autopilot switch)
+	// are in the tail now rather than ranked among the answers — they are
+	// the card page's tabs and its inventory, not answers to "what now".
+	tail := "run deps spec diff verify envelope gate ask inbox attach rebase merge squash prlink duplicate delete"
+	want := "bounce advance " + tail
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
 	}
-	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != "deps spec diff advance envelope gate ask inbox attach rebase merge prlink duplicate delete" {
+	if gotFolded := idsOf(foldedOnly(acts, true)); gotFolded != tail {
 		t.Fatalf("unexpected folded tail: %q", gotFolded)
 	}
 }
@@ -95,7 +96,7 @@ func TestCardActionsForFoldsTheTail(t *testing.T) {
 
 	acts := cardActionsFor(in, r)
 	promoted := foldedOnly(acts, false)
-	if got, want := idsOf(promoted), "advance diff bounce"; got != want {
+	if got, want := idsOf(promoted), "advance bounce"; got != want {
 		t.Fatalf("promoted tier:\n got  %q\n want %q", got, want)
 	}
 	if n := len(foldedOnly(acts, true)); n < foldMin {

@@ -199,9 +199,11 @@ func TestVerifyPassRaisesCleanGate(t *testing.T) {
 	if !strings.Contains(it.Text, "passed") {
 		t.Errorf("gate text does not say it passed: %q", it.Text)
 	}
+	// g lands, b sends it back, p parks the settled session. Reading the
+	// diff before landing is the card page's diff tab, not a row here.
 	acts := nextActions(m.nextInputFor(m.rows[0]))
-	if keysOf(acts) != "g d b" {
-		t.Fatalf("pass suggestions = %q, want g d b", keysOf(acts))
+	if keysOf(acts) != "g b p" {
+		t.Fatalf("pass suggestions = %q, want g b p", keysOf(acts))
 	}
 	if !strings.Contains(acts[0].why, "verify passed") {
 		t.Errorf("landing why does not carry the verdict: %q", acts[0].why)
@@ -217,9 +219,16 @@ func TestVerifyFailEscalates(t *testing.T) {
 	if !strings.Contains(it.Text, "FAILED") {
 		t.Errorf("gate text does not say it failed: %q", it.Text)
 	}
-	acts := nextActions(m.nextInputFor(m.rows[0]))
-	if keysOf(acts) != "s b g" {
-		t.Fatalf("fail suggestions = %q, want s b g (read evidence first)", keysOf(acts))
+	// send it back leads, land-anyway follows. "Read the evidence first"
+	// is no longer a row: the evidence is in the artifact, which is a tab,
+	// and why the card stopped is the narration's first sentence.
+	in := m.nextInputFor(m.rows[0])
+	if keysOf(nextActions(in)) != "b g p" {
+		t.Fatalf("fail suggestions = %q, want b g p", keysOf(nextActions(in)))
+	}
+	narr := m.cardNarration(in, m.rows[0])
+	if len(narr) == 0 || !strings.Contains(narr[0], "failure") {
+		t.Errorf("the narration does not say verify failed: %q", narr)
 	}
 }
 
@@ -238,12 +247,18 @@ func TestVerifyBlockedEscalatesWithoutBounce(t *testing.T) {
 	if !strings.Contains(it.Text, "re-implementing won't help") {
 		t.Errorf("gate text does not warn off the bounce: %q", it.Text)
 	}
-	acts := nextActions(m.nextInputFor(m.rows[0]))
-	if keysOf(acts) != "s enter g" {
-		t.Fatalf("blocked suggestions = %q, want s enter g (no bounce)", keysOf(acts))
+	in := m.nextInputFor(m.rows[0])
+	acts := nextActions(in)
+	if keysOf(acts) != "enter g p" {
+		t.Fatalf("blocked suggestions = %q, want enter g p (no bounce)", keysOf(acts))
 	}
 	if !strings.Contains(acts[0].why, "environment") {
 		t.Errorf("blocked why does not name the environment: %q", acts[0].why)
+	}
+	// the blocker itself is the narration's job now
+	narr := m.cardNarration(in, m.rows[0])
+	if len(narr) == 0 || !strings.Contains(narr[0], "Verify") {
+		t.Errorf("the narration does not say verify could not run: %q", narr)
 	}
 }
 
@@ -258,12 +273,13 @@ func TestVerifyUnclearVerdictEscalates(t *testing.T) {
 	if !strings.Contains(it.Text, "no clear verdict") {
 		t.Errorf("gate text does not flag the missing verdict: %q", it.Text)
 	}
-	acts := nextActions(m.nextInputFor(m.rows[0]))
-	if keysOf(acts) != "s b g" {
-		t.Fatalf("unclear suggestions = %q, want s b g", keysOf(acts))
+	in := m.nextInputFor(m.rows[0])
+	if keysOf(nextActions(in)) != "b g p" {
+		t.Fatalf("unclear suggestions = %q, want b g p", keysOf(nextActions(in)))
 	}
-	if !strings.Contains(acts[0].why, "no clear verdict") {
-		t.Errorf("unclear why does not explain itself: %q", acts[0].why)
+	narr := m.cardNarration(in, m.rows[0])
+	if len(narr) == 0 || !strings.Contains(narr[0], "no clear verdict") {
+		t.Errorf("the narration does not explain the missing verdict: %q", narr)
 	}
 }
 
@@ -301,23 +317,37 @@ func TestVerifyBounces(t *testing.T) {
 	}
 }
 
-// After a prior bounce, the fail suggestions drop the bounce to last
-// with a warning — pure nextActions table check.
-func TestVerifyRepeatedFailDeemphasizesBounce(t *testing.T) {
-	in := nextInput{
+// After a prior bounce, the loop-breaker warns — in the NARRATION, and
+// without touching the answer set.
+//
+// It used to de-rank the bounce row to last and put the warning in its
+// why. It cannot any more: "send it back" carries the in-place re-run as
+// well as the rewind (nextsteps.go), so demoting the row would demote an
+// answer the guard was never about. The rows keep the order a first
+// failure gives them and the warning is a sentence — which is the split
+// the whole surface rests on: the narration may say anything, and may
+// change nothing.
+func TestVerifyRepeatedFailWarnsWithoutReranking(t *testing.T) {
+	first := nextInput{
 		stage: domain.StageVerify, kind: domain.KindFeature,
-		attn: attnGate, escalated: true,
-		verdict: verdictFail, verifyBounces: 2,
+		attn: attnGate, escalated: true, verdict: verdictFail,
 	}
-	acts := nextActions(in)
-	if keysOf(acts) != "s g b" {
-		t.Fatalf("repeat-fail suggestions = %q, want s g b (bounce last)", keysOf(acts))
+	repeat := first
+	repeat.verifyBounces = 2
+
+	if keysOf(nextActions(first)) != keysOf(nextActions(repeat)) {
+		t.Fatalf("the repeat re-ranked the answers: %q vs %q",
+			keysOf(nextActions(first)), keysOf(nextActions(repeat)))
 	}
-	if !strings.Contains(acts[2].why, "unlikely to help") {
-		t.Errorf("bounce why does not warn: %q", acts[2].why)
+	if got := whyItStopped(first); strings.Contains(got, "has now failed") {
+		t.Errorf("a first failure already warns: %q", got)
 	}
-	if !strings.Contains(acts[0].why, "3 times") {
-		t.Errorf("read why does not count the failures: %q", acts[0].why)
+	got := whyItStopped(repeat)
+	if !strings.Contains(got, "3 times") {
+		t.Errorf("the narration does not count the failures: %q", got)
+	}
+	if !strings.Contains(got, "verification plan") {
+		t.Errorf("the narration does not say what to check instead: %q", got)
 	}
 }
 
@@ -344,9 +374,13 @@ func TestVerifyLoopBreakerWarnsOnSecondFailure(t *testing.T) {
 	if !strings.Contains(it.Text, "2nd time") || !strings.Contains(it.Text, "unlikely to help") {
 		t.Errorf("second failure gate does not warn: %q", it.Text)
 	}
-	acts := nextActions(m.nextInputFor(m.rows[0]))
-	if keysOf(acts) != "s g b" {
-		t.Fatalf("second-failure suggestions = %q, want s g b", keysOf(acts))
+	in := m.nextInputFor(m.rows[0])
+	if keysOf(nextActions(in)) != "b g p" {
+		t.Fatalf("second-failure suggestions = %q, want b g p", keysOf(nextActions(in)))
+	}
+	narr := m.cardNarration(in, m.rows[0])
+	if len(narr) == 0 || !strings.Contains(narr[0], "2 times") {
+		t.Errorf("the second failure's narration does not count it: %q", narr)
 	}
 }
 

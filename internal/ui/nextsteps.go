@@ -171,12 +171,14 @@ func escalatedGateVerdict(v reviewVerdict, escalated bool) reviewVerdict {
 func blockedGate(in nextInput) *nextAction {
 	if in.openSpecQs > 0 {
 		a := nextStep("spec", "s", "resolve open comments",
-			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" block the gate — R requests changes")
+			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" "+blockVerb(in.openSpecQs)+
+				" the gate — R requests changes")
 		return &a
 	}
 	if in.openDiffComments > 0 {
 		a := nextStep("diff", "d", "resolve diff comments",
-			itoa(in.openDiffComments)+" open block the gate — R requests changes, x resolves")
+			itoa(in.openDiffComments)+" open "+blockVerb(in.openDiffComments)+
+				" the gate — R requests changes, x resolves")
 		return &a
 	}
 	if len(in.undrafted) > 0 {
@@ -193,6 +195,18 @@ func blockedGate(in nextInput) *nextAction {
 	return nil
 }
 
+// blockVerb agrees the blocker count's verb. One open comment blocks the
+// gate; two block it. The row sits directly under the narration sentence
+// stating the same count (narration.go), so a disagreement between the
+// two is read as one of them being wrong about the card rather than
+// about grammar.
+func blockVerb(n int) string {
+	if n == 1 {
+		return "blocks"
+	}
+	return "block"
+}
+
 // talkAction is how the next card offers an interactive stage's own
 // conversation.
 //
@@ -202,17 +216,6 @@ func blockedGate(in nextInput) *nextAction {
 // looking at, costing a row of the one block that exists to tell you
 // something you did not know. It appears only when there is nobody to
 // talk to yet, and then it says what enter actually does: start them.
-// autopilotAction is the "hand the rest to autopilot" row the design
-// puts at the foot of a gate: the same `A` overlay the accelerator opens,
-// offered where handing over is a real answer to the decision on screen
-// rather than a key you have to already know about. why says what
-// handing over means at this particular stop, since that is the part
-// that differs — gates crossing themselves is not the same promise as
-// taking the remaining correction rounds alone.
-func autopilotAction(why string) nextAction {
-	return nextStep("gate", "A", "let autopilot finish", why)
-}
-
 func talkAction(in nextInput, who, why string) []nextAction {
 	// Only an attached conversation is the one already on screen. A row
 	// whose state merely persisted as interactive — a card rehydrated
@@ -235,9 +238,18 @@ func talkAction(in nextInput, who, why string) []nextAction {
 	return []nextAction{nextStep("run", "enter", verb+" "+who, why)}
 }
 
-// nextActions derives the ranked suggestion list — the first entry is
-// the recommendation, at most three entries total. Empty means the
-// state speaks for itself (an agent mid-run, a done feature).
+// nextActions is the ACTION INVENTORY's ranking feed — the answer set,
+// plus the per-card nudges that are not workflow answers but should
+// still ride above the fold when they apply.
+//
+// It is deliberately NOT what the decision picker renders. That is
+// stageActions, the answer set itself (decision.go's openDecision): a
+// "pull PR review" row is a reading surface for a linked card, and
+// putting it in the picker would reopen exactly the blur this change
+// closes — a view rendered as an equal-weight option beside "land on
+// main". cardActionsFor promotes whatever this ranks, so the nudge keeps
+// its place above the fold in the inventory without becoming an answer
+// to "what now".
 func nextActions(in nextInput) []nextAction {
 	return appendPullReviewSuggestion(stageActions(in), in)
 }
@@ -266,49 +278,43 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 	return append(acts, nextStep("prpull", "", "pull PR review", "read the PR's review comments back onto the diff"))
 }
 
-// withAttach offers the raw agent CLI alongside lead, but only on a card
-// that has a worktree to attach into.
+// stageActions is the card's ANSWER SET: the workflow answers to "what
+// now", and nothing else.
 //
-// The action inventory (cardactions.go) has always asked exactly this,
-// gating its own attach row on HasWorktree. The two arms below — a
-// paused run and a failed one — did not, so the picker recommended
-// attaching on cards where the attach could only print a refusal. On a
-// research card that is not a "not yet" either: research runs in the
-// main checkout and never gets a worktree, so attach was one of only two
-// offered ways forward and neither of them was one.
-func withAttach(in nextInput, lead nextAction, why string) []nextAction {
-	if !in.hasWorktree {
-		return []nextAction{lead}
-	}
-	return []nextAction{lead, nextStep("attach", "a", "attach the agent CLI", why)}
-}
-
-// designDiffAction offers the diff at a design gate.
+// Four answers cover every stop (PROPOSAL-card-surface §4), and the
+// label a row wears is the arm's own name — "approve", "land on main",
+// "send it back" — because the category is what makes the set legible,
+// not what the reader presses:
 //
-// Under one worktree per card, a design stage runs in the same tree
-// implement will continue in, so a plan that prototyped — or a spec chat
-// that tried something — has already written code onto the card's branch.
-// A gate that only showed the artifact would let that code cross on the
-// strength of a document that never mentions it. The proposal's
-// requirement is exactly this: the design gate must show the diff.
+//   - GO ON — every arm of advance (start / approve / advance to verify /
+//     land on main / merge the PR / mark done / clean up), plus the run
+//     that gets a stage moving when nothing is running yet.
+//   - SEND IT BACK — one answer, not three. bounce, "request changes"
+//     and re-run-with-a-note all meant *not right, try again*, and the
+//     reader re-derived the difference on every visit. Which edge it
+//     takes is a fixed rule in this phase: at verify it bounces to
+//     implement, at implement it re-runs in place, at the design stage it
+//     is the turn that asks the architect for the changes. The typed
+//     line rides along in all three (decision.go's wordConsumer, which
+//     still keys on these same three ids).
+//   - STOP HERE — pause and park, which were already one action wearing
+//     two words (pauseLabelWhy); the detail line still says which of the
+//     two this card's state means.
+//   - ANSWER IT — a pending ask_user, which replaces the rest rather
+//     than joining it: a blocked agent's question is not one option
+//     among four.
 //
-// It is offered whenever the card has a worktree, rather than only when
-// the tree is actually dirty or ahead. Answering "is there a diff?" means
-// two git calls per card per load, and featureRow is deliberately free of
-// per-frame IO; the diff view already says plainly when there is nothing
-// to show, so the cost of the unconditional offer is one wasted keystroke
-// and the cost of the conditional one is a slower board.
-func designDiffAction(in nextInput) []nextAction {
-	if !in.hasWorktree {
-		return nil
-	}
-	return []nextAction{nextStep("diff", "d", "review the diff",
-		"a design stage runs on the card's own branch — see anything it wrote")}
-}
-
-// stageActions is nextActions' own stage-by-stage derivation, factored out
-// so the PR-pull nudge above can post-process its result uniformly instead
-// of being threaded into every one of its early returns.
+// What is NOT here is as load-bearing as what is. Reading surfaces
+// (the artifact, the diff, the thread) are tabs on the card page now,
+// not rows in this list, and card housekeeping (the envelope, the
+// autopilot switch, attach, rebase, merge, deps, the PR verbs) lives in
+// the action inventory and the "/" menu. Both were rendered here as
+// equal-weight options beside the actual decision, which is what made a
+// reader sweep all 22 every visit to be sure the fold hid nothing.
+//
+// It stays a pure function of nextInput — table-tested, free, no agent
+// anywhere near it (DESIGN §6.3: the options are deterministic even
+// though the narration above them is not).
 func stageActions(in nextInput) []nextAction {
 	if in.landed {
 		a := nextStep("clean", "c", "clean up", "branch landed on main — remove the worktree and branch")
@@ -326,31 +332,34 @@ func stageActions(in nextInput) []nextAction {
 		return nil
 	case engine.StateRunning:
 		if in.hasAsk {
-			return []nextAction{
-				nextStep("run", "enter", "answer the agent", "it asked a question and is blocked on your reply"),
-				nextStep("pause", "p", "pause", "free the slot — enter re-runs the stage later"),
-			}
+			return append([]nextAction{answerIt()}, stopHere(in)...)
 		}
 		return nil
 	case engine.StatePaused:
-		return withAttach(in,
-			nextStep("run", "enter", "re-run "+string(in.stage), "the run is paused — a fresh run picks the stage back up"),
-			"work in the worktree by hand instead")
+		// already stopped by hand: picking it back up is the only answer,
+		// and "stop here" would be a row offering what has already
+		// happened. attach is plumbing — it is in the inventory and
+		// answers /attach, it is not one of the four.
+		return []nextAction{nextStep("run", "enter", "pick it back up",
+			"the run is paused — a fresh run picks "+string(in.stage)+" back up")}
 	}
 
 	// failures, budget stops, and questions override stage guidance.
 	switch in.attn {
 	case attnFailure:
-		return withAttach(in,
-			nextStep("run", "enter", "re-run "+string(in.stage), "the session errored — a fresh run retries the stage"),
-			"debug it by hand in the worktree")
+		return append([]nextAction{nextStep("run", "enter", "try again",
+			"the session errored — a fresh run retries "+string(in.stage))}, stopHere(in)...)
 	case attnBudget:
-		return []nextAction{nextStep("inbox", "i", "open the inbox", "the stage hit its budget — top up (u) or park (x) from there")}
+		// the two honest answers to an exhausted envelope, offered where
+		// the stop is rather than as a pointer at the inbox tab: raise it
+		// and carry on, or stop here. The inbox reaches the same top-up
+		// with u; this is the same act, not a second one.
+		return append([]nextAction{nextStep("topup", "", "top up and go on",
+			"raise the envelope — "+string(in.stage)+" picks up where it stopped")}, stopHere(in)...)
 	case attnQuestion:
-		return []nextAction{nextStep("run", "enter", "attach & answer", "the agent asked a question and is waiting")}
+		return append([]nextAction{answerIt()}, stopHere(in)...)
 	}
 
-	work := domain.StageImplement // one work stage now, whatever the kind
 	finished := in.attn == attnGate || in.sess == engine.StateDone
 
 	switch in.stage {
@@ -358,130 +367,95 @@ func stageActions(in nextInput) []nextAction {
 		return []nextAction{nextStep("advance", "g", "start", "advance into the design flow")}
 
 	case domain.StagePlan:
-		// The design stage. It absorbed brainstorm, spec and plan for a
-		// feature (and triage/diagnose, investigate/shape for the other
-		// kinds), so it offers what all of them offered: talk it through,
-		// read what it wrote, send it back, or approve.
+		// The design stage. Its answers are: get the conversation going,
+		// approve what it wrote, send it back, or stop. Reading the
+		// artifact it wrote — and the code a design stage may already have
+		// put on the card's branch — are the artifact and diff tabs.
 		acts := talkAction(in, designPartner(in.kind), "shape the "+artifactNoun(in.kind)+" until it convinces you")
 		if b := blockedGate(in); b != nil {
-			return append([]nextAction{*b}, acts...)
+			// "you cannot cross yet" is a different sentence, not another
+			// way forward: it leads, and the rest still follows it.
+			return append(append([]nextAction{*b}, acts...), stopHere(in)...)
 		}
 		acts = append(acts, nextStep("advance", "g", "approve", "hands the card to the agent stages"))
-		// Sending it back is an answer in its own right, not just
-		// something typing happens to do. It is the option that consumes
-		// the composer's words (decision.go's wordConsumer), so typing
-		// aims at it and enter delivers the line as the turn that asks
-		// for the changes. Only worth offering while the agent is here to
-		// receive it — with no session the "start" row above is the way in.
+		// Only worth offering while the architect is here to receive it —
+		// with no session the "start" row above is the way in.
 		if in.live {
-			acts = append(acts, nextStep("changes", "", "request changes",
-				"send it back with what's wrong — your line goes with it"))
+			acts = append(acts, nextStep("changes", "", "send it back",
+				"say what is wrong — your line goes to the architect as the turn asking for it"))
 		}
-		// reading the thing you are about to approve is an option in its
-		// own right. It goes after the gate rather than before it: the
-		// recommendation leads, and this is what you reach for when you
-		// are not ready to take it yet.
-		acts = append(acts, nextStep("spec", "s", "read the "+artifactNoun(in.kind)+" first",
-			"it is what approving signs off on"))
-		acts = append(acts, designDiffAction(in)...)
-		return append(acts, autopilotAction("gates cross themselves from here"))
+		return append(acts, stopHere(in)...)
 
 	case domain.StageImplement:
-		// bounce takes the graph's implement→plan rerun edge: the one
-		// arm that reaches upstream of the work instead of re-running
-		// it. Worth offering in every state the panel exists — a card
-		// parked mid-stage can need a different plan just as much as a
-		// gated one.
-		bounce := nextStep("bounce", "b", "bounce to "+string(domain.StagePlan),
-			"the plan was wrong — rewind to it for a fresh one")
 		if !finished {
-			return []nextAction{
-				nextStep("run", "enter", "run "+string(in.stage), "no active run — start (or restart) the stage"),
-				bounce,
-			}
+			// nothing has been produced yet, so there is nothing to send
+			// back: the rewind to plan is /bounce, in the inventory.
+			return append([]nextAction{nextStep("run", "enter", "run "+string(in.stage),
+				"no active run — start (or restart) the stage")}, stopHere(in)...)
 		}
-		acts := []nextAction{nextStep("diff", "d", "review the diff", "spot-check what the "+string(in.stage)+" run produced")}
 		if b := blockedGate(in); b != nil {
-			return append(acts, *b, bounce)
+			return append([]nextAction{*b}, stopHere(in)...)
 		}
-		acts = append(acts, nextStep("advance", "g", "advance to verify", "the critique passed — run the checks"))
-		// Sending it back is an answer in its own right, and it is the
-		// option that consumes the composer's words. It re-runs the stage
-		// in place rather than rewinding to it: the work stage's critique
-		// iterates the stage, so there is no edge to take. This is where
-		// the review gate's bounce went when Review stopped being a stage,
-		// and it is the same act the diff surface's R performs. The bounce
-		// beside it is the bigger hammer: the whole plan, not this pass.
-		return append(acts,
-			nextStep("run", "", "send it back with changes",
-				"re-runs "+string(in.stage)+" with what's wrong — your line goes with it"),
-			bounce)
+		acts := []nextAction{
+			nextStep("advance", "g", "advance to verify", "the critique passed — run the checks"),
+			// re-runs the stage in place rather than rewinding to it: the
+			// work stage's critique iterates the stage, so there is no edge
+			// to take. The bigger hammer — the whole plan, not this pass —
+			// is /bounce.
+			nextStep("run", "", "send it back",
+				"re-runs "+string(in.stage)+" with what is wrong — your line goes with it"),
+		}
+		return append(acts, stopHere(in)...)
 
 	case domain.StageVerify:
 		if !finished {
-			return []nextAction{nextStep("run", "enter", "run verify", "no active run — runs the checks and the verification plan")}
+			return append([]nextAction{nextStep("run", "enter", "run verify",
+				"no active run — runs the checks and the verification plan")}, stopHere(in)...)
 		}
 		if b := blockedGate(in); b != nil {
-			return []nextAction{
+			return append([]nextAction{
 				*b,
-				nextStep("bounce", "b", "bounce to "+string(work), "or send the open items back as rework"),
-			}
+				nextStep("bounce", "b", "send it back", "or send the open items back as rework"),
+			}, stopHere(in)...)
 		}
 		if in.failedCheck != "" {
-			return []nextAction{
-				nextStep("verify", "v", "re-run checks", "'"+in.failedCheck+"' failed on the last manual run"),
-				nextStep("run", "enter", "re-run verify", "let the agent chase the failure and update the "+artifactNoun(in.kind)),
-				nextStep("bounce", "b", "bounce to "+string(work), "if the failure is the implementation's fault"),
-			}
+			// re-running the checks alone is /verify: it re-evaluates the
+			// gate rather than answering it, so it is not one of the four.
+			return append([]nextAction{
+				nextStep("bounce", "b", "send it back", "the failure is the implementation's fault — your line goes with it"),
+				nextStep("advance", "g", "land anyway", "overrule if the failure does not hold up"),
+			}, stopHere(in)...)
 		}
 		// blocked: the environment can't run the plan, so rework can't
-		// help — steer at the environment, not the bounce. (Session gone
-		// drops this to the fail arm below, same degradation as fail; the
-		// inbox gate text still says BLOCKED.)
+		// help — steer at the environment, not the bounce. The blocker
+		// itself is the narration's first sentence now (narration.go).
 		if in.verdict == verdictBlocked {
-			// name the blocker when gummi's own floor recorded one: after
-			// BG-086 that reason survives a restart, so the card can say
-			// what to fix rather than only that something is wrong.
-			blocked := "verify is blocked on the environment — the missing prerequisites are in the " + artifactNoun(in.kind)
-			if in.verdictFloorReason != "" {
-				blocked = sanitize(in.verdictFloorReason) + " — fix that, or tag the plan's env-bound steps"
-			}
-			return []nextAction{
-				nextStep("spec", "s", "read the blockers", blocked),
+			return append([]nextAction{
 				nextStep("run", "enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"),
-				nextStep("advance", "g", "land on main", "only if you verified it by hand — verify never proved this build"),
-			}
+				nextStep("advance", "g", "land anyway", "only if you verified it by hand — verify never proved this build"),
+			}, stopHere(in)...)
 		}
 		// a verify gate carries a verdict (or, session gone, at least the
 		// escalation flag): recommend landing only on a clean pass.
+		//
+		// The FD-004 loop-breaker used to live here as an ORDERING — after
+		// a repeated failed verify, bounce dropped to last with a warning.
+		// It cannot: "send it back" now carries the in-place re-run too,
+		// and de-ranking the merged row would demote an answer the guard
+		// was never about. The warning moved into the narration, where it
+		// is a sentence rather than a rank (narration.go's loopBreaker).
 		if in.verdict == verdictFail || in.verdict == verdictChanges ||
 			(in.verdict == verdictUnclear && in.escalated) {
-			why := "verify reported failure — the evidence is in the " + artifactNoun(in.kind)
-			if in.verdict == verdictUnclear {
-				why = "verify gave no clear verdict — judge the results in the " + artifactNoun(in.kind)
-			}
-			// repeat failures: each bounce already bought a full
-			// implement→review→verify round that changed nothing, so the
-			// bounce drops to last with a warning — the FD-004 loop-breaker.
-			if in.verifyBounces >= 1 {
-				n := itoa(in.verifyBounces + 1)
-				return []nextAction{
-					nextStep("spec", "s", "read the verify results", "verify has failed "+n+" times — the evidence is in the "+artifactNoun(in.kind)),
-					nextStep("advance", "g", "land on main", "overrule if the failures don't hold up"),
-					nextStep("bounce", "b", "bounce to "+string(work), "unlikely to help after "+n+" failed verifies — check the environment and the verification plan first"),
-				}
-			}
-			return []nextAction{
-				nextStep("spec", "s", "read the verify results", why),
-				nextStep("bounce", "b", "bounce to "+string(work), "send the failures back as rework"),
-				nextStep("advance", "g", "land on main", "overrule if the failure doesn't hold up"),
-			}
+			return append([]nextAction{
+				nextStep("bounce", "b", "send it back", "send the failures back as rework — your line goes with them"),
+				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
+			}, stopHere(in)...)
 		}
 		if in.kind == domain.KindResearch {
-			return []nextAction{
+			return append([]nextAction{
 				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
-				nextStep("bounce", "b", "bounce to "+string(work), "not convinced — send it back with comments"),
-			}
+				nextStep("bounce", "b", "send it back", "not convinced — your line goes back with it"),
+			}, stopHere(in)...)
 		}
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"
 		if in.verdict == verdictPass {
@@ -491,13 +465,53 @@ func stageActions(in nextInput) []nextAction {
 		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
 			gate = nextStep("advance", "g", "merge the PR", hint)
 		}
-		return []nextAction{
+		return append([]nextAction{
 			gate,
-			nextStep("diff", "d", "final read of the diff", "one last look before it lands"),
-			nextStep("bounce", "b", "bounce to "+string(work), "not convinced — send it back with comments"),
-		}
+			nextStep("bounce", "b", "send it back", "not convinced — your line goes back with it"),
+		}, stopHere(in)...)
 	}
 	return nil
+}
+
+// answerIt is the row a pending ask_user gets in the workflow answer set.
+//
+// It is only ever reached from the two arms that have an ask without a
+// live Ask object to render (a running session blocked on one, and the
+// attnQuestion inbox item). Once the session hands over the Ask itself,
+// decision.go renders the question's own options instead and this list
+// is not consulted at all — which is the settled answer to "does a
+// pending ask keep the full answer set": it replaces it.
+func answerIt() nextAction {
+	return nextStep("run", "enter", "answer it", "the agent asked a question and is blocked on your reply")
+}
+
+// stopHere is the "stop here" answer, or nothing when there is nothing
+// to stop.
+//
+// pause and park were never two actions — both are boardVerb's p, which
+// is engine.Pause either way (shell.go's pauseRun). Only the word
+// differed, by session state, which is a distinction the detail line can
+// carry without spending a second row on it. A session already paused
+// gets no row: it has already stopped.
+//
+// An INTERACTIVE session gets none either, and that is the lockstep rule
+// rather than a nicety. boardVerb's p pauses only a non-interactive
+// session (pauseRun refuses one outright); with an interactive session it
+// falls through to the dependency picker. So a "stop here" row keyed p on
+// a live design chat would name one act and perform an unrelated other —
+// exactly the divergence between the offered list and the key handler
+// that foreignBlockedKeys exists to prevent, and now stated for every
+// card rather than only for a foreign-driven one.
+func stopHere(in nextInput) []nextAction {
+	switch in.sess {
+	case "", engine.StatePaused, engine.StateInteractive:
+		return nil
+	}
+	why := "park it — nothing runs until you come back"
+	if in.sess == engine.StateRunning || in.sess == engine.StateQueued {
+		why = "free the slot — enter re-runs the stage later"
+	}
+	return []nextAction{nextStep("pause", "p", "stop here", why)}
 }
 
 // noun names the work item kind for prose.

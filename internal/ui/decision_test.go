@@ -423,8 +423,12 @@ func TestThreadDecisionTypingIsChoosing(t *testing.T) {
 	if d == nil || d.kind != decisionGate {
 		t.Fatalf("review gate has no gate decision: %+v", d)
 	}
-	if i := d.wordConsumer(); i != 2 {
-		t.Fatalf("word consumer = %d, want request-changes at 2 (actions %v)", i, d.actions)
+	// the work stage's gate offers "advance to verify" then the merged
+	// "send it back" — the word consumer, at index 1 now that the diff is
+	// a tab rather than an option and the three rows that all meant "not
+	// right, try again" are one answer
+	if i := d.wordConsumer(); i != 1 {
+		t.Fatalf("word consumer = %d, want send-it-back at 1 (actions %v)", i, d.actions)
 	}
 
 	m = typeString(t, m, "the contrast is off in dark mode")
@@ -432,8 +436,8 @@ func TestThreadDecisionTypingIsChoosing(t *testing.T) {
 	if !strings.Contains(out, "with your words") {
 		t.Errorf("typing did not aim and relabel the word-eating option:\n%s", out)
 	}
-	if m.decisionCursor != 2 {
-		t.Errorf("typed prose left the cursor at %d, want request-changes at 2", m.decisionCursor)
+	if m.decisionCursor != 1 {
+		t.Errorf("typed prose left the cursor at %d, want send-it-back at 1", m.decisionCursor)
 	}
 
 	// enter re-runs the work stage with the line rather than rewinding to
@@ -677,21 +681,21 @@ func TestVerbLeavesPickerAtFullBrightness(t *testing.T) {
 func TestThreadDecisionDigitSelectsWorkflowOption(t *testing.T) {
 	m := reviewGateWorkspace(t)
 	d := m.openDecision(m.rows[m.sel])
-	// the work stage's gate: diff, advance, and the word-eating
-	// send-it-back at index 2 (the bounce's successor now that the
-	// critique iterates the stage instead of rewinding to it)
-	if d == nil || len(d.actions) < 3 || d.actions[2].id != "run" {
-		t.Fatalf("precondition: a work-stage gate with send-it-back at 2, got %+v", d)
+	// the work stage's gate: advance, then the word-eating send-it-back
+	// at index 1 (the diff moved to a tab, and bounce/changes/re-run
+	// merged into this one row)
+	if d == nil || len(d.actions) < 2 || d.actions[1].id != "run" {
+		t.Fatalf("precondition: a work-stage gate with send-it-back at 1, got %+v", d)
 	}
 
-	// digit 3 selects option index 2 — it must not land in the composer,
+	// digit 2 selects option index 1 — it must not land in the composer,
 	// and it must not commit on its own
-	m = press(t, m, tea.KeyPressMsg{Code: '3', Text: "3"})
+	m = press(t, m, tea.KeyPressMsg{Code: '2', Text: "2"})
 	if got := m.threadInput.Value(); got != "" {
 		t.Fatalf("the digit typed into the composer instead of selecting: %q", got)
 	}
-	if m.decisionCursor != 2 {
-		t.Fatalf("digit 3 left the cursor at %d, want 2", m.decisionCursor)
+	if m.decisionCursor != 1 {
+		t.Fatalf("digit 2 left the cursor at %d, want 1", m.decisionCursor)
 	}
 	if m.rows[m.sel].F.Stage != domain.StageImplement {
 		t.Fatalf("the digit alone committed the option — stage moved to %s", m.rows[m.sel].F.Stage)

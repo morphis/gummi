@@ -2232,6 +2232,13 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// tier 3: whichever surface owns the main pane, in the same order
 	// mainView paints them, and only on the tab they belong to.
 	if m.boardSurfacesLive() {
+		// the card page's tabs, answered before any of the three surfaces
+		// they switch between gets the key (cardtabs.go)
+		if m.cardOpen {
+			if cmd, ok := m.cardTabKey(key); ok {
+				return cmd
+			}
+		}
 		if m.spec != nil {
 			return m.handleSpecKey(key)
 		}
@@ -3475,10 +3482,21 @@ func autonomousStage(s domain.Stage) bool {
 
 func (m *Shell) mainView(w, h int) string {
 	if m.boardSurfacesLive() {
+		// With a card page open, the artifact and the diff are that page's
+		// tabs rather than surfaces that replaced it, so each draws the
+		// bar naming where it is and how to get back (cardtabs.go).
+		// Reached from the backlog list there is no page underneath and no
+		// bar — the same surface, mounted without a card page around it.
 		if m.spec != nil {
+			if m.cardOpen {
+				return m.cardSurface(cardTabArtifact, w, h, m.specViewRender)
+			}
 			return m.specViewRender(w, h)
 		}
 		if m.diff != nil {
+			if m.cardOpen {
+				return m.cardSurface(cardTabDiff, w, h, m.diffViewRender)
+			}
 			return m.diffViewRender(w, h)
 		}
 		if m.ingest != nil {
@@ -3514,6 +3532,10 @@ func (m *Shell) mainView(w, h int) string {
 		// the board tab owns the whole pane: the backlog list, or one
 		// card's page opened out of it.
 		if m.cardOpen {
+			// no cardSurface here: the thread tab's bar rides the card
+			// page's own chrome line rather than taking a second row of
+			// its own (cardPageView). The artifact and diff have no such
+			// line, so those two get the standalone bar above.
 			return m.cardPageView(w, h)
 		}
 		return m.backlogView(w, h)

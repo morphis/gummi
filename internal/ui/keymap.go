@@ -60,9 +60,13 @@ func (m *Shell) activeSurface() (string, []binding) {
 	live := m.boardSurfacesLive()
 	switch {
 	case live && m.spec != nil:
-		return "spec", m.spec.bindings()
+		// with a card page underneath, the artifact is one of that page's
+		// tabs (cardtabs.go) and its table has to name the way to the
+		// other two. Opened from the backlog list there is no page and no
+		// bar, so the table stays the surface's own.
+		return "spec", m.withCardTabsIf(m.cardOpen, m.spec.bindings())
 	case live && m.diff != nil:
-		return "diff", m.diff.bindings()
+		return "diff", m.withCardTabsIf(m.cardOpen, m.diff.bindings())
 	case live && m.ingest != nil:
 		return "ingest", m.ingest.bindings()
 	case live && m.bugIngest != nil:

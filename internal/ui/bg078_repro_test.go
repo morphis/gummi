@@ -49,9 +49,17 @@ func TestBG078PinnedArtifactHintFiresFromTheCardPage(t *testing.T) {
 		t.Errorf("the pinned line advertises %q, which the focused composer types instead of acting on", hint)
 	}
 
-	// and pressing it must open the artifact rather than reach the draft
+	// and pressing it must open the artifact rather than reach the draft.
+	//
+	// Through handleKey, not straight into handleThreadInputKey: the
+	// chord is answered a tier above the composer now, as one of the card
+	// page's tabs (cardtabs.go's cardTabKey), so the composer's own
+	// handler never sees it. Driving the real entry point is what keeps
+	// this test honest about where the key actually lands — a test that
+	// called the handler which no longer owns the key would pass or fail
+	// for reasons unrelated to the reader's keyboard.
 	before := m.threadInput.Value()
-	cmd := m.handleThreadInputKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
+	cmd := m.handleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
 	if got := m.threadInput.Value(); got != before {
 		t.Errorf("the advertised key typed into the composer: draft %q -> %q", before, got)
 	}

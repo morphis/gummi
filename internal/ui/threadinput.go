@@ -255,17 +255,6 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")
 		return nil
-	case "alt+s":
-		// the artifact the pinned line names, opened from the line that
-		// names it. That line has always advertised a key, but the plain
-		// s it used to name is a printable one, so the composer swallowed
-		// it and the reader who pressed it got the letter in their draft
-		// instead of the document — the hint could not fire on the only
-		// surface that draws it. Alt for the same reason alt+o and
-		// alt+j/k take it, and hoisted here with them so checking what a
-		// pending chip is about to confirm works the way scrolling up to
-		// re-read does.
-		return m.openSpec(r.F)
 	}
 	switch msg.String() {
 	case "esc":
@@ -497,7 +486,7 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 		// a command keeps the parser; prose nothing consumes sends as a
 		// turn — always safe, and exactly what the bare composer did.
 	}
-	return m.submitThreadInput(r.F)
+	return m.submitThreadInput(r)
 }
 
 // submitThreadInput parses a line and routes it as the bare composer
@@ -512,9 +501,11 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 //     and the rest of cardactions.go's list — none of them in the verb
 //     vocabulary — find something too, instead of needing a second,
 //     narrower inventory here.
-//   - verbCommand ("/verb") -> routeVerb, which fires it. Nothing
-//     confirms: the sigil already said this was meant as a verb.
-func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
+//   - verbCommand ("/verb") -> fires it when the option it names is on
+//     screen; otherwise opens the same menu, pre-filtered to it (the
+//     on-screen rule, below). Nothing confirms: the sigil already said
+//     this was meant as a verb.
+func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 	text := strings.TrimSpace(m.threadInput.Value())
 	if text == "" {
 		return nil
@@ -522,19 +513,153 @@ func (m *Shell) submitThreadInput(f domain.Feature) tea.Cmd {
 	parsed := parseInput(text)
 	switch parsed.Kind {
 	case verbMenu:
-		cm := newCommandMenu(m.globalCommands(), m.runCommand)
-		if parsed.Remainder != "" {
-			cm.filter.SetValue(parsed.Remainder)
-			cm.setCursor(0)
-		}
-		m.Overlay.Push(cm)
-		m.threadInput.Reset()
-		return nil
+		return m.openCommandMenu(parsed.Remainder)
 	case verbCommand:
-		return m.routeVerb(f, parsed.Verb, parsed.Remainder)
+		// ON SCREEN = ACTIONABLE. A verb naming an option the card is
+		// actually offering fires; every other verb degrades to the menu
+		// with itself typed into the filter, one enter from running.
+		//
+		// This is what the surface owed the reader once the option list
+		// stopped enumerating everything legal. The alternative — a verb
+		// that silently does nothing, or reports that it "isn't wired to
+		// an action yet", which is what /changes, /bounce and /autopilot
+		// all did — teaches that the vocabulary is a lie, and a
+		// vocabulary you cannot trust is one you stop typing.
+		//
+		// The degradation is existing machinery, not new work: parseInput
+		// already carries a filter for the menu, and the menu already
+		// carries the selected card's whole action inventory
+		// (globalCommands' cardCommands branch), so everything a verb can
+		// name is in there to be filtered down to.
+		if m.verbDegrades(r, parsed.Verb) {
+			return m.openCommandMenu(parsed.Verb)
+		}
+		return m.routeVerb(r.F, parsed.Verb, parsed.Remainder)
 	default: // verbNone
-		return m.sendThreadMessage(f, text)
+		return m.sendThreadMessage(r.F, text)
 	}
+}
+
+// openCommandMenu opens the "/" overlay, pre-filtered by filter (empty
+// for the bare "/"), and clears the line it was typed on.
+func (m *Shell) openCommandMenu(filter string) tea.Cmd {
+	cm := newCommandMenu(m.globalCommands(), m.runCommand)
+	if filter != "" {
+		cm.filter.SetValue(filter)
+		cm.setCursor(0)
+	}
+	m.Overlay.Push(cm)
+	m.threadInput.Reset()
+	return nil
+}
+
+// verbActionIDs maps the composer's verb vocabulary (verbs.go) onto the
+// action ids the card's answer set and its tabs are built from, so
+// "is this verb on screen" is asked of the same table the screen is
+// rendered from rather than of a second list free to drift.
+var verbActionIDs = map[string]string{
+	"approve": "advance",
+	// land maps to merge, not to advance. Landing IS what advance does
+	// from the verify gate, but advance is also "advance to verify" at
+	// implement and "approve" at the design stage — so treating /land as
+	// on-screen wherever an advance row is would fire the merge dialog
+	// from a card two stages short of a branch worth landing. Mapped to
+	// the action it actually performs (verbKeys sends it to "m"), it is
+	// never in the answer set and always degrades to the menu, where the
+	// merge row answers to "land" by name.
+	"land":      "merge",
+	"changes":   "changes",
+	"bounce":    "bounce",
+	"park":      "pause",
+	"verify":    "verify",
+	"rebase":    "rebase",
+	"squash":    "squash",
+	"clean":     "clean",
+	"autopilot": "gate",
+	"spec":      "spec",
+	"diff":      "diff",
+}
+
+// verbDegrades reports whether a verb should open the "/" menu instead
+// of firing.
+//
+// Three cases, and the third is why this is not simply "is it on
+// screen":
+//
+//   - ON SCREEN — an answer in the card's set, or one of its tabs. It
+//     fires, with its remainder.
+//   - VALID BUT OFF SCREEN — legal on this card, just not one of the
+//     answers to "what now" (rebase, merge, the autopilot switch). It
+//     degrades to the menu, pre-filtered, one enter from firing.
+//   - NOT VALID AT ALL — "/diff" on a research card, which carries no
+//     branch and never gets a worktree. It must NOT degrade: the menu is
+//     built from this same validity table (globalCommands' cardCommands
+//     branch), so filtering it by a word nothing valid answers to opens
+//     an empty list, which is a worse dead end than the refusal it
+//     replaced. It routes instead, and boardVerb says why the card
+//     cannot do it.
+//
+// The third case is the one an "on screen = actionable" rule read
+// literally gets wrong, and it is not a rare corner — every
+// worktree-gated verb hits it on every research card.
+func (m *Shell) verbDegrades(r featureRow, verb string) bool {
+	// The rule is about what is on screen, so it needs a screen. With no
+	// card page open there is no answer set and no tab bar to be off, and
+	// — decisively — globalCommands only merges the card's inventory in
+	// when a page is open, so the menu this would degrade INTO carries no
+	// card actions at all. Degrading there would open an empty list.
+	if !m.cardOpen {
+		return false
+	}
+	id, ok := verbActionIDs[verb]
+	if !ok {
+		return false
+	}
+	return !m.verbOnScreen(r, verb) && m.verbValid(r, id)
+}
+
+// verbValid reports whether id is legal on this card at all, asked of
+// the card's own action inventory so the answer is the same one the "/"
+// menu and the ↑ list are built from.
+func (m *Shell) verbValid(r featureRow, id string) bool {
+	for _, a := range cardActionsFor(m.nextInputFor(r), r) {
+		if a.id == id {
+			return true
+		}
+	}
+	return false
+}
+
+// verbOnScreen reports whether the verb names something the reader can
+// currently see: an option in the card's answer set, or one of the
+// page's tabs.
+//
+// The tabs count as on screen because they are — permanently, by
+// construction. That is the whole reason reading surfaces became tabs:
+// "/spec" and "/diff" can never be a verb for something the fold is
+// hiding, because nothing hides them.
+//
+// "ask" is deliberately absent from the table and answers true: asking
+// needs no live session, no lock and no stage (cardactions.go's own
+// note), so it is valid on every card in every state and has nothing to
+// degrade to.
+func (m *Shell) verbOnScreen(r featureRow, verb string) bool {
+	if verb == "ask" {
+		return true
+	}
+	id, ok := verbActionIDs[verb]
+	if !ok {
+		return false
+	}
+	if id == "spec" || (id == "diff" && cardHasDiff(r)) {
+		return true
+	}
+	for _, a := range stageActions(m.nextInputFor(r)) {
+		if a.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 // routeVerb performs a recognised verb. It fires immediately, always:
@@ -605,16 +730,50 @@ func (m *Shell) fireVerb(verb, remainder string) tea.Cmd {
 	if key, ok := verbKeys[verb]; ok {
 		return m.boardVerb(key)
 	}
+	// The two "send it back" verbs. They reach here only when the answer
+	// set is actually offering that answer (submitThreadInput's on-screen
+	// rule), so each performs the same delivery the highlighted row
+	// performs — deliverDecisionWords' own two cases — rather than
+	// reporting that the word is not wired to anything, which is what
+	// both used to do.
+	//
+	// The remainder is the point of typing the verb instead of pressing
+	// the row: it is what is wrong, and it rides along. Typed bare, each
+	// says what it wants rather than sending an empty complaint.
+	switch verb {
+	case "bounce":
+		if remainder == "" {
+			m.notice = noticeMsg{text: "say what should change — /bounce <what is wrong>, or pick \"send it back\" and type the line"}
+			return nil
+		}
+		if r, ok := m.selected(); ok {
+			return m.bounceStage(r.F.ID, remainder)
+		}
+		return nil
+	case "changes":
+		if remainder == "" {
+			m.notice = noticeMsg{text: "type what should change — your line goes back with it"}
+			return nil
+		}
+		if r, ok := m.selected(); ok {
+			return m.sendThreadMessage(r.F, remainder)
+		}
+		return nil
+	}
 	return m.notWiredVerb(verb, remainder)
 }
 
-// notWiredVerb is changes/bounce/autopilot's landing spot: parsed and
-// carried through (including the remainder, so it isn't silently
-// dropped), but not yet routed to an action — a later change owns giving
-// them one. bounce already has a card-level accelerator (shell.go's "b",
-// msgs.go's bounceStage) with matching semantics for the no-remainder
-// case, but this verb path stays unwired on purpose so a bounce typed
-// with a reason isn't half-implemented ahead of that later change.
+// notWiredVerb is the floor under fireVerb: a verb in the vocabulary
+// that reached here with no key, no special case and no route.
+//
+// Nothing in today's vocabulary lands on it. changes and bounce are
+// routed above; autopilot names a card SETTING rather than a workflow
+// answer, so it is never in the answer set and the on-screen rule always
+// sends it to the "/" menu, where the card's own inventory carries it
+// (cardCommands' gate row). The floor stays because a vocabulary that
+// silently swallows a word is worse than one that admits it has nowhere
+// to put it — and the next verb added gets a legible failure instead of
+// a no-op while it is being wired.
 func (m *Shell) notWiredVerb(verb, remainder string) tea.Cmd {
 	text := verb + " isn't wired to an action yet"
 	if remainder != "" {
@@ -724,14 +883,13 @@ func (m *Shell) threadInputBindings() []binding {
 		// free-form answer channel does, but every line goes to the
 		// card's consult session instead of a decision — sticky, so it
 		// stays armed across a follow-up question without retyping `ask`.
-		return []binding{
+		return m.withCardTabs([]binding{
 			{key: "enter", label: "ask", help: "your line is the next consult question — empty sends nothing", bar: true, sticky: true},
 			{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
 			m.threadOutputsBinding(),
 			{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
-			{key: "alt+s", label: "open", help: "open the artifact the pinned line names"},
 			{key: "esc", label: "steer", help: "drop the consult channel — a plain line steers again (the draft is kept)", bar: true},
-		}
+		})
 	}
 	if r, ok := m.selected(); ok {
 		if d := m.visibleDecision(r); d != nil {
@@ -742,7 +900,7 @@ func (m *Shell) threadInputBindings() []binding {
 			if m.threadFreeForm && freeForm {
 				// armed: the composer owns the keyboard the way a plain
 				// input does; enter delivers the line as the answer
-				return []binding{
+				return m.withCardTabs([]binding{
 					// sticky (F15): this enter delivers the line as the
 					// decision's answer — on a gate that can mean
 					// attaching an agent — so a tight bar sheds pgup/pgdn
@@ -752,9 +910,8 @@ func (m *Shell) threadInputBindings() []binding {
 					{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
 					m.threadOutputsBinding(),
 					{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
-					{key: "alt+s", label: "open", help: "open the artifact the pinned line names"},
 					{key: "esc", label: "picker", help: "drop the free-form channel — the decision's own keys come back (the draft is kept)", bar: true},
-				}
+				})
 			}
 			label, help := "answer", "answer the highlighted option"
 			switch {
@@ -813,26 +970,24 @@ func (m *Shell) threadInputBindings() []binding {
 				bs = append(bs, binding{key: "o", label: "own answer", help: "type your own answer — the digits stop picking while it's armed", bar: true})
 			}
 			bs = append(bs, m.threadOutputsBinding(),
-				binding{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
-				binding{key: "alt+s", label: "open", help: "open the artifact the pinned line names"})
+				binding{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"})
 			// esc stays last: the status bar drops hints from the
 			// second-to-last backwards precisely so the surface's escape
 			// hatch outlives every other row (statusbar.Render).
-			return append(bs, binding{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true})
+			return m.withCardTabs(append(bs, binding{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true}))
 		}
 	}
-	return []binding{
+	return m.withCardTabs([]binding{
 		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; does nothing when the line is empty", bar: true},
 		{key: "↑", label: "actions", help: "open the action inventory while the line is empty (the placeholder says so too)", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
 		m.threadOutputsBinding(),
 		{key: "alt+j/k", label: "prev/next", help: "next / previous card without leaving the page"},
-		{key: "alt+s", label: "open", help: "open the artifact the pinned line names"},
 		// esc last, for the reason the decision table gives above: the
 		// bar sheds the second-to-last hint first, so the way out is the
 		// last thing to go.
 		{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true},
-	}
+	})
 }
 
 // threadEnterLabel names what enter will actually do with a verb-leading

@@ -53,15 +53,43 @@ func TestBG089AttachIsNotRecommendedWithoutAWorktree(t *testing.T) {
 }
 
 // TestBG089AttachSurvivesWhereItWorks is the other half: the row must
-// still be offered on a card that does have a worktree, so the fix
+// still be OFFERED on a card that does have a worktree, so the fix
 // narrows the recommendation instead of removing it.
+//
+// Where it is offered moved. Attach is plumbing — a raw agent CLI in the
+// worktree — not one of the four answers to "what now", so it is no
+// longer ranked into the answer set beside "approve" and "land on main"
+// (PROPOSAL-card-surface §4). It is in the card's action inventory, on
+// its own key, gated on exactly the same HasWorktree test; the half of
+// BG-089 that matters is that the gate is still there, not which of the
+// two lists it is drawn in.
 func TestBG089AttachSurvivesWhereItWorks(t *testing.T) {
-	for _, in := range []nextInput{
-		{sess: engine.StatePaused, kind: domain.KindFeature, stage: domain.StageImplement, hasWorktree: true},
-		{attn: attnFailure, kind: domain.KindBug, stage: domain.StageImplement, hasWorktree: true},
+	hasAttachAction := func(acts []cardAction) bool {
+		for _, a := range acts {
+			if a.id == "attach" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, tc := range []struct {
+		in  nextInput
+		row featureRow
+	}{
+		{
+			nextInput{sess: engine.StatePaused, kind: domain.KindFeature, stage: domain.StageImplement, hasWorktree: true},
+			featureRow{F: domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageImplement}, HasWorktree: true},
+		},
+		{
+			nextInput{attn: attnFailure, kind: domain.KindBug, stage: domain.StageImplement, hasWorktree: true},
+			featureRow{F: domain.Feature{ID: "BG-001", Kind: domain.KindBug, Stage: domain.StageImplement}, HasWorktree: true},
+		},
 	} {
-		if !hasAttach(nextActions(in)) {
-			t.Errorf("%v: attach dropped on a card that has a worktree", in.stage)
+		if !hasAttachAction(cardActionsFor(tc.in, tc.row)) {
+			t.Errorf("%v: attach dropped on a card that has a worktree", tc.in.stage)
+		}
+		if hasAttachAction(cardActionsFor(tc.in, featureRow{F: tc.row.F})) {
+			t.Errorf("%v: attach offered on a card with no worktree", tc.in.stage)
 		}
 	}
 }

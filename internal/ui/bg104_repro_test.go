@@ -52,12 +52,22 @@ func TestBG104AttentionTextNamesNoBareKeys(t *testing.T) {
 		}
 	}
 
-	// the card page's own next step is the one place these keys belong,
-	// and it still points at the surface that has them
+	// the card page answers the stop where the stop is. It used to point
+	// at the inbox — the surface that had the keys — which made the one
+	// row offered at a budget stop a piece of navigation rather than an
+	// answer. The top-up is the same engine.TopUp the inbox's u performs,
+	// offered here directly, so the sentence above may name the inbox
+	// without the card page having to send anyone there.
 	steps := nextActions(nextInput{
 		kind: domain.KindFeature, stage: domain.StageVerify, attn: attnBudget, sess: engine.StateDone,
 	})
-	if len(steps) == 0 || !strings.Contains(steps[0].label+steps[0].why, "inbox") {
-		t.Errorf("the card page no longer sends a budget stop to the inbox: %+v", steps)
+	var tops bool
+	for _, s := range steps {
+		if s.id == "topup" {
+			tops = true
+		}
+	}
+	if !tops {
+		t.Errorf("a budget stop offers no way to raise the envelope: %+v", steps)
 	}
 }
