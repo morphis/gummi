@@ -140,6 +140,95 @@ func (s *Store) newestOpenGateDecisionTx(ctx context.Context, tx *sql.Tx, id dom
 	return answerID
 }
 
+// RewordOpenGateDecision replaces the question on the card's newest
+// still-open gate decision with question, reporting whether such a row
+// existed. "Still open" is OpenDecisions' own rule — no later gate or ask
+// event answers its id, and the card still sits at the stage the decision
+// was raised in — so a spent or abandoned row is left alone and reported
+// absent, and the caller can open a fresh one instead.
+//
+// It exists for the refused crossing: a crossing attempted on a card's
+// behalf (autopilotCrossGate) opens the gate decision before Advance
+// runs, in the crossing's own inviting wording, and a refusal leaves the
+// card parked with that row as its waiting-on-you record — the reason
+// `gummi status --json`, the inbox seed and the thread's pinned decision
+// all read. Rewording the row in place — same id, same timestamp, still
+// one row for the one stop — turns that record back to the truth (the
+// blocker Advance named) without touching the id the crossing that
+// eventually lands will answer.
+func (s *Store) RewordOpenGateDecision(ctx context.Context, id domain.FeatureID, question string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after commit
+
+	var curStage string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT stage FROM features WHERE id = ?`, string(id)).Scan(&curStage); err != nil {
+		return false, err
+	}
+	answered, err := answeredIDsOn(ctx, tx, id, 0)
+	if err != nil {
+		return false, err
+	}
+	// The scan runs in its own scope so its rows are closed before the
+	// update below executes on the transaction's one connection. It
+	// returns the parsed payload of the row it picked, so the reword
+	// below need not unmarshal the same bytes a second time.
+	foundSeq, found, err := func() (int64, DecisionPayload, error) {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT seq, stage, payload FROM card_events
+			WHERE feature_id = ? AND kind = ? ORDER BY seq DESC`,
+			string(id), EventDecisionOpen)
+		if err != nil {
+			return 0, DecisionPayload{}, err
+		}
+		defer rows.Close()
+		// seq is AUTOINCREMENT starting at 1, so 0 is a safe "no
+		// candidate".
+		for rows.Next() {
+			var seq int64
+			var stage, payload string
+			if err := rows.Scan(&seq, &stage, &payload); err != nil {
+				return 0, DecisionPayload{}, err
+			}
+			var p DecisionPayload
+			// A malformed payload reads as nothing rather than failing
+			// the scan, the same contract OpenDecisions keeps.
+			if err := json.Unmarshal([]byte(payload), &p); err != nil {
+				continue
+			}
+			if p.Kind != DecisionKindGate || answered[p.ID] {
+				continue
+			}
+			if stage != curStage {
+				// the stage moved on: OpenDecisions reports it abandoned
+				continue
+			}
+			return seq, p, nil
+		}
+		return 0, DecisionPayload{}, rows.Err()
+	}()
+	if err != nil {
+		return false, err
+	}
+	if foundSeq == 0 {
+		return false, nil
+	}
+	found.Question = question
+	reworded, err := json.Marshal(found)
+	if err != nil {
+		return false, fmt.Errorf("encoding reworded decision for %s: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE card_events SET payload = ? WHERE seq = ?`,
+		string(reworded), foundSeq); err != nil {
+		return false, fmt.Errorf("rewording open gate decision for %s: %w", id, err)
+	}
+	return true, tx.Commit()
+}
+
 // correlatingID reads an answer event's payload for the decision id it
 // closes. Both answer kinds (gate, ask) carry it as the same field; a
 // malformed or pre-decision payload reads as uncorrelated.

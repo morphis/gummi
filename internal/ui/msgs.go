@@ -420,7 +420,11 @@ func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
 // event which tried autopilot first skipped in favor of the attempt.
 // It carries plain text rather than an AdvanceStatus because every
 // blocked branch below already renders the right explanation once, for
-// both actors — there is nothing left for the handler to add.
+// both actors — the handler adds no second rendering of its own: it
+// parks with this text and re-words the standing gate decision with it,
+// so the card's waiting-on-you record names the blocker Advance named
+// instead of the crossing's inviting wording (shell.go's
+// rewordGateDecision).
 type autopilotGateBlockedMsg struct {
 	id   domain.FeatureID
 	text string

@@ -383,7 +383,9 @@ func autopilotAnswers(mode string, kind decisionKind) bool {
 // autopilotGateBlockedMsg rather than a plain error notice; shell.go's
 // Update handles that by parking the card through parkAttentionItem, not
 // raiseAttention, so the decision opened here isn't logged a second time
-// for the one stop.
+// for the one stop — and by re-wording that row to the blocker Advance
+// named, so the refusal never leaves the inviting wording standing as
+// the record the card waits on.
 //
 // Crossing always runs through advanceStageAs — never autoStep or
 // m.store.Transition directly — so the same blocker checks a human's own

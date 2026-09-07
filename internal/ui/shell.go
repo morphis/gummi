@@ -709,6 +709,28 @@ func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text strin
 	return true
 }
 
+// rewordGateDecision points the card's standing open gate decision at
+// text — the blocker Advance named — after a crossing attempted on the
+// card's behalf was refused. The row was opened by the attempt itself
+// (autopilotCrossGate) in the crossing's inviting wording, and it is the
+// record every waiting-on-you surface reads (status's escalation reason,
+// the startup inbox seed, the thread's pinned decision), so leaving it
+// standing as-is keeps inviting an approval the gate just refused.
+// Rewording in place keeps one row for the one stop and the id the
+// landing crossing answers; when no such row stands — a crossing the
+// `A` dialog attempted pre-opens nothing — a fresh one is opened
+// instead, so every blocked stop still leaves the row §10.18 requires.
+// Best-effort and silent, like logDecision beside it.
+func (m *Shell) rewordGateDecision(id domain.FeatureID, text string) {
+	if m.store == nil {
+		return
+	}
+	reworded, err := m.store.RewordOpenGateDecision(context.Background(), id, text)
+	if err == nil && !reworded {
+		m.logDecision(id, state.DecisionKindGate, text)
+	}
+}
+
 // logDecision records a card's open decision in its own history
 // (best-effort and silent, like logPark beside it): a card blocked on a
 // person leaves a row, whoever drove it here. The id is minted per
@@ -1605,9 +1627,15 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// decision row before attempting the crossing, so parking here
 		// uses parkAttentionItem, not raiseAttention — logging the
 		// decision a second time for the one stop would leave a
-		// duplicate open row for what is a single park.
+		// duplicate open row for what is a single park. But the row it
+		// opened speaks the crossing's own inviting wording, and the
+		// crossing was just refused: re-word it to the blocker Advance
+		// named — the same text the card parks with — so the card's
+		// waiting-on-you record stops inviting an approval the gate
+		// refuses.
 		m.clearAutopilotAnswering(msg.id)
 		m.parkAttentionItem(msg.id, attnGate, msg.text)
+		m.rewordGateDecision(msg.id, msg.text)
 		return m, m.loadRows
 
 	case mergeThenDoneMsg:
