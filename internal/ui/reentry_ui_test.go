@@ -269,3 +269,52 @@ func TestRewindRefusesWithoutItsArtifactEdit(t *testing.T) {
 		t.Errorf("no error notice explaining the refusal: %+v", m.notice)
 	}
 }
+
+// A verb with its reason attached is an instruction, not a bare word:
+// "/bounce <reason>" reaches the router whether or not a bounce row is
+// on screen, instead of degrading to the "/" menu and dropping the
+// reason. The bare verb still degrades — it has nothing to lose.
+func TestBounceWithAReasonNeverDropsIt(t *testing.T) {
+	asked := 0
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		reply := "ok"
+		if strings.Contains(msg, "INTENT: <one of the words above>") {
+			asked++
+			reply = "INTENT: implementation_wrong"
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
+	}}
+	m, _ := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageVerify)
+	m.cardOpen = true
+	// a verify that has not run offers "run verify" and no bounce row, so
+	// the bare verb is valid-but-off-screen: exactly the case that used
+	// to open the menu on the reason too
+	in := m.nextInputFor(m.rows[0])
+	for _, a := range stageActions(in) {
+		if a.id == "bounce" {
+			t.Fatal("fixture offers a bounce row; the test needs it off screen")
+		}
+	}
+
+	m.threadInput.SetValue("/bounce the jq bootstrap never ran")
+	m = pump(t, m, m.submitThreadInput(m.rows[0]))
+	if asked != 1 {
+		t.Fatalf("the reason never reached the router (asked=%d)", asked)
+	}
+	if _, isMenu := m.Overlay.Top().(*commandMenu); isMenu {
+		t.Fatal("/bounce with a reason opened the menu instead of routing")
+	}
+
+	// the bare verb keeps the on-screen rule: nothing to lose, so the
+	// menu, pre-filtered
+	m.Overlay.Pop()
+	m.threadInput.SetValue("/bounce")
+	m = pump(t, m, m.submitThreadInput(m.rows[0]))
+	if _, isMenu := m.Overlay.Top().(*commandMenu); !isMenu {
+		t.Errorf("a bare /bounce with no row on screen did not open the menu (top=%T)", m.Overlay.Top())
+	}
+	if asked != 1 {
+		t.Errorf("a bare /bounce spent a classification turn")
+	}
+}

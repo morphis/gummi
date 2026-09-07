@@ -531,6 +531,19 @@ func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 		// carries the selected card's whole action inventory
 		// (globalCommands' cardCommands branch), so everything a verb can
 		// name is in there to be filtered down to.
+		//
+		// One exception, and it is the difference between a word and an
+		// instruction: a verb that carries a sentence — "/bounce the jq
+		// bootstrap never ran" — says what it wants, and degrading it to
+		// a filtered list would drop the sentence on the floor. The
+		// on-screen rule exists so a BARE word with nothing to answer to
+		// lands somewhere useful; a word with its reason attached already
+		// has somewhere to go (fireVerb routes both through the same
+		// reader the highlighted row takes), and losing the reason is
+		// the one outcome worse than either firing or refusing.
+		if parsed.Remainder != "" && verbCarriesReason(parsed.Verb) {
+			return m.routeVerb(r.F, parsed.Verb, parsed.Remainder)
+		}
 		if m.verbDegrades(r, parsed.Verb) {
 			return m.openCommandMenu(parsed.Verb)
 		}
@@ -538,6 +551,14 @@ func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 	default: // verbNone
 		return m.sendThreadMessage(r.F, text)
 	}
+}
+
+// verbCarriesReason names the verbs whose remainder is the point of
+// typing them: the two "send it back" words, whose sentence is what the
+// router reads. Every other verb's remainder is noise the verb ignores,
+// so a bare on-screen check is the right one for them.
+func verbCarriesReason(verb string) bool {
+	return verb == "bounce" || verb == "changes"
 }
 
 // openCommandMenu opens the "/" overlay, pre-filtered by filter (empty
