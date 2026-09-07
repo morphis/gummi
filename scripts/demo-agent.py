@@ -792,6 +792,9 @@ def scribe(ctx, prompt):
         intent = "implementation_wrong"
         if line.rstrip().endswith("?"):
             intent = "question"
+        elif line.strip() in ("go", "ok", "yes") or "looks right" in line or "go on" in line \
+                or "approve" in line or "ship it" in line or "land it" in line:
+            intent = "proceed"
         elif "separate" in line or "another card" in line or "own card" in line:
             intent = "separate_card"
         elif "test" in line or "check" in line or "verif" in line:
