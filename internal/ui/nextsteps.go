@@ -467,7 +467,7 @@ func stageActions(in nextInput) []nextAction {
 		if in.kind == domain.KindResearch {
 			return []nextAction{
 				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
-				nextStep("bounce", "b", "bounce to investigate", "not convinced — send it back with comments"),
+				nextStep("bounce", "b", "bounce to "+string(work), "not convinced — send it back with comments"),
 			}
 		}
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"

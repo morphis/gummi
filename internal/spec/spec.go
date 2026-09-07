@@ -288,7 +288,7 @@ const (
 	promptProblem      = "%% @gummi: what hurts today? who feels it?"
 	promptOutOfScope   = "%% @gummi: what this feature deliberately won't do — scope boundaries prevent gold-plating"
 	promptConsidered   = "%% @gummi: at least two candidates, with tradeoffs"
-	promptChosen       = "%% @gummi: converge on one during the spec stage"
+	promptChosen       = "%% @gummi: converge on one during the plan stage"
 	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
 	promptReview       = "%% @gummi: reviewer findings land here; the implementer resolves each one"
 	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered and baselined); add the feature-specific live checks that prove this works — tag steps that can't run in the local worktree with [CI-only] or [env: <prereq>]"
@@ -420,15 +420,15 @@ func renderProvenance(b *strings.Builder, p domain.DraftProvenance) {
 }
 
 // Bug report prompts: the %% guidance a blank bug report carries. The
-// root-cause and fix sections stay open until the diagnose/fix stages
-// fill them — a source seeds symptoms, not the why or the how.
+// root-cause and fix sections stay open until the plan and
+// implement stages fill them — a source seeds symptoms, not the why or the how.
 const (
 	promptBugSummary   = "%% @gummi: what's broken, and who hits it?"
 	promptBugRepro     = "%% @gummi: exact steps to reproduce — a minimal repro if you can"
 	promptBugExpAct    = "%% @gummi: what should happen, vs what actually happens?"
 	promptBugEnv       = "%% @gummi: versions, OS, config where it reproduces"
-	promptBugRootCause = "%% @gummi: the diagnose stage records the root cause here — the why"
-	promptBugFix       = "%% @gummi: the fix stage summarizes the change here"
+	promptBugRootCause = "%% @gummi: the plan stage records the root cause here — the why"
+	promptBugFix       = "%% @gummi: the implement stage summarizes the change here"
 	promptBugReview    = "%% @gummi: reviewer findings land here; the fix addresses each one"
 	// The verify contract for a bug: the deterministic quality floor plus
 	// the bug-specific proof (repro gone + regression test).
@@ -445,7 +445,7 @@ func BugTemplate(f *domain.Feature) string {
 // (GitHub issue, manual entry): the symptoms fill Summary, Reproduction,
 // Expected vs actual, and Environment; open questions become %% markers
 // under Summary; the provenance header records the source and severity.
-// Root cause and Fix stay open %% prompts — diagnose/fix work.
+// Root cause and Fix stay open %% prompts — plan/implement work.
 func SeededBugTemplate(f *domain.Feature, r domain.BugReport, prov domain.BugProvenance, sev domain.Severity) string {
 	return renderBug(f, r, prov, sev)
 }

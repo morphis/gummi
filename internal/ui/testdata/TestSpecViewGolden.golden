@@ -6,7 +6,7 @@
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mwhat hurts today? who feels it?[38;2;96;95;107m  L5[39m                                                           [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mwhat this feature deliberately won't do — scope boundaries prevent gold-plating[38;2;96;95;107m  L9[39m           [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mat least two candidates, with tradeoffs[38;2;96;95;107m  L13[39m                                                  [m
-[48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mconverge on one during the spec stage[38;2;96;95;107m  L17[39m                                                    [m
+[48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mconverge on one during the plan stage[38;2;96;95;107m  L17[39m                                                    [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mimplement checkpoints here — what's done, what's left, where to resume[38;2;96;95;107m  L23[39m                   [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mreviewer findings land here; the implementer resolves each one[38;2;96;95;107m  L27[39m                           [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mthe repo's build/test/lint commands land here as a gummi-checks block at approval (auto-…[38;2;96;95;107m  L31[m

@@ -962,7 +962,7 @@ func TestAdvanceBlockedByUndraftedChosenApproach(t *testing.T) {
 	putFeature(t, store, f)
 
 	writeDraftBody(t, ws, f, "# Spec\n\n## Problem\n\nToggle needed.\n\n"+
-		"## Chosen approach\n\n%% @gummi: converge on one during the spec stage\n")
+		"## Chosen approach\n\n%% @gummi: converge on one during the plan stage\n")
 
 	res := mustAdvance(t, e, f.ID)
 	if res.Status != StatusBlockedUndrafted {
@@ -1004,7 +1004,7 @@ func TestAdvanceBlockedByUndraftedRootCause(t *testing.T) {
 	putFeature(t, store, f)
 
 	writeDraftBody(t, ws, f, "# Report\n\n## Summary\n\nCrashes on empty input.\n\n"+
-		"## Root cause\n\n%% @gummi: the diagnose stage records the root cause here — the why\n")
+		"## Root cause\n\n%% @gummi: the plan stage records the root cause here — the why\n")
 
 	res := mustAdvance(t, e, f.ID)
 	if res.Status != StatusBlockedUndrafted {

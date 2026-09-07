@@ -31,7 +31,7 @@ func runSpec(args []string) error {
 		}
 		path := artifactPath(wt, ws, &f)
 		if path == "" {
-			return fmt.Errorf("%s has no spec yet — it is created when the spec/brainstorm stage first runs", f.ID)
+			return fmt.Errorf("%s has no spec yet — it is created when the plan stage first runs", f.ID)
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
