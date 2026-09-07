@@ -102,11 +102,11 @@ func TestDecide(t *testing.T) {
 			},
 		},
 		{
-			name: "implement + wrong implementation re-runs in place and never confirms",
+			name: "implement + wrong implementation re-runs in place — and confirms, since it starts a run",
 			in:   Input{Stage: domain.StageImplement, Kind: domain.KindFeature, Intent: ImplementationWrong, Note: note},
 			want: Outcome{
 				Action: RerunInPlace, Target: domain.StageImplement,
-				Note: note, Reason: "implementation_wrong-in-place",
+				Note: note, Confirm: true, Reason: "implementation_wrong-in-place",
 			},
 		},
 
@@ -117,7 +117,7 @@ func TestDecide(t *testing.T) {
 			want: Outcome{
 				Action: RerunInPlace, Target: domain.StageVerify,
 				Edit: Edit{Section: "Verification plan", Text: note},
-				Note: note, Reason: "check-missing",
+				Note: note, Confirm: true, Reason: "check-missing",
 			},
 		},
 		{
@@ -126,7 +126,7 @@ func TestDecide(t *testing.T) {
 			want: Outcome{
 				Action: RerunInPlace, Target: domain.StageVerify,
 				Edit: Edit{Section: "Verification", Text: note},
-				Note: note, Reason: "check-missing",
+				Note: note, Confirm: true, Reason: "check-missing",
 			},
 		},
 		{
@@ -182,13 +182,40 @@ func TestDecide(t *testing.T) {
 			want: Outcome{
 				Action: RerunInPlace, Target: domain.StageImplement,
 				Edit: Edit{Section: "Verification plan", Text: note},
-				Note: note, Reason: "check-missing",
+				Note: note, Confirm: true, Reason: "check-missing",
 			},
 		},
 		{
 			name: "a done card has no edge to walk",
 			in:   Input{Stage: domain.StageDone, Kind: domain.KindFeature, Intent: ImplementationWrong, Note: note},
 			want: Outcome{Note: note, Reason: "implementation_wrong-unreachable"},
+		},
+
+		// --- go on ----------------------------------------------------
+		{
+			name: "proceed at a clear design gate is the approval",
+			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: Proceed, Note: "looks right, go", Forward: domain.StageImplement},
+			want: Outcome{Action: Advance, Target: domain.StageImplement, Note: "looks right, go", Confirm: true, Reason: "proceed"},
+		},
+		{
+			name: "proceed at a blocked gate is the blocker, said back",
+			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: Proceed, Note: "go", Forward: domain.StageImplement, Blocked: "open comments"},
+			want: Outcome{Note: "go", Reason: "proceed-blocked"},
+		},
+		{
+			name: "proceed at a passing verify gate lands — confirmed",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: Proceed, Note: "ship it", Forward: domain.StageDone},
+			want: Outcome{Action: Advance, Target: domain.StageDone, Note: "ship it", Confirm: true, Reason: "proceed"},
+		},
+		{
+			name: "proceed where the forward act is a run re-runs the stage — confirmed, it spends",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: Proceed, Note: "run it", Rerun: true},
+			want: Outcome{Action: RerunInPlace, Target: domain.StageVerify, Note: "run it", Confirm: true, Reason: "proceed-rerun"},
+		},
+		{
+			name: "proceed with nothing forward on offer is a turn",
+			in:   Input{Stage: domain.StageDone, Kind: domain.KindFeature, Intent: Proceed, Note: "go"},
+			want: Outcome{Note: "go", Reason: "proceed-nowhere"},
 		},
 
 		// --- the split ------------------------------------------------
@@ -258,7 +285,10 @@ func TestRewindsCarryTheirArtifactEdit(t *testing.T) {
 				if out.Action != Rewind && out.Action != RerunInPlace {
 					continue
 				}
-				if intent == ImplementationWrong {
+				if intent == ImplementationWrong || intent == Proceed {
+					// the artifact is right (wrong implementation), or
+					// nothing was complained about at all (go on): neither
+					// has anything to write
 					if !out.Edit.Empty() {
 						t.Errorf("%s/%s/%s: writes %q into a correct artifact", stage, kind, intent, out.Edit.Section)
 					}
@@ -275,18 +305,46 @@ func TestRewindsCarryTheirArtifactEdit(t *testing.T) {
 	}
 }
 
-// Confirm is not a per-row preference: it is "did the card move
-// somewhere it was not". Stated as a property so a new route cannot
-// quietly ship a silent rewind.
-func TestOnlyMovesConfirm(t *testing.T) {
+// Confirm is not a per-row preference: it is "does this move the card or
+// spend its credits". Everything but a turn does one or the other, so
+// everything but a turn confirms. Stated as a property so a new route
+// cannot quietly ship a silent move or a silent spend.
+func TestEverythingButATurnConfirms(t *testing.T) {
 	stages := []domain.Stage{domain.StageTodo, domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone}
 	for _, stage := range stages {
 		for _, intent := range Vocabulary() {
-			out := Decide(Input{Stage: stage, Kind: domain.KindFeature, Intent: intent, Note: note})
-			want := out.Action == Rewind || out.Action == NewCard
-			if out.Confirm != want {
-				t.Errorf("%s/%s: %s Confirm=%v, want %v", stage, intent, out.Action, out.Confirm, want)
+			for _, in := range []Input{
+				{Stage: stage, Kind: domain.KindFeature, Intent: intent, Note: note},
+				{Stage: stage, Kind: domain.KindFeature, Intent: intent, Note: note, Forward: domain.StageImplement},
+				{Stage: stage, Kind: domain.KindFeature, Intent: intent, Note: note, Rerun: true},
+			} {
+				out := Decide(in)
+				want := out.Action != Turn
+				if out.Confirm != want {
+					t.Errorf("%s/%s/%+v: %s Confirm=%v, want %v", stage, intent, in, out.Action, out.Confirm, want)
+				}
 			}
+		}
+	}
+}
+
+// Proceed is confined by construction: it can only produce the act the
+// caller said the stop offers. No Forward and no Rerun means nowhere to
+// go, whatever the stage; a blocked gate is never crossed.
+func TestProceedOnlyTakesWhatTheStopOffers(t *testing.T) {
+	stages := []domain.Stage{domain.StageTodo, domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone}
+	for _, stage := range stages {
+		bare := Decide(Input{Stage: stage, Kind: domain.KindFeature, Intent: Proceed, Note: "go"})
+		if bare.Action != Turn {
+			t.Errorf("%s: proceed with nothing on offer produced %s", stage, bare.Action)
+		}
+		blocked := Decide(Input{Stage: stage, Kind: domain.KindFeature, Intent: Proceed, Note: "go", Forward: domain.StageDone, Blocked: "open comments"})
+		if blocked.Action != Turn || blocked.Reason != "proceed-blocked" {
+			t.Errorf("%s: proceed at a blocked gate produced %+v", stage, blocked)
+		}
+		fwd := Decide(Input{Stage: stage, Kind: domain.KindFeature, Intent: Proceed, Note: "go", Forward: domain.StageVerify})
+		if fwd.Action != Advance || fwd.Target != domain.StageVerify || !fwd.Confirm {
+			t.Errorf("%s: proceed with an advance on offer produced %+v", stage, fwd)
 		}
 	}
 }

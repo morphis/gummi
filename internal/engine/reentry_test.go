@@ -45,7 +45,7 @@ func TestParseIntentReply(t *testing.T) {
 // can ever reach; one added here and not there is a word that routes to
 // a turn while reading as if it did something.
 func TestClassifyPromptOffersTheWholeVocabulary(t *testing.T) {
-	p := classifyPrompt(feature(1, "dark mode", domain.StageVerify), "the toggle never persists")
+	p := classifyPrompt(feature(1, "dark mode", domain.StageVerify), "the toggle never persists", "land on main")
 	for _, i := range reentry.Vocabulary() {
 		if !strings.Contains(p, string(i)) {
 			t.Errorf("prompt does not offer %q", i)
@@ -59,6 +59,9 @@ func TestClassifyPromptOffersTheWholeVocabulary(t *testing.T) {
 	}
 	if !strings.Contains(p, "verify") {
 		t.Error("prompt does not say which stage the card is at")
+	}
+	if !strings.Contains(p, "land on main") {
+		t.Error("prompt does not tell the model what going on would do here")
 	}
 }
 
@@ -78,7 +81,7 @@ func TestClassifyReentry(t *testing.T) {
 	f := feature(1, "dark mode", domain.StageVerify)
 	withWorktree(t, wt, f)
 
-	got, err := e.ClassifyReentry(context.Background(), f, "the persistence step was never in the spec")
+	got, err := e.ClassifyReentry(context.Background(), f, "the persistence step was never in the spec", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +98,7 @@ func TestClassifyReentry(t *testing.T) {
 	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "INTENT: none"}, {Kind: agent.EventIdle}}
 	}
-	got, err = e.ClassifyReentry(context.Background(), f, "something is off")
+	got, err = e.ClassifyReentry(context.Background(), f, "something is off", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +112,7 @@ func TestClassifyReentry(t *testing.T) {
 		called = true
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}
-	if _, err := e.ClassifyReentry(context.Background(), f, "   "); err != nil {
+	if _, err := e.ClassifyReentry(context.Background(), f, "   ", ""); err != nil {
 		t.Fatal(err)
 	}
 	if called {
@@ -125,7 +128,7 @@ func TestClassifyReentryWithNoBackend(t *testing.T) {
 	e := New(Config{Agents: map[string]agent.Agent{}, Store: store, Worktrees: wt, Workspace: ws, MaxActive: 1})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "dark mode", domain.StageVerify)
-	if _, err := e.ClassifyReentry(context.Background(), f, "the toggle never persists"); err == nil {
+	if _, err := e.ClassifyReentry(context.Background(), f, "the toggle never persists", ""); err == nil {
 		t.Fatal("want ErrNoScribe, got nil")
 	}
 }
@@ -224,7 +227,7 @@ func TestOneShotSpendIsMeteredAgainstTheStage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := e.ClassifyReentry(context.Background(), f, "the approach cannot work offline"); err != nil {
+	if _, err := e.ClassifyReentry(context.Background(), f, "the approach cannot work offline", ""); err != nil {
 		t.Fatal(err)
 	}
 

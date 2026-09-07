@@ -82,7 +82,7 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 	m.notice = noticeMsg{text: string(r.F.ID) + ": reading the card to place your line…"}
 	f := r.F
 	return func() tea.Msg {
-		intent, err := eng.ClassifyReentry(context.Background(), f, note)
+		intent, err := eng.ClassifyReentry(context.Background(), f, note, "")
 		return reentryClassifiedMsg{f: f, note: note, fallback: fallback, intent: intent, err: err}
 	}
 }

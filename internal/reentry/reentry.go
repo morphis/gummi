@@ -79,6 +79,11 @@ const (
 	// Question: a question about the card rather than a complaint about
 	// it. The honest answer is an answer, not a rewind.
 	Question Intent = "question"
+	// Proceed: go on. Not a complaint at all — the forward answer the
+	// stop already offers, asked for in words: approve the artifact,
+	// advance, run the stage that is waiting. It never means more than
+	// that row means, and it never lands anywhere a row does not.
+	Proceed Intent = "proceed"
 )
 
 // Vocabulary lists the intents a classifier may return, in the order a
@@ -86,7 +91,7 @@ const (
 // written from the same list the router switches on, rather than from a
 // second copy of the six words free to drift from it.
 func Vocabulary() []Intent {
-	return []Intent{RequirementMissing, PlanWrong, ImplementationWrong, CheckMissing, SeparateCard, Question}
+	return []Intent{RequirementMissing, PlanWrong, ImplementationWrong, CheckMissing, SeparateCard, Question, Proceed}
 }
 
 // Describe is the one-line gloss of an intent, for the classifier's
@@ -106,6 +111,8 @@ func Describe(i Intent) string {
 		return "real, but not this card's work"
 	case Question:
 		return "a question about the card, not a complaint about it"
+	case Proceed:
+		return "go on — approve, advance, or run what this stop is offering; not a complaint"
 	}
 	return ""
 }
@@ -147,6 +154,11 @@ const (
 	// NewCard splits the sentence onto a card of its own and leaves this
 	// card exactly where it is. Confirms, because it mints something.
 	NewCard
+	// Advance crosses the stop's forward gate as the user — approve the
+	// artifact, advance to verify, land on main — the act the stop's own
+	// "go on" row performs, reached in words. Always confirms: it moves
+	// the card, and past verify it leaves it.
+	Advance
 )
 
 // String names an Action for log lines and test failure output.
@@ -160,6 +172,8 @@ func (a Action) String() string {
 		return "rewind"
 	case NewCard:
 		return "new-card"
+	case Advance:
+		return "advance"
 	default:
 		return "unknown"
 	}
@@ -192,6 +206,21 @@ type Input struct {
 	// Note is the sentence itself, verbatim. An empty one routes as a
 	// turn: there is nothing to carry and nothing to write.
 	Note string
+
+	// The stop's own forward answer, which is all Proceed may ever mean.
+	// The caller reads these off the answer set it is rendering, so a
+	// "go on" can only produce the act that set already offers — the
+	// confinement is by construction, not by a second table here.
+	//
+	// Forward is the stage the offered advance row leads to (StageDone
+	// for the landing), "" when the stop offers no advance. Rerun
+	// reports that the stop's forward act is a run of the current stage
+	// instead. Blocked names why the gate is held shut ("open comments",
+	// "undrafted sections", …) and "" when it is clear; a blocked gate
+	// answers Proceed with the blocker, never with a crossing.
+	Forward domain.Stage
+	Rerun   bool
+	Blocked string
 }
 
 // Outcome is Decide's answer. Reason is machine-readable and never
@@ -212,8 +241,9 @@ type Outcome struct {
 	// Note is the line to carry into whatever runs next.
 	Note string
 	// Confirm reports whether the caller must ask before performing
-	// this. A rewind and a new card confirm; a turn and an in-place
-	// re-run just go.
+	// this. Everything that moves the card or spends its credits
+	// confirms — a rewind, a re-run, an advance, a new card; only a
+	// turn just goes.
 	Confirm bool
 	Reason  string
 }
@@ -237,11 +267,16 @@ func Decide(in Input) Outcome {
 	if note == "" {
 		return Outcome{Reason: "no-note"}
 	}
-	if in.Stage == domain.StagePlan {
+	// Every complaint at the design stage is a turn — but "go on" is not
+	// a complaint, and at the design stage it is the approval the gate
+	// is waiting for, so it goes through the table like anywhere else.
+	if in.Stage == domain.StagePlan && in.Intent != Proceed {
 		return Outcome{Note: note, Reason: "design-stage-turn"}
 	}
 
 	switch in.Intent {
+	case Proceed:
+		return proceed(in, note)
 	case Question:
 		return Outcome{Note: note, Reason: "question"}
 	case SeparateCard:
@@ -252,7 +287,7 @@ func Decide(in Input) Outcome {
 		// At verify that is exactly the tight loop it should be: write
 		// the check, run the checks again.
 		return withEdit(in, note, Outcome{
-			Action: RerunInPlace, Target: in.Stage, Note: note, Reason: "check-missing",
+			Action: RerunInPlace, Target: in.Stage, Note: note, Confirm: true, Reason: "check-missing",
 		})
 	case RequirementMissing, PlanWrong:
 		return rewindTo(in, note, domain.StagePlan, string(in.Intent))
@@ -265,15 +300,34 @@ func Decide(in Input) Outcome {
 	return Outcome{Note: note, Reason: "unclassified"}
 }
 
+// proceed routes "go on" to the stop's own forward answer, and nowhere
+// else. It has no table of its own: Forward, Rerun and Blocked are what
+// the caller read off the answer set, so the outcome is the row that
+// set already shows, chosen in words. A blocked gate is answered with
+// the blocker — a turn, said back — because the crossing the reader
+// asked for is the one thing the stop cannot offer.
+func proceed(in Input, note string) Outcome {
+	switch {
+	case in.Blocked != "":
+		return Outcome{Note: note, Reason: "proceed-blocked"}
+	case in.Forward != "":
+		return Outcome{Action: Advance, Target: in.Forward, Note: note, Confirm: true, Reason: "proceed"}
+	case in.Rerun:
+		return Outcome{Action: RerunInPlace, Target: in.Stage, Note: note, Confirm: true, Reason: "proceed-rerun"}
+	}
+	return Outcome{Note: note, Reason: "proceed-nowhere"}
+}
+
 // rewindTo builds the outcome for an intent that names a target stage.
 // Landing on the stage the card is already in is an in-place re-run, not
-// a zero-length rewind: there is no transition to record and nothing to
-// confirm, and that is what makes implement's own "send it back" the
-// same act it was before this package existed.
+// a zero-length rewind: there is no transition to record. It still
+// confirms — a re-run starts a session that spends credits now, and
+// every spend asks (PROPOSAL-composer-router §9.2) — so implement's own
+// "send it back" now says what it is about to run before it runs it.
 func rewindTo(in Input, note string, target domain.Stage, reason string) Outcome {
 	if target == in.Stage {
 		return withEdit(in, note, Outcome{
-			Action: RerunInPlace, Target: target, Note: note, Reason: reason + "-in-place",
+			Action: RerunInPlace, Target: target, Note: note, Confirm: true, Reason: reason + "-in-place",
 		})
 	}
 	path, ok := rewindPath(in.Stage, target)

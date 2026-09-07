@@ -64,10 +64,18 @@ var intentRe = regexp.MustCompile(`(?im)^\s*INTENT:\s*` + "`?" + `([A-Za-z_ -]+)
 // The vocabulary is read from internal/reentry rather than written out
 // here, so the words the model is offered and the words the router
 // switches on cannot drift apart.
-func classifyPrompt(f domain.Feature, sentence string) string {
+func classifyPrompt(f domain.Feature, sentence, forward string) string {
 	var b strings.Builder
 	b.WriteString(classifyIntro + "\n\n")
-	fmt.Fprintf(&b, "The card is a %s, currently at the %s stage.\n\n", kindNoun(f.Kind), f.Stage)
+	fmt.Fprintf(&b, "The card is a %s, currently at the %s stage.\n", kindNoun(f.Kind), f.Stage)
+	if forward != "" {
+		// "go on" is judged against something concrete — the row the
+		// stop is actually offering — rather than against the bare word,
+		// so "ship it" at the verify gate is read as the landing that it
+		// is and not as a vague cheer.
+		fmt.Fprintf(&b, "Its forward answer — what \"go on\" means here — is: %s.\n", forward)
+	}
+	b.WriteString("\n")
 	b.WriteString("The kinds, exactly one of which is the answer:\n\n")
 	for _, i := range reentry.Vocabulary() {
 		fmt.Fprintf(&b, "- %s — %s\n", i, reentry.Describe(i))
@@ -103,7 +111,9 @@ func parseIntentReply(text string) (reentry.Intent, bool) {
 }
 
 // ClassifyReentry runs one cheap scribe-role pass over the card and
-// returns which kind of complaint a typed sentence is.
+// returns which kind of complaint a typed sentence is — or that it is
+// not a complaint but "go on". forward names what going on would do at
+// this stop (the label of its forward row), "" when it offers none.
 //
 // It is the only model call the re-entry makes, and it is deliberately
 // the smallest one available: the scribe tier is the cheap one-shot
@@ -117,11 +127,11 @@ func parseIntentReply(text string) (reentry.Intent, bool) {
 //     unreadable, and the caller sends it as a turn.
 //   - ("", err) — the turn could not run. The caller falls back to the
 //     route its own row declares; see ErrNoScribe.
-func (e *Engine) ClassifyReentry(ctx context.Context, f domain.Feature, sentence string) (reentry.Intent, error) {
+func (e *Engine) ClassifyReentry(ctx context.Context, f domain.Feature, sentence, forward string) (reentry.Intent, error) {
 	if strings.TrimSpace(sentence) == "" {
 		return "", nil
 	}
-	text, err := e.oneShot(ctx, f, classifyPrompt(f, sentence))
+	text, err := e.oneShot(ctx, f, classifyPrompt(f, sentence, forward))
 	if err != nil {
 		return "", err
 	}
