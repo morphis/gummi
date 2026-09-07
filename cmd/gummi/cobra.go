@@ -371,6 +371,7 @@ func bindResumeFlags(cmd *cobra.Command) {
 	f.String("request-changes", "", "send a caller design gate back with a note")
 	f.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)")
 	f.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)")
+	f.String("say", "", "read a line the way the card page would and report what it would do, as a `say` event, without acting")
 	f.String("gate-approval", driver.GateAttended, "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")

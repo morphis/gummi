@@ -339,6 +339,7 @@ main is still always yours.
 |---|---|
 | `gummi run [flags] "<description>"` | create and drive one feature to a verified branch |
 | `gummi resume <id\|ref> [--answer … \| --approve \| --request-changes …]` | apply a decision and drive on |
+| `gummi resume <id\|ref> --say "<line>"` | read a line the way the card page would and print what it would do (a `say` event), without acting |
 | `gummi status <id\|ref> [--json]` | read-only: stage, blockers, spend, branch state |
 | `gummi spec <id\|ref>` | read-only: the current spec/report markdown |
 | `gummi diff <id\|ref>` | read-only: the worktree diff |
@@ -400,6 +401,7 @@ Every `run`/`resume` ends on a typed exit the caller branches on:
 |---|---|---|
 | `0` | `done` | verified branch ready — report it, stop |
 | `0` | `stopped` | `--until` reached its clean stop — `resume --approve` to continue |
+| `0` | `said` | `--say` reported a reading and acted on nothing |
 | `2` | `question` | a delegated question or caller gate — `resume --answer`/`--approve`/`--request-changes` |
 | `3` | `blocked` | open `%%`/diff threads block a gate (resolve, or `resume --request-changes`), or an unmet dependency blocks coding-stage entry (`blocking_deps` on the event — wait for it to land, or edit the edge with `gummi deps rm`) |
 | `4` | `escalation` | a rerun/critique cap or unclear verdict — report to a human; resumable |

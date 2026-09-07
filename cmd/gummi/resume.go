@@ -36,8 +36,8 @@ func runResume(args []string) error {
 		return err
 	}
 
-	in, err := resumeInput(*rv.answer, *rv.approve, *rv.requestChanges, *rv.bounce, *rv.note,
-		isSet(fs, "answer"), isSet(fs, "request-changes"), isSet(fs, "note"))
+	in, err := resumeInput(*rv.answer, *rv.approve, *rv.requestChanges, *rv.bounce, *rv.note, *rv.say,
+		isSet(fs, "answer"), isSet(fs, "request-changes"), isSet(fs, "note"), isSet(fs, "say"))
 	if err != nil {
 		return err
 	}
@@ -91,6 +91,7 @@ func runResume(args []string) error {
 // grammar generator can enumerate the same set (see runFlagValues).
 type resumeFlagValues struct {
 	answer, requestChanges, note *string
+	say                          *string
 	gate, ref, until             *string
 	approve, autonomous, bounce  *bool
 	verbose                      *bool
@@ -108,6 +109,7 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
 		bounce:         fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's `b` key)"),
 		note:           fs.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)"),
+		say:            fs.String("say", "", "read a line the way the card page would and report what it would do, as a `say` event, without acting"),
 		gate:           fs.String("gate-approval", driver.GateAttended, "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)"),
 		timeout:        fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
 		autonomous:     fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
@@ -124,11 +126,16 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 // the driver can reject cleanly rather than silently re-running. --note
 // only composes with --bounce; on its own it is a usage error, not a silent
 // no-op.
-func resumeInput(answer string, approve bool, requestChanges string, bounce bool, note string,
-	answerSet, changesSet, noteSet bool,
+func resumeInput(answer string, approve bool, requestChanges string, bounce bool, note, say string,
+	answerSet, changesSet, noteSet, saySet bool,
 ) (driver.ResumeInput, error) {
 	n := 0
 	var in driver.ResumeInput
+	if saySet {
+		n++
+		sy := say
+		in = driver.ResumeInput{Say: &sy}
+	}
 	if answerSet {
 		n++
 		a := answer
@@ -149,7 +156,7 @@ func resumeInput(answer string, approve bool, requestChanges string, bounce bool
 		in = driver.ResumeInput{Bounce: &nt}
 	}
 	if n > 1 {
-		return driver.ResumeInput{}, fmt.Errorf("give at most one of --answer, --approve, --request-changes, --bounce")
+		return driver.ResumeInput{}, fmt.Errorf("give at most one of --answer, --approve, --request-changes, --bounce, --say")
 	}
 	if noteSet && !bounce {
 		return driver.ResumeInput{}, fmt.Errorf("--note only applies with --bounce")

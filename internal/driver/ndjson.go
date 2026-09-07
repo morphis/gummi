@@ -64,6 +64,28 @@ type resumedEvent struct {
 // envelopeRaisedEvent reports a `resume --envelope N` top-up: the feature's
 // credit budget went From→To before the parked stage re-ran. Emitted only
 // when the new envelope actually exceeds the old one (a no-op raise is silent).
+// sayEvent is --say's whole answer: what the reader made of the line and
+// what the card would have done with it. Reader is false when no scribe
+// backend was configured, in which case the act is a bare resume's.
+type sayEvent struct {
+	Event    string   `json:"event"`
+	ID       string   `json:"id"`
+	Line     string   `json:"line"`
+	Reader   bool     `json:"reader"`
+	Intent   string   `json:"intent,omitempty"`
+	Action   string   `json:"action"`
+	Target   string   `json:"target,omitempty"`
+	Path     []string `json:"path,omitempty"`
+	Edit     *sayEdit `json:"edit,omitempty"`
+	Confirms bool     `json:"confirms"`
+	Reason   string   `json:"reason"`
+}
+
+type sayEdit struct {
+	Section string `json:"section"`
+	Text    string `json:"text"`
+}
+
 type envelopeRaisedEvent struct {
 	Event string `json:"event"`
 	ID    string `json:"id"`

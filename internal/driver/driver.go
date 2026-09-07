@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morphis/gummi/internal/reentry"
+
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -203,6 +205,12 @@ type ResumeInput struct {
 	Approve        bool
 	RequestChanges *string
 	Bounce         *string
+	// Say runs the composer's reader over a line and reports what the
+	// card would do with it — intent, act, target, artifact edit, and
+	// whether it would wait for a confirm — as one `say` event, then
+	// stops without acting. It is how a script sees a reading without a
+	// screen to read a chip off; the explicit flags stay the way to act.
+	Say *string
 }
 
 // Resume rehydrates the engine's persisted sessions, applies the caller's
@@ -242,6 +250,10 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 
 	// the correlation line first, so a resume's stream is self-identifying.
 	d.out.emit(resumedEvent{Event: "resumed", ID: string(id), Ref: d.opts.Ref, Stage: string(f.Stage)})
+
+	if in.Say != nil {
+		return d.say(ctx, f, *in.Say)
+	}
 
 	// --answer resolves a delegated ask_user question, and the durable
 	// decision is the record of one being open. Before decisions were
@@ -2094,4 +2106,64 @@ func (d *Driver) resumeCritiqueLoop(ctx context.Context, f domain.Feature) (Outc
 		}
 	}
 	return Outcome{}, false, nil
+}
+
+// say reads a line the way the card page's composer would and reports
+// the reading without acting on it.
+//
+// What "go on" may mean is read off the card the way the TUI reads it
+// off the answer set — from the stop the card is parked at: a gate or a
+// verify checkpoint offers the crossing, anything else re-runs the
+// parked stage, and an open spec or diff thread (or an unmet
+// dependency) blocks the crossing outright. No reader configured is not
+// an error: the event says so, and the act reported is the one a bare
+// resume would take.
+func (d *Driver) say(ctx context.Context, f domain.Feature, line string) (Outcome, error) {
+	in := reentry.Input{Stage: f.Stage, Kind: f.Kind, Note: line}
+	forwardLabel := ""
+	if open := d.newestOpenDecision(ctx, f.ID); open != nil && (open.Kind == state.DecisionKindGate || open.Kind == state.DecisionKindVerify) {
+		if next := workflow.Next(f.Stage); len(next) > 0 {
+			in.Forward = next[0]
+			forwardLabel = "advance to " + string(next[0])
+			if next[0] == domain.StageDone {
+				forwardLabel = "land on main"
+			}
+		}
+	} else if !workflow.Terminal(f.Stage) {
+		in.Rerun = true
+		forwardLabel = "run " + string(f.Stage)
+	}
+	if specOpen, diffOpen, deps, err := d.eng.GateBlockers(ctx, f.ID); err == nil {
+		switch {
+		case specOpen > 0:
+			in.Blocked = "open comments"
+		case diffOpen > 0:
+			in.Blocked = "open diff comments"
+		case len(deps) > 0:
+			in.Blocked = "unmet dependencies"
+		}
+	}
+	ev := sayEvent{Event: "say", ID: string(f.ID), Line: line, Reader: true}
+	intent, err := d.eng.ClassifyReentry(ctx, f, line, forwardLabel)
+	switch {
+	case errors.Is(err, engine.ErrNoScribe):
+		ev.Reader = false
+	case err != nil:
+		return d.fail(ctx, string(f.ID), err)
+	}
+	in.Intent = intent
+	out := reentry.Decide(in)
+	ev.Intent = string(intent)
+	ev.Action = out.Action.String()
+	ev.Target = string(out.Target)
+	for _, st := range out.Path {
+		ev.Path = append(ev.Path, string(st))
+	}
+	if !out.Edit.Empty() {
+		ev.Edit = &sayEdit{Section: out.Edit.Section, Text: out.Edit.Text}
+	}
+	ev.Confirms = out.Confirm
+	ev.Reason = out.Reason
+	d.out.emit(ev)
+	return Outcome{Status: StatusSaid, ID: string(f.ID)}, nil
 }

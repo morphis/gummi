@@ -10,7 +10,7 @@ import (
 // needs no new CLI plumbing, only the driver-side dispatch on kind+stage
 // (internal/driver/decompose_test.go covers that dispatch end-to-end).
 func TestResumeDoneRSDispatchesDecompose(t *testing.T) {
-	in, err := resumeInput("", true, "", false, "", false, false, false)
+	in, err := resumeInput("", true, "", false, "", "", false, false, false, false)
 	if err != nil {
 		t.Fatalf("--approve: %v", err)
 	}
@@ -19,7 +19,7 @@ func TestResumeDoneRSDispatchesDecompose(t *testing.T) {
 	}
 
 	note := "tighten the second slice's scope"
-	in, err = resumeInput("", false, note, false, "", false, true, false)
+	in, err = resumeInput("", false, note, false, "", "", false, true, false, false)
 	if err != nil {
 		t.Fatalf("--request-changes: %v", err)
 	}

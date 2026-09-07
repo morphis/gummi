@@ -97,6 +97,7 @@ gummi resume <id|ref> [decision]
     --note string             addendum to the reborn stage's kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
     --request-changes string  send a caller design gate back with a note
+    --say string              read a line the way the card page would and report what it would do, as a say event, without acting
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
     --until string            stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)
     --verbose                 add per-tool-call activity lines to the stream

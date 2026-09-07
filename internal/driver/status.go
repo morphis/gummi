@@ -44,6 +44,9 @@ const (
 	// design gate. A clean, resumable halt — exit 0, distinguished from done
 	// only by the event name.
 	StatusStopped Status = "stopped"
+	// StatusSaid: --say reported what a line would do and stopped without
+	// acting. Exit 0: nothing happened, and that was the point.
+	StatusSaid Status = "said"
 )
 
 // ExitCode is the process exit status for a terminal Status. done is 0;
@@ -51,7 +54,7 @@ const (
 // codes so a caller can branch on them.
 func (s Status) ExitCode() int {
 	switch s {
-	case StatusDone, StatusStopped:
+	case StatusDone, StatusStopped, StatusSaid:
 		return 0
 	case StatusError:
 		return 1
