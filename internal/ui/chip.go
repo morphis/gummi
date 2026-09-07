@@ -276,8 +276,12 @@ func (m *Shell) chipKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.takeReading(r), true
 	case "esc":
 		// the take-it-back gesture, and it never leaves the page: the
-		// line goes where a bare composer would have sent it
+		// line goes where a bare composer would have sent it — and that
+		// starts a conversation the next line continues (chat.go)
 		m.reentryPending = nil
+		if s := m.sessionFor(r.F.ID); s == nil || !s.Live() {
+			m.startChat(r.F.ID)
+		}
 		return m.sendThreadMessage(r.F, p.line), true
 	case "up", "down", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		// the picker is not on screen, so its keys do nothing rather than

@@ -379,11 +379,16 @@ type Shell struct {
 	// line back (chip.go). Nil when no chip is up. Withdrawn by esc, by
 	// any edit to the composer, and by the card moving under it.
 	reentryPending *reentryReading
-	roundStore     rounds.Store     // persistence seam for rounds (defaults to store)
-	profileNames   []string         // profile names for the new-feature form
-	repoNames      []string         // configured managed-repo names for the new-card forms
-	envelope       int              // default spend-plan envelope for new features (0 = none)
-	notifier       *notify.Notifier // bell/desktop hook for needs-attention events
+	// chatting marks a card whose thread's newest exchange is a consult
+	// answer: a line typed next continues that conversation and is not
+	// read again (chat.go). Ended by a row picked, a verb, the card
+	// moving, or leaving the page.
+	chatting     map[domain.FeatureID]bool
+	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
+	profileNames []string         // profile names for the new-feature form
+	repoNames    []string         // configured managed-repo names for the new-card forms
+	envelope     int              // default spend-plan envelope for new features (0 = none)
+	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
 
 	// Copilot quota hint (copilotquota.go): the latest reading shown as
 	// a status-bar pill, its enable flag, and the gh seam for tests.

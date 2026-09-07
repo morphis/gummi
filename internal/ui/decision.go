@@ -463,8 +463,10 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionKey = d.key
 		m.decisionCursor = 0
 		m.decisionPicked = map[int]bool{}
-		// a reading was of a stop that is gone — the card moved under it
+		// a reading was of a stop that is gone — the card moved under it,
+		// and so has the conversation the stop was in
 		m.reentryPending = nil
+		m.chatting = nil
 		m.decisionAimed = false
 		// a different question invalidates the armed free-form channel —
 		// it belonged to the answer that is gone
@@ -854,6 +856,7 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 	}
 	action := d.actions[m.decisionCursor]
 	m.clearTransientNotice()
+	m.endChat(r.F.ID) // a row picked is the way out of a conversation
 	return m.runCardAction(cardAction{
 		id: action.id, key: action.key, label: action.label,
 		why: action.detail, danger: action.danger,

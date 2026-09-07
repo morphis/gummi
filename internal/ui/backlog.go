@@ -51,6 +51,9 @@ func (m *Shell) openCard() tea.Cmd {
 // (F5) — "leaving hides, never discards" applies to the draft too, just
 // scoped to the card that owns it rather than to the shared widget.
 func (m *Shell) closeCard() {
+	if r, ok := m.selected(); ok {
+		m.endChat(r.F.ID)
+	}
 	m.clearTransientNotice()
 	if r, ok := m.selected(); ok {
 		m.saveThreadDraft(r.F.ID)

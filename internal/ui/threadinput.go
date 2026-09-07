@@ -499,6 +499,24 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 				m.decisionCursor = i
 				fallback = d.actions[i].id
 			}
+			// A conversation in progress stays one (chat.go): no read,
+			// unless the line leads with a vocabulary word asking for a
+			// move — then the word is the reading and the rest is read.
+			if m.inChat(r.F.ID) {
+				intent, rest, exit := chatExit(text)
+				switch {
+				case !exit:
+					return m.sendThreadMessage(r.F, text)
+				case intent == "":
+					return m.routeReentry(r, fallback, rest)
+				default:
+					note := rest
+					if note == "" {
+						note = text
+					}
+					return m.applyReentry(reentryClassifiedMsg{f: r.F, note: note, fallback: fallback, intent: intent})
+				}
+			}
 			return m.routeReentry(r, fallback, text)
 		}
 		// a command keeps the parser, always.
@@ -530,8 +548,10 @@ func (m *Shell) submitThreadInput(r featureRow) tea.Cmd {
 	parsed := parseInput(text)
 	switch parsed.Kind {
 	case verbMenu:
+		m.endChat(r.F.ID)
 		return m.openCommandMenu(parsed.Remainder)
 	case verbCommand:
+		m.endChat(r.F.ID)
 		// ON SCREEN = ACTIONABLE. A verb naming an option the card is
 		// actually offering fires; every other verb degrades to the menu
 		// with itself typed into the filter, one enter from running.
