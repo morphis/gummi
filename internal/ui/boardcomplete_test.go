@@ -3,6 +3,7 @@ package ui
 import (
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -702,5 +703,158 @@ func TestBoardEnterOnHighlightedNeedsValueRowCompletesThatRow(t *testing.T) {
 	}
 	if m.boardComplete == nil || !m.boardComplete.value {
 		t.Error("enter completed the word but did not open the value tier behind it")
+	}
+}
+
+// TestBoardClearOfferedByPopup: the conversation-scoped /clear is a
+// first-class member of the vocabulary the popup offers — narrowable
+// with a prefix, described, and drawn into the tab like any other row.
+func TestBoardClearOfferedByPopup(t *testing.T) {
+	m := boardTabWithSlash(t)
+	m = typeString(t, m, "cl")
+
+	var got []string
+	for _, r := range m.boardComplete.rows {
+		got = append(got, r.name)
+	}
+	if strings.Join(got, ",") != "clear" {
+		t.Fatalf("rows for %q = %v, want [clear]", m.boardInput.Value(), got)
+	}
+	row := m.boardComplete.rows[0]
+	if row.id != "board-clear" {
+		t.Errorf("row id = %q, want board-clear", row.id)
+	}
+	if row.desc != "start a fresh conversation" {
+		t.Errorf("row desc = %q, want the words the keybar already spends on it", row.desc)
+	}
+	if row.needsValue {
+		t.Error("clear is marked needsValue — no value tier may open behind it")
+	}
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "/clear") || !strings.Contains(view, "start a fresh conversation") {
+		t.Errorf("the clear row is not drawn into the tab:\n%s", view)
+	}
+}
+
+// TestBoardClearFromPopupRow: enter on the popup's clear row RUNS the
+// clear — never a word-completion — exactly like every other
+// no-argument row: the old session is closed, a fresh one opens, the
+// transcript and its context and spend are gone, the composer is reset,
+// and the line never reaches the backend.
+func TestBoardClearFromPopupRow(t *testing.T) {
+	ag := agent.NewFake("hello from the board")
+	// a Responder, so the test can say what the backend was actually
+	// asked — the same spy TestBoardClearStartsAFreshSession keeps.
+	var mu sync.Mutex
+	var sent []string
+	ag.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		sent = append(sent, msg)
+		mu.Unlock()
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "hello from the board"},
+			{Kind: agent.EventIdle},
+		}
+	}
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+	first := m.board
+
+	m = typeString(t, m, "what's on the board?")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+
+	m = typeString(t, m, "/cl")
+	if m.boardComplete == nil {
+		t.Fatal(`"/cl" did not offer the clear row`)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.board == nil {
+		t.Fatalf("clear left no session open: boardErr = %q", m.boardErr)
+	}
+	if m.board == first {
+		t.Fatal("enter on the row kept the same session — its context and spend would have survived")
+	}
+	if n := len(m.board.Snapshot().Transcript); n != 0 {
+		t.Fatalf("the fresh session already carries %d transcript entries", n)
+	}
+	if got := m.boardInput.Value(); got != "" {
+		t.Errorf("composer = %q, want it reset", got)
+	}
+	if strings.Contains(ansi.Strip(m.View().Content), "hello from the board") {
+		t.Error("the cleared transcript is still on screen")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 || sent[0] != "what's on the board?" {
+		t.Errorf("the backend was sent %q, want only the one real turn", sent)
+	}
+}
+
+// TestBoardClearTypedCaseInsensitive: with the popup dismissed, enter
+// still claims the word the way the literal matcher did — any casing ("a
+// command typed from muscle memory is not a place to be strict about a
+// shift key") and with leading whitespace, which the popup itself stays
+// column-one-strict about.
+func TestBoardClearTypedCaseInsensitive(t *testing.T) {
+	ag := agent.NewFake("hello from the board")
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+	first := m.board
+
+	m = typeString(t, m, "what's on the board?")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+
+	m = typeString(t, m, "/CLEAR")
+	if m.boardComplete == nil {
+		t.Fatal(`"/CLEAR" was not offered by the popup before the dismissal`)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.boardComplete != nil {
+		t.Fatal("esc did not dismiss the popup")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.board == nil || m.board == first {
+		t.Fatalf("/CLEAR did not start a fresh session: boardErr = %q", m.boardErr)
+	}
+	if n := len(m.board.Snapshot().Transcript); n != 0 {
+		t.Error("the fresh session inherited the old transcript")
+	}
+
+	second := m.board
+	m = typeString(t, m, " /clear")
+	if m.boardComplete != nil {
+		t.Fatal(`the popup stays column-one-strict: " /clear" must earn no completion help`)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.board == nil || m.board == second {
+		t.Fatal("a leading-space /clear did not clear")
+	}
+	if got := m.boardInput.Value(); got != "" {
+		t.Errorf("composer = %q, want it reset", got)
+	}
+}
+
+// TestBoardClearWordPrefixStaysAMessage: the whole-word guard. "clearing"
+// is not the command word — exact match, never a prefix — so the line
+// stays the prose this tab has always promised every unclaimed line is.
+func TestBoardClearWordPrefixStaysAMessage(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("on it"))
+	m = openBoardTab(t, m)
+	first := m.board
+
+	const line = "/clearing the deck"
+	m = typeString(t, m, line)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+
+	if m.board != first {
+		t.Fatal("a line whose word merely starts like the command closed the session")
+	}
+	if !strings.Contains(ansi.Strip(m.View().Content), line) {
+		t.Error("the line was not sent as a message")
 	}
 }

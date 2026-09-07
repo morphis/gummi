@@ -410,15 +410,18 @@ func (m *Shell) boardOutputsBinding() binding {
 // reached by the model deciding to call them, never by gummi parsing the
 // user's words for a verb the way the card thread does.
 //
-// The one line it answers itself is "/clear", and that is not the verb
-// vocabulary coming back through a side door: a verb acts on a card,
-// while /clear acts on the conversation the composer is standing in —
-// the same category as esc's interrupt above, which this surface
-// already takes for itself. Nothing else beginning with a slash is
-// claimed. A message can honestly open with a path ("/etc/hosts is
-// stale, fix it"), and a board conversation is exactly where such a
-// line gets typed, so an unrecognised slash line is sent rather than
-// refused as a mistyped command.
+// The one command it answers that belongs to no card and no workspace
+// is "/clear", and that is not the verb vocabulary coming back through
+// a side door: a verb acts on a card, while /clear acts on the
+// conversation the composer is standing in — the same category as esc's
+// interrupt above, which this surface already takes for itself. Enter
+// dispatches the trimmed line through runTypedBoardCommand
+// (boardcomplete.go), whose vocabulary is the popup's own: the space
+// menu's named entries plus this conversation's /clear, matched
+// whole-word and case-insensitively. A message can honestly open with a
+// path ("/etc/hosts is stale, fix it"), and a board conversation is
+// exactly where such a line gets typed, so an unrecognised slash line
+// is sent rather than refused as a mistyped command.
 func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	// The completion popup is answered first, and only for the keys it
 	// actually claims (boardcomplete.go). It sits above this switch
@@ -447,15 +450,19 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		// itself, before this surface replaced it.
 		return m.interruptBoardSession()
 	case "enter":
-		text := m.boardInput.Value()
-		if strings.TrimSpace(text) == "" {
+		// Trimmed once, up front, and every branch below takes that same
+		// string: the dispatcher matches the line it is given, and
+		// completeSlash only recognizes a "/" in column one, so an
+		// untrimmed " /clear" would fall through every command check and
+		// reach the agent as a message — the exact line the literal
+		// matcher used to clear before this became a plain vocabulary
+		// word. The send below taking the same string keeps unclaimed
+		// prose byte-identical; trimming before matching is the idiom the
+		// card thread's parser already sets (verbs.go parseInput trims
+		// first).
+		text := strings.TrimSpace(m.boardInput.Value())
+		if text == "" {
 			return nil
-		}
-		// /clear is not one of globalCommands, so runTypedBoardCommand
-		// below never claims it — it has to be matched literally, before
-		// the command dispatcher gets a look.
-		if isBoardClear(text) {
-			return m.clearBoardConversation()
 		}
 		// The popup is already closed here (handleBoardCompletionKey above
 		// claims enter for as long as one is open), which is exactly the
@@ -469,7 +476,7 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			return cmd
 		}
 		m.boardScroll = 0 // jump to the latest on send, as the card thread does
-		return m.sendBoardMessage(strings.TrimSpace(text))
+		return m.sendBoardMessage(text)
 	}
 	var cmd tea.Cmd
 	m.boardInput, cmd = m.boardInput.Update(msg)
@@ -497,22 +504,15 @@ func (m *Shell) interruptBoardSession() tea.Cmd {
 	}
 }
 
-// boardClearCommand is the whole of the board composer's command
-// vocabulary: one line, typed rather than bound to a key, because it is
-// the line a person arriving from a hosted CLI already has in their
-// fingers — the agent tab used to BE that CLI (agenttab.go), and /clear
-// is what it answered there.
+// boardClearCommand is the board conversation's command word: typed
+// rather than bound to a key, because it is the line a person arriving
+// from a hosted CLI already has in their fingers — the agent tab used
+// to BE that CLI (agenttab.go), and /clear is what it answered there.
+// It is spelled here for the keybar row that names it (keymap.go); the
+// running of it lives with the rest of the vocabulary, in the board
+// command dispatcher (boardcomplete.go), which claims the word
+// whole-line, case-insensitively, and never with an argument.
 const boardClearCommand = "/clear"
-
-// isBoardClear reports whether a composed line is that command. The
-// match is against the whole trimmed line, so "/clear the verify
-// backlog" stays an ordinary message aimed at the board's tools rather
-// than being read as a command with an argument it has no use for;
-// EqualFold, because a command typed from muscle memory is not a place
-// to be strict about a shift key.
-func isBoardClear(line string) bool {
-	return strings.EqualFold(strings.TrimSpace(line), boardClearCommand)
-}
 
 // clearBoardConversation drops the board conversation and starts a fresh
 // one: the transcript, the context window it accumulated and the spend

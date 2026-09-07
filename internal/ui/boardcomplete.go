@@ -21,18 +21,31 @@ import (
 // inventory the space menu has carried all along (globalCommands): "new
 // feature", "the inbox", "import bugs from GitHub" are workspace
 // actions, they belong to this tab as much as to the dashboard, and the
-// only way to reach them from here was to leave the tab. So the slash
-// vocabulary here is exactly that menu and nothing else — one inventory,
-// two presentations, which is the same rule submitThreadInput settled on
-// for the card thread after the two-vocabularies bug.
+// only way to reach them from here was to leave the tab. So the command
+// tier here has two sources: the space menu's named entries — one
+// inventory, two presentations, the same rule submitThreadInput settled
+// on for the card thread after the two-vocabularies bug — plus the one
+// conversation-scoped command this tab answers itself: /clear acts on
+// the conversation the composer stands in, not on the workspace, so the
+// menu (openable from every tab) never learns it (boardCommandRows).
 //
 // Anything that is not a command line stays a message, unchanged. A "/"
 // mid-sentence, a pasted path, a word that matches no command: all prose,
 // all sent, because that is what this tab promised and completion is not
 // a reason to start refusing lines it used to accept.
 
-// boardCommandRows is the command tier's source: the board-level entries
-// of the space menu that have a slash name.
+// boardCommandRows is the command tier's source, in two parts: the
+// board-level entries of the space menu that have a slash name, plus the
+// tab's own conversation-scoped /clear appended after them.
+//
+// The appended row is a deliberate exception to "the popup's rows are
+// the menu's rows", made here where the rows are built so it reads as a
+// decision rather than an oversight: /clear acts on the conversation the
+// composer is standing in — the same category as esc's interrupt — while
+// everything above it acts on the workspace. The space menu is openable
+// from every tab, so a row there would offer clearing a conversation it
+// cannot show; it never learns this one, exactly as the split below
+// keeps the card-scoped verbs out of here.
 //
 // The name filter is what keeps the card-scoped entries out.
 // globalCommands appends the selected card's whole action inventory when
@@ -57,6 +70,20 @@ func (m *Shell) boardCommandRows() []completionRow {
 			needsValue: boardCommandNeedsValue(c.id),
 		})
 	}
+	// The conversation-scoped command, last: the workspace rows keep
+	// their order and their places, and this one reads after them — the
+	// same tier the buried profile and model rows already occupy, with
+	// prefix narrowing ("c", "cl") doing the surfacing. Clearing is
+	// always safe to offer: it answers a missing session and an
+	// opening-in-flight itself (clearBoardConversation), so available is
+	// unconditional, and it takes no argument, so needsValue stays false
+	// and no value tier ever opens behind it.
+	out = append(out, completionRow{
+		name:      "clear",
+		desc:      "start a fresh conversation",
+		id:        "board-clear",
+		available: true,
+	})
 	return out
 }
 
@@ -377,7 +404,9 @@ func (m *Shell) runBoardCompletion(row completionRow) tea.Cmd {
 // by typing the whole line and pressing enter with no popup open
 // (runTypedBoardCommand). Every command in globalCommands still ignores
 // arg and falls through to runCommand(id) except the two that were the
-// reason arg was wired through in the first place.
+// reason arg was wired through in the first place — and board-clear,
+// which belongs to no menu (boardCommandRows) and routes to the tab's
+// own clear action.
 func (m *Shell) runBoardCommand(id, arg string) tea.Cmd {
 	switch id {
 	case "board-profile":
@@ -386,6 +415,8 @@ func (m *Shell) runBoardCommand(id, arg string) tea.Cmd {
 		return m.runBoardModelCommand(arg)
 	case "agent-cli":
 		return m.runBoardAgentCommand(arg)
+	case "board-clear":
+		return m.clearBoardConversation()
 	}
 	return m.runCommand(id)
 }
