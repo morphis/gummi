@@ -141,6 +141,11 @@ func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
 		return nil
 	}
 	m.threadInput.Reset()
+	// the "reading…" notice was about a read that is over; a turn has
+	// nothing to say in the bar beyond what the thread is about to show
+	if out.Reason != "unclassified" {
+		m.clearTransientNotice()
+	}
 	// a turn with nobody live goes to the consult conversation, and the
 	// next line continues it rather than being read again (chat.go)
 	if s := m.sessionFor(r.F.ID); s == nil || !s.Live() {

@@ -198,9 +198,14 @@ func chipDetails(r featureRow, p *reentryReading) []string {
 		// exactly the cards a reader trusts least: on autopilot the
 		// design gate crosses itself, so the "stops for you" a reader
 		// expects from a rewind never happens (§9.4).
-		if f.GateApproval != "" && f.GateApproval != domain.GateAttended {
+		switch {
+		case f.GateApproval != "" && f.GateApproval != domain.GateAttended && !out.Edit.Empty():
+			// the open comment the rewind writes holds the gate until the
+			// architect resolves it; only then does autopilot cross
+			d = append(d, "Autopilot is on: once your comment is resolved the design gate crosses itself and implement runs straight away — /autopilot off first if you want to read the plan.")
+		case f.GateApproval != "" && f.GateApproval != domain.GateAttended:
 			d = append(d, "Autopilot is on: the design gate crosses itself and implement runs straight away — /autopilot off first if you want to read the plan.")
-		} else {
+		default:
 			d = append(d, "The design gate stops for you before implement runs again.")
 		}
 	}
