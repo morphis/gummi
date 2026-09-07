@@ -1,0 +1,319 @@
+package reentry
+
+import (
+	"reflect"
+	"testing"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflow"
+)
+
+const note = "the persistence step was never in the spec"
+
+// This table is the rule set's single specification: one row per route,
+// plus the boundaries that make the routes safe. Read it top to bottom
+// as the spec. Nothing here constructs a store, a session or an agent —
+// that is the property the package exists to have, and a test that
+// needed one would mean Decide had stopped being pure.
+func TestDecide(t *testing.T) {
+	tests := []struct {
+		name string
+		in   Input
+		want Outcome
+	}{
+		// --- the floor ------------------------------------------------
+		{
+			name: "an empty line routes nowhere",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: PlanWrong, Note: "   "},
+			want: Outcome{Reason: "no-note"},
+		},
+		{
+			name: "a sentence nothing classified is a turn, never an invented move",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: "", Note: note},
+			want: Outcome{Note: note, Reason: "unclassified"},
+		},
+		{
+			name: "a word outside the vocabulary is a turn too",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: Intent("rewrite_everything"), Note: note},
+			want: Outcome{Note: note, Reason: "unclassified"},
+		},
+		{
+			name: "a question is answered, not routed",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: Question, Note: note},
+			want: Outcome{Note: note, Reason: "question"},
+		},
+
+		// --- the design stage -----------------------------------------
+		{
+			name: "at plan every sentence is a turn — the architect is in this thread",
+			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: PlanWrong, Note: note},
+			want: Outcome{Note: note, Reason: "design-stage-turn"},
+		},
+		{
+			name: "at plan even a missing requirement is a turn",
+			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: RequirementMissing, Note: note},
+			want: Outcome{Note: note, Reason: "design-stage-turn"},
+		},
+
+		// --- rewinds from verify --------------------------------------
+		{
+			name: "verify + missing requirement walks back to plan through implement",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: RequirementMissing, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StagePlan,
+				Path:    []domain.Stage{domain.StageImplement, domain.StagePlan},
+				Edit:    Edit{Section: "Problem", Text: note},
+				Note:    note,
+				Confirm: true, Reason: "requirement_missing",
+			},
+		},
+		{
+			name: "verify + wrong plan lands in the chosen-approach section",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: PlanWrong, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StagePlan,
+				Path:    []domain.Stage{domain.StageImplement, domain.StagePlan},
+				Edit:    Edit{Section: "Chosen approach", Text: note},
+				Note:    note,
+				Confirm: true, Reason: "plan_wrong",
+			},
+		},
+		{
+			name: "verify + wrong implementation is one edge, and writes nothing — the artifact is right",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: ImplementationWrong, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StageImplement,
+				Path:    []domain.Stage{domain.StageImplement},
+				Note:    note,
+				Confirm: true, Reason: "implementation_wrong",
+			},
+		},
+
+		// --- rewinds from implement -----------------------------------
+		{
+			name: "implement + missing requirement is one edge back to plan",
+			in:   Input{Stage: domain.StageImplement, Kind: domain.KindFeature, Intent: RequirementMissing, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StagePlan,
+				Path:    []domain.Stage{domain.StagePlan},
+				Edit:    Edit{Section: "Problem", Text: note},
+				Note:    note,
+				Confirm: true, Reason: "requirement_missing",
+			},
+		},
+		{
+			name: "implement + wrong implementation re-runs in place and never confirms",
+			in:   Input{Stage: domain.StageImplement, Kind: domain.KindFeature, Intent: ImplementationWrong, Note: note},
+			want: Outcome{
+				Action: RerunInPlace, Target: domain.StageImplement,
+				Note: note, Reason: "implementation_wrong-in-place",
+			},
+		},
+
+		// --- the verification plan ------------------------------------
+		{
+			name: "a missing check is an edit plus a re-run in place, never a rewind",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: CheckMissing, Note: note},
+			want: Outcome{
+				Action: RerunInPlace, Target: domain.StageVerify,
+				Edit: Edit{Section: "Verification plan", Text: note},
+				Note: note, Reason: "check-missing",
+			},
+		},
+		{
+			name: "a bug's checks live under its own heading",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindBug, Intent: CheckMissing, Note: note},
+			want: Outcome{
+				Action: RerunInPlace, Target: domain.StageVerify,
+				Edit: Edit{Section: "Verification", Text: note},
+				Note: note, Reason: "check-missing",
+			},
+		},
+		{
+			name: "research has no verification section, so the route degrades to a turn",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindResearch, Intent: CheckMissing, Note: note},
+			want: Outcome{Note: note, Reason: "check-missing-no-section"},
+		},
+
+		// --- the other kinds' headings --------------------------------
+		{
+			name: "a bug's missing requirement lands under Summary",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindBug, Intent: RequirementMissing, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StagePlan,
+				Path:    []domain.Stage{domain.StageImplement, domain.StagePlan},
+				Edit:    Edit{Section: "Summary", Text: note},
+				Note:    note,
+				Confirm: true, Reason: "requirement_missing",
+			},
+		},
+		{
+			name: "a bug's wrong plan lands under Root cause",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindBug, Intent: PlanWrong, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StagePlan,
+				Path:    []domain.Stage{domain.StageImplement, domain.StagePlan},
+				Edit:    Edit{Section: "Root cause", Text: note},
+				Note:    note,
+				Confirm: true, Reason: "plan_wrong",
+			},
+		},
+		{
+			name: "a research card's wrong plan lands under Direction",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindResearch, Intent: PlanWrong, Note: note},
+			want: Outcome{
+				Action: Rewind, Target: domain.StagePlan,
+				Path:    []domain.Stage{domain.StageImplement, domain.StagePlan},
+				Edit:    Edit{Section: "Direction", Text: note},
+				Note:    note,
+				Confirm: true, Reason: "plan_wrong",
+			},
+		},
+
+		// --- unreachable targets --------------------------------------
+		{
+			name: "todo has no rerun edge, so nothing rewinds out of it",
+			in:   Input{Stage: domain.StageTodo, Kind: domain.KindFeature, Intent: PlanWrong, Note: note},
+			want: Outcome{Note: note, Reason: "plan_wrong-unreachable"},
+		},
+		{
+			name: "a missing check found at implement re-runs implement, not verify — nothing rewinds forward",
+			in:   Input{Stage: domain.StageImplement, Kind: domain.KindFeature, Intent: CheckMissing, Note: note},
+			want: Outcome{
+				Action: RerunInPlace, Target: domain.StageImplement,
+				Edit: Edit{Section: "Verification plan", Text: note},
+				Note: note, Reason: "check-missing",
+			},
+		},
+		{
+			name: "a done card has no edge to walk",
+			in:   Input{Stage: domain.StageDone, Kind: domain.KindFeature, Intent: ImplementationWrong, Note: note},
+			want: Outcome{Note: note, Reason: "implementation_wrong-unreachable"},
+		},
+
+		// --- the split ------------------------------------------------
+		{
+			name: "a separate card leaves this one where it is, and confirms",
+			in:   Input{Stage: domain.StageVerify, Kind: domain.KindFeature, Intent: SeparateCard, Note: note},
+			want: Outcome{Action: NewCard, Note: note, Confirm: true, Reason: "separate-card"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Decide(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Decide(%+v)\n got %+v\nwant %+v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// Every rewind the table can produce must be walkable on the real graph,
+// edge by edge — the property that makes it impossible for a
+// classification to invent a transition. Asserted against
+// workflow.CanTransition rather than against the path builder, so a
+// future graph change that drops a rerun edge fails here rather than
+// at runtime.
+func TestRewindsTakeOnlyLegalEdges(t *testing.T) {
+	stages := []domain.Stage{domain.StageTodo, domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone}
+	kinds := []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch}
+	for _, stage := range stages {
+		for _, kind := range kinds {
+			for _, intent := range Vocabulary() {
+				out := Decide(Input{Stage: stage, Kind: kind, Intent: intent, Note: note})
+				if out.Action != Rewind {
+					if len(out.Path) != 0 {
+						t.Errorf("%s/%s/%s: %s carries a path %v", stage, kind, intent, out.Action, out.Path)
+					}
+					continue
+				}
+				from := stage
+				for _, to := range out.Path {
+					if err := workflow.CanTransition(from, to); err != nil {
+						t.Errorf("%s/%s/%s: rewind path %v takes an illegal edge: %v", stage, kind, intent, out.Path, err)
+					}
+					from = to
+				}
+				if from != out.Target {
+					t.Errorf("%s/%s/%s: path %v ends at %s, not at Target %s", stage, kind, intent, out.Path, from, out.Target)
+				}
+			}
+		}
+	}
+}
+
+// A rewind that moves the card without recording why is the bug this
+// package exists to fix. The one exception is stated in the table above
+// and re-stated here so it cannot be widened by accident: an
+// implementation that does not match a correct artifact has nothing to
+// write into that artifact.
+func TestRewindsCarryTheirArtifactEdit(t *testing.T) {
+	stages := []domain.Stage{domain.StageTodo, domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone}
+	kinds := []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch}
+	for _, stage := range stages {
+		for _, kind := range kinds {
+			for _, intent := range Vocabulary() {
+				out := Decide(Input{Stage: stage, Kind: kind, Intent: intent, Note: note})
+				if out.Action != Rewind && out.Action != RerunInPlace {
+					continue
+				}
+				if intent == ImplementationWrong {
+					if !out.Edit.Empty() {
+						t.Errorf("%s/%s/%s: writes %q into a correct artifact", stage, kind, intent, out.Edit.Section)
+					}
+					continue
+				}
+				if out.Edit.Empty() {
+					t.Errorf("%s/%s/%s: %s with no artifact edit", stage, kind, intent, out.Action)
+				}
+				if out.Edit.Text != note {
+					t.Errorf("%s/%s/%s: edit text %q, want the typed line", stage, kind, intent, out.Edit.Text)
+				}
+			}
+		}
+	}
+}
+
+// Confirm is not a per-row preference: it is "did the card move
+// somewhere it was not". Stated as a property so a new route cannot
+// quietly ship a silent rewind.
+func TestOnlyMovesConfirm(t *testing.T) {
+	stages := []domain.Stage{domain.StageTodo, domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone}
+	for _, stage := range stages {
+		for _, intent := range Vocabulary() {
+			out := Decide(Input{Stage: stage, Kind: domain.KindFeature, Intent: intent, Note: note})
+			want := out.Action == Rewind || out.Action == NewCard
+			if out.Confirm != want {
+				t.Errorf("%s/%s: %s Confirm=%v, want %v", stage, intent, out.Action, out.Confirm, want)
+			}
+		}
+	}
+}
+
+func TestParseIntent(t *testing.T) {
+	for _, i := range Vocabulary() {
+		if got, ok := ParseIntent(string(i)); !ok || got != i {
+			t.Errorf("ParseIntent(%q) = %q,%v", i, got, ok)
+		}
+		if Describe(i) == "" {
+			t.Errorf("Describe(%q) is empty — the prompt would offer a word with no meaning", i)
+		}
+	}
+	loose := map[string]Intent{
+		"  PLAN_WRONG  ":         PlanWrong,
+		"plan-wrong":             PlanWrong,
+		"plan wrong":             PlanWrong,
+		"`check_missing`":        CheckMissing,
+		"INTENT_placeholder":     "",
+		"":                       "",
+		"implementation_wrongly": "",
+		"separate":               "",
+	}
+	for in, want := range loose {
+		got, ok := ParseIntent(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("ParseIntent(%q) = %q,%v, want %q", in, got, ok, want)
+		}
+	}
+}
