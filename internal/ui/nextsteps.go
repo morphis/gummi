@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/verdict"
 )
 
 // The status bar answers "what keys exist"; this file answers "what
@@ -70,6 +73,11 @@ type nextInput struct {
 
 	attn      attnKind // "" when the feature has no attention item
 	escalated bool     // the gate is a loop give-up, not a clean finish
+	// exited is whether the current stage already finished a run, read
+	// from the event log rather than from any live session (featureRow.
+	// Exited). It is the third way a stage counts as finished, and the
+	// only one that survives a restart.
+	exited bool
 	// cardOpen is whether the reader is on the card page itself rather
 	// than the board — the same test talkAction makes for the
 	// conversation, for the actions that would only re-open the surface
@@ -101,6 +109,50 @@ type nextInput struct {
 	pullRequest domain.PullRequestRef // the card's linked outbound PR, empty when unlinked
 }
 
+// finished reports whether the card's current stage has produced its
+// result and is waiting on a person: a gate item is up, the session is
+// done, or — after a restart, when neither survives — the log carries
+// the stage's exit. Every arm that offers "send it back" rather than
+// "run the stage" asks this, so the three sources cannot disagree about
+// whether there is anything to send back.
+func (in nextInput) finished() bool {
+	return in.attn == attnGate || in.sess == engine.StateDone || in.exited
+}
+
+// stageExited reads a stage's finished run out of the log: the newest
+// stage_exit event for stage, provided it is not older than the newest
+// transition INTO stage in the card's history. The second clause is the
+// generation check — a card that finished verify, was sent back, and
+// came round to verify again carries the old exit in its log, and that
+// exit belongs to a stage generation that no longer exists.
+//
+// It answers with the exit's verdict so a restarted card can still be
+// told apart as passed or failed, through the same FromTool mapping the
+// tool result itself took.
+func stageExited(events []state.CardEvent, hist []state.TransitionRecord, stage domain.Stage) (reviewVerdict, bool) {
+	var entered time.Time
+	for _, tr := range hist {
+		if tr.To == stage && tr.At.After(entered) {
+			entered = tr.At
+		}
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != state.EventStageExit || ev.Stage != stage {
+			continue
+		}
+		if ev.At.Before(entered) {
+			return verdictUnclear, false
+		}
+		var p struct {
+			Verdict string `json:"verdict"`
+		}
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return verdict.FromTool(p.Verdict), true
+	}
+	return verdictUnclear, false
+}
+
 // verifyBounces counts verify→work bounce edges in a feature's history:
 // each one is a verify failure someone sent back for rework. Derived
 // from the transitions table, so the count survives restarts. Verify
@@ -130,6 +182,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		openDiffComments: r.OpenDiffComments,
 		undrafted:        r.Undrafted,
 		pullRequest:      r.F.PullRequest,
+		exited:           r.Exited,
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
@@ -150,6 +203,13 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 			in.verdict = sessionVerdict(snap)
 		}
 		in.verdictFloorReason = snap.VerdictFloorReason
+	}
+	// No session at all — a restart took it — but the log still says how
+	// the stage ended. The exit's verdict stands in for the session's,
+	// and goes through the same escalation guard below, so a restarted
+	// escalated gate still refuses to read as a clean pass.
+	if in.sess == "" && r.Exited {
+		in.verdict = r.ExitVerdict
 	}
 	for _, res := range m.checksFor(r.F) {
 		if !res.OK {
@@ -381,7 +441,7 @@ func stageActions(in nextInput) []nextAction {
 		return append([]nextAction{answerIt()}, stopHere(in)...)
 	}
 
-	finished := in.attn == attnGate || in.sess == engine.StateDone
+	finished := in.finished()
 
 	switch in.stage {
 	case domain.StageTodo:

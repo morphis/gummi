@@ -215,7 +215,7 @@ func approveShaped(in nextInput) bool {
 	if in.stage != domain.StageImplement && in.stage != domain.StageVerify {
 		return false
 	}
-	return in.attn == attnGate || in.sess == engine.StateDone
+	return in.finished()
 }
 
 // whyItStopped is the first sentence. Its order of precedence is the
@@ -256,16 +256,13 @@ func whyItStopped(in nextInput) string {
 			isAre(len(in.undrafted)) + " required before the gate opens."
 	}
 
-	finished := in.attn == attnGate || in.sess == engine.StateDone
+	finished := in.finished()
 	if !finished {
 		return ""
 	}
 
 	if in.stage == domain.StageVerify {
 		return verifyStopped(in, art)
-	}
-	if in.attn != attnGate && in.sess != engine.StateDone {
-		return ""
 	}
 	switch in.stage {
 	case domain.StagePlan:

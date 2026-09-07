@@ -44,6 +44,16 @@ type featureRow struct {
 	// snapshot resolved against the live dependency store (never a
 	// persisted flag, so it cannot go stale and diverge from the gate).
 	DepBlocked bool
+	// Exited reports that the card's CURRENT stage has already finished a
+	// run — a stage_exit event for it sits in the log, newer than the
+	// transition that entered the stage — and ExitVerdict is what that
+	// run concluded. Both are read from the log at load, so they survive
+	// the process that ran the stage: a card whose verify finished an
+	// hour ago must still present as finished after a restart, or the
+	// stop offers "run verify" to a reader looking at two completed
+	// verify receipts (nextsteps.go's finished predicate).
+	Exited      bool
+	ExitVerdict reviewVerdict
 	// Foreign is the live session another gummi process is running on this
 	// card (a headless run/resume, a second board), resolved at load from
 	// the card's live file. The board cannot drive a card someone else
@@ -140,6 +150,7 @@ func (m *Shell) loadRows() tea.Msg {
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		if events, err := m.store.Events(ctx, f.ID); err == nil {
 			row.AutopilotDriving = autopilotDriving(liveStretches(f, events, m.ws))
+			row.ExitVerdict, row.Exited = stageExited(events, row.History, f.Stage)
 		}
 		rows = append(rows, row)
 	}

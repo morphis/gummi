@@ -82,7 +82,7 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		kind = decisionFailure
 	case in.attn == attnBudget:
 		kind = decisionBudget
-	case in.stage == domain.StageVerify && (in.attn == attnGate || in.sess == engine.StateDone):
+	case in.stage == domain.StageVerify && in.finished():
 		kind = decisionVerify
 	case in.attn == attnGate:
 		kind = decisionGate

@@ -33,10 +33,17 @@ func surfaceInputs() []nextInput {
 				for _, attn := range attns {
 					for _, verdict := range verdicts {
 						for _, landed := range []bool{false, true} {
-							out = append(out, nextInput{
-								stage: stage, kind: kind, sess: sess, attn: attn,
-								verdict: verdict, landed: landed, hasWorktree: true,
-							})
+							// exited is the third way a stage counts as
+							// finished, and the only one that survives a
+							// restart — every invariant holds with it
+							// set as well as clear
+							for _, exited := range []bool{false, true} {
+								out = append(out, nextInput{
+									stage: stage, kind: kind, sess: sess, attn: attn,
+									verdict: verdict, landed: landed, hasWorktree: true,
+									exited: exited,
+								})
+							}
 						}
 					}
 				}
