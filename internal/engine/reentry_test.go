@@ -243,10 +243,31 @@ func TestOneShotSpendIsMeteredAgainstTheStage(t *testing.T) {
 	for _, row := range rows {
 		if row.Stage == domain.StageVerify && row.Role == string(agent.RoleScribe) && row.Credits == 3 {
 			found = true
+			// Booked as REAL, not estimated. The masthead prefixes "~"
+			// and labels a figure "est." off this field, so a one-shot
+			// must label an adapter's own credit figure exactly the way
+			// a stage session does — otherwise the same card reads as
+			// estimated or not depending on which path spent the money.
+			if row.EstimatedCredits != 0 {
+				t.Errorf("metered credits booked as an estimate: %+v", row)
+			}
 		}
 	}
 	if !found {
 		t.Errorf("no verify/scribe row carrying the pass's credits: %+v", rows)
+	}
+
+	// A token-only backend reports no credits, and that figure IS an
+	// estimate — the other half of the same rule.
+	e.recordOneShotUsage(f.ID, domain.StageImplement, agent.Usage{Model: "fake-model", InputTokens: 2000, OutputTokens: 100})
+	rows, err = store.StageBreakdown(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Stage == domain.StageImplement && row.EstimatedCredits != row.Credits {
+			t.Errorf("token-derived credits not labelled as an estimate: %+v", row)
+		}
 	}
 }
 

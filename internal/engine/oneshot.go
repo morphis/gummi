@@ -131,11 +131,15 @@ func (e *Engine) recordOneShotUsage(id domain.FeatureID, stage domain.Stage, u a
 	credits := domain.Spend{
 		Credits: u.Credits, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 	}.CreditEquivalent()
-	// A metered sample is the provider's own figure and is real; anything
-	// else here is derived from tokens and is labelled as an estimate, so
-	// the masthead can say which it is showing.
+	// Estimated is booked on exactly the rule recordUsage uses, and the
+	// match matters more than the rule: the masthead prefixes "~" and
+	// labels a figure "est." from this field, so the same usage sample
+	// booked by a stage and by a one-shot has to be labelled the same
+	// way or one card reads as estimated purely because of which code
+	// path spent the credits. A positive credit figure the adapter did
+	// not flag as an estimate is real; a token-priced one is not.
 	var estimated float64
-	if !u.Metered && !u.Settled {
+	if u.Credits <= 0 || u.Estimate {
 		estimated = credits
 	}
 	if credits == 0 && estimated == 0 && u.InputTokens == 0 && u.OutputTokens == 0 {
