@@ -763,6 +763,35 @@ def scribe(ctx, prompt):
         usage(6, 4300, 210, ctx["model"])
         idle()
         return True
+    if "INTENT: <one of the words above>" in prompt:
+        # The re-entry classifier. Scripted, like everything else here:
+        # the demo has no model, so the intent is read off keywords in
+        # the sentence the driver typed. That keeps the drive
+        # deterministic and still exercises every route -- say "never in
+        # the spec" to see the walk back to plan, "approach" to land in
+        # the chosen-approach section, "no test"/"nothing checks" for the
+        # verification plan, "separate" to split it onto a new card.
+        # Only the fenced sentence, never the whole prompt: the
+        # vocabulary gummi lists above it contains "never" and
+        # "approach" in its own glosses, so matching on the prompt would
+        # answer the same word every time.
+        m = re.search(r"The sentence:\s*```\n(.*?)\n```", prompt, re.S)
+        line = (m.group(1) if m else "").lower()
+        intent = "implementation_wrong"
+        if line.rstrip().endswith("?"):
+            intent = "question"
+        elif "separate" in line or "another card" in line or "own card" in line:
+            intent = "separate_card"
+        elif "test" in line or "check" in line or "verif" in line:
+            intent = "check_missing"
+        elif "never" in line or "missing requirement" in line or "not in the spec" in line:
+            intent = "requirement_missing"
+        elif "approach" in line or "design" in line or "plan is wrong" in line:
+            intent = "plan_wrong"
+        emit({"type": "text", "text": "INTENT: " + intent})
+        usage(1, 1400, 8, ctx["model"])
+        idle()
+        return True
     if "build/test/lint" in prompt or "checks block" in prompt:
         emit({"type": "text", "text": "```gummi-checks\n- name: build\n  cmd: go build ./lxc/...\n"
                                       "- name: vet\n  cmd: go vet ./lxc/\n```"})

@@ -780,6 +780,18 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 // defers to sendThreadMessage, composer clear included, rather than
 // resetting ahead of a send that might not have anywhere to go.
 func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, text string) tea.Cmd {
+	// "SEND IT BACK" IS ROUTED, NOT FIXED. The row's id still names its
+	// default delivery — and fixedSendBack falls back to exactly that
+	// when no classifier can run — but a line aimed at this answer is
+	// first read for what KIND of complaint it is, because the three
+	// deliveries below cannot express the one that matters most: a
+	// requirement the artifact never carried belongs in the artifact and
+	// then back at plan, not in a kickoff the next stage forgets
+	// (reentry.go, internal/reentry).
+	if d.actions[i].sendBack {
+		m.threadInput.Reset()
+		return m.routeReentry(r, d.actions[i].id, text)
+	}
 	switch d.actions[i].id {
 	case "run":
 		m.threadInput.Reset()

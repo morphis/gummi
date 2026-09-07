@@ -741,22 +741,17 @@ func (m *Shell) fireVerb(verb, remainder string) tea.Cmd {
 	// the row: it is what is wrong, and it rides along. Typed bare, each
 	// says what it wants rather than sending an empty complaint.
 	switch verb {
-	case "bounce":
+	case "bounce", "changes":
 		if remainder == "" {
-			m.notice = noticeMsg{text: "say what should change — /bounce <what is wrong>, or pick \"send it back\" and type the line"}
+			m.notice = noticeMsg{text: "say what should change — /" + verb + " <what is wrong>, or pick \"send it back\" and type the line"}
 			return nil
 		}
 		if r, ok := m.selected(); ok {
-			return m.bounceStage(r.F.ID, remainder)
-		}
-		return nil
-	case "changes":
-		if remainder == "" {
-			m.notice = noticeMsg{text: "type what should change — your line goes back with it"}
-			return nil
-		}
-		if r, ok := m.selected(); ok {
-			return m.sendThreadMessage(r.F, remainder)
+			// The same router the highlighted row takes, deliberately:
+			// /bounce and picking "send it back" are one answer typed two
+			// ways, and a sentence that reaches plan through the row must
+			// not stop at implement through the verb.
+			return m.routeReentry(r, verb, remainder)
 		}
 		return nil
 	}

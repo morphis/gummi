@@ -25,10 +25,31 @@ type nextAction struct {
 	why    string // why gummi recommends it for the current state
 	detail string // option detail rendered beside the label
 	danger bool   // the option crosses a destructive boundary
+	// sendBack marks the answer set's "send it back" row, whichever id
+	// it happens to wear at this stage. It is asked instead of the id
+	// because the id is the DELIVERY (bounce rewinds, run re-runs in
+	// place, changes turns) and the answer is one answer: a typed line
+	// aimed at this row is routed by internal/reentry rather than by the
+	// stage's fixed rule, and there is no other way to tell "send it
+	// back" apart from the plain "run implement" row, which is also a
+	// run and must not be classified — there is nothing to send back
+	// before a stage has produced anything.
+	sendBack bool
 }
 
 func nextStep(id, key, label, detail string) nextAction {
 	return nextAction{id: id, key: key, label: label, why: detail, detail: detail}
+}
+
+// sendBackStep is the answer set's "send it back" row. One label, one
+// flag, three deliveries — the whole point of merging bounce, "request
+// changes" and re-run-with-a-note into one answer (PROPOSAL §4) is that
+// a reader never has to know which edge it takes, so the row is built
+// once here rather than spelled out at each of the arms that offer it.
+func sendBackStep(id, key, detail string) nextAction {
+	a := nextStep(id, key, "send it back", detail)
+	a.sendBack = true
+	return a
 }
 
 // nextInput is the in-memory state the suggestions derive from. All
@@ -381,7 +402,7 @@ func stageActions(in nextInput) []nextAction {
 		// Only worth offering while the architect is here to receive it —
 		// with no session the "start" row above is the way in.
 		if in.live {
-			acts = append(acts, nextStep("changes", "", "send it back",
+			acts = append(acts, sendBackStep("changes", "",
 				"say what is wrong — your line goes to the architect as the turn asking for it"))
 		}
 		return append(acts, stopHere(in)...)
@@ -402,7 +423,7 @@ func stageActions(in nextInput) []nextAction {
 			// work stage's critique iterates the stage, so there is no edge
 			// to take. The bigger hammer — the whole plan, not this pass —
 			// is /bounce.
-			nextStep("run", "", "send it back",
+			sendBackStep("run", "",
 				"re-runs "+string(in.stage)+" with what is wrong — your line goes with it"),
 		}
 		return append(acts, stopHere(in)...)
@@ -415,14 +436,14 @@ func stageActions(in nextInput) []nextAction {
 		if b := blockedGate(in); b != nil {
 			return append([]nextAction{
 				*b,
-				nextStep("bounce", "b", "send it back", "or send the open items back as rework"),
+				sendBackStep("bounce", "b", "or send the open items back as rework"),
 			}, stopHere(in)...)
 		}
 		if in.failedCheck != "" {
 			// re-running the checks alone is /verify: it re-evaluates the
 			// gate rather than answering it, so it is not one of the four.
 			return append([]nextAction{
-				nextStep("bounce", "b", "send it back", "the failure is the implementation's fault — your line goes with it"),
+				sendBackStep("bounce", "b", "the failure is the implementation's fault — your line goes with it"),
 				nextStep("advance", "g", "land anyway", "overrule if the failure does not hold up"),
 			}, stopHere(in)...)
 		}
@@ -447,14 +468,14 @@ func stageActions(in nextInput) []nextAction {
 		if in.verdict == verdictFail || in.verdict == verdictChanges ||
 			(in.verdict == verdictUnclear && in.escalated) {
 			return append([]nextAction{
-				nextStep("bounce", "b", "send it back", "send the failures back as rework — your line goes with them"),
+				sendBackStep("bounce", "b", "send the failures back as rework — your line goes with them"),
 				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
 			}, stopHere(in)...)
 		}
 		if in.kind == domain.KindResearch {
 			return append([]nextAction{
 				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
-				nextStep("bounce", "b", "send it back", "not convinced — your line goes back with it"),
+				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
 			}, stopHere(in)...)
 		}
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"
@@ -467,7 +488,7 @@ func stageActions(in nextInput) []nextAction {
 		}
 		return append([]nextAction{
 			gate,
-			nextStep("bounce", "b", "send it back", "not convinced — your line goes back with it"),
+			sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
 		}, stopHere(in)...)
 	}
 	return nil

@@ -1691,6 +1691,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.baselining[msg.id] = true
 		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
 
+	case reentryClassifiedMsg:
+		return m, m.applyReentry(msg)
+
 	case scribeEstimateDoneMsg:
 		m.scribeSettled(msg.id)
 		if msg.blended == 0 {
