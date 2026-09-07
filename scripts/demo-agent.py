@@ -648,39 +648,67 @@ FD001 = {
 GENERIC_TOOLS = [("read", "README.md"), ("grep", "func main"), ("read", "lxc/list.go")]
 
 
+def is_bug(ctx):
+    """Bug cards owe different sections than features (bugSections)."""
+    return os.path.basename(ctx["spec"]).startswith("BG-")
+
+
 def generic(ctx, turn):
     stage = ctx["stage"]
     think("working the {} stage".format(stage))
     for name, detail in GENERIC_TOOLS[:2]:
         tool(name, detail)
     spec = ctx["spec"]
-    if stage in ("brainstorm", "triage"):
-        edit_spec(spec, lambda d: set_section(
-            d, "Problem",
-            "Filed from the demo seed. The card exists to give the board a\n"
-            "card at this stage; its content is not the subject of the demo."))
-        edit_spec(spec, lambda d: set_section(
-            d, "Considered approaches",
-            "1. **Narrow fix** -- smallest diff, no new seams.\n"
-            "2. **Generalised seam** -- more code, room to grow."))
-        say("Wrote up the problem and two candidate approaches.")
-    elif stage in ("spec", "diagnose"):
-        edit_spec(spec, lambda d: set_section(
-            d, "Chosen approach", "Approach 1: the narrow fix."))
-        edit_spec(spec, lambda d: set_section(
-            d, "Verification plan",
-            "```gummi-checks\n- name: vet\n  cmd: go vet ./lxc/\n```\n\n"
-            "- the change builds and vets clean"))
-        say("Converged on approach 1 and wrote the verification plan.")
-    elif stage == "plan":
-        edit_spec(spec, lambda d: set_section(
-            d, "Implementation notes",
-            "1. Make the change in the identified file.\n"
-            "2. Add a regression test that fails without step 1.\n\n"
-            "### Plan claims\n\n"
-            "- `the change is confined to one file`"))
-        say("Two steps, tracer-bullet ordered.")
-    elif stage in ("implement", "fix"):
+    if stage == "plan":
+        # The design stage. It absorbed brainstorm/spec (and triage/diagnose
+        # for a bug), so it owes every section those stages used to write --
+        # including the two the design gate blocks on, "Chosen approach" and
+        # "Implementation notes" (engine/advance.go requiredSections). This
+        # branch used to be three, keyed on the thirteen-stage vocabulary; the
+        # two dead ones left both gate sections blank and deadlocked the card.
+        if is_bug(ctx):
+            edit_spec(spec, lambda d: set_section(
+                d, "Root cause",
+                "The size is read into a 32-bit counter, so the transfer\n"
+                "stops at the first value that does not fit."))
+            edit_spec(spec, lambda d: set_section(
+                d, "Fix",
+                "1. Widen the counter to 64 bits.\n"
+                "2. Add a regression test that fails without step 1.\n\n"
+                "### Plan claims\n\n"
+                "- `the change is confined to one file`"))
+            edit_spec(spec, lambda d: set_section(
+                d, "Verification",
+                "```gummi-checks\n- name: vet\n  cmd: go vet ./lxc/\n```\n\n"
+                "- the change builds and vets clean"))
+            say("Found the root cause and wrote the fix plan.")
+        else:
+            edit_spec(spec, lambda d: set_section(
+                d, "Problem",
+                "Filed from the demo seed. The card exists to give the board a\n"
+                "card at this stage; its content is not the subject of the demo."))
+            edit_spec(spec, lambda d: set_section(
+                d, "Out of scope",
+                "- anything outside the one command this card names"))
+            edit_spec(spec, lambda d: set_section(
+                d, "Considered approaches",
+                "1. **Narrow fix** -- smallest diff, no new seams.\n"
+                "2. **Generalised seam** -- more code, room to grow."))
+            edit_spec(spec, lambda d: set_section(
+                d, "Chosen approach", "Approach 1: the narrow fix."))
+            edit_spec(spec, lambda d: set_section(
+                d, "Implementation notes",
+                "1. Make the change in the identified file.\n"
+                "2. Add a regression test that fails without step 1.\n\n"
+                "### Plan claims\n\n"
+                "- `the change is confined to one file`"))
+            edit_spec(spec, lambda d: set_section(
+                d, "Verification plan",
+                "```gummi-checks\n- name: vet\n  cmd: go vet ./lxc/\n```\n\n"
+                "- the change builds and vets clean"))
+            say("Converged on approach 1, wrote the notes and the\n"
+                "verification plan.")
+    elif stage == "implement":
         wd = ctx["workdir"]
         with open(os.path.join(wd, "DEMO-NOTE.md"), "w", encoding="utf-8") as fh:
             fh.write("Placeholder change for the gummi demo board.\n")
