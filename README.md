@@ -211,15 +211,20 @@ in the text and opened with that key. A claim citing something that does
 not exist is thrown away rather than shown, so the paragraph cannot
 present evidence the card does not have.
 
-Typing at a stop is always safe, and it reaches further than a re-run. A
-sentence aimed at "send it back" is read for what KIND of change it asks
-for: a missed requirement is written into the artifact and the card
-walks back to the design stage (with a confirm, since it moves); a
-missing check goes into the verification plan and the checks run again
-in place; work that is not this card's opens a new card seeded with your
-line. A sentence nothing can place is delivered as a message and says
-so. Nothing typed can produce a move the workflow does not already
-declare.
+Typing at a stop is always safe, and it reaches further than a re-run.
+Every line you type while a card is parked is read for what it asks
+for, and you never pick an action: a missed requirement is written into
+the artifact and the card walks back to the design stage; a missing
+check goes into the verification plan and the checks run again; work
+that is not this card's opens a new card seeded with your line; "go on"
+approves, advances or runs whatever the stop is offering; a question is
+answered. Anything that moves the card or spends credits first shows
+what it is about to do, in the picker's place, with your line still in
+the composer — `enter` goes for a move, `y` goes for a spend, `esc`
+sends the line as a plain message instead. A sentence nothing can place
+is delivered as a message and says so. Nothing typed can produce a move
+the workflow does not already declare, and a line typed at a running
+stage simply steers it.
 
 That card page is a thread. When the card needs a decision, the question
 and its regenerated legal answers stay pinned directly above the composer;

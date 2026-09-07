@@ -485,7 +485,10 @@ func TestThreadDecisionBounceNoteRidesTheNextRun(t *testing.T) {
 // the word-eater is the run — typed prose re-runs the stage with the line
 // appended to its kickoff.
 func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
-	m, eng := chatWorkspace(t, agent.NewFake("on it")) // the card is at plan
+	// the card is at plan with nobody live: a complaint typed here is
+	// read, and the reading is "start the design stage with this as its
+	// brief" — a spend, so it waits for y
+	m, eng := chatWorkspace(t, classifyingAgent("plan_wrong"))
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the card page
 
@@ -499,7 +502,14 @@ func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
 	if !strings.Contains(out, "start the architect with your words") {
 		t.Errorf("typing did not relabel the run:\n%s", out)
 	}
-	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if p := m.reentryPending; p == nil || p.out.Target != domain.StagePlan || p.goOnEnter {
+		t.Fatalf("no y-only chip to start the design stage: %+v", p)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.reentryPending != nil {
+		t.Fatal("y did not take the chip")
+	}
 	settleChat(t, eng)
 
 	snap := eng.Get("FD-001").Snapshot()

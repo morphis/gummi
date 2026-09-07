@@ -256,6 +256,11 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.scrollThread(msg.String() == "pgup")
 		return nil
 	}
+	// A chip up owns enter, y and esc, swallows the picker's keys, and
+	// is withdrawn by anything that types (chip.go).
+	if cmd, handled := m.chipKey(r, msg); handled {
+		return cmd
+	}
 	switch msg.String() {
 	case "esc":
 		if m.threadFreeForm {
@@ -475,16 +480,28 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 			return m.answerAskWith(r, text)
 		}
 		if parseInput(text).Kind == verbNone {
-			if d.ask != nil && d.ask.FreeForm {
-				return m.answerAskWith(r, text)
+			if d.ask != nil {
+				if d.ask.FreeForm {
+					return m.answerAskWith(r, text)
+				}
+				// a structured ask keeps its terms: prose is a turn
+				return m.submitThreadInput(r)
 			}
+			// EVERY PROSE LINE AT A STOP IS READ. Not only one aimed at
+			// "send it back": the row the highlight happened to sit on
+			// used to take the line — a bug report typed above "run
+			// verify" became that run's kickoff note — and the reader
+			// never picked that row. The read decides what the line
+			// means; the fallback, for a card with no reader, is still
+			// the highlighted word-consumer, which is what it always was.
+			fallback := ""
 			if i := d.wordConsumer(); i >= 0 {
 				m.decisionCursor = i
-				return m.deliverDecisionWords(r, d, i, text)
+				fallback = d.actions[i].id
 			}
+			return m.routeReentry(r, fallback, text)
 		}
-		// a command keeps the parser; prose nothing consumes sends as a
-		// turn — always safe, and exactly what the bare composer did.
+		// a command keeps the parser, always.
 	}
 	return m.submitThreadInput(r)
 }
@@ -908,6 +925,9 @@ func (m *Shell) threadInputBindings() []binding {
 		})
 	}
 	if r, ok := m.selected(); ok {
+		if p := m.reentryPending; p != nil {
+			return m.chipBindings(p)
+		}
 		if d := m.visibleDecision(r); d != nil {
 			aim := m.wordAim(d)
 			text := strings.TrimSpace(m.threadInput.Value())

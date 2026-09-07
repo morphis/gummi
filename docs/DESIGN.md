@@ -1123,6 +1123,13 @@ Rules that make the control safe:
     unresolved `%%` marker then holds the gate shut until somebody
     answers it.
 
+  The router reads every prose line typed at a stop, not only one aimed
+  at "send it back". Its answers are still drawn from the offered set
+  and the graph's rerun edges; what moves or spends is shown before it
+  happens and waits for the reader, and what spends waits for `y`. A
+  line typed at a running or live stage is steering, and a line that
+  continues a conversation stays in it.
+
   What is still refused is a model-backed *conductor*: something that
   decides what a card may do next, or that a user could argue out of the
   workflow. Describing a stop and placing a sentence are not that. The

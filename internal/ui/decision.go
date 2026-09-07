@@ -456,12 +456,15 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionKey, m.decisionCursor, m.decisionPicked = "", 0, nil
 		m.decisionAimed = false
 		m.threadFreeForm = false
+		m.reentryPending = nil
 		return
 	}
 	if d.key != m.decisionKey {
 		m.decisionKey = d.key
 		m.decisionCursor = 0
 		m.decisionPicked = map[int]bool{}
+		// a reading was of a stop that is gone — the card moved under it
+		m.reentryPending = nil
 		m.decisionAimed = false
 		// a different question invalidates the armed free-form channel —
 		// it belonged to the answer that is gone
@@ -494,6 +497,18 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	m.syncDecision(d)
 	if d == nil {
 		return nil
+	}
+	if p := m.reentryPending; p != nil && d.ask == nil {
+		// the chip stands where the picker stood, under the same
+		// narration; the picker comes back the moment the chip goes
+		width := max(w-2, 10)
+		narr := m.narrationBlock(s, d, r, width)
+		rows := maxRows
+		if maxRows > 0 {
+			narr = fitNarration(narr, maxRows-2-1)
+			rows = max(maxRows-len(narr), 2)
+		}
+		return append(narr, m.chipLines(s, r, p, width, rows)...)
 	}
 	title := "gummi"
 	options := make([]pickerOption, 0, len(d.actions))
@@ -783,49 +798,6 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 		}
 		return nil
 	}
-}
-
-// deliverDecisionWords sends the composer's line through the highlighted
-// word-eating option. run opens (or re-runs) the stage with the line as
-// its kickoff note — an interactive stage attaches and the line is the
-// conversation's first turn — and bounce rewinds the card with the line
-// riding the reborn work stage's kickoff, the same delivery the headless
-// --bounce note takes. Both are actions the screen is already offering,
-// highlighted and named, which is what makes answering unambiguous
-// (DESIGN §6.3) rather than a guess. Both clear the composer immediately:
-// neither has a live-session precondition to fail against synchronously
-// the way a message does, so there is nothing here for F8 to protect.
-// changes is different — it is a plain message under the covers — so it
-// defers to sendThreadMessage, composer clear included, rather than
-// resetting ahead of a send that might not have anywhere to go.
-func (m *Shell) deliverDecisionWords(r featureRow, d *threadDecision, i int, text string) tea.Cmd {
-	// "SEND IT BACK" IS ROUTED, NOT FIXED. The row's id still names its
-	// default delivery — and fixedSendBack falls back to exactly that
-	// when no classifier can run — but a line aimed at this answer is
-	// first read for what KIND of complaint it is, because the three
-	// deliveries below cannot express the one that matters most: a
-	// requirement the artifact never carried belongs in the artifact and
-	// then back at plan, not in a kickoff the next stage forgets
-	// (reentry.go, internal/reentry).
-	if d.actions[i].sendBack {
-		m.threadInput.Reset()
-		return m.routeReentry(r, d.actions[i].id, text)
-	}
-	switch d.actions[i].id {
-	case "run":
-		m.threadInput.Reset()
-		return m.runStageWithNote(r.F, text)
-	case "bounce":
-		m.threadInput.Reset()
-		return m.bounceStage(r.F.ID, text)
-	case "changes":
-		// a design stage sends its changes back as the turn that asks for
-		// them: the architect is live in this thread, so what is wrong
-		// with the artifact goes to it directly rather than through a
-		// stage rewind, which is what bounce is for.
-		return m.sendThreadMessage(r.F, text)
-	}
-	return nil
 }
 
 func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {

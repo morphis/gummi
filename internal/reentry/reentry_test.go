@@ -45,14 +45,24 @@ func TestDecide(t *testing.T) {
 
 		// --- the design stage -----------------------------------------
 		{
-			name: "at plan every sentence is a turn — the architect is in this thread",
+			name: "at plan with nobody live a complaint starts the design stage with the line — confirmed, it spends",
 			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: PlanWrong, Note: note},
-			want: Outcome{Note: note, Reason: "design-stage-turn"},
+			want: Outcome{Action: RerunInPlace, Target: domain.StagePlan, Note: note, Confirm: true, Reason: "design-stage-rerun"},
 		},
 		{
-			name: "at plan even a missing requirement is a turn",
+			name: "at plan a missing requirement does the same — the artifact is what the stage is about to write",
 			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: RequirementMissing, Note: note},
-			want: Outcome{Note: note, Reason: "design-stage-turn"},
+			want: Outcome{Action: RerunInPlace, Target: domain.StagePlan, Note: note, Confirm: true, Reason: "design-stage-rerun"},
+		},
+		{
+			name: "at plan a question is still just answered",
+			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: Question, Note: note},
+			want: Outcome{Note: note, Reason: "question"},
+		},
+		{
+			name: "at plan an unknown word is still a turn",
+			in:   Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: Intent("banana"), Note: note},
+			want: Outcome{Note: note, Reason: "unclassified"},
 		},
 
 		// --- rewinds from verify --------------------------------------
@@ -285,10 +295,11 @@ func TestRewindsCarryTheirArtifactEdit(t *testing.T) {
 				if out.Action != Rewind && out.Action != RerunInPlace {
 					continue
 				}
-				if intent == ImplementationWrong || intent == Proceed {
-					// the artifact is right (wrong implementation), or
-					// nothing was complained about at all (go on): neither
-					// has anything to write
+				if intent == ImplementationWrong || intent == Proceed || out.Reason == "design-stage-rerun" {
+					// the artifact is right (wrong implementation), nothing
+					// was complained about at all (go on), or the artifact
+					// is what the stage is about to write (the design
+					// stage): none has anything to write
 					if !out.Edit.Empty() {
 						t.Errorf("%s/%s/%s: writes %q into a correct artifact", stage, kind, intent, out.Edit.Section)
 					}

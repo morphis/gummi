@@ -372,13 +372,18 @@ type Shell struct {
 	// consumed by the load handlers and cleared there, because a jump is
 	// something that happens on arrival, not a position the page holds
 	// (thread.go's anchorTo makes the same argument for the third).
-	specJump     string
-	diffJump     diffTarget
-	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
-	profileNames []string         // profile names for the new-feature form
-	repoNames    []string         // configured managed-repo names for the new-card forms
-	envelope     int              // default spend-plan envelope for new features (0 = none)
-	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
+	specJump string
+	diffJump diffTarget
+	// reentryPending is the chip: a typed line the card has read whose
+	// reading is an act, waiting for the reader to take it or take the
+	// line back (chip.go). Nil when no chip is up. Withdrawn by esc, by
+	// any edit to the composer, and by the card moving under it.
+	reentryPending *reentryReading
+	roundStore     rounds.Store     // persistence seam for rounds (defaults to store)
+	profileNames   []string         // profile names for the new-feature form
+	repoNames      []string         // configured managed-repo names for the new-card forms
+	envelope       int              // default spend-plan envelope for new features (0 = none)
+	notifier       *notify.Notifier // bell/desktop hook for needs-attention events
 
 	// Copilot quota hint (copilotquota.go): the latest reading shown as
 	// a status-bar pill, its enable flag, and the gh seam for tests.

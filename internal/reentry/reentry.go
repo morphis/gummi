@@ -86,6 +86,16 @@ const (
 	Proceed Intent = "proceed"
 )
 
+// intentKnown reports whether i is one of the vocabulary's words.
+func intentKnown(i Intent) (Intent, bool) {
+	for _, v := range Vocabulary() {
+		if v == i {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 // Vocabulary lists the intents a classifier may return, in the order a
 // prompt should present them. It exists so the classifier's prompt is
 // written from the same list the router switches on, rather than from a
@@ -267,11 +277,18 @@ func Decide(in Input) Outcome {
 	if note == "" {
 		return Outcome{Reason: "no-note"}
 	}
-	// Every complaint at the design stage is a turn — but "go on" is not
-	// a complaint, and at the design stage it is the approval the gate
-	// is waiting for, so it goes through the table like anywhere else.
-	if in.Stage == domain.StagePlan && in.Intent != Proceed {
-		return Outcome{Note: note, Reason: "design-stage-turn"}
+	// The design stage. Decide is only ever reached here with nobody
+	// live in the thread — a line typed at a live architect is the next
+	// thing said to it and is never read (the caller's rule) — so a
+	// complaint has no one to be a turn to. It starts the design stage
+	// with the line as its kickoff instead: confirmed, since that spends.
+	// A question is still a question, and "go on" is the approval the
+	// gate is waiting for; both go through the table like anywhere else.
+	if in.Stage == domain.StagePlan && in.Intent != Proceed && in.Intent != Question {
+		if _, known := intentKnown(in.Intent); !known {
+			return Outcome{Note: note, Reason: "unclassified"}
+		}
+		return Outcome{Action: RerunInPlace, Target: in.Stage, Note: note, Confirm: true, Reason: "design-stage-rerun"}
 	}
 
 	switch in.Intent {

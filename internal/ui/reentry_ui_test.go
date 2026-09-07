@@ -75,16 +75,21 @@ func TestSendItBackWalksToPlanAfterConfirming(t *testing.T) {
 	const miss = "the persistence step was never in the spec"
 
 	r := m.rows[0]
+	m = openCardPage(t, m)
 	m = pump(t, m, m.routeReentry(r, "bounce", miss))
 
-	// A REWIND CONFIRMS. The card has not moved yet.
+	// A REWIND CONFIRMS. The card has not moved yet; the chip is up.
 	if got := m.rows[0].F.Stage; got != domain.StageVerify {
 		t.Fatalf("the card moved before the confirm (at %s)", got)
 	}
-	if m.Overlay.Top() == nil {
-		t.Fatal("a rewind must ask before it moves the card")
+	p := m.reentryPending
+	if p == nil || p.out.Action != reentry.Rewind {
+		t.Fatalf("no rewind chip: %+v", p)
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if !p.goOnEnter {
+		t.Fatal("a rewind spends nothing now, so it goes on enter")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = pump(t, m, m.loadRows)
 
 	if got := m.rows[0].F.Stage; got != domain.StagePlan {
@@ -128,10 +133,22 @@ func TestRewindCancelledChangesNothing(t *testing.T) {
 	m := verifyCard(t, classifyingAgent("plan_wrong"))
 	before := artifactBody(t, m)
 
+	m = openCardPage(t, m)
 	m = pump(t, m, m.routeReentry(m.rows[0], "bounce", "the chosen approach cannot work offline"))
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if m.reentryPending == nil {
+		t.Fatal("no chip to take back")
+	}
+	// esc is the take-it-back gesture: the chip goes, the line is sent
+	// as a plain message, and the page stays open
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = pump(t, m, m.loadRows)
 
+	if m.reentryPending != nil {
+		t.Error("esc left the chip up")
+	}
+	if !m.cardOpen {
+		t.Error("esc on a chip left the card page")
+	}
 	if got := m.rows[0].F.Stage; got != domain.StageVerify {
 		t.Errorf("a cancelled rewind moved the card to %s", got)
 	}
@@ -140,30 +157,36 @@ func TestRewindCancelledChangesNothing(t *testing.T) {
 	}
 }
 
-// An in-place re-run just goes: it is exactly what "send it back" has
-// always meant at that stage, so a confirm would be asking about
-// nothing.
-func TestInPlaceReentryDoesNotConfirm(t *testing.T) {
-	m := verifyCard(t, classifyingAgent("implementation_wrong"))
-	m = pump(t, m, m.routeReentry(m.rows[0], "bounce", "the toggle does not do what step 4 describes"))
-	if m.Overlay.Top() == nil {
-		t.Fatal("verify→implement is a rewind and must confirm")
+// An in-place re-run starts a session that spends credits now, so it
+// confirms like every other spend — and on y, never on enter (§9.2).
+func TestInPlaceReentryConfirmsOnYNotEnter(t *testing.T) {
+	m, _ := chatWorkspace(t, classifyingAgent("implementation_wrong"))
+	m = advanceTo(t, m, domain.StageImplement)
+	m = openCardPage(t, m)
+	m = pump(t, m, m.routeReentry(m.rows[0], "run", "the toggle does not do what step 4 describes"))
+	p := m.reentryPending
+	if p == nil || p.out.Action != reentry.RerunInPlace {
+		t.Fatalf("no re-run chip: %+v", p)
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if got := m.rows[0].F.Stage; got != domain.StageVerify {
-		t.Fatalf("the declined rewind moved the card to %s", got)
+	if p.goOnEnter {
+		t.Fatal("a re-run spends now; it must not go on enter")
 	}
-
-	// At implement the same complaint re-runs the stage in place — one
-	// stage, no edge, nothing to ask about.
-	m2, _ := chatWorkspace(t, classifyingAgent("implementation_wrong"))
-	m2 = advanceTo(t, m2, domain.StageImplement)
-	m2 = pump(t, m2, m2.routeReentry(m2.rows[0], "run", "the toggle does not do what step 4 describes"))
-	if m2.Overlay.Top() != nil {
-		t.Error("an in-place re-run asked for a confirm")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.reentryPending == nil {
+		t.Fatal("enter took a chip that spends")
 	}
-	if got := m2.rows[0].F.Stage; got != domain.StageImplement {
+	if !strings.Contains(m.notice.text, "press y") {
+		t.Errorf("enter on a spend did not say what key goes: %+v", m.notice)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.reentryPending != nil {
+		t.Error("y did not take the chip")
+	}
+	if got := m.rows[0].F.Stage; got != domain.StageImplement {
 		t.Errorf("an in-place re-run moved the card to %s", got)
+	}
+	if m.engine.Get(m.rows[0].F.ID) == nil {
+		t.Error("y did not start the run")
 	}
 }
 
@@ -174,15 +197,16 @@ func TestTypedBounceAndTheRowReachTheSameRouter(t *testing.T) {
 	const miss = "nothing in the spec ever asked for offline support"
 
 	viaVerb := verifyCard(t, classifyingAgent("requirement_missing"))
-	viaVerb.cardOpen = true
+	viaVerb = openCardPage(t, viaVerb)
 	viaVerb = pump(t, viaVerb, viaVerb.fireVerb("bounce", miss))
-	viaVerb = press(t, viaVerb, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	viaVerb = press(t, viaVerb, tea.KeyPressMsg{Code: tea.KeyEnter})
 	viaVerb = pump(t, viaVerb, viaVerb.loadRows)
 
+	// the composer's own path: prose typed at the stop, no row picked
 	viaRow := verifyCard(t, classifyingAgent("requirement_missing"))
-	d := &threadDecision{actions: []nextAction{sendBackStep("bounce", "b", "send the failures back")}}
-	viaRow = pump(t, viaRow, viaRow.deliverDecisionWords(viaRow.rows[0], d, 0, miss))
-	viaRow = press(t, viaRow, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	viaRow = openCardPage(t, viaRow)
+	viaRow = pump(t, viaRow, viaRow.submitThreadLine(viaRow.rows[0], miss))
+	viaRow = press(t, viaRow, tea.KeyPressMsg{Code: tea.KeyEnter})
 	viaRow = pump(t, viaRow, viaRow.loadRows)
 
 	for name, m := range map[string]*Shell{"/bounce": viaVerb, "the row": viaRow} {
@@ -224,10 +248,10 @@ func TestNoClassifierKeepsTheRowsFixedRoute(t *testing.T) {
 	}
 }
 
-// The design stage never spends a classification turn: the architect is
-// live in the very thread the line was typed into, so the line is
-// already delivered correctly by being a turn.
-func TestDesignStageNeverClassifies(t *testing.T) {
+// A live session is a conversation: a line typed into one is the next
+// thing said in it, never something to read first. The design chat is
+// the everyday case — an attached architect sitting at its own gate.
+func TestLiveSessionIsNeverRead(t *testing.T) {
 	asked := 0
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		if strings.Contains(msg, "INTENT: <one of the words above>") {
@@ -235,16 +259,23 @@ func TestDesignStageNeverClassifies(t *testing.T) {
 		}
 		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
 	}}
-	m, _ := chatWorkspace(t, ag)
-	if got := m.rows[0].F.Stage; got != domain.StagePlan {
-		t.Fatalf("fixture is at %s, want plan", got)
+	m, eng := chatWorkspace(t, ag)
+	// an attached interactive session is the everyday live conversation
+	if _, err := eng.Attach(context.Background(), m.rows[0].F); err != nil {
+		t.Fatal(err)
+	}
+	if s := m.sessionFor(m.rows[0].F.ID); s == nil || !s.Live() {
+		t.Fatal("fixture has no live session")
 	}
 	m = pump(t, m, m.routeReentry(m.rows[0], "changes", "the approach ignores the offline case"))
 	if asked != 0 {
-		t.Errorf("the design stage spent %d classification turns", asked)
+		t.Errorf("a line into a live conversation spent %d classification turns", asked)
 	}
 	if got := m.rows[0].F.Stage; got != domain.StagePlan {
-		t.Errorf("a design-stage line moved the card to %s", got)
+		t.Errorf("a design-chat line moved the card to %s", got)
+	}
+	if m.reentryPending != nil {
+		t.Error("a line into a live conversation raised a chip")
 	}
 }
 
@@ -308,7 +339,9 @@ func TestBounceWithAReasonNeverDropsIt(t *testing.T) {
 
 	// the bare verb keeps the on-screen rule: nothing to lose, so the
 	// menu, pre-filtered
-	m.Overlay.Pop()
+	if m.Overlay.Top() != nil {
+		m.Overlay.Pop()
+	}
 	m.threadInput.SetValue("/bounce")
 	m = pump(t, m, m.submitThreadInput(m.rows[0]))
 	if _, isMenu := m.Overlay.Top().(*commandMenu); !isMenu {
@@ -317,4 +350,18 @@ func TestBounceWithAReasonNeverDropsIt(t *testing.T) {
 	if asked != 1 {
 		t.Errorf("a bare /bounce spent a classification turn")
 	}
+}
+
+// openCardPage opens the selected card's page from the backlog with the
+// key that does it, so the composer is focused and chip keys reach it.
+func openCardPage(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	if m.cardOpen {
+		return m
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.cardOpen {
+		t.Fatal("enter on the backlog did not open the card page")
+	}
+	return m
 }

@@ -71,18 +71,26 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 		// same act pressing the row with an empty composer performs.
 		return m.fixedSendBack(r, fallback, "")
 	}
-	if r.F.Stage == domain.StagePlan {
+	// A live session is a conversation, and a line typed into one is
+	// the next thing said in it — never something to read first. This
+	// covers the design chat (an attached architect sitting idle at its
+	// own gate) as well as a running stage: both already have someone
+	// on the other end of the composer.
+	if sess := m.sessionFor(r.F.ID); sess != nil && sess.Live() {
 		return m.sendThreadMessage(r.F, note)
 	}
 	eng := m.engine
 	if eng == nil {
 		return m.fixedSendBack(r, fallback, note)
 	}
-	m.threadInput.Reset()
+	// The composer keeps the line. The chip that may follow is a reading
+	// OF that line, shown beside it; resetting here would show a reading
+	// of nothing.
 	m.notice = noticeMsg{text: string(r.F.ID) + ": reading the card to place your line…"}
 	f := r.F
+	_, _, _, forward := stopForward(m.nextInputFor(r))
 	return func() tea.Msg {
-		intent, err := eng.ClassifyReentry(context.Background(), f, note, "")
+		intent, err := eng.ClassifyReentry(context.Background(), f, note, forward)
 		return reentryClassifiedMsg{f: f, note: note, fallback: fallback, intent: intent, err: err}
 	}
 }
@@ -109,13 +117,35 @@ func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
 		m.notice = noticeMsg{text: string(msg.f.ID) + ": " + why + " — sending it back the usual way"}
 		return m.fixedSendBack(r, msg.fallback, msg.note)
 	}
+	in := m.nextInputFor(r)
+	fwd, rerun, blocked, label := stopForward(in)
 	out := reentry.Decide(reentry.Input{
 		Stage: r.F.Stage, Kind: r.F.Kind, Intent: msg.intent, Note: msg.note,
+		Forward: fwd, Rerun: rerun, Blocked: blocked,
 	})
+	if out.Reason == "proceed-blocked" {
+		// "go on" at a gate that is held shut: the answer is the blocker,
+		// said at the moment it was asked for, and nothing is sent.
+		why := blocked
+		if b := blockedGate(in); b != nil {
+			why = b.detail
+		}
+		m.notice = noticeMsg{text: string(r.F.ID) + ": can't go on yet — " + why}
+		return nil
+	}
+	if out.Confirm {
+		// An act, not an answer: it waits. The chip takes the picker's
+		// place and the line stays in the composer (chip.go).
+		m.reentryPending = &reentryReading{line: msg.note, out: out, forward: label, goOnEnter: goOnEnter(out)}
+		m.clearTransientNotice()
+		return nil
+	}
+	m.threadInput.Reset()
 	return m.performReentry(r, out)
 }
 
-// performReentry carries out one routed outcome.
+// performReentry carries out one routed outcome — a turn straight away,
+// an act once the chip has been taken (chip.go's takeReading).
 func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 	switch out.Action {
 	case reentry.RerunInPlace:
@@ -126,25 +156,14 @@ func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 		return m.runStageWithNote(r.F, out.Note)
 
 	case reentry.Rewind:
-		// A REWIND CONFIRMS. It moves the card off the stage the reader
-		// is looking at, sometimes two stages, and every stage it passes
-		// gets re-run — that is a bigger thing than the row said it was
-		// doing, so it is said out loud before it happens. An in-place
-		// re-run above just goes: it is exactly what "send it back" has
-		// always meant at that stage.
-		m.Overlay.Push(&confirmDialog{
-			id:       "reentry:" + string(r.F.ID),
-			question: rewindQuestion(r.F, out),
-			// Wrapped here rather than left to the dialog: confirmDialog
-			// renders detail as one line and every other caller's is
-			// short, so an unwrapped sentence loses its tail off the
-			// right edge — and the tail is the half naming the stages
-			// the card walks through.
-			detail:       wrapText(rewindDetail(out), max(m.width-12, 40)),
-			confirmLabel: "Send it back",
-			onConfirm:    func() tea.Cmd { return m.commitRewind(r.F, out) },
-		})
-		return nil
+		return m.commitRewind(r.F, out)
+
+	case reentry.Advance:
+		// The forward row's own act, reached in words: the same
+		// runCardAction the row's enter takes, so "go on" can only ever
+		// do what pressing 1 would have done — including the landing
+		// dialog that opens at the verify gate.
+		return m.runCardAction(cardAction{id: "advance", key: "g", label: "advance"})
 
 	case reentry.NewCard:
 		// Not this card's work. The card stays exactly where it is and
@@ -275,34 +294,6 @@ func (m *Shell) reentryNotice(f domain.Feature, out reentry.Outcome) {
 	}
 	m.notice = noticeMsg{text: string(f.ID) + ": recorded under \"" + out.Edit.Section +
 		"\" in the " + artifactNoun(f.Kind) + " — re-running " + string(out.Target)}
-}
-
-// rewindQuestion is the confirm's headline: what will happen, named by
-// the stage it lands on rather than by the intent that got it there. A
-// reader confirming a move needs to know where the card ends up.
-func rewindQuestion(f domain.Feature, out reentry.Outcome) string {
-	return "Send " + string(f.ID) + " back to " + string(out.Target) + "?"
-}
-
-// rewindDetail says the two things a reader cannot see from the
-// headline: that the miss is written into the artifact (and so will hold
-// the gate shut until it is answered), and every stage that re-runs on
-// the way.
-func rewindDetail(out reentry.Outcome) string {
-	var b strings.Builder
-	if !out.Edit.Empty() {
-		b.WriteString("Your line is added to \"" + out.Edit.Section + "\" as an open comment first, so the gate stays shut until it is answered. ")
-	}
-	if len(out.Path) > 1 {
-		names := make([]string, 0, len(out.Path))
-		for _, s := range out.Path {
-			names = append(names, string(s))
-		}
-		b.WriteString("The card walks back through " + strings.Join(names, " then ") + ", and each stage runs again.")
-	} else {
-		b.WriteString(strings.ToUpper(string(out.Target)[:1]) + string(out.Target)[1:] + " runs again from there.")
-	}
-	return b.String()
 }
 
 // rowByID finds a card's current board row by id.
