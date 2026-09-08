@@ -74,13 +74,40 @@ func spendSummary(snap engine.Snapshot) string {
 	return ""
 }
 
+// liveCardSpent returns the card's total spend as the session driving it
+// has it — engine.Session.CardSpent, which moves with every usage event
+// the engine books against the store row. 0 when nothing is live on the
+// card (or a restored session has not been dispatched again), which
+// leaves the caller on the board row's own copy.
+func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
+	if m.engine == nil {
+		return 0
+	}
+	s := m.engine.Get(id)
+	if s == nil {
+		return 0
+	}
+	return s.CardSpent()
+}
+
 // budgetSummary formats the budget: spend against the envelope plus
 // what's left — every stage draws from the same pool, so one remainder
 // is the whole story. A top-up raises the envelope itself (durably, in
 // the store), so these figures already reflect it.
-func budgetSummary(f domain.Feature) string {
+//
+// live is the running session's view of the card's total (0 = none), and
+// it wins over f's when there is one. f comes from the board's row
+// snapshot, which is reloaded on a handful of events and never on a
+// usage one, so during a run — and after a stage parks on its budget —
+// it is behind by everything the session has spent. The engine's own
+// budget arithmetic reads the store, so a stale figure here is exactly
+// the case where the card claims headroom the stage was already denied.
+func budgetSummary(f domain.Feature, live float64) string {
 	env := float64(f.Budget.Envelope)
 	spent := f.Spend.CreditEquivalent()
+	if live > 0 {
+		spent = live
+	}
 	s := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
 	if left := f.Budget.Remaining(spent); left > 0 {
 		s += fmt.Sprintf("  ·  %g left", roundSpend(left))

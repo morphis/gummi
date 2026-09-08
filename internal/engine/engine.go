@@ -576,6 +576,9 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	s.setSpecPath(specPath)
 	s.setMCPTeardown(mcpTeardown)
 	e.stampSpawnInfo(s)
+	// interactive chat is uncapped but not free: its spend moves the
+	// card's total the same way, so the masthead needs the same seed.
+	e.seedCardSpend(s)
 	// s is not yet reachable by Pause/Drop/Close (not in e.live), so
 	// attachAgent can't be racing a finalize here; the bool is checked for
 	// symmetry with the autonomous path.
@@ -807,6 +810,10 @@ func (e *Engine) startAutonomous(s *Session) {
 	// compute the stage budget once so the enforced cap, the budget-aware
 	// hint, and the session's own budget all agree.
 	budget := e.stageBudget(s.Feature, rate)
+	// the same row the budget was just derived from, kept live on the
+	// session so displays stop reading a snapshot taken before the run
+	// (the masthead's "credits left" was frozen at spawn-time spend).
+	e.seedCardSpend(s)
 	// a budgeted feature with nothing left must not run uncapped (a 0
 	// budget elsewhere means "unbudgeted"): gate it immediately.
 	if s.Feature.Budget.Envelope > 0 && budget <= 0 && !s.Interactive {
@@ -2229,6 +2236,10 @@ func (e *Engine) recordUsage(s *Session, id domain.FeatureID, stage domain.Stage
 		return
 	}
 	_ = e.cfg.Store.AddSpend(context.Background(), id, credits, estimated, u.InputTokens, u.OutputTokens)
+	// the card's running total moves by exactly what the row just did,
+	// so a render can read the store's figure off the session instead of
+	// the board snapshot it last reloaded.
+	s.addCardSpent(credits)
 	// the same sample attributed to (stage, model, role) for the
 	// breakdown; same credit-equivalent, so stage_spend sums to
 	// spend_credits. A backend's internal side-model call is booked to

@@ -1178,6 +1178,22 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, false))
 			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
 		}
+		// The park's own numbers: the engine suppresses the trailing idle
+		// of an exhausted turn (engine.handle), so the EventIdle branch
+		// below — the one that reloads rows when a stage finishes — never
+		// fires here, and the row would keep the spend it had before the
+		// run. That is the reading that made a budget stop look like a
+		// mistake: "budget exhausted" beside a masthead still offering
+		// hundreds of credits. The session is gone by now, so the live
+		// figure goes with it and only a reload can tell the truth.
+		return m.loadRows
+	case engine.EventBudget:
+		// a threshold crossing (50/80/95%) is the one usage-driven event
+		// worth a row reload: the card is deep enough into its envelope
+		// that the board's other surfaces — the cost tick, the run chip's
+		// "N are left in the envelope" — are about to matter, and they
+		// read the row rather than the live session.
+		return m.loadRows
 	case engine.EventQuestion:
 		// A card whose stored mode answers its own questions (§10.17: full
 		// only — gates still stops for a question) takes the recommended

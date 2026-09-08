@@ -80,6 +80,15 @@ func (e *Engine) currentFeature(f domain.Feature) domain.Feature {
 	return f
 }
 
+// seedCardSpend stamps a spawning session with the card's spend as the
+// store holds it right now, priced at the session's own adapter rate —
+// the same figure stageBudget just subtracted from the envelope. From
+// here recordUsage moves it by each booked sample, so a render path has
+// the store's running total without a read of its own (Session.cardSpent).
+func (e *Engine) seedCardSpend(s *Session) {
+	s.seedCardSpent(e.currentFeature(s.Feature).Spend.CreditEquivalentAt(s.rate()))
+}
+
 // diffReviewHints turns a feature's open diff annotations into system
 // hints for an implement run (DESIGN §6.1). Empty when the store is
 // absent or there is nothing open.

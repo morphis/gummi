@@ -242,16 +242,27 @@ type Session struct {
 	verdict        string // review verdict from submit_verdict ("pass"/"changes")
 	err            error
 	stopped        bool
-	finalized      bool         // stopped; must not be persisted (may be dropped)
-	heldSlot       bool         // true between taking and releasing an attention slot
-	budget         float64      // stage credit budget (0 = none)
-	creditRate     float64      // adapter's token→credit rate (0 = engine default)
-	threshold      int          // highest budget threshold crossed (%)
-	pendingNudge   string       // budget nudge awaiting the next sent turn
-	exhausted      bool         // hit the credit cap
-	tripped        bool         // main-checkout tripwire fired; the run is dead
-	clientTools    bool         // resolved backend's ClientTools capability (spawn-time cache)
-	sandboxMode    sandbox.Mode // resolved confinement mode (stamped at spawn)
+	finalized      bool    // stopped; must not be persisted (may be dropped)
+	heldSlot       bool    // true between taking and releasing an attention slot
+	budget         float64 // stage credit budget (0 = none)
+	creditRate     float64 // adapter's token→credit rate (0 = engine default)
+	// cardSpent is the whole card's metered spend (credit-equivalent) as
+	// the store knows it: seeded from the feature row when the session
+	// spawns, then moved by exactly the figure recordUsage books against
+	// that row, so it stays the store's number without re-reading it.
+	// 0 means "never seeded" — a session restored from a snapshot that
+	// has not been dispatched again — and callers fall back to their own
+	// (possibly stale) copy of the row. Another session on the same card
+	// (a consult, which books its spend against the same feature) moves
+	// the row without moving this, so the figure can sit that much low
+	// until the next reload; it is never high.
+	cardSpent    float64
+	threshold    int          // highest budget threshold crossed (%)
+	pendingNudge string       // budget nudge awaiting the next sent turn
+	exhausted    bool         // hit the credit cap
+	tripped      bool         // main-checkout tripwire fired; the run is dead
+	clientTools  bool         // resolved backend's ClientTools capability (spawn-time cache)
+	sandboxMode  sandbox.Mode // resolved confinement mode (stamped at spawn)
 
 	// cardUnlock retires this session's hold on the workspace's per-card
 	// lock (state.CardLocks), taken before the session was created so a
@@ -718,6 +729,13 @@ func (s *Session) spentForBudgetLocked() float64 {
 		CreditEquivalentAt(s.creditRate)
 }
 
+// rate returns the adapter's token→credit rate for this session.
+func (s *Session) rate() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.creditRate
+}
+
 func (s *Session) setByokRate(r float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1053,6 +1071,31 @@ func (s *Session) setBudget(b float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.budget = b
+}
+
+// CardSpent returns the card's running total spend in credit-equivalent
+// terms — the feature row's figure, kept live here so a render path can
+// read it without touching the store (0 = never seeded).
+func (s *Session) CardSpent() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cardSpent
+}
+
+// seedCardSpent records the card's spend as the store holds it at spawn.
+func (s *Session) seedCardSpent(v float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cardSpent = v
+}
+
+// addCardSpent moves the card total by one booked usage sample. It takes
+// the same signed figure recordUsage hands Store.AddSpend, and is called
+// beside it, so the two never drift.
+func (s *Session) addCardSpent(credits float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cardSpent += credits
 }
 
 // queueNudge stores a budget nudge to be prepended to the next turn the

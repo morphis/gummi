@@ -826,7 +826,7 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	autopilot := headerGap + autopilotField(s, m, f)
 	budget := ""
 	if f.Budget.Envelope > 0 {
-		budget = headerGap + s.Faint.Render(budgetSummary(f))
+		budget = headerGap + s.Faint.Render(budgetSummary(f, m.liveCardSpent(f.ID)))
 	} else if !f.Spend.Zero() {
 		budget = headerGap + s.Faint.Render(featureSpend(f.Spend))
 	}
