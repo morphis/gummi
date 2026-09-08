@@ -14,8 +14,19 @@ import (
 
 // mergeReadyMsg carries a squash merge that passed its preconditions and
 // awaits the user's commit message, or the guard error that stops it.
-// thenDone marks a merge launched from the verify→done gate: landing it
-// also moves the feature to Done.
+// thenDone marks a merge of a card that is AT verify: landing it also
+// moves the feature to Done.
+//
+// It used to mean "launched from the verify→done gate", which is how the
+// board's `m` key came to pass false unconditionally and land a branch on
+// main while leaving its card at verify forever — `gummi status` reporting
+// `Stage: verify`, the board filing it under REVIEW, and the status bar
+// counting work that is already on main as "in review". The two landing
+// keys reach the same place, so what decides the transition is the card's
+// own stage, not which key was pressed. It stays false for a card that is
+// not at verify: landing an earlier stage's branch by hand is not a
+// judgment that verify happened, and jumping such a card to done would
+// skip the quality floor outright.
 type mergeReadyMsg struct {
 	f        domain.Feature
 	thenDone bool
@@ -69,9 +80,18 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 // squashMergeFeature lands the branch on main as one commit carrying the
 // user-approved message. Landed is re-checked at run time so a stale
 // board row (or a dialog left open across an outside merge) can't land
-// the work twice. With thenDone set (the verify→done gate) a landed
+// the work twice. With thenDone set (the card was at verify) a landed
 // merge also moves the feature to Done — the user's "this is done"
 // decision and the landing are one action.
+//
+// Every success return clears the card's needs-attention entry
+// (noticeMsg.clearInbox). That removal used to sit in the gate path's own
+// key handler, which is why the `m` key never did it: the branch went to
+// main and the inbox went on asking the reader to "review & land on main"
+// work that was already landed. Clearing it here, on the outcome rather
+// than on the keypress, is also what keeps the decision open when the
+// merge is refused or conflicts — the thing still has not been attended
+// to — and leaves no second place for a future caller to forget.
 func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bool) tea.Cmd {
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
@@ -91,12 +111,16 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		}
 		if thenDone {
 			if _, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user"); err != nil {
-				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into main, but moving to done failed: " + err.Error()), isErr: true, reload: true}
+				// the branch IS on main; the card just did not move. That is
+				// still the state the inbox item was asking about, so it is
+				// cleared here too — leaving it up would keep inviting a
+				// second landing of work already landed.
+				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into main, but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — press c to clean up", reload: true}
+			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — press c to clean up", reload: true, clearInbox: f.ID}
 		}
-		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up", reload: true}
+		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up", reload: true, clearInbox: f.ID}
 	})
 }
 

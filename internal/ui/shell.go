@@ -1676,12 +1676,18 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mergeThenDoneMsg:
 		// the verify→done gate routes through the merge flow: collect the
 		// user's commit message, then land + transition on ctrl+s.
+		//
+		// The inbox entry is NOT dropped here. It used to be, on dispatch,
+		// which meant the gate's "review & land on main" vanished the moment
+		// the dialog opened and stayed gone if the user pressed esc — and it
+		// was also the reason the `m` key had no removal at all, since the
+		// removal lived on this path rather than on the landing. It is
+		// cleared on the merge's own success now (squashMergeFeature).
 		if m.mergePrep {
 			m.notice = noticeMsg{text: "already preparing a merge — wait for it", isErr: true}
 			return m, nil
 		}
 		m.mergePrep = true
-		m.inbox.remove(msg.f.ID)
 		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main…"}
 		return m, m.prepareMerge(msg.f, true)
 
@@ -2799,7 +2805,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			m.mergePrep = true
 			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing merge…"}
-			return m.prepareMerge(r.F, false)
+			// m and the verify gate land the same branch the same way, so
+			// they must leave the card in the same state: a card AT verify
+			// goes to done with the landing. Derived from the stage rather
+			// than hardcoded per key — hardcoding false here is what stranded
+			// a landed card at verify forever, and hardcoding true would be
+			// worse, jumping a card that never reached verify straight past
+			// the quality floor. branchVerbRefusal above has already refused
+			// the cards with no branch to land at all.
+			return m.prepareMerge(r.F, r.F.Stage == domain.StageVerify)
 		}
 	case "z":
 		if r, ok := m.selected(); ok {
