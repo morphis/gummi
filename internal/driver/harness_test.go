@@ -404,6 +404,14 @@ func (h *harness) draftRequiredSections(f domain.Feature) {
 		want = []string{"Verification plan"}
 	case f.Kind == domain.KindBug && f.Stage == domain.StageVerify:
 		want = []string{"Verification"}
+	case f.Kind == domain.KindResearch && f.Stage == domain.StagePlan:
+		// the shape stage's own stop condition: the question, its bounds,
+		// and the direction the survey then runs on
+		want = []string{"Questions", "Constraints", "Direction"}
+	case f.Kind == domain.KindResearch && f.Stage == domain.StageImplement:
+		// the survey's output, and what the done edge still asks for later —
+		// the artifact is durable, so writing it here satisfies both gates
+		want = []string{"Findings"}
 	default:
 		return
 	}

@@ -495,16 +495,23 @@ func fileMap(root string, paths []string) map[string][]string {
 	return out
 }
 
-// requiredSections names the one section a gate expects the departing
+// requiredSections names the section(s) a gate expects the departing
 // stage to have actually written, keyed on the edge Advance is crossing.
-// Deliberately one section per gate, not a completeness checklist: the
-// gate is checking that the stage did its own job (spec chose an
-// approach, diagnose found a root cause, plan wrote the notes implement
-// needs, and the coding stages wrote their verification story), not that
-// every template section got filled in. A research card's gates always
-// return nil — its verify→done edge already has a floor of its own
-// (verifydoc, see documentReport in this file), and no other research
-// edge produces a section this predicate should hold open.
+// Deliberately narrow — a stage's own output, not a completeness
+// checklist over the template: the gate is checking that the stage did
+// its own job (spec chose an approach, diagnose found a root cause, plan
+// wrote the notes implement needs, and the coding stages wrote their
+// verification story), not that every template section got filled in.
+//
+// Research used to fall through to nil on every edge, on the theory that
+// its verify→done edge already had a floor of its own (verifydoc). It
+// does not: verifydoc checks that the citations in Findings resolve and
+// that the brief's questions are answered, and a document where nothing
+// was ever written has no citations and no questions — so it passes
+// vacuously. That is how a research card walked todo→done in four
+// keypresses, spending nothing, with every section of its document still
+// holding the `%% @gummi:` prompt the template shipped. The rows below
+// give each research edge the same treatment the other kinds get.
 func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	switch {
 	// The design gate. Its row grew from one section to two when the
@@ -522,6 +529,46 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 		return []string{"Verification plan"}
 	case kind == domain.KindBug && to == domain.StageDone:
 		return []string{"Verification"}
+
+	// The research design gate. The row is the shape contract's own stop
+	// condition, quoted from shapeHint (hints.go): "stop when the
+	// question, its constraints, and the direction are set". Three
+	// sections rather than one because that stage settles three separate
+	// decisions the survey then runs on — not a completeness sweep of the
+	// ten-section template: Brief is the requester's own words, and the
+	// remaining six are later stages' work.
+	case kind == domain.KindResearch && from == domain.StagePlan && to == domain.StageImplement:
+		return []string{"Questions", "Constraints", "Direction"}
+
+	// The research build gate. investigateHint sends the build stage to
+	// survey the question read-only and "record your findings … in the
+	// research document as you go": Findings is that survey, and it is the
+	// section every later check reads — verifydoc resolves its citations,
+	// and with nothing in it there is nothing to resolve.
+	case kind == domain.KindResearch && from == domain.StageImplement && to == domain.StageVerify:
+		return []string{"Findings"}
+
+	// The research done gate — the edge that decomposes the document into
+	// feature cards. This one is keyed on what crossing CONSUMES rather
+	// than on what the departing stage wrote, because for research the
+	// departing stage wrote nothing: verify is a read-only critique whose
+	// verdict lives in the session, not in the document. Findings is what
+	// the evidence was supposed to be, so a document reaching done without
+	// it has nothing to have proved anything with — the same shape as a
+	// feature owing its Verification plan here.
+	//
+	// `## Slices` is deliberately NOT required, even though it is the
+	// decomposition's input. A research card that concludes no follow-on
+	// work is needed is a legitimate terminal, not a stalled one:
+	// DecomposeForCard treats a doc with no unsettled rows as a cheap
+	// no-op rather than an error, and TestZeroSliceRSExitsDoneCleanly
+	// pins that a zero-slice RS reaches done without ever spawning an
+	// architect. Demanding Slices here would forbid the honest answer
+	// "nothing to build", which is exactly the judgement this stage is
+	// allowed to reach.
+	case kind == domain.KindResearch && to == domain.StageDone:
+		return []string{"Findings"}
+
 	default:
 		return nil
 	}

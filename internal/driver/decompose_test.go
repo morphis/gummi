@@ -18,6 +18,13 @@ import (
 // decompose gate: verify's blocker checks (open threads, open diff
 // comments, verifydoc citations) all pass trivially against a doc with no
 // %% markers and no Findings citations.
+//
+// These fixtures seed a card straight into verify, so they skip the design
+// and survey gates a real card crosses to get here. That means their
+// documents have to carry what those gates would already have demanded —
+// notably a drafted `## Findings`, which the done edge asks for — or they
+// stall on a blocker that says nothing about the decompose behaviour under
+// test.
 func researchCardInVerify() domain.Feature {
 	const num = 1
 	id, _ := domain.NewID(domain.KindResearch, num)
@@ -49,7 +56,12 @@ const decomposeTwoRows = "# RS-001: research card\n\n## Findings\n\nNothing cite
 	"- title: Row two\n  one-liner: second\n  depends-on: [Row one]\n  requirements: []\n  id: \"\"\n" +
 	"```\n"
 
-const decomposeScaffoldOnly = "# RS-001: research card\n\n## Slices\n\n```yaml\n" +
+// decomposeFindings is the survey output every fixture below inherits, so
+// the done edge's undrafted gate is satisfied the way a real card's
+// implement stage would have satisfied it.
+const decomposeFindings = "## Findings\n\nThe retry path re-enters the meter once per attempt.\n\n"
+
+const decomposeScaffoldOnly = "# RS-001: research card\n\n" + decomposeFindings + "## Slices\n\n```yaml\n" +
 	"- title: example slice\n  one-liner: what it mints\n  depends-on: []\n  requirements: []\n  id: \"\"\n" +
 	"```\n"
 
