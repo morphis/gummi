@@ -407,6 +407,14 @@ func (s *copilotSession) toolHandler(name string) copilot.ToolHandler {
 		case result := <-ans:
 			return copilot.ToolResult{TextResultForLLM: result}, nil
 		case <-s.stop:
+			// Give up the registration on the way out. Leaving it behind
+			// makes a later Resolve look like it landed: it finds the
+			// entry, drops the answer into a buffer this goroutine will
+			// never read again, and reports success — while the model has
+			// already been told to carry on without it.
+			s.mu.Lock()
+			delete(s.pending, callID)
+			s.mu.Unlock()
 			return copilot.ToolResult{TextResultForLLM: "cancelled — proceed with your best judgment"}, nil
 		}
 	}
