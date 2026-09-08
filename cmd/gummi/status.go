@@ -164,8 +164,13 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 	if kind == "" {
 		kind = domain.KindFeature
 	}
-	// One workflow, so one route. The field stays on the wire for a
-	// consumer that still reads it; it can no longer vary.
+	// One workflow, so one route: this is a constant, "full" for a
+	// feature and "" for everything else. It is deliberately wire-only —
+	// still marshaled for a consumer that reads the JSON schema, never
+	// printed in the human summary, where a line that cannot vary would
+	// spend one of twelve saying nothing, contradict the README's "no
+	// routes", and give features and bugs differently shaped output for
+	// a reason a user cannot see.
 	route := ""
 	if kind == domain.KindFeature {
 		route = "full"
@@ -288,9 +293,6 @@ func renderStatus(w io.Writer, v statusView) {
 	fmt.Fprintf(w, "%s  %s\n", v.ID, v.Title)
 	fmt.Fprintf(w, "  Kind:     %s\n", v.Kind)
 	fmt.Fprintf(w, "  Stage:    %s\n", v.Stage)
-	if v.Route != "" {
-		fmt.Fprintf(w, "  Route:    %s\n", v.Route)
-	}
 	fmt.Fprintf(w, "  Branch:   %s  (%s)\n", v.Branch, v.BranchState)
 	fmt.Fprintf(w, "  Verified: %s\n", yesNo(v.Verified))
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))

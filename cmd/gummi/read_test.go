@@ -116,8 +116,8 @@ func TestResolveFeatureIDByIDAndRef(t *testing.T) {
 	}
 }
 
-// status reports the stage, route, spend, an open %% question as a blocker,
-// and a not-yet-created branch state.
+// status reports the stage, spend, an open %% question as a blocker, and
+// a not-yet-created branch state. Route rides along on the JSON only.
 func TestBuildStatusBlockersAndRoute(t *testing.T) {
 	f := newReadFixture(t)
 	feat := f.mkFeature(t, "JIRA-9")
@@ -131,6 +131,13 @@ func TestBuildStatusBlockersAndRoute(t *testing.T) {
 	// now and stays on the wire only for a consumer that still reads it.
 	if v.Route != "full" {
 		t.Fatalf("route = %q, want full", v.Route)
+	}
+	// ...and only on the wire. A constant has no business costing a line
+	// of a twelve-line human summary.
+	var buf bytes.Buffer
+	renderStatus(&buf, v)
+	if strings.Contains(buf.String(), "Route:") {
+		t.Errorf("renderStatus printed a Route line:\n%s", buf.String())
 	}
 	if v.Blockers.OpenQuestions != 1 || v.Blockers.OpenDiff != 0 {
 		t.Fatalf("blockers = %+v, want 1 open question / 0 diff", v.Blockers)
