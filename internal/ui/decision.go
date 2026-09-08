@@ -38,10 +38,16 @@ type threadDecision struct {
 
 func (m *Shell) openDecision(r featureRow) *threadDecision {
 	if r.DrivenAbroad {
-		// a card another process drives withholds the composer entirely,
-		// so nothing here could answer — and nextActions' suggestions for
-		// it are about driving it locally, which would be a lie on screen.
-		// Its read-only rendering is later work (PLAN R5).
+		// Nothing here could answer: the pending ask's resolver lives in
+		// the owning process, and nextActions' suggestions are about
+		// driving the card locally, which would be a lie on screen. The
+		// question itself is not swallowed — the followed session's own
+		// footer (follow.go) names it and says which pid to answer it
+		// from. A picker that can answer across the process boundary is
+		// later work (PLAN R5).
+		//
+		// The composer is NOT withheld, as this said: submitThreadLine
+		// routes a foreign card's line to its consult session instead.
 		return nil
 	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {
