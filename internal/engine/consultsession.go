@@ -104,7 +104,8 @@ func (e *Engine) OpenConsult(ctx context.Context, f domain.Feature) (*ConsultSes
 	// e.live, so the stage seed can never happen a second time.
 	var seed []Message
 	if priorStage != nil {
-		seed = priorStage.Snapshot().Transcript
+		snap := priorStage.Snapshot()
+		seed = stampSeedRole(snap.Transcript, snap.Role)
 	}
 	if err := c.spawn(ctx, seed); err != nil {
 		return nil, err
@@ -120,6 +121,42 @@ func (e *Engine) OpenConsult(ctx context.Context, f domain.Feature) (*ConsultSes
 	e.mu.Unlock()
 	e.send(Event{Feature: f.ID, Kind: EventUpdated})
 	return c, nil
+}
+
+// stampSeedRole labels a transcript with the role that actually produced
+// it, so the consult session it seeds can render the borrowed turns as
+// what they were. Without it every seeded turn inherited the holding
+// session's role at render time and the stage's own work was re-attributed
+// to `consult`: the reviewer's "VERDICT: pass" reappeared further down the
+// same card page as something the consult agent had said, under the
+// consult model's name.
+//
+// Stamped uniformly rather than only on the assistant turns. Message.Role
+// answers "who produced this", which is true of a user turn and a tool
+// line as much as an assistant one; the renderer consults it only where it
+// labels an assistant-style line, so a stamp it does not read costs
+// nothing, while a rule about which authors get one is a second thing to
+// keep in sync with the renderer.
+//
+// A message that already carries a Role is left alone: it was produced by
+// some third session and seeded through here once already, and this
+// session's role is not a better answer than the one recorded.
+func stampSeedRole(transcript []Message, role agent.Role) []Message {
+	if role == "" || len(transcript) == 0 {
+		return transcript
+	}
+	// A new slice, never stamped in place: today's only caller hands this
+	// Snapshot's own private copy, but a helper whose safety rests on that
+	// is one refactor away from relabelling a live session's transcript
+	// under whatever role happened to be borrowing it.
+	out := make([]Message, len(transcript))
+	copy(out, transcript)
+	for i := range out {
+		if out[i].Role == "" {
+			out[i].Role = role
+		}
+	}
+	return out
 }
 
 // Consult looks up a card's consult session without ever spawning one —

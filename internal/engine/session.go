@@ -133,6 +133,16 @@ type Message struct {
 	ToolOutput string
 	callID     string // backend call id awaiting its result; cleared on resolve
 
+	// Role names the role that produced this message when it is NOT the
+	// role of the session now holding it. Empty — the normal case — means
+	// "whatever this session is", and a renderer falls back to the
+	// session's own role. It is stamped only where a transcript crosses
+	// sessions: OpenConsult seeds a consult session with the card's stage
+	// transcript, and without this every seeded turn was relabelled, so a
+	// stage reviewer's "VERDICT: pass" reappeared lower down the same card
+	// page attributed to `consult` under the architect's model.
+	Role agent.Role
+
 	// AnsweredBy names who chose this user-authored turn's text when a
 	// person did not type it: state.ActorAutopilot when the unattended
 	// loop answered its own ask_user question. Stamped only by

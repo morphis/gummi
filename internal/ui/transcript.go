@@ -65,7 +65,21 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 			label = s.Faint.Render("gummi")
 			style = s.Subtle
 		default:
-			label = s.Title.Render(string(snap.Role))
+			// The message's OWN role wins when it carries one; the session's
+			// role is the fallback for the ordinary case, where every turn was
+			// produced by the session holding it (engine.Message.Role).
+			//
+			// Labelling everything with snap.Role is what made a consult
+			// session re-attribute the stage transcript OpenConsult seeds it
+			// with: the plan stage's kickoff and the reviewer's own "VERDICT:
+			// pass" rendered once under `reviewer` in the stage segment and
+			// again, fifteen lines down the same card page, under `consult`
+			// inside a block captioned with the architect's model.
+			role := snap.Role
+			if msg.Role != "" {
+				role = msg.Role
+			}
+			label = s.Title.Render(string(role))
 			style = s.Subtle
 		}
 		// assistant text is untrusted model output; strip escapes before render

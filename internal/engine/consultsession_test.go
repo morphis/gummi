@@ -442,3 +442,64 @@ func TestSessionLiveNilAndZeroValueReportFalse(t *testing.T) {
 		t.Error("a restored session with no agent handle reports Live() == true")
 	}
 }
+
+// TestConsultSeedStampsTheProducingRole: the seeded turns must carry the
+// role that actually produced them. The seed is a good design — a
+// finished stage's conversation is the best context a consult session can
+// open with — but without a stamp every borrowed turn rendered under the
+// consult role, so the implementer's own words reappeared further down
+// the same card page as something the consult agent had said, under the
+// consult model's name. Message.Role is what a renderer reads to label
+// them; the stage session it came from is left untouched.
+func TestConsultSeedStampsTheProducingRole(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "implemented the thing"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	f := feature(9, "seeded roles", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, f.ID, StateDone)
+
+	stage := e.Get(f.ID).Snapshot()
+	if stage.Role != agent.RoleImplementer {
+		t.Fatalf("stage session role = %q, want %q", stage.Role, agent.RoleImplementer)
+	}
+	for _, m := range stage.Transcript {
+		if m.Role != "" {
+			t.Fatalf("a stage session's own transcript should carry no Role stamp: %+v", m)
+		}
+	}
+
+	c, err := e.OpenConsult(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded := c.Snapshot().Transcript
+	if len(seeded) < len(stage.Transcript) {
+		t.Fatalf("consult transcript = %+v, want at least the stage's own", seeded)
+	}
+	for i := range stage.Transcript {
+		if seeded[i].Role != agent.RoleImplementer {
+			t.Errorf("seeded message %d Role = %q, want %q (%+v)", i, seeded[i].Role, agent.RoleImplementer, seeded[i])
+		}
+	}
+
+	// stamping copies: the stage session's own transcript must not have
+	// been relabelled in place under the role that borrowed it.
+	for _, m := range e.Get(f.ID).Snapshot().Transcript {
+		if m.Role != "" {
+			t.Errorf("stamping the seed mutated the stage session's transcript: %+v", m)
+		}
+	}
+}
