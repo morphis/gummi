@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -36,6 +37,11 @@ merge. This branch is verified and awaiting a human landing.
 
 Compose the landing commit message as:
 - a Conventional Commits subject: type(scope): summary
+- the type is one of: ` + conventionalCommitTypeList() + `
+- the scope, if present, is one or more comma-separated names, each made
+  only of lowercase letters, digits and hyphens. A path is not a scope:
+  write fix(list), never fix(lxc/list). Prefer the last meaningful
+  segment when the area you mean reads like a path
 - imperative mood, at most 72 characters, no trailing period
 - a blank line
 - a body of "- " bullets, each stating the change's rationale (the "why"),
@@ -82,8 +88,13 @@ feat(scope): summary
 
 Compose this message in this repository's established landing style, as
 shown by these recent subjects from its history (newest first). Match
-their type and scope usage; the Conventional Commits shape above stays
-the floor when the history is thin or mixed.
+their tone, their level of detail, and which areas they name.
+
+The subject rules above are not negotiable against this history: they are
+what gummi validates before the branch may land, so a shape this repo
+happens to use but those rules forbid must NOT be copied. Path-shaped
+scopes are the common case — where the history writes fix(lxc/list), you
+write fix(list).
 `)
 		for _, s := range feed.StyleSubjects {
 			fmt.Fprintf(&b, "- %s\n", s)
@@ -215,6 +226,30 @@ func isDiffDump(s string) bool {
 var conventionalCommitTypes = map[string]struct{}{
 	"build": {}, "chore": {}, "ci": {}, "docs": {}, "feat": {}, "fix": {},
 	"perf": {}, "refactor": {}, "revert": {}, "style": {}, "test": {},
+}
+
+// conventionalCommitTypeList renders the accepted types for the scribe
+// prompt, sorted so the prompt text is stable across runs (a map's range
+// order is not) and so a cached prefix stays cached.
+//
+// The prompt states the subject rules by DERIVING them from the same
+// values ValidateCommitMessage enforces, rather than restating them in
+// prose that can drift. It has to state them at all because the prompt
+// also hands the scribe "the repo's recent landing subjects as the style
+// to imitate" — and a repo whose own convention writes path-shaped scopes
+// (`feat(lxc/list): …`) will teach the scribe to draft a subject that
+// gummi's own headless landing path then refuses as malformed. The TUI's
+// dialog is deliberately laxer than the validator (see
+// ValidateCommitMessage), so nothing downstream catches it either: the
+// message lands from the board and the same shape is rejected from
+// `gummi merge`.
+func conventionalCommitTypeList() string {
+	types := make([]string, 0, len(conventionalCommitTypes))
+	for t := range conventionalCommitTypes {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return strings.Join(types, ", ")
 }
 
 // ccSubjectRe matches a Conventional Commits `type(scope): summary` subject

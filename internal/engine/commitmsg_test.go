@@ -627,3 +627,53 @@ func TestDraftCommitMsgSurfacesDistinctReasons(t *testing.T) {
 		})
 	}
 }
+
+// TestCommitmsgPromptStatesWhatTheValidatorEnforces pins the prompt to the
+// rules ValidateCommitMessage actually applies. The two used to disagree:
+// the prompt asked only for "type(scope): summary" and then handed the
+// scribe the repo's own recent subjects "as the style to imitate", so a
+// repo writing path-shaped scopes taught the scribe to draft
+// `feat(lxc/list): …` — which the headless landing path then refuses as
+// malformed while the TUI's laxer dialog lands it. A drafter must not be
+// able to satisfy the instructions and fail the gate.
+func TestCommitmsgPromptStatesWhatTheValidatorEnforces(t *testing.T) {
+	p := commitmsgPrompt(&worktree.DraftFeed{
+		StyleSubjects: []string{"feat(lxc/list): add a column"},
+	}, "")
+
+	// Every type the validator accepts is offered, so the scribe never has
+	// to guess one that will be rejected.
+	for typ := range conventionalCommitTypes {
+		if !strings.Contains(p, typ) {
+			t.Errorf("prompt never names the accepted type %q", typ)
+		}
+	}
+	// The scope charset is the rule the style section can otherwise
+	// override, so the prompt must state it and must say it outranks the
+	// repo's own history.
+	for _, want := range []string{
+		"lowercase letters, digits and hyphens",
+		"not negotiable",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt is missing the scope rule fragment %q", want)
+		}
+	}
+}
+
+// TestCommitmsgPromptTypeListTracksTheValidator proves the prompt derives
+// its type list rather than restating it, so adding a type to
+// conventionalCommitTypes cannot leave the prompt behind.
+func TestCommitmsgPromptTypeListTracksTheValidator(t *testing.T) {
+	list := conventionalCommitTypeList()
+	if got, want := len(strings.Split(list, ", ")), len(conventionalCommitTypes); got != want {
+		t.Fatalf("type list names %d types, validator accepts %d: %q", got, want, list)
+	}
+	if list != conventionalCommitTypeList() {
+		t.Error("type list is not stable across calls; a map range order leaked into the prompt")
+	}
+	// The example subject the prompt shows must itself pass the validator.
+	if err := ValidateCommitMessage("feat(scope): summary\n\n- bullet one\n"); err != nil {
+		t.Errorf("the prompt's own example subject fails validation: %v", err)
+	}
+}
