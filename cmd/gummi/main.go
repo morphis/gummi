@@ -305,12 +305,23 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		return nil, nil, nil, nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
-	// Two independent attention pools (internal/engine): attended (a card
-	// whose gate-approval mode is off — a human is expected to stay with
-	// it) defaults to one lane so it never queues behind autopilot work;
-	// autopilot (every other card, including the everyday default)
-	// defaults to two. GUMMI_MAX_ACTIVE overrides only the attended pool's
-	// size; autopilot_lanes in config.yaml overrides the autopilot pool's.
+	// Two independent attention pools (internal/engine): attended — every
+	// card that is not explicitly on autopilot, which after
+	// engine.lanePoolFor's resolution through domain.Feature.GateMode
+	// means the empty default and so every ordinary card — defaults to one
+	// lane, so it never queues behind autopilot work. Autopilot (cards
+	// whose mode is domain.GateAutopilot, and only those) defaults to two.
+	// GUMMI_MAX_ACTIVE overrides only the attended pool's size;
+	// autopilot_lanes in config.yaml overrides the autopilot pool's.
+	//
+	// The one lane is therefore what an everyday board runs at: a card you
+	// have not handed over is one you are expected to be reading, and two
+	// of those at once is two things to attend to. Widen it with
+	// GUMMI_MAX_ACTIVE, or hand cards to autopilot to reach the other two
+	// lanes. (This comment used to describe the reverse split — the
+	// default in the autopilot pool, one attended lane for the rare
+	// opted-in card — which is the classification lanePoolFor no longer
+	// makes.)
 	maxActive := 1
 	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

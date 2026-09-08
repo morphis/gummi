@@ -29,15 +29,23 @@ type Config struct {
 	// (agent.WriteCage), and no backend confines the shell at all. See
 	// DESIGN §4.4 for what each layer actually guarantees.
 	Sandbox string `yaml:"sandbox"`
-	// AutopilotLanes caps how many autopilot-pool cards — every card whose
-	// gate-approval mode is domain.GateAttended or domain.GateAutopilot, which
-	// includes the empty default — can drive at once (internal/engine's
-	// autopilot pool). 0 or unset means the built-in default of 2; a
-	// negative value is rejected by Load. The ATTENDED pool (a card whose
-	// mode is domain.GateAttended) is sized separately: it defaults to 1 and is
-	// overridden by GUMMI_MAX_ACTIVE, not by this key — a human is expected
-	// to stay with an attended card, so it must never queue behind
-	// autopilot work.
+	// AutopilotLanes caps how many autopilot-pool cards — a card whose
+	// gate-approval mode is domain.GateAutopilot, and ONLY that mode — can
+	// drive at once (internal/engine's autopilot pool). 0 or unset means
+	// the built-in default of 2; a negative value is rejected by Load.
+	//
+	// The ATTENDED pool is everything else, the empty default included
+	// (engine.lanePoolFor resolves the field through
+	// domain.Feature.GateMode, where empty reads as domain.GateAttended),
+	// which makes it the pool every ordinary card competes in. It is sized
+	// separately: it defaults to 1 and is overridden by GUMMI_MAX_ACTIVE,
+	// not by this key — a human is expected to stay with an attended card,
+	// so it must never queue behind autopilot work.
+	//
+	// This comment used to say the autopilot pool held both modes
+	// "including the empty default", contradicting its own next sentence.
+	// It described the classification from before lanePoolFor went through
+	// GateMode, when an unset field pooled as autopilot.
 	AutopilotLanes int `yaml:"autopilot_lanes"`
 	// Repo is the git repository root gummi manages, when it is not the
 	// workspace root. Empty = the workspace root (the sibling layout, where
@@ -458,12 +466,12 @@ permissions: allow-all
 # override this per-profile in .gummi/profiles.yaml.
 # sandbox: warn
 
-# autopilot_lanes: how many autopilot cards (gate-approval mode gates or
-# full, which includes the everyday default) can drive at once. Default 2.
-# The attended pool (gate-approval mode off — a human is expected to stay
-# with the card) is sized separately, defaulting to 1 and overridden by
-# GUMMI_MAX_ACTIVE, not this key: an attended card must never queue behind
-# autopilot work.
+# autopilot_lanes: how many autopilot cards (gate-approval mode autopilot,
+# and only that mode) can drive at once. Default 2. The attended pool —
+# every other card, the everyday default included, where a human is
+# expected to stay with it — is sized separately, defaulting to 1 and
+# overridden by GUMMI_MAX_ACTIVE, not this key: an attended card must
+# never queue behind autopilot work.
 # autopilot_lanes: 2
 
 # instructions: — a list of absolute paths to extra instruction files that

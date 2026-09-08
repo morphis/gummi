@@ -326,12 +326,18 @@ func (m *Shell) boardCounts() string {
 // engine has nothing to say here, and "attended 0 · unattended 0" beside
 // a card count reads like a contradiction rather than an absence.
 //
-// The second pool is labeled "unattended", not "autopilot": lanePoolFor
-// pools every card whose GateApproval isn't GateAttended here (including the
-// empty default every TUI-created card stores), but the card line's own
-// autopilot badge (below) lights up only for the explicit GateAttended
-// value. Reusing "autopilot" for this wider count would name a
-// population the board itself refuses to badge as such.
+// The second pool is labeled "unattended" rather than "autopilot" because
+// that is the property the count is about: these are the runs going on
+// without you. Its population is exactly the cards the line's own ⚡
+// badge marks — engine.lanePoolFor sends only GateAutopilot here, and the
+// empty default every TUI-created card stores pools as attended — so the
+// two surfaces agree on which cards they mean.
+//
+// They did not always. This comment used to justify the wider label by
+// claiming lanePoolFor pooled every non-attended card here "including the
+// empty default", and that the badge lit for GateAttended. Both were the
+// pre-GateMode classification read backwards; the badge (below) has only
+// ever lit for GateAutopilot.
 func laneCountsText(lc engine.LaneCounts) string {
 	if lc.AttendedMax <= 0 && lc.AutopilotMax <= 0 &&
 		lc.AttendedRunning == 0 && lc.AutopilotRunning == 0 {
