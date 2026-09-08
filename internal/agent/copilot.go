@@ -144,13 +144,7 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	// handler runs on the SDK's goroutine; blocking it holds the model's
 	// turn open (what ask_user needs) without spending tokens.
 	for _, td := range opts.Tools {
-		cfg.Tools = append(cfg.Tools, copilot.Tool{
-			Name:           td.Name,
-			Description:    td.Description,
-			Parameters:     td.Parameters,
-			SkipPermission: true, // gummi asking gummi; no approval prompt
-			Handler:        cs.toolHandler(td.Name),
-		})
+		cfg.Tools = append(cfg.Tools, copilotTool(td, cs.toolHandler(td.Name)))
 	}
 
 	sess, err := c.client.CreateSession(ctx, cfg)
@@ -382,6 +376,22 @@ func (s *copilotSession) settleIdle() {
 		s.emit(Event{Kind: EventUsage, Usage: u})
 	}
 	s.emit(Event{Kind: EventIdle})
+}
+
+// copilotTool constructs a copilot.Tool from gummi's ToolDef. It sets
+// OverridesBuiltInTool = true so that gummi client tools (specifically
+// ask_user, which collides with Copilot CLI's built-in tool of the same
+// name) replace the runtime's built-in definitions and route calls to
+// gummi's handler instead of getting shadowed.
+func copilotTool(td ToolDef, handler copilot.ToolHandler) copilot.Tool {
+	return copilot.Tool{
+		Name:                 td.Name,
+		Description:          td.Description,
+		Parameters:           td.Parameters,
+		SkipPermission:       true, // gummi asking gummi; no approval prompt
+		OverridesBuiltInTool: true, // explicitly override built-in CLI tools (e.g. ask_user)
+		Handler:              handler,
+	}
 }
 
 // toolHandler builds an SDK handler for a client tool: it emits an

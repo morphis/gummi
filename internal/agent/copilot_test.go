@@ -493,3 +493,26 @@ func TestCopilotRejectsReadOnly(t *testing.T) {
 		t.Errorf("ReadOnly session error = %v, want a clear read-only rejection", err)
 	}
 }
+
+// TestCopilotToolOverridesBuiltIn asserts that tools registered with the
+// Copilot SDK have OverridesBuiltInTool = true. This prevents Copilot CLI's
+// built-in tools (notably ask_user) from colliding with or shadowing gummi's
+// client tools, which would cause ask_user invocations to stall indefinitely.
+func TestCopilotToolOverridesBuiltIn(t *testing.T) {
+	td := ToolDef{
+		Name:        "ask_user",
+		Description: "Ask question",
+		Parameters:  map[string]any{"type": "object"},
+	}
+	tool := copilotTool(td, nil)
+	if !tool.OverridesBuiltInTool {
+		t.Error("copilotTool must set OverridesBuiltInTool = true so built-in tools like ask_user are overridden")
+	}
+	if !tool.SkipPermission {
+		t.Error("copilotTool must set SkipPermission = true")
+	}
+	if tool.Name != td.Name || tool.Description != td.Description {
+		t.Errorf("copilotTool metadata mismatch: got name=%q desc=%q", tool.Name, tool.Description)
+	}
+}
+

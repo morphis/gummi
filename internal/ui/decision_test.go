@@ -381,6 +381,7 @@ func verifyGateWorkspace(t *testing.T) *Shell {
 func reviewGateWorkspace(t *testing.T) *Shell {
 	t.Helper()
 	m, _ := newWorkspace(t)
+	m.SetCopilotHint(false)
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Bouncy")
