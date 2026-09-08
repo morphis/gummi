@@ -76,6 +76,14 @@ func (m *Shell) burnCorrective(id domain.FeatureID, out gatepolicy.Outcome) {
 // Verify never auto-advances — landing on main is the human's call —
 // but the gate says whether verification held up: a clean pass is
 // ready-to-approve, a fail or a shrug is an escalation.
+//
+// The clean-pass arm is also where the verified marker is stamped, which
+// is the TUI's half of a fact the store had only ever learned from
+// engine.Advance: a card driven to its verify gate here never passed
+// through that code, so two cards in identical states reported opposite
+// `verified` values depending only on whether a human or `gummi run` had
+// driven them — and a script polling `gummi status --json … .verified` to
+// open a PR never fired for the human-driven one.
 func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	s := m.engine.Get(id)
 	if s == nil {
@@ -91,9 +99,11 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		// rule as dormant; this keeps it switched off).
 		VerifyMayBounce: false,
 	})
+	var stamp tea.Cmd
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
-		m.raiseAttention(id, attnGate, verifyGateReason(id.Kind()))
+		m.raiseAttention(id, attnGate, gateReason(domain.StageVerify, id.Kind(), true))
+		stamp = m.markVerified(id)
 	case out.Reason == "verify-blocked":
 		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
@@ -119,7 +129,49 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	}
 	// the session edited the artifact and committed; reload so the gate's
 	// row state (landed, open-comment counts) is fresh
-	return m.loadRows
+	return tea.Batch(stamp, m.loadRows)
+}
+
+// markVerified stamps the card's verified marker, the store-side twin of
+// what engine.Advance does on the branch that returns StatusNeedsMerge.
+// Its semantics are copied from there deliberately: stamp only when
+// VerifiedAt is still zero, so re-reaching the gate (a re-run, a restart
+// that replays the completion) keeps the FIRST pass's time rather than
+// sliding the record forward every time the stage is looked at again.
+// The zero test reads the store, not a board row: a row is a snapshot
+// that can be a beat stale, and a stale zero here is exactly the read
+// that would move a timestamp that must not move.
+//
+// It is a command because it writes: the store's single sqlite
+// connection (SetMaxOpenConns(1)) can block, and the render loop is not a
+// place to wait on it — the same reason setGateApproval and setEnvelope
+// are commands. Like those it is a side-channel write, so it takes no
+// card lock and asks for no reload; nothing on screen renders VerifiedAt.
+//
+// Research cards are deliberately NOT stamped. They reach this arm too —
+// verifyGateReason has a wording for them — but they carry no branch, and
+// engine.Advance stamps only where a branch exists and is ahead of main,
+// so headless never marks one verified. Stamping here would fix the
+// divergence for feature and bug cards and open the identical one, in the
+// other direction, for research.
+func (m *Shell) markVerified(id domain.FeatureID) tea.Cmd {
+	if m.store == nil || id.Kind() == domain.KindResearch {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		if !f.VerifiedAt.IsZero() {
+			return nil
+		}
+		if err := m.store.SetVerifiedAt(ctx, id, m.now().UTC()); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		return nil
+	}
 }
 
 // onPlanDone drives the plan-critique loop when a Plan-stage session
@@ -401,8 +453,32 @@ func ordinal(n int) string {
 	return itoa(n) + suffix
 }
 
+// gateReason is what a card's gate is asking the reader to do, for every
+// stage that raises one — the single place that wording is written.
+//
+// The three surfaces that raise gate items (a live stage completion, a
+// clean verify, and the startup reconstruction for cards that reached
+// their gate while the TUI was closed) each spelled this out for
+// themselves, and two of them spelled it "<stage> finished — review &
+// advance" for every stage there is. At verify that is not what the gate
+// asks: the next keypress opens the landing dialog and puts the branch on
+// main. So whether the reader was told they were about to merge depended
+// on whether gummi happened to be running when the card got there, and
+// one inbox could show both wordings on two cards at the same gate.
+//
+// It stays short on purpose — inboxview's rows spend their width on this
+// text, and inboxRowText trims the leading stage word the row's own label
+// has already printed, so every wording here keeps the stage first.
+func gateReason(stage domain.Stage, k domain.Kind, verifyPassed bool) string {
+	if stage == domain.StageVerify {
+		return verifyGateReason(k, verifyPassed)
+	}
+	return string(stage) + " finished — review & advance"
+}
+
 // verifyGateReason is what a clean verify asks the reader to do, in the
-// words of the act itself.
+// words of the act itself. gateReason routes the verify stage here rather
+// than restating it, so the branch-vs-research split below is made once.
 //
 // It is not only the inbox line: raiseAttention writes the reason into
 // the card's events as the park receipt, so it stays in the card's
@@ -410,11 +486,26 @@ func ordinal(n int) string {
 // the picker's own row already says "mark done" — so a fixed "land on
 // main" left the card permanently recorded as having been asked to do
 // something it cannot.
-func verifyGateReason(k domain.Kind) string {
-	if k == domain.KindResearch {
-		return "verify passed — review & mark it done"
+//
+// passed says whether the caller actually knows verify succeeded. The live
+// path does — it is on gatepolicy's clean-pass arm. The startup
+// reconstruction does NOT: a session's verdict is not durable (the
+// sessions row's verdict column is empty in practice, even for a card
+// driven headlessly to a verified branch), so it infers from the stage
+// alone. Asserting "verify passed" there would put that sentence on a card
+// whose verify failed and invite the reader to land a branch verification
+// rejected — worse than the vague wording this replaced. So the outcome
+// word is the caller's to supply, while the act ("land on main") is
+// unconditional, which is the half the reader was missing.
+func verifyGateReason(k domain.Kind, passed bool) string {
+	lead := "verify finished"
+	if passed {
+		lead = "verify passed"
 	}
-	return "verify passed — review & land on main"
+	if k == domain.KindResearch {
+		return lead + " — review & mark it done"
+	}
+	return lead + " — review & land on main"
 }
 
 // forwardEdge is the primary forward stage out of f's current stage — the

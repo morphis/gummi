@@ -674,7 +674,21 @@ func (m *Shell) reconstructInbox() {
 		case exhaustedActivity(snap.Activity):
 			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: budgetAttentionText(snap.Feature.Stage, false)})
 		default:
-			m.inbox.seed(attnItem{Feature: id, Kind: attnGate, Text: string(snap.Feature.Stage) + " finished — review & advance"})
+			// gateReason, not a hardcoded "review & advance": a card that
+			// reached its verify gate while the TUI was closed is reconstructed
+			// here, and telling that reader to "advance" it hides that the next
+			// keypress lands the branch on main (reviewloop.go).
+			//
+			// The outcome word comes from VerifiedAt, not from the session:
+			// a verdict does not survive a restart, but the verified stamp
+			// does, so it is the only thing here that can honestly say
+			// whether verify passed. An unstamped card gets "verify
+			// finished" — still told that the next press lands it, without
+			// claiming a result nothing recorded.
+			m.inbox.seed(attnItem{
+				Feature: id, Kind: attnGate,
+				Text: gateReason(snap.Feature.Stage, id.Kind(), !snap.Feature.VerifiedAt.IsZero()),
+			})
 		}
 	}
 }
@@ -1218,7 +1232,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		if handled, cmd := m.onAutonomousDone(ev.Feature, ev.Stage); handled {
 			return cmd
 		}
-		text := string(ev.Stage) + " finished — review & advance"
+		// verify never reaches here — onAutonomousDone consumes it and
+		// raises its own gate on the clean-pass arm — so the outcome word
+		// is dead for this call. It is false rather than true so that if
+		// that ever stops being true, the wording degrades to "verify
+		// finished" instead of silently asserting a pass.
+		text := gateReason(ev.Stage, ev.Feature.Kind(), false)
 		if cmd, attempted := m.autopilotCrossGate(s.Snapshot().Feature, text); attempted {
 			return cmd
 		}

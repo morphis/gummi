@@ -53,7 +53,7 @@ func TestBG090VerifyGateReasonMatchesTheKind(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reason := verifyGateReason(id.Kind())
+		reason := verifyGateReason(id.Kind(), true)
 		branchy := k != domain.KindResearch
 		if got := strings.Contains(reason, "land on main"); got != branchy {
 			t.Errorf("%s: gate reason %q offers landing = %v, want %v", k, reason, got, branchy)
