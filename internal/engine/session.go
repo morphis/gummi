@@ -202,10 +202,14 @@ type Session struct {
 	// even when a hand-crafted MCP call names them.
 	ReadOnly bool
 	// pool is the attention pool (attended/autopilot) this session
-	// competes in — decided once by lanePoolFor at construction from the
-	// feature's gate-approval mode, and immutable after. It is what lets
-	// freeSlot return a slot to the same pool the session took it from
-	// (see heldSlot and releaseSlot).
+	// competes in — decided by lanePoolFor at construction from the
+	// feature's gate-approval mode, and re-decided by repool whenever that
+	// mode changes under a live run. It is what lets freeSlot return a
+	// slot to the same pool the session took it from (see heldSlot and
+	// releaseSlot), which is why it is written under s.mu rather than
+	// being the construction-time constant it used to be: the `A` switch
+	// can flip a card mid-stage, and a slot returned to the pool the run
+	// no longer competes in corrupts both counts.
 	pool lanePool
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
@@ -488,6 +492,27 @@ func (s *Session) takeSlot() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.heldSlot = true
+}
+
+// repool re-binds the pool this session competes in, reporting whether
+// the pool actually changed and — when it did — whether a slot is
+// currently held and which pool it came out of, so the engine can move
+// the running count across under e.mu.
+//
+// The three answers come out of one critical section on purpose. freeSlot
+// clears heldSlot and reads s.pool in a single releaseSlot call and only
+// then takes e.mu to decrement, so a repool that split "is a slot held"
+// from "which pool is it in" could interleave between the two and either
+// decrement a pool twice or leak a slot into the other one forever.
+func (s *Session) repool(p lanePool) (moved, held bool, from lanePool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	from = s.pool
+	if from == p {
+		return false, false, from
+	}
+	s.pool = p
+	return true, s.heldSlot, from
 }
 
 // releaseSlot clears the slot flag, reporting whether it was held (so the

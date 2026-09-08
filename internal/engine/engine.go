@@ -233,11 +233,18 @@ type laneState struct {
 // and comparing the raw string put every one of those cards — every card
 // `bugs new` and the GitHub import ever minted — in the autopilot pool
 // while its own card page read "autopilot: off".
-func lanePoolFor(f domain.Feature) lanePool {
-	if f.GateMode() == domain.GateAttended {
-		return poolAttended
+func lanePoolFor(f domain.Feature) lanePool { return lanePoolForMode(f.GateMode()) }
+
+// lanePoolForMode is lanePoolFor over a bare mode string, for the callers
+// that have the mode a card was just given rather than the row it was
+// written to (Repool). It applies GateMode's own rule — only
+// GateAutopilot is autopilot, everything else including the empty default
+// is attended — so a raw stored value is safe to pass.
+func lanePoolForMode(mode string) lanePool {
+	if mode == domain.GateAutopilot {
+		return poolAutopilot
 	}
-	return poolAutopilot
+	return poolAttended
 }
 
 // Engine orchestrates all live sessions and the autonomous run queue.
@@ -496,6 +503,73 @@ func (e *Engine) LaneCounts() LaneCounts {
 		AutopilotRunning: e.lanes[poolAutopilot].running,
 		AutopilotMax:     e.lanes[poolAutopilot].max,
 	}
+}
+
+// Repool moves a card's live autonomous run into the attention pool its
+// gate-approval mode now names, and is what every writer of that mode
+// must call after persisting it.
+//
+// A session's pool used to be decided once, at dispatch, from the feature
+// snapshot run() was handed. The mode is not fixed for a run's lifetime:
+// the `A` switch hands a card to autopilot mid-stage — the "set a running
+// card to autopilot and go to bed" flow it is largely there for — and the
+// run went on holding the ATTENDED slot it took, so the next attended
+// card queued behind unattended work. That is the one thing the split
+// pools exist to prevent. The reverse leaked the other way: cards taken
+// back from autopilot kept their unattended lanes, and two of them ran at
+// once under an attended cap of one.
+//
+// Both live states are handled, and the queued one is the more important:
+// a card still waiting in a queue has not started, so there is no reason
+// for it to take a slot in the pool it has stopped belonging to.
+//
+//   - queued: the entry moves to the other pool's FIFO, at the back —
+//     a card changing pools takes its turn in the new one, it does not
+//     inherit a position it earned somewhere else.
+//   - running: the slot moves with it, which can briefly put the
+//     destination pool over its cap. That is accounted honestly rather
+//     than avoided: the run really is in that pool now, and the
+//     alternative is stopping a working agent to satisfy a count. The cap
+//     throttles the next start, and the over-subscription drains on its
+//     own as the run ends.
+//
+// The session's own Feature copy is deliberately left alone. It is read
+// without a lock all over the engine, and the pool is the only thing that
+// has to agree with the row here; every continuation reloads the feature
+// from the store anyway, so the next stage's session is built from the
+// new mode regardless.
+//
+// A no-op when the card has no live session, when its session never
+// competes for a slot (interactive), or when the mode maps to the pool it
+// is already in.
+func (e *Engine) Repool(id domain.FeatureID, mode string) {
+	want := lanePoolForMode(mode)
+	e.mu.Lock()
+	s := e.live[id]
+	if s == nil || s.Interactive {
+		e.mu.Unlock()
+		return
+	}
+	queued := s.State() == StateQueued
+	moved, held, from := s.repool(want)
+	if !moved {
+		e.mu.Unlock()
+		return
+	}
+	switch {
+	case held:
+		if e.lanes[from].running > 0 {
+			e.lanes[from].running--
+		}
+		e.lanes[want].running++
+	case queued:
+		e.removeFromQueue(id)
+		e.lanes[want].queue = append(e.lanes[want].queue, id)
+	}
+	e.mu.Unlock()
+	// the pool it left may now have room, and the pool it joined may have
+	// gained a waiter; schedule covers both.
+	e.schedule()
 }
 
 // Attach starts (or reuses) an interactive chat session for a feature's

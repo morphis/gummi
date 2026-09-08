@@ -3649,6 +3649,17 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
+		// A card already running (or queued) competes in the pool its OLD
+		// mode named, and nothing else ever revisits that: the session
+		// carries the feature snapshot it was dispatched with, and only the
+		// next stage's session is built from the row this call just wrote.
+		// Without this, handing a running card to autopilot left it holding
+		// the attended slot — so the next attended card queued behind
+		// unattended work, which is the one thing the two pools exist to
+		// prevent (engine.Repool says what the move does in each state).
+		if m.engine != nil {
+			m.engine.Repool(id, mode)
+		}
 		// The confirmation reads back in the words the choice was made in.
 		// Two modes, so two sentences — no table to look them up in.
 		text := fmt.Sprintf("%s: attended — every gate stops for you", id)
