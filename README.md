@@ -65,7 +65,9 @@ writes and what its gate demands, not the route.
   bounded question mid-turn through the built-in `ask_user` tool, and the
   turn spends nothing while it waits.
 - **Verify proves it.** The repo's checks and the spec's own verification
-  plan run. A failure sends the work back to implement.
+  plan run. A failure sends the work back to implement — unless the check
+  was already red on the fresh branch, which is excused and gates nothing.
+  `gummi status` names the excused ones.
 - **Research writes a document, not a branch.** Its verify is a citation
   check that spends no tokens. Crossing `done` turns the approved document
   into pre-seeded feature cards with dependency edges.
