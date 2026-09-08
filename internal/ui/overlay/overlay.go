@@ -142,6 +142,19 @@ func Dim(scr uv.Screen, area uv.Rectangle, s *theme.Styles) {
 			if c == nil {
 				continue
 			}
+			// Skip the zero-width placeholder that trails a double-width
+			// grapheme. It is not a redundant nil-guard: writing to a
+			// placeholder is destructive. ultraviolet's Line.Set, seeing a
+			// width-0 cell under the cursor, walks BACK to the wide cell
+			// that owns it and blanks the pair — so dimming cell x+1 erases
+			// the glyph at x. The row then renders one column short and the
+			// dialog frame sits a column left on that line alone. The
+			// placeholder carries no content and no style of its own (it is
+			// a bare Cell{}), so the wide cell's own recolour, one x
+			// earlier, is the whole of its dimming.
+			if c.Width == 0 {
+				continue
+			}
 			cc := *c
 			cc.Style.Fg = s.Theme.FgFaint
 			cc.Style.Bg = s.Theme.BgBase

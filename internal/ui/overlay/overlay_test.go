@@ -100,6 +100,32 @@ func TestDrawDimsBackdropAndCentersDialog120(t *testing.T) {
 	golden.RequireEqual(t, []byte(drawScene(t, &st, 120, 34)))
 }
 
+// A double-width grapheme survives the dim. drawScene's backdrop is
+// ASCII-only, which is why the goldens above never caught this: every
+// cell there is width 1 and has no placeholder to trample. gummi renders
+// ⚡ as its autopilot badge on the board, so opening any dialog over a
+// board with autopilot on used to eat the badge and shift the rest of
+// that row one column left.
+func TestDimPreservesWideGraphemes(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	buf := uv.NewScreenBuffer(10, 1)
+	uv.NewStyledString("ab⚡cd").Draw(&buf, buf.Bounds())
+
+	Dim(&buf, buf.Bounds(), s)
+
+	if c := buf.CellAt(2, 0); c == nil || c.Content != "\u26a1" || c.Width != 2 {
+		t.Errorf("cell 2 = %+v, want the ⚡ still there at width 2", c)
+	}
+	// the placeholder must stay a placeholder: a width-1 cell here would
+	// desynchronise the line's columns from its content just as badly.
+	if c := buf.CellAt(3, 0); c == nil || c.Width != 0 {
+		t.Errorf("cell 3 = %+v, want the wide cell's zero-width placeholder", c)
+	}
+	if got := uv.TrimSpace(buf.Render()); !strings.Contains(got, "ab\u26a1cd") {
+		t.Errorf("render = %q, want it to still contain \"ab⚡cd\"", got)
+	}
+}
+
 func TestDrawEmptyStackLeavesContent(t *testing.T) {
 	var st Stack
 	out := drawScene(t, &st, 40, 6)
