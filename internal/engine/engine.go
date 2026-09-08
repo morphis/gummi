@@ -5,9 +5,10 @@
 // Interactive sessions (brainstorm/spec chat) run whenever you attach
 // and hold no slot — you are the scarce resource. Autonomous sessions
 // (plan/implement/review/verify) compete for one of two independent
-// attention pools: attended (a card whose gate-approval mode is
-// domain.GateAttended — a human is expected to stay with it) and autopilot
-// (everything else, including the empty default). Each pool has its own
+// attention pools: attended (a card whose gate-approval mode reads as
+// domain.GateAttended — a human is expected to stay with it, and the
+// empty default reads that way too) and autopilot (domain.GateAutopilot,
+// and only that). Each pool has its own
 // cap and its own FIFO queue, so a slot freed in one pool is never handed
 // to a session waiting in the other — an attended card never queues
 // behind autopilot work. Excess runs queue and start automatically as
@@ -163,16 +164,17 @@ type Config struct {
 	// a value falls back to the built-in default (warn).
 	Sandbox string
 	// MaxActive caps concurrent autonomous slots in the ATTENDED pool — a
-	// card whose gate-approval mode is domain.GateAttended. Zero or
+	// card whose gate-approval mode reads as domain.GateAttended, which
+	// includes the empty default (domain.Feature.GateMode). Zero or
 	// negative — the default — means no cap: every attended run started
 	// begins immediately. cmd/gummi's own default for this field is 1;
 	// GUMMI_MAX_ACTIVE overrides it from there. A positive value queues
 	// attended runs beyond it.
 	MaxActive int
 	// AutopilotLanes caps concurrent autonomous slots in the AUTOPILOT
-	// pool — every card whose gate-approval mode is domain.GateAttended or
-	// domain.GateAutopilot, which includes the empty default (see
-	// domain.Feature.GateApproval). Zero or negative means no cap, the
+	// pool — every card whose gate-approval mode is domain.GateAutopilot,
+	// and only those: the empty default reads as attended and competes in
+	// the other pool (see domain.Feature.GateMode). Zero or negative means no cap, the
 	// same "unlimited" semantics MaxActive has always had — kept
 	// available here for tests and any caller that wants both pools
 	// uncapped. internal/config.Config's autopilot_lanes key supplies
@@ -222,13 +224,17 @@ type laneState struct {
 }
 
 // lanePoolFor decides which attention pool an autonomous session for f
-// competes in. GateAttended is the only mode that reads as attended: a human
-// is expected to stay with that card, so it must never queue behind
-// unattended work. Everything else — GateAttended, GateAutopilot, and the empty
-// default (domain.Feature.GateApproval documents empty as reading like
-// GateAttended) — runs unattended and belongs in the autopilot pool.
+// competes in. Attended is the mode that reads as attended: a human is
+// expected to stay with that card, so it must never queue behind
+// unattended work. Only GateAutopilot belongs in the autopilot pool.
+//
+// The test goes through GateMode(), never the raw field: an unset
+// GateApproval is storable and documented as reading like GateAttended,
+// and comparing the raw string put every one of those cards — every card
+// `bugs new` and the GitHub import ever minted — in the autopilot pool
+// while its own card page read "autopilot: off".
 func lanePoolFor(f domain.Feature) lanePool {
-	if f.GateApproval == domain.GateAttended {
+	if f.GateMode() == domain.GateAttended {
 		return poolAttended
 	}
 	return poolAutopilot

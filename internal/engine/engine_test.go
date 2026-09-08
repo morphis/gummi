@@ -338,8 +338,8 @@ func TestSchedulerQueuesBeyondMaxActive(t *testing.T) {
 		e.Close()
 	})
 
-	f1 := feature(1, "one", domain.StageImplement)
-	f2 := feature(2, "two", domain.StageImplement)
+	f1 := autopilotFeature(1, "one")
+	f2 := autopilotFeature(2, "two")
 	withWorktree(t, wt, f1)
 	withWorktree(t, wt, f2)
 
@@ -372,8 +372,8 @@ func TestPauseFreesSlotAndPromotes(t *testing.T) {
 		e.Close()
 	})
 
-	f1 := feature(1, "one", domain.StageImplement)
-	f2 := feature(2, "two", domain.StageImplement)
+	f1 := autopilotFeature(1, "one")
+	f2 := autopilotFeature(2, "two")
 	withWorktree(t, wt, f1)
 	withWorktree(t, wt, f2)
 	if err := e.Run(f1); err != nil {
@@ -407,7 +407,7 @@ func TestMaxActiveTwo(t *testing.T) {
 	})
 
 	for i := 1; i <= 3; i++ {
-		f := feature(i, "f", domain.StageImplement)
+		f := autopilotFeature(i, "f")
 		withWorktree(t, wt, f)
 		if err := e.Run(f); err != nil {
 			t.Fatal(err)
@@ -475,9 +475,9 @@ func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
 		e.Close()
 	})
 
-	f1 := feature(1, "one", domain.StageImplement)
-	f2 := feature(2, "two", domain.StageImplement)
-	f3 := feature(3, "three", domain.StageImplement)
+	f1 := autopilotFeature(1, "one")
+	f2 := autopilotFeature(2, "two")
+	f3 := autopilotFeature(3, "three")
 	for _, f := range []domain.Feature{f1, f2, f3} {
 		withWorktree(t, wt, f)
 	}

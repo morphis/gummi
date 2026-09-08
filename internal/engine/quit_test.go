@@ -11,7 +11,7 @@ import (
 )
 
 // TestStopForQuitParksAutopilotSession: a live autopilot session
-// (GateApproval GateAttended, the default) is stopped and the park event
+// (GateApproval domain.GateAutopilot) is stopped and the park event
 // StopForQuit writes carries reason "quit". A second call is a no-op —
 // the dedupe key holds the marker to one write per session generation.
 func TestStopForQuitParksAutopilotSession(t *testing.T) {
@@ -192,5 +192,51 @@ func TestQuitStoppedCardsEmptyWithNothingStopped(t *testing.T) {
 	}
 	if len(cards) != 0 {
 		t.Fatalf("got %d quit-stopped cards, want 0: %+v", len(cards), cards)
+	}
+}
+
+// TestStopForQuitLeavesUnsetGateSessionRunning: a card whose GateApproval
+// was never set is attended, so quitting must leave it exactly as it
+// leaves an explicitly attended one. StopForQuit used to compare the
+// stored string, which read every such card — every card `bugs new` and
+// the GitHub import minted — as autopilot work: quitting parked it, and
+// the reopen prompt then offered to pick up work a human had been sitting
+// with.
+func TestStopForQuitLeavesUnsetGateSessionRunning(t *testing.T) {
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	ws, store, wt := newRepo(t)
+	e := persistEngine(t, ag, ws, store, wt)
+	t.Cleanup(func() { close(release) })
+
+	f := feature(1, "one", domain.StageImplement)
+	if f.GateApproval != "" {
+		t.Fatalf("this test needs an unset gate mode, got %q", f.GateApproval)
+	}
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateRunning)
+
+	e.StopForQuit(context.Background())
+
+	if st := e.Get("FD-001").State(); st != StateRunning {
+		t.Fatalf("unset-gate session state after StopForQuit = %s, want still running", st)
+	}
+	evs, err := store.Events(context.Background(), "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if ev.Kind == state.EventPark {
+			t.Fatalf("unset-gate session got a park event, want none: %+v", ev)
+		}
 	}
 }

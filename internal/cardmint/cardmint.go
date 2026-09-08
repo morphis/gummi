@@ -95,10 +95,13 @@ type Input struct {
 	// draft's Verification plan section alongside the description's
 	// overflow. Ignored for KindResearch.
 	Acceptance string
-	// GateApproval selects who crosses this card's design gates:
-	// domain.GateAttended (auto-crosses) or domain.GateAttended (checkpoints
-	// each for a human). Empty reads as domain.GateAttended, matching
-	// Feature.GateApproval's own empty-reads-as-auto contract.
+	// GateApproval selects who crosses this card's gates on an unattended
+	// resume: domain.GateAutopilot (crosses them all) or
+	// domain.GateAttended (checkpoints each one for a human). Empty reads
+	// as domain.GateAttended — the stricter of the two — matching
+	// domain.(*Feature).GateMode, which is how every reader resolves the
+	// stored field. Mint writes the resolved value rather than the empty
+	// string so nothing downstream has to resolve it again.
 	GateApproval string
 }
 

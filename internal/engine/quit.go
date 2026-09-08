@@ -24,9 +24,8 @@ import (
 )
 
 // StopForQuit stops every live session belonging to an autopilot card —
-// GateApproval anything but domain.GateAttended, same as everywhere else
-// the field is interpreted (domain.Feature.GateApproval's own doc: empty
-// reads as GateAttended) — and records why in the card-event log, so a
+// GateMode() anything but domain.GateAttended, same as everywhere else
+// the field is interpreted — and records why in the card-event log, so a
 // later QuitStoppedCards can tell this card apart from one a human
 // parked with p. An attended card is left untouched: the
 // process exiting stops it the same way it always did, and nothing about
@@ -46,7 +45,11 @@ func (e *Engine) StopForQuit(ctx context.Context) {
 		default:
 			continue
 		}
-		if s.Feature.GateApproval == domain.GateAttended {
+		// GateMode(), not the raw field: an unset GateApproval reads as
+		// attended, and comparing the string parked every card `bugs new`
+		// ever minted as though a robot had been driving it — the reopen
+		// prompt then offered to resume work a human had been sitting with.
+		if s.Feature.GateMode() == domain.GateAttended {
 			continue
 		}
 		targets = append(targets, s)

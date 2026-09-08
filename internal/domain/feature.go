@@ -403,6 +403,22 @@ func (f *Feature) kind() Kind {
 	}
 }
 
+// GateMode returns the feature's gate-approval mode with the empty
+// default resolved, the same job kind() does for Kind. Every read of
+// GateApproval that branches on the mode must go through this: the field
+// is documented as "empty reads as GateAttended" and ValidGateApproval
+// accepts empty as storable, so a bare `f.GateApproval == GateAttended`
+// silently classifies an unset card as autopilot. That is exactly what
+// engine.lanePoolFor did — every card minted by `bugs new` stores the
+// empty string, so every bug card competed in the autopilot lane pool
+// while its own card page read "autopilot: off".
+func (f *Feature) GateMode() string {
+	if f.GateApproval == GateAutopilot {
+		return GateAutopilot
+	}
+	return GateAttended
+}
+
 // BranchName is the feature's git branch: gummi/FD-042-slug.
 func (f *Feature) BranchName() string {
 	return "gummi/" + string(f.ID) + "-" + f.Slug

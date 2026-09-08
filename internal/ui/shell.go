@@ -2179,13 +2179,17 @@ func (m *Shell) quitNow() tea.Cmd {
 }
 
 // liveAutopilotSplit splits the board's live (StateRunning/StateQueued)
-// sessions by whether their card is on autopilot — GateApproval
+// sessions by whether their card is on autopilot — domain.Feature.GateMode
 // anything but domain.GateAttended, same as everywhere else the field is
-// interpreted (domain.Feature.GateApproval's own doc: empty reads as
-// GateAttended). autopilot holds bare ids, sorted — all the quit dialog
-// needs to name them; plain mirrors the old liveSessions' "<id>
-// (<stage>)" labels, so a hand-driven session's wording stays exactly
-// what it was.
+// interpreted.
+//
+// GateMode, not the raw field: empty reads as GateAttended (its own doc
+// says so, and ValidGateApproval stores it), so the bare comparison this
+// used to make listed every card `bugs new` minted under "running on
+// autopilot" in the quit dialog — cards whose own page said "autopilot:
+// off". autopilot holds bare ids, sorted — all the quit dialog needs to
+// name them; plain mirrors the old liveSessions' "<id> (<stage>)" labels,
+// so a hand-driven session's wording stays exactly what it was.
 func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
 	if m.engine == nil {
 		return nil, nil
@@ -2196,7 +2200,7 @@ func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
 		default:
 			continue
 		}
-		if s.Feature.GateApproval == domain.GateAttended {
+		if s.Feature.GateMode() == domain.GateAttended {
 			plain = append(plain, fmt.Sprintf("%s (%s)", id, s.Feature.Stage))
 			continue
 		}

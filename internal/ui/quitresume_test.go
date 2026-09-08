@@ -39,9 +39,14 @@ func TestResumeLabelWording(t *testing.T) {
 // --- quitCmd wording ---
 
 // TestQuitWithAutopilotLiveSessionWordsDialog: a live autonomous session
-// on a card that is not GateAttended gets the autopilot wording — it names
+// on a card whose mode IS autopilot gets the autopilot wording — it names
 // the card, says it stops and picks back up, and never implies it keeps
 // going once the terminal closes.
+//
+// The mode is set explicitly. It used to be left unset, which reached this
+// wording only because liveAutopilotSplit read the empty default as
+// autopilot — the misclassification GateMode fixes, and the reason an
+// attended card was listed here as running on autopilot.
 func TestQuitWithAutopilotLiveSessionWordsDialog(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
@@ -52,9 +57,9 @@ func TestQuitWithAutopilotLiveSessionWordsDialog(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m)  // brainstorm → spec
-	m = pressAdvance(t, m)  // spec → plan
-	m = openAndAttach(t, m) // run plan (autonomous)
+	m = advanceTo(t, m, domain.StageImplement)
+	m.rows[0].F.GateApproval = domain.GateAutopilot // set before the run, matching the session's own snapshot
+	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
 
 	cmd := m.quitCmd()
@@ -123,8 +128,8 @@ func TestQuitConfirmParksAutopilotSessionOnConfirm(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	m, eng := chatWorkspace(t, ag)
-	m = pressAdvance(t, m)
-	m = pressAdvance(t, m)
+	m = advanceTo(t, m, domain.StageImplement)
+	m.rows[0].F.GateApproval = domain.GateAutopilot // the mode this dialog is about, stated rather than inferred from the empty default
 	m = openAndAttach(t, m)
 	waitLive(t, eng, "FD-001")
 

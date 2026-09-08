@@ -71,7 +71,12 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 		f := domain.Feature{
 			ID: id, Num: num, Title: p.Title, OneLiner: p.OneLiner, Slug: slugs[i],
 			Kind: domain.KindFeature, Stage: workflow.Initial(), Profile: opts.Profile,
-			Budget: domain.Budget{Envelope: opts.Envelope}, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
+			// Explicit for the same reason MaterializeBugs is: an ingested
+			// proposal carries no gate mandate of its own, and a stored
+			// empty string is a value every reader has to resolve rather
+			// than one it can compare.
+			GateApproval: domain.GateAttended,
+			Budget:       domain.Budget{Envelope: opts.Envelope}, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		feats[i] = f
 		if _, seen := byTitle[p.Title]; !seen {

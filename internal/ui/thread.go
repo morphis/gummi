@@ -899,8 +899,14 @@ func correctiveLabel(m *Shell, f domain.Feature) string {
 // way a note about a finished period did — there is nothing here to go
 // stale, and nothing to clean up.
 func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
-	label := "autopilot: " + autopilotLabel(f.GateApproval)
-	if f.GateApproval == domain.GateAttended {
+	// Both reads go through GateMode rather than the raw field. An unset
+	// GateApproval reads as attended (domain.Feature.GateApproval's own
+	// doc), and comparing the raw field against GateAttended made every
+	// card `bugs new` mints fall through to the live-session branch — so an
+	// attended card with a stage running rendered "autopilot: off ·
+	// running", claiming autopilot held work it had never been given.
+	label := "autopilot: " + autopilotLabel(f.GateMode())
+	if f.GateMode() == domain.GateAttended {
 		return s.Faint.Render(label)
 	}
 	sess := m.sessionFor(f.ID)

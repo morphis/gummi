@@ -621,7 +621,7 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 	if gate == "" {
 		gate = domain.GateAttended
 	} else if norm, ok := domain.NormalizeGateApproval(gate); !ok {
-		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateAttended, domain.GateAttended, gate)
+		return "", fmt.Errorf("card_new: gate_approval must be %q or %q (got %q)", domain.GateAttended, domain.GateAutopilot, gate)
 	} else {
 		gate = norm
 	}

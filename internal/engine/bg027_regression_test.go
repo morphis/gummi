@@ -68,22 +68,28 @@ func TestBG027AttendedLaneOutlivesBusy(t *testing.T) {
 	}
 }
 
-// TestBG027AutopilotPoolStaysWiderThanTheBadge pins the scheduling
-// invariant that makes defect 2 (see internal/ui's
-// TestBG027FooterLabelMatchesBadgedPopulation) a labeling problem rather
-// than a pooling one: lanePoolFor deliberately pools every non-GateAttended
-// card — including the empty default every TUI-created card stores —
-// into poolAutopilot, while the card line's badge (board.go) lights up
-// only for the explicit GateAttended value. That gap is correct and
-// pinned by TestAttendedNeverQueuesBehindAutopilot; this test documents
-// it stays open so a future change here doesn't silently make the UI
-// test moot by narrowing the pool to match the badge.
-func TestBG027AutopilotPoolStaysWiderThanTheBadge(t *testing.T) {
+// TestBG027PoolAndBadgeAgreeOnTheEmptyDefault reverses what this test
+// used to pin. BG-027 recorded the pool being deliberately WIDER than the
+// badge: lanePoolFor pooled every card whose GateApproval was not the
+// literal string "attended" — the empty default every `bugs new` and
+// every TUI-created card stores included — into poolAutopilot, while the
+// card line's badge (board.go) lights up only for an explicit
+// domain.GateAutopilot. That gap was not a labeling nuance, it was a
+// misreading of the field: empty is documented as reading like
+// GateAttended (domain.(*Feature).GateMode), so those cards competed in
+// the autopilot lane pool while their own card page read "autopilot:
+// off". lanePoolFor goes through GateMode() now, which closes the gap
+// from the pool's side.
+//
+// Kept, inverted, rather than deleted: the pool and the badge must now
+// agree about a default card, and if they ever diverge again it should be
+// a test failure here rather than a scheduling surprise nobody can see.
+func TestBG027PoolAndBadgeAgreeOnTheEmptyDefault(t *testing.T) {
 	f := feature(1, "default gate", domain.StageImplement)
 	inAutopilotPool := lanePoolFor(f) == poolAutopilot
-	badgedAsAutopilot := f.GateApproval == domain.GateAttended // board.go's badge condition
-	if inAutopilotPool == badgedAsAutopilot {
-		t.Fatalf("BG-027: expected lanePoolFor's autopilot grouping (%v) to stay wider than the card-line autopilot badge (%v) for GateApproval=%q — if these now agree, the footer's \"unattended\" label may no longer be needed",
-			inAutopilotPool, badgedAsAutopilot, f.GateApproval)
+	badgedAsAutopilot := f.GateApproval == domain.GateAutopilot // board.go's badge condition
+	if inAutopilotPool || inAutopilotPool != badgedAsAutopilot {
+		t.Fatalf("BG-027: a card with GateApproval=%q pools as autopilot=%v but badges as autopilot=%v — an unset gate mode reads as attended and must do so on both surfaces",
+			f.GateApproval, inAutopilotPool, badgedAsAutopilot)
 	}
 }

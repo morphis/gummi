@@ -50,7 +50,9 @@ func TestBG026BackendDeathLeaksLaneSlot(t *testing.T) {
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
 	t.Cleanup(func() { e.Close() })
 
-	f := feature(1, "one", domain.StageImplement)
+	// An explicit autopilot card: the slot this test watches for a leak is
+	// the autopilot pool's, and only domain.GateAutopilot lands there.
+	f := autopilotFeature(1, "one")
 	withWorktree(t, wt, f)
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)

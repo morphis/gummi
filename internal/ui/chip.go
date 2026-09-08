@@ -198,12 +198,18 @@ func chipDetails(r featureRow, p *reentryReading) []string {
 		// exactly the cards a reader trusts least: on autopilot the
 		// design gate crosses itself, so the "stops for you" a reader
 		// expects from a rewind never happens (§9.4).
+		//
+		// GateMode is the one idiom the package reads the mode through
+		// (domain.Feature.GateMode); the explicit `!= "" &&` guard these two
+		// arms used to carry said the same thing a longer way, and being the
+		// only site spelling it out is how the shorter, wrong spelling
+		// survived everywhere else.
 		switch {
-		case f.GateApproval != "" && f.GateApproval != domain.GateAttended && !out.Edit.Empty():
+		case f.GateMode() != domain.GateAttended && !out.Edit.Empty():
 			// the open comment the rewind writes holds the gate until the
 			// architect resolves it; only then does autopilot cross
 			d = append(d, "Autopilot is on: once your comment is resolved the design gate crosses itself and implement runs straight away — /autopilot off first if you want to read the plan.")
-		case f.GateApproval != "" && f.GateApproval != domain.GateAttended:
+		case f.GateMode() != domain.GateAttended:
 			d = append(d, "Autopilot is on: the design gate crosses itself and implement runs straight away — /autopilot off first if you want to read the plan.")
 		default:
 			d = append(d, "The design gate stops for you before implement runs again.")

@@ -342,3 +342,42 @@ func TestMaterializeBugsReposOnlyNamedRepo(t *testing.T) {
 		t.Errorf("unexpected no-default error: %v", err)
 	}
 }
+
+// TestMaterializeBugsStoresAGateMode: a bug minted through the ingest
+// path must store its gate mode, not leave the field empty. This is the
+// mint half of the empty-gate defect — MaterializeBugs' domain.Feature
+// literal carried no GateApproval at all, so every bug `bugs new` and the
+// GitHub import created was persisted with the empty string, and any
+// reader comparing that string rather than resolving it (lanePoolFor,
+// StopForQuit) read the card as autopilot work. cardmint.Mint resolves
+// empty to the same value, so both mint paths now write identical rows.
+func TestMaterializeBugsStoresAGateMode(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	props := []domain.BugProposal{{Title: "Login loops", Report: domain.BugReport{Description: "SSO bounce"}}}
+	created, err := e.MaterializeBugs(ctx, props, MaterializeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 1 {
+		t.Fatalf("created %d, want 1", len(created))
+	}
+	if created[0].GateApproval != domain.GateAttended {
+		t.Errorf("minted bug GateApproval = %q, want %q", created[0].GateApproval, domain.GateAttended)
+	}
+	// and it survives the round trip through the store, which is where
+	// every later reader picks it up.
+	got, err := store.GetFeature(ctx, created[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GateApproval != domain.GateAttended {
+		t.Errorf("stored GateApproval = %q, want %q", got.GateApproval, domain.GateAttended)
+	}
+	if lanePoolFor(got) != poolAttended {
+		t.Error("an ingested bug must compete in the attended pool, not autopilot")
+	}
+}

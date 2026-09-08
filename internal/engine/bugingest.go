@@ -103,7 +103,16 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 			ID: id, Num: num, Kind: domain.KindBug, Title: p.Title, OneLiner: p.OneLiner,
 			Slug: slugs[i], Stage: workflow.Initial(),
 			Profile: opts.Profile, Budget: domain.Budget{Envelope: opts.Envelope},
-			ExternalRef: p.ExternalRef, Severity: p.Severity, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
+			// Stored explicitly, not left empty, and not conditional:
+			// MaterializeOpts carries no gate mode, so a bug arriving this
+			// way (`bugs new`, the GitHub import) is nobody's autopilot
+			// mandate. cardmint.Mint resolves its own empty input to the
+			// same value, so the two mint paths write identical rows —
+			// leaving the field unset here is what filled the store with
+			// cards whose mode had to be re-derived by every reader, and
+			// readers that compared the raw string got it wrong.
+			GateApproval: domain.GateAttended,
+			ExternalRef:  p.ExternalRef, Severity: p.Severity, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
 		}
 		// Draft first so a write failure aborts before the bug exists — a
 		// persisted bug with no draft would be reseeded blank on first open.

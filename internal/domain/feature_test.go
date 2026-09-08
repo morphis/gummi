@@ -159,6 +159,24 @@ func TestValidGateApproval(t *testing.T) {
 	}
 }
 
+// TestGateModeResolvesTheEmptyDefault pins the contract every reader of
+// GateApproval depends on: the stored empty string is attended, not "some
+// third thing". Comparing the raw field instead of calling this is what
+// classified every card minted with an unset mode as autopilot work — see
+// engine's TestLanePoolForEmptyGateIsAttended for the failure that caused.
+func TestGateModeResolvesTheEmptyDefault(t *testing.T) {
+	for _, c := range []struct{ stored, want string }{
+		{"", GateAttended},
+		{GateAttended, GateAttended},
+		{GateAutopilot, GateAutopilot},
+	} {
+		f := Feature{GateApproval: c.stored}
+		if got := f.GateMode(); got != c.want {
+			t.Errorf("Feature{GateApproval: %q}.GateMode() = %q, want %q", c.stored, got, c.want)
+		}
+	}
+}
+
 func TestNormalizeGateApproval(t *testing.T) {
 	cases := []struct {
 		in     string
