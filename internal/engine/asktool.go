@@ -1039,7 +1039,20 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// blocked call and its resolver died with the process, so the answer
 	// rides a fresh turn. The transcript above already recorded it; the
 	// turn must deliver it without appending it a second time.
-	return e.deliverTurn(ctx, s, answer)
+	if err := e.deliverTurn(ctx, s, answer); err != nil {
+		// Restore the question, exactly as every other failing branch
+		// above does. This is the branch a restored ask always takes, and
+		// deliverTurn refuses a session with no agent behind it — which a
+		// restored one never has until something attaches. Returning the
+		// error without putting the question back consumed the ask and
+		// recorded an answer that reached nobody: the card was left with
+		// nothing open to answer and no agent to answer it, and the
+		// person who had just typed the answer was told only that the
+		// card was "queued, not yet running".
+		s.trySetPendingAsk(ask)
+		return err
+	}
+	return nil
 }
 
 // resumeAfterAnswer marks the session working again once the answer has
