@@ -1169,8 +1169,11 @@ func TestParkedDesignGateHasNoWayForward(t *testing.T) {
 	runsAtPark := runs.Load()
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // leave the card page; back to the board
 
-	// approve is refused, and should name the undrafted section.
+	// approve is refused, and should name the undrafted section. The
+	// board's design-gate confirmation is answered first: it asks about
+	// intent, not about whether the gate will open.
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("approve crossed a gate with an undrafted section")
 	}
@@ -1202,7 +1205,14 @@ func TestParkedDesignGateHasNoWayForward(t *testing.T) {
 func pressAdvance(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	draftRequiredSections(t, m)
-	return press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	// the design gate asks first (shell.go's boardVerb): answer it, so
+	// every fixture that walks a card forward with this helper keeps
+	// meaning "cross the gate" rather than "open the dialog".
+	if d, ok := m.Overlay.Top().(*confirmDialog); ok && d.id == "confirm-design-gate" {
+		m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	}
+	return m
 }
 
 // draftRequiredSections writes content into the section the card's current

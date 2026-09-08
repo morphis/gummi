@@ -143,6 +143,10 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		switch key {
 		case "enter", "right", "l":
 			return m.openCard(), true
+		case "g":
+			if m.askDesignGate() {
+				return nil, true
+			}
 		}
 		return nil, false
 	}
@@ -178,6 +182,54 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+// askDesignGate raises the design gate's confirmation for the selected
+// card, reporting false when there is nothing to ask about and `g` should
+// go straight to boardVerb as it always did.
+//
+// It confirms the way c (cleanup), m (merge) and D (delete) already do,
+// and for the same class of reason: the board's 1..9 jump keys are
+// positional and positions shift as cards move between sections, so "the
+// card that was at 1 a moment ago" is not the card 1 selects now — and g
+// on the wrong card walked it out of the design phase, plan → implement,
+// with no dialog and no undo. The verify gate already asks (advanceStage
+// there opens the landing dialog), and todo → plan starts a stage rather
+// than closing one, so plan is the one crossing left that spent the
+// reader's judgment without asking for it.
+//
+// It lives here, on the board's own key layer, rather than in boardVerb's
+// g case, because that case is shared: the card page's action list
+// (runCardAction), a typed /approve (threadinput.go's verbKeys) and the
+// "go on" chip (reentry.go's Advance arm) all route through it, and every
+// one of those already made the reader name this card and choose the act.
+// The mis-selection this dialog exists to catch is the board's alone.
+//
+// It asks before the gate's own floor runs, not after, and deliberately
+// does not try to pre-empt a blocked crossing. The board row's blocker
+// fields are a snapshot — a section drafted since the last loadRows, an
+// annotation resolved in the spec view — so a "skip the dialog when the
+// gate is shut" test answers from state that can be a beat old, and an
+// intermittent confirmation is worse than an unconditional one. The
+// dialog asks about intent; engine.Advance still answers about state, and
+// a card whose gate is shut is refused with the same notice it always
+// was, one keypress later.
+func (m *Shell) askDesignGate() bool {
+	r, ok := m.selected()
+	if !ok || r.F.Stage != domain.StagePlan {
+		return false
+	}
+	f := r.F
+	to := forwardEdge(f)
+	m.Overlay.Push(&confirmDialog{
+		id:           "confirm-design-gate",
+		cancelLabel:  "Stay",
+		confirmLabel: "Advance",
+		question:     "advance " + string(f.ID) + ": " + string(f.Stage) + " → " + string(to) + "?",
+		detail:       f.Title + " — crossing approves the " + artifactNoun(f.Kind) + " and closes the design phase",
+		onConfirm:    func() tea.Cmd { return m.advanceStage(f.ID) },
+	})
+	return true
 }
 
 // backlogEntry is one rendered line of the backlog list: a super-state

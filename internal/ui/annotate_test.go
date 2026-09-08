@@ -93,8 +93,12 @@ func TestUndraftedSectionBlocksSpecApproval(t *testing.T) {
 	m = openSpecFor(t, m)  // creates the draft, every section undrafted
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	// press g WITHOUT drafting: the stage produced nothing
+	// press g WITHOUT drafting: the stage produced nothing. The board's g
+	// asks first now (backlog.go's askDesignGate) — the confirmation is
+	// about intent, so it is answered, and the gate's own floor still
+	// refuses the crossing behind it.
 	m = press(t, m, tea.KeyPressMsg{Code: 'g', Text: "g"})
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("an undrafted spec crossed its gate (stage=%s)", m.rows[0].F.Stage)
 	}
