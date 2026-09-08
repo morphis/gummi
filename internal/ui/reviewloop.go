@@ -103,7 +103,12 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
 		m.raiseAttention(id, attnGate, gateReason(domain.StageVerify, id.Kind(), true))
-		stamp = m.markVerified(id)
+		// The excused-checks cache is otherwise filled on a board load, so
+		// the frame that first says "verify passed" — the one most likely
+		// to be read, because it is the one that just changed — was the
+		// only frame missing the clause naming what the pass did not
+		// cover. It arrived a navigation later, which is exactly too late.
+		stamp = tea.Batch(m.markVerified(id), m.loadExcusedChecks(id))
 	case out.Reason == "verify-blocked":
 		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")

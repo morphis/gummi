@@ -293,9 +293,36 @@ func verifyStopped(in nextInput, art string) string {
 		return "Verify gave no clear verdict, and the loop gave up rather than passing it." + loopBreaker(in)
 	}
 	if in.verdict == verdictPass {
-		return "Verify passed — the branch is ready to land."
+		return "Verify passed — the branch is ready to land" + excusedClause(in.excusedChecks) + "."
 	}
 	return ""
+}
+
+// excusedClause names the checks a clean verify did not actually hold to,
+// as a clause on the pass rather than a warning of its own.
+//
+// A check already failing on the fresh branch is written off as "FAIL
+// (pre-existing)" and does not floor the verdict (internal/engine's
+// checkReport), which is right — only regressions are this card's fault.
+// But the sentence reporting the pass said nothing about it, so a repo
+// whose `lint` has been red for a month lost that gate on every card with
+// nothing on screen admitting it. It is a clause and not a banner because
+// the pass is still a pass: this narrows what it claims, it does not
+// contradict it.
+//
+// Empty for the ordinary case — a branch born clean — so the sentence is
+// unchanged wherever there is nothing to disclose.
+func excusedClause(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	safe := make([]string, 0, len(names))
+	for _, n := range names {
+		// check names come out of the artifact's own gummi-checks block,
+		// which is agent-written text like any other on this page
+		safe = append(safe, sanitize(n))
+	}
+	return ", with " + strings.Join(safe, " and ") + " excused (already failing before this card)"
 }
 
 // loopBreaker is the FD-004 guard, moved from the ordering into the

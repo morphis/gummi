@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -59,11 +60,14 @@ func registerStatusFlags(fs *flag.FlagSet) *bool {
 // statusView is the status command's payload — the JSON schema the skill
 // parses, and the source of the text summary.
 type statusView struct {
-	ID          string         `json:"id"`
-	Ref         string         `json:"ref,omitempty"`
-	Kind        string         `json:"kind"`
-	Title       string         `json:"title"`
-	Stage       string         `json:"stage"`
+	ID    string `json:"id"`
+	Ref   string `json:"ref,omitempty"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	Stage string `json:"stage"`
+	// Route is wire-only: a constant since the stage merge, kept for a
+	// consumer still parsing it and never rendered by renderStatus. See
+	// buildStatus.
 	Route       string         `json:"route,omitempty"`
 	Blockers    statusBlockers `json:"blockers"`
 	Spend       statusSpend    `json:"spend"`
@@ -103,6 +107,13 @@ type statusView struct {
 	// single event in the workflow, so "how many times did this bounce"
 	// belongs beside the spend rather than in the event log.
 	Rounds statusRounds `json:"rounds"`
+	// ExcusedChecks names the repo checks that were already failing on
+	// this card's fresh branch. Verify writes those off as pre-existing
+	// and does not floor the verdict for them — only regressions count —
+	// so a check listed here gated nothing on this card, and "verified"
+	// above is a pass that did not cover it. Absent when the branch was
+	// born clean, which is the ordinary case.
+	ExcusedChecks []string `json:"excused_checks,omitempty"`
 	// StageSpend is where the money went, per stage/role/model, largest
 	// first. It is what makes a reviewer's bounces answerable: a run total
 	// hides a stage that doubled. Note it is per stage, NOT per round —
@@ -194,6 +205,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		PullRequestLine: f.PullRequest.PlainLine(),
 		Escalation:      openEscalation(ctx, store, f),
 		Rounds:          roundCounts(ctx, store, f),
+		ExcusedChecks:   excusedChecks(ctx, store, f),
 		StageSpend:      stageSpendRows(ctx, store, f),
 	}
 }
@@ -240,6 +252,19 @@ func roundCounts(ctx context.Context, store *state.Store, f *domain.Feature) sta
 		Review:     n(domain.RoundKindReview),
 		Corrective: n(domain.RoundKindCorrective),
 	}
+}
+
+// excusedChecks names the repo checks verify will write off as
+// pre-existing for this card, read straight off the stored baseline. A
+// store error reads as none: status must still answer for a card whose
+// baseline is unreadable, and the honest fallback is to claim no
+// carve-out rather than to invent one.
+func excusedChecks(ctx context.Context, store *state.Store, f *domain.Feature) []string {
+	baseline, err := store.CheckBaseline(ctx, f.ID)
+	if err != nil {
+		return nil
+	}
+	return state.ExcusedChecks(baseline)
 }
 
 // stageSpendRows projects the store's per-stage breakdown into the view,
@@ -295,6 +320,15 @@ func renderStatus(w io.Writer, v statusView) {
 	fmt.Fprintf(w, "  Stage:    %s\n", v.Stage)
 	fmt.Fprintf(w, "  Branch:   %s  (%s)\n", v.Branch, v.BranchState)
 	fmt.Fprintf(w, "  Verified: %s\n", yesNo(v.Verified))
+	// Directly under Verified because it qualifies it: these checks were
+	// red before the card touched anything, so verify excused them and
+	// the pass above says nothing about them. Printed only when there
+	// are any — the ordinary clean-baseline card should not carry a line
+	// about a carve-out that did not apply to it.
+	if len(v.ExcusedChecks) > 0 {
+		fmt.Fprintf(w, "  Excused:  %s (already failing on the fresh branch; not gated at verify)\n",
+			strings.Join(v.ExcusedChecks, ", "))
+	}
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)
 	// continuation lines under Spend: the breakdown is the same figure

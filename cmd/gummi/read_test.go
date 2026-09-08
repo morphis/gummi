@@ -286,6 +286,62 @@ func TestBuildStatusRunning(t *testing.T) {
 	}
 }
 
+// A repo check that was already red on the fresh branch is excused at
+// verify and floors nothing, so status has to name it in both output
+// forms — otherwise a team whose lint has been red for a month reads a
+// clean "Verified: yes" on every card and never learns the gate is gone.
+// A clean baseline says nothing at all.
+func TestBuildStatusReportsExcusedChecks(t *testing.T) {
+	f := newReadFixture(t)
+	feat := f.mkFeature(t, "")
+
+	var buf bytes.Buffer
+	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if len(v.ExcusedChecks) != 0 {
+		t.Errorf("excused_checks = %v with no baseline taken, want none", v.ExcusedChecks)
+	}
+	renderStatus(&buf, v)
+	if strings.Contains(buf.String(), "Excused:") {
+		t.Errorf("clean card printed an Excused line:\n%s", buf.String())
+	}
+	// omitempty, so the key must be absent from the JSON too — a caller
+	// distinguishing "nothing excused" from "this build cannot tell me"
+	// relies on it.
+	if b, err := json.Marshal(v); err != nil {
+		t.Fatal(err)
+	} else if bytes.Contains(b, []byte("excused_checks")) {
+		t.Errorf("clean card marshaled an excused_checks key: %s", b)
+	}
+
+	now := time.Now()
+	if err := f.store.SetCheckBaseline(f.ctx, feat.ID, []state.CheckResult{
+		{Name: "build", Cmd: "go build ./...", OK: true, RanAt: now},
+		{Name: "lint", Cmd: "golangci-lint run", OK: false, ExitCode: 1, RanAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	v = buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
+	if len(v.ExcusedChecks) != 1 || v.ExcusedChecks[0] != "lint" {
+		t.Fatalf("excused_checks = %v, want [lint] (build was green at baseline)", v.ExcusedChecks)
+	}
+	buf.Reset()
+	renderStatus(&buf, v)
+	if !strings.Contains(buf.String(), "Excused:") || !strings.Contains(buf.String(), "lint") {
+		t.Errorf("summary does not name the excused check:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), "build") {
+		t.Errorf("summary named the green baseline check:\n%s", buf.String())
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"excused_checks":["lint"]`)) {
+		t.Errorf("json payload = %s, want an excused_checks array naming lint", b)
+	}
+}
+
 // buildStatus surfaces a top-level pull_request object mirroring the stored
 // ref, present only on a linked card, and reflects the stored ref only (no
 // live gh call).

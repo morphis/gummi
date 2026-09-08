@@ -1073,6 +1073,28 @@ type CheckResult struct {
 	RanAt    time.Time
 }
 
+// ExcusedChecks names the baseline checks that were ALREADY failing on
+// the fresh branch, in baseline order. Engine.checkReport writes each of
+// these off as "FAIL (pre-existing)" at verify and does not floor the
+// verdict for them — only regressions count against a feature — so a repo
+// whose `lint` has been red for a month has silently lost that gate on
+// every card.
+//
+// That carve-out is right; its invisibility was not. The names are a
+// durable fact about the card, derivable from the baseline alone with no
+// new writes, and every surface that reports a verify pass should be able
+// to say what the pass did not cover. Empty when the branch was born
+// clean, which is the ordinary case.
+func ExcusedChecks(baseline []CheckResult) []string {
+	var out []string
+	for _, r := range baseline {
+		if !r.OK {
+			out = append(out, r.Name)
+		}
+	}
+	return out
+}
+
 // SetCheckBaseline replaces the feature's whole check baseline in one
 // transaction (delete + insert), so a re-baseline never leaves stale
 // rows behind renamed or removed checks.

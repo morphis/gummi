@@ -107,6 +107,12 @@ type nextInput struct {
 	undrafted []string
 
 	pullRequest domain.PullRequestRef // the card's linked outbound PR, empty when unlinked
+
+	// excusedChecks names the repo checks that were already failing when
+	// the branch was cut, which verify writes off rather than failing on
+	// (state.ExcusedChecks). Read from the shell's per-card cache, never
+	// from the store — this is assembled on the render path.
+	excusedChecks []string
 }
 
 // finished reports whether the card's current stage has produced its
@@ -183,6 +189,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		undrafted:        r.Undrafted,
 		pullRequest:      r.F.PullRequest,
 		exited:           r.Exited,
+		excusedChecks:    m.excusedChecks[r.F.ID],
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated

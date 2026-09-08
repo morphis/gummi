@@ -13,9 +13,11 @@ import (
 // openCard opens the selected card's page. The action list is the only
 // list on that page, so it takes the arrow keys on arrival — there is no
 // second region to hand them to. It also kicks off the selected card's
-// event-log load (shell.go's loadCardEvents): the thread's folded stage
-// receipts need it, and the card page is the one place that reads it, so
-// it is fetched on arrival rather than on every board refresh.
+// event-log load (shell.go's loadCardEvents) and its excused-check load
+// (loadExcusedChecks): the thread's folded stage receipts need the first
+// and the verify sentence needs the second, and the card page is the one
+// place that reads either, so both are fetched on arrival rather than on
+// every board refresh.
 func (m *Shell) openCard() tea.Cmd {
 	r, ok := m.selected()
 	if !ok {
@@ -42,7 +44,7 @@ func (m *Shell) openCard() tea.Cmd {
 	m.threadScroll = 0
 	m.loadThreadDraft(r.F.ID)
 	m.focusThreadInput()
-	return m.loadCardEvents(r.F.ID)
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadExcusedChecks(r.F.ID))
 }
 
 // closeCard returns to the backlog list, stopping a live watch tail —
@@ -116,7 +118,7 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return m.loadCardEvents(r.F.ID)
+	return tea.Batch(m.loadCardEvents(r.F.ID), m.loadExcusedChecks(r.F.ID))
 }
 
 // actionsOwnArrows reports whether the card's action list owns ↑↓ and

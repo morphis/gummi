@@ -292,6 +292,15 @@ type Shell struct {
 	// open card page — loading every card's log on each board refresh
 	// would be unbounded IO.
 	cardEvents map[domain.FeatureID][]state.CardEvent
+	// excusedChecks caches, per feature, the names of the repo checks that
+	// were ALREADY failing when the card's branch was born
+	// (state.ExcusedChecks over the stored baseline). Loaded lazily beside
+	// cardEvents, for the same reason and on the same trigger: it is read
+	// only by the open card's page, and a per-card store read on every
+	// board refresh is exactly the IO-per-frame the row snapshot exists to
+	// avoid. Absent entry and empty slice both mean "nothing excused",
+	// which is the ordinary case.
+	excusedChecks map[domain.FeatureID][]string
 	// threadScroll is how many lines back from the newest the card
 	// thread's body is scrolled. Zero is the bottom, which is where a
 	// card opens and where it stays as a live stage streams — counting
@@ -457,6 +466,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		scribing:      map[domain.FeatureID]int{},
 		rounds:        map[roundKey]int{},
 		cardEvents:    map[domain.FeatureID][]state.CardEvent{},
+		excusedChecks: map[domain.FeatureID][]string{},
 		threadDrafts:  map[domain.FeatureID]string{},
 		copilotHint:   true,
 		motionEnabled: true,
@@ -2010,6 +2020,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case excusedChecksMsg:
+		m.excusedChecks[msg.id] = msg.names
+		return m, nil
+
 	case cardEventsMsg:
 		// a late reply for a card the page has since moved off (esc, or a
 		// second J/K before the first load landed) is dropped: the cache
@@ -3472,6 +3486,43 @@ func (m *Shell) loadCardEvents(id domain.FeatureID) tea.Cmd {
 	return func() tea.Msg {
 		evs, err := m.store.Events(context.Background(), id)
 		return cardEventsMsg{id: id, events: evs, err: err}
+	}
+}
+
+// excusedChecksMsg delivers one card's excused check names — the checks
+// that were already failing on its fresh branch — loaded by
+// loadExcusedChecks.
+type excusedChecksMsg struct {
+	id    domain.FeatureID
+	names []string
+}
+
+// loadExcusedChecks reads one card's check baseline and reduces it to the
+// names engine.checkReport writes off as "FAIL (pre-existing)" at verify.
+//
+// That carve-out is correct — only regressions should count against a
+// card — but it left the card page saying "Verify passed — the branch is
+// ready to land" for a repo whose `lint` has been red for a month, with
+// nothing anywhere saying the gate had been given away. The names are a
+// durable fact derivable from the baseline alone, so surfacing them costs
+// one read and no new writes.
+//
+// It is fired exactly where loadCardEvents is (card page open, selection
+// moved on it) and cached the same way, so the render path never reads
+// the store. A detached shell has nothing to read.
+func (m *Shell) loadExcusedChecks(id domain.FeatureID) tea.Cmd {
+	if m.store == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		baseline, err := m.store.CheckBaseline(context.Background(), id)
+		if err != nil {
+			// a missing or unreadable baseline is not worth a notice: the
+			// clause it feeds is an addition to a sentence that is already
+			// correct without it, and most cards have no baseline at all.
+			return nil
+		}
+		return excusedChecksMsg{id: id, names: state.ExcusedChecks(baseline)}
 	}
 }
 
