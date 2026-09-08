@@ -327,6 +327,7 @@ func (e *Engine) openAskFor(ctx context.Context, id domain.FeatureID, stage doma
 		return &Ask{
 			Question:   d.Question,
 			FreeForm:   true, // the options died with the process and are never stored
+			SpecAnchor: d.Anchor,
 			DecisionID: d.ID,
 		}
 	}

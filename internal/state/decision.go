@@ -52,8 +52,13 @@ type OpenDecision struct {
 	ID       string
 	Kind     string // the DecisionPayload kind: gate|ask|verify|conflict|budget|idle
 	Question string
-	Stage    domain.Stage // the stage the card was waiting in
-	At       time.Time
+	// Anchor is the ask's spec anchor, carried through so a restored ask
+	// can still land its answer on the spec line the agent named. The
+	// options are gone by design; the anchor is not — it is recorded on
+	// the decision row precisely to survive the process.
+	Anchor string
+	Stage  domain.Stage // the stage the card was waiting in
+	At     time.Time
 }
 
 // The decision kinds, as the record's own closed vocabulary. These are
@@ -287,7 +292,7 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 		}
 		pendingByFeature[domain.FeatureID(fid)] = append(
 			pendingByFeature[domain.FeatureID(fid)], pending{
-				dec:   OpenDecision{ID: p.ID, Kind: p.Kind, Question: p.Question, Stage: domain.Stage(stage), At: atT},
+				dec:   OpenDecision{ID: p.ID, Kind: p.Kind, Question: p.Question, Anchor: p.Anchor, Stage: domain.Stage(stage), At: atT},
 				seq:   seq,
 				stage: domain.Stage(stage),
 			})
