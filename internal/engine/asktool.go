@@ -520,6 +520,25 @@ func (e *Engine) DispatchClientTool(ctx context.Context, s *Session, name string
 	}
 }
 
+// AskBouncedNote prefixes the activity line a bounced ask_user leaves on
+// the card. A rejected ask is answered straight back to the model as a
+// tool error and the agent carries on without the answer, so without this
+// the only trace of a question that never reached the reader lived in the
+// backend's own log: the card showed a bare ask_user tool line, no
+// question, and a run that appeared to hang for no stated reason. Three
+// separate investigations have started from that silence.
+const AskBouncedNote = "question not put to you"
+
+// bounceAsk rejects an ask_user call back to the model AND records why on
+// the card, so a question that never became a decision is visible to the
+// person the question was for. The activity line is best-effort narration
+// beside the tool call; resolveNow still owns the actual rejection.
+func (e *Engine) bounceAsk(s *Session, callID, reason string) {
+	s.appendActivity(AskBouncedNote + ": " + reason)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
+	e.resolveNow(s, callID, reason)
+}
+
 // handleAsk turns an ask_user call into a pending question (blocks the
 // agent's turn until Answer). One question at a time: a parallel ask_user
 // while another is pending is bounced with an immediate result — letting
@@ -528,7 +547,7 @@ func (e *Engine) DispatchClientTool(ctx context.Context, s *Session, name string
 func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	ask, err := parseAsk(tc.ID, tc.Args)
 	if err != nil {
-		e.resolveNow(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
+		e.bounceAsk(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
 		return
 	}
 	// mint the decision id before the ask installs: the pump goroutine owns
@@ -536,7 +555,7 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	// after install would race the answer that reads it.
 	ask.DecisionID = decisionIDFor(s, ask)
 	if !s.trySetPendingAsk(ask) {
-		e.resolveNow(s, tc.ID, "the user is still answering your previous question — "+
+		e.bounceAsk(s, tc.ID, "the user is still answering your previous question — "+
 			"ask one question at a time; re-ask this after that answer arrives")
 		return
 	}
