@@ -43,13 +43,16 @@ func TestResearchUntilValidation(t *testing.T) {
 	}
 }
 
-// RS seeds no Verification-plan section and has no route to widen, so
-// its flag surface deliberately omits --full and --acceptance.
-func TestResearchRejectsFullAndAcceptance(t *testing.T) {
+// RS seeds no Verification-plan section, so its flag surface
+// deliberately omits --acceptance. (--full was checked here too until it
+// was deleted outright: there is one route now, and no command defines
+// it. TestCobraFlagsMirrorCanonical is what keeps it from coming back on
+// the cobra side alone.)
+func TestResearchRejectsAcceptance(t *testing.T) {
 	fs := flag.NewFlagSet("research", flag.ContinueOnError)
 	registerResearchFlags(fs)
 	fs.VisitAll(func(f *flag.Flag) {
-		if f.Name == "full" || f.Name == "acceptance" {
+		if f.Name == "acceptance" {
 			t.Errorf("registerResearchFlags binds --%s, want it absent", f.Name)
 		}
 	})

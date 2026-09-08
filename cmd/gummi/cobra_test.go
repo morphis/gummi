@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/morphis/gummi/internal/driver"
 )
@@ -191,6 +192,8 @@ func TestCobraFlagsMirrorCanonical(t *testing.T) {
 		register func(fs *flag.FlagSet)
 	}{
 		{name: "run", cmd: runCmd, register: func(fs *flag.FlagSet) { registerRunFlags(fs) }},
+		{name: "research", cmd: researchCmd, register: func(fs *flag.FlagSet) { registerResearchFlags(fs) }},
+		{name: "resume", cmd: resumeCmd, register: func(fs *flag.FlagSet) { registerResumeFlags(fs) }},
 		{name: "ingest", cmd: ingestCmd, register: func(fs *flag.FlagSet) { registerIngestFlags(fs) }},
 		{name: "bugs new", cmd: bugsNewCmd, register: func(fs *flag.FlagSet) { registerBugsNewFlags(fs) }},
 		{name: "bugs ingest", cmd: bugsIngestCmd, register: func(fs *flag.FlagSet) { registerBugIngestFlags(fs) }},
@@ -203,6 +206,21 @@ func TestCobraFlagsMirrorCanonical(t *testing.T) {
 			canonical.VisitAll(func(f *flag.Flag) {
 				if c.cmd.Flags().Lookup(f.Name) == nil {
 					t.Errorf("%s: canonical flag --%s is not bound on the cobra command", c.name, f.Name)
+				}
+			})
+			// And the other direction, which is the one that bites a user.
+			// Cobra owns --help and completion, then hands the command an
+			// argv the canonical FlagSet re-parses; a flag bound only here
+			// is advertised by --help, offered by completion, and then
+			// rejected at parse with "flag provided but not defined".
+			// --full shipped that way. Only cobra's own --help is exempt:
+			// it never reaches the canonical set because cobra answers it.
+			c.cmd.Flags().VisitAll(func(f *pflag.Flag) {
+				if f.Name == "help" {
+					return
+				}
+				if canonical.Lookup(f.Name) == nil {
+					t.Errorf("%s: cobra binds --%s, which the canonical FlagSet does not define — `gummi %s --%s` will be advertised and then rejected", c.name, f.Name, c.name, f.Name)
 				}
 			})
 		})

@@ -322,7 +322,6 @@ func bindRunFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)")
 	f.String("profile", "", "profile mapping roles to models (default: first configured)")
-	f.Bool("full", false, "run the full route (brainstorm + plan), not the quick route")
 	f.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
 	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
@@ -336,8 +335,8 @@ func bindRunFlags(cmd *cobra.Command) {
 // bindResearchFlags mirrors the flags registerResearchFlags defines on
 // runResearch's FlagSet, so cobra parses the same surface (runResearch
 // still re-parses the reconstructed slice, and the SKILL grammar stays
-// sourced from registerResearchFlags). No --full or --acceptance: RS has
-// no brainstorm/plan and no Verification-plan section to seed.
+// sourced from registerResearchFlags). No --acceptance: RS has no
+// Verification-plan section to seed.
 func bindResearchFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.Int("envelope", 0, "credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)")
