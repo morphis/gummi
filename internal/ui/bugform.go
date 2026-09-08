@@ -227,9 +227,10 @@ func (d *bugForm) sevLabel() string {
 // View implements overlay.Dialog.
 func (d *bugForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-desc(1),
-	// envelope+blank(2), profile+severity+route(3), blank+buttons(2),
-	// blank+hint(2); +2 more when the repo field renders (repo+blank).
-	staticRows := 12
+	// envelope caption+envelope+blank(3), profile+severity+route(3),
+	// blank+buttons(2), blank+hint(2); +2 more when the repo field
+	// renders (repo+blank).
+	staticRows := 13
 	if d.repo.shown() {
 		staticRows += 2
 	}
@@ -243,6 +244,7 @@ func (d *bugForm) View(s *theme.Styles, w, h int) string {
 		b.WriteString(fieldRow(s, d.focus == bugFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.desc.View() + "\n\n")
+	b.WriteString(envelopeCaption(s, envelopeHintCapped) + "\n")
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == bugFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 	b.WriteString(fieldRow(s, d.focus == bugFieldSeverity, d.sevLabel()) + "\n")

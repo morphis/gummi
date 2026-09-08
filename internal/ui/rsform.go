@@ -205,9 +205,9 @@ func (d *rsForm) setFocus(f int) {
 // View implements overlay.Dialog.
 func (d *rsForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-brief(1),
-	// envelope+blank(2), profile(1), blank+buttons(2), blank+hint(2); +2
-	// more when the repo field renders (repo+blank).
-	staticRows := 10
+	// envelope caption+envelope+blank(3), profile(1), blank+buttons(2),
+	// blank+hint(2); +2 more when the repo field renders (repo+blank).
+	staticRows := 11
 	if d.repo.shown() {
 		staticRows += 2
 	}
@@ -221,6 +221,7 @@ func (d *rsForm) View(s *theme.Styles, w, h int) string {
 		b.WriteString(fieldRow(s, d.focus == rsFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.brief.View() + "\n\n")
+	b.WriteString(envelopeCaption(s, envelopeHintRequired) + "\n")
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == rsFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 	b.WriteString("\n" + d.buttons.View(s, d.focus == rsFieldButtons) + "\n")

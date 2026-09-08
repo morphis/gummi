@@ -91,6 +91,30 @@ func fieldRow(s *theme.Styles, focused bool, label string) string {
 	return "  " + s.Faint.Render(label)
 }
 
+// The envelope caption: the static label drawn over every creation
+// dialog's envelope input.
+//
+// The number is a credit figure and 0 is a meaningful value, and the only
+// thing that ever said so was the input's Placeholder — which a text input
+// renders only while it is empty, and this field is prefilled from
+// envelopePrefill() every single time it opens. So the modal a first-time
+// user meets showed a bare "> 2400": no unit, and no sign that 0 means
+// anything but a rejected entry. A caption is drawn whatever the field
+// holds, which is the whole reason it is one and not a placeholder.
+//
+// The three creation dialogs share it rather than each writing their own,
+// which is how the feature form and the bug form drift. Research passes
+// the other hint: an RS card carries no default budget, so 0 is refused
+// there rather than meaning uncapped (rsForm.submit).
+const (
+	envelopeHintCapped   = "credits · 0 = uncapped"
+	envelopeHintRequired = "credits · required"
+)
+
+func envelopeCaption(s *theme.Styles, hint string) string {
+	return s.Faint.Render("envelope: " + hint)
+}
+
 // repoUnset is repoPicker.idx while no repository has been chosen. A
 // picker with a real choice to make starts here and can never return:
 // choosing is one-way, because there is nothing sensible to go back to.
@@ -422,9 +446,9 @@ func (d *featureForm) setFocus(f int) {
 // View implements overlay.Dialog.
 func (d *featureForm) View(s *theme.Styles, w, h int) string {
 	// base static rows: title+blank(2), blank-after-desc(1),
-	// envelope+blank(2), profile(1), blank+buttons(2), blank+hint(2);
-	// +2 more when the repo field renders (repo+blank).
-	staticRows := 11
+	// envelope caption+envelope+blank(3), profile(1), blank+buttons(2),
+	// blank+hint(2); +2 more when the repo field renders (repo+blank).
+	staticRows := 12
 	if d.repo.shown() {
 		staticRows += 2
 	}
@@ -438,6 +462,7 @@ func (d *featureForm) View(s *theme.Styles, w, h int) string {
 		b.WriteString(fieldRow(s, d.focus == featureFieldRepo, "repo: "+d.repo.label()) + "\n\n")
 	}
 	b.WriteString(d.desc.View() + "\n\n")
+	b.WriteString(envelopeCaption(s, envelopeHintCapped) + "\n")
 	b.WriteString(d.env.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == featureFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
 	b.WriteString("\n" + d.buttons.View(s, d.focus == featureFieldButtons) + "\n")
