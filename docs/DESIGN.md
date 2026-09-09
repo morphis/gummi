@@ -636,9 +636,15 @@ design system.
     mode** (see 6.1).
   - *Diff view* — worktree diff pager before gates, with the same
     annotation mechanics as the spec view.
-- **Global**: `n` new feature (a single description line — the design
-  stage develops the rest; profile and envelope on a demoted options row),
-  `tab` cycle gummi's own tabs (§6 below), `1..9` jump to feature, `?` help.
+- **Global**: `n` new card — one dialog for a feature, a bug or a research
+  card (the kind is a row; `B`/`R`/`G` open it preset). It asks where
+  (the repository, every configured name side by side with its GitHub
+  origin read from git), what kind, and what (free text whose first line
+  is the title); it reads back what will be created and, on one collapsed
+  line, how it will run (envelope, profile, dependencies). A GitHub issue
+  reference on the first line is an *offer*: `alt+g` imports it into the
+  box, nothing fetches on its own, and enter only ever creates. `tab`
+  cycle gummi's own tabs (§6 below), `1..9` jump to feature, `?` help.
 
 **One board, tabbed.** The split layout the diagram above shows (a kanban
 column beside the dashboard, with `→`/`←` moving the arrow keys between
@@ -1683,12 +1689,18 @@ piece of machinery doc-ingest didn't need, and what makes GitHub polling safe.
 
 The gate lives on two surfaces, mirroring §11.4, and both pick a **single**
 issue out of one fetch rather than gating a batch — an entire repo's issues
-should never land in todo from one keystroke. The TUI import-review pane is a
-searchable picker: it opens with a live substring filter over the fetched
-issues' title/label/body already focused, `Tab` swaps focus between typing
-and commanding the list (rename/edit), and `enter` imports exactly the
-highlighted issue — the filter narrows what you see, never what gets
-created. The CLI (`gummi bugs ingest`, gated y/N or `--yes`) keeps its batch
+should never land in todo from one keystroke. In the TUI the gate *is* the
+new-card dialog: a pasted issue reference is imported into it with `alt+g`
+(the title and body land in the box, editable, with the labels reported
+beside the reference and the severity read from them), and the issue
+picker — `alt+g` with no reference, or `G` from the board — lists the
+chosen repository's issues with a live substring filter, greys the ones
+already on the board with their card id, and on `enter` fills the dialog
+rather than minting; Create from a dialog filled that way returns to the
+picker with the row greyed, so importing several is one `enter` each. gh
+runs in the chosen repository's checkout with its origin's owner/repo, so
+a `repos:` workspace whose root is no checkout still lists the right
+issues. The CLI (`gummi bugs ingest`, gated y/N or `--yes`) keeps its batch
 import for scripted use, plus an additive `--issue N` that resolves N against
 the same fetched batch and materializes just that one bug.
 

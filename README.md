@@ -127,7 +127,7 @@ The keys you need first:
 
 | key | does |
 |---|---|
-| `n` / `B` / `R` | new feature / bug / research card |
+| `n` | new card — feature, bug or research; paste a GitHub issue link and `alt+g` imports it (`B` / `R` / `G` preset bug / research / browse issues) |
 | `enter` | open the selected card; in the card, send what you typed |
 | `↑` | the card's actions, when nothing is typed |
 | `s` / `d` | spec / diff, with comments in place |
