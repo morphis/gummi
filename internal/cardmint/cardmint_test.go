@@ -323,3 +323,81 @@ func TestMintSequenceIncrements(t *testing.T) {
 		t.Errorf("f2.Num = %d, want %d", f2.Num, f1.Num+1)
 	}
 }
+
+// TestMintBugSeverityAndSections: a bug's severity lands on the card and
+// in its report header; headings typed into the description route into
+// the report's sections through the same parser the GitHub import uses;
+// an imported issue's comments and provenance ride alongside.
+func TestMintBugSeverityAndSections(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{
+		Kind:        domain.KindBug,
+		Description: "Login loops\n\nSSO users bounce back.\n\n## Steps to reproduce\n1. log in\n\n## Expected\nthe dashboard",
+		Envelope:    2400,
+		Severity:    domain.SeverityHigh,
+		Source:      "github",
+		ExternalRef: "https://github.com/o/r/issues/42",
+		Discussion:  "**b:** same here",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Severity != domain.SeverityHigh {
+		t.Errorf("card severity = %q, want high", f.Severity)
+	}
+	got, err := store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Severity != domain.SeverityHigh || got.ExternalRef != "https://github.com/o/r/issues/42" {
+		t.Errorf("persisted severity/ref = %q %q", got.Severity, got.ExternalRef)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
+	if err != nil {
+		t.Fatalf("expected a seeded draft: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{"## Reproduction\n\n1. log in", "the dashboard", "**b:** same here", "github", "issues/42"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("draft missing %q:\n%s", want, content)
+		}
+	}
+
+	// comments alone are enough to warrant a bug draft
+	f2, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindBug, Description: "Just a title", Envelope: 1, Discussion: "**a:** hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f2))); err != nil {
+		t.Errorf("discussion-only bug seeded no draft: %v", err)
+	}
+}
+
+// TestMintFeatureAcceptanceHeading: a feature description's `## Acceptance`
+// section seeds the Verification plan and leaves the Problem, while the
+// rest of the text stays verbatim (no other heading is recognised).
+func TestMintFeatureAcceptanceHeading(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{
+		Kind:        domain.KindFeature,
+		Description: "Dark mode\n\nThe console is white at night.\n\n## Steps to reproduce\nnot a bug heading here\n\n## Acceptance\n- a toggle in settings",
+		Envelope:    2400,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
+	if err != nil {
+		t.Fatalf("expected a seeded draft: %v", err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "- a toggle in settings") {
+		t.Errorf("acceptance not seeded:\n%s", content)
+	}
+	if !strings.Contains(content, "## Steps to reproduce\nnot a bug heading here") {
+		t.Errorf("feature overflow was not kept verbatim:\n%s", content)
+	}
+	if strings.Contains(strings.SplitN(content, "## Verification", 2)[0], "a toggle in settings") {
+		t.Errorf("acceptance text left in the Problem section:\n%s", content)
+	}
+}

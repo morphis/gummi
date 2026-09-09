@@ -1,27 +1,27 @@
-package engine
+package domain
 
 import (
 	"regexp"
 	"strings"
-
-	"github.com/morphis/gummi/internal/domain"
 )
 
-// parseBodySections splits a GitHub issue body into the BugReport's
-// symptom fields by recognizing common bug-report template headings. The
-// issue body is the raw markdown a reporter pasted in; its structure is
-// real signal a bug report should keep, so triage doesn't have to re-split
-// it by hand. Everything before the first recognized heading (and any
+// ParseBugBody splits a bug description — typed by hand, or a GitHub
+// issue body — into the BugReport's symptom fields by recognizing common
+// bug-report template headings. The text is raw markdown a person wrote
+// or pasted; its structure is real signal a bug report should keep, so
+// triage doesn't have to re-split it by hand. The same parser serves the
+// GitHub import and the new-card dialog, so a heading typed by hand
+// lands exactly where the same heading in an issue body does. Everything before the first recognized heading (and any
 // text that doesn't sit under a recognized heading) stays in Description,
 // preserving the source's original framing. Comment threads are not the
-// body's concern — Discussion is filled separately by fetchComments.
+// body's concern — Discussion is filled separately by the source.
 //
 // Headings are matched case-insensitively in three shapes: ATX
 // (`## Steps to reproduce`), bold labels (`**Steps to reproduce:** …`),
 // and definition-list colons (`Steps to reproduce:`). See headingFields
 // for the recognized labels and the field each populates.
-func parseBodySections(body string) domain.BugReport {
-	var r domain.BugReport
+func ParseBugBody(body string) BugReport {
+	var r BugReport
 	writer := writeDescription
 	for _, line := range strings.Split(body, "\n") {
 		label, content, ok := matchHeading(line)
@@ -40,7 +40,7 @@ func parseBodySections(body string) domain.BugReport {
 // headingFields maps a normalized heading label to the writer that
 // appends prose into its BugReport field. Adding a recognized heading is
 // one map entry, not a new switch branch.
-var headingFields = map[string]func(*domain.BugReport, string){
+var headingFields = map[string]func(*BugReport, string){
 	"steps to reproduce": writeReproduction,
 	"step to reproduce":  writeReproduction,
 	"reproduction":       writeReproduction,
@@ -120,11 +120,11 @@ func normalizeHeading(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-func writeDescription(r *domain.BugReport, line string)  { appendLine(&r.Description, line) }
-func writeReproduction(r *domain.BugReport, line string) { appendLine(&r.Reproduction, line) }
-func writeExpected(r *domain.BugReport, line string)     { appendLine(&r.Expected, line) }
-func writeActual(r *domain.BugReport, line string)       { appendLine(&r.Actual, line) }
-func writeEnvironment(r *domain.BugReport, line string)  { appendLine(&r.Environment, line) }
+func writeDescription(r *BugReport, line string)  { appendLine(&r.Description, line) }
+func writeReproduction(r *BugReport, line string) { appendLine(&r.Reproduction, line) }
+func writeExpected(r *BugReport, line string)     { appendLine(&r.Expected, line) }
+func writeActual(r *BugReport, line string)       { appendLine(&r.Actual, line) }
+func writeEnvironment(r *BugReport, line string)  { appendLine(&r.Environment, line) }
 
 // appendLine adds one source line to a section, joining multi-line
 // sections with a newline so the raw text round-trips.

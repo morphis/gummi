@@ -77,6 +77,15 @@ type BugProposal struct {
 	Number      int      // GitHub issue number; 0 when not applicable (e.g. ManualSource)
 	Severity    Severity // impact, seeded into the report header
 	Report      BugReport
+	// State and Labels are what the source said about the issue — "open",
+	// its label names — carried for a surface to show beside the
+	// reference. Neither is persisted on the card: the labels are
+	// reported to the person, never applied for them.
+	State  string
+	Labels []string
+	// Body is the source's raw text — an issue body as written — for a
+	// surface that shows it verbatim before it is parsed into Report.
+	Body string
 }
 
 // Slug derives the proposal's branch/filename slug from its title, with

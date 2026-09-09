@@ -1,4 +1,4 @@
-package engine
+package domain
 
 import (
 	"strings"
@@ -20,7 +20,7 @@ func TestParseBodySections_FullTemplate(t *testing.T) {
 		"## Environment",
 		"macOS 14, Chrome 120",
 	}, "\n")
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 
 	if !strings.Contains(r.Description, "shows a white screen") {
 		t.Errorf("pre-heading prose should land in Description, got %q", r.Description)
@@ -44,7 +44,7 @@ func TestParseBodySections_FullTemplate(t *testing.T) {
 
 func TestParseBodySections_NoHeadings(t *testing.T) {
 	body := "just a paragraph with no headings whatsoever\n\nsecond paragraph"
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 	if r.Description != body {
 		t.Errorf("whole body should round-trip to Description, got %q", r.Description)
 	}
@@ -55,7 +55,7 @@ func TestParseBodySections_NoHeadings(t *testing.T) {
 
 func TestParseBodySections_PartialHeadings(t *testing.T) {
 	body := "## Steps to reproduce\n1. foo\n## Actual behavior\ncrash"
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 	if r.Reproduction != "1. foo" {
 		t.Errorf("Reproduction = %q", r.Reproduction)
 	}
@@ -69,7 +69,7 @@ func TestParseBodySections_PartialHeadings(t *testing.T) {
 
 func TestParseBodySections_BoldLabels(t *testing.T) {
 	body := "**Steps to reproduce:** 1. foo"
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 	if r.Reproduction != "1. foo" {
 		t.Errorf("bold label with same-line content: Reproduction = %q, want %q", r.Reproduction, "1. foo")
 	}
@@ -77,7 +77,7 @@ func TestParseBodySections_BoldLabels(t *testing.T) {
 
 func TestParseBodySections_DefListLabels(t *testing.T) {
 	body := "Steps to reproduce:\n1. foo"
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 	if r.Reproduction != "1. foo" {
 		t.Errorf("def-list label: Reproduction = %q, want %q", r.Reproduction, "1. foo")
 	}
@@ -85,14 +85,14 @@ func TestParseBodySections_DefListLabels(t *testing.T) {
 
 func TestParseBodySections_CaseInsensitive(t *testing.T) {
 	body := "## steps to reproduce\n1. foo"
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 	if r.Reproduction != "1. foo" {
 		t.Errorf("lowercase heading should match the whitelist: Reproduction = %q", r.Reproduction)
 	}
 }
 
 func TestParseBodySections_EmptyBody(t *testing.T) {
-	r := parseBodySections("")
+	r := ParseBugBody("")
 	if r.Description != "" || r.Reproduction != "" || r.Expected != "" || r.Actual != "" || r.Environment != "" || r.Discussion != "" || len(r.OpenQuestions) != 0 {
 		t.Errorf("empty body should return a zero BugReport, got %+v", r)
 	}
@@ -105,7 +105,7 @@ func TestParseBodySections_ColonFalsePositives(t *testing.T) {
 		"see the `steps to reproduce:` command above",
 		"Actual behavior: crash",
 	}, "\n")
-	r := parseBodySections(body)
+	r := ParseBugBody(body)
 	if r.Actual != "crash" {
 		t.Errorf("Actual = %q, want %q", r.Actual, "crash")
 	}

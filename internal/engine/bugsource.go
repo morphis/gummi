@@ -85,6 +85,18 @@ type ghIssue struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// Comments is populated only by FetchIssue's `gh issue view`; a list
+	// fetch never asks for it (fetchComments does that per issue, opt-in).
+	Comments []ghComment `json:"comments"`
+}
+
+// ghComment is one top-level issue comment as gh prints it.
+type ghComment struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // Fetch lists issues from the target repo and maps each to a proposal.
@@ -129,11 +141,10 @@ func (g GitHubSource) Fetch(ctx context.Context) ([]domain.BugProposal, error) {
 	}
 	proposals := make([]domain.BugProposal, 0, len(issues))
 	for _, is := range issues {
-		title := strings.TrimSpace(is.Title)
-		if title == "" || strings.TrimSpace(is.URL) == "" {
+		p, ok := proposalFor(is)
+		if !ok {
 			continue // unusable: no title to slug, or no ref to dedup on
 		}
-		report := parseBodySections(is.Body)
 		if g.FetchComments {
 			discussion, err := g.fetchComments(ctx, g.Dir, is.Number, g.Repo)
 			if err != nil {
@@ -142,19 +153,68 @@ func (g GitHubSource) Fetch(ctx context.Context) ([]domain.BugProposal, error) {
 				// parsed body but no Discussion.
 				log.Printf("fetching comments for issue #%d: %v", is.Number, err)
 			} else {
-				report.Discussion = discussion
+				p.Report.Discussion = discussion
 			}
 		}
-		proposals = append(proposals, domain.BugProposal{
-			Title:       title,
-			Source:      "github",
-			ExternalRef: is.URL,
-			Number:      is.Number,
-			Severity:    severityFromLabels(is.Labels),
-			Report:      report,
-		})
+		proposals = append(proposals, p)
 	}
 	return proposals, nil
+}
+
+// FetchIssue fetches exactly one issue by number — the new-card dialog's
+// import of a pasted reference — with its comments in the same gh call,
+// so a single import is one round trip. It is not deduplicated against
+// the board: the caller shows the reference and decides.
+func (g GitHubSource) FetchIssue(ctx context.Context, number int) (domain.BugProposal, error) {
+	args := []string{"issue", "view", strconv.Itoa(number)}
+	if g.Repo != "" {
+		args = append(args, "--repo", g.Repo)
+	}
+	args = append(args, "--json", "number,title,body,url,state,labels,author,comments")
+	run := g.run
+	if run == nil {
+		run = execGH
+	}
+	out, err := run(ctx, g.Dir, args...)
+	if err != nil {
+		return domain.BugProposal{}, err
+	}
+	var is ghIssue
+	if err := json.Unmarshal(out, &is); err != nil {
+		return domain.BugProposal{}, fmt.Errorf("parsing gh output: %w", err)
+	}
+	p, ok := proposalFor(is)
+	if !ok {
+		return domain.BugProposal{}, fmt.Errorf("issue #%d has no title or url to import", number)
+	}
+	p.Report.Discussion = joinComments(is.Comments)
+	return p, nil
+}
+
+// proposalFor maps one gh issue to a proposal: the body split into the
+// report's sections, severity read from the labels, state and label
+// names carried along for display. ok is false for an issue with no
+// title to slug or no URL to dedupe on.
+func proposalFor(is ghIssue) (domain.BugProposal, bool) {
+	title := strings.TrimSpace(is.Title)
+	if title == "" || strings.TrimSpace(is.URL) == "" {
+		return domain.BugProposal{}, false
+	}
+	labels := make([]string, 0, len(is.Labels))
+	for _, l := range is.Labels {
+		labels = append(labels, l.Name)
+	}
+	return domain.BugProposal{
+		Title:       title,
+		Source:      "github",
+		ExternalRef: is.URL,
+		Number:      is.Number,
+		Severity:    severityFromLabels(is.Labels),
+		Report:      domain.ParseBugBody(is.Body),
+		Body:        is.Body,
+		State:       strings.ToLower(is.State),
+		Labels:      labels,
+	}, true
 }
 
 // maxComments bounds the number of comments kept per issue, and
@@ -168,13 +228,7 @@ const (
 // ghIssueComments is the subset of `gh issue view --json comments` we
 // consume: top-level comments only, oldest first.
 type ghIssueComments struct {
-	Comments []struct {
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
-		Body      string    `json:"body"`
-		CreatedAt time.Time `json:"createdAt"`
-	} `json:"comments"`
+	Comments []ghComment `json:"comments"`
 }
 
 // fetchComments pulls a single issue's comments and joins them into a
@@ -200,17 +254,25 @@ func (g GitHubSource) fetchComments(ctx context.Context, dir string, issueNum in
 	if err := json.Unmarshal(out, &data); err != nil {
 		return "", fmt.Errorf("parsing gh comments output: %w", err)
 	}
-	sort.SliceStable(data.Comments, func(i, j int) bool {
-		return data.Comments[i].CreatedAt.Before(data.Comments[j].CreatedAt)
+	return joinComments(data.Comments), nil
+}
+
+// joinComments renders comments into one Discussion block, oldest first,
+// each prefixed with its author's login and truncated to maxCommentChars;
+// at most maxComments are kept.
+func joinComments(comments []ghComment) string {
+	comments = append([]ghComment(nil), comments...)
+	sort.SliceStable(comments, func(i, j int) bool {
+		return comments[i].CreatedAt.Before(comments[j].CreatedAt)
 	})
-	if len(data.Comments) > maxComments {
-		data.Comments = data.Comments[:maxComments]
+	if len(comments) > maxComments {
+		comments = comments[:maxComments]
 	}
-	parts := make([]string, 0, len(data.Comments))
-	for _, c := range data.Comments {
+	parts := make([]string, 0, len(comments))
+	for _, c := range comments {
 		parts = append(parts, fmt.Sprintf("**%s:** %s", c.Author.Login, truncateComment(c.Body)))
 	}
-	return strings.Join(parts, "\n\n"), nil
+	return strings.Join(parts, "\n\n")
 }
 
 // truncateComment cuts an overlong comment body at maxCommentChars, noting

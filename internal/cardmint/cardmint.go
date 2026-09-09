@@ -57,11 +57,10 @@ type Input struct {
 	// draft-seeded shape, and KindResearch mints an RS card and seeds its
 	// `## Brief` directly (research has no draft step).
 	Kind domain.Kind
-	// Description is the free-form input text. For KindResearch it is
-	// split into title/one-liner only (domain.SplitDescription); for
-	// everything else it is split into title/one-liner/problem-seed
-	// (domain.SplitFreeform), and the seed pre-fills the draft's Problem
-	// section when non-empty.
+	// Description is the free-form input text: its first line is the
+	// title (domain.SplitFreeform). For KindResearch the whole text is the
+	// Brief; for everything else the overflow past the first line seeds
+	// the draft (the Problem section, or a bug report's sections).
 	Description string
 	// Profile is the model-role profile the card runs under (empty means
 	// the workspace default).
@@ -95,6 +94,18 @@ type Input struct {
 	// draft's Verification plan section alongside the description's
 	// overflow. Ignored for KindResearch.
 	Acceptance string
+	// Severity is a bug's impact, persisted on the card and seeded into
+	// its report header. Ignored for every other kind.
+	Severity domain.Severity
+	// Source names where the description came from ("manual", "github"),
+	// rendered into the artifact's provenance header beside ExternalRef.
+	// Empty renders no provenance.
+	Source string
+	// Discussion is an imported issue's comment thread, seeded into a bug
+	// report's Discussion section. It is the one part of an import that is
+	// not in the description text a person can edit, so it rides beside
+	// it. Ignored for every other kind.
+	Discussion string
 	// GateApproval selects who crosses this card's gates on an unattended
 	// resume: domain.GateAutopilot (crosses them all) or
 	// domain.GateAttended (checkpoints each one for a human). Empty reads
@@ -116,12 +127,11 @@ type Input struct {
 // both callers' pre-existing behavior (createFeature's own comment, and
 // Engine.Materialize's requireRepo pre-flight).
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
-	var title, oneLiner, seed string
-	if in.Kind == domain.KindResearch {
-		title, oneLiner = domain.SplitDescription(in.Description)
-	} else {
-		title, oneLiner, seed = domain.SplitFreeform(in.Description)
-	}
+	// the first line is the title for every kind — a multi-line research
+	// brief names itself on its first line exactly as a feature does; the
+	// full brief goes into the artifact below. Research just keeps no
+	// separate seed: the whole description is the Brief.
+	title, oneLiner, seed := domain.SplitFreeform(in.Description)
 	slug, err := domain.Slugify(title)
 	if err != nil {
 		return domain.Feature{}, err
@@ -149,34 +159,50 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
 	}
+	if in.Kind == domain.KindBug {
+		f.Severity = in.Severity
+	}
 	if in.Kind == domain.KindResearch {
 		artifact := filepath.Join(ws.Root, f.ArtifactPath())
-		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: in.Description}, domain.DraftProvenance{})
+		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: in.Description}, domain.DraftProvenance{Source: in.Source})
 		if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
 			return domain.Feature{}, err
 		}
 		if err := atomicfile.Write(artifact, []byte(content), 0o600); err != nil {
 			return domain.Feature{}, err
 		}
-	} else if seed != "" || in.Acceptance != "" {
+	} else if seed != "" || in.Acceptance != "" || (in.Kind == domain.KindBug && in.Discussion != "") {
 		// seed the draft before persisting: the description's overflow fills
 		// the Problem section (a title-sized description seeds nothing
 		// there), and Acceptance fills the Verification plan (D10). Either
 		// input alone is enough to warrant a draft; both are just a pre-fill
 		// the spec agent still owns and approves.
 		//
-		// KindBug gets the bug report shape instead: the overflow fills
-		// Summary, the same bucket bugingest.go and the TUI's new-bug form
-		// already seed from free-form text. Acceptance has no destination
-		// for a bug (SeededBugTemplate never pre-seeds Root cause/Fix/
-		// Verification) and is silently unused here, matching that
-		// template's existing contract.
+		// KindBug gets the bug report shape instead, and the overflow goes
+		// through domain.ParseBugBody: the same headings the GitHub import
+		// recognises in an issue body (Steps to reproduce, Expected,
+		// Actual, Environment) route typed text into the report's sections,
+		// and everything else lands in Summary. Acceptance has no
+		// destination for a bug (SeededBugTemplate never pre-seeds Root
+		// cause/Fix/Verification) and is silently unused here, matching
+		// that template's existing contract.
+		//
+		// A feature keeps its overflow verbatim in Problem, with exactly one
+		// heading recognised: an `## Acceptance` section is cut out and
+		// seeds the Verification plan, the same place the --acceptance flag
+		// writes. An explicit Acceptance wins over one found in the text.
 		draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
 		var content string
 		if in.Kind == domain.KindBug {
-			content = spec.SeededBugTemplate(&f, domain.BugReport{Description: seed}, domain.BugProvenance{}, "")
+			report := domain.ParseBugBody(seed)
+			report.Discussion = in.Discussion
+			content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: in.Source, ExternalRef: in.ExternalRef}, in.Severity)
 		} else {
-			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed, Acceptance: in.Acceptance}, domain.DraftProvenance{})
+			problem, acceptance := domain.SplitAcceptance(seed)
+			if in.Acceptance != "" {
+				acceptance = in.Acceptance
+			}
+			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: problem, Acceptance: acceptance}, domain.DraftProvenance{Source: in.Source})
 		}
 		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
 			return domain.Feature{}, err
