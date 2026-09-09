@@ -86,7 +86,7 @@ type IngestStep struct {
 // progress, when non-nil, receives live steps (tool calls, streamed
 // commentary) as the pass runs. It is called from the pass's goroutine;
 // callers wanting UI updates must hand off to their own loop.
-func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progress func(IngestStep)) (domain.IngestResult, error) {
+func (e *Engine) Ingest(ctx context.Context, sourcePath, profile, repo string, progress func(IngestStep)) (domain.IngestResult, error) {
 	rc, backend := e.resolveRole(profile, agent.RoleArchitect)
 	ag := e.agentFor(backend)
 	if ag == nil {
@@ -116,7 +116,13 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile string, progres
 	} else {
 		hints = append(hints, ingestConventionHint)
 	}
-	wt, err := e.mgr(ctx, &domain.Feature{})
+	wt, err := e.mgr(ctx, &domain.Feature{Repo: repo})
+	if err != nil && repo == "" && e.pool != nil {
+		names := e.pool.Names()
+		if len(names) > 0 {
+			wt, err = e.pool.ManagerForName(ctx, names[0])
+		}
+	}
 	if err != nil {
 		return domain.IngestResult{}, fmt.Errorf("resolving ingest repository: %w", err)
 	}

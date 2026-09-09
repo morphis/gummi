@@ -103,7 +103,7 @@ func runIngest(args []string) error {
 	fmt.Printf("Ingesting %s (architect / profile %q / repo %q) …\n", source, cmpOrDefault(prof), cmpOrDefault(*f.repo))
 	// stream the pass's discrete steps (milestones + tool calls) so the
 	// wait isn't silent; the architect's prose commentary stays quiet.
-	res, err := eng.Ingest(ctx, source, prof, func(st engine.IngestStep) {
+	res, err := eng.Ingest(ctx, source, prof, *f.repo, func(st engine.IngestStep) {
 		switch st.Kind {
 		case engine.IngestStepNote:
 			fmt.Printf("  · %s\n", clean(st.Text))

@@ -99,7 +99,7 @@ func TestIngestClientToolPath(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# Platform PRD\nlots of requirements\n")
-	res, err := e.Ingest(context.Background(), src, "premium", nil)
+	res, err := e.Ingest(context.Background(), src, "premium", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestIngestConventionPath(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "design.md", "# Design\nstuff\n")
-	res, err := e.Ingest(context.Background(), src, "thrifty", nil)
+	res, err := e.Ingest(context.Background(), src, "thrifty", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestIngestConventionPathStreamedThenCompleted(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "streamy.md", "# Spec\nthings\n")
-	res, err := e.Ingest(context.Background(), src, "", nil)
+	res, err := e.Ingest(context.Background(), src, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestIngestNoProposalIsError(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "empty-ish.md", "not really a spec\n")
-	if _, err := e.Ingest(context.Background(), src, "", nil); err == nil {
+	if _, err := e.Ingest(context.Background(), src, "", "", nil); err == nil {
 		t.Error("expected an error when the agent returns no proposal")
 	}
 }
@@ -184,7 +184,7 @@ func TestIngestEmptySourceRejected(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "blank.md", "   \n")
-	if _, err := e.Ingest(context.Background(), src, "", nil); err == nil {
+	if _, err := e.Ingest(context.Background(), src, "", "", nil); err == nil {
 		t.Error("expected empty source to be rejected before spawning a session")
 	}
 }
@@ -213,11 +213,11 @@ func TestIngestStashDoesNotClobberSameBasename(t *testing.T) {
 	srcA := writeSource(t, wsRoot{ws.Root}, filepath.Join("a", "spec.md"), "AAA content\n")
 	srcB := writeSource(t, wsRoot{ws.Root}, filepath.Join("b", "spec.md"), "BBB content\n")
 
-	resA, err := e.Ingest(context.Background(), srcA, "", nil)
+	resA, err := e.Ingest(context.Background(), srcA, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resB, err := e.Ingest(context.Background(), srcB, "", nil)
+	resB, err := e.Ingest(context.Background(), srcB, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestIngestStashDoesNotClobberSameBasename(t *testing.T) {
 	}
 
 	// re-ingesting the identical document reuses its existing stash.
-	resA2, err := e.Ingest(context.Background(), srcA, "", nil)
+	resA2, err := e.Ingest(context.Background(), srcA, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestIngestReportsProgress(t *testing.T) {
 	// progress is invoked synchronously from the pass, so the slice is
 	// safe to inspect once Ingest returns.
 	var steps []IngestStep
-	if _, err := e.Ingest(context.Background(), src, "", func(st IngestStep) { steps = append(steps, st) }); err != nil {
+	if _, err := e.Ingest(context.Background(), src, "", "", func(st IngestStep) { steps = append(steps, st) }); err != nil {
 		t.Fatal(err)
 	}
 	if len(steps) < 4 {
@@ -337,7 +337,7 @@ func TestIngestPassesStashedSourceAsExtraRead(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "prd.md", "# PRD\nrequirements\n")
-	if _, err := e.Ingest(context.Background(), src, "", nil); err != nil {
+	if _, err := e.Ingest(context.Background(), src, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(e.cfg.Workspace.IngestDir(), "prd.md")
@@ -375,7 +375,7 @@ func TestIngestOpencodeUsesConventionPath(t *testing.T) {
 	t.Cleanup(func() { e.Close() })
 
 	src := writeSource(t, wsRoot{ws.Root}, "design.md", "# Design\nstuff\n")
-	res, err := e.Ingest(context.Background(), src, "", nil)
+	res, err := e.Ingest(context.Background(), src, "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

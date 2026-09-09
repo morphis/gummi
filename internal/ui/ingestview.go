@@ -295,7 +295,7 @@ func (m *Shell) startIngest(path, profile, repo string) tea.Cmd {
 	steps := make(chan engine.IngestStep, 256)
 	pass := func() tea.Msg {
 		defer close(steps)
-		res, err := eng.Ingest(context.Background(), path, profile, func(st engine.IngestStep) {
+		res, err := eng.Ingest(context.Background(), path, profile, repo, func(st engine.IngestStep) {
 			select {
 			case steps <- st:
 			default: // progress is advisory — never stall the pass on a full feed
