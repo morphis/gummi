@@ -1136,6 +1136,23 @@ Rules that make the control safe:
   line typed at a running or live stage is steering, and a line that
   continues a conversation stays in it.
 
+  **The read is on screen while it runs, and no way out of it costs the
+  reader the line.** Placing a sentence is a model call — seconds, not
+  milliseconds — and a screen that does not account for them is a screen
+  that has stopped: same picker, same line, nothing moving, and the
+  reader's own `enter` the last thing that visibly happened. So the pass
+  is state. It stands in the slot its answer will land in, it marks the
+  card busy for as long as it runs (so the board row, the dashboard and
+  the status bar all animate for it), and it owns `esc`, which cancels
+  the read and sends the line to the card as a plain message — the chip's
+  own escape hatch, reached a few seconds earlier. The rule holds one
+  step further in than the router itself: abandoning the new card a
+  `separate_card` reading opens puts the line back in the composer it was
+  typed in. Delivering it takes another model call (a consult session has
+  to open), and that one is on screen too, carrying the line, until the
+  session has it. A route that reads prose may never be a route that
+  loses it.
+
   What is still refused is a model-backed *conductor*: something that
   decides what a card may do next, or that a user could argue out of the
   workflow. Describing a stop and placing a sentence are not that. The
