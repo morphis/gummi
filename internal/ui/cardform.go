@@ -74,6 +74,14 @@ type cardForm struct {
 	// form is popped while it is open and pushed back when it returns.
 	onImport func(ref domain.IssueRef, repo string) tea.Cmd
 	onBrowse func(repo string) tea.Cmd
+	// onCancel runs when the form is abandoned — esc, or the Cancel
+	// button. Nil for the plain new-card door, where abandoning it loses
+	// nothing that was not typed into it. It is set by the caller that
+	// seeded the box from somewhere else: a re-entry's "not this card's
+	// work" opens this form already holding a line the reader typed on a
+	// card page, and dropping the form has to give that line back rather
+	// than being the one gesture in the package that discards prose.
+	onCancel func() tea.Cmd
 }
 
 // afterCand is one card the `after` row can name.
@@ -196,6 +204,16 @@ const cardPlaceholder = "Describe it. The first line is the title.\n\n" +
 // ID implements overlay.Dialog.
 func (d *cardForm) ID() string { return "new-card" }
 
+// cancel is the abandon path, both keys that reach it (esc and the
+// Cancel button) routed through one place so they cannot diverge on what
+// leaving without creating anything does.
+func (d *cardForm) cancel() tea.Cmd {
+	if d.onCancel == nil {
+		return nil
+	}
+	return d.onCancel()
+}
+
 // SetText replaces the box's content (a preset's seed, a test's fixture).
 func (d *cardForm) SetText(s string) { d.text.SetValue(s) }
 
@@ -310,7 +328,7 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	k := key.String()
 	switch k {
 	case "esc":
-		return true, nil
+		return true, d.cancel()
 	case "tab":
 		d.advanceFocus(1)
 		return false, nil
@@ -346,7 +364,7 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		case "enter":
 			switch d.buttons.Cursor() {
 			case 0:
-				return true, nil
+				return true, d.cancel()
 			case 1:
 				return d.submit(false)
 			default:

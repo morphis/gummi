@@ -261,6 +261,11 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	if cmd, handled := m.chipKey(r, msg); handled {
 		return cmd
 	}
+	// A read still out owns esc and swallows the keys of a picker that is
+	// not on screen, on the same terms (chip.go's readingKey).
+	if cmd, handled := m.readingKey(r, msg); handled {
+		return cmd
+	}
 	switch msg.String() {
 	case "esc":
 		if m.threadFreeForm {
@@ -883,17 +888,39 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 		return nil
 	}
 	m.threadInput.Reset()
+	// The line is held until the session has it, and the thread shows it
+	// there (consultBlock's asking marker). Opening a consult session is
+	// itself a model call: without this the composer clears, whatever was
+	// on screen stays exactly as it was, and for those seconds the line
+	// exists nowhere the reader can see — which is indistinguishable from
+	// having been thrown away, and is what an esc out of the re-entry
+	// chip used to look like.
+	if m.consultSending == nil {
+		m.consultSending = map[domain.FeatureID]string{}
+	}
+	m.consultSending[f.ID] = text
 	eng := m.engine
+	id := f.ID
 	return func() tea.Msg {
 		c, err := eng.OpenConsult(context.Background(), f)
 		if err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			return consultSentMsg{id: id, err: err}
 		}
 		if err := c.Send(context.Background(), text); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			return consultSentMsg{id: id, err: err}
 		}
-		return nil
+		return consultSentMsg{id: id}
 	}
+}
+
+// consultSentMsg settles one consult delivery: the session has the line
+// (and renders it from its own transcript from here on), or it never
+// took it. Either way the asking marker comes down — a marker that
+// outlived its send would leave a card reading busy forever, the same
+// rule Shell.scribing settles under.
+type consultSentMsg struct {
+	id  domain.FeatureID
+	err error
 }
 
 // inputBlock is the thread's bottom input slot (thread.go's threadView).
@@ -947,6 +974,9 @@ func (m *Shell) threadInputBindings() []binding {
 	if r, ok := m.selected(); ok {
 		if p := m.reentryPending; p != nil {
 			return m.chipBindings(p)
+		}
+		if p := m.reentryRead; p != nil && p.id == r.F.ID {
+			return m.readingBindings()
 		}
 		if d := m.visibleDecision(r); d != nil {
 			aim := m.wordAim(d)

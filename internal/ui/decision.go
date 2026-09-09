@@ -470,8 +470,11 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionCursor = 0
 		m.decisionPicked = map[int]bool{}
 		// a reading was of a stop that is gone — the card moved under it,
-		// and so has the conversation the stop was in
+		// and so has the conversation the stop was in. A read still out is
+		// withdrawn for the same reason, and cancelled with it: it would
+		// come back a reading of a stop nobody is looking at any more.
 		m.reentryPending = nil
+		m.withdrawRead()
 		m.chatting = nil
 		m.decisionAimed = false
 		// a different question invalidates the armed free-form channel —
@@ -517,6 +520,19 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 			rows = max(maxRows-len(narr), 2)
 		}
 		return append(narr, m.chipLines(s, r, p, width, rows)...)
+	}
+	if p := m.reentryRead; p != nil && p.id == r.F.ID && d.ask == nil {
+		// the same slot, one moment earlier: the line is out being read
+		// and the picker is not the answer to anything until it comes
+		// back (chip.go's readingLines)
+		width := max(w-2, 10)
+		narr := m.narrationBlock(s, d, r, width)
+		rows := maxRows
+		if maxRows > 0 {
+			narr = fitNarration(narr, maxRows-2-1)
+			rows = max(maxRows-len(narr), 2)
+		}
+		return append(narr, m.readingLines(s, width, rows)...)
 	}
 	title := "gummi"
 	options := make([]pickerOption, 0, len(d.actions))

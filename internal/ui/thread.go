@@ -1629,11 +1629,19 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 // anything renders nothing here at all.
 func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 	c := m.consultFor(r.F.ID)
+	asking := m.consultSending[r.F.ID]
 	if c == nil {
-		return nil
+		if asking == "" {
+			return nil
+		}
+		// A line on its way to a session that does not exist yet. It is
+		// drawn without the caption because there is no snapshot to write
+		// one from — and it is drawn at all because the alternative is a
+		// composer that has just emptied itself into nothing visible.
+		return m.askingLines(s, asking, w)
 	}
 	snap := c.Snapshot()
-	if len(snap.Transcript) == 0 {
+	if len(snap.Transcript) == 0 && asking == "" {
 		return nil
 	}
 	lines := []string{consultCaption(s, snap, w), ""}
@@ -1643,10 +1651,41 @@ func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 			lines = append(lines, "  "+s.Error.Render(l))
 		}
 	}
+	if asking != "" && !delivered(snap, asking) {
+		// delivered, not settled: the session records the turn before its
+		// send returns, so for the moment between the two the transcript
+		// and the marker would show the same sentence twice.
+		lines = append(lines, m.askingLines(s, asking, w)...)
+	}
 	if snap.Busy {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" thinking…"))
 	}
 	return lines
+}
+
+// delivered reports whether the consult session's transcript already
+// holds text as the reader's own newest turn.
+func delivered(snap engine.Snapshot, text string) bool {
+	for i := len(snap.Transcript) - 1; i >= 0; i-- {
+		if msg := snap.Transcript[i]; msg.Author == engine.AuthorUser {
+			return msg.Content == text
+		}
+	}
+	return false
+}
+
+// askingLines is the marker for a line handed to the consult session and
+// not yet delivered: the spinner every busy marker in the package shares,
+// and the line itself, so a reader can see WHICH line is in flight rather
+// than only that something is. It comes down the moment the session has
+// the line — from then on the transcript renders it, and rendering both
+// would show the same sentence twice.
+func (m *Shell) askingLines(s *theme.Styles, text string, w int) []string {
+	out := []string{"  " + s.Info.Render(m.spinner()+" asking…")}
+	for _, l := range strings.Split(wrapText(oneLineText(text), max(w-4, 8)), "\n") {
+		out = append(out, "    "+s.Subtle.Render(l))
+	}
+	return out
 }
 
 // consultCaption is the consult block's own boundary line: dash-dot

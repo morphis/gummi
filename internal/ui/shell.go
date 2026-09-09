@@ -278,7 +278,7 @@ type Shell struct {
 	checks     map[domain.FeatureID]stagedChecks
 	baselining map[domain.FeatureID]bool // a baseline check run is in flight
 	// scribing counts the one-shot scribe passes (check discovery, envelope
-	// estimate) currently in flight against a card. A count, not a flag,
+	// estimate, the re-entry read) currently in flight against a card. A count, not a flag,
 	// because the shell dispatches both together and either can outlive the
 	// other. A settled card is removed from the map, not left at zero, so
 	// "in flight" is testable as key-presence — cardBusy/spinnerActive rely
@@ -388,6 +388,17 @@ type Shell struct {
 	// line back (chip.go). Nil when no chip is up. Withdrawn by esc, by
 	// any edit to the composer, and by the card moving under it.
 	reentryPending *reentryReading
+	// reentryRead is the moment before that one: a line that has been
+	// sent out to be read and has not come back yet (reentry.go). It
+	// holds the chip's own slot while it waits, so the seconds a model
+	// call takes are seconds the screen accounts for rather than seconds
+	// the reader spends wondering whether enter registered.
+	reentryRead *reentryRead
+	// consultSending holds, per card, a line handed to the consult session
+	// and not yet delivered — opening a session is a model call, and the
+	// thread says so for as long as it runs (consultBlock). Cleared by
+	// consultSentMsg on both outcomes.
+	consultSending map[domain.FeatureID]string
 	// chatting marks a card whose thread's newest exchange is a consult
 	// answer: a line typed next continues that conversation and is not
 	// read again (chat.go). Ended by a row picked, a verb, the card
@@ -468,18 +479,19 @@ func (m *Shell) setRound(id domain.FeatureID, kind domain.RoundKind, n int) {
 func NewShell(t theme.Theme, version string) *Shell {
 	styles := theme.New(t)
 	m := &Shell{
-		styles:        styles,
-		version:       version,
-		now:           time.Now,
-		checks:        map[domain.FeatureID]stagedChecks{},
-		baselining:    map[domain.FeatureID]bool{},
-		scribing:      map[domain.FeatureID]int{},
-		rounds:        map[roundKey]int{},
-		cardEvents:    map[domain.FeatureID][]state.CardEvent{},
-		excusedChecks: map[domain.FeatureID][]string{},
-		threadDrafts:  map[domain.FeatureID]string{},
-		copilotHint:   true,
-		motionEnabled: true,
+		styles:         styles,
+		version:        version,
+		now:            time.Now,
+		checks:         map[domain.FeatureID]stagedChecks{},
+		baselining:     map[domain.FeatureID]bool{},
+		scribing:       map[domain.FeatureID]int{},
+		consultSending: map[domain.FeatureID]string{},
+		rounds:         map[roundKey]int{},
+		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
+		excusedChecks:  map[domain.FeatureID][]string{},
+		threadDrafts:   map[domain.FeatureID]string{},
+		copilotHint:    true,
+		motionEnabled:  true,
 		// the composer is themed from the same styles as everything else
 		// on the page; left on the widget's own defaults it renders in raw
 		// ANSI and reads as a foreign box (threadinput.go).
@@ -1789,6 +1801,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reentryClassifiedMsg:
 		return m, m.applyReentry(msg)
+
+	case consultSentMsg:
+		delete(m.consultSending, msg.id)
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true, id: msg.id}
+		}
+		return m, nil
 
 	case narrationDoneMsg:
 		m.applyNarration(msg)

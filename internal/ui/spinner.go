@@ -50,6 +50,12 @@ func (m *Shell) spinnerActive() bool {
 	if m.ingestRun != nil || m.mergePrep || m.squashPrep || len(m.baselining) > 0 || len(m.scribing) > 0 {
 		return true
 	}
+	// a line on its way to a consult session that has not opened yet: no
+	// session exists to report itself busy, so the only thing that knows
+	// the UI is waiting on a model is the send that is still out
+	if len(m.consultSending) > 0 {
+		return true
+	}
 	// the board session is not one of m.engine.Sessions() below — those
 	// are card-scoped, and a board session is bound to the workspace
 	// instead (engine/boardsession.go) — so its own busy turn has to be

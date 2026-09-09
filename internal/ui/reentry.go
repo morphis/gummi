@@ -50,6 +50,32 @@ type reentryClassifiedMsg struct {
 	fallback string
 	intent   reentry.Intent
 	err      error
+	// read is the in-flight pass this answer belongs to, nil for an
+	// answer no pass produced (chatExit's leading word is itself the
+	// reading, so nothing was sent anywhere). Update drops an answer
+	// whose pass the shell is no longer waiting on — esc took it back,
+	// or the line it was a reading of was edited — so a model call that
+	// lands late cannot raise a chip over a line that has moved on.
+	read *reentryRead
+}
+
+// reentryRead is a classification in flight: whose line went out to be
+// read, the line itself, and the cancel that takes it back.
+//
+// It exists because the read is a model call and costs seconds, not
+// milliseconds. Without it the screen between enter and the chip is
+// exactly the screen before enter — the same picker, the same line, no
+// motion anywhere — and a reader who has just been told nothing reads
+// that as a UI that has stopped. So the pass is state: it stands in the
+// chip's own slot (chip.go's readingLines), counts as a scribe pass
+// against the card (Shell.scribing) so every busy marker in the package
+// animates for it, and owns esc, which is the same escape hatch the chip
+// offers — the line comes back as a plain message and nothing is spent
+// waiting for a reading nobody wants any more.
+type reentryRead struct {
+	id     domain.FeatureID
+	line   string
+	cancel context.CancelFunc
 }
 
 // routeReentry is the single entry point for a "send it back" carrying a
@@ -83,16 +109,50 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 	if eng == nil {
 		return m.fixedSendBack(r, fallback, note)
 	}
+	if m.reentryRead != nil && m.reentryRead.id == r.F.ID {
+		// A second line sent while the first is still out buys nothing and
+		// spends another scribe turn. The slot says the read is running;
+		// this is the guard for the paths that reach here without it —
+		// "/bounce <reason>" typed at a card already reading, say — and it
+		// says so, because a verb that silently does nothing is the same
+		// complaint one stop further along.
+		m.notice = noticeMsg{text: string(r.F.ID) + ": still reading your line — esc sends it as a plain message instead"}
+		return nil
+	}
 	// The composer keeps the line. The chip that may follow is a reading
 	// OF that line, shown beside it; resetting here would show a reading
 	// of nothing.
 	m.notice = noticeMsg{text: string(r.F.ID) + ": reading the card to place your line…"}
 	f := r.F
 	_, _, _, forward := stopForward(m.nextInputFor(r))
+	// The pass is visible for as long as it runs: in the chip's slot on
+	// this page, in the card's busy marker everywhere else. Both hang off
+	// the same two writes, so neither can show a read the other has
+	// already settled.
+	ctx, cancel := context.WithCancel(context.Background())
+	read := &reentryRead{id: f.ID, line: note, cancel: cancel}
+	m.reentryRead = read
+	m.scribing[f.ID]++
 	return func() tea.Msg {
-		intent, err := eng.ClassifyReentry(context.Background(), f, note, forward)
-		return reentryClassifiedMsg{f: f, note: note, fallback: fallback, intent: intent, err: err}
+		intent, err := eng.ClassifyReentry(ctx, f, note, forward)
+		return reentryClassifiedMsg{f: f, note: note, fallback: fallback, intent: intent, err: err, read: read}
 	}
+}
+
+// withdrawRead takes back an in-flight read: the model call is cancelled,
+// the card's scribe count settles, and the answer that may already be on
+// its way is dropped by applyReentry's own identity check. It returns the
+// withdrawn pass — nil when there was none — so the caller can do
+// something with the line it was holding.
+func (m *Shell) withdrawRead() *reentryRead {
+	p := m.reentryRead
+	if p == nil {
+		return nil
+	}
+	m.reentryRead = nil
+	p.cancel()
+	m.scribeSettled(p.id)
+	return p
 }
 
 // applyReentry routes a classified sentence. Update calls it on
@@ -105,6 +165,20 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 // already offered "send it back" and quietly turning that into a chat
 // message would drop an answer the reader had been given.
 func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
+	if msg.read != nil {
+		if m.reentryRead != msg.read {
+			// The pass was withdrawn while it was out — esc, or an edit to
+			// the line it was a reading of. Whoever withdrew it settled it;
+			// this answer is a reading of something that is no longer on
+			// screen, and raising a chip from it would confirm an act
+			// against a line the reader has already taken back.
+			return nil
+		}
+		// Settled before anything below can return early: a pass that
+		// leaks its count leaves the card busy forever.
+		m.reentryRead = nil
+		m.scribeSettled(msg.f.ID)
+	}
 	r, ok := m.rowByID(msg.f.ID)
 	if !ok {
 		return nil
@@ -182,6 +256,27 @@ func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 		// moved THIS card.
 		form := m.openCardForm(domain.KindFeature)
 		form.SetText(out.Note)
+		// Backing out of the form is backing out of the whole route, so
+		// it lands the reader where the route started: the line back in
+		// the composer it was typed in, the stop's own options under it,
+		// nothing created and nothing moved. Without this the line is
+		// gone — takeReading cleared the composer on the way in — and
+		// declining the new card silently costs the reader what they
+		// wrote.
+		line := out.Note
+		id := r.F.ID
+		form.onCancel = func() tea.Cmd {
+			if cur, ok := m.selected(); !ok || cur.F.ID != id {
+				// the reader moved on while the form was up; putting the
+				// line into another card's composer would be worse than
+				// dropping it, so the notice carries it instead
+				m.notice = noticeMsg{text: string(id) + ": nothing created — your line was \"" + oneLineText(line) + "\""}
+				return nil
+			}
+			m.threadInput.SetValue(line)
+			m.notice = noticeMsg{text: string(id) + ": nothing created — your line is back in the composer"}
+			return nil
+		}
 		m.Overlay.Push(form)
 		m.notice = noticeMsg{text: string(r.F.ID) + ": that reads as separate work — " + string(r.F.ID) + " stays where it is"}
 		return nil

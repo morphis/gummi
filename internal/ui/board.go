@@ -52,13 +52,16 @@ func stageGlyph(s domain.Stage) string {
 // in-process actions.
 //
 // It is a pure function of (m.rows, m.sessionFor(row.F.ID), m.baselining,
-// m.scribing) — no other mutable state feeds it — so it renders
-// identically whenever called twice within one frame.
+// m.scribing, m.consultSending) — no other mutable state feeds it — so it
+// renders identically whenever called twice within one frame.
 func (m *Shell) cardBusy(r featureRow) bool {
 	if m.baselining[r.F.ID] {
 		return true
 	}
 	if m.scribing[r.F.ID] > 0 {
+		return true
+	}
+	if m.consultSending[r.F.ID] != "" {
 		return true
 	}
 	sess := m.sessionFor(r.F.ID)

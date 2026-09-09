@@ -101,8 +101,17 @@ func (m *Shell) cardBusyWord(r featureRow) string {
 	if m.baselining[r.F.ID] {
 		return "checking"
 	}
+	if m.reentryRead != nil && m.reentryRead.id == r.F.ID {
+		// a re-entry read is a scribe pass and counts as one for busy-ness,
+		// but the row can say what it is actually doing: reading the line
+		// the reader just typed, not writing anything
+		return "reading"
+	}
 	if m.scribing[r.F.ID] > 0 {
 		return "scribing"
+	}
+	if m.consultSending[r.F.ID] != "" {
+		return "asking"
 	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {
 		return m.runningLabel(sess.Snapshot())
