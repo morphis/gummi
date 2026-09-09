@@ -29,10 +29,10 @@ func separateWorkStop(t *testing.T) *Shell {
 	return m
 }
 
-// While the line is out being read the screen says so — in the chip's own
-// slot, with the picker gone, and with the card marked busy so every
-// other surface animates for it too.
-func TestReadInFlightHoldsTheChipsSlot(t *testing.T) {
+// While the line is out being read the conversation says so, the stop's
+// own answers stay exactly where they were, and the card is marked busy
+// so every other surface animates for it too.
+func TestReadInFlightIsInTheThread(t *testing.T) {
 	m := separateWorkStop(t)
 	m = typeString(t, m, separateWork)
 
@@ -59,8 +59,8 @@ func TestReadInFlightHoldsTheChipsSlot(t *testing.T) {
 	if !strings.Contains(view, "reading your line") {
 		t.Errorf("the page does not say a read is running:\n%s", view)
 	}
-	if strings.Contains(view, "send it back") {
-		t.Error("the picker is still on screen under a read that has not answered")
+	if !strings.Contains(view, "run verify") {
+		t.Errorf("the picker went away under a read — its rows are still the answers to an unanswered question:\n%s", view)
 	}
 
 	// A second enter must not buy a second read.
@@ -76,6 +76,21 @@ func TestReadInFlightHoldsTheChipsSlot(t *testing.T) {
 		t.Errorf("enter while reading said nothing back: %+v", m.notice)
 	}
 
+	// and the bar says so rather than naming a destination enter no
+	// longer has
+	var barred bool
+	for _, b := range m.threadInputBindings() {
+		if b.key == "enter" && b.label == "reading…" {
+			barred = true
+		}
+		if b.key == "esc" && b.label != "stop reading" {
+			t.Errorf("esc reads %q while a line is out being read", b.label)
+		}
+	}
+	if !barred {
+		t.Error("the bar still claims enter commits something")
+	}
+
 	m = pump(t, m, cmd)
 	if m.reentryRead != nil {
 		t.Error("the read stayed on screen after its answer landed")
@@ -88,17 +103,17 @@ func TestReadInFlightHoldsTheChipsSlot(t *testing.T) {
 	}
 }
 
-// esc during the read is the chip's own take-it-back, reached a few
-// seconds earlier: the read is cancelled, the line goes to the card as a
-// plain message, and the answer that was already on its way raises
-// nothing when it lands.
-func TestEscWhileReadingTakesTheLineBack(t *testing.T) {
+// esc during the read stops the read and nothing else: nothing has been
+// proposed yet, so there is nothing to decline and nothing to send. The
+// line stays where it was typed, the page stays open, and the answer that
+// was already on its way raises nothing when it lands.
+func TestEscWhileReadingStopsItAndKeepsTheLine(t *testing.T) {
 	m := separateWorkStop(t)
 	m = typeString(t, m, separateWork)
 
 	model, classify := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = model.(*Shell)
-	model, sent := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model, after := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = model.(*Shell)
 
 	if m.reentryRead != nil {
@@ -108,8 +123,41 @@ func TestEscWhileReadingTakesTheLineBack(t *testing.T) {
 		t.Errorf("a cancelled read left the card busy: %+v", m.scribing)
 	}
 	if !m.cardOpen {
-		t.Error("esc closed the page instead of taking the line back")
+		t.Error("esc closed the page instead of stopping the read")
 	}
+	if got := m.threadInput.Value(); got != separateWork {
+		t.Errorf("composer = %q, want the line still there — stopping a read sends nothing", got)
+	}
+	id := m.rows[0].F.ID
+	if got := m.consultSending[id]; got != "" {
+		t.Errorf("stopping a read sent the line to the consult session: %q", got)
+	}
+	if after != nil {
+		t.Error("stopping a read returned a command")
+	}
+	if !strings.Contains(m.notice.text, "stopped reading") {
+		t.Errorf("esc said nothing back: %+v", m.notice)
+	}
+
+	// the answer to the cancelled read arrives late and is dropped
+	m = pump(t, m, classify)
+	if m.reentryPending != nil {
+		t.Errorf("a withdrawn read still raised a chip: %+v", m.reentryPending)
+	}
+}
+
+// The chip's own esc is the other one, and it still sends: an act has
+// been proposed, declining it still owes the line a destination, and
+// getting it there is a model call the page shows too.
+func TestEscOnTheChipSendsTheLineAndSaysSo(t *testing.T) {
+	m := separateWorkStop(t)
+	m = typeAndSend(t, m, separateWork)
+	if m.reentryPending == nil {
+		t.Fatal("no chip to decline")
+	}
+	model, sent := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = model.(*Shell)
+
 	id := m.rows[0].F.ID
 	if got := m.consultSending[id]; got != separateWork {
 		t.Errorf("the line in flight to the consult session = %q, want the typed line", got)
@@ -117,16 +165,9 @@ func TestEscWhileReadingTakesTheLineBack(t *testing.T) {
 	if view := m.View().Content; !strings.Contains(view, "asking…") {
 		t.Errorf("the line went somewhere the page does not show:\n%s", view)
 	}
-
 	m = pump(t, m, sent)
 	if got := m.consultSending[id]; got != "" {
 		t.Errorf("the asking marker outlived its send: %q", got)
-	}
-
-	// the answer to the cancelled read arrives late and is dropped
-	m = pump(t, m, classify)
-	if m.reentryPending != nil {
-		t.Errorf("a withdrawn read still raised a chip: %+v", m.reentryPending)
 	}
 }
 

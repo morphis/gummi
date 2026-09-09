@@ -450,6 +450,18 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
+	// A line out being read is the newest thing on the page, because it
+	// is the only thing still happening — so it goes here, in the
+	// conversation, beside every other marker for work in flight. It is
+	// deliberately NOT in the decision's control below: the picker's rows
+	// are still the answers to a question nobody has answered, and a
+	// status standing in their place would hide three choices to say one
+	// thing.
+	if p := m.reentryRead; p != nil && p.id == f.ID {
+		add("  " + s.Info.Render(m.spinner()+" reading your line…"))
+		blank()
+	}
+
 	// todo and done are the two stages currentSpecSection has no anchor
 	// for, and todo is exactly the stage where "what is this card about"
 	// is the whole question — with nothing run yet there is no receipt,

@@ -121,80 +121,50 @@ func (m *Shell) chipLines(s *theme.Styles, r featureRow, p *reentryReading, widt
 	return core
 }
 
-// readingLines renders the moment before the chip: the line is out being
-// read and nothing has come back yet.
+// readingKey answers a key while a line is out being read.
 //
-// It stands in the chip's slot, and that is the whole point of it. The
-// read is a model call, and while it runs the alternative is a screen
-// identical to the one before enter was pressed — the same picker, the
-// same line, nothing moving — which is indistinguishable from a UI that
-// has stopped. So the slot the answer will land in says, in advance,
-// that an answer is coming and that nothing has moved yet.
+// The read is not a control and does not take the picker's place — it is
+// something happening, and it says so in the conversation (thread.go's
+// readingMarker). So the rows under it stay exactly what they were, and
+// this claims only the two keys whose meaning the read changes: enter,
+// which has nothing left to commit while the line it would send is
+// already out, and esc, which stops the read.
 //
-// It borrows the chip's own escape hatch and nothing else: esc gives the
-// line back as a plain message, cancelling the read. There is nothing to
-// confirm yet, so enter and y have nothing to do (readingKey swallows
-// them), and the picker's rows are not on screen to be picked.
-func (m *Shell) readingLines(s *theme.Styles, width, maxRows int) []string {
-	head := " " + s.Base.Bold(true).Render("gummi") + "  " + s.Info.Render(m.spinner()) + " " + s.Base.Render("reading your line to see where it belongs…")
-	keys := "   " + s.KeyHint.Render("esc") + " " + s.Subtle.Render("keep it here — send the line as a message instead")
-	var details []string
-	for _, l := range strings.Split(wrapText("Nothing has moved and nothing has been spent. What comes back is a proposal you confirm, not an act — your line stays in the composer either way.", max(width-4, 8)), "\n") {
-		details = append(details, "   "+s.Subtle.Render(l))
-	}
-	// same yield order as the chip: the key line never goes, the head
-	// goes only after the detail it explains.
-	if maxRows <= 0 || maxRows >= len(details)+2 {
-		return append(append([]string{head}, details...), keys)
-	}
-	if maxRows >= 2 {
-		return []string{head, keys}
-	}
-	return []string{keys}
-}
-
-// readingKey answers a key while a read is out. Like chipKey, a key it
-// does not recognise withdraws the read and is handed on to the composer:
-// the pass is a reading OF the line in the composer, so an edit to that
-// line makes the answer that is coming a reading of something that no
-// longer exists.
-func (m *Shell) readingKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+// esc here is NOT the chip's esc. The chip has proposed an act, so
+// declining it still owes the line a destination and sends it as a
+// message. Nothing has been proposed yet, so stopping the read is just
+// stopping it: the line stays in the composer, nothing is sent, and the
+// stop's own answers are where they were.
+//
+// Anything else falls through — and anything that types withdraws the
+// read on the way, for the reason the chip is withdrawn by an edit: it
+// is a reading OF the line in the composer, and an edited line is not
+// the line that was read.
+// It answers no key with a command, so it reports only whether it took
+// the key.
+func (m *Shell) readingKey(r featureRow, msg tea.KeyPressMsg) bool {
 	if m.reentryRead == nil || m.reentryRead.id != r.F.ID {
-		return nil, false
+		return false
 	}
 	switch msg.String() {
 	case "esc":
-		p := m.withdrawRead()
-		// the "reading…" notice was about a read that is over
-		m.clearTransientNotice()
-		// the chip's own take-it-back, reached a few seconds earlier: the
-		// line goes where a bare composer would have sent it, and that
-		// starts a conversation the next line continues (chat.go)
-		if s := m.sessionFor(r.F.ID); s == nil || !s.Live() {
-			m.startChat(r.F.ID)
-		}
-		return m.sendThreadMessage(r.F, p.line), true
-	case "enter", "y":
-		// there is nothing to take yet, and a reader pressing enter again
-		// is asking why nothing happened — so answer that, rather than
-		// starting a second read or falling through to the picker.
-		m.notice = noticeMsg{text: string(r.F.ID) + ": still reading your line — esc sends it as a plain message instead"}
-		return nil, true
-	case "up", "down", "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		// the picker is not on screen (readingLines took its slot), so its
-		// keys do nothing rather than moving a highlight nobody can see
-		return nil, true
+		m.withdrawRead()
+		m.notice = noticeMsg{text: string(r.F.ID) + ": stopped reading — your line is still here"}
+		return true
+	case "enter":
+		// the line this would send is the line already out being read, so
+		// a second enter can only buy the same answer twice. A reader
+		// pressing it is asking why nothing has happened; say that.
+		m.notice = noticeMsg{text: string(r.F.ID) + ": still reading your line — esc stops it"}
+		return true
+	case "up", "down", "left", "right", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+		"pgup", "pgdown", "alt+j", "alt+k", "alt+o", "tab", "shift+tab":
+		// navigation moves a highlight; it does not edit the line, so the
+		// reading it was taken from still stands
+		return false
 	}
 	m.withdrawRead()
-	return nil, false
-}
-
-// readingBindings is the status bar while a read is out: the one key
-// there is, and what the wait is for.
-func (m *Shell) readingBindings() []binding {
-	return m.withCardTabs([]binding{
-		{key: "esc", label: "keep it here", help: "stop reading and send your line as a plain message", bar: true, sticky: true},
-	})
+	return false
 }
 
 // readingNoun is the reading in the card's own words — reentry.Describe

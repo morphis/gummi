@@ -156,10 +156,12 @@ that moves the card or spends credits shows you first: `enter` confirms
 a move, `y` a spend, `esc` sends the line as a plain message instead.
 Nothing you type can produce a move the workflow does not already have.
 
-Reading the line takes a few seconds, and the page says so while it
-does — the reading stands where the answer will, and `esc` cancels it.
-Backing out never costs you the sentence: `esc` at the reading and `esc`
-at the new card it may open both leave your line where you typed it.
+Reading the line takes a few seconds, and the thread says so while it
+does — your options stay where they are, and `esc` stops the read with
+your line still in the composer. Backing out never costs you the
+sentence: `esc` at the reading keeps it, `esc` at the chip sends it as a
+message, and `esc` at the new card it may open puts it back where you
+typed it.
 
 The **agent tab** hosts your own coding CLI, picked once on the first
 visit. `ctrl+g` locks the keyboard to it when you want its own `tab`

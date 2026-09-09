@@ -66,12 +66,12 @@ type reentryClassifiedMsg struct {
 // milliseconds. Without it the screen between enter and the chip is
 // exactly the screen before enter — the same picker, the same line, no
 // motion anywhere — and a reader who has just been told nothing reads
-// that as a UI that has stopped. So the pass is state: it stands in the
-// chip's own slot (chip.go's readingLines), counts as a scribe pass
-// against the card (Shell.scribing) so every busy marker in the package
-// animates for it, and owns esc, which is the same escape hatch the chip
-// offers — the line comes back as a plain message and nothing is spent
-// waiting for a reading nobody wants any more.
+// that as a UI that has stopped. So the pass is state: it marks the card
+// busy (Shell.scribing) so every busy marker in the package animates for
+// it, it says so in the card's own conversation where work in flight is
+// always reported (thread.go's reading marker, beside a stage's
+// "thinking…"), and it can be stopped (chip.go's readingKey) without
+// costing the reader the line.
 type reentryRead struct {
 	id     domain.FeatureID
 	line   string
@@ -141,18 +141,17 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 
 // withdrawRead takes back an in-flight read: the model call is cancelled,
 // the card's scribe count settles, and the answer that may already be on
-// its way is dropped by applyReentry's own identity check. It returns the
-// withdrawn pass — nil when there was none — so the caller can do
-// something with the line it was holding.
-func (m *Shell) withdrawRead() *reentryRead {
+// its way is dropped by applyReentry's own identity check. Nothing is
+// sent and the composer is untouched — the line the read was taken from
+// is still exactly where the reader typed it.
+func (m *Shell) withdrawRead() {
 	p := m.reentryRead
 	if p == nil {
-		return nil
+		return
 	}
 	m.reentryRead = nil
 	p.cancel()
 	m.scribeSettled(p.id)
-	return p
 }
 
 // applyReentry routes a classified sentence. Update calls it on

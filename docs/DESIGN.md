@@ -1141,17 +1141,24 @@ Rules that make the control safe:
   milliseconds — and a screen that does not account for them is a screen
   that has stopped: same picker, same line, nothing moving, and the
   reader's own `enter` the last thing that visibly happened. So the pass
-  is state. It stands in the slot its answer will land in, it marks the
-  card busy for as long as it runs (so the board row, the dashboard and
-  the status bar all animate for it), and it owns `esc`, which cancels
-  the read and sends the line to the card as a plain message — the chip's
-  own escape hatch, reached a few seconds earlier. The rule holds one
-  step further in than the router itself: abandoning the new card a
-  `separate_card` reading opens puts the line back in the composer it was
-  typed in. Delivering it takes another model call (a consult session has
-  to open), and that one is on screen too, carrying the line, until the
-  session has it. A route that reads prose may never be a route that
-  loses it.
+  is state, and it is reported where the card reports everything else
+  that is happening: in the conversation, beside a stage's own
+  "thinking…", and on the card's busy marker, so the board row, the
+  dashboard and the status bar animate for it too. It is deliberately not
+  in the control below — the picker's rows are still the answers to a
+  question nobody has answered, and a status standing in their place
+  would hide three choices to say one thing. Two keys change while it
+  runs, and the bar says so: `enter` has nothing left to commit, and
+  `esc` stops the read. Stopping is only stopping — nothing has been
+  proposed yet, so nothing is sent and the line stays in the composer.
+  The chip's own `esc` is the other one and still sends, because
+  declining a proposed act still owes the line a destination; getting it
+  there opens a consult session, which is another model call, and that
+  one is on screen too, carrying the line, until the session has it. The
+  rule holds one step further in than the router itself: abandoning the
+  new card a `separate_card` reading opens puts the line back in the
+  composer it was typed in. A route that reads prose may never be a route
+  that loses it.
 
   What is still refused is a model-backed *conductor*: something that
   decides what a card may do next, or that a user could argue out of the
