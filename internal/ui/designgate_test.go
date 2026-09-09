@@ -90,7 +90,7 @@ func TestBoardGOutsideTheDesignGateDoesNotAsk(t *testing.T) {
 	m, root := newWorkspace(t)
 	_ = root
 	m = pump(t, m, m.Init())
-	if msg := m.createFeature(formResult{Desc: "a todo card"})(); msg != nil {
+	if msg := m.createCard(formResult{Desc: "a todo card"})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

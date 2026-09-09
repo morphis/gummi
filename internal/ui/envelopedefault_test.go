@@ -42,10 +42,9 @@ func TestPrefillLeavesEstimationModeIntact(t *testing.T) {
 func TestCreationDialogsPrefillDefaultEnvelope(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	want := strconv.Itoa(DefaultEnvelopeCredits)
-	views := map[string]string{
-		"feature":  newFeatureForm(nil, nil, true, DefaultEnvelopeCredits, nil).View(s, 80, 24),
-		"bug":      newBugForm(nil, nil, true, DefaultEnvelopeCredits, nil).View(s, 80, 24),
-		"research": newRSForm(nil, nil, true, DefaultEnvelopeCredits, nil).View(s, 80, 24),
+	views := map[string]string{}
+	for _, kind := range cardKinds {
+		views[string(kind)] = newCardForm(kind, nil, nil, true, "", nil, DefaultEnvelopeCredits, nil).View(s, 80, 24)
 	}
 	for name, view := range views {
 		if !strings.Contains(view, want) {

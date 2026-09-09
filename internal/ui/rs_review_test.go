@@ -270,20 +270,27 @@ func rsCardShell(t *testing.T, repo string) (*Shell, domain.Feature) {
 	return m, f
 }
 
-// --- Step 1: the rsForm dialog ---
+// --- Step 1: the new-card dialog, research preset ---
+
+func rsDoor(profiles, repos []string, hasDefault bool, onSubmit func(formResult) tea.Cmd) *cardForm {
+	return newCardForm(domain.KindResearch, profiles, repos, hasDefault, "", nil, 1000, onSubmit)
+}
 
 func TestRS_Form_SubmitCarriesBrief(t *testing.T) {
-	var got rsFormResult
-	form := newRSForm([]string{"thrifty"}, []string{"lxd"}, true, 1000, func(res rsFormResult) tea.Cmd {
+	var got formResult
+	form := rsDoor([]string{"thrifty"}, []string{"lxd"}, true, func(res formResult) tea.Cmd {
 		got = res
 		return nil
 	})
-	form.brief.SetValue("Investigate the retry storm\n\nmore detail")
+	form.SetText("Investigate the retry storm\n\nmore detail")
 	if done, _ := form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done {
 		t.Fatal("form did not submit")
 	}
-	if got.Brief != "Investigate the retry storm\n\nmore detail" {
-		t.Errorf("Brief = %q", got.Brief)
+	if got.Kind != domain.KindResearch {
+		t.Errorf("Kind = %q, want research", got.Kind)
+	}
+	if got.Desc != "Investigate the retry storm\n\nmore detail" {
+		t.Errorf("Desc = %q", got.Desc)
 	}
 	if got.Profile != "thrifty" {
 		t.Errorf("Profile = %q, want thrifty", got.Profile)
@@ -295,7 +302,7 @@ func TestRS_Form_SubmitCarriesBrief(t *testing.T) {
 
 func TestRS_Form_EnterEmptyBriefErrors(t *testing.T) {
 	submitted := false
-	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
+	form := rsDoor(nil, nil, false, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
@@ -305,18 +312,20 @@ func TestRS_Form_EnterEmptyBriefErrors(t *testing.T) {
 	if submitted {
 		t.Fatal("onSubmit ran with an empty brief")
 	}
-	if form.errText != "brief required" {
-		t.Errorf("errText = %q, want %q", form.errText, "brief required")
+	if form.errText == "" {
+		t.Error("expected a refusal")
 	}
 }
 
+// TestRS_Form_EnterEmptyEnvelopeErrors: research carries no default
+// budget, so the door refuses an empty envelope for it alone.
 func TestRS_Form_EnterEmptyEnvelopeErrors(t *testing.T) {
 	submitted := false
-	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
+	form := rsDoor(nil, nil, false, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
-	form.brief.SetValue("investigate the retry storm")
+	form.SetText("investigate the retry storm")
 	form.env.SetValue("")
 	if done, _ := form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done {
 		t.Fatal("empty envelope submitted")
@@ -324,31 +333,31 @@ func TestRS_Form_EnterEmptyEnvelopeErrors(t *testing.T) {
 	if submitted {
 		t.Fatal("onSubmit ran with an empty envelope")
 	}
-	if form.errText != "envelope required" {
-		t.Errorf("errText = %q, want %q", form.errText, "envelope required")
+	if !strings.Contains(form.errText, "envelope required") {
+		t.Errorf("errText = %q, want an envelope-required refusal", form.errText)
 	}
 }
 
 func TestRS_Form_EnterPunctuationOnlyBriefErrors(t *testing.T) {
 	submitted := false
-	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
+	form := rsDoor(nil, nil, false, func(formResult) tea.Cmd {
 		submitted = true
 		return nil
 	})
-	form.brief.SetValue("???")
+	form.SetText("???")
 	if done, _ := form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done {
 		t.Fatal("punctuation-only brief submitted")
 	}
 	if submitted {
 		t.Fatal("onSubmit ran with a punctuation-only brief")
 	}
-	if form.errText != "brief must include a letter or digit" {
-		t.Errorf("errText = %q, want %q", form.errText, "brief must include a letter or digit")
+	if !strings.Contains(form.errText, "letter or digit") {
+		t.Errorf("errText = %q, want the slug refusal", form.errText)
 	}
 }
 
 func TestRS_Form_EscCancels(t *testing.T) {
-	form := newRSForm(nil, nil, false, 1000, func(rsFormResult) tea.Cmd {
+	form := rsDoor(nil, nil, false, func(formResult) tea.Cmd {
 		t.Fatal("onSubmit ran on esc")
 		return nil
 	})
@@ -358,16 +367,6 @@ func TestRS_Form_EscCancels(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Fatal("esc returned a non-nil command")
-	}
-}
-
-func TestRS_Form_TabsFocusRing(t *testing.T) {
-	form := newRSForm(nil, nil, false, 0, func(rsFormResult) tea.Cmd { return nil })
-	for _, want := range []int{rsFieldBrief, rsFieldEnvelope, rsFieldProfile, rsFieldButtons, rsFieldBrief} {
-		if form.focus != want {
-			t.Fatalf("focus = %d, want %d", form.focus, want)
-		}
-		form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 }
 
@@ -382,9 +381,11 @@ func TestRS_CreateResearch_MintsAndSeedsDraft(t *testing.T) {
 
 	envelope := 750
 	brief := "Investigate the retry storm\n\nmore detail about the ask"
-	msg := m.createResearch(rsFormResult{Brief: brief, Profile: "thrifty", Envelope: &envelope})()
-	if nm, ok := msg.(noticeMsg); !ok || nm.isErr {
+	msg := m.createCard(formResult{Kind: domain.KindResearch, Desc: brief, Profile: "thrifty", Envelope: &envelope})()
+	if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 		t.Fatalf("createResearch failed: %#v", msg)
+	} else if _, ok := msg.(cardCreatedMsg); !ok {
+		t.Fatalf("createCard returned %#v, want cardCreatedMsg", msg)
 	}
 
 	f, err := store.GetFeature(ctx, "RS-001")
@@ -408,7 +409,9 @@ func TestRS_CreateResearch_MintsAndSeedsDraft(t *testing.T) {
 		t.Errorf("Envelope = %d, want 750", f.Budget.Envelope)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)))
+	// research has no draft step: the brief renders straight to the
+	// artifact's workspace home, the same place the headless verb writes
+	raw, err := os.ReadFile(filepath.Join(ws.Root, f.ArtifactPath()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,11 +436,11 @@ func TestRS_R_CreatesResearchCard(t *testing.T) {
 	m = model.(*Shell)
 
 	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
-	form, ok := m.Overlay.Top().(*rsForm)
-	if !ok {
-		t.Fatal("R did not open the research form")
+	form, ok := m.Overlay.Top().(*cardForm)
+	if !ok || form.Kind() != domain.KindResearch {
+		t.Fatal("R did not open the new-card form with research preset")
 	}
-	form.brief.SetValue("Scratch research brief")
+	form.SetText("Scratch research brief")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	f, err := store.GetFeature(context.Background(), "RS-001")
@@ -467,7 +470,7 @@ func TestRS_R_CreatesResearchCard(t *testing.T) {
 func TestRS_EmptyBoard_HintR(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	out := m.backlogView(80, 24)
-	if !strings.Contains(out, "new research") {
+	if !strings.Contains(out, "research") {
 		t.Errorf("empty-board hint does not mention research: %s", out)
 	}
 }

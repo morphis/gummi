@@ -25,7 +25,7 @@ func TestCreateFeatureSeedsDraft(t *testing.T) {
 	m.Attach(store, wt, ws)
 
 	desc := "Dark mode toggle\n\nRespect the OS preference by default.\nPersist an explicit override in config."
-	if msg := m.createFeature(formResult{Desc: desc})(); msg != nil {
+	if msg := m.createCard(formResult{Desc: desc})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}
@@ -46,7 +46,7 @@ func TestCreateFeatureSeedsDraft(t *testing.T) {
 	}
 
 	// one line carries no more than the card already does — no draft
-	if msg := m.createFeature(formResult{Desc: "Add a healthz endpoint"})(); msg != nil {
+	if msg := m.createCard(formResult{Desc: "Add a healthz endpoint"})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}
@@ -67,8 +67,8 @@ func TestCreateBugSeedsReport(t *testing.T) {
 	m.Attach(store, wt, ws)
 
 	seed := "Crash on empty diff\n\nRepro: stage nothing, hit c."
-	res := bugFormResult{Title: "Crash on empty diff", Seed: seed, Severity: domain.SeverityHigh}
-	if msg := m.createBug(res)(); msg != nil {
+	res := formResult{Kind: domain.KindBug, Desc: seed, Severity: domain.SeverityHigh}
+	if msg := m.createCard(res)(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create bug failed: %s", nm.text)
 		}
@@ -81,7 +81,13 @@ func TestCreateBugSeedsReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeded report missing: %v", err)
 	}
-	if !strings.Contains(string(raw), "## Summary\n\n"+seed) {
+	// the same parser the GitHub import uses runs on typed text: the
+	// "Repro:" label routes its line into Reproduction, the rest stays
+	// in Summary.
+	if !strings.Contains(string(raw), "## Summary\n\nCrash on empty diff") {
 		t.Errorf("report Summary section lost the seeded text:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "## Reproduction\n\nstage nothing, hit c.") {
+		t.Errorf("report Reproduction section did not receive the Repro: line:\n%s", raw)
 	}
 }

@@ -37,8 +37,8 @@ func TestPasteIntoFeatureForm(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = paste(t, m, "stray")
-	form := m.Overlay.Top().(*featureForm)
-	if got := form.desc.Value(); got != "" {
+	form := m.Overlay.Top().(*cardForm)
+	if got := form.Text(); got != "" {
 		t.Fatalf("paste landed in a blurred input: %q", got)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -86,7 +86,7 @@ func TestPasteIntoTextPrompt(t *testing.T) {
 
 func TestPasteIntoBugIngestFilter(t *testing.T) {
 	m := &Shell{}
-	m.bugIngest = newBugIngestView(sampleBugImport(), "thrifty", 0)
+	m.bugIngest = samplePicker()
 
 	// the picker opens with the filter already focused, so a paste lands
 	// directly in it.

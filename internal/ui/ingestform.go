@@ -232,7 +232,7 @@ func (d *ingestForm) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("ingest spec") + "\n\n")
 	if d.repo.shown() {
-		b.WriteString(fieldRow(s, d.focus == ingestFieldRepo, "repo: "+d.repo.label()) + "\n\n")
+		b.WriteString(choiceRow(s, d.focus == ingestFieldRepo, "repo", d.repo.options(), d.repo.idx, repoUnsetLabel) + "\n\n")
 	}
 	b.WriteString(d.path.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == ingestFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")

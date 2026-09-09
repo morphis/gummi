@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -84,26 +86,27 @@ func TestRepoPickerSingleRepoNeedsNoChoice(t *testing.T) {
 	}
 }
 
-// TestFeatureFormRefusesUnchosenRepo: the new-feature dialog will not
-// create a card until a repository is named, and it points focus at the
-// field it is complaining about. Once chosen, the card carries that repo.
-func TestFeatureFormRefusesUnchosenRepo(t *testing.T) {
+// TestCardFormRefusesUnchosenRepo: the door will not create a card until
+// a repository is named. It opens on the repo row, since that is the one
+// field with no default; enter there is refused and focus stays. Once
+// chosen, the card carries that repo.
+func TestCardFormRefusesUnchosenRepo(t *testing.T) {
 	var got formResult
 	var created bool
-	f := newFeatureForm(nil, []string{"a", "b"}, false, 0, func(res formResult) tea.Cmd {
+	f := newCardForm(domain.KindFeature, nil, []string{"a", "b"}, false, "", nil, 0, func(res formResult) tea.Cmd {
 		got, created = res, true
 		return nil
 	})
-	f.desc.SetValue("teach the board to whistle")
+	if f.focus != cardStopRepo {
+		t.Fatalf("focus = %d, want the repo row", f.focus)
+	}
+	f.SetText("teach the board to whistle")
 
 	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done || created {
 		t.Fatal("form submitted without a repository")
 	}
 	if f.errText != repoUnchosenErr {
 		t.Errorf("errText = %q, want %q", f.errText, repoUnchosenErr)
-	}
-	if f.focus != featureFieldRepo {
-		t.Errorf("focus = %d, want the repo field (%d)", f.focus, featureFieldRepo)
 	}
 	if view := f.View(theme.New(theme.GummiDark()), 80, 24); !strings.Contains(view, repoUnchosenErr) {
 		t.Errorf("refusal not shown in the dialog:\n%s", view)
@@ -113,36 +116,36 @@ func TestFeatureFormRefusesUnchosenRepo(t *testing.T) {
 	f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
 	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
-		t.Fatalf("form did not submit after choosing: done=%v created=%v", done, created)
+		t.Fatalf("form did not submit after choosing: done=%v created=%v err=%q", done, created, f.errText)
 	}
 	if got.Repo != "b" {
 		t.Errorf("created repo = %q, want b", got.Repo)
 	}
 }
 
-// TestBugFormRefusesUnchosenRepo mirrors the feature form: the same
-// refusal guards every creation dialog.
-func TestBugFormRefusesUnchosenRepo(t *testing.T) {
-	var created bool
-	f := newBugForm(nil, []string{"a", "b"}, false, 0, func(bugFormResult) tea.Cmd {
-		created = true
-		return nil
-	})
-	f.desc.SetValue("the board forgets the selection")
-
-	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); done || created {
-		t.Fatal("bug form submitted without a repository")
+// TestCardFormRepoRowNeverEatsTyping: on the repo row, digits and arrows
+// choose; any other printable key falls through to the text, so a person
+// who starts describing the card never cycles anything by accident. The
+// last repo chosen this session is the preselect.
+func TestCardFormRepoRowNeverEatsTyping(t *testing.T) {
+	f := newCardForm(domain.KindFeature, nil, []string{"a", "b", "c"}, false, "", nil, 0, nil)
+	f.HandleKey(tea.KeyPressMsg{Code: '3', Text: "3"})
+	if f.repo.name() != "c" {
+		t.Errorf("digit 3 chose %q, want c", f.repo.name())
 	}
-	if f.errText != repoUnchosenErr {
-		t.Errorf("errText = %q, want %q", f.errText, repoUnchosenErr)
+	f.HandleKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if f.focus != cardStopText || f.Text() != "x" {
+		t.Errorf("typing on the repo row: focus=%d text=%q", f.focus, f.Text())
 	}
-	if f.focus != bugFieldRepo {
-		t.Errorf("focus = %d, want the repo field (%d)", f.focus, bugFieldRepo)
+	if f.repo.name() != "c" {
+		t.Errorf("typing changed the repo to %q", f.repo.name())
 	}
-
-	f.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
-	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
-		t.Fatalf("bug form did not submit after choosing: done=%v created=%v", done, created)
+	sticky := newCardForm(domain.KindFeature, nil, []string{"a", "b", "c"}, false, "b", nil, 0, nil)
+	if sticky.repo.name() != "b" || sticky.focus != cardStopText {
+		t.Errorf("last repo preselect: repo=%q focus=%d", sticky.repo.name(), sticky.focus)
+	}
+	if bogus := newCardForm(domain.KindFeature, nil, []string{"a", "b"}, false, "zzz", nil, 0, nil); bogus.repo.chosen() {
+		t.Error("an unconfigured last repo should not preselect")
 	}
 }
 
@@ -151,11 +154,11 @@ func TestBugFormRefusesUnchosenRepo(t *testing.T) {
 // enter still creates a card on the first press.
 func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 	var created bool
-	f := newFeatureForm(nil, nil, true, 0, func(formResult) tea.Cmd {
+	f := newCardForm(domain.KindFeature, nil, nil, true, "", nil, 0, func(formResult) tea.Cmd {
 		created = true
 		return nil
 	})
-	f.desc.SetValue("a card in the only repo there is")
+	f.SetText("a card in the only repo there is")
 	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
 		t.Fatalf("single-repo form did not submit: done=%v created=%v err=%q", done, created, f.errText)
 	}
@@ -169,13 +172,11 @@ func TestSingleRepoFormsSubmitUnprompted(t *testing.T) {
 func TestSingleNamedRepoStillRenders(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	views := map[string]string{
-		"feature":  newFeatureForm(nil, []string{"lxd"}, false, 0, nil).View(s, 80, 24),
-		"bug":      newBugForm(nil, []string{"lxd"}, false, 0, nil).View(s, 80, 24),
-		"research": newRSForm(nil, []string{"lxd"}, false, 0, nil).View(s, 80, 24),
-		"ingest":   newIngestForm(nil, []string{"lxd"}, false, nil).View(s, 80, 24),
+		"card":   ansi.Strip(newCardForm(domain.KindFeature, nil, []string{"lxd"}, false, "", nil, 0, nil).View(s, 80, 24)),
+		"ingest": ansi.Strip(newIngestForm(nil, []string{"lxd"}, false, nil).View(s, 80, 24)),
 	}
 	for name, view := range views {
-		if !strings.Contains(view, "repo: lxd") {
+		if !strings.Contains(view, "repo") || !strings.Contains(view, "lxd") {
 			t.Errorf("%s dialog does not name its sole repository:\n%s", name, view)
 		}
 	}
@@ -187,13 +188,11 @@ func TestSingleNamedRepoStillRenders(t *testing.T) {
 func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	views := map[string]string{
-		"feature":  newFeatureForm(nil, nil, true, 0, nil).View(s, 80, 24),
-		"bug":      newBugForm(nil, nil, true, 0, nil).View(s, 80, 24),
-		"research": newRSForm(nil, nil, true, 0, nil).View(s, 80, 24),
-		"ingest":   newIngestForm(nil, nil, true, nil).View(s, 80, 24),
+		"card":   ansi.Strip(newCardForm(domain.KindFeature, nil, nil, true, "", nil, 0, nil).View(s, 80, 24)),
+		"ingest": ansi.Strip(newIngestForm(nil, nil, true, nil).View(s, 80, 24)),
 	}
 	for name, view := range views {
-		if strings.Contains(view, "repo: ") {
+		if strings.Contains(view, "repo ") || strings.Contains(view, "repo:") {
 			t.Errorf("%s dialog renders a repo row for the anonymous default:\n%s", name, view)
 		}
 	}
@@ -203,13 +202,18 @@ func TestLoneWorkspaceDefaultRendersNoRepoRow(t *testing.T) {
 // is read-only. Tabbing through the dialog must never land on it, because
 // ←/→ there would do nothing.
 func TestSingleNamedRepoIsNotATabStop(t *testing.T) {
-	f := newFeatureForm(nil, []string{"lxd"}, false, 0, nil)
+	f := newCardForm(domain.KindFeature, nil, []string{"lxd"}, false, "", nil, 0, nil)
+	for _, s := range f.stops() {
+		if s == cardStopRepo {
+			t.Error("the read-only repo row is a tab stop")
+		}
+	}
 	seen := map[int]bool{}
-	for i := 0; i < featureFieldCount*2; i++ {
+	for i := 0; i < 12; i++ {
 		f.advanceFocus(1)
 		seen[f.focus] = true
 	}
-	if seen[featureFieldRepo] {
+	if seen[cardStopRepo] {
 		t.Error("focus landed on the read-only repo row")
 	}
 }

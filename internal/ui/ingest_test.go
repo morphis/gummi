@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -328,8 +329,8 @@ func TestIngestFormRepo(t *testing.T) {
 	t.Run("field shown unset when repos configured", func(t *testing.T) {
 		f := newIngestForm(nil, []string{"a", "b"}, false, func(string, string, string) tea.Cmd { return nil })
 		s := theme.New(theme.GummiDark())
-		view := f.View(s, 60, 12)
-		if !strings.Contains(view, "repo: "+repoUnsetLabel) {
+		view := ansi.Strip(f.View(s, 60, 12))
+		if !strings.Contains(view, "repo") || !strings.Contains(view, repoUnsetLabel) {
 			t.Errorf("repo field missing or pre-selected when repos configured:\n%s", view)
 		}
 	})
@@ -339,7 +340,7 @@ func TestIngestFormRepo(t *testing.T) {
 		s := theme.New(theme.GummiDark())
 		// the row still reports where the spec lands — it just cannot be
 		// tabbed to, since there is nothing else to cycle to
-		if view := f.View(s, 60, 12); !strings.Contains(view, "repo: b") {
+		if view := ansi.Strip(f.View(s, 60, 12)); !strings.Contains(view, "repo") || !strings.Contains(view, "b") {
 			t.Errorf("sole configured repo should still be named:\n%s", view)
 		}
 		f.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})

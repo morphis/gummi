@@ -393,9 +393,19 @@ type Shell struct {
 	// read again (chat.go). Ended by a row picked, a verb, the card
 	// moving, or leaving the page.
 	chatting     map[domain.FeatureID]bool
-	roundStore   rounds.Store     // persistence seam for rounds (defaults to store)
-	profileNames []string         // profile names for the new-feature form
-	repoNames    []string         // configured managed-repo names for the new-card forms
+	roundStore   rounds.Store // persistence seam for rounds (defaults to store)
+	profileNames []string     // profile names for the new-card dialog
+	repoNames    []string     // configured managed-repo names for the new-card dialog
+	// lastRepo is the repository the last card was created in: the
+	// new-card dialog's preselect. pendingCard is a dialog parked while
+	// the issue picker it opened is up (carddoor.go).
+	lastRepo    string
+	pendingCard *cardForm
+	// ghIssue and remoteOrigin are the new-card dialog's GitHub and git
+	// seams; nil uses gh and git. Tests stub both.
+	ghIssue      func(ctx context.Context, dir, ownerRepo string, n int) (domain.BugProposal, error)
+	ghIssues     func(ctx context.Context, src engine.GitHubSource) (engine.BugIngestResult, error)
+	remoteOrigin func(dir string) string
 	envelope     int              // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
 
@@ -1958,20 +1968,29 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bugIngesting = false
 		if msg.err != nil {
 			m.notice = noticeMsg{text: "import: " + sanitize(msg.err.Error()), isErr: true}
+			m.restorePendingCard()
 			return m, nil
 		}
-		if len(msg.res.Proposals) == 0 {
-			extra := ""
-			if n := len(msg.res.Skipped); n > 0 {
-				extra = fmt.Sprintf(" (%d already on the board)", n)
-			}
-			m.notice = noticeMsg{text: "no new bugs to import" + extra}
+		if len(msg.res.Proposals) == 0 && len(msg.res.Skipped) == 0 {
+			m.notice = noticeMsg{text: "no issues to import"}
+			m.restorePendingCard()
 			return m, nil
 		}
 		m.spec, m.diff, m.ingest = nil, nil, nil
-		m.bugIngest = newBugIngestView(msg.res, msg.profile, msg.envelope)
-		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " bug(s) — review & approve"}
+		m.bugIngest = newBugIngestView(msg.res, msg.params)
+		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " issue(s) — enter fills the form"}
 		return m, nil
+
+	case cardIssueMsg:
+		if msg.err != nil {
+			msg.form.failImport(msg.err)
+		} else {
+			msg.form.applyIssue(msg.prop, msg.ref)
+		}
+		return m, nil
+
+	case cardCreatedMsg:
+		return m, m.cardCreated(msg)
 
 	case foreignTickMsg:
 		// keep the probe running whether or not anything is driven
@@ -2753,11 +2772,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.syncActionFocus()
 		}
 	case "n":
-		m.Overlay.Push(newFeatureForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createFeature))
+		m.Overlay.Push(m.openCardForm(domain.KindFeature))
 	case "B":
-		m.Overlay.Push(newBugForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createBug))
+		m.Overlay.Push(m.openCardForm(domain.KindBug))
 	case "R":
-		m.Overlay.Push(newRSForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createResearch))
+		m.Overlay.Push(m.openCardForm(domain.KindResearch))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
@@ -2793,7 +2812,16 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.notice = noticeMsg{text: "an import is already running — wait for it", isErr: true}
 			return nil
 		}
-		m.Overlay.Push(newBugIngestForm(m.profileNames, m.startBugIngest))
+		// the door with bug preset, then straight into browse: the form
+		// parks while the picker is up and comes back filled.
+		d := m.openCardForm(domain.KindBug)
+		if d.repo.needsChoice() {
+			d.errText = "choose a repository to browse its issues"
+			d.setFocus(cardStopRepo)
+			m.Overlay.Push(d)
+			return nil
+		}
+		return m.browseIssues(d, d.repo.name())
 	case "g":
 		if r, ok := m.selected(); ok {
 			if r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {

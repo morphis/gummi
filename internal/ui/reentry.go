@@ -180,8 +180,8 @@ func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 		// the sentence becomes the seed of a new one — the honest answer
 		// the fixed rule had no way to give, since every route it knew
 		// moved THIS card.
-		form := newFeatureForm(m.profileNames, m.repoNames, m.repoHasDefault(), m.envelopePrefill(), m.createFeature)
-		form.desc.SetValue(out.Note)
+		form := m.openCardForm(domain.KindFeature)
+		form.SetText(out.Note)
 		m.Overlay.Push(form)
 		m.notice = noticeMsg{text: string(r.F.ID) + ": that reads as separate work — " + string(r.F.ID) + " stays where it is"}
 		return nil

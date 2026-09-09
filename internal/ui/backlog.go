@@ -310,8 +310,7 @@ func (m *Shell) backlogView(w, h int) string {
 		var b strings.Builder
 		b.WriteString("\n " + s.PaneTitleActive.Render("BACKLOG") + "\n\n")
 		b.WriteString(" " + s.Faint.Render("nothing on the board yet") + "\n")
-		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" new feature · ") +
-			s.KeyHint.Render("B") + s.Muted.Render(" new bug · ") + s.KeyHint.Render("R") + s.Muted.Render(" new research") + "\n")
+		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" for a new card — a feature, a bug, or research") + "\n")
 		return b.String()
 	}
 

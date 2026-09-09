@@ -117,7 +117,7 @@ func TestDuplicateBugStaysABug(t *testing.T) {
 	m.now = func() time.Time { return time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC) }
 	m.Attach(store, wt, ws)
 
-	if msg := m.createBug(bugFormResult{Title: "Crash on empty diff", Severity: domain.SeverityHigh})(); msg != nil {
+	if msg := m.createCard(formResult{Kind: domain.KindBug, Desc: "Crash on empty diff", Severity: domain.SeverityHigh})(); msg != nil {
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
 			t.Fatalf("create failed: %s", nm.text)
 		}

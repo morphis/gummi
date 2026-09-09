@@ -4,50 +4,40 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
-// TestCreationFormsLabelTheEnvelopeField: the envelope input's unit and
-// its `0 = uncapped` affordance were carried only by the input's
-// Placeholder, which renders only while the field is empty — and the
-// field is prefilled from envelopePrefill() every time the dialog opens.
-// So the modal a first-time user met showed a bare "> 2400": no unit, and
-// no sign that 0 meant anything but a rejected entry.
+// TestCreationFormsLabelTheEnvelopeField: the envelope's unit and its
+// `0 = uncapped` affordance used to live only in the input's Placeholder,
+// which renders only while the field is empty — and the field is
+// prefilled every time the dialog opens. The door reads the value back
+// with its unit on the collapsed "runs as" line, and labels the input
+// when the options are expanded; research, which refuses 0, says
+// "required" there instead.
 func TestCreationFormsLabelTheEnvelopeField(t *testing.T) {
 	s := m0Styles()
 	profiles := []string{"thrifty"}
-
-	forms := []struct {
-		name string
-		view string
+	for _, c := range []struct {
+		kind domain.Kind
 		want string
 	}{
-		{
-			"feature",
-			newFeatureForm(profiles, nil, true, 2400, nil).View(s, 100, 30),
-			envelopeHintCapped,
-		},
-		{
-			"bug",
-			newBugForm(profiles, nil, true, 2400, nil).View(s, 100, 30),
-			envelopeHintCapped,
-		},
-		{
-			// research refuses 0 — an RS card carries no default budget —
-			// so its caption must not offer uncapped
-			"research",
-			newRSForm(profiles, nil, true, 2400, nil).View(s, 100, 30),
-			envelopeHintRequired,
-		},
-	}
-	for _, f := range forms {
-		t.Run(f.name, func(t *testing.T) {
-			out := ansi.Strip(f.view)
-			if !strings.Contains(out, "2400") {
-				t.Fatalf("the envelope field is not prefilled, so this test is not about the case that broke:\n%s", out)
+		{domain.KindFeature, envelopeHintCapped},
+		{domain.KindBug, envelopeHintCapped},
+		{domain.KindResearch, envelopeHintRequired},
+	} {
+		t.Run(string(c.kind), func(t *testing.T) {
+			form := newCardForm(c.kind, profiles, nil, true, "", nil, 2400, nil)
+			collapsed := ansi.Strip(form.View(s, 100, 30))
+			if !strings.Contains(collapsed, "2400 credits") {
+				t.Errorf("the collapsed readout does not carry the envelope with its unit:\n%s", collapsed)
 			}
-			if !strings.Contains(out, "envelope: "+f.want) {
-				t.Errorf("the prefilled envelope field carries no label:\n%s", out)
+			form.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt})
+			expanded := ansi.Strip(form.View(s, 100, 30))
+			if !strings.Contains(expanded, "2400") || !strings.Contains(expanded, c.want) {
+				t.Errorf("the expanded envelope field carries no label %q:\n%s", c.want, expanded)
 			}
 		})
 	}

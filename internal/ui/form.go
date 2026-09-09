@@ -1,13 +1,6 @@
 package ui
 
 import (
-	"strconv"
-	"strings"
-
-	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -91,8 +84,8 @@ func fieldRow(s *theme.Styles, focused bool, label string) string {
 	return "  " + s.Faint.Render(label)
 }
 
-// The envelope caption: the static label drawn over every creation
-// dialog's envelope input.
+// The envelope hints: the label drawn beside the new-card dialog's
+// envelope input, and the unit on its collapsed readout.
 //
 // The number is a credit figure and 0 is a meaningful value, and the only
 // thing that ever said so was the input's Placeholder — which a text input
@@ -110,10 +103,6 @@ const (
 	envelopeHintCapped   = "credits · 0 = uncapped"
 	envelopeHintRequired = "credits · required"
 )
-
-func envelopeCaption(s *theme.Styles, hint string) string {
-	return s.Faint.Render("envelope: " + hint)
-}
 
 // repoUnset is repoPicker.idx while no repository has been chosen. A
 // picker with a real choice to make starts here and can never return:
@@ -240,243 +229,6 @@ func (p *repoPicker) cycle(delta int) {
 	p.idx = ((p.idx+delta)%total + total) % total
 }
 
-// feature form fields, in tab order. fieldRepo is skipped when the repo
-// picker has nothing to choose (see advanceFocus) — the row itself may
-// still render read-only there, see repoPicker.shown; fieldButtons is the
-// last stop, so tab from it wraps back to the first field.
-const (
-	featureFieldRepo = iota
-	featureFieldDesc
-	featureFieldEnvelope
-	featureFieldProfile
-	featureFieldButtons
-	featureFieldCount
-)
-
-// featureForm is the new-feature dialog: a free-form description — the
-// first line becomes the card title, anything beyond it seeds the
-// draft's Problem section for the brainstorm stage to develop. Every
-// other choice (repo, profile) is its own tab stop, cycled with
-// ←/→ — no mnemonic keys.
-type featureForm struct {
-	desc     textarea.Model
-	env      textinput.Model
-	profiles []string
-	profile  int
-	repo     repoPicker
-	focus    int
-	errText  string
-	buttons  *buttonRow
-
-	onSubmit func(formResult) tea.Cmd
-}
-
-// newFeatureForm builds the dialog; profiles are the selectable profile
-// names in display order, first selected (falling back to the built-in
-// presets when empty), repos are the configured managed repository names
-// (empty = only the workspace default) and hasDefault reports whether the
-// workspace default actually resolves, defaultEnvelope is the global
-// default pre-filled into the envelope input, and onSubmit receives the
-// validated fields.
-func newFeatureForm(profiles []string, repos []string, hasDefault bool, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *featureForm {
-	if len(profiles) == 0 {
-		profiles = defaultProfilePresets
-	}
-	desc := textarea.New()
-	desc.Placeholder = "describe the feature…"
-	desc.CharLimit = 4096
-	desc.ShowLineNumbers = false
-	desc.SetWidth(descWidthMin)
-	desc.SetHeight(descHeightMin)
-	desc.Focus()
-	env := textinput.New()
-	env.Placeholder = "credits (0 = uncapped)"
-	env.SetWidth(46)
-	env.CharLimit = 12
-	env.SetValue(strconv.Itoa(defaultEnvelope))
-	return &featureForm{
-		desc: desc, env: env, profiles: profiles,
-		repo: newRepoPicker(repos, hasDefault), focus: featureFieldDesc,
-		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}),
-		onSubmit: onSubmit,
-	}
-}
-
-// ID implements overlay.Dialog.
-func (d *featureForm) ID() string { return "new-feature" }
-
-// submit validates and fires onSubmit, matching enter's own handling from
-// any other field exactly — the button row's Create button is just another
-// way to reach the same action.
-func (d *featureForm) submit() (bool, tea.Cmd) {
-	// the repository is the first field and the one choice with no
-	// default, so it is the first thing refused — and focus moves there,
-	// since the field is what the message is asking about.
-	if d.repo.needsChoice() {
-		d.errText = repoUnchosenErr
-		d.setFocus(featureFieldRepo)
-		return false, nil
-	}
-	desc := strings.TrimSpace(d.desc.Value())
-	if desc == "" {
-		d.errText = "description must not be empty"
-		return false, nil
-	}
-	// validate the slug of the derived title (what creation will use),
-	// not the whole description
-	title, _, _ := domain.SplitFreeform(desc)
-	if _, err := domain.Slugify(title); err != nil {
-		d.errText = err.Error()
-		return false, nil
-	}
-	// an empty envelope is the "use default" signal; a non-negative
-	// integer becomes an explicit envelope (0 = uncapped)
-	var env *int
-	if trimmed := strings.TrimSpace(d.env.Value()); trimmed != "" {
-		n, err := strconv.Atoi(trimmed)
-		if err != nil || n < 0 {
-			d.errText = "envelope must be a non-negative number of credits"
-			return false, nil
-		}
-		env = &n
-	}
-	res := formResult{
-		Desc:     desc,
-		Profile:  d.profiles[d.profile],
-		Envelope: env,
-		Repo:     d.repo.name(),
-	}
-	return true, d.onSubmit(res)
-}
-
-// HandleKey implements overlay.Dialog.
-func (d *featureForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
-	switch key.String() {
-	case "esc":
-		return true, nil
-	case "alt+enter", "ctrl+j":
-		if d.focus == featureFieldDesc {
-			d.desc.InsertString("\n")
-			d.errText = ""
-		}
-		return false, nil
-	case "tab":
-		d.advanceFocus(1)
-		return false, nil
-	case "shift+tab":
-		d.advanceFocus(-1)
-		return false, nil
-	}
-
-	if d.focus == featureFieldButtons {
-		switch key.String() {
-		case "left", "h":
-			d.buttons.Move(-1)
-		case "right", "l":
-			d.buttons.Move(1)
-		case "enter":
-			if d.buttons.Cursor() == 0 {
-				return true, nil
-			}
-			return d.submit()
-		}
-		return false, nil
-	}
-	if key.String() == "enter" {
-		return d.submit()
-	}
-
-	switch d.focus {
-	case featureFieldRepo:
-		if delta, ok := selectCycleDelta(key.String()); ok {
-			d.repo.cycle(delta)
-			// clear a pending "choose a repo" refusal the moment they do
-			d.errText = ""
-		}
-	case featureFieldProfile:
-		if delta, ok := selectCycleDelta(key.String()); ok {
-			n := len(d.profiles)
-			d.profile = ((d.profile+delta)%n + n) % n
-		}
-	case featureFieldDesc:
-		d.desc, _ = d.desc.Update(key)
-		d.errText = ""
-	case featureFieldEnvelope:
-		d.env, _ = d.env.Update(key)
-		d.errText = ""
-	}
-	return false, nil
-}
-
-// HandlePaste implements overlay.Paster: pasted text goes into the
-// description while it's focused, newlines intact.
-func (d *featureForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	if d.focus == featureFieldDesc {
-		d.desc, _ = d.desc.Update(msg)
-		d.errText = ""
-	}
-	return nil
-}
-
-// advanceFocus moves focus by dir (±1), wrapping, and skips the repo stop
-// when there's nothing to choose there.
-func (d *featureForm) advanceFocus(dir int) {
-	f := d.focus
-	for {
-		f = (f + dir + featureFieldCount) % featureFieldCount
-		if f != featureFieldRepo || d.repo.multi() {
-			break
-		}
-	}
-	d.setFocus(f)
-}
-
-func (d *featureForm) setFocus(f int) {
-	d.focus = f
-	d.desc.Blur()
-	d.env.Blur()
-	switch f {
-	case featureFieldDesc:
-		d.desc.Focus()
-	case featureFieldEnvelope:
-		d.env.Focus()
-	}
-}
-
-// View implements overlay.Dialog.
-func (d *featureForm) View(s *theme.Styles, w, h int) string {
-	// base static rows: title+blank(2), blank-after-desc(1),
-	// envelope caption+envelope+blank(3), profile(1), blank+buttons(2),
-	// blank+hint(2); +2 more when the repo field renders (repo+blank).
-	staticRows := 12
-	if d.repo.shown() {
-		staticRows += 2
-	}
-	descW, descH := dialogDescSize(w, h, staticRows)
-	d.desc.SetWidth(descW)
-	d.desc.SetHeight(descH)
-
-	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("new feature") + "\n\n")
-	if d.repo.shown() {
-		b.WriteString(fieldRow(s, d.focus == featureFieldRepo, "repo: "+d.repo.label()) + "\n\n")
-	}
-	b.WriteString(d.desc.View() + "\n\n")
-	b.WriteString(envelopeCaption(s, envelopeHintCapped) + "\n")
-	b.WriteString(d.env.View() + "\n\n")
-	b.WriteString(fieldRow(s, d.focus == featureFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
-	b.WriteString("\n" + d.buttons.View(s, d.focus == featureFieldButtons) + "\n")
-
-	if d.errText != "" {
-		b.WriteString("\n" + s.Error.Render(d.errText))
-	}
-	hint := "tab next · ←/→ change · enter create · esc cancel"
-	switch d.focus {
-	case featureFieldDesc:
-		hint = "alt+enter newline · " + hint
-	case featureFieldButtons:
-		hint = "←/→ buttons · enter activate · tab next · esc cancel"
-	}
-	b.WriteString("\n" + s.Faint.Render(hint))
-	return s.DialogFrame.Render(b.String())
-}
+// bugSeverityChoices are the severities the new-card dialog cycles
+// through for a bug; the first ("") means unset — triage classifies it.
+var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}

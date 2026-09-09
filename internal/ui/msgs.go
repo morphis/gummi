@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphis/gummi/internal/atomicfile"
+	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/rounds"
@@ -195,183 +195,83 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 	return err == nil && landed
 }
 
-// formResult carries the new-feature form's fields. The description's
-// first line is the feature's title; the lines past it are seeded into
-// the spec, which the brainstorm stage develops.
+// formResult is what the new-card dialog hands the shell: everything a
+// mint needs, for any kind. The description's first line is the card's
+// title; the lines past it seed the artifact (cardmint decides how, per
+// kind). After names dependency edges written once the card exists;
+// Start opens the autopilot dialog on it; FromPicker sends the person
+// back to the browse picker instead of the board.
 type formResult struct {
-	Desc     string
-	Profile  string
-	Envelope *int
-	Repo     string
+	Kind        domain.Kind // "" reads as feature
+	Desc        string
+	Profile     string
+	Envelope    *int // nil = the shell's default envelope
+	Repo        string
+	Severity    domain.Severity
+	ExternalRef string
+	Source      string // "manual", "github"
+	Discussion  string // an imported issue's comments
+	After       []domain.FeatureID
+	Start       bool
+	FromPicker  bool
 }
 
-// createFeature mints a number and persists a new feature in todo,
-// seeding the spec draft with the description when it runs past one
-// line — the brainstorm stage picks the Problem section up from there.
-func (m *Shell) createFeature(res formResult) tea.Cmd {
+// cardCreatedMsg is createCard's success: the shell reloads rows, keeps
+// the repo as the next dialog's preselect, and does what the result
+// asked for next (autopilot dialog, back to the picker).
+type cardCreatedMsg struct {
+	f          domain.Feature
+	start      bool
+	fromPicker bool
+	warn       string // a dependency edge that could not be written
+}
+
+// createCard mints a card of any kind through cardmint.Mint — the same
+// recipe `gummi run`, `bugs new` and the workspace MCP endpoint use — and
+// then records its dependency edges. The old feature/bug/research
+// create paths were three hand-rolled copies of that recipe; this is the
+// one TUI caller now.
+func (m *Shell) createCard(res formResult) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		// the first line becomes a concise card title with its full text
-		// kept as the one-liner (the card body), so the title slot isn't
-		// the whole description.
-		title, oneLiner, seed := domain.SplitFreeform(res.Desc)
-		slug, err := domain.Slugify(title)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
+		kind := res.Kind
+		if !kind.Valid() {
+			kind = domain.KindFeature
 		}
-		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		id, err := domain.NewFeatureID(num)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		now := m.now()
 		env := m.envelope
 		if res.Envelope != nil {
 			env = *res.Envelope
 		}
-		f := domain.Feature{
-			ID: id, Num: num, Title: title, OneLiner: oneLiner,
-			Slug: slug, Stage: workflow.Initial(),
-			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
-			Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
+		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
+			Kind: kind, Description: res.Desc, Profile: res.Profile, Envelope: env,
+			Repo: res.Repo, RequireRepo: m.requireRepo,
+			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
+			Discussion: res.Discussion,
+		})
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		// Seed the draft first (so the description survives), then persist —
-		// a persisted feature with no draft would be reseeded blank. A
-		// title-sized description seeds nothing: the blank template's
-		// prompts do more for brainstorm than an echoed title would.
-		if seed != "" {
-			draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
-			content := spec.SeededTemplate(&f, domain.DraftSeed{Problem: seed}, domain.DraftProvenance{})
-			if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
+		var warn []string
+		for _, dep := range res.After {
+			if err := m.store.AddDependency(ctx, f.ID, dep); err != nil {
+				warn = append(warn, sanitize(err.Error()))
 			}
 		}
-		if err := m.store.CreateFeature(ctx, &f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		return noticeMsg{text: fmt.Sprintf("%s created", id), reload: true}
+		return cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker, warn: strings.Join(warn, "; ")}
 	}
 }
 
-// bugFormResult carries the new-bug form's fields. Like a feature, the
-// title is the card title; the symptoms are seeded into the report and
-// triage develops the rest.
-type bugFormResult struct {
-	Title    string
-	OneLiner string
-	Seed     string
-	Severity domain.Severity
-	Profile  string
-	Envelope *int
-	Repo     string
-}
-
-// createBug mints a BG number and persists a new bug in todo, seeding its
-// report with the one-liner and severity so nothing the user typed is
-// lost (triage fills reproduction and root cause).
-func (m *Shell) createBug(res bugFormResult) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		slug, err := domain.Slugify(res.Title)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		id, err := domain.NewID(domain.KindBug, num)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		now := m.now()
-		env := m.envelope
-		if res.Envelope != nil {
-			env = *res.Envelope
-		}
-		f := domain.Feature{
-			ID: id, Num: num, Kind: domain.KindBug, Title: res.Title, OneLiner: res.OneLiner,
-			Slug: slug, Stage: workflow.Initial(),
-			Profile: res.Profile, Budget: domain.Budget{Envelope: env},
-			Severity: res.Severity, Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
-		}
-		// Seed the report draft first (so severity/one-liner survive), then
-		// persist — a persisted bug with no draft would be reseeded blank.
-		draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
-		content := spec.SeededBugTemplate(&f, domain.BugReport{Description: res.Seed}, domain.BugProvenance{Source: "manual"}, res.Severity)
-		if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if err := m.store.CreateFeature(ctx, &f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		return noticeMsg{text: fmt.Sprintf("%s created", id), reload: true}
+// requireRepo is cardmint's repository check for this workspace: a name
+// the pool knows, or the default when the pool has one. A shell with no
+// pool (a scaffold) has one implicit repository and refuses nothing.
+func (m *Shell) requireRepo(name string) error {
+	if m.wt == nil || m.wt.Known(name) {
+		return nil
 	}
-}
-
-// rsFormResult carries the new-research form's fields. The brief is the
-// raw, unparsed text — createResearch splits it into title/one-liner and
-// seeds the doc's Brief section, so the form stays a pure input surface.
-// Envelope is always non-nil at submit: the form's own guard rejects an
-// empty or non-integer envelope inline before the callback fires.
-type rsFormResult struct {
-	Brief    string
-	Profile  string
-	Repo     string
-	Envelope *int
-}
-
-// createResearch mints an RS number and persists a new research card in
-// todo, seeding its doc's Brief section with the full trimmed brief
-// verbatim — investigate and shape develop the rest.
-func (m *Shell) createResearch(res rsFormResult) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		title, oneLiner, _ := domain.SplitFreeform(res.Brief)
-		slug, err := domain.Slugify(title)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		num, err := m.store.MintFeatureNum(ctx, m.ws.SeqFile())
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		id, err := domain.NewID(domain.KindResearch, num)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		now := m.now()
-		f := domain.Feature{
-			ID: id, Num: num, Kind: domain.KindResearch, Title: title, OneLiner: oneLiner,
-			Slug: slug, Stage: workflow.Initial(),
-			Profile: res.Profile, Budget: domain.Budget{Envelope: *res.Envelope},
-			Repo: res.Repo, CreatedAt: now, UpdatedAt: now,
-		}
-		// Seed the draft first (so nothing typed is lost on a persist
-		// failure), then persist — a persisted card with no draft would be
-		// reseeded blank.
-		draft := filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f))
-		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: strings.TrimSpace(res.Brief)}, domain.DraftProvenance{Source: "manual"})
-		if err := os.MkdirAll(m.ws.DraftsDir(), 0o750); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if err := m.store.CreateFeature(ctx, &f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		return noticeMsg{text: fmt.Sprintf("%s created", id), reload: true}
+	if name == "" {
+		return errors.New(repoUnchosenErr)
 	}
+	return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml", name)
 }
 
 // duplicateFeature mints a fresh card from an existing one: same title,

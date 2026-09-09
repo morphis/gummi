@@ -14,136 +14,6 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// bugIngest form fields, in tab order.
-const (
-	bugIngestFieldRepo = iota
-	bugIngestFieldLabel
-	bugIngestFieldProfile
-	bugIngestFieldComments
-	bugIngestFieldCount
-)
-
-// bugIngestForm collects the GitHub target for a bug import: the repo
-// (blank = this repo's origin remote), a label filter, the profile the
-// new bugs adopt, and whether to fetch each issue's comments. State
-// defaults to open (the CLI exposes the rest).
-type bugIngestForm struct {
-	repo     textinput.Model
-	label    textinput.Model
-	profiles []string
-	profile  int
-	comments bool
-	focus    int
-
-	onSubmit func(repo, label, profile string, comments bool) tea.Cmd
-}
-
-func newBugIngestForm(profiles []string, onSubmit func(repo, label, profile string, comments bool) tea.Cmd) *bugIngestForm {
-	if len(profiles) == 0 {
-		profiles = defaultProfilePresets
-	}
-	repo := textinput.New()
-	repo.Placeholder = "owner/repo (blank = origin)"
-	repo.CharLimit = 140
-	repo.SetWidth(46)
-	repo.Focus()
-	label := textinput.New()
-	label.Placeholder = "label filter"
-	label.CharLimit = 60
-	label.SetWidth(46)
-	label.SetValue("bug")
-	return &bugIngestForm{repo: repo, label: label, profiles: profiles, onSubmit: onSubmit}
-}
-
-// ID implements overlay.Dialog.
-func (d *bugIngestForm) ID() string { return "ingest-bugs" }
-
-// HandleKey implements overlay.Dialog.
-func (d *bugIngestForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
-	switch key.String() {
-	case "esc":
-		return true, nil
-	case "enter":
-		return true, d.onSubmit(strings.TrimSpace(d.repo.Value()), strings.TrimSpace(d.label.Value()), d.profiles[d.profile], d.comments)
-	case "tab", "down":
-		d.setFocus((d.focus + 1) % bugIngestFieldCount)
-		return false, nil
-	case "shift+tab", "up":
-		d.setFocus((d.focus + bugIngestFieldCount - 1) % bugIngestFieldCount)
-		return false, nil
-	}
-	switch d.focus {
-	case bugIngestFieldProfile:
-		switch key.String() {
-		case "left", "h":
-			d.profile = (d.profile + len(d.profiles) - 1) % len(d.profiles)
-		case "right", "l", "space":
-			d.profile = (d.profile + 1) % len(d.profiles)
-		}
-	case bugIngestFieldComments:
-		if key.String() == "space" {
-			d.comments = !d.comments
-		}
-	case bugIngestFieldRepo:
-		d.repo, _ = d.repo.Update(key)
-	case bugIngestFieldLabel:
-		d.label, _ = d.label.Update(key)
-	}
-	return false, nil
-}
-
-// HandlePaste implements overlay.Paster: pasted text goes into the
-// focused field (repo or label).
-func (d *bugIngestForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	switch d.focus {
-	case bugIngestFieldRepo:
-		d.repo, _ = d.repo.Update(msg)
-	case bugIngestFieldLabel:
-		d.label, _ = d.label.Update(msg)
-	}
-	return nil
-}
-
-func (d *bugIngestForm) setFocus(f int) {
-	d.focus = f
-	d.repo.Blur()
-	d.label.Blur()
-	switch f {
-	case bugIngestFieldRepo:
-		d.repo.Focus()
-	case bugIngestFieldLabel:
-		d.label.Focus()
-	}
-}
-
-// View implements overlay.Dialog.
-func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
-	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("import github bugs") + "\n\n")
-	b.WriteString(d.repo.View() + "\n")
-	b.WriteString(d.label.View() + "\n\n")
-
-	// both option rows use the shared field-row look (form.go): the
-	// focused one wears the selection band, the rest stay faint.
-	b.WriteString(fieldRow(s, d.focus == bugIngestFieldProfile, d.profiles[d.profile]) + "\n")
-
-	box := "[ ]"
-	if d.comments {
-		box = "[x]"
-	}
-	b.WriteString(fieldRow(s, d.focus == bugIngestFieldComments, box+" Fetch comments") + "\n")
-
-	hint := "enter import · tab next · esc cancel"
-	switch d.focus {
-	case bugIngestFieldProfile:
-		hint = "←/→ profile · enter import · esc cancel"
-	case bugIngestFieldComments:
-		hint = "space toggle comments · enter import · esc cancel"
-	}
-	b.WriteString("\n" + s.Faint.Render(hint))
-	return s.DialogFrame.Render(b.String())
-}
-
 // bugIngestView is the bug-import review surface (DESIGN §11.4 phase B,
 // bug variant): the GitHub issues fetched as proposals, single-picked
 // before any is minted. Unlike feature ingest there is no coverage map and
@@ -151,12 +21,16 @@ func (d *bugIngestForm) View(s *theme.Styles, w, h int) string {
 // "kept set" either: only a cursor position, and enter imports exactly the
 // row under it.
 type bugIngestView struct {
-	source   string
-	props    []domain.BugProposal
-	skipped  []domain.FeatureID
-	cursor   int // index into the filtered (visible) list
-	profile  string
-	envelope int
+	source string
+	props  []domain.BugProposal
+	// onBoard maps an external ref to the card that already carries it:
+	// such an issue is listed greyed with its id rather than counted in a
+	// footnote, and enter on it says so instead of filling the form.
+	onBoard map[string]domain.FeatureID
+	cursor  int // index into the filtered (visible) list
+	// params is what was fetched — repo, owner/repo, label, state — so
+	// the l/s/o keys can refetch with one of them changed.
+	params bugIngestParams
 
 	filter    textinput.Model // live substring filter over the fetched issues
 	filtering bool            // the filter input has focus (typing into it)
@@ -167,22 +41,49 @@ type bugIngestView struct {
 	edited bool
 }
 
+// bugIngestParams is one fetch's target: the managed repo whose checkout
+// gh runs in, the owner/repo it lists, and the label/state filters.
+type bugIngestParams struct {
+	repo      string // configured repo name ("" = default)
+	ownerRepo string // "owner/repo" for gh; "" lets gh detect from the checkout
+	label     string
+	state     string // open|closed|all
+}
+
 // newBugIngestView opens with the filter input focused: typing narrows the
-// list live, and Tab moves focus to the list without discarding the query.
-func newBugIngestView(res engine.BugIngestResult, profile string, envelope int) *bugIngestView {
+// list live, and esc moves focus to the list without discarding the query.
+// Issues already on the board are listed too, greyed with their card id.
+func newBugIngestView(res engine.BugIngestResult, params bugIngestParams) *bugIngestView {
 	filter := textinput.New()
 	filter.Placeholder = "filter by title / label / text…"
 	filter.CharLimit = 80
 	filter.SetWidth(40)
 	filter.Focus()
-	skipped := make([]domain.FeatureID, len(res.Skipped))
-	for i, s := range res.Skipped {
-		skipped[i] = s.LocalID
+	onBoard := map[string]domain.FeatureID{}
+	props := append([]domain.BugProposal(nil), res.Proposals...)
+	for _, sk := range res.Skipped {
+		onBoard[sk.Proposal.ExternalRef] = sk.LocalID
+		props = append(props, sk.Proposal)
 	}
 	return &bugIngestView{
-		source: res.Source, props: res.Proposals, skipped: skipped,
-		profile: profile, envelope: envelope, filter: filter, filtering: true,
+		source: res.Source, props: props, onBoard: onBoard,
+		params: params, filter: filter, filtering: true,
 	}
+}
+
+// markOnBoard records that ref was just minted as id, so the row greys
+// out in place when Create returns here.
+func (bv *bugIngestView) markOnBoard(ref string, id domain.FeatureID) {
+	if ref == "" {
+		return
+	}
+	bv.onBoard[ref] = id
+}
+
+// isOnBoard reports the card already carrying the proposal's ref.
+func (bv *bugIngestView) isOnBoard(p domain.BugProposal) (domain.FeatureID, bool) {
+	id, ok := bv.onBoard[p.ExternalRef]
+	return id, ok
 }
 
 // bugMatches reports whether a proposal matches the (already lowercased)
@@ -246,7 +147,7 @@ func (bv *bugIngestView) bindings() []binding {
 		return withHelpKey([]binding{
 			{key: "type", label: "filter", help: "type to filter the list", bar: true},
 			{key: "up/down/pgup/pgdn", label: "move", help: "move the highlighted row without leaving the filter"},
-			{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
+			{key: "enter", label: "use", help: "fill the new-card form with the highlighted issue", bar: true},
 			// esc last here too: leaving the filter is this sub-surface's
 			// own way out, and it is the row that must outlive the others.
 			{key: "esc", label: "list", help: "leave the filter for the list, keeping the query", bar: true},
@@ -257,13 +158,16 @@ func (bv *bugIngestView) bindings() []binding {
 		{key: "pgup/pgdn", label: "page", help: "move by a page over the bugs"},
 		{key: "/", label: "filter", help: "focus the filter", bar: true},
 		{key: "r", label: "rename", help: "rename the bug (also c)", bar: true},
-		{key: "o", label: "one-liner", help: "edit the one-line summary", bar: true},
-		{key: "enter", label: "import", help: "import the highlighted issue", bar: true},
+		{key: "e", label: "one-liner", help: "edit the one-line summary"},
+		{key: "l", label: "label", help: "change the label filter and fetch again"},
+		{key: "s", label: "state", help: "cycle open / closed / all and fetch again"},
+		{key: "o", label: "other repo", help: "list another owner/repo's issues"},
+		{key: "enter", label: "use", help: "fill the new-card form with the highlighted issue", bar: true},
 		// esc stays last: the status bar drops hints from the
 		// second-to-last backwards precisely so the surface's escape hatch
 		// outlives every other row (statusbar.Render).
 		{key: "?", label: "help", bar: true},
-		{key: "esc", label: "discard", help: "discard the import — nothing created (also q)", bar: true},
+		{key: "esc", label: "back", help: "leave the picker — back to the form, nothing created (also q)", bar: true},
 	}
 }
 
@@ -302,7 +206,7 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 			bv.filtering = false
 			bv.filter.Blur()
 		case "enter":
-			return m.importHighlighted()
+			return m.useInForm()
 		default:
 			bv.filter, _ = bv.filter.Update(msg)
 			bv.setCursor(bv.cursor) // reclamp: the visible set may have shrunk
@@ -323,12 +227,42 @@ func (m *Shell) handleBugIngestKey(msg tea.KeyPressMsg) tea.Cmd {
 		bv.setCursor(bv.cursor - 1)
 	case "r", "c":
 		bv.promptTitle(m)
-	case "o":
+	case "e":
 		bv.promptOneLiner(m)
+	case "l":
+		m.Overlay.Push(newTextPrompt("label filter", bv.params.label, "label (empty = every issue)", nil, func(v string) tea.Cmd {
+			params := bv.params
+			params.label = strings.TrimSpace(v)
+			return m.refetchBugIngest(params)
+		}))
+	case "s":
+		params := bv.params
+		switch params.state {
+		case "open":
+			params.state = "closed"
+		case "closed":
+			params.state = "all"
+		default:
+			params.state = "open"
+		}
+		return m.refetchBugIngest(params)
+	case "o":
+		m.Overlay.Push(newTextPrompt("browse issues of", bv.params.ownerRepo, "owner/repo", nil, func(v string) tea.Cmd {
+			params := bv.params
+			params.ownerRepo = strings.TrimSpace(v)
+			return m.refetchBugIngest(params)
+		}))
 	case "enter":
-		return m.importHighlighted()
+		return m.useInForm()
 	}
 	return nil
+}
+
+// refetchBugIngest replaces the open picker with a fresh fetch under
+// params, keeping the parked form where it is.
+func (m *Shell) refetchBugIngest(params bugIngestParams) tea.Cmd {
+	m.bugIngest = nil
+	return m.startBugIngest(params)
 }
 
 func (bv *bugIngestView) promptTitle(m *Shell) {
@@ -361,7 +295,8 @@ func (m *Shell) discardBugIngest() tea.Cmd {
 	}
 	drop := func() tea.Cmd {
 		m.bugIngest = nil
-		m.notice = noticeMsg{text: "import discarded — nothing created"}
+		m.notice = noticeMsg{text: "left the issue picker — nothing created"}
+		m.restorePendingCard()
 		return nil
 	}
 	if !bv.edited {
@@ -378,82 +313,84 @@ func (m *Shell) discardBugIngest() tea.Cmd {
 	return nil
 }
 
-// importHighlighted confirms, then imports exactly the row under the
-// cursor — the only materialize path this surface has left.
-func (m *Shell) importHighlighted() tea.Cmd {
+// useInForm fills the new-card form with the row under the cursor and
+// brings the form back. Nothing is minted here: the form is the one
+// confirmation for every source, and Create from a form filled this way
+// returns to this picker with the row greyed.
+func (m *Shell) useInForm() tea.Cmd {
 	bv := m.bugIngest
 	if bv == nil {
 		return nil
 	}
 	i := bv.selected()
 	if i < 0 {
-		m.notice = noticeMsg{text: "no bug matches the filter", isErr: true}
+		m.notice = noticeMsg{text: "no issue matches the filter", isErr: true}
 		return nil
 	}
 	p := bv.props[i]
-	m.Overlay.Push(&confirmDialog{
-		id:           "confirm-bug-ingest",
-		cancelLabel:  "Cancel",
-		confirmLabel: "Import",
-		question:     "import " + p.Title + "?",
-		detail:       p.ExternalRef,
-		onConfirm:    m.materializeBugIngest,
-	})
+	if id, ok := bv.isOnBoard(p); ok {
+		m.notice = noticeMsg{text: fmt.Sprintf("%s is already on the board as %s", p.ExternalRef, id), isErr: true}
+		return nil
+	}
+	d := m.pendingCard
+	m.pendingCard = nil
+	if d == nil {
+		d = m.openCardForm(domain.KindBug)
+	}
+	if d.repo.multi() && d.repo.name() != bv.params.repo {
+		for j, name := range d.repo.options() {
+			if name == bv.params.repo {
+				d.repo.idx = j
+			}
+		}
+	}
+	d.fill(p)
+	m.Overlay.Push(d)
 	return nil
 }
 
-func (m *Shell) materializeBugIngest() tea.Cmd {
-	bv := m.bugIngest
-	if bv == nil || m.engine == nil {
-		return nil
-	}
-	i := bv.selected()
-	if i < 0 {
-		return nil
-	}
-	eng := m.engine
-	props := []domain.BugProposal{bv.props[i]}
-	opts := engine.MaterializeOpts{Profile: bv.profile, Envelope: bv.envelope}
-	m.bugIngest = nil
-	return func() tea.Msg {
-		created, err := eng.MaterializeBugs(context.Background(), props, opts)
-		if err != nil {
-			return noticeMsg{text: "import: " + sanitize(err.Error()), isErr: true}
-		}
-		return noticeMsg{text: fmt.Sprintf("imported %d bug(s) into todo", len(created)), reload: true}
-	}
-}
-
-// startBugIngest fetches issues from the GitHub target and opens the
-// review surface. The fetch shells out to gh, so it runs off the main loop.
-func (m *Shell) startBugIngest(repo, label, profile string, comments bool) tea.Cmd {
+// startBugIngest fetches issues for params and opens the picker. gh runs
+// in the chosen repository's checkout with an explicit owner/repo, so a
+// `repos:` workspace whose root is no checkout still lists the right
+// issues. The fetch shells out, so it runs off the main loop.
+func (m *Shell) startBugIngest(params bugIngestParams) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured — bug import needs the engine", isErr: true}
+		m.restorePendingCard()
 		return nil
 	}
 	if m.bugIngesting {
 		m.notice = noticeMsg{text: "an import is already running — wait for it", isErr: true}
 		return nil
 	}
-	eng, envelope, root := m.engine, m.envelope, m.wt.Root()
+	fetch := m.ghIssues
+	if fetch == nil {
+		eng := m.engine
+		fetch = func(ctx context.Context, src engine.GitHubSource) (engine.BugIngestResult, error) {
+			return eng.IngestBugs(ctx, src)
+		}
+	}
+	dir, _ := m.repoRoot(params.repo)
+	if dir == "" && m.wt != nil {
+		dir = m.wt.Root()
+	}
 	m.bugIngesting = true
-	m.notice = noticeMsg{text: "importing GitHub issues…"}
+	m.notice = noticeMsg{text: "fetching GitHub issues…"}
 	return func() tea.Msg {
-		src := engine.GitHubSource{Repo: repo, Label: label, Dir: root, FetchComments: comments}
-		res, err := eng.IngestBugs(context.Background(), src)
+		src := engine.GitHubSource{Repo: params.ownerRepo, Label: params.label, State: params.state, Dir: dir}
+		res, err := fetch(context.Background(), src)
 		if err != nil {
 			return bugIngestLoadedMsg{err: err}
 		}
-		return bugIngestLoadedMsg{res: res, profile: profile, envelope: envelope}
+		return bugIngestLoadedMsg{res: res, params: params}
 	}
 }
 
-// bugIngestLoadedMsg delivers the result of a bug import to the shell.
+// bugIngestLoadedMsg delivers the result of a fetch to the shell.
 type bugIngestLoadedMsg struct {
-	res      engine.BugIngestResult
-	profile  string
-	envelope int
-	err      error
+	res    engine.BugIngestResult
+	params bugIngestParams
+	err    error
 }
 
 // bugIngestViewRender paints the bug-import review surface.
@@ -469,7 +406,18 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	if bv.active() {
 		countPill = fmt.Sprintf("%d/%d match", len(vis), len(bv.props))
 	}
-	head := s.Title.Render("import bugs") + " " + s.Base.Render("· "+bv.source) +
+	target := bv.params.ownerRepo
+	if target == "" {
+		target = bv.source
+	}
+	filters := ""
+	if bv.params.label != "" {
+		filters += "  " + s.Faint.Render("label ") + s.Subtle.Render(bv.params.label)
+	}
+	if bv.params.state != "" {
+		filters += "  " + s.Faint.Render("state ") + s.Subtle.Render(bv.params.state)
+	}
+	head := s.Title.Render("issues") + " " + s.Base.Render("· "+target) + filters +
 		"  " + s.Pill.Render(countPill)
 	b.WriteString("\n" + head + "\n")
 
@@ -497,6 +445,10 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 		marker := "  "
 		style := s.Base
 		meta := s.Faint
+		onBoard, taken := bv.isOnBoard(p)
+		if taken {
+			style = s.Faint
+		}
 		sel := pos == bv.cursor
 		if sel {
 			marker = s.BandMarker(true)
@@ -505,7 +457,9 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 		}
 		num := meta.Render(fmt.Sprintf("%*d.", numW, i+1))
 		line := marker + num + " " + style.Render(ansi.Truncate(p.Title, max(w-numW-6, 8), "…"))
-		if tag := bugProposalTags(p); tag != "" {
+		if taken {
+			line += "  " + meta.Render("on board · "+string(onBoard))
+		} else if tag := bugProposalTags(p); tag != "" {
 			line += "  " + meta.Render(tag)
 		}
 		if sel {
@@ -520,13 +474,6 @@ func (m *Shell) bugIngestViewRender(w, h int) string {
 	var tail strings.Builder
 	if bv.selected() >= 0 {
 		tail.WriteString("\n" + bv.renderDetail(s, w))
-	}
-	if len(bv.skipped) > 0 {
-		ids := make([]string, len(bv.skipped))
-		for i, id := range bv.skipped {
-			ids[i] = string(id)
-		}
-		tail.WriteString("\n" + s.Faint.Render(fmt.Sprintf("%d already on the board, skipped: %s", len(bv.skipped), strings.Join(ids, ", "))))
 	}
 	tailLines := 0
 	if tail.Len() > 0 {

@@ -234,8 +234,8 @@ func TestBugLifecycleFlow(t *testing.T) {
 
 	// B → bug form, type a title, enter → bug created in todo
 	m = press(t, m, tea.KeyPressMsg{Code: 'B', Text: "B"})
-	if m.Overlay.Top() == nil || m.Overlay.Top().ID() != "new-bug" {
-		t.Fatal("B did not open the new-bug form")
+	if form, ok := m.Overlay.Top().(*cardForm); !ok || form.Kind() != domain.KindBug {
+		t.Fatal("B did not open the new-card form with bug preset")
 	}
 	m = typeString(t, m, "Login loops")
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -454,15 +454,16 @@ func TestSkipFlagsChangeRoute(t *testing.T) {
 	m = pump(t, m, m.Init())
 	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = typeString(t, m, "Tiny fix")
-	// dial the route field to "skip brainstorm+plan": tab past envelope
-	// and profile to reach it, then step ←/→ to the third state
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // envelope field
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // profile field
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // route field
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	// there is no route field any more (one graph, one route); enter from
+	// any option row still creates — here from the after row, which has
+	// nothing to add on an empty board
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // envelope
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // profile
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab}) // after
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(m.rows) != 1 {
+		t.Fatalf("card not created from the after row: %q", m.notice.text)
+	}
 	// todo → spec directly, then spec → implement directly
 	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StagePlan {
