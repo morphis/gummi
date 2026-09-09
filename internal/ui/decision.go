@@ -509,6 +509,20 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	if d == nil {
 		return nil
 	}
+	if p := m.reentryRead; p != nil && p.id == r.F.ID && d.ask == nil {
+		// The reader already answered: enter committed the line to the row
+		// it was aimed at, and what is happening now is that answer being
+		// carried out. Rows that are no longer waiting on anybody must not
+		// go on standing there as though they were — the question comes
+		// back only if the answer does not, which is a stopped read. The
+		// act itself is reported where the card reports every act in
+		// progress: in the conversation (thread.go's reading marker).
+		//
+		// An open ask is the exception and keeps its picker: it is the
+		// agent's own question, not this stop's, and a re-entry reached
+		// through a verb while one is up has not answered it.
+		return nil
+	}
 	if p := m.reentryPending; p != nil && d.ask == nil {
 		// the chip stands where the picker stood, under the same
 		// narration; the picker comes back the moment the chip goes

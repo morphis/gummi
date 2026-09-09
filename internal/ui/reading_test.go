@@ -29,9 +29,10 @@ func separateWorkStop(t *testing.T) *Shell {
 	return m
 }
 
-// While the line is out being read the conversation says so, the stop's
-// own answers stay exactly where they were, and the card is marked busy
-// so every other surface animates for it too.
+// While the line is out being read the conversation says so, the answers
+// the reader just picked from are gone (they are not waiting on anybody
+// any more), and the card is marked busy so every other surface animates
+// for it too.
 func TestReadInFlightIsInTheThread(t *testing.T) {
 	m := separateWorkStop(t)
 	m = typeString(t, m, separateWork)
@@ -59,8 +60,8 @@ func TestReadInFlightIsInTheThread(t *testing.T) {
 	if !strings.Contains(view, "reading your line") {
 		t.Errorf("the page does not say a read is running:\n%s", view)
 	}
-	if !strings.Contains(view, "run verify") {
-		t.Errorf("the picker went away under a read — its rows are still the answers to an unanswered question:\n%s", view)
+	if strings.Contains(view, "run verify") {
+		t.Errorf("the picker is still on screen under a read — the reader already answered it:\n%s", view)
 	}
 
 	// A second enter must not buy a second read.
@@ -77,7 +78,7 @@ func TestReadInFlightIsInTheThread(t *testing.T) {
 	}
 
 	// and the bar says so rather than naming a destination enter no
-	// longer has
+	// longer has, or a picker key with no picker to move
 	var barred bool
 	for _, b := range m.threadInputBindings() {
 		if b.key == "enter" && b.label == "reading…" {
@@ -86,9 +87,20 @@ func TestReadInFlightIsInTheThread(t *testing.T) {
 		if b.key == "esc" && b.label != "stop reading" {
 			t.Errorf("esc reads %q while a line is out being read", b.label)
 		}
+		if b.key == "↑↓" || b.key == "1-9" {
+			t.Errorf("the bar offers %q with no picker on screen", b.key)
+		}
 	}
 	if !barred {
 		t.Error("the bar still claims enter commits something")
+	}
+
+	// the picker's keys do nothing rather than moving a highlight nobody
+	// can see
+	model, moved := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = model.(*Shell)
+	if moved != nil || m.reentryRead != p {
+		t.Error("a picker key reached something while the picker was off screen")
 	}
 
 	m = pump(t, m, cmd)
@@ -127,6 +139,9 @@ func TestEscWhileReadingStopsItAndKeepsTheLine(t *testing.T) {
 	}
 	if got := m.threadInput.Value(); got != separateWork {
 		t.Errorf("composer = %q, want the line still there — stopping a read sends nothing", got)
+	}
+	if view := m.View().Content; !strings.Contains(view, "run verify") {
+		t.Errorf("the answers did not come back when the read stopped:\n%s", view)
 	}
 	id := m.rows[0].F.ID
 	if got := m.consultSending[id]; got != "" {

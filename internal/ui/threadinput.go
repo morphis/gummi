@@ -950,19 +950,6 @@ func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 	return m.threadInput.View()
 }
 
-// rebind rewrites one row's label and help in place, leaving its key,
-// bar-worthiness and order alone. It exists so a state that changes what
-// a key does can say so without forking the whole table and drifting
-// from it.
-func rebind(bs []binding, key, label, help string) []binding {
-	for i := range bs {
-		if bs[i].key == key {
-			bs[i].label, bs[i].help = label, help
-		}
-	}
-	return bs
-}
-
 // threadInputBindings is the card page's key table while the thread
 // input has the keyboard — cardPageBindings' focused branch (backlog.go),
 // the same filtering-split convention bugIngestView.bindings() uses. The
@@ -987,6 +974,9 @@ func (m *Shell) threadInputBindings() []binding {
 	if r, ok := m.selected(); ok {
 		if p := m.reentryPending; p != nil {
 			return m.chipBindings(p)
+		}
+		if p := m.reentryRead; p != nil && p.id == r.F.ID {
+			return m.readingBindings()
 		}
 		if d := m.visibleDecision(r); d != nil {
 			aim := m.wordAim(d)
@@ -1070,16 +1060,7 @@ func (m *Shell) threadInputBindings() []binding {
 			// esc stays last: the status bar drops hints from the
 			// second-to-last backwards precisely so the surface's escape
 			// hatch outlives every other row (statusbar.Render).
-			out := m.withCardTabs(append(bs, binding{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true}))
-			if p := m.reentryRead; p != nil && p.id == r.F.ID {
-				// the picker is still on screen and its rows still mean
-				// what they say; only these two keys change while a line
-				// is out being read (chip.go's readingKey), and the bar
-				// may not name a destination the key no longer has.
-				out = rebind(out, "enter", "reading…", "your line is out being read — what comes back is a proposal you confirm")
-				out = rebind(out, "esc", "stop reading", "drop the read — your line stays in the composer and nothing is sent")
-			}
-			return out
+			return m.withCardTabs(append(bs, binding{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true}))
 		}
 	}
 	return m.withCardTabs([]binding{

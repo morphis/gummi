@@ -123,25 +123,23 @@ func (m *Shell) chipLines(s *theme.Styles, r featureRow, p *reentryReading, widt
 
 // readingKey answers a key while a line is out being read.
 //
-// The read is not a control and does not take the picker's place — it is
-// something happening, and it says so in the conversation (thread.go's
-// readingMarker). So the rows under it stay exactly what they were, and
-// this claims only the two keys whose meaning the read changes: enter,
-// which has nothing left to commit while the line it would send is
-// already out, and esc, which stops the read.
+// The picker is not on screen while a read is out — the reader answered
+// it, and the answer is what is running (decision.go) — so this claims
+// its keys the way the chip does, and answers the two that still mean
+// something: enter, which has nothing left to commit while the line it
+// would send is already out, and esc, which stops the read.
 //
 // esc here is NOT the chip's esc. The chip has proposed an act, so
 // declining it still owes the line a destination and sends it as a
 // message. Nothing has been proposed yet, so stopping the read is just
-// stopping it: the line stays in the composer, nothing is sent, and the
-// stop's own answers are where they were.
+// stopping it: the line stays in the composer, the stop's own answers
+// come back, and nothing was sent anywhere.
 //
 // Anything else falls through — and anything that types withdraws the
 // read on the way, for the reason the chip is withdrawn by an edit: it
 // is a reading OF the line in the composer, and an edited line is not
-// the line that was read.
-// It answers no key with a command, so it reports only whether it took
-// the key.
+// the line that was read. No key here answers with a command, so this
+// reports only whether it took the key.
 func (m *Shell) readingKey(r featureRow, msg tea.KeyPressMsg) bool {
 	if m.reentryRead == nil || m.reentryRead.id != r.F.ID {
 		return false
@@ -157,14 +155,26 @@ func (m *Shell) readingKey(r featureRow, msg tea.KeyPressMsg) bool {
 		// pressing it is asking why nothing has happened; say that.
 		m.notice = noticeMsg{text: string(r.F.ID) + ": still reading your line — esc stops it"}
 		return true
-	case "up", "down", "left", "right", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-		"pgup", "pgdown", "alt+j", "alt+k", "alt+o", "tab", "shift+tab":
-		// navigation moves a highlight; it does not edit the line, so the
-		// reading it was taken from still stands
-		return false
+	case "up", "down", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		// the picker's own keys, with no picker on screen: they do nothing
+		// rather than moving a highlight nobody can see (chipKey's rule,
+		// and the scroll and card-step keys are hoisted above both of us
+		// so they keep working regardless)
+		return true
 	}
 	m.withdrawRead()
 	return false
+}
+
+// readingBindings is the status bar while a read is out: the picker's
+// rows are gone with it, so the two keys that still do something are the
+// whole table.
+func (m *Shell) readingBindings() []binding {
+	return m.withCardTabs([]binding{
+		{key: "enter", label: "reading…", help: "your line is out being read — what comes back is a proposal you confirm", bar: true, sticky: true},
+		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread while the read runs", bar: true},
+		{key: "esc", label: "stop reading", help: "drop the read — your line stays in the composer and nothing is sent", bar: true},
+	})
 }
 
 // readingNoun is the reading in the card's own words — reentry.Describe

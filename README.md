@@ -157,8 +157,9 @@ a move, `y` a spend, `esc` sends the line as a plain message instead.
 Nothing you type can produce a move the workflow does not already have.
 
 Reading the line takes a few seconds, and the thread says so while it
-does — your options stay where they are, and `esc` stops the read with
-your line still in the composer. Backing out never costs you the
+does. The options go while it runs — you answered them by sending the
+line — and `esc` stops the read, which brings them back with your line
+still in the composer. Backing out never costs you the
 sentence: `esc` at the reading keeps it, `esc` at the chip sends it as a
 message, and `esc` at the new card it may open puts it back where you
 typed it.

@@ -1145,12 +1145,13 @@ Rules that make the control safe:
   that is happening: in the conversation, beside a stage's own
   "thinking…", and on the card's busy marker, so the board row, the
   dashboard and the status bar animate for it too. It is deliberately not
-  in the control below — the picker's rows are still the answers to a
-  question nobody has answered, and a status standing in their place
-  would hide three choices to say one thing. Two keys change while it
-  runs, and the bar says so: `enter` has nothing left to commit, and
-  `esc` stops the read. Stopping is only stopping — nothing has been
-  proposed yet, so nothing is sent and the line stays in the composer.
+  reported *as a control*. The picker goes with it — `enter` was the
+  answer, and rows that are no longer waiting on anybody must not go on
+  standing there as though they were — so the two keys that still mean
+  something are the whole table, and the bar says so: `enter` has nothing
+  left to commit, and `esc` stops the read. Stopping is only stopping —
+  nothing has been proposed yet, so nothing is sent, the line stays in
+  the composer and the answers come back.
   The chip's own `esc` is the other one and still sends, because
   declining a proposed act still owes the line a destination; getting it
   there opens a consult session, which is another model call, and that
