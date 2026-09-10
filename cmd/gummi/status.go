@@ -79,14 +79,24 @@ type statusView struct {
 	// run reached its verified branch, since the headless driver never merges.
 	Verified bool `json:"verified"`
 	Done     bool `json:"done"`
-	// Running reports whether the pid recorded at this card's pid file
-	// (.gummi/state/locks/<id>.pid) is still alive — a live run or resume
-	// driving this specific card. Meant for an orchestrating agent whose
-	// bash wrapper was killed by the harness:
-	// gummi's SIGHUP-ignore makes it survive the hangup, so the wrapper's
-	// death is not gummi's death. A caller that sees running=true should wait
-	// (or attach to the events.jsonl mirror) instead of retrying, which would
-	// hit ErrLocked and look like a fresh failure.
+	// Running reports whether something is currently driving this card:
+	// either the pid recorded at this card's pid file
+	// (.gummi/state/locks/<id>.pid) is still alive — a headless run/resume
+	// — or, since status is its own process and cannot see another
+	// process's in-memory session, some other gummi process (a headless
+	// drive, or an open TUI board — see state.CardLocks) holds the card's
+	// exclusive lock right now. That lock is held for the session's whole
+	// life, including while it sits paused on an open ask, so a card
+	// waiting on a person (see Escalation) still reads running=true rather
+	// than contradicting the Waiting line. See cardRunning: an
+	// inconclusive lock probe also reads true, so this never asserts "no"
+	// about a card it has no way to rule out.
+	//
+	// Meant for an orchestrating agent whose bash wrapper was killed by the
+	// harness: gummi's SIGHUP-ignore makes it survive the hangup, so the
+	// wrapper's death is not gummi's death. A caller that sees running=true
+	// should wait (or attach to the events.jsonl mirror) instead of
+	// retrying, which would hit ErrLocked and look like a fresh failure.
 	Running bool `json:"running"`
 	// PullRequest mirrors the linked PullRequestRef verbatim (repo, number,
 	// url, head_sha) when the card is linked; absent otherwise. Never a live
@@ -200,7 +210,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		BranchState:     branchState(ctx, wt, f),
 		Verified:        !f.VerifiedAt.IsZero(),
 		Done:            f.Stage == domain.StageDone,
-		Running:         state.ProcessAlive(state.ReadPIDFile(ws.PIDFile(f.ID))),
+		Running:         cardRunning(ws, f.ID),
 		PullRequest:     f.PullRequest.StatusPayload(),
 		PullRequestLine: f.PullRequest.PlainLine(),
 		Escalation:      openEscalation(ctx, store, f),
@@ -293,6 +303,39 @@ func stageSpendRows(ctx context.Context, store *state.Store, f *domain.Feature) 
 		return out[i].Role < out[j].Role
 	})
 	return out
+}
+
+// cardRunning reports whether anything is currently driving f: this
+// process cannot see another process's in-memory session (status is its
+// own separate process, holding no lock of its own — see the package
+// doc), so it can only reason from what is durably visible: the pid file
+// a headless run/resume records, and the card's own exclusive lock
+// (state.CardLockFile), which every drive — headless or the TUI board —
+// holds for as long as it drives the card, including while paused on an
+// open ask (see state.CardLocks).
+//
+// The pid file is checked first since it names the exact pid an
+// orchestrating agent wants to kill -0 itself. Past that, a clean,
+// uncontended trylock on the card's own lock is proof positive that
+// nothing else holds it — this process took it and let it go — so "no" is
+// as authoritative here as ErrLocked already is everywhere else that
+// relies on this lock for mutual exclusion. Any other error from the
+// probe (e.g. an unreadable lock dir) leaves the question genuinely open,
+// so it reads as running rather than asserting a "no" this check could
+// not actually establish.
+func cardRunning(ws state.Workspace, id domain.FeatureID) bool {
+	if state.ProcessAlive(state.ReadPIDFile(ws.PIDFile(id))) {
+		return true
+	}
+	release, err := state.AcquireLock(ws.CardLockFile(id))
+	if err != nil {
+		// ErrLocked (another gummi process holds the card) and any other
+		// failure to even ask the question both leave "running" as the
+		// honest answer.
+		return true
+	}
+	release()
+	return false
 }
 
 // branchState collapses the worktree manager's branch queries into one

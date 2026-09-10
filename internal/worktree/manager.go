@@ -595,6 +595,13 @@ func (m *Manager) MainDirtyPaths(ctx context.Context) ([]string, error) {
 //
 // A branch merged by fast-forward while main had no other activity (HEAD
 // == branch tip) still reads as not-yet-landed until main next advances.
+//
+// A branch still sitting exactly at its recorded fork point has produced
+// no commits of its own — there is nothing of the feature's to land.
+// Without this check, merge-base --is-ancestor is trivially true for such
+// a branch against any HEAD, so the moment any *other* card lands and
+// advances main, this one would misreport "landed" too, purely because
+// its own tip predates main's new head.
 func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	// A rewrite of main (a rewind or rebase past the recorded fork) makes
 	// the is-ancestor and squash-landed routes disagree: the branch reads
@@ -609,11 +616,23 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	anc, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", branch, "HEAD")
+	branchTip, err := runGit(ctx, m.repo, "rev-parse", branch)
 	if err != nil {
 		return false, err
 	}
-	branchTip, err := runGit(ctx, m.repo, "rev-parse", branch)
+	// AssertNoForkDrift above lazily backfills a missing recorded fork
+	// point before returning, so this read sees it even on a
+	// pre-drift-detection worktree; an empty result here means the store
+	// still could not persist one (no feature row) and we fall through to
+	// the pre-existing ancestry/squash logic rather than block on it.
+	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	if err != nil {
+		return false, err
+	}
+	if recorded != "" && branchTip == recorded {
+		return false, nil
+	}
+	anc, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", branch, "HEAD")
 	if err != nil {
 		return false, err
 	}

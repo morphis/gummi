@@ -154,6 +154,22 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		}
 	}
 
+	// 1b. git identity — one check per managed repository (the default
+	// plus every named one, mirroring the repo check above), gated the
+	// same way: only a root the repo check itself already confirmed is a
+	// git toplevel is worth asking. A workspace with no repo resolved at
+	// all (rerr != nil) has nothing to check here either.
+	if rerr == nil {
+		if defaultRoot != "" && isGitRepoRoot(defaultRoot) {
+			c := gitIdentityCheck("git-identity", defaultRoot)
+			add(c.Name, c.Status, c.Detail, c.Remediation)
+		}
+		for _, n := range namedRepos {
+			c := gitIdentityCheck("git-identity:"+n.Name, n.Root)
+			add(c.Name, c.Status, c.Detail, c.Remediation)
+		}
+	}
+
 	// 2. workspace
 	ws, wsErr := state.Open(wsRoot, defaultRoot)
 	if wsErr == nil {
@@ -1151,6 +1167,77 @@ func repoLabel(name string) string {
 		return "default"
 	}
 	return name
+}
+
+// gitIdentityCheck resolves whether root can author a commit — a
+// repo-local, global, or system user.name/user.email all count, since any
+// of them lets a squash merge in this repo succeed. `git var
+// GIT_AUTHOR_IDENT` performs the exact resolution git itself runs
+// immediately before writing a commit (checking with git rather than
+// reading a config file ourselves, so a scope this process doesn't know
+// to look at — global, system, an include.path — still counts). A repo
+// with no identity anywhere fails here exactly the way a real squash
+// merge would — "*** Please tell me who you are." — but for free, before
+// any stage has run or any credit has been spent, instead of at the last
+// keystroke of a full run.
+//
+// A *git that ran* and said so (an *exec.ExitError) is a confirmed gap and
+// fails readiness; anything else — git missing from PATH, unreadable
+// worktree, some other launch failure — is a probe limitation doctor
+// cannot tell apart from a healthy repo, and reads unknown rather than
+// asserting a fail it did not actually establish (mirroring reach's own
+// unknown-never-blocks rule).
+func gitIdentityCheck(name, root string) doctorCheck {
+	out, err := exec.CommandContext(context.Background(), "git", "-C", root, "var", "GIT_AUTHOR_IDENT").Output() //nolint:gosec // read-only identity probe against a validated repo root
+	if err != nil {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			return doctorCheck{
+				Name: name, Status: statusUnknown,
+				Detail: "could not probe git identity: " + err.Error(),
+			}
+		}
+		detail := "git cannot resolve a commit identity"
+		if line := lastNonEmptyLine(string(ee.Stderr)); line != "" {
+			detail = line
+		}
+		return doctorCheck{
+			Name:   name,
+			Status: statusFail,
+			Detail: detail,
+			Remediation: fmt.Sprintf(
+				"run `git -C %s config user.name \"Your Name\"` and `git -C %s config user.email you@example.com` (add --global to set it once for every repo)",
+				root, root),
+		}
+	}
+	return doctorCheck{
+		Name:   name,
+		Status: statusOK,
+		Detail: "commits will be authored as " + identNameEmail(strings.TrimSpace(string(out))),
+	}
+}
+
+// identNameEmail trims GIT_AUTHOR_IDENT's trailing "<epoch> <tz>" down to
+// "Name <email>" for a readable check detail.
+func identNameEmail(ident string) string {
+	if i := strings.Index(ident, ">"); i >= 0 {
+		return strings.TrimSpace(ident[:i+1])
+	}
+	return ident
+}
+
+// lastNonEmptyLine returns the last non-blank line of s, trimmed. git's own
+// missing-identity error is a multi-line nudge ("*** Please tell me who you
+// are." plus the two commands to run) ending in the one line — `fatal:
+// empty ident name ...` — worth surfacing in a one-line check detail.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return ""
 }
 
 // isGitRepoRoot reports whether dir looks like a git working-tree root:

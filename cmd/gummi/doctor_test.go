@@ -122,14 +122,25 @@ func TestDoctorCodexUsesNativeLoginRemediation(t *testing.T) {
 	}
 }
 
-// gitRepo makes a temp dir look like a git repo root (buildDoctorReport only
-// stats .git; it never shells out).
+// gitRepo makes a temp dir a real, minimal git repository with a local
+// commit identity configured. Most of buildDoctorReport only stats .git
+// and never shells out, but the git-identity check does run real git
+// against the resolved repo root, so a fixture merely named ".git" is no
+// longer enough — this gives every caller a repo git will actually work
+// with, identity included, for free.
 func gitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
-		t.Fatal(err)
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
 	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "t")
+	git("config", "user.email", "t@e.invalid")
 	return dir
 }
 
@@ -150,6 +161,16 @@ func fakeAgentsOnPath(t *testing.T, bins ...string) {
 		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The whole point of a hermetic PATH is that only these named fakes
+	// are found — a real backend binary the dev/CI machine happens to have
+	// installed must not leak into a check's result. git-identity now
+	// shells out to real git regardless, though, so a symlink to the real
+	// `git` joins the fakes: real git init/config, still nothing else on
+	// PATH. Best-effort — a caller with no git on its own PATH gets the
+	// hermetic dir unchanged, same as before this check existed.
+	if realGit, err := exec.LookPath("git"); err == nil {
+		_ = os.Symlink(realGit, filepath.Join(dir, "git"))
 	}
 	t.Setenv("PATH", dir)
 }
@@ -291,6 +312,60 @@ func TestDoctorNoRepoFails(t *testing.T) {
 	}
 	if r.Ready {
 		t.Error("report is ready outside a git repo")
+	}
+}
+
+// A repo whose git identity cannot be resolved in any scope fails the
+// git-identity check and blocks readiness — the gap that let a full run
+// reach the final keystroke of its squash merge before discovering "***
+// Please tell me who you are.", after every credit had already been spent.
+func TestDoctorGitIdentityFails(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	// Isolate every scope git would otherwise resolve an identity from —
+	// this test must not pass or fail depending on whatever global/system
+	// config happens to exist on the machine running it.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(k, "")
+	}
+
+	r := buildDoctorReport(repo, doctorOpts{})
+	c := checkByName(r, "git-identity")
+	if c.Status != statusFail {
+		t.Fatalf("git-identity = %+v, want fail", c)
+	}
+	if !strings.Contains(c.Detail, "ident") {
+		t.Errorf("detail %q should surface git's own identity error", c.Detail)
+	}
+	if !strings.Contains(c.Remediation, "git") || !strings.Contains(c.Remediation, "config") {
+		t.Errorf("remediation %q should name the git config commands to run", c.Remediation)
+	}
+	if r.Ready {
+		t.Error("report is ready with no resolvable git identity")
+	}
+}
+
+// A repo with a configured local identity reports ok and names it —
+// repo-local is one of the three scopes (local/global/system) that all
+// count.
+func TestDoctorGitIdentityOK(t *testing.T) {
+	clearDoctorEnv(t)
+	repo := gitRepo(t) // configures user.name "t", user.email "t@e.invalid"
+	r := buildDoctorReport(repo, doctorOpts{})
+	c := checkByName(r, "git-identity")
+	if c.Status != statusOK || !strings.Contains(c.Detail, "t@e.invalid") {
+		t.Fatalf("git-identity = %+v, want ok naming the configured identity", c)
 	}
 }
 
@@ -1354,9 +1429,19 @@ func TestDoctorNestedReady(t *testing.T) {
 	clearDoctorEnv(t)
 	ws := t.TempDir()
 	repo := filepath.Join(ws, "git", "lxd")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "t")
+	git("config", "user.email", "t@e.invalid")
 	writeConfig(t, ws, "repo: git/lxd\n")
 	writeProfiles(t, ws, headlessProfiles)
 	fakeAgentOnPath(t, "fakeagent")

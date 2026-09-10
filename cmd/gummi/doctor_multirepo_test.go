@@ -118,4 +118,15 @@ func TestDoctorMultiRepoForkDrift(t *testing.T) {
 	if repoIncus.Status != statusOK {
 		t.Errorf("repo:incus check = %+v, want ok", repoIncus)
 	}
+
+	// git-identity is checked per repository too, mirroring repo:<name> —
+	// this workspace is repos:-only (no bare default), so both configured
+	// names — "default" and "incus" — get their own check, and both were
+	// configured with a local identity above, so both read ok.
+	if c := checkByName(r, "git-identity:default"); c.Status != statusOK {
+		t.Errorf("git-identity:default = %+v, want ok", c)
+	}
+	if c := checkByName(r, "git-identity:incus"); c.Status != statusOK {
+		t.Errorf("git-identity:incus = %+v, want ok", c)
+	}
 }

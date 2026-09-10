@@ -558,6 +558,32 @@ func TestLandedFalseForFreshBranch(t *testing.T) {
 	}
 }
 
+// TestLandedFalseForNoCommitsAfterMainAdvances pins the exact scenario
+// found driving the real tool: a card's branch never got a commit of its
+// own (still sitting on its recorded fork point) when another card's work
+// landed on main. merge-base --is-ancestor is trivially true for a branch
+// still at its fork point against any later HEAD, so before this fix
+// Landed misreported the untouched branch as landed the moment main moved
+// — see the comment on Landed for why "no commits of its own" means
+// nothing to land.
+func TestLandedFalseForNoCommitsAfterMainAdvances(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(7, "Never started")
+	if _, err := m.Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	// main advances independently while the branch is untouched — the
+	// other card landing that BG-002's report cited.
+	writeFile(t, root, "main.txt", "main advanced\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "another card lands")
+
+	if landed, err := m.Landed(ctx, f); landed || err != nil {
+		t.Fatalf("branch with no commits of its own landed=%v err=%v, want false", landed, err)
+	}
+}
+
 func TestList(t *testing.T) {
 	root := newRepo(t)
 	m := newManager(t, root)
