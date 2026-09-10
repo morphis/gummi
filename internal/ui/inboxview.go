@@ -198,7 +198,7 @@ func (m *Shell) inboxView(w, h int) string {
 	line := func(str string) { b.WriteString(ansi.Truncate(str, w, "…") + "\n") }
 
 	line(" " + s.PaneTitleActive.Render("NEEDS YOU") + "  " +
-		s.Faint.Render("·  "+strconv.Itoa(len(items))+" open decisions · oldest first"))
+		s.Faint.Render("·  "+strconv.Itoa(len(items))+" open decision"+plural(len(items))+" · oldest first"))
 	line("")
 
 	// the label is a column, not a prefix: padded to the widest of them so

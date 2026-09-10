@@ -842,7 +842,10 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 		if err := eng.Answer(context.Background(), r.F.ID, text); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return nil
+		// the question is answered: it is no longer something that needs
+		// you, and EventQuestion now queues every ask (shell.go) rather
+		// than guessing from where the reader happened to be looking.
+		return noticeMsg{clearInbox: r.F.ID}
 	}
 }
 
@@ -884,7 +887,7 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 			if err := eng.Answer(context.Background(), r.F.ID, answer); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
-			return nil
+			return noticeMsg{clearInbox: r.F.ID}
 		}
 		if !crossing {
 			return answerCmd

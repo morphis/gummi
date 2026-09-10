@@ -1239,13 +1239,18 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// no live ask, or RecommendedOption came back empty: nothing
 			// safe to answer with, so fall through and park like today.
 		}
-		// the agent asked something. When the card page is open on the
-		// asking card, its pinned decision already shows the question
-		// inline; otherwise queue it so you can jump to it from the
-		// needs-attention inbox.
-		if m.cardOpen && m.sel >= 0 && m.sel < len(m.rows) && m.rows[m.sel].F.ID == ev.Feature {
-			return nil
-		}
+		// The agent asked something: queue it, always. This used to skip
+		// the queue whenever the card page happened to be open on the
+		// asking card, on the grounds that its pinned decision already
+		// shows the question inline — but the test ran once, at event
+		// time, and nothing revisited it. Open the card, start the stage,
+		// step back to the board while it thinks, and the question arrives
+		// with the card open, is never queued, and then exists nowhere a
+		// person can find it: the board says "in progress", the status bar
+		// says "running", and the inbox says "nothing needs you", while
+		// the agent sits blocked on a human. The item is cleared when the
+		// answer lands, so the redundancy while you are looking straight
+		// at the question costs one row and is at least true.
 		q := "the agent has a question — attach to answer"
 		if s := m.engine.Get(ev.Feature); s != nil {
 			if a := s.Snapshot().PendingAsk; a != nil {
