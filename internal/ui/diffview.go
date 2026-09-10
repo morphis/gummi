@@ -109,6 +109,21 @@ func (dv *diffView) openCount() int {
 	return n
 }
 
+// openOrphanCount is openCount restricted to annotations whose anchor no
+// longer matches any line — the ones whose code has changed since the
+// comment was written. Resolved orphans are excluded, so this can be
+// compared against openCount to ask "has every comment still holding the
+// gate already had its line edited?".
+func (dv *diffView) openOrphanCount() int {
+	n := 0
+	for _, i := range dv.orphans {
+		if i >= 0 && i < len(dv.anns) && !dv.anns[i].Resolved {
+			n++
+		}
+	}
+	return n
+}
+
 // setCursor clamps the cursor to the addressable positions: the diff
 // lines plus one slot per orphaned annotation in the footer (so x/D can
 // reach a comment whose line changed).

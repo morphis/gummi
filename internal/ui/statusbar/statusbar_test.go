@@ -95,11 +95,17 @@ func TestRenderStickyEnterSurvivesTightDecisionBar(t *testing.T) {
 	if !strings.Contains(plain, "backlog") {
 		t.Fatalf("esc's own row should still be present:\n%s", plain)
 	}
-	// alt+o's row is the one that gives way to make room — confirming
-	// shedding actually happened rather than everything fitting by
-	// coincidence (pgup/pgdn survives too: only one hint had to go).
-	if strings.Contains(plain, "outputs") {
-		t.Fatalf("expected alt+o to have been shed to make room for the sticky enter row, still present:\n%s", plain)
+	// Nothing had to be shed from the hint row at all: the ambient counts
+	// pill gives way first now, which is the whole point of that order —
+	// hints say what the next keystroke does, the counts beside them are
+	// unchanged for minutes. Before the reorder alt+o's row was the one
+	// that gave way here; now the row survives intact and "⬤ 1 active"
+	// is what the width is spent on instead.
+	if !strings.Contains(plain, "outputs") {
+		t.Fatalf("alt+o's row should survive now that the counts pill sheds first:\n%s", plain)
+	}
+	if strings.Contains(plain, "1 active") {
+		t.Fatalf("expected the ambient counts pill to have been shed for the hints:\n%s", plain)
 	}
 	golden.RequireEqual(t, []byte(out))
 }

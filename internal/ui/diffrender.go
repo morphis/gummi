@@ -38,6 +38,16 @@ func (m *Shell) diffViewRender(w, h int) string {
 		head += " " + s.Faint.Render(fmt.Sprintf("(%d orphaned)", len(dv.orphans)))
 	}
 	b.WriteString("\n" + head + "\n")
+	// Every open comment sitting on a line that has since changed is what
+	// a finished rework round looks like when the agent edited the code
+	// and never called resolve_annotation: the work is done, the comment
+	// still holds the gate shut, and the gate's own advice — request
+	// changes — sends the identical round again. Nothing said so, so the
+	// round could repeat indefinitely. Said here, at the surface holding
+	// both keys, because this is where the reader is when they choose.
+	if n := dv.openCount(); n > 0 && dv.openOrphanCount() == n {
+		b.WriteString(s.Warning.Render("  every open comment's line has already changed — x resolves one that the change addressed; R sends them back again") + "\n")
+	}
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
 	// keys live in the status bar (keymap.go), so the body gets the pane

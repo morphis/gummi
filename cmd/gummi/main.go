@@ -126,8 +126,8 @@ func runBoard() error {
 	shell.SetRepoNames(pool.Names())
 	// The agent tab's hosted-CLI choice: a prior picker answer persisted
 	// to config.yaml's `agent:` key, or empty when nothing has been
-	// chosen yet (in which case MaybeShowAgentPicker below shows the
-	// picker).
+	// chosen yet — in which case the board asks on the first visit to
+	// that tab, not before the first frame (Shell.gotoTab).
 	shell.SetAgentConfig(configuredAgentCLI(ws), ws.ConfigFile())
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
@@ -191,11 +191,10 @@ func runBoard() error {
 	if strings.EqualFold(os.Getenv("GUMMI_MOTION"), "off") {
 		shell.SetMotion(false)
 	}
-	// First-run ask for the agent tab's hosted CLI: a no-op once
-	// GUMMI_ATTACH_CMD/GUMMI_AGENT is set or a prior choice is recorded in
-	// config.yaml's `agent:` key. Must run before Run() starts (see
-	// MaybeShowAgentPicker's own comment for why that ordering matters).
-	shell.MaybeShowAgentPicker()
+	// The agent tab's hosted-CLI question is NOT asked here any more. It
+	// used to be the first thing a new user saw — a modal about a tab
+	// they had not opened, in front of a board they had not seen — and it
+	// is asked on arrival at that tab instead (Shell.gotoTab).
 
 	_, err = tea.NewProgram(shell).Run()
 	return err

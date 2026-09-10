@@ -74,11 +74,11 @@ func (m *Shell) SetAgentConfig(name, configPath string) {
 // agentConfigured reports whether the agent tab already knows which CLI
 // to host, by resolveAgentAttach's own precedence minus its last rung
 // (the picker): an explicit GUMMI_ATTACH_CMD or GUMMI_AGENT env var, or a
-// persisted config `agent:` value. MaybeShowAgentPicker (agentpicker.go)
-// uses this to decide whether the picker needs to show unasked on first
-// start; the space menu's agent-cli entry (boardactions.go) ignores it and
-// opens the picker unconditionally, since re-asking on demand is exactly
-// what that entry is for.
+// persisted config `agent:` value. gotoTab (shell.go) uses this to decide
+// whether arriving at the agent tab has to ask first; the space menu's
+// agent-cli entry (boardactions.go) ignores it and opens the picker
+// unconditionally, since re-asking on demand is exactly what that entry
+// is for.
 func (m *Shell) agentConfigured() bool {
 	return strings.TrimSpace(os.Getenv("GUMMI_ATTACH_CMD")) != "" ||
 		strings.TrimSpace(os.Getenv("GUMMI_AGENT")) != "" ||

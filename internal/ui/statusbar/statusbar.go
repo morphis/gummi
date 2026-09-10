@@ -66,37 +66,23 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 	leftStr := strings.Join(left, " ")
 
 	lw := ansi.StringWidth(leftStr)
-	// keep the pills; when the hints don't fit, drop whole hints rather
-	// than truncating mid-word. Hints arrive most-important-first except
-	// the last (help / the surface's escape hatch), which survives
-	// longest — so drop from the second-to-last backwards. A hint marked
-	// Sticky is excluded from that pool entirely: everything else sheds
-	// before a sticky row is even considered (lastSheddable), the same
-	// protection the trailing escape hatch always had, generalized to
-	// whichever row a surface declared load-bearing.
 	hs := append([]Hint(nil), hints...)
 	rightStr := joinHints(s, hs)
-	for lw+ansi.StringWidth(rightStr)+1 > width {
-		i := lastSheddable(hs)
-		if i < 0 {
-			break // nothing left we're allowed to drop
-		}
-		hs = append(hs[:i], hs[i+1:]...)
-		rightStr = joinHints(s, hs)
-	}
-	// With the hints shed to the bone and the row still over, whole pills
-	// go next — before anything is cut in half. The pill row is ordered
-	// oldest-standing to newest, and the newest is the notice: the answer
+
+	// The AMBIENT PILLS GO FIRST — before any hint is dropped. They used
+	// to go last, and the cost of that order showed up the moment a
+	// notice arrived: a notice pill is wide, so it pushed the row over,
+	// and the row paid for it out of the hints. The result was a bar
+	// reading "FD-001: 1 open diff comment(s) block approval — resolve
+	// them (x) or press R in the diff view" above a hint row shed down to
+	// "esc back" — the message naming the two keys, and the two keys
+	// gone. Hints say what the next keystroke does; the counts beside
+	// them ("1 active · attended 0/1") are unchanged for minutes and
+	// readable again on the next frame. Whole pills, never a cut one, and
+	// by the same rule as before: never the last (the notice — the answer
 	// to the key just pressed, on screen for a moment and nowhere else
-	// afterwards. Truncating the row from its right edge (below) spends
-	// exactly that segment, and spends it from the tail, where the
-	// sentence says what happened — "no diff — …" for "no diff — research
-	// cards carry no branch". The counts it was protecting are ambient:
-	// unchanged for minutes, and readable again on the next frame.
-	//
-	// So the pills shed by the hints' own rule, which already means the
-	// right thing here: never the last (the notice), and never the mode
-	// pill at index 0, which is where "locked" announces itself.
+	// afterwards), and never the mode pill at index 0, which is where
+	// "locked" announces itself.
 	for lw+ansi.StringWidth(rightStr)+1 > width {
 		i := lastSheddablePill(left)
 		if i < 0 {
@@ -105,6 +91,23 @@ func Render(s *theme.Styles, width int, pills []Pill, hints []Hint) string {
 		left = append(left[:i], left[i+1:]...)
 		leftStr = strings.Join(left, " ")
 		lw = ansi.StringWidth(leftStr)
+	}
+	// With the ambient counts gone and the row still over, hints go next
+	// — whole hints rather than a word cut in half. Hints arrive
+	// most-important-first except the last (help / the surface's escape
+	// hatch), which survives longest — so drop from the second-to-last
+	// backwards. A hint marked Sticky is excluded from that pool
+	// entirely: everything else sheds before a sticky row is even
+	// considered (lastSheddable), the same protection the trailing escape
+	// hatch always had, generalized to whichever row a surface declared
+	// load-bearing.
+	for lw+ansi.StringWidth(rightStr)+1 > width {
+		i := lastSheddable(hs)
+		if i < 0 {
+			break // nothing left we're allowed to drop
+		}
+		hs = append(hs[:i], hs[i+1:]...)
+		rightStr = joinHints(s, hs)
 	}
 	if lw+ansi.StringWidth(rightStr)+1 > width {
 		if hasSticky(hs) {

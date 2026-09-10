@@ -104,50 +104,33 @@ func TestAgentPickerDialogNoneInstalledGolden(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-// TestMaybeShowAgentPickerFirstRun proves the actual production trigger:
-// an attached shell with nothing configured (no env var, no persisted
-// choice) opens the picker when MaybeShowAgentPicker is called — the
-// call cmd/gummi's runBoard makes once, before the program starts.
-func TestMaybeShowAgentPickerFirstRun(t *testing.T) {
+// TestAgentPickerIsNeverRaisedUnprompted is the whole of the first-run
+// behaviour now: there isn't any.
+//
+// The picker used to be pushed in front of the very first frame, so a new
+// user's first interaction with gummi was a modal about the agent tab —
+// a tab they had not opened, explained in vocabulary nothing had taught
+// them yet. It is asked for now (the space menu's agent-cli entry, and
+// A), never raised: the answer feeds a hosted-pty path the board thread
+// replaced, so there is nothing an unprompted question could be for.
+func TestAgentPickerIsNeverRaisedUnprompted(t *testing.T) {
 	m, _ := newWorkspace(t)
-	m.MaybeShowAgentPicker()
-	if _, ok := m.Overlay.Top().(*agentPickerDialog); !ok {
-		t.Fatalf("MaybeShowAgentPicker did not open the picker, got %T", m.Overlay.Top())
+	if m.Overlay.Top() != nil {
+		t.Fatalf("something was asked before the user did anything: %T", m.Overlay.Top())
+	}
+	// nor on the way into the tab the question is about
+	if cmd := m.gotoTab(TabAgent); cmd != nil {
+		if _, ok := cmd().(agentPickerLoadedMsg); ok {
+			t.Fatal("arriving at the agent tab raised the picker unprompted")
+		}
+	}
+	if m.Overlay.Top() != nil {
+		t.Fatalf("arriving at the agent tab opened a dialog: %T", m.Overlay.Top())
 	}
 }
 
-// TestMaybeShowAgentPickerSkipsWhenConfigured covers every way
-// agentConfigured can already be satisfied: an env var, or a persisted
-// config choice.
-func TestMaybeShowAgentPickerSkipsWhenConfigured(t *testing.T) {
-	t.Run("GUMMI_ATTACH_CMD", func(t *testing.T) {
-		t.Setenv("GUMMI_ATTACH_CMD", "true")
-		m, _ := newWorkspace(t)
-		m.MaybeShowAgentPicker()
-		if m.Overlay.Top() != nil {
-			t.Fatalf("picker opened despite GUMMI_ATTACH_CMD, got %T", m.Overlay.Top())
-		}
-	})
-	t.Run("GUMMI_AGENT", func(t *testing.T) {
-		t.Setenv("GUMMI_AGENT", "claude")
-		m, _ := newWorkspace(t)
-		m.MaybeShowAgentPicker()
-		if m.Overlay.Top() != nil {
-			t.Fatalf("picker opened despite GUMMI_AGENT, got %T", m.Overlay.Top())
-		}
-	})
-	t.Run("config agent:", func(t *testing.T) {
-		m, _ := newWorkspace(t)
-		m.SetAgentConfig("claude", "")
-		m.MaybeShowAgentPicker()
-		if m.Overlay.Top() != nil {
-			t.Fatalf("picker opened despite a persisted agent choice, got %T", m.Overlay.Top())
-		}
-	})
-}
-
 // TestBoardKeyAReopensPickerRegardlessOfConfig proves the board's "A" key
-// always reopens the dialog, unlike MaybeShowAgentPicker's first-run gate
+// always reopens the dialog — the picker is reached by asking for it
 // — "change later" has to work even after a choice was already made.
 func TestAgentCommandReopensPickerRegardlessOfConfig(t *testing.T) {
 	m, _ := newWorkspace(t)

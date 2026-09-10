@@ -160,35 +160,26 @@ type agentPickerLoadedMsg struct{ agents []agentcli.AgentCLI }
 
 // openAgentPickerCmd builds the command that detects installed CLIs and
 // delivers them for the picker. It backs the space menu's agent-cli entry
-// (boardactions.go), which calls it unconditionally so reopening the
-// dialog later always works regardless of what's already chosen.
+// (boardactions.go) — and, since nothing else does, the picker is now
+// asked for rather than raised.
+//
+// It used to be pushed before the first frame from cmd/gummi's runBoard,
+// which made it the FIRST THING a new user met: a modal about the agent
+// tab, in front of a board they had not seen, before a card existed, in
+// vocabulary nothing had taught them — and spending two of its own lines
+// disclaiming that it does NOT pick the engine's per-role backends,
+// which is the shape of a question asked in the wrong place.
+//
+// The wrong place turns out to be anywhere unprompted. The answer feeds
+// resolveAgentAttach, which is read by ensureAgent — the hosted-pty
+// spawn that the board thread replaced and that nothing reaches any more
+// (gotoTab's own comment: "m.agent must stay nil"). A modal cannot be
+// justified for a setting nothing currently consumes. The dialog stays
+// exactly as it is, reachable on demand for the workspaces that set
+// `agent:` by hand and for whenever a hosted tab returns; it simply
+// stops interrupting people who never asked it anything.
 func (m *Shell) openAgentPickerCmd() tea.Cmd {
 	return func() tea.Msg { return agentPickerLoadedMsg{agents: agentcli.Detect()} }
-}
-
-// MaybeShowAgentPicker opens the agent-tab CLI picker up front when
-// nothing has told resolveAgentAttach which CLI to host yet — no env
-// var, no persisted config `agent:` choice (agentConfigured).
-//
-// cmd/gummi's runBoard calls this once, after SetAgentConfig and before
-// tea.NewProgram(shell).Run() starts. That timing is what lets this push
-// straight onto m.Overlay instead of going through a tea.Cmd/message
-// round trip the way openAgentPickerCmd does: before Run() there is no
-// second goroutine yet for a direct field mutation to race with, so the
-// usual "never touch Shell fields outside Update" rule doesn't apply —
-// there is no "outside Update" here, only "before the loop exists". It
-// is deliberately NOT wired into Shell.Init(): Init runs on every
-// program start including the many test scaffolds across this package
-// that call it directly and then immediately drive keys, none of which
-// configure an agent — wiring the picker there would pop an unexpected
-// modal in front of nearly every existing test's first keypress. A real
-// TUI run past Init and into the picker instead sees it appear before
-// the first frame ever draws.
-func (m *Shell) MaybeShowAgentPicker() {
-	if !m.attached() || m.agentConfigured() {
-		return
-	}
-	m.Overlay.Push(newAgentPickerDialog(agentcli.Detect(), m.agentConfigName, m.chooseAgentCLI))
 }
 
 // agentChosenMsg carries the outcome of persisting a picker choice. name

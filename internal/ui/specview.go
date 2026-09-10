@@ -332,42 +332,72 @@ func (m *Shell) specViewRender(w, h int) string {
 	return b.String()
 }
 
+// reviewerMarker returns the last unresolved `@reviewer` marker in a
+// thread, or nil. It mirrors userMarker (spec.UnresolvedUserMarker) for
+// the one other role that must never be lumped in with plain agent
+// scaffolding: a critique finding does not gate on its own, but calling
+// it "informational" — the word that tells a reader they may skip
+// something — let a card approve past two rounds of escalated blocking
+// findings with the gate none the wiser (see renderStatus).
+func reviewerMarker(t spec.Thread) *spec.Marker {
+	var found *spec.Marker
+	for i := range t.Markers {
+		if t.Markers[i].Author == "reviewer" && !t.Markers[i].Resolved {
+			found = &t.Markers[i]
+		}
+	}
+	return found
+}
+
 // renderStatus renders the fixed header: live dependency status, then
-// the open threads split by who they wait on. An unresolved @user
-// comment blocks the approval gate (DESIGN §6.1); agent-authored threads
-// (questions, reviewer findings) are informational here and don't gate —
-// the gate math counts only the user threads, so surfacing them under
-// one "open questions" header misread the agent's threads as blockers.
+// the open threads split into three groups by who authored them. An
+// unresolved @user comment blocks the approval gate (DESIGN §6.1) — the
+// gate math counts only those threads, so a reader must be able to tell
+// which group that is. The other two groups are both agent-authored and
+// neither gates, but they are not the same thing: a @reviewer finding is
+// the critique's own verdict on the artifact and needs weighing before
+// approving, while an @architect/@gummi thread (template prompts, notes)
+// is ordinary scaffolding. Grouping by the marker's role rather than by
+// scanning finding text for words like "blocking" is what keeps this
+// honest — free text a reviewer writes is not a contract gummi can
+// pattern-match without eventually mislabeling a finding that happens
+// not to start with the expected word.
 func (sv *specView) renderStatus(m *Shell, w int) string {
 	s := m.styles
 	var b strings.Builder
 	b.WriteString(sv.renderDependencyStatus(m, w))
 
-	var blocking, informational []spec.Thread
+	var blocking, reviewed, agentNotes []spec.Thread
 	for _, t := range sv.doc.OpenQuestions() {
-		if userMarker(t) != nil {
+		switch {
+		case userMarker(t) != nil:
 			blocking = append(blocking, t)
-		} else {
-			informational = append(informational, t)
+		case reviewerMarker(t) != nil:
+			reviewed = append(reviewed, t)
+		default:
+			agentNotes = append(agentNotes, t)
 		}
 	}
-	renderThreadGroup := func(label string, threads []spec.Thread) {
+	renderThreadGroup := func(label string, threads []spec.Thread, marker func(spec.Thread) *spec.Marker) {
 		if len(threads) == 0 {
 			return
 		}
 		b.WriteString(s.Subtitle.Render(label) + "\n")
 		for _, t := range threads {
 			mk := t.Markers[0]
-			if u := userMarker(t); u != nil {
-				mk = *u
+			if marker != nil {
+				if found := marker(t); found != nil {
+					mk = *found
+				}
 			}
 			b.WriteString(s.Warning.Render("  ☐ ") + s.Subtle.Render(ansi.Truncate(mk.Text, max(w-8, 4), "…")) +
 				s.Faint.Render("  L"+strconv.Itoa(mk.Line)) + "\n")
 		}
 		b.WriteString("\n")
 	}
-	renderThreadGroup("blocks approval (you)", blocking)
-	renderThreadGroup("informational (agent)", informational)
+	renderThreadGroup("blocks approval (you)", blocking, userMarker)
+	renderThreadGroup("reviewer findings — weigh before approving", reviewed, reviewerMarker)
+	renderThreadGroup("agent notes (non-blocking)", agentNotes, nil)
 	return b.String()
 }
 

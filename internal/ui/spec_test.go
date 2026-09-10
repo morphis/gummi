@@ -263,14 +263,19 @@ func TestSpecEditorRequiresEDITOR(t *testing.T) {
 	}
 }
 
-// TestSpecViewSeparatesBlockingThreads: a spec with both an open @user
-// comment (blocks approval) and an agent thread renders them under
-// distinct headers, so an agent question isn't misread as a blocker.
+// TestSpecViewSeparatesBlockingThreads: a spec with an open @user
+// comment (blocks approval), a @reviewer finding (its own group — must
+// be weighed before approving, but does not itself gate), and an
+// @architect thread (ordinary agent scaffolding) renders all three under
+// distinct headers, so neither agent thread is misread as a blocker and
+// the reviewer's finding is never lumped in with plain notes.
 func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 	content := "## Problem\n\nThe toggle persists via localStorage.\n" +
 		"%% @user(2026-07-14): should this sync to the account?\n\n" +
 		"It defaults to on for new installs.\n" +
-		"%% @architect: is that the right default?\n"
+		"%% @architect: is that the right default?\n\n" +
+		"## Fix\n\nRemove the toggle entirely.\n" +
+		"%% @reviewer: blocking — the implementation plan is missing from this artifact\n"
 	id, _ := domain.NewFeatureID(1)
 	sv := &specView{
 		f:       domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan},
@@ -290,14 +295,24 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 	if !strings.Contains(out, "should this sync to the account?") {
 		t.Errorf("user thread not listed as blocking:\n%s", out)
 	}
-	// the architect-only thread is informational, not a blocker
+	// the three groups render in this order: user, reviewer, agent notes
 	bi := strings.Index(out, "blocks approval")
-	ii := strings.Index(out, "informational (agent)")
-	if ii < 0 || bi < 0 || ii < bi {
-		t.Errorf("informational group missing or misordered (blocks=%d info=%d):\n%s", bi, ii, out)
+	ri := strings.Index(out, "reviewer findings")
+	ai := strings.Index(out, "agent notes")
+	if bi < 0 || ri < 0 || ai < 0 || !(bi < ri && ri < ai) {
+		t.Errorf("group order wrong (blocks=%d reviewer=%d agent=%d):\n%s", bi, ri, ai, out)
 	}
 	if !strings.Contains(out, "is that the right default?") {
-		t.Errorf("agent thread not listed as informational:\n%s", out)
+		t.Errorf("agent thread not listed under agent notes:\n%s", out)
+	}
+	if !strings.Contains(out, "the implementation plan is missing from this artifact") {
+		t.Errorf("reviewer finding not listed under reviewer findings:\n%s", out)
+	}
+	// nothing on screen may call an agent-authored thread "informational"
+	// again — that is precisely the word that told a reader they could
+	// skip a finding two critique rounds had already escalated
+	if strings.Contains(out, "informational") {
+		t.Errorf("stale 'informational' label still present:\n%s", out)
 	}
 }
 

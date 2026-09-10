@@ -2466,10 +2466,21 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 				return cmd
 			}
 		}
+		// The review surfaces clear a standing notice before acting on the
+		// key. Elsewhere a notice is dropped on a view change, which is
+		// enough — but these two are surfaces a reader stays on for many
+		// keystrokes, resolving comments one after another, and a refusal
+		// raised by one of those keys used to sit under all the rest of
+		// them. "stage todo has no agent action" was still on the bar
+		// several successful resolves later, describing nothing that had
+		// happened since. A key that acts here replaces the answer to the
+		// last key; one that fails raises its own notice again anyway.
 		if m.spec != nil {
+			m.clearTransientNotice()
 			return m.handleSpecKey(key)
 		}
 		if m.diff != nil {
+			m.clearTransientNotice()
 			return m.handleDiffKey(key)
 		}
 		if m.ingest != nil {
