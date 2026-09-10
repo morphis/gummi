@@ -488,11 +488,17 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 		}
 		if parseInput(text).Kind == verbNone {
 			if d.ask != nil {
-				if d.ask.FreeForm {
-					return m.answerAskWith(r, text)
-				}
-				// a structured ask keeps its terms: prose is a turn
-				return m.submitThreadInput(r)
+				// EVERY PROSE LINE AT AN OPEN ASK IS THE ANSWER, whether
+				// or not the ask declared free_form. A structured ask used
+				// to "keep its terms" and route prose as a turn instead —
+				// which is the one thing that cannot work here: the ask is
+				// blocking the agent's turn from inside a client tool, so
+				// the backend refuses the second turn, and the line was
+				// lost after being echoed into the transcript as if it had
+				// been delivered. Engine.Answer takes arbitrary text and
+				// hands it back as the tool's result, so the model reads
+				// the sentence the person actually wrote.
+				return m.answerAskWith(r, text)
 			}
 			// EVERY PROSE LINE AT A STOP IS READ. Not only one aimed at
 			// "send it back": the row the highlight happened to sit on
@@ -1009,23 +1015,27 @@ func (m *Shell) threadInputBindings() []binding {
 			}
 			label, help := "answer", "answer the highlighted option"
 			switch {
-			case d.ask != nil && typed && d.ask.FreeForm:
+			case d.ask != nil && typed && parseInput(text).Kind == verbNone:
+				// Prose in front of an open question is the answer,
+				// whether or not the ask declared allow_free_form. It used
+				// to be the answer only for a free-form ask; a structured
+				// one "kept its terms" and the line went out as an
+				// ordinary turn, which is the one thing that cannot work
+				// while the ask is blocking that very turn from inside a
+				// client tool. The bar said "send", and the send was
+				// refused. It says "answer" now because that is what enter
+				// does (submitThreadLine).
 				help = "your line is the answer"
 			case typed && aim < 0:
-				// aim is -1 for three reasons now, not two: prose a
-				// workflow decision has nowhere to spend (send is right),
-				// a verb-leading line the parser owns regardless of what
-				// the decision offers, or — F4 — a structured (non-
-				// free-form) ask, which wordAim refuses to aim at
-				// unconditionally (decision.go) because there is nothing
-				// on it that takes prose. submitThreadLine falls all
-				// three through to submitThreadInput exactly alike, so
-				// the bar names that real destination instead of the
-				// picker's "answer" — DESIGN §6.3 keeps a structured
-				// ask's terms and routes prose as a turn, and the bar may
-				// not claim enter for a choice the line is not aimed at
-				// (F7). The parse is deterministic and context-free, so
-				// asking it directly is safe here.
+				// aim is -1 for two reasons: prose a workflow decision has
+				// nowhere to spend (send is right), or a verb-leading line
+				// the parser owns regardless of what the decision offers.
+				// submitThreadLine falls both through to submitThreadInput
+				// alike, so the bar names that real destination instead of
+				// the picker's "answer" — the bar may not claim enter for
+				// a choice the line is not aimed at (F7). The parse is
+				// deterministic and context-free, so asking it directly is
+				// safe here.
 				label, help = threadEnterLabel(text)
 			case d.ask == nil:
 				// the option the highlight sits on — the word-eater while

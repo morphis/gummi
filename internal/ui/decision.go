@@ -454,7 +454,18 @@ func (m *Shell) decisionArmed(d *threadDecision) bool {
 		return false
 	}
 	text := strings.TrimSpace(m.threadInput.Value())
-	return text == "" || parseInput(text).Kind == verbNone
+	if text == "" {
+		return true
+	}
+	if parseInput(text).Kind != verbNone {
+		return false
+	}
+	// Prose in front of an open question is the answer now — the words,
+	// not the highlighted row (submitThreadLine). So the row must stop
+	// claiming enter, exactly as it does for the armed free-form channel
+	// above: one control owns enter at a time, and here it is the
+	// composer.
+	return d.ask == nil
 }
 
 func (m *Shell) syncDecision(d *threadDecision) {
@@ -557,10 +568,11 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 	autopilots := m.autopilotAnswering[r.F.ID]
 	if d.ask != nil {
 		title = string(r.F.ID) + " asks"
-		if m.threadFreeForm {
-			// armed: the composer below is the answer channel — say so on
-			// the pinned control, the way the pane's free-form mode put
-			// the textarea where the picker stood
+		if m.threadFreeForm || m.proseAnswersAsk() {
+			// armed, or simply typed into: either way the composer below
+			// is the answer channel — say so on the pinned control, the
+			// way the pane's free-form mode put the textarea where the
+			// picker stood.
 			title += " · your line is the answer"
 		}
 		options = askPickerOptions(d.ask)
@@ -793,6 +805,15 @@ func (m *Shell) moveDecision(d *threadDecision, delta int) {
 	}
 	m.decisionCursor = clamp(m.decisionCursor+delta, 0, n-1)
 	m.decisionAimed = false
+}
+
+// proseAnswersAsk reports whether the composer currently holds a line
+// that would be delivered as the open ask's answer: prose, not a verb.
+// The picker's title and its armed paint both read it, so what the screen
+// says about enter and what enter does cannot drift apart.
+func (m *Shell) proseAnswersAsk() bool {
+	text := strings.TrimSpace(m.threadInput.Value())
+	return text != "" && parseInput(text).Kind == verbNone
 }
 
 // answerAskWith delivers free-form prose as the answer to the open ask —

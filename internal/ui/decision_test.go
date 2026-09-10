@@ -575,16 +575,29 @@ func TestThreadDecisionTypedProseAnswersTheAsk(t *testing.T) {
 	}
 }
 
-// TestThreadDecisionStructuredAskLabelsEnterSend is F4: with a structured
-// (non-free-form) ask pinned and prose typed in front of it, the bar used
-// to keep the label "answer" — but submitThreadLine only ever routes
-// prose to the ask when it declared allow_free_form (DESIGN §6.3), so a
-// structured ask's typed line falls through and goes out as an ordinary
-// turn while the question stays open. Confirmed against a live agent: the
-// ask never got a reply and the spinner ran forever. The fix is the
-// label, not the routing — enter has to say "send" here, the same as any
-// other prose the decision has nowhere to spend.
-func TestThreadDecisionStructuredAskLabelsEnterSend(t *testing.T) {
+// TestThreadDecisionStructuredAskAnswersWithProse reverses F4's fix, on
+// the evidence of a full pty drive.
+//
+// F4 found that prose typed in front of a STRUCTURED (non-free-form) ask
+// went out as an ordinary turn while the question stayed open — "the ask
+// never got a reply and the spinner ran forever" — and concluded the fix
+// was the label: enter should say "send", because DESIGN §6.3 keeps a
+// structured ask's terms and routes prose as a turn.
+//
+// Driving it end to end showed the label was not the problem. The turn
+// CANNOT be delivered: the ask is blocking that very turn from inside a
+// client tool, so the backend refuses the second one — and the refusal
+// used to be routed through failRun, which killed the stage. Relabelling
+// enter only told the user, accurately, that their sentence was about to
+// be thrown away. And a structured ask leaves them nowhere else to put
+// it: there is no free-form channel to arm, so the choice was to say
+// something they did not mean or to be stuck.
+//
+// So the words are the answer now, whatever the ask declared.
+// Engine.Answer takes arbitrary text and hands it back as the tool's
+// result, so the model reads the sentence the person actually wrote — and
+// enter says "answer" because that is what it does.
+func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
 	m, eng := chatWorkspace(t, structuredAskFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
@@ -599,31 +612,39 @@ func TestThreadDecisionStructuredAskLabelsEnterSend(t *testing.T) {
 		if b.key != "enter" {
 			continue
 		}
-		if b.label != "send" {
-			t.Errorf("enter labeled %q while pinned to a structured ask with typed prose, want \"send\"", b.label)
+		if b.label != "answer" {
+			t.Errorf("enter labeled %q while pinned to a structured ask with typed prose, want \"answer\"", b.label)
 		}
-		if !strings.Contains(b.help, "message") {
-			t.Errorf("enter help %q does not say the line becomes a message", b.help)
+		if !strings.Contains(b.help, "the answer") {
+			t.Errorf("enter help %q does not say the line is the answer", b.help)
 		}
 	}
+	// the picker stops claiming enter: one control owns it, and with
+	// words on the line that control is the composer.
+	if d := m.visibleDecision(m.rows[0]); d == nil || m.decisionArmed(d) {
+		t.Error("the picker still claims enter while prose is typed at an open ask")
+	}
 
-	// confirm the routing itself is untouched (DESIGN §6.3): enter really
-	// does send a turn, and the ask is still open behind it
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
 	for {
-		snap := eng.Get("FD-001").Snapshot()
-		if len(snap.Transcript) > 0 {
+		if eng.Get("FD-001").Snapshot().PendingAsk == nil {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatal("enter never sent the line as a turn")
+			t.Fatal("the typed line never answered the structured ask")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if eng.Get("FD-001").Snapshot().PendingAsk == nil {
-		t.Error("the structured ask closed on its own — it should still be open")
+	var answered string
+	for _, msg := range eng.Get("FD-001").Snapshot().Transcript {
+		if msg.Author == engine.AuthorUser {
+			answered = msg.Content
+		}
+	}
+	if answered != "please point me at the rig" {
+		t.Errorf("the ask was answered with %q, want the composer's own line", answered)
 	}
 }
 
