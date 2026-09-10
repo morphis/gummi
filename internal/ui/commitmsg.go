@@ -225,11 +225,42 @@ func (d *commitMsgDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 }
 
 // View implements overlay.Dialog.
+// commitBodyCols is the widest the message box gets. A commit body is
+// wrapped at ~72 columns by convention (and gummi's own drafts are), so
+// anything narrower re-wraps an already-wrapped paragraph and produces
+// the ragged mess this box used to show:
+//
+//	┃ - scripts had to scrape the padded text table;
+//	┃ machine-readable JSON
+//	┃   lets consumers parse structured data instead of
+//	┃ screen-scraping
+//
+// The box was a fixed 64×8 regardless of the terminal, so on a 120-column
+// screen the reader was asked to approve, here, a message they could not
+// read here — eight lines of eighteen, with nothing saying there was
+// more. A few columns of slack past 72 keeps the longest conventional
+// line off the edge.
+const commitBodyCols = 78
+
 func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
+	// Size to the frame rather than to a constant. The dialog is given
+	// its space here and nowhere else, and the textarea has to be told
+	// before it renders.
+	d.input.SetWidth(clamp(w-12, 40, commitBodyCols))
+	// chrome: title, branch, blank, the status line and its blank, the
+	// button row and its blanks, the hint, and the frame's own border.
+	d.input.SetHeight(clamp(h-12, 6, 24))
+
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("squash-merge "+string(d.feature)) + "\n")
 	b.WriteString(s.Subtle.Render(d.branch+" → main") + "\n\n")
 	b.WriteString(d.input.View() + "\n")
+	// Say when the message continues past the box. Approving something
+	// you cannot see all of is the failure this guards, and a reader with
+	// no scrollbar has no other way to know there is more.
+	if hidden := d.input.LineCount() - d.input.Height(); hidden > 0 {
+		b.WriteString(s.Faint.Render("  ↓ "+itoa(hidden)+" more line"+plural(hidden)+" — ↑↓ scrolls the message") + "\n")
+	}
 	switch {
 	case d.armed && !d.modified:
 		b.WriteString("\n" + s.Warning.Render("unreviewed draft — ctrl+s again to land without reviewing"))

@@ -11,38 +11,42 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-func TestButtonRowMoveWraps(t *testing.T) {
+func TestButtonRowMoveClamps(t *testing.T) {
 	r := newButtonRow(button{label: "Cancel"}, button{label: "Confirm"}, button{label: "Later"})
 
 	r.Move(-1)
-	if got := r.Cursor(); got != 2 {
-		t.Fatalf("Move(-1) from 0 = %d, want 2 (wrap backward)", got)
-	}
-	r.Move(1)
 	if got := r.Cursor(); got != 0 {
-		t.Fatalf("Move(1) from 2 = %d, want 0 (wrap forward)", got)
+		t.Fatalf("Move(-1) from 0 = %d, want 0 (clamped, not wrapped)", got)
 	}
 	r.Move(1)
 	r.Move(1)
+	r.Move(1)
 	if got := r.Cursor(); got != 2 {
-		t.Fatalf("Move(1) x2 from 0 = %d, want 2", got)
+		t.Fatalf("Move(1) x3 from 0 = %d, want 2 (clamped at the last button)", got)
 	}
 }
 
-func TestButtonRowMoveWrapsTwoItems(t *testing.T) {
+// TestButtonRowMoveClampsTwoItems is the regression for the defect this
+// clamping rule exists to close: a two-item confirm/cancel row that opens
+// on its confirm button (newAutopilotDialog's shape) used to wrap on a
+// single →, landing back on Cancel — the "obvious next key" after opening
+// a confirmation silently cancelled it instead.
+func TestButtonRowMoveClampsTwoItems(t *testing.T) {
 	r := newButtonRow(button{label: "Cancel"}, button{label: "Confirm"})
 
 	r.Move(1)
 	if got := r.Cursor(); got != 1 {
 		t.Fatalf("Move(1) from 0 = %d, want 1", got)
 	}
+	// the case that used to wrap: → from the last button must stay there.
 	r.Move(1)
-	if got := r.Cursor(); got != 0 {
-		t.Fatalf("Move(1) from 1 = %d, want 0 (a two-item row cycles)", got)
+	if got := r.Cursor(); got != 1 {
+		t.Fatalf("Move(1) from 1 = %d, want 1 (clamped, not wrapped back to 0)", got)
 	}
 	r.Move(-1)
-	if got := r.Cursor(); got != 1 {
-		t.Fatalf("Move(-1) from 0 = %d, want 1 (wrap backward on a two-item row)", got)
+	r.Move(-1)
+	if got := r.Cursor(); got != 0 {
+		t.Fatalf("Move(-1) x2 from 1 = %d, want 0 (clamped, not wrapped)", got)
 	}
 }
 
@@ -141,16 +145,16 @@ func TestButtonRowViewFocusedVsUnfocused(t *testing.T) {
 		t.Fatal("focused and unfocused row rendered identically")
 	}
 
-	// with focused=false, no button is filled — every label renders the
-	// same unfilled way regardless of cursor position.
-	allPlain := s.Button.Render("[ Cancel ]") + "  " + s.Button.Render("[ Delete ]")
+	// with focused=false, no button is filled or marked — every label
+	// renders the same unfilled way regardless of cursor position.
+	allPlain := "  " + s.Button.Render("[ Cancel ]") + "  " + "  " + s.Button.Render("[ Delete ]")
 	if unfocusedRow != allPlain {
 		t.Fatalf("unfocused row = %q, want every button unfilled: %q", unfocusedRow, allPlain)
 	}
 
-	// with focused=true, the cursor button is filled, the other stays a
-	// plain legend.
-	wantFocused := s.ButtonFocus.Render("[ Cancel ]") + "  " + s.Button.Render("[ Delete ]")
+	// with focused=true, the cursor button is filled and carries the ▸
+	// marker, the other stays a plain, unmarked legend.
+	wantFocused := "▸ " + s.ButtonFocus.Render("[ Cancel ]") + "  " + "  " + s.Button.Render("[ Delete ]")
 	if focusedRow != wantFocused {
 		t.Fatalf("focused row = %q, want %q", focusedRow, wantFocused)
 	}
@@ -167,8 +171,8 @@ func TestButtonRowViewPadsLabelsEvenly(t *testing.T) {
 	r := newButtonRow(button{label: "No"}, button{label: "Delete forever", danger: true})
 
 	view := ansi.Strip(r.View(s, true))
-	want := "[ No" + strings.Repeat(" ", ansi.StringWidth("Delete forever")-ansi.StringWidth("No")) +
-		" ]  [ Delete forever ]"
+	want := "▸ [ No" + strings.Repeat(" ", ansi.StringWidth("Delete forever")-ansi.StringWidth("No")) +
+		" ]  " + "  [ Delete forever ]"
 	if view != want {
 		t.Fatalf("view = %q, want %q (short label padded to the long one's width)", view, want)
 	}

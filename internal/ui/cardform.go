@@ -179,7 +179,7 @@ func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, la
 		kind: kind, repo: repo, origins: map[string]repoOrigin{},
 		text: text, env: env, profiles: profiles,
 		afterCands: cands, afterFilter: filter,
-		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}, button{label: "Create & start"}),
+		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}, button{label: "Create & autopilot"}),
 		onSubmit: onSubmit,
 	}
 	d.buttons.SetCursor(1)
@@ -630,7 +630,7 @@ func (d *cardForm) failImport(err error) {
 	d.errText = "import: " + sanitize(err.Error())
 }
 
-// submit validates and fires onSubmit. start marks Create & start.
+// submit validates and fires onSubmit. start marks Create & autopilot.
 func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	if d.repo.needsChoice() {
 		d.errText = repoUnchosenErr
@@ -747,11 +747,20 @@ func choices(s *theme.Styles, focused bool, opts []string, idx int, unsetLabel s
 }
 
 // optionLabel is an expanded option row's label cell: indented under
-// "runs as", banded when its row has focus.
+// "runs as", banded when its row has focus — and, since the band alone
+// used to be the only tell, carrying a leading ▸ too. The rows here
+// (envelope, profile, severity, after) each show their own value with
+// choices()' own "▸" beside whichever option is picked, on every row,
+// focused or not — that answers "what is this row set to", never "which
+// row is tab on right now". A reader driving the dialog with no working
+// color (or who just can't tell a faint cell from a banded one at a
+// glance) needs a mark that only ever appears on the one row focus is
+// actually on; the label's own margin is that mark, and it costs no
+// width — "  ▸ " and "    " are both four columns.
 func optionLabel(s *theme.Styles, focused bool, label string) string {
 	cell := fmt.Sprintf("%-10s", label)
 	if focused {
-		return "    " + s.Band(cell, 0, true)
+		return "  ▸ " + s.Band(cell, 0, true)
 	}
 	return "    " + s.Faint.Render(cell)
 }
@@ -1022,12 +1031,26 @@ func (d *cardForm) hint() string {
 			g = "alt+g import"
 		}
 		return "tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
+	case cardStopEnvelope:
+		return "type a number of credits · alt+o collapse · tab next · esc cancel"
+	case cardStopProfile:
+		return "←/→ choose the profile · alt+o collapse · tab next · esc cancel"
+	case cardStopSeverity:
+		return "←/→ choose the severity · alt+o collapse · tab next · esc cancel"
 	case cardStopAfter:
-		return "type to filter · ↑/↓ move · enter add · backspace remove last · tab next · esc cancel"
+		return "type to filter · ↑/↓ move · enter add · backspace remove last · alt+o collapse · tab next · esc cancel"
 	case cardStopButtons:
 		return "←/→ buttons · enter activate · tab next · esc cancel"
+	case cardStopRuns:
+		// stops() offers this as the collapsed "runs as" line's tab stop,
+		// but advanceFocus always converts landing here into
+		// cardStopEnvelope or cardStopAfter (expanding the row instead of
+		// focusing it bare) before setFocus runs, so d.focus is never
+		// actually this value. Named anyway so the switch has no silent
+		// gap if that ever stops being true.
+		return "tab expands the run options · esc cancel"
 	default:
-		return "tab rows · ←/→ choose · type a number · alt+o collapse · enter create · esc cancel"
+		return "tab rows · esc cancel"
 	}
 }
 

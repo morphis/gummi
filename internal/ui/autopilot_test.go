@@ -98,7 +98,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		// stage that needs a person by nature — so the list is the whole
 		// remainder and nothing is named as a stage it will only open.
 		"plan, implement and verify",
-		"5 corrections",
+		"5 corrective rounds",
 		"2400 credit envelope",
 		"parks to the inbox if it can't finish",
 		"never lands on main",
@@ -128,7 +128,7 @@ func TestAutopilotBodyOffNeverStarts(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
 	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan}}
 	body := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")
-	if strings.Contains(body, "corrections") || strings.Contains(body, "runs brainstorm") {
+	if strings.Contains(body, "corrective rounds") || strings.Contains(body, "runs brainstorm") {
 		t.Errorf("off's body should not describe a run: %q", body)
 	}
 	if !strings.Contains(body, "waits for you") {
@@ -465,18 +465,32 @@ func TestAutopilotDialogConfirmSubmitsAutopilot(t *testing.T) {
 		t.Fatalf("onSubmit mode = %q, want %q", got, domain.GateAutopilot)
 	}
 
-	// ←  reaches Cancel, and enter there changes nothing
+	// ←  reaches Cancel, and enter there changes nothing — but it does
+	// leave a notice, so cancelling one confirmation never reads like
+	// confirming another (see TestAutopilotDialogEscCancelsWithoutSubmitting).
 	got = ""
 	d = newAutopilotDialog(f, plan, func(mode string) tea.Cmd { got = mode; return nil })
 	d.HandleKey(tea.KeyPressMsg{Text: "left"})
-	if done, _ := d.HandleKey(tea.KeyPressMsg{Text: "enter"}); !done {
+	done, cmd := d.HandleKey(tea.KeyPressMsg{Text: "enter"})
+	if !done {
 		t.Fatal("enter on Cancel should close the dialog")
 	}
 	if got != "" {
 		t.Fatalf("Cancel submitted %q — it must change nothing", got)
 	}
+	if cmd == nil {
+		t.Fatal("enter on Cancel should leave a notice behind")
+	}
+	if msg, ok := cmd().(noticeMsg); !ok || !strings.Contains(msg.text, "nothing started") {
+		t.Fatalf("Cancel notice = %#v, want a noticeMsg saying nothing started", cmd())
+	}
 }
 
+// TestAutopilotDialogEscCancelsWithoutSubmitting also covers the notice
+// esc leaves behind: closing the overlay used to leave nothing at all,
+// so cancelling a confirmation read identically to confirming one that
+// happened to do nothing — the miss driving this dialog for real found,
+// two screens later, with the card still unstarted and no record of why.
 func TestAutopilotDialogEscCancelsWithoutSubmitting(t *testing.T) {
 	called := false
 	f := domain.Feature{ID: "FD-001"}
@@ -485,11 +499,18 @@ func TestAutopilotDialogEscCancelsWithoutSubmitting(t *testing.T) {
 		return nil
 	})
 	done, cmd := d.HandleKey(tea.KeyPressMsg{Text: "esc"})
-	if !done || cmd != nil {
-		t.Fatalf("esc: done=%v cmd=%v, want done, no cmd", done, cmd)
+	if !done || cmd == nil {
+		t.Fatalf("esc: done=%v cmd=%v, want done, with a cancel notice", done, cmd)
 	}
 	if called {
 		t.Fatal("esc must not submit")
+	}
+	msg, ok := cmd().(noticeMsg)
+	if !ok {
+		t.Fatalf("esc's cmd = %T, want a noticeMsg", cmd())
+	}
+	if !strings.Contains(msg.text, "nothing started") {
+		t.Errorf("esc notice = %q, want it to say nothing started", msg.text)
 	}
 }
 
@@ -520,11 +541,11 @@ func stagesEqual(a, b []domain.Stage) bool {
 	return true
 }
 
-// gates and full promise different things, and the dialog is what
-// someone reads before leaving the room: full runs the card unattended
-// and spends the corrective budget doing it, gates crosses design gates
-// but still stops the moment the agent needs an answer. Sharing a
-// sentence between them would make one of the two a lie.
+// attended and autopilot promise different things, and the dialog is
+// what someone reads before leaving the room: autopilot runs the card
+// unattended and spends the corrective budget doing it, attended stops
+// at every gate and spends nothing. Sharing a sentence between them
+// would make one of the two a lie.
 func TestAutopilotBodyDistinguishesAttendedFromAutopilot(t *testing.T) {
 	f := domain.Feature{
 		ID: "FD-051", Num: 51, Title: "rate limits", Slug: "rate-limits",
@@ -549,10 +570,10 @@ func TestAutopilotBodyDistinguishesAttendedFromAutopilot(t *testing.T) {
 	}
 	// the corrective budget is autopilot's; naming it under attended would
 	// imply a bounce loop that mode never runs.
-	if !strings.Contains(autopilot, "corrections") {
+	if !strings.Contains(autopilot, "corrective rounds") {
 		t.Errorf("autopilot body omits the corrective budget: %q", autopilot)
 	}
-	if strings.Contains(attended, "corrections") {
+	if strings.Contains(attended, "corrective rounds") {
 		t.Errorf("attended body names a budget that does not apply to it: %q", attended)
 	}
 	// autopilot is the mode that walks away, so it carries the guarantees;

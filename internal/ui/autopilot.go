@@ -314,17 +314,23 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 	// person by nature any more, so the list that used to split in two —
 	// the stages it runs, and the ones it would only open and hand back —
 	// is one list again.
+	//
+	// mode is always domain.GateAutopilot below: autopilotModeFor already
+	// sent anything else through the GateAttended branch above, and the
+	// two-mode switch (autopilotAnswers' own doc) leaves nothing else this
+	// could be. There used to be a third, "gates" mode with its own
+	// sentence here — "%s it on gates runs %s, crossing each design gate
+	// for you" — retired along with the mode itself; the wording below
+	// names only vocabulary the rest of the UI actually uses: "autopilot"
+	// (this dialog's own header, thread.go's autopilotField) and
+	// "corrective rounds" (thread.go's "N of M corrective", quitresume.go's
+	// "N of M corrections spent") rather than the bare, unitless
+	// "corrections" this used to say.
 	runs := plan.remaining
 	var out []string
-	switch {
-	case len(runs) == 0:
-		// nothing it may run unattended, so no promise about running one
-	case mode == domain.GateAutopilot:
-		out = append(out, fmt.Sprintf("%s it on full runs %s without you — up to %d corrections%s.",
+	if len(runs) > 0 {
+		out = append(out, fmt.Sprintf("%s it on autopilot runs %s without you — up to %d corrective rounds%s.",
 			verb, englishList(runs), verdict.MaxRounds(domain.RoundKindCorrective), envelope))
-	default:
-		out = append(out, fmt.Sprintf("%s it on gates runs %s, crossing each design gate for you%s — but it still stops whenever the agent needs an answer.",
-			verb, englishList(runs), envelope))
 	}
 	return append(out, "it parks to the inbox if it can't finish, and it never lands on main.")
 }
@@ -589,7 +595,7 @@ func (d *autopilotDialog) ID() string { return "autopilot" }
 func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc":
-		return true, nil
+		return true, d.cancelNotice()
 	case "left", "h", "shift+tab":
 		d.buttons.Move(-1)
 		return false, nil
@@ -601,11 +607,28 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		// (buttonRow's own contract). There is one thing to confirm now
 		// that the modes are a binary: hand this card to autopilot.
 		if d.buttons.Cursor() == 0 {
-			return true, nil
+			return true, d.cancelNotice()
 		}
 		return true, d.onSubmit(domain.GateAutopilot)
 	}
 	return false, nil
+}
+
+// cancelNotice is what closing this dialog on Cancel (or esc) leaves
+// behind. It used to leave nothing: driven for real, a stray → off the
+// confirm button (buttonRow.Move wrapped before it clamped) landed on
+// Cancel, and enter there closed the overlay with no notice at all — the
+// status bar kept whatever it said before the dialog opened, and the
+// card still read "autopilot: off". The miss was found only two screens
+// later. A cancel is a real outcome, not the absence of one, so it gets
+// the same notice-on-the-way-out every other abandoned dialog in this
+// package leaves (bugingestview.go's "left the issue picker — nothing
+// created" is the same convention).
+func (d *autopilotDialog) cancelNotice() tea.Cmd {
+	id := d.feature.ID
+	return func() tea.Msg {
+		return noticeMsg{text: string(id) + ": cancelled — nothing started"}
+	}
 }
 
 // dashRule renders "── label ────…" filled to width, the same dash-fill

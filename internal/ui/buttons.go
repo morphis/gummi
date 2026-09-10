@@ -29,14 +29,18 @@ func newButtonRow(buttons ...button) *buttonRow {
 	return &buttonRow{buttons: buttons}
 }
 
-// Move shifts focus by delta, wrapping — a two-item row cycles rather than
-// clamping, so ←/→ (or tab/shift+tab) always lands on a button.
+// Move shifts focus by delta, clamping at the ends. It used to wrap — the
+// reasoning was that a two-item row cycles rather than clamping, so ←/→
+// always lands on a button — but clamping lands on a button just as
+// reliably, and wrapping made the row's most tempting gesture dangerous:
+// on a two-item confirm/cancel row with the confirm focused (the common
+// case — see newAutopilotDialog), pressing → once is the obvious "move to
+// the affirmative button" reflex, and wrapping sends it past the far end
+// and back onto Cancel instead. Clamping means an extra press in a
+// direction that has nowhere left to go is a no-op, never a surprise
+// trip to the other side of the row.
 func (r *buttonRow) Move(delta int) {
-	n := len(r.buttons)
-	if n == 0 {
-		return
-	}
-	r.cursor = ((r.cursor+delta)%n + n) % n
+	r.SetCursor(r.cursor + delta)
 }
 
 // Cursor returns the focused button's index.
@@ -66,22 +70,32 @@ func (r *buttonRow) Selected() button {
 	return r.buttons[r.cursor]
 }
 
-// View renders "[ Label ]  [ Label ]". The focused button is *filled* —
-// accent ink for an ordinary one, the destructive color for a danger one
-// — while every other button stays an unfilled legend: faint for plain,
-// destructive-tinted for danger.
+// View renders "  [ Label ]  ▸ [ Label ]". The focused button carries a
+// leading ▸ in the two-column margin every button reserves, and is also
+// *filled* — accent ink for an ordinary one, the destructive color for a
+// danger one — while every other button stays an unfilled legend: faint
+// for plain, destructive-tinted for danger.
 //
-// The fill is the point. Focus used to be a hue swap (s.Destructive →
-// s.Error on the danger button), which said nothing: the two reds read
-// as the same red on the dark theme, and on the light theme they are
-// literally the same color, so the most consequential button in the app
-// — merge, delete — looked identical whether or not enter would fire it.
-// A fill is a shape change, so it survives both a red-on-red palette and
-// a colorblind reader.
+// The ▸ exists because the fill alone was not enough: driving a real
+// dialog over a pty, the confirm button read bold-white-on-blue and
+// Cancel read dim, and that contrast was the *only* cue — a capture with
+// no color (or a reader who can't rely on one) saw two identical-looking
+// buttons and a stray keypress could cancel a confirmation that looked
+// like it would confirm. The marker always occupies the same two columns
+// whether or not it is drawn, so which button is focused never changes
+// the row's width.
+//
+// The fill is still the point for color-capable terminals. Focus used to
+// be a hue swap (s.Destructive → s.Error on the danger button), which
+// said nothing: the two reds read as the same red on the dark theme, and
+// on the light theme they are literally the same color, so the most
+// consequential button in the app — merge, delete — looked identical
+// whether or not enter would fire it. A fill is a shape change, so it
+// survives both a red-on-red palette and a colorblind reader.
 //
 // focused reports whether the row itself holds input focus; false leaves
 // every button unfilled (e.g. while a sibling text input has it), so a
-// filled button always means "enter presses this".
+// filled, marked button always means "enter presses this".
 func (r *buttonRow) View(s *theme.Styles, focused bool) string {
 	width := 0
 	for _, b := range r.buttons {
@@ -93,8 +107,9 @@ func (r *buttonRow) View(s *theme.Styles, focused bool) string {
 		if pad := width - ansi.StringWidth(label); pad > 0 {
 			label += strings.Repeat(" ", pad)
 		}
+		on := focused && i == r.cursor
 		style := s.Button
-		switch on := focused && i == r.cursor; {
+		switch {
 		case on && b.danger:
 			style = s.ButtonDangerFocus
 		case on:
@@ -102,7 +117,11 @@ func (r *buttonRow) View(s *theme.Styles, focused bool) string {
 		case b.danger:
 			style = s.ButtonDanger
 		}
-		parts[i] = style.Render("[ " + label + " ]")
+		marker := "  "
+		if on {
+			marker = "▸ "
+		}
+		parts[i] = marker + style.Render("[ "+label+" ]")
 	}
 	return strings.Join(parts, "  ")
 }
