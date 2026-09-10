@@ -324,30 +324,33 @@ func (m *Shell) boardCounts() string {
 }
 
 // laneCountsText renders the two attention pools in the board's compact
-// count shape: "attended 1/1 · unattended 2/2". Empty when neither pool
+// count shape: "attended 1/1 · autopilot 2/2". Empty when neither pool
 // has a cap to report or anything running in it — an uncapped, idle
-// engine has nothing to say here, and "attended 0 · unattended 0" beside
+// engine has nothing to say here, and "attended 0 · autopilot 0" beside
 // a card count reads like a contradiction rather than an absence.
 //
-// The second pool is labeled "unattended" rather than "autopilot" because
-// that is the property the count is about: these are the runs going on
-// without you. Its population is exactly the cards the line's own ⚡
-// badge marks — engine.lanePoolFor sends only GateAutopilot here, and the
-// empty default every TUI-created card stores pools as attended — so the
-// two surfaces agree on which cards they mean.
+// The second pool is named "autopilot", matching the `autopilot_lanes`
+// config key, the masthead's own "autopilot: on" field and this same
+// line's ⚡ badge — it used to say "unattended", a word that appeared
+// nowhere else the concept was named and read as unexplained jargon
+// next to those three. Its population is exactly the cards the ⚡ badge
+// marks — engine.lanePoolFor sends only GateAutopilot here, and the
+// empty default every TUI-created card stores pools as attended — so
+// every surface that names this pool agrees on which cards it means.
 //
-// They did not always. This comment used to justify the wider label by
-// claiming lanePoolFor pooled every non-attended card here "including the
-// empty default", and that the badge lit for GateAttended. Both were the
-// pre-GateMode classification read backwards; the badge (below) has only
-// ever lit for GateAutopilot.
+// The label did not always agree even with itself. This comment used to
+// justify the old "unattended" label by claiming lanePoolFor pooled
+// every non-attended card here "including the empty default", and that
+// the badge lit for GateAttended. Both were the pre-GateMode
+// classification read backwards; the badge (below) has only ever lit
+// for GateAutopilot.
 func laneCountsText(lc engine.LaneCounts) string {
 	if lc.AttendedMax <= 0 && lc.AutopilotMax <= 0 &&
 		lc.AttendedRunning == 0 && lc.AutopilotRunning == 0 {
 		return ""
 	}
 	return laneCountText("attended", lc.AttendedRunning, lc.AttendedMax) + " · " +
-		laneCountText("unattended", lc.AutopilotRunning, lc.AutopilotMax)
+		laneCountText("autopilot", lc.AutopilotRunning, lc.AutopilotMax)
 }
 
 // laneCountText renders one pool's running/cap pair. An uncapped pool

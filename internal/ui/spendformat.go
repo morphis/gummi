@@ -102,6 +102,11 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 // it is behind by everything the session has spent. The engine's own
 // budget arithmetic reads the store, so a stale figure here is exactly
 // the case where the card claims headroom the stage was already denied.
+//
+// The "· N left" clause is dropped on a card that hasn't spent anything
+// yet: with spent at 0, left is just the envelope again, and "0 / 2000
+// credits · 2000 left" says the same number twice. Once spend is
+// nonzero the two figures diverge and the remainder earns its place.
 func budgetSummary(f domain.Feature, live float64) string {
 	env := float64(f.Budget.Envelope)
 	spent := f.Spend.CreditEquivalent()
@@ -109,8 +114,10 @@ func budgetSummary(f domain.Feature, live float64) string {
 		spent = live
 	}
 	s := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
-	if left := f.Budget.Remaining(spent); left > 0 {
-		s += fmt.Sprintf("  ·  %g left", roundSpend(left))
+	if spent > 0 {
+		if left := f.Budget.Remaining(spent); left > 0 {
+			s += fmt.Sprintf("  ·  %g left", roundSpend(left))
+		}
 	}
 	return s
 }

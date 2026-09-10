@@ -464,7 +464,9 @@ func stageActions(in nextInput) []nextAction {
 
 	switch in.stage {
 	case domain.StageTodo:
-		return []nextAction{nextStep("advance", "g", "start", "advance into the design flow")}
+		// "the plan stage", the strip's own word for where this goes —
+		// not "flow", which is a noun nothing else on the screen uses.
+		return []nextAction{nextStep("advance", "g", "start", "opens the plan stage — the agent reads the card, and any comments on it")}
 
 	case domain.StagePlan:
 		// The design stage. Its answers are: get the conversation going,

@@ -884,16 +884,22 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 // you sat and watched the whole time could carry that block on the
 // strength of this number alone.
 //
-// The word is load-bearing. roundLabel above already renders a bare
-// "⟲ n of m" for whichever loop the current stage belongs to, and two
-// unlabelled badges of the same shape side by side would be two numbers
-// nobody could tell apart.
+// The trailing word is load-bearing twice over. roundLabel above already
+// renders a bare "⟲ n of m" for whichever loop the current stage belongs
+// to, and two unlabelled badges of the same shape side by side would be
+// two numbers nobody could tell apart. And "corrective" alone is an
+// adjective with nothing to modify — a reader has to already know this
+// is a count of rounds for it to parse at all. "rounds" is the noun the
+// word was missing, and it is the same phrase autopilot.go's own confirm
+// dialog already uses for this exact budget ("N corrective rounds"), so
+// the masthead badge now says what that dialog says rather than a
+// clipped half of it.
 func correctiveLabel(m *Shell, f domain.Feature) string {
 	n := m.round(f.ID, domain.RoundKindCorrective)
 	if n == 0 {
 		return ""
 	}
-	return "⟲ " + itoa(n) + " of " + itoa(verdict.MaxRounds(domain.RoundKindCorrective)) + " corrective"
+	return "⟲ " + itoa(n) + " of " + itoa(verdict.MaxRounds(domain.RoundKindCorrective)) + " corrective rounds"
 }
 
 // autopilotField is the masthead's autopilot cell: the stored mode, and
@@ -1472,7 +1478,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		case snap.State == engine.StateQueued:
 			lines = append(lines, "  "+s.Faint.Render("◔ "+queuedLabel()))
 		case snap.Busy:
-			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.runningLabel(snap)))
+			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.runningLabel(snap, r.F.UpdatedAt)))
 		}
 		// A period that ended in this stage still says so. The session
 		// object outlives the run that filled it — the engine keeps a

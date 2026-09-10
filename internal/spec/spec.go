@@ -394,12 +394,14 @@ var rsSourceRe = regexp.MustCompile(`^RS-\d{3,} [a-z0-9]+(-[a-z0-9]+)*$`)
 
 // renderProvenance writes the "Ingested from …" header for a seeded
 // draft: source path, the source refs it was cut from, and its
-// dependencies. Nothing is written for a blank (non-ingested) draft. A
-// source naming an RS card (rsSourceRe) renders verbatim, without
-// backticks — it is a card reference, not a file path; every other
-// source (a stashed `.gummi/ingest/…` copy) keeps the backticked form.
+// dependencies. Nothing is written for a blank (non-ingested) draft, nor
+// for one typed by hand in the new-card dialog (Source: "manual") — the
+// person who just typed it already knows where it came from. A source
+// naming an RS card (rsSourceRe) renders verbatim, without backticks —
+// it is a card reference, not a file path; every other source (a
+// stashed `.gummi/ingest/…` copy) keeps the backticked form.
 func renderProvenance(b *strings.Builder, p domain.DraftProvenance) {
-	if p.Empty() {
+	if p.Empty() || p.Source == "manual" {
 		return
 	}
 	b.WriteString("> _Ingested")

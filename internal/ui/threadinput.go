@@ -864,6 +864,13 @@ func (m *Shell) notWiredVerb(verb, remainder string) tea.Cmd {
 // attach (enter) and resend, rather than retype from memory. The consult
 // path (sendConsultMessage) has no such precondition to fail against
 // synchronously, so it always clears.
+//
+// A turn the backend refuses is the other way this can fail after the
+// composer has cleared, and the line comes back (noticeMsg.restore)
+// rather than being lost. It used to be delivered anyway, echoed into
+// the transcript as a "you" message, and then refused by the adapter —
+// and the refusal was routed through failRun, so typing a second thought
+// while the spinner was up both lost the thought and killed the stage.
 func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 	sess := m.sessionFor(f.ID)
 	if !sess.Live() {

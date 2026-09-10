@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -157,11 +158,42 @@ func TestRunningLabelNamesPlanLegs(t *testing.T) {
 		{"writer", engine.Snapshot{Feature: f}, 0, "writing plan"},
 		{"critique", engine.Snapshot{Feature: f, Critique: true}, 0, "critiquing plan"},
 		{"replan", engine.Snapshot{Feature: f}, 1, "replanning"},
-		{"other stage", engine.Snapshot{Feature: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}, 0, "running"},
+		{"implement", engine.Snapshot{Feature: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}, 0, "implementing"},
+		{"verify", engine.Snapshot{Feature: domain.Feature{ID: "FD-001", Stage: domain.StageVerify}}, 0, "verifying"},
+		{"interactive plan", engine.Snapshot{Feature: f, Interactive: true}, 0, "running"},
 	}
 	for _, c := range cases {
 		m.setRound("FD-001", domain.RoundKindPlan, c.rounds)
-		if got := m.runningLabel(c.snap); got != c.want {
+		// zero time: no elapsed clause, so the base word is exactly the
+		// label — the elapsed clause itself is TestRunningLabelElapsed's job.
+		if got := m.runningLabel(c.snap, time.Time{}); got != c.want {
+			t.Errorf("%s: runningLabel = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestRunningLabelElapsed covers the busy line's clock: a known start
+// time appends a compact "· Ns"/"· NmNNs" clause, using m.now() (fixed
+// here) rather than the wall clock so the assertion is exact instead of
+// racing real time; an unknown (zero) start time carries no clause at
+// all, which TestRunningLabelNamesPlanLegs above already exercises.
+func TestRunningLabelElapsed(t *testing.T) {
+	m := loopShell()
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	snap := engine.Snapshot{Feature: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}
+
+	cases := []struct {
+		name  string
+		since time.Time
+		want  string
+	}{
+		{"seconds", now.Add(-42 * time.Second), "implementing · 42s"},
+		{"minutes", now.Add(-(4*time.Minute + 12*time.Second)), "implementing · 4m12s"},
+		{"hours", now.Add(-(1*time.Hour + 5*time.Minute)), "implementing · 1h05m"},
+	}
+	for _, c := range cases {
+		if got := m.runningLabel(snap, c.since); got != c.want {
 			t.Errorf("%s: runningLabel = %q, want %q", c.name, got, c.want)
 		}
 	}

@@ -287,8 +287,11 @@ func TestCardBusyStateRunning(t *testing.T) {
 	if !m.cardBusy(r) {
 		t.Fatal("cardBusy false for a StateRunning session mid-turn")
 	}
-	if word := m.cardBusyWord(r); word != "running" {
-		t.Errorf("cardBusyWord = %q, want \"running\"", word)
+	// the stage's own verb, not a bare "running": a board row saying
+	// "running" for four different stages told the reader nothing they
+	// could not already see from the stage strip.
+	if word := m.cardBusyWord(r); word != "implementing" {
+		t.Errorf("cardBusyWord = %q, want \"implementing\"", word)
 	}
 	line := m.cardLine(r, 1, false, true, 100)
 	if !strings.Contains(line, stageGlyph(r.F.Stage)) {
@@ -297,8 +300,8 @@ func TestCardBusyStateRunning(t *testing.T) {
 	if strings.Contains(line, "◔") {
 		t.Errorf("busy running card must not also show the queued marker: %q", line)
 	}
-	if !strings.Contains(line, "running") {
-		t.Errorf("busy card line missing the running word: %q", line)
+	if !strings.Contains(line, "implementing") {
+		t.Errorf("busy card line missing the stage's busy word: %q", line)
 	}
 }
 

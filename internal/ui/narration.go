@@ -275,7 +275,7 @@ func whyItStopped(in nextInput) string {
 	}
 	switch in.stage {
 	case domain.StagePlan:
-		return "The design stage finished and wrote the " + art + " — the gate is waiting on you."
+		return "The plan stage finished and wrote the " + art + " — the gate is waiting on you."
 	case domain.StageImplement:
 		return "Implement finished and its critique passed — the diff has not been read yet."
 	}
