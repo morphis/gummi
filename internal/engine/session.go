@@ -238,18 +238,42 @@ type Session struct {
 	specPath       string        // resolved spec/draft path (for ask_user capture)
 	state          SessionState
 	transcript     []Message
-	activity       []string
-	spend          agent.Usage
-	context        agent.Context
-	busy           bool
-	pendingAsk     *Ask
-	verdict        string // review verdict from submit_verdict ("pass"/"changes")
-	err            error
-	stopped        bool
-	finalized      bool    // stopped; must not be persisted (may be dropped)
-	heldSlot       bool    // true between taking and releasing an attention slot
-	budget         float64 // stage credit budget (0 = none)
-	creditRate     float64 // adapter's token→credit rate (0 = engine default)
+	// streamOpen and streamIdx name the transcript entry that is
+	// currently streaming an assistant message and awaiting its
+	// finishAssistant completion. finishAssistant used to find that
+	// entry by checking whether it was still the *last* transcript
+	// entry — but a tool-call activity line or an ask_user answer can
+	// land in between a message's first delta and its completion, and
+	// once that happens the streamed entry is no longer last. The old
+	// check then read that as "nothing to finalize" and appended the
+	// authoritative text as a brand new message, duplicating the
+	// paragraph the reader had already seen straddling whatever got
+	// appended in between. Tracking the index directly survives any
+	// number of intervening appends. appendTool may still flip the
+	// tracked entry's own Streaming flag off (closing its bubble for
+	// the tool boundary, so a genuinely new paragraph after the tool
+	// call opens its own bubble instead of silently extending this
+	// one) without touching streamOpen/streamIdx: the entry is still
+	// the one finishAssistant must finalize, it is just no longer
+	// receiving deltas. streamIdx is meaningful only while streamOpen
+	// is true. There is at most one in-progress streamed assistant
+	// message at a time — one backend event stream drives a session —
+	// so a single index suffices; this would need to become a stack or
+	// a set if that ever stopped being true.
+	streamOpen bool
+	streamIdx  int
+	activity   []string
+	spend      agent.Usage
+	context    agent.Context
+	busy       bool
+	pendingAsk *Ask
+	verdict    string // review verdict from submit_verdict ("pass"/"changes")
+	err        error
+	stopped    bool
+	finalized  bool    // stopped; must not be persisted (may be dropped)
+	heldSlot   bool    // true between taking and releasing an attention slot
+	budget     float64 // stage credit budget (0 = none)
+	creditRate float64 // adapter's token→credit rate (0 = engine default)
 	// cardSpent is the whole card's metered spend (credit-equivalent) as
 	// the store knows it: seeded from the feature row when the session
 	// spawns, then moved by exactly the figure recordUsage books against
@@ -565,11 +589,18 @@ func (s *Session) appendDelta(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.live.Delta(text)
-	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming {
-		s.transcript[n-1].Content += text
+	// Extend the tracked entry only while it is still actually
+	// streaming: appendTool closes that flag on a tool-call boundary on
+	// purpose, so a delta arriving after one starts a fresh bubble
+	// (see TestToolCallMidStreamClosesBubble) rather than resuming a
+	// paragraph the reader has already seen rendered as finished.
+	if s.streamOpen && s.transcript[s.streamIdx].Streaming {
+		s.transcript[s.streamIdx].Content += text
 		return
 	}
 	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text, Streaming: true})
+	s.streamOpen = true
+	s.streamIdx = len(s.transcript) - 1
 }
 
 // finishAssistant finalizes the streaming assistant message with the
@@ -585,17 +616,23 @@ func (s *Session) finishAssistant(text string) {
 	// the empty completion is emitted too: it closes the follower's
 	// streaming bubble exactly as it closes this transcript's.
 	s.live.Emit(livelog.Record{Kind: livelog.KindMessage, Text: text})
-	n := len(s.transcript)
-	streaming := n > 0 && s.transcript[n-1].Author == AuthorAssistant && s.transcript[n-1].Streaming
+	// Finalize by tracked index, not "the last transcript entry": an
+	// activity line or an ask_user answer recorded between the first
+	// delta and this completion — the whole point of streamOpen/
+	// streamIdx — must not make this look like there was nothing to
+	// finalize.
+	streaming := s.streamOpen
 	if strings.TrimSpace(text) == "" {
 		if streaming {
-			s.transcript[n-1].Streaming = false
+			s.transcript[s.streamIdx].Streaming = false
+			s.streamOpen = false
 		}
 		return
 	}
 	if streaming {
-		s.transcript[n-1].Content = text
-		s.transcript[n-1].Streaming = false
+		s.transcript[s.streamIdx].Content = text
+		s.transcript[s.streamIdx].Streaming = false
+		s.streamOpen = false
 		return
 	}
 	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text})

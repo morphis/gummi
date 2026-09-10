@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,5 +223,44 @@ func TestSessionWithoutLiveWriter(t *testing.T) {
 	s.stop()
 	if got := len(s.Snapshot().Transcript); got != 2 {
 		t.Fatalf("transcript = %d messages, want 2", got)
+	}
+}
+
+// The follower must not duplicate a message whose completion arrives
+// after something else was appended — the same defect Session had, and
+// the same fix, because a follower renders another process's session
+// (`gummi watch`, the board's view of a card driven elsewhere) and would
+// otherwise show the paragraph twice while the session that produced it
+// shows it once.
+func TestFollowerFinalizesAcrossInterleavedActivity(t *testing.T) {
+	f := domain.Feature{ID: "FD-101", Stage: domain.StagePlan, Title: "interleaved"}
+	path := filepath.Join(t.TempDir(), "FD-101.jsonl")
+	s := newLiveSession(t, path, f)
+
+	// the exact shape from the drive: the architect streams a paragraph,
+	// calls ask_user mid-message, the answer lands, and only then does
+	// the authoritative completion arrive.
+	s.appendDelta("Baseline is clean. Two decisions remain. ")
+	s.appendDelta("First:")
+	s.appendToolCall("call-1", "gummi_ask_user")
+	s.appendUser("Presenter unit tests")
+	s.finishAssistant("Baseline is clean. Two decisions remain. First:")
+	s.stop()
+
+	fl := NewFollower(f)
+	collect(t, path, fl)
+
+	got := fl.Snapshot().Transcript
+	n := 0
+	for _, m := range got {
+		if m.Author == AuthorAssistant && strings.Contains(m.Content, "Baseline is clean") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the assistant paragraph appears %d times in the followed transcript, want 1:\n%+v", n, got)
+	}
+	if len(got) != len(s.Snapshot().Transcript) {
+		t.Errorf("followed transcript has %d messages, session has %d", len(got), len(s.Snapshot().Transcript))
 	}
 }

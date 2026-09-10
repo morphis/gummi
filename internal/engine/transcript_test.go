@@ -103,6 +103,58 @@ func TestToolCallMidStreamClosesBubble(t *testing.T) {
 	}
 }
 
+func TestFinishAssistantFinalizesAcrossInterleavedActivity(t *testing.T) {
+	s := &Session{}
+	// Reproduces the drive that showed every assistant message twice: a
+	// tool-call activity line lands between the deltas and the
+	// completion for the SAME message (the adapter only emits the
+	// authoritative "message" event once the tool round-trip is done).
+	// finishAssistant must finalize the entry the deltas built, not
+	// treat "no longer last" as "nothing to finalize" and append a
+	// duplicate.
+	const text = "Baseline is clean. Two contract decisions remain. First:"
+	s.appendDelta("Baseline is clean. ")
+	s.appendDelta("Two contract decisions remain. First:")
+	s.appendToolCall("call-1", "gummi_ask_user  Presenter unit tests?")
+	s.finishAssistant(text)
+
+	tr := s.Snapshot().Transcript
+	var assistants []string
+	for _, m := range tr {
+		if m.Author == AuthorAssistant {
+			assistants = append(assistants, m.Content)
+		}
+	}
+	if len(assistants) != 1 || assistants[0] != text {
+		t.Fatalf("assistant messages = %+v, want exactly one %q", assistants, text)
+	}
+	if len(tr) != 2 || tr[0].Author != AuthorAssistant || tr[0].Streaming {
+		t.Errorf("transcript = %+v, want [finalized assistant, tool]", tr)
+	}
+}
+
+func TestFinishAssistantFinalizesAcrossAskAnswer(t *testing.T) {
+	s := &Session{}
+	// Same interleaving, but with the user's ask_user answer (recorded
+	// via appendUserAs, not a tool line) landing mid-message instead of
+	// an activity line — the other shape the drive showed.
+	const text = "Baseline is clean. Two contract decisions remain. First:"
+	s.appendDelta(text)
+	s.appendUserAs("Presenter unit tests (recommended)", "")
+	s.finishAssistant(text)
+
+	tr := s.Snapshot().Transcript
+	if len(tr) != 2 {
+		t.Fatalf("transcript = %+v, want 2 entries (assistant, user answer)", tr)
+	}
+	if tr[0].Author != AuthorAssistant || tr[0].Content != text || tr[0].Streaming {
+		t.Errorf("assistant entry = %+v, want finalized %q", tr[0], text)
+	}
+	if tr[1].Author != AuthorUser {
+		t.Errorf("second entry = %+v, want the recorded answer", tr[1])
+	}
+}
+
 func TestResolveToolResultMarksMatchingCall(t *testing.T) {
 	s := &Session{}
 	s.appendToolCall("c1", "bash  rockcraft pack")

@@ -32,6 +32,12 @@ type Follower struct {
 	stopped   bool
 
 	transcript []Message
+	// streamOpen/streamIdx name the entry currently receiving deltas —
+	// the follower's copy of Session.streamOpen, and for the same reason
+	// (see its comment there): the entry stops being the last one the
+	// moment a tool line or an answer lands mid-message.
+	streamOpen bool
+	streamIdx  int
 	activity   []string
 	spend      agent.Usage
 	pendingAsk *Ask
@@ -114,39 +120,51 @@ func (fl *Follower) resetSession() {
 	fl.spend = agent.Usage{}
 	fl.pendingAsk, fl.err = nil, nil
 	fl.busy, fl.stopped, fl.dropped = false, false, 0
+	fl.streamOpen, fl.streamIdx = false, 0
 	fl.state = ""
 }
 
 // appendDelta mirrors Session.appendDelta: streaming text extends the
-// open assistant bubble, or opens one.
+// open assistant bubble, or opens one — tracked by index, for the reason
+// Session.streamOpen's own comment gives.
 func (fl *Follower) appendDelta(text string) {
 	if text == "" {
 		return
 	}
-	if n := len(fl.transcript); n > 0 && fl.transcript[n-1].Author == AuthorAssistant && fl.transcript[n-1].Streaming {
-		fl.transcript[n-1].Content += text
+	if fl.streamOpen && fl.transcript[fl.streamIdx].Streaming {
+		fl.transcript[fl.streamIdx].Content += text
 		return
 	}
 	fl.transcript = append(fl.transcript, Message{Author: AuthorAssistant, Content: text, Streaming: true})
+	fl.streamOpen = true
+	fl.streamIdx = len(fl.transcript) - 1
 }
 
 // finishAssistant mirrors Session.finishAssistant: the authoritative
 // text supersedes whatever the deltas built, and an empty completion
 // only closes the open bubble.
+//
+// Mirroring includes the index tracking, and it must: this side had the
+// same duplication bug for the same reason. A follower renders another
+// process's session — `gummi watch`, the board's own view of a card
+// driven elsewhere — so a tool line or an answer landing between a
+// message's first delta and its completion produced the same paragraph
+// twice here too.
 func (fl *Follower) finishAssistant(text string) {
-	n := len(fl.transcript)
-	streaming := n > 0 && fl.transcript[n-1].Author == AuthorAssistant && fl.transcript[n-1].Streaming
+	streaming := fl.streamOpen
 	// the same emptiness test the session applies, so a whitespace-only
 	// completion closes the bubble on both sides instead of diverging.
 	if strings.TrimSpace(text) == "" {
 		if streaming {
-			fl.transcript[n-1].Streaming = false
+			fl.transcript[fl.streamIdx].Streaming = false
+			fl.streamOpen = false
 		}
 		return
 	}
 	if streaming {
-		fl.transcript[n-1].Content = text
-		fl.transcript[n-1].Streaming = false
+		fl.transcript[fl.streamIdx].Content = text
+		fl.transcript[fl.streamIdx].Streaming = false
+		fl.streamOpen = false
 		return
 	}
 	fl.transcript = append(fl.transcript, Message{Author: AuthorAssistant, Content: text})
@@ -168,8 +186,10 @@ func (fl *Follower) appendTool(r livelog.Record) {
 	if r.OK {
 		m.ToolStatus = ToolOK
 	}
-	if n := len(fl.transcript); n > 0 && fl.transcript[n-1].Author == AuthorAssistant && fl.transcript[n-1].Streaming {
-		fl.transcript[n-1].Streaming = false
+	// close the open bubble at the tool boundary without forgetting which
+	// entry it is: finishAssistant still has to finalize that entry.
+	if fl.streamOpen && fl.transcript[fl.streamIdx].Streaming {
+		fl.transcript[fl.streamIdx].Streaming = false
 	}
 	fl.activity = append(fl.activity, r.Text)
 	fl.transcript = append(fl.transcript, m)
