@@ -56,10 +56,19 @@ func TestNextActionsByState(t *testing.T) {
 		// "send it back" appears at the design stage only while the
 		// architect is live to receive the turn that carries it.
 		{"live design stage can send it back", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StateInteractive, live: true}, "g "},
-		{"design stage with open questions blocks approve", nextInput{stage: domain.StagePlan, kind: feat, openSpecQs: 2}, "s enter"},
+		{"design stage with open questions blocks approve", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, openSpecQs: 2}, "s enter"},
+		// …but only once there is a gate to block. A comment written
+		// before the stage ran is context for the agent about to read it,
+		// not an objection to work it has not done.
+		{"a comment before the first run is not a blocker", nextInput{stage: domain.StagePlan, kind: feat, openSpecQs: 2}, "enter g"},
 		// a gate blocked on a section the stage never drafted leads with
 		// the writer re-run that unblocks it, not with approve
-		{"design gate with a blank section leads with the redraft", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter enter"},
+		// the gate marker matters: only a stage that RAN can have left a
+		// section blank, and before the first run the row is suppressed
+		// (blockedGate) so it cannot appear as a second, identical-looking
+		// way to say "start the architect".
+		{"design gate with a blank section leads with the redraft", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, undrafted: []string{"Chosen approach"}}, "enter enter"},
+		{"a blank section before the first run is not a blocker", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter g"},
 		// nothing has been produced yet, so there is nothing to send back:
 		// the rewind to plan is /bounce, in the inventory.
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},
@@ -155,20 +164,20 @@ func TestNextActionsProseDetails(t *testing.T) {
 		t.Errorf("failed-check send-it-back why = %q", find(acts, "bounce").why)
 	}
 	// open comment counts surface in the blocker why
-	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, openSpecQs: 2})
+	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate, openSpecQs: 2})
 	if !strings.Contains(acts[0].why, "2 open") {
 		t.Errorf("blocked-gate why = %q, want the count", acts[0].why)
 	}
 	// a blank required section is named in the blocker why, on the run
 	// action that redrafts it — approve is not even offered
-	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, undrafted: []string{"Chosen approach", "Implementation notes"}})
+	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate, undrafted: []string{"Chosen approach", "Implementation notes"}})
 	if acts[0].id != "run" || acts[0].label != "draft the missing sections" {
 		t.Errorf("undrafted-gate lead = %s/%q, want the redraft run action", acts[0].id, acts[0].label)
 	}
 	if !strings.Contains(acts[0].why, "Chosen approach, Implementation notes") {
 		t.Errorf("undrafted-gate why = %q, want the blank sections named", acts[0].why)
 	}
-	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindBug, undrafted: []string{"Root cause"}})
+	acts = nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindBug, attn: attnGate, undrafted: []string{"Root cause"}})
 	if acts[0].label != "draft the missing section" || !strings.Contains(acts[0].why, "Root cause") {
 		t.Errorf("single undrafted-gate lead = %q/%q, want the section named", acts[0].label, acts[0].why)
 	}

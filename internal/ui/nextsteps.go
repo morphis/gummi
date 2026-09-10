@@ -257,6 +257,18 @@ func escalatedGateVerdict(v reviewVerdict, escalated bool) reviewVerdict {
 // run again, now that the panel knows what is missing before approve is
 // tried and refused.
 func blockedGate(in nextInput) *nextAction {
+	// A BLOCKER DESCRIBES A GATE, AND THERE IS NO GATE UNTIL THE STAGE
+	// HAS PRODUCED SOMETHING TO APPROVE. Before that, an open comment is
+	// what the person wrote for the agent that is about to read it —
+	// leading with "resolve open comments" tells them to take back the
+	// only thing they have said about the card, and a blank required
+	// section is blank because nothing has filled it yet. Both used to
+	// show anyway, above (and identical to) the one row that actually
+	// moves the card, which is how a comment written at todo turned into
+	// a card with nothing to do but undo it.
+	if !in.finished() {
+		return nil
+	}
 	if in.openSpecQs > 0 {
 		a := nextStep("spec", "s", "resolve open comments",
 			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" "+blockVerb(in.openSpecQs)+
@@ -271,13 +283,13 @@ func blockedGate(in nextInput) *nextAction {
 	}
 	if len(in.undrafted) > 0 {
 		blank := strings.Join(in.undrafted, ", ")
-		pronoun, be, label := "they", "are", "draft the missing sections"
+		subject, object, be, label := "they", "them", "are", "draft the missing sections"
 		if len(in.undrafted) == 1 {
-			pronoun, be, label = "it", "is", "draft the missing section"
+			subject, object, be, label = "it", "it", "is", "draft the missing section"
 		}
 		a := nextStep("run", "enter", label,
 			blank+" "+be+" required in the "+artifactNoun(in.kind)+" and still blank — the gate stays shut until "+
-				pronoun+" "+be+" drafted; enter re-runs the stage to write "+pronoun)
+				subject+" "+be+" drafted; enter runs the stage to draft "+object)
 		return &a
 	}
 	return nil

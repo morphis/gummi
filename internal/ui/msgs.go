@@ -119,6 +119,58 @@ type boardOpenedMsg struct {
 	err     error
 }
 
+// blockersMsg carries one card's recomputed gate blockers back into its
+// row. See Shell.refreshBlockers.
+type blockersMsg struct {
+	id               domain.FeatureID
+	openSpecQs       int
+	openDiffComments int
+	undrafted        []string
+}
+
+// refreshBlockers recomputes the three gate-blocker fields for one card
+// and folds them back into its row.
+//
+// These fields decide what the card page SAYS about the gate — the
+// narration's first sentence, the decision block's recommended action,
+// the chip — and until this existed they were only ever computed by
+// loadRows, which runs on a handful of engine events and on none of the
+// things that actually change them. The card page therefore lied in both
+// directions, from the same stale snapshot: it insisted "the spec still
+// has Chosen approach and Implementation notes blank, and the gate stays
+// shut" over two fully written sections, offering only to re-run the
+// stage that had just written them (an unbounded loop, since the re-run
+// changes nothing the page is reading); and, with a comment freshly
+// added, it still said "verify passed — the branch is ready to land" and
+// recommended landing, which the engine then refused. Advance() was
+// right every time — it re-reads the artifact itself — so the fix is to
+// stop the page's copy from drifting away from it.
+//
+// One card, not all of them: this runs on artifact loads and on every
+// turn end, where walking the whole board would be a file read and a
+// query per card for one card's change.
+func (m *Shell) refreshBlockers(id domain.FeatureID) tea.Cmd {
+	if !m.attached() {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			// a card that cannot be read keeps the counts it has: a failed
+			// read must never be reported as "no blockers", which would
+			// wave a gate through.
+			return nil
+		}
+		return blockersMsg{
+			id:               id,
+			openSpecQs:       m.openQuestionsBlockingGate(f),
+			openDiffComments: m.openDiffCommentsBlockingGate(ctx, id),
+			undrafted:        m.undraftedGate(f),
+		}
+	}
+}
+
 // loadRows reads all features, their histories, and worktree presence.
 func (m *Shell) loadRows() tea.Msg {
 	ctx := context.Background()

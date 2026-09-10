@@ -236,7 +236,17 @@ func whyItStopped(in nextInput) string {
 	case in.attn == attnBudget:
 		return "The " + stage + " stage reached its envelope and stopped."
 	case in.sess == engine.StatePaused:
-		return "The " + stage + " run is paused — you stopped it."
+		return "The " + stage + " run is paused."
+	}
+
+	// Nothing below describes a stop until the stage has produced
+	// something to stop at, blockers included: they describe a GATE, and
+	// there is no gate before the first run. Telling someone their own
+	// comment is "holding the gate shut" before the agent has even read
+	// it is a complaint about a rule they have not reached — the same
+	// reason blockedGate's rows wait for this (nextsteps.go).
+	if !in.finished() {
+		return ""
 	}
 
 	// A blocked gate outranks any verdict: the crossing is held shut
@@ -252,13 +262,12 @@ func whyItStopped(in nextInput) string {
 			isAre(in.openDiffComments) + " holding the gate shut."
 	}
 	if len(in.undrafted) > 0 {
+		pronoun := "it"
+		if len(in.undrafted) > 1 {
+			pronoun = "they"
+		}
 		return "The " + art + " still has " + strings.Join(in.undrafted, " and ") + " blank, and " +
-			isAre(len(in.undrafted)) + " required before the gate opens."
-	}
-
-	finished := in.finished()
-	if !finished {
-		return ""
+			pronoun + " " + isAre(len(in.undrafted)) + " required before the gate opens."
 	}
 
 	if in.stage == domain.StageVerify {

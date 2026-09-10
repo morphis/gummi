@@ -1255,10 +1255,13 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		m.raiseAttention(ev.Feature, attnQuestion, q)
 	case engine.EventAnnotations:
 		// the agent resolved a diff comment — refresh an open diff surface
-		// so its open-count and gutter markers burn down live
+		// so its open-count and gutter markers burn down live. The row's
+		// own count has to move too, and it must move whether or not the
+		// diff happens to be on screen: the gate reads the row.
 		if m.diff != nil && m.diff.f.ID == ev.Feature {
 			return m.reloadDiff()
 		}
+		return m.refreshBlockers(ev.Feature)
 	case engine.EventTripwire:
 		// the agent wrote into the main checkout — a hard stop with no
 		// top-up path, so it shares the failure attention lane.
@@ -1268,6 +1271,15 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
 		if s == nil || s.Interactive || s.State() != engine.StateDone {
+			// An interactive turn ending is the moment the design stage's
+			// writes land — and it used to return here having refreshed
+			// nothing, which is how the plan gate came to insist that two
+			// fully written sections were still blank while offering only
+			// to re-run the stage that had written them. The autonomous
+			// arm below reaches loadRows eventually; this one never did.
+			if s != nil {
+				return m.refreshBlockers(ev.Feature)
+			}
 			return nil
 		}
 		// a finished rebase-resolve session is judged by the git state it
@@ -1841,6 +1853,21 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadRows
 
+	case blockersMsg:
+		// fold the recomputed counts into the row the page reads. Nothing
+		// else about the row is touched: this arrives while a session may
+		// be streaming into the same row, and a wholesale replacement
+		// would roll back whatever landed in between.
+		for i := range m.rows {
+			if m.rows[i].F.ID == msg.id {
+				m.rows[i].OpenSpecQs = msg.openSpecQs
+				m.rows[i].OpenDiffComments = msg.openDiffComments
+				m.rows[i].Undrafted = msg.undrafted
+				break
+			}
+		}
+		return m, nil
+
 	case specLoadedMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
@@ -1879,7 +1906,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sv.cursor = min(m.spec.cursor, len(sv.doc.Lines))
 		}
 		m.spec = sv
-		return m, nil
+		// the artifact just changed under the gate — a comment added or
+		// resolved, or a section the stage wrote. The counts the card page
+		// reads live on the row, not here, so refresh them or the page
+		// goes on describing the document as it was (see refreshBlockers).
+		return m, m.refreshBlockers(msg.f.ID)
 
 	case diffLoadedMsg:
 		if msg.err != nil {
@@ -1900,7 +1931,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if line := diffLineFor(msg.diff, target); line > 0 {
 				dv.setCursor(line)
 				m.diff = dv
-				return m, nil
+				return m, m.refreshBlockers(msg.f.ID)
 			}
 		}
 		if m.diff != nil && m.diff.f.ID == msg.f.ID {
@@ -1910,7 +1941,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dv.setCursor(m.diff.cursor)
 		}
 		m.diff = dv
-		return m, nil
+		// same reason as specLoadedMsg: adding or resolving a diff comment
+		// arrives here as a reload, and the gate's count lives on the row.
+		return m, m.refreshBlockers(msg.f.ID)
 
 	case verifyResultMsg:
 		if msg.err != nil {
