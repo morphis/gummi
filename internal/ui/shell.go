@@ -1558,6 +1558,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// succeeded, so drop the attention item it resolved (see
 		// noticeMsg.clearInbox). It runs on the Update goroutine, never
 		// inside a command.
+		if msg.restore != "" && strings.TrimSpace(m.threadInput.Value()) == "" {
+			// back into the line it was typed on, and only while nothing
+			// has been typed since — a sentence the user has moved on
+			// from must not reappear under their cursor.
+			m.threadInput.SetValue(msg.restore)
+		}
 		if msg.clearInbox != "" {
 			m.inbox.remove(msg.clearInbox)
 		}

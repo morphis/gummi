@@ -129,8 +129,10 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 		return errors.New("session closed")
 	}
 	if s.cancel != nil {
+		// still streaming the previous turn: a refusal the caller retries,
+		// never a failed run (see ErrBusy).
 		s.mu.Unlock()
-		return errors.New("a turn is already in progress")
+		return ErrBusy
 	}
 	args, err := s.buildArgs()
 	if err != nil {

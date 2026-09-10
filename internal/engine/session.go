@@ -1184,6 +1184,51 @@ func (s *Session) takePendingNudge() string {
 	return text
 }
 
+// requeueNudge puts a nudge back at the FRONT of the pending text after
+// a turn that consumed it was refused. Front, not back: the nudges are
+// delivered in crossing order, and one taken for a turn that never
+// happened is older than anything queued since.
+func (s *Session) requeueNudge(text string) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingNudge == "" {
+		s.pendingNudge = text
+		return
+	}
+	s.pendingNudge = text + "\n" + s.pendingNudge
+}
+
+// dropUnsentUser removes the user message the caller appended for a turn
+// the backend then refused (agent.ErrBusy). An echo of a line the agent
+// never received is worse than no echo at all: the reader sees their own
+// sentence in the transcript, believes it delivered, and has no way to
+// tell otherwise.
+//
+// It searches backwards for the newest user entry with exactly this
+// content rather than assuming the entry is still last — the turn that
+// refused this one is by definition still streaming, so its own output
+// can and does land in between. Matching on content keeps that search
+// honest: the same sentence sent twice means the newer copy is the
+// undelivered one, which is the copy this removes.
+func (s *Session) dropUnsentUser(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.transcript) - 1; i >= 0; i-- {
+		if s.transcript[i].Author != AuthorUser || s.transcript[i].Content != text {
+			continue
+		}
+		s.transcript = append(s.transcript[:i], s.transcript[i+1:]...)
+		// a streamed entry after the removed one shifts down with it.
+		if s.streamOpen && s.streamIdx > i {
+			s.streamIdx--
+		}
+		return
+	}
+}
+
 func (s *Session) setBusy(b bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

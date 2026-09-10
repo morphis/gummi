@@ -31,6 +31,12 @@ type Fake struct {
 	// sessions, without emitting Idle/Error — the driver's silent-death
 	// regression trigger. 0 disables it.
 	DieAfter int
+	// SendErr, when set, is returned by every Send instead of running a
+	// turn. Set it to ErrBusy to model what every real adapter does and
+	// this Fake otherwise does not: refuse a second turn while the first
+	// is still streaming. Tests that lean on the Fake's permissiveness
+	// are pinning a state production cannot reach.
+	SendErr error
 
 	mu       sync.Mutex
 	sessions []*fakeSession
@@ -157,6 +163,10 @@ func (s *fakeSession) Send(_ context.Context, msg string) error {
 	if s.closed {
 		s.mu.Unlock()
 		return errors.New("session closed")
+	}
+	if err := s.agent.SendErr; err != nil {
+		s.mu.Unlock()
+		return err
 	}
 	s.sends++
 	s.lastMsg = msg

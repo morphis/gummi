@@ -2,12 +2,14 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -869,6 +871,12 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
 		if err := eng.Send(context.Background(), id, text); err != nil {
+			if errors.Is(err, agent.ErrBusy) {
+				return noticeMsg{
+					text:    string(id) + ": the agent is still mid-turn — your line is back in the composer, send it when the turn ends",
+					restore: text,
+				}
+			}
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return nil

@@ -102,6 +102,13 @@ type noticeMsg struct {
 	// gate-blocked returns leave it empty so the attention item survives
 	// until the thing is actually attended to.
 	clearInbox domain.FeatureID
+	// restore, when non-empty, is a composer line that was never
+	// delivered and belongs back in the input. A refused turn (the
+	// backend was still streaming the previous one) must not cost the
+	// user their sentence: the composer clears optimistically when the
+	// line is handed off, so the one path that can fail after that hands
+	// it back here.
+	restore string
 }
 
 // boardOpenedMsg carries the result of engine.OpenBoard — boardthread.go's

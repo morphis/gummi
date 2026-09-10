@@ -278,8 +278,10 @@ func (s *zzSession) Send(_ context.Context, msg string) error {
 		return errors.New("session closed")
 	}
 	if s.cancel != nil {
+		// still streaming the previous turn: a refusal the caller retries,
+		// never a failed run (see ErrBusy).
 		s.mu.Unlock()
-		return errors.New("a turn is already in progress")
+		return ErrBusy
 	}
 	prompt := msg
 	// Never pass --system-prompt: it REPLACES zz's built-in prompt (and

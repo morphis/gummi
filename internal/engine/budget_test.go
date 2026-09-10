@@ -157,11 +157,19 @@ func TestBudgetNudgeFoldedIntoSentTurn(t *testing.T) {
 		mu.Lock()
 		sent = append(sent, msg)
 		mu.Unlock()
-		// the kickoff turn crosses 60% (a 10-credit budget) and keeps
-		// working — no idle — so the threshold fires mid-session and the
-		// run stays live for a follow-up orchestrator turn.
+		// the kickoff turn crosses 60% (a 10-credit budget) and then ends
+		// the turn, so the threshold fires and the session is idle when
+		// the follow-up turn is sent. It has to be idle: Engine.Send
+		// refuses a turn while the backend is still streaming the
+		// previous one (agent.ErrBusy), because every real adapter does —
+		// only the Fake was ever permissive enough to accept two at once,
+		// and a test leaning on that was pinning a state production
+		// cannot reach.
 		if !strings.Contains(msg, "[budget]") {
-			return []agent.Event{{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 6}}}
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 6}},
+				{Kind: agent.EventIdle},
+			}
 		}
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
@@ -174,24 +182,41 @@ func TestBudgetNudgeFoldedIntoSentTurn(t *testing.T) {
 	if err := e.Run(f); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, e, EventBudget) // the 50% threshold fires mid-session
+	waitFor(t, e, EventBudget) // the 50% threshold fires on the first turn
+	// and the turn ends. It has to: Engine.Send refuses a turn while the
+	// backend is still streaming the previous one (agent.ErrBusy),
+	// because every real adapter does — this used to send mid-stream and
+	// passed only because the Fake accepts what no real backend would,
+	// pinning a state production cannot reach.
+	waitState(t, e, "FD-001", StateDone)
 
 	// a follow-up turn is the next orchestrator-sent turn: the queued
 	// nudge must ride on it rather than being dropped.
 	if err := e.Send(context.Background(), "FD-001", "continue"); err != nil {
 		t.Fatal(err)
 	}
-	waitState(t, e, "FD-001", StateDone)
+
+	sentDeadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(sent)
+		mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		select {
+		case <-sentDeadline:
+			t.Fatalf("agent received %d turns, want at least 2", n)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(sent) < 2 {
-		t.Fatalf("agent received %d turns, want at least 2: %v", len(sent), sent)
-	}
 	if !strings.Contains(sent[1], "[budget] 50% consumed") {
 		t.Errorf("next turn did not carry the budget nudge:\n%q", sent[1])
 	}
-	if strings.HasPrefix(sent[1], "[budget]") != true {
+	if !strings.HasPrefix(sent[1], "[budget]") {
 		t.Errorf("nudge should lead the turn, got:\n%q", sent[1])
 	}
 }

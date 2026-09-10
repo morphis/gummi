@@ -199,9 +199,11 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	if s.cancel != nil {
 		// a turn is already streaming; the orchestrator serializes turns
 		// (one message per idle), so this only guards against misuse that
-		// would spawn a second concurrent run and orphan the first.
+		// would spawn a second concurrent run and orphan the first. It is
+		// a refusal, not a failure — ErrBusy so the caller keeps the line
+		// instead of failing the run over it.
 		s.mu.Unlock()
-		return errors.New("a turn is already in progress")
+		return ErrBusy
 	}
 	args := []string{"run", "--format", "json", "-m", s.model}
 	// --auto: opencode's default policy rejects any tool call touching a

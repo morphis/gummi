@@ -1649,17 +1649,46 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	if a == nil {
 		return fmt.Errorf("%s is queued, not yet running", id)
 	}
+	// A turn blocked inside ask_user cannot take another one: the session
+	// reports itself not-busy there (handleAsk drops the spinner so the
+	// question can be read), but the backend's turn is very much still
+	// open, waiting on the person. Refused up front, before anything is
+	// consumed or recorded — and refused as ErrBusy, so the caller offers
+	// the line again rather than treating it as a failed run.
+	if s.Snapshot().PendingAsk != nil {
+		return fmt.Errorf("%s is waiting on your answer: %w", id, agent.ErrBusy)
+	}
 	// deliver any queued budget nudge before the orchestrator's own text
 	// (DESIGN §5.1 layer 2: the mid-session threshold is folded into the
 	// next turn rather than injected mid-flight).
-	if n := s.takePendingNudge(); n != "" {
-		msg = n + "\n\n" + msg
+	nudge := s.takePendingNudge()
+	if nudge != "" {
+		msg = nudge + "\n\n" + msg
 	}
 	s.appendUser(msg)
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	return e.deliverTurn(ctx, s, msg)
+	if err := e.deliverTurn(ctx, s, msg); err != nil {
+		// The backend is the authority on whether it can take a turn, and
+		// it said no. Undo what this call consumed and recorded, so a
+		// refusal leaves the session exactly as it found it: the nudge
+		// goes back on the queue for the turn that does land, and the
+		// echo comes back out of the transcript. An echo of a line the
+		// agent never received is worse than no echo — the reader sees
+		// their own sentence, believes it delivered, and has no way to
+		// tell otherwise. That is what a line typed while the spinner was
+		// up used to look like, right before failRun killed the stage
+		// under it.
+		if errors.Is(err, agent.ErrBusy) {
+			s.dropUnsentUser(msg)
+			s.requeueNudge(nudge)
+			e.persist(s)
+			e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
+		}
+		return err
+	}
+	return nil
 }
 
 // deliverTurn dispatches msg as the session's next turn to the backend.
@@ -1676,6 +1705,15 @@ func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string) error 
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
 	e.beforeTurn(s)
 	if err := s.agent().Send(ctx, msg); err != nil {
+		// ErrBusy is the backend saying "not now", not "this session is
+		// broken". Failing the run over it is how a second thought typed
+		// while the spinner was up used to kill a stage — and the card
+		// then reported "plan failed" while the same session went on
+		// answering questions, because failRun leaves an interactive
+		// session running and nothing ever clears the error it set.
+		if errors.Is(err, agent.ErrBusy) {
+			return err
+		}
 		e.failRun(s, err)
 		return err
 	}

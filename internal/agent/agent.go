@@ -7,6 +7,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
 
 // Role is a named capability slot a profile maps to a concrete model.
@@ -264,11 +265,21 @@ func (c WriteCage) Describe() string {
 	return "unknown"
 }
 
+// ErrBusy is Send's refusal when the backend is still streaming the
+// previous turn — including the case where that turn is blocked inside a
+// gummi client tool waiting on a human (ask_user). It says "not now",
+// never "this session is broken": callers must keep the line and offer it
+// again rather than treat it as a run failure. Engine.deliverTurn used to
+// route every Send error through failRun, which turned a user typing a
+// second thought while the spinner was up into a dead stage.
+var ErrBusy = errors.New("a turn is already in progress")
+
 // Session is one live agent conversation bound to a feature + stage.
 type Session interface {
 	// Send delivers a user/orchestrator turn. It returns when the turn
 	// has been accepted, not when the agent is done; watch Events for
-	// completion.
+	// completion. A backend that cannot accept a turn yet returns a
+	// error wrapping ErrBusy — a refusal, not a failure.
 	Send(ctx context.Context, msg string) error
 	// Events streams the agent's activity. The channel closes when the
 	// session closes.
