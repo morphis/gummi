@@ -136,23 +136,38 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	}
 	res.To = next
 
-	// unresolved user %% annotations block every human gate, not just spec
-	// approval — the gate re-opens only once they resolve (DESIGN §6.1).
-	if n := e.openQuestionsBlockingGate(f); n > 0 {
-		res.Status, res.Blockers = StatusBlockedQuestions, n
-		return res, nil
-	}
-	// a stage that ran and wrote nothing into its one required section is
-	// not a clean crossing — auto-approval must not wave a stub through to
-	// the next stage (the measured failure this gate exists to catch).
-	if names := e.undraftedBlockingGate(f); len(names) > 0 {
-		res.Status, res.Undrafted = StatusBlockedUndrafted, names
-		return res, nil
-	}
-	// so do unresolved diff annotations, the gate's other backend.
-	if n := e.openDiffCommentsBlockingGate(ctx, id); n > 0 {
-		res.Status, res.Blockers = StatusBlockedDiff, n
-		return res, nil
+	// Leaving todo is not a gate. Nothing has been produced to review, no
+	// agent has run, and the artifact holds nothing but its template — so
+	// the blocker checks below have nothing to be about, and running them
+	// here wedges the card outright: a comment written before the first
+	// stage (the natural way to add context for the agent you are about
+	// to start) blocked the only action the card had, and the refusal's
+	// own advice — request changes instead — is refused too, because todo
+	// has no agent to send them to. A comment written at todo is INPUT to
+	// the stage about to run, not an objection to work already done; it
+	// travels into the plan session in the artifact, which is where the
+	// architect reads it.
+	if f.Stage != domain.StageTodo {
+		// unresolved user %% annotations block every human gate, not just
+		// spec approval — the gate re-opens only once they resolve
+		// (DESIGN §6.1).
+		if n := e.openQuestionsBlockingGate(f); n > 0 {
+			res.Status, res.Blockers = StatusBlockedQuestions, n
+			return res, nil
+		}
+		// a stage that ran and wrote nothing into its one required section
+		// is not a clean crossing — auto-approval must not wave a stub
+		// through to the next stage (the measured failure this gate exists
+		// to catch).
+		if names := e.undraftedBlockingGate(f); len(names) > 0 {
+			res.Status, res.Undrafted = StatusBlockedUndrafted, names
+			return res, nil
+		}
+		// so do unresolved diff annotations, the gate's other backend.
+		if n := e.openDiffCommentsBlockingGate(ctx, id); n > 0 {
+			res.Status, res.Blockers = StatusBlockedDiff, n
+			return res, nil
+		}
 	}
 
 	// A research card's Verify→done gate additionally runs the

@@ -572,12 +572,25 @@ func (e *Engine) Repool(id domain.FeatureID, mode string) {
 	e.schedule()
 }
 
+// noAgentAtStage is the refusal for a stage no role is mapped to — in
+// practice todo, the one stage that exists before any agent has been
+// asked for anything. It names the way forward rather than only the
+// wall: the old wording ("stage todo has no agent action") was what a
+// person met after being told to request changes instead of approving,
+// and it left them with nothing to do at all.
+func noAgentAtStage(stage domain.Stage) error {
+	if stage == domain.StageTodo {
+		return errors.New("nothing has run yet — start the card, and the comments in its artifact go to the agent with it")
+	}
+	return fmt.Errorf("stage %s runs no agent", stage)
+}
+
 // Attach starts (or reuses) an interactive chat session for a feature's
 // current stage. Interactive sessions hold no attention slot.
 func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error) {
 	role, ok := roleForStage(f)
 	if !ok {
-		return nil, fmt.Errorf("stage %s has no agent action", f.Stage)
+		return nil, noAgentAtStage(f.Stage)
 	}
 	// A run whose profile resolves to enforce must not start while any role
 	// names a backend without tool coverage — feature-level, before any
@@ -777,7 +790,7 @@ func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string
 func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	role, ok := roleForStage(f)
 	if !ok {
-		return fmt.Errorf("stage %s has no agent action", f.Stage)
+		return noAgentAtStage(f.Stage)
 	}
 	switch flavor {
 	case flavorCritique:

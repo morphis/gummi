@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1158,5 +1159,48 @@ func TestAdvanceBlockedByUndraftedResearchDocument(t *testing.T) {
 	}
 	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StagePlan {
 		t.Fatalf("blocked undrafted gate still transitioned to %s", got.Stage)
+	}
+}
+
+// A comment written at todo — the natural way to hand the agent context
+// before starting it — must not block the card from starting. Leaving
+// todo is not a review gate: nothing has been produced to object to, and
+// there is no agent to send objections to either, so the refusal used to
+// be terminal. The comment travels into the plan session in the artifact
+// instead, which is where the architect reads it.
+func TestAdvanceFromTodoIgnoresComments(t *testing.T) {
+	e, ws, store, _ := advanceEngine(t)
+	f := feature(1, "commented at todo", domain.StageTodo)
+	putFeature(t, store, f)
+
+	if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	body := "# Spec\nAdd a --json flag.\n%% @user(2026-01-01): also cover the rm command?\n"
+	if err := os.WriteFile(draft, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status == StatusBlockedQuestions {
+		t.Fatalf("a comment written at todo blocked the card from starting (blockers=%d)", res.Blockers)
+	}
+	got, err := store.GetFeature(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stage != domain.StagePlan {
+		t.Fatalf("stage = %s after advancing from todo, want plan", got.Stage)
+	}
+	// the comment is untouched: it is input for the stage now running,
+	// not something the crossing consumed or resolved on the user's
+	// behalf (the only escape hatch the old wedge left).
+	raw, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "also cover the rm command?") {
+		t.Fatalf("the user's comment did not survive the crossing:\n%s", raw)
 	}
 }
