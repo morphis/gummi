@@ -82,6 +82,15 @@ var squashCmd = &cobra.Command{
 	},
 }
 
+// handoffCmd implements `gummi handoff <id|ref>`.
+var handoffCmd = &cobra.Command{
+	Use:   "handoff <id|ref>",
+	Short: "Close a verified card and keep its branch — nothing lands",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runHandOff(buildFlagArgs(cmd, args))
+	},
+}
+
 // cleanCmd implements `gummi clean <id|ref>`.
 var cleanCmd = &cobra.Command{
 	Use:   "clean <id|ref>",

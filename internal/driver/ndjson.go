@@ -365,6 +365,17 @@ type cleanedEvent struct {
 	Branch string `json:"branch"`
 }
 
+// handedOffEvent reports a successful `gummi handoff`: the card moved to
+// done with its branch deliberately left where it is. Branch names what
+// the caller now owns — the whole point of the verb is that gummi is not
+// going to merge it, so a driving script needs the name to push, PR or
+// cherry-pick it.
+type handedOffEvent struct {
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Branch string `json:"branch"`
+}
+
 // squashedEvent reports a successful `gummi squash`: the card's branch was
 // rewritten, in place, to one commit. BeforeSHA/AfterSHA/BaseSHA let a
 // driving script audit exactly what moved without re-reading git; on the
