@@ -207,6 +207,17 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	// branch that already landed, is already gone, or never got any commits
 	// of its own (nothing to land — the artifact lives in the workspace,
 	// not on the branch) skips straight to the transition.
+	//
+	// So does a HANDED-OFF card, and that is the fourth skip: landing is
+	// owed to whoever is going to do it, and a hand-off is the person
+	// saying it will not be gummi. The stamp is written before this call
+	// (HandOff), so the floor reads it as permission rather than being
+	// told to ignore itself by a parameter — which also means a card that
+	// somehow reaches the gate by another route with the stamp set gets
+	// the same, consistent answer. It waives the LANDING and nothing
+	// else: the omission gate below still runs, because a hand-off is a
+	// decision about who merges the branch, not a verdict on whether the
+	// work is finished.
 	if next == domain.StageDone {
 		// Bug-only omission gate: a bug with a clean-present env
 		// prerequisite, zero [env:] live checks, and no human waiver cannot
@@ -218,32 +229,34 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 			return res, nil
 		}
 
-		wt, err := e.mgr(ctx, &f)
-		if err != nil {
-			return res, err
-		}
-		if exists, err := wt.BranchExists(ctx, &f); err != nil {
-			return res, err
-		} else if exists {
-			if landed, err := wt.Landed(ctx, &f); err != nil {
+		if !f.HandedOff() {
+			wt, err := e.mgr(ctx, &f)
+			if err != nil {
 				return res, err
-			} else if !landed {
-				if ahead, err := wt.BranchAhead(ctx, &f); err != nil {
+			}
+			if exists, err := wt.BranchExists(ctx, &f); err != nil {
+				return res, err
+			} else if exists {
+				if landed, err := wt.Landed(ctx, &f); err != nil {
 					return res, err
-				} else if ahead {
-					res.Status = StatusNeedsMerge
-					// The verify gate has passed and the branch is ready to
-					// land: stamp the verified marker (once, keeping the first
-					// pass's time stable) so status can report `verified` at
-					// this terminal state without moving the stage off verify.
-					if f.VerifiedAt.IsZero() {
-						now := time.Now().UTC()
-						if err := e.cfg.Store.SetVerifiedAt(ctx, id, now); err != nil {
-							return res, err
+				} else if !landed {
+					if ahead, err := wt.BranchAhead(ctx, &f); err != nil {
+						return res, err
+					} else if ahead {
+						res.Status = StatusNeedsMerge
+						// The verify gate has passed and the branch is ready to
+						// land: stamp the verified marker (once, keeping the first
+						// pass's time stable) so status can report `verified` at
+						// this terminal state without moving the stage off verify.
+						if f.VerifiedAt.IsZero() {
+							now := time.Now().UTC()
+							if err := e.cfg.Store.SetVerifiedAt(ctx, id, now); err != nil {
+								return res, err
+							}
+							res.Feature.VerifiedAt = now
 						}
-						res.Feature.VerifiedAt = now
+						return res, nil
 					}
-					return res, nil
 				}
 			}
 		}
