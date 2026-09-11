@@ -304,11 +304,18 @@ func (m *Shell) boardNarrationLine(r featureRow) string {
 // backlogView renders the full-width backlog: cards grouped by
 // super-state, given the whole terminal to spend on them, and scrolled
 // to keep the selection on screen.
+//
+// Its header used to print "BACKLOG" while the tab that opens it is
+// labelled "board" and its own help overlay titles itself "keys ·
+// board" (activeSurface names this surface "board", not "backlog") — one
+// screen wearing three names depending on where the reader looks. BOARD
+// matches the other two; "backlog" survives only in prose that means the
+// todo super-state specifically, never as this screen's name.
 func (m *Shell) backlogView(w, h int) string {
 	s := m.styles
 	if len(m.rows) == 0 {
 		var b strings.Builder
-		b.WriteString("\n " + s.PaneTitleActive.Render("BACKLOG") + "\n\n")
+		b.WriteString("\n " + s.PaneTitleActive.Render("BOARD") + "\n\n")
 		b.WriteString(" " + s.Faint.Render("nothing on the board yet") + "\n")
 		b.WriteString(" " + s.Muted.Render("press ") + s.KeyHint.Render("n") + s.Muted.Render(" for a new card — a feature, a bug, or research") + "\n")
 		return b.String()
@@ -356,8 +363,13 @@ func (m *Shell) backlogView(w, h int) string {
 	if m.sortMode == SortSeverity {
 		sortLabel = "severity (todo)"
 	}
-	line(" " + s.PaneTitleActive.Render("BACKLOG") + "  " +
-		s.Faint.Render(strconv.Itoa(len(m.rows))+" cards  ·  sort: "+sortLabel))
+	// "1 cards" was never plural-agreed (BACKLOG was renamed above; this
+	// count had the same live-drive report). plural() (receipt.go) is the
+	// package's existing singular/plural switch, reused here rather than
+	// hand-rolling a second one.
+	n := len(m.rows)
+	line(" " + s.PaneTitleActive.Render("BOARD") + "  " +
+		s.Faint.Render(strconv.Itoa(n)+" card"+plural(n)+"  ·  sort: "+sortLabel))
 	line("")
 
 	if scrolls {
@@ -520,7 +532,7 @@ func (m *Shell) cardPageBindings() []binding {
 		return withHelpKey(m.threadInputBindings())
 	}
 	out := []binding{
-		{key: "esc", label: "backlog", help: "back to the backlog list", bar: true},
+		{key: "esc", label: "board", help: "back to the board", bar: true},
 		{key: "J/K", label: "prev/next", help: "previous / next card without leaving the page", bar: true},
 	}
 	out = append(out, m.cardTabBindings()...)

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -241,6 +242,16 @@ type headlessSession struct {
 	closeOnce sync.Once
 	waitOnce  sync.Once // guards the single cmd.Wait() shared by read() and Close()
 	waitErr   error
+
+	// hadIdle marks that some prior turn on this session reached a clean
+	// idle — RunFailure.FirstTurn on a later failure reads the negation
+	// of this.
+	//
+	// It is atomic because it is no longer read from one goroutine.
+	// read() sets it, and writeFailure reads it on whichever caller's
+	// goroutine just lost a write to a child that had already died —
+	// the first-run case this whole seam exists for.
+	hadIdle atomic.Bool
 }
 
 // reap waits for the child exactly once (read() reaps a self-exited child;
@@ -324,6 +335,9 @@ func (s *headlessSession) read(stdout io.Reader) {
 		if !ok {
 			continue
 		}
+		if ev.Kind == EventIdle {
+			s.hadIdle.Store(true)
+		}
 		select {
 		case s.raw <- ev:
 		case <-s.stop:
@@ -341,11 +355,10 @@ func (s *headlessSession) read(stdout io.Reader) {
 	if err := sc.Err(); err != nil {
 		final = Event{Kind: EventError, Err: fmt.Errorf("headless agent stream: %w", err)}
 	} else if waitErr != nil && !s.stopping() {
-		detail := strings.TrimSpace(s.stderr.String())
-		if detail == "" {
-			detail = waitErr.Error()
-		}
-		final = Event{Kind: EventError, Err: fmt.Errorf("headless agent exited abnormally: %s", detail)}
+		final = Event{Kind: EventError, Err: &RunFailure{
+			Backend: "headless", Diagnostic: strings.TrimSpace(s.stderr.String()),
+			FirstTurn: !s.hadIdle.Load(), Err: waitErr,
+		}}
 	}
 	select {
 	case s.raw <- final:
@@ -420,9 +433,60 @@ func (s *headlessSession) write(v any) error {
 		_ = f.SetWriteDeadline(time.Now().Add(headlessWriteTimeout))
 	}
 	if _, err := s.stdin.Write(b); err != nil {
-		return err
+		return s.writeFailure(err)
 	}
 	return nil
+}
+
+// writeFailure turns a failed stdin write into the failure the USER can act
+// on.
+//
+// A child that dies immediately — the first-run case, where the coding CLI
+// is not installed, not authenticated, or misconfigured — is usually dead
+// before it ever reads the prompt, so the write loses the race with the
+// pump's own diagnosis and the caller sees the pipe's symptom instead of
+// the cause. On a pty that read, verbatim:
+//
+//	✗ write |1: file already closed
+//
+// with the child's actual stderr ("failed to load provider config…",
+// "run 'opencode auth login'") nowhere on screen, and the narration
+// treating it as an ordinary mid-session error rather than a backend that
+// never started. Both halves are wrong, and this is the seam that fixes
+// them: if the process is already gone, report ITS death, with the stderr
+// tail and FirstTurn, exactly as the pump would have.
+//
+// A write that failed while the child is still alive (a wedged reader
+// hitting headlessWriteTimeout) is a genuine write failure and passes
+// through unchanged — reap would block there, so this only reaps once the
+// process has actually exited.
+func (s *headlessSession) writeFailure(werr error) error {
+	if s.stopping() || !s.exited() {
+		return werr
+	}
+	waitErr := s.reap()
+	if waitErr == nil {
+		// A clean exit that still cost us the write: the child is gone but
+		// had nothing to complain about, so the write error is all there is.
+		return werr
+	}
+	return &RunFailure{
+		Backend: "headless", Diagnostic: strings.TrimSpace(s.stderr.String()),
+		FirstTurn: !s.hadIdle.Load(), Err: waitErr,
+	}
+}
+
+// exited reports whether the child process has already terminated, without
+// blocking on it — os/exec publishes ProcessState only after Wait, so this
+// asks the OS directly with signal 0.
+func (s *headlessSession) exited() bool {
+	if s.cmd.ProcessState != nil {
+		return true
+	}
+	if s.cmd.Process == nil {
+		return false
+	}
+	return s.cmd.Process.Signal(syscall.Signal(0)) != nil
 }
 
 func (s *headlessSession) Send(_ context.Context, msg string) error {

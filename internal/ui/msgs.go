@@ -29,6 +29,16 @@ type featureRow struct {
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
 	History     []state.TransitionRecord
 	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
+	// BaseBranch is what f actually lands on, resolved once at load
+	// (loadRows) through Shell.baseBranch — the same map lookup shell.go
+	// resolves at attach — so a pure function holding only this row, not a
+	// *Shell, can still say the trunk's real name instead of asserting
+	// "main" (REVIEW-ux-drive-2026-09-10-round2.md §3.4). Empty on a row
+	// nothing has populated it for (a synthetic test row, a not-yet-loaded
+	// card); baseBranch() below is what every reader actually calls, and it
+	// carries the same worktree.DefaultBaseBranchName fallback Shell.baseBranch
+	// does, so a sentence built from it is never missing a word.
+	BaseBranch string
 	// gate blockers (DESIGN §6.1), snapshotted at load so the dashboard's
 	// next block can explain why g would bounce without doing IO per frame
 	OpenSpecQs       int // open user %% threads in the artifact
@@ -72,6 +82,17 @@ type featureRow struct {
 	// refresh would be unbounded IO, which is exactly what the row
 	// snapshot above exists to avoid.
 	Events []state.CardEvent
+}
+
+// baseBranch names the branch r's card lands on, for prose that only has
+// the row in hand (cardactions.go's action inventory, built by a plain
+// function with no *Shell). Mirrors Shell.baseBranch's own fallback so
+// the two never say something different for the same card.
+func (r featureRow) baseBranch() string {
+	if r.BaseBranch != "" {
+		return r.BaseBranch
+	}
+	return worktree.DefaultBaseBranchName
 }
 
 // rowsMsg delivers a fresh load of the board content.
@@ -180,7 +201,7 @@ func (m *Shell) loadRows() tea.Msg {
 	}
 	rows := make([]featureRow, 0, len(feats))
 	for _, f := range feats {
-		row := featureRow{F: f}
+		row := featureRow{F: f, BaseBranch: m.baseBranch(f)}
 		if hist, err := m.store.History(ctx, f.ID); err == nil {
 			row.History = hist
 		}
@@ -720,7 +741,7 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " rebased onto main", reload: true}
+		return noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true}
 	})
 }
 
@@ -736,7 +757,7 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if !landed {
-			return noticeMsg{text: string(f.ID) + " hasn't landed on main yet — nothing to clean up", isErr: true}
+			return noticeMsg{text: string(f.ID) + " hasn't landed on " + m.baseBranch(f) + " yet — nothing to clean up", isErr: true}
 		}
 		m.dropSession(f.ID)
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {

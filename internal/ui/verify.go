@@ -325,7 +325,17 @@ func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
 			"%s: baseline — check '%s' %s; %s",
 			id, sanitize(r.Name), reason, fix)}
 	}
-	return noticeMsg{text: fmt.Sprintf("%s: baseline — all %d repo check(s) pass on the fresh branch", id, len(results))}
+	// "check(s) ... pass" never agreed: a single-check repo read "all 1
+	// repo check(s) pass on the fresh branch" verbatim on screen. Both the
+	// noun and its verb have to flex together (one check passes, several
+	// checks pass), so plural() (receipt.go) picks the noun's suffix and a
+	// local switch on the same count picks the verb.
+	verb := "pass"
+	if len(results) == 1 {
+		verb = "passes"
+	}
+	n := len(results)
+	return noticeMsg{text: fmt.Sprintf("%s: baseline — all %d repo check%s %s on the fresh branch", id, n, plural(n), verb)}
 }
 
 // verifySummary renders the last verify results for the dashboard.

@@ -118,7 +118,7 @@ func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
 		label:       fs.String("label", "bug", "issue label filter (\"\" imports all issues)"),
 		stateFilter: fs.String("state", "open", "issue state: open|closed|all"),
 		profile:     fs.String("profile", "", "profile the new bugs adopt (default: first configured)"),
-		envelope:    fs.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)"),
+		envelope:    fs.Int("envelope", 0, "spend budget per bug, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
 		issue:       fs.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)"),
 		yes:         fs.Bool("yes", false, "materialize without the confirmation prompt"),
 		comments:    fs.Bool("comments", false, "fetch issue comments into the report's Discussion section"),
@@ -252,7 +252,7 @@ func registerBugsNewFlags(fs *flag.FlagSet) *bugNewFlagValues {
 		env:      fs.String("env", "", "environment (versions, OS, config)"),
 		desc:     fs.String("desc", "", "summary of what's broken"),
 		profile:  fs.String("profile", "", "profile the bug adopts (default: first configured)"),
-		envelope: fs.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)"),
+		envelope: fs.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
 		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)"),
 		yes:      fs.Bool("yes", false, "create without the confirmation prompt"),
 	}

@@ -225,6 +225,26 @@ type copilotSession struct {
 	// getMetrics fetches the CLI's cumulative usage (the sdk RPC in
 	// production; a stub in tests). nil settles from the fallback stash.
 	getMetrics func(context.Context) (*copilotrpc.UsageGetMetricsResult, error)
+
+	// hadIdle marks that some prior turn on this session reached a clean
+	// idle — RunFailure.FirstTurn on a later failure reads the negation
+	// of this.
+	hadIdle bool
+}
+
+// markHadIdle records that some turn on this session reached a clean
+// idle — RunFailure.FirstTurn on a later failure reads the negation of
+// this.
+func (s *copilotSession) markHadIdle() {
+	s.mu.Lock()
+	s.hadIdle = true
+	s.mu.Unlock()
+}
+
+func (s *copilotSession) hadIdleValue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hadIdle
 }
 
 // addSettled folds one emitted usage sample into the per-model settled
@@ -375,6 +395,7 @@ func (s *copilotSession) settleIdle() {
 		u.Metered = s.metered
 		s.emit(Event{Kind: EventUsage, Usage: u})
 	}
+	s.markHadIdle()
 	s.emit(Event{Kind: EventIdle})
 }
 
@@ -550,7 +571,10 @@ func (s *copilotSession) onEvent(ev copilot.SessionEvent) {
 	case *copilot.SessionLimitsExhaustedRequestedData:
 		out = Event{Kind: EventBudgetExhausted, Usage: Usage{Credits: d.UsedAiCredits}}
 	case *copilot.SessionErrorData:
-		out = Event{Kind: EventError, Err: fmt.Errorf("%s: %s", d.ErrorType, d.Message)}
+		out = Event{Kind: EventError, Err: &RunFailure{
+			Backend: "copilot", Diagnostic: boundTail(d.Message, false),
+			FirstTurn: !s.hadIdleValue(), Err: errors.New(d.ErrorType),
+		}}
 	default:
 		return
 	}

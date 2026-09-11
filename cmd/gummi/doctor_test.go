@@ -218,7 +218,7 @@ func TestDoctorReadyWithHeadlessAuth(t *testing.T) {
 	if c := checkByName(r, "auth:headless"); c.Status != statusOK {
 		t.Errorf("auth = %+v, want ok", c)
 	}
-	if c := checkByName(r, "envelope"); c.Status != statusOK {
+	if c := checkByName(r, "budget"); c.Status != statusOK {
 		t.Errorf("envelope = %+v, want ok", c)
 	}
 }
@@ -250,7 +250,7 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 	// no envelope, no BYOK (auth becomes n/a for headless).
 
 	r := buildDoctorReport(repo, doctorOpts{})
-	if c := checkByName(r, "envelope"); c.Status != statusWarn {
+	if c := checkByName(r, "budget"); c.Status != statusWarn {
 		t.Errorf("envelope = %+v, want warn", c)
 	}
 	if !r.Ready {
@@ -259,7 +259,7 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 
 	t.Setenv("GUMMI_ENVELOPE", "5") // below one turn
 	r = buildDoctorReport(gitRepo(t), doctorOpts{})
-	if c := checkByName(r, "envelope"); c.Status != statusWarn {
+	if c := checkByName(r, "budget"); c.Status != statusWarn {
 		t.Errorf("sub-turn envelope = %+v, want warn", c)
 	}
 }

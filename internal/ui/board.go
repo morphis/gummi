@@ -212,9 +212,19 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if r.HasWorktree {
 		wtMark = " " + faint.Render("⎇")
 	}
-	// a landed branch is cleanup-ready (press c) — flag it so it stands out
+	// r.Landed answers "is there still a worktree to clean up" — msgs.go
+	// only computes it when the worktree exists (canHaveLanded gates the
+	// walk behind wt.Exists), so it drops back to false the moment clean-up
+	// deletes the branch: a card that landed and one that was abandoned
+	// then read identically in DONE (round 2 UX drive, §8). The badge is
+	// answering a different, permanent question — "did this ever land" —
+	// which domain.Feature.LandedSHA already carries independently of the
+	// worktree: SquashMerge stamps it once, at merge time, and nothing
+	// ever clears it. Showing "landed" off either signal keeps the r.Landed
+	// fast-path (no extra work on the common case, worktree still present)
+	// while surviving clean-up.
 	landed := ""
-	if r.Landed {
+	if r.Landed || r.F.LandedSHA != "" {
 		landed = " " + s.Success.Render("landed")
 	}
 	// a card linked to an outbound PR gets a compact badge, kept visually
@@ -225,8 +235,9 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		pr = " " + s.Info.Render(b)
 	}
 	cost := ""
-	if !r.F.Spend.Zero() {
-		cost = " " + faint.Render(spendTick(r.F.Spend))
+	live := m.liveCardSpent(r.F.ID)
+	if !r.F.Spend.Zero() || live > 0 {
+		cost = " " + faint.Render(spendTick(r.F.Spend, live))
 	}
 	// The row used to be assembled title-first and cut from the right by a
 	// single ansi.Truncate: at narrow widths the title (the one field the
@@ -250,6 +261,35 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	return line
 }
 
+// boardGlyphLegend explains the board row's glyph vocabulary: the four
+// stage shapes (stageGlyph), the queued marker, and the badges cardLine
+// appends after the id. It exists because the round 2 UX drive found no
+// legend anywhere — a row can carry any of ○ ● ◐ ✔ ⚡ ⎇ ✗ ⏸ ✉ ⟲ ~ and the
+// ? help overlay documents keys only, never what the marks mean.
+//
+// Shaped as [][2]string, the same pair helpRows (keymap.go) produces, so
+// the board's ? overlay (built by helpOverlay, also keymap.go) can show
+// it by appending this slice to helpRows(bs) before building the
+// helpDialog — e.g. rows: append(helpRows(bs), boardGlyphLegend()...) —
+// or rendering it as its own titled section if helpDialog grows one.
+// keymap.go and dialogs.go are outside this package's write scope for
+// this pass, so the wiring itself is left to their owner.
+//
+// Two marks in the drive's list are not defined here and are omitted:
+// ⟲ (corrective-round counter, thread.go) and ~ (estimated-spend prefix,
+// spendformat.go's estMark) — whoever owns those files is best placed to
+// fold them into this same legend or its own.
+func boardGlyphLegend() [][2]string {
+	return [][2]string{
+		{"○ ● ◐ ✔", "stage: todo · in progress · review/verify · done"},
+		{"◔", "queued — waiting for a driver"},
+		{"⚡", "autopilot gate-approval (gates cross unattended)"},
+		{"⎇", "worktree present"},
+		{"⏸", "paused — a run the user stopped"},
+		{"✉ ✗ ? $", "needs you: gate · run failure · question · budget"},
+	}
+}
+
 // severityAbbrev is the compact badge text for a bug's severity level;
 // called only for non-empty severities.
 func severityAbbrev(sev domain.Severity) string {
@@ -267,10 +307,30 @@ func severityAbbrev(sev domain.Severity) string {
 
 // spendTick is the compact cost marker on a card: Copilot credits when
 // any were metered, else BYOK tokens. A "~" prefix flags a credit figure
-// with a token-derived (estimated) component.
-func spendTick(sp domain.Spend) string {
+// that is not the settled total: either a token-derived estimate
+// (estMark) or, while live is nonzero, the driving session's own running
+// credit-equivalent (Session.CardSpent, reached through
+// Shell.liveCardSpent — the same accessor the card masthead's budget
+// line already reads). Without the live branch the board's cost column
+// held the row's last-reload snapshot for as long as a turn ran — a
+// live drive watched one sit at "~317.4cr" for seven minutes while the
+// card page counted the same turn up to 24.7 credits, reading as "nothing
+// is happening" on a card that was actively spending. live wins outright
+// over the stored figure while a session is running, the same precedence
+// budgetSummary (spendformat.go) already gives it for the masthead.
+//
+// The unit is spelled "credits" in full rather than the old "cr"
+// suffix, which was invented for this one line — nowhere else in the
+// product abbreviates it (the masthead's budget line and the dashboard's
+// spend rollup both say "credits"). The column is also the first thing
+// cardLine sheds once a row runs out of room, so the extra characters
+// cost nothing the layout wasn't already prepared to give up.
+func spendTick(sp domain.Spend, live float64) string {
+	if live > 0 {
+		return fmt.Sprintf("~%g credits", roundSpend(live))
+	}
 	if sp.Credits > 0 {
-		return fmt.Sprintf("%s%gcr", estMark(sp), roundSpend(sp.Credits))
+		return fmt.Sprintf("%s%g credits", estMark(sp), roundSpend(sp.Credits))
 	}
 	tk := sp.InputTokens + sp.OutputTokens
 	if tk >= 1000 {
@@ -295,7 +355,10 @@ func shortcutLabel(n int) string {
 // boardCounts summarizes the board for the status bar.
 func (m *Shell) boardCounts() string {
 	if len(m.rows) == 0 {
-		return "0 features"
+		// "cards", not "features": every other surface calls them cards,
+		// and this pill is the very first words a new user reads under an
+		// empty board.
+		return "no cards yet"
 	}
 	counts := map[domain.SuperState]int{}
 	for _, r := range m.rows {

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"reflect"
@@ -584,6 +585,153 @@ gotError:
 		!strings.Contains(strings.ToLower(errMsg), "no events") &&
 		!strings.Contains(strings.ToLower(errMsg), "empty") {
 		t.Errorf("EventError present but wording %q does not name the empty-session failure mode", errMsg)
+	}
+}
+
+// TestOpencodeRunFailureCarriesDiagnostic pins §1.4 of the 2026-09-10
+// UX drive: a failed run used to surface as bare "opencode run failed:
+// exit status 1" — the process's exit code with none of the backend's
+// own diagnosis, because gummi captured stderr but never attached it to
+// anything a caller could act on. The turn's exit code (1) here IS the
+// only thing Go's exec error carries, so proving the diagnostic survives
+// depends entirely on the *RunFailure wrapping: Error() must fold the
+// captured stderr in, and a caller (the engine, then the UI) must be
+// able to reach it structurally via errors.As instead of re-parsing a
+// string.
+func TestOpencodeRunFailureCarriesDiagnostic(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"echo 'error: openrouter/z-ai/glm-5.3-flash: provider not authenticated' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind != EventError {
+				continue
+			}
+			var rf *RunFailure
+			if !errors.As(e.Err, &rf) {
+				t.Fatalf("EventError.Err = %v (%T), want a *RunFailure", e.Err, e.Err)
+			}
+			if rf.Backend != "opencode" {
+				t.Errorf("RunFailure.Backend = %q, want opencode", rf.Backend)
+			}
+			if !rf.FirstTurn {
+				t.Error("RunFailure.FirstTurn = false on the session's first Send")
+			}
+			if !strings.Contains(rf.Diagnostic, "provider not authenticated") {
+				t.Errorf("RunFailure.Diagnostic = %q, missing the backend's own stderr", rf.Diagnostic)
+			}
+			if !strings.Contains(e.Err.Error(), "provider not authenticated") {
+				t.Errorf("Error() = %q, does not fold the diagnostic in for a caller that only reads the string", e.Err.Error())
+			}
+			return
+		case <-deadline:
+			t.Fatal("no EventError before deadline")
+		}
+	}
+}
+
+// TestOpencodeRunFailureFirstTurnFalseAfterASuccess: FirstTurn must read
+// false once a prior turn on the same session has already reached idle
+// — otherwise every mid-task crash would misreport as a fresh session's
+// first turn and wrongly point a reader at `gummi doctor` for a backend
+// that was, until a moment ago, working fine.
+func TestOpencodeRunFailureFirstTurnFalseAfterASuccess(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	marker := dir + "/turn-two"
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"if [ -f " + marker + " ]; then\n" +
+		"  echo 'boom' >&2\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"touch " + marker + "\n" +
+		`echo '{"type":"text","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	waitIdle := func() {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case e := <-sess.Events():
+				if e.Kind == EventIdle {
+					return
+				}
+				if e.Kind == EventError {
+					t.Fatalf("unexpected error waiting for the first turn's idle: %v", e.Err)
+				}
+			case <-deadline:
+				t.Fatal("no idle before deadline")
+			}
+		}
+	}
+
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	waitIdle()
+
+	if err := sess.Send(ctx, "go again"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind != EventError {
+				continue
+			}
+			var rf *RunFailure
+			if !errors.As(e.Err, &rf) {
+				t.Fatalf("EventError.Err = %v, want a *RunFailure", e.Err)
+			}
+			if rf.FirstTurn {
+				t.Error("RunFailure.FirstTurn = true on a session's second turn")
+			}
+			return
+		case <-deadline:
+			t.Fatal("no EventError before deadline")
+		}
 	}
 }
 

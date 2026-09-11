@@ -1085,7 +1085,7 @@ func (m *Shell) threadInputBindings() []binding {
 			// esc stays last: the status bar drops hints from the
 			// second-to-last backwards precisely so the surface's escape
 			// hatch outlives every other row (statusbar.Render).
-			return m.withCardTabs(append(bs, binding{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true}))
+			return m.withCardTabs(append(bs, binding{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true}))
 		}
 	}
 	return m.withCardTabs([]binding{
@@ -1097,7 +1097,7 @@ func (m *Shell) threadInputBindings() []binding {
 		// esc last, for the reason the decision table gives above: the
 		// bar sheds the second-to-last hint first, so the way out is the
 		// last thing to go.
-		{key: "esc", label: "backlog", help: "back to the backlog list (the draft is kept)", bar: true},
+		{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true},
 	})
 }
 

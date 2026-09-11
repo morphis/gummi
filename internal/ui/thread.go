@@ -258,13 +258,33 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// and where its opening rule ends up in the body. anchorIdx stays -1
 	// unless that rule is actually drawn, so a period whose rule the
 	// render never reaches cannot move the scroll to a row that is not
-	// there.
+	// there. Two different callers arm m.anchorTo/m.anchorFrom for this:
+	// markSeen (shell.go), for the unread-period jump on opening a card,
+	// and openCitation → openAnchor's "event" case (citations.go), for
+	// alt+a on a narration claim that cites the period's opening event —
+	// both just want the same rule found and scrolled to, so both share
+	// one mechanism rather than each inventing its own.
 	// markSeen (shell.go) already resolved which period this is and left
 	// its opening index behind; the render only has to notice when it
 	// draws that period's rule. It must not put the question again here:
 	// markSeen advances the read mark at the same moment it sets the
 	// anchor, so by the time this runs the honest answer to "what is
-	// unread" is always "nothing".
+	// unread" is always "nothing". openCitation resolves its own index
+	// the same way, against the same stretches (scrollThreadToEvent), and
+	// for the same reason: this render pass draws the rule, it does not
+	// decide whether one exists to draw.
+	//
+	// markAnchor below sets anchorIdx directly for a rule drawn in the
+	// folded-segment loop; a rule the live stage draws instead reports
+	// its own row back through liveStageBlock's anchorAt return (folded
+	// in just below, at "if at >= 0 && anchorIdx < 0"), because that is
+	// the one block with no access to this closure. Both paths write the
+	// same field, so whichever one actually draws the rule is the one
+	// that gets to set it — including appendStretchCloses, now, for a
+	// period that opened and closed entirely inside the live stage or a
+	// followed tail (§2.2 of the 2026-09-10 round-2 review): before that
+	// fix this render drew the rule but never told anchorIdx where, and
+	// alt+a on such a period cleared the anchor and moved nothing.
 	anchoring := !measure && m.anchorTo == f.ID
 	anchorIdx := -1
 	markAnchor := func(st autopilotStretch) {
@@ -1105,8 +1125,13 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 }
 
 // pinnedSpecLine is the thread's anchor back to the design artifact: the
-// section current for this stage, how many open %% questions block the
-// gate, and the key that opens the full view.
+// section current for this stage, how many open comment threads block
+// the gate, and the key that opens the full view.
+//
+// "open comments", not "open %%": %% is the marker the artifact's own
+// file syntax uses to spell a comment, and printing it here put the
+// file's own punctuation in front of a reader who has never opened the
+// file (2026-09-10 round-2 review, §5's word table).
 func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	f := r.F
 	section := currentSpecSection(f.Kind, f.Stage)
@@ -1116,7 +1141,7 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	head := "⌄ " + artifactNoun(f.Kind) + " · " + section
 	tail := ""
 	if r.OpenSpecQs > 0 {
-		tail = itoa(r.OpenSpecQs) + " open %%  "
+		tail = itoa(r.OpenSpecQs) + " open comment" + plural(r.OpenSpecQs) + "  "
 	}
 	tail += "alt+s"
 
@@ -1128,7 +1153,7 @@ func pinnedSpecLine(s *theme.Styles, r featureRow, w int) string {
 	out := s.Faint.Render("⌄ ") + s.Muted.Render(artifactNoun(f.Kind)) + s.Faint.Render(" · "+section) +
 		" " + s.Separator.Render(strings.Repeat("─", fill)) + " "
 	if r.OpenSpecQs > 0 {
-		out += s.Warning.Render(itoa(r.OpenSpecQs)+" open %%") + "  "
+		out += s.Warning.Render(itoa(r.OpenSpecQs)+" open comment"+plural(r.OpenSpecQs)) + "  "
 	}
 	// alt+s, not s: the composer owns every printable key on this page
 	// (threadinput.go), so a bare s landed in the reader's draft instead
@@ -1402,7 +1427,22 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // snapshot rather than from the event log: those have no indices to
 // place a rule against, so the rules go last, and without them a closed
 // period had no ending anywhere on the page.
-func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []autopilotStretch, w int) []string {
+//
+// anchorFrom/anchorAt carry the event-citation anchor (see thread.go's
+// own doc comment on it, and liveStageBlock's callers below) through
+// this, the one place that can still satisfy it in the sess/follow
+// branches: a period that opened AND closed inside the session or
+// followed tail those branches are rendering has no other rule drawn
+// for it anywhere in them — their own open-loops only place a period
+// that began before the session started (2026-09-10 round-2 review,
+// §2.2, "alt+a — open cited — is dead") — so
+// without checking here, alt+a on such a period's opening citation armed
+// an anchor this function was the only place left that could have drawn
+// it, found nothing, and cleared itself unnoticed. anchorAt is threaded
+// through rather than recomputed because the caller may already have
+// found the row from an earlier, unrelated loop (the "before this
+// session" one) and a later match here must never overwrite that one.
+func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []autopilotStretch, anchorFrom, anchorAt int, w int) ([]string, int) {
 	for _, st := range closes {
 		lines = append(lines, "")
 		// A period that also opened in this stage has had no rule drawn
@@ -1413,13 +1453,53 @@ func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []autopi
 		// at least reads as one run that began and ended in this stage.
 		for _, op := range opens {
 			if op.from == st.from {
+				if op.from == anchorFrom && anchorAt < 0 {
+					anchorAt = len(lines)
+				}
 				lines = append(lines, stretchOpenLine(s, st, w))
 				break
 			}
 		}
 		lines = append(lines, stretchCloseLines(s, st, w)...)
 	}
-	return lines
+	return lines, anchorAt
+}
+
+// liveBusyLabel is the live stage's busy line: what is actually running,
+// plus how long this run has been at it. It is not simply
+// m.runningLabel(snap, since) (loopline.go), for two reasons — a bug fix
+// and a value it already has that runningLabel does not:
+//
+//   - runningVerb (loopline.go) distinguishes a critique pass from the
+//     stage's own work for Plan (snap.Critique flips "writing plan" to
+//     "critiquing plan") but has no equivalent branch for Implement,
+//     whose review→fix loop runs its own fresh-context reviewer pass the
+//     same way (engine.CritiqueRoundKind lists both stages). So a review
+//     turn on Implement read "implementing" here while the section rule
+//     drawn a few lines above it, and the transcript inside it, both
+//     said reviewer — the user was told code was being written while it
+//     was being read. runningVerb also backs cardBusyWord (the board
+//     row, which has no room for a role distinction) and
+//     planLoopLine's breadcrumb, so the fix belongs here, at the one
+//     caller that both knows the difference and has somewhere to put it,
+//     rather than in the shared table every other reader of it trusts to
+//     mean "the stage".
+//   - since here is the caller's own segs[len(segs)-1].enterAt (see the
+//     "at" local in liveStageBlock's sess branch), which is this RUN's
+//     start — mirrorEvents (internal/engine/persist.go) stamps each
+//     session generation's own stage_enter with that generation's own
+//     startedAt, so a retry after a failure gets a fresh timestamp even
+//     though the stage never changed. runningLabel's only caller used to
+//     pass r.F.UpdatedAt instead, the STAGE's own start, which a retry
+//     does not move: a run that failed at 20:35 and restarted at 20:37
+//     read "2m38s" a minute later, counting the two minutes the TUI sat
+//     closed between them.
+func (m *Shell) liveBusyLabel(snap engine.Snapshot, since time.Time) string {
+	verb := m.runningVerb(snap)
+	if snap.Critique && !snap.Interactive && snap.Feature.Stage == domain.StageImplement {
+		verb = "reviewing"
+	}
+	return withElapsed(verb, m.now(), since)
 }
 
 func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens, liveCloses []autopilotStretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
@@ -1436,19 +1516,23 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		anchorAt = -1
 		lines = []string{boundaryRule(s, string(f.Stage), string(snap.Role), runModel(snap), at, w), ""}
 		// A live session renders from its own snapshot rather than the
-		// event log, so there are no indices here to place a rule against.
-		// There is only ever one period to draw in that case — a card with
-		// something running now is a card whose period, if it has one, has
-		// not closed — so its opening rule goes at the top and nothing
-		// else is claimed.
-		// Only a period that began before this session can be placed
-		// here. A live session renders from its own snapshot, which has no
-		// event indices to hang a rule off, so a switch pressed part-way
-		// through one has no honest position: drawing it at the top would
-		// put it above the turns that preceded it, which is the error this
-		// change exists to remove. It is left undrawn until the session
-		// ends and the log renders it in its own place — and meanwhile the
-		// masthead already names the card's autopilot now-state.
+		// event log, so there are no indices here to place a rule against
+		// a period that is STILL RUNNING (to == len(events)) — this loop
+		// only ever places one that began before this session, at the
+		// top, because that is the one position a snapshot can justify: a
+		// switch pressed part-way through the session has no honest
+		// place to draw the rule, and putting it at the top would claim
+		// it happened before turns that came first. Such a period is left
+		// undrawn until the session ends and the log renders it in its
+		// own place — the masthead already names the card's autopilot
+		// now-state meanwhile, so nothing about it goes unsaid.
+		//
+		// A period that has already CLOSED is a different question with a
+		// different answer, and does not go through this loop at all: it
+		// gets its rule from appendStretchCloses below, whether it opened
+		// before this session or inside it, because a closed period's
+		// whole span is known and a rule for it does not have to guess at
+		// a position the way a still-running one would.
 		if len(segs) > 0 {
 			for _, st := range liveOpens {
 				if st.running() && st.from < segs[len(segs)-1].enterIdx {
@@ -1478,7 +1562,16 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		case snap.State == engine.StateQueued:
 			lines = append(lines, "  "+s.Faint.Render("◔ "+queuedLabel()))
 		case snap.Busy:
-			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.runningLabel(snap, r.F.UpdatedAt)))
+			// at, not r.F.UpdatedAt: the row field names when the STAGE
+			// began, which a retry after a failed run does not move, so a
+			// run that failed at 20:35 and restarted at 20:37 read
+			// "2m38s" a minute later — counting the two minutes the TUI
+			// sat closed between them. at is this run's own generation
+			// (mirrorEvents stamps its stage_enter with the session's own
+			// startedAt), the same stamp the boundary rule two lines above
+			// already prints, so the clock and the rule it sits under can
+			// no longer disagree about when this run began.
+			lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+m.liveBusyLabel(snap, at)))
 		}
 		// A period that ended in this stage still says so. The session
 		// object outlives the run that filled it — the engine keeps a
@@ -1489,7 +1582,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// under the transcript because that is the only honest place a
 		// snapshot can put them: it carries no event indices, and the
 		// period covered the work above.
-		lines = appendStretchCloses(s, lines, liveOpens, liveCloses, w)
+		lines, anchorAt = appendStretchCloses(s, lines, liveOpens, liveCloses, anchorFrom, anchorAt, w)
 		return lines, anchorAt, nil
 	}
 
@@ -1516,7 +1609,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		}
 		lines = append(lines, "  "+s.Warning.Render(m.follow.marker())+
 			s.Faint.Render(" — "+m.follow.footer(snap)))
-		lines = appendStretchCloses(s, lines, liveOpens, liveCloses, w)
+		lines, anchorAt = appendStretchCloses(s, lines, liveOpens, liveCloses, anchorFrom, anchorAt, w)
 		return lines, anchorAt, nil
 	}
 

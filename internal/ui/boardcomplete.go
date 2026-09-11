@@ -5,7 +5,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/engine"
 )
 
@@ -124,42 +123,12 @@ func boardCommandNeedsValue(id string) bool {
 // behind it.
 func (m *Shell) boardValueRows(cmd string) ([]completionRow, bool) {
 	switch cmd {
-	case "agent":
-		return m.boardAgentValueRows(), true
 	case "profile":
 		return m.boardProfileValueRows(), true
 	case "model":
 		return m.boardModelValueRows(), true
 	}
 	return nil, false
-}
-
-// boardAgentValueRows lists the five known hosted CLIs, installed or
-// not — split out from boardValueRows' switch so each command's rows
-// have their own function to carry their own doc comment, rather than
-// three unrelated bodies sharing one.
-func (m *Shell) boardAgentValueRows() []completionRow {
-	var out []completionRow
-	for _, a := range agentcli.Detect() {
-		desc := "not on PATH"
-		if a.Installed {
-			desc = "installed"
-		}
-		if a.Name == m.agentConfigName {
-			desc += " · current"
-		}
-		out = append(out, completionRow{
-			name: a.Name,
-			desc: desc,
-			id:   "agent-cli:" + a.Name,
-			// An uninstalled CLI stays visible and unrunnable rather than
-			// being filtered out: seeing it is what explains why a config
-			// naming it does nothing, and refusing it here is a clearer
-			// failure than one at spawn time.
-			available: a.Installed,
-		})
-	}
-	return out
 }
 
 // labelBackendModel words an empty Backend or Model coming back from the
@@ -385,14 +354,8 @@ func (m *Shell) setBoardLine(line string) {
 // carries "<command id>:<value>" (boardProfileValueRows,
 // boardModelValueRows), which this splits back into the pair
 // runBoardCommand expects — the one mapping this file needs of its own,
-// and one line per command that takes values. "agent-cli:" is handled
-// first and separately: its rows don't name a board command at all
-// (agent-cli has no globalCommands entry to dispatch through), so it
-// goes straight to chooseAgentCLI instead.
+// and one line per command that takes values.
 func (m *Shell) runBoardCompletion(row completionRow) tea.Cmd {
-	if name, ok := strings.CutPrefix(row.id, "agent-cli:"); ok {
-		return m.chooseAgentCLI(name)
-	}
 	if id, val, ok := strings.Cut(row.id, ":"); ok {
 		return m.runBoardCommand(id, val)
 	}
@@ -413,8 +376,6 @@ func (m *Shell) runBoardCommand(id, arg string) tea.Cmd {
 		return m.runBoardProfileCommand(arg)
 	case "board-model":
 		return m.runBoardModelCommand(arg)
-	case "agent-cli":
-		return m.runBoardAgentCommand(arg)
 	case "board-clear":
 		return m.clearBoardConversation()
 	}
@@ -456,32 +417,6 @@ func (m *Shell) boardSnapshot() engine.Snapshot {
 		return engine.Snapshot{}
 	}
 	return m.board.Snapshot()
-}
-
-// runBoardAgentCommand answers "/agent" with and without a name.
-//
-// Without one it opens the picker dialog, which is what the command has
-// always done. With one it applies that choice directly — the whole point
-// of an inline value picker is not having to open a dialog to say a word
-// you already typed. A name that matches nothing is refused rather than
-// silently falling through to the dialog: "/agent claud" quietly opening
-// a picker looks exactly like the typo having worked.
-func (m *Shell) runBoardAgentCommand(arg string) tea.Cmd {
-	if arg == "" {
-		return m.runCommand("agent-cli")
-	}
-	for _, a := range agentcli.Detect() {
-		if !strings.EqualFold(a.Name, arg) {
-			continue
-		}
-		if !a.Installed {
-			m.notice = noticeMsg{text: a.Name + " — not on PATH", isErr: true}
-			return nil
-		}
-		return m.chooseAgentCLI(a.Name)
-	}
-	m.notice = noticeMsg{text: "no agent CLI named " + arg, isErr: true}
-	return nil
 }
 
 // runBoardProfileCommand answers /profile <arg>. An empty arg — the bare

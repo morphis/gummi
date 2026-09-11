@@ -13,9 +13,15 @@ import (
 // the default behavior of the old hand-rolled dispatch.
 var rootCmd = &cobra.Command{
 	Use:   "gummi",
-	Short: "Meta-harness for coding agents",
-	Long: `gummi drives a fleet of coding agents through a spec-driven workflow
-across git worktrees, from one TUI (DESIGN §8.2).
+	// "Meta-harness" was the Short line for a long time. It is what gummi
+	// is to the people who build it and nothing at all to someone typing
+	// --help for the first time, and the Long text pointed at a design-doc
+	// section number that a user of the binary has no copy of. Both now
+	// say what the program does instead.
+	Short: "Drives coding agents through plan, implement and verify",
+	Long: `gummi drives coding agents through a spec-driven workflow: each piece of
+work is a card, and every card is planned, implemented and verified on its
+own git branch before you decide whether to land it.
 
 Run 'gummi' with no arguments to launch the board. The subcommands run the
 same operations headlessly so agents and scripts can drive the workflow

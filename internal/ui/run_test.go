@@ -82,6 +82,65 @@ func TestPauseStopsRun(t *testing.T) {
 	}
 }
 
+// TestPauseKeepsAGateAndFailureAndBudgetItemOpen is §1.1's regression:
+// pausing a run used to clear whatever needs-attention item the feature
+// carried unconditionally (pauseRun's noticeMsg always set clearInbox),
+// which is how a card that had just PASSED verify and was sitting on the
+// landing decision (attnGate) could be "parked" and vanish from the
+// inbox — "nothing needs you" while a verified branch waited for the one
+// action gummi never automates. An attnFailure (a session errored) and
+// an attnBudget (a stage hit its envelope) are the same shape: both
+// describe a stop that pausing an already-stopped-in-substance session
+// does not resolve either. None of the three may be cleared by a pause.
+func TestPauseKeepsAGateAndFailureAndBudgetItemOpen(t *testing.T) {
+	for _, kind := range []attnKind{attnGate, attnFailure, attnBudget} {
+		t.Run(string(kind), func(t *testing.T) {
+			m, eng := agentWorkspace(t, agent.NewFake("working…"))
+			m = advanceTo(t, m, domain.StageImplement)
+			m = openAndAttach(t, m)
+			settleChat(t, eng)
+			if m.sessionFor("FD-001") == nil {
+				t.Fatal("run did not start a session")
+			}
+			m.inbox.add("FD-001", kind, "pinned for this test")
+			m = toKeys(t, m)
+			m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
+			if !strings.Contains(m.notice.text, "paused") {
+				t.Fatalf("notice = %q, want paused", m.notice.text)
+			}
+			it, ok := m.inbox.get("FD-001")
+			if !ok || it.Kind != kind {
+				t.Errorf("after pausing over an open %s item: inbox = %+v, ok=%v, want the %s item still open", kind, it, ok, kind)
+			}
+		})
+	}
+}
+
+// TestPauseClearsAQuestionItem is the other half of §1.1's deliberate
+// split: an attnQuestion exists only because a live agent asked something
+// and is waiting on the answer. Pausing stops that very agent, so unlike
+// a gate, failure or budget item there is nothing left behind to answer
+// — the question item legitimately goes away with the session that asked
+// it.
+func TestPauseClearsAQuestionItem(t *testing.T) {
+	m, eng := agentWorkspace(t, agent.NewFake("working…"))
+	m = advanceTo(t, m, domain.StageImplement)
+	m = openAndAttach(t, m)
+	settleChat(t, eng)
+	if m.sessionFor("FD-001") == nil {
+		t.Fatal("run did not start a session")
+	}
+	m.inbox.add("FD-001", attnQuestion, "pinned for this test")
+	m = toKeys(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})
+	if !strings.Contains(m.notice.text, "paused") {
+		t.Fatalf("notice = %q, want paused", m.notice.text)
+	}
+	if it, ok := m.inbox.get("FD-001"); ok {
+		t.Errorf("after pausing over an open question item: inbox = %+v, want it cleared", it)
+	}
+}
+
 // selectRow points the board selection at a feature by ID.
 func selectRow(t *testing.T, m *Shell, id domain.FeatureID) {
 	t.Helper()

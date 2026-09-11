@@ -320,7 +320,7 @@ func init() {
 // registerRunFlags).
 func bindRunFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)")
+	f.Int("envelope", 0, "spend budget for the card, in credits (required; falls back to GUMMI_ENVELOPE)")
 	f.String("profile", "", "profile mapping roles to models (default: first configured)")
 	f.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
@@ -339,7 +339,7 @@ func bindRunFlags(cmd *cobra.Command) {
 // Verification-plan section to seed.
 func bindResearchFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.Int("envelope", 0, "credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)")
+	f.Int("envelope", 0, "spend budget for the research card, in credits (required; falls back to GUMMI_ENVELOPE)")
 	f.String("profile", "", "profile mapping roles to models (default: first configured)")
 	f.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)")
 	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
@@ -356,7 +356,7 @@ func bindResearchFlags(cmd *cobra.Command) {
 func bindIngestFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("profile", "", "profile the new features adopt (default: first configured)")
-	f.Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)")
+	f.Int("envelope", 0, "spend budget per card, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	f.Bool("yes", false, "materialize without the confirmation prompt")
 	f.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; required when `repos:` is configured)")
 }
@@ -365,7 +365,7 @@ func bindIngestFlags(cmd *cobra.Command) {
 func bindResumeFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("answer", "", "answer a delegated ask_user question")
-	f.Int("envelope", 0, "raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)")
+	f.Int("envelope", 0, "raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)")
 	f.Bool("approve", false, "approve a caller design gate")
 	f.String("request-changes", "", "send a caller design gate back with a note")
 	f.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)")
@@ -387,7 +387,7 @@ func bindBugsIngestFlags(cmd *cobra.Command) {
 	f.String("label", "bug", "issue label filter (\"\" imports all issues)")
 	f.String("state", "open", "issue state: open|closed|all")
 	f.String("profile", "", "profile the new bugs adopt (default: first configured)")
-	f.Int("envelope", 0, "credit envelope per bug (0 = none; falls back to GUMMI_ENVELOPE)")
+	f.Int("envelope", 0, "spend budget per bug, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	f.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)")
 	f.Bool("yes", false, "materialize without the confirmation prompt")
 	f.Bool("comments", false, "fetch issue comments into the report's Discussion section")
@@ -405,7 +405,7 @@ func bindBugsNewFlags(cmd *cobra.Command) {
 	f.String("env", "", "environment (versions, OS, config)")
 	f.String("desc", "", "summary of what's broken")
 	f.String("profile", "", "profile the bug adopts (default: first configured)")
-	f.Int("envelope", 0, "credit envelope (0 = none; falls back to GUMMI_ENVELOPE)")
+	f.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)")
 	f.Bool("yes", false, "create without the confirmation prompt")
 }

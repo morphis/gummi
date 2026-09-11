@@ -34,18 +34,16 @@ import (
 
 // ensureBoardSession opens the board's own conversation the first time
 // the agent tab is visited, and is a no-op on every later visit —
-// gotoTab's own lazy-spawn contract for the pty it is replacing, applied
-// here instead. engine.OpenBoard is itself idempotent (a second call
-// while one is live just returns the existing session), so the guard
-// below exists only to stop this from dispatching a second spawn command
-// while the first is still in flight — a quick tab bounce before
-// boardOpenedMsg has landed.
+// gotoTab's own lazy-spawn contract. engine.OpenBoard is itself
+// idempotent (a second call while one is live just returns the existing
+// session), so the guard below exists only to stop this from dispatching
+// a second spawn command while the first is still in flight — a quick
+// tab bounce before boardOpenedMsg has landed.
 //
-// Unlike ensureAgent's synchronous pty spawn, OpenBoard can start a real
-// backend process and dial its tools, which can take real time — the
-// same cost attachChat's own doc comment names for a card's Attach — so
-// this runs in a command, never inline (the no-IO-in-Update contract
-// attachChat states applies here too).
+// OpenBoard can start a real backend process and dial its tools, which
+// can take real time — the same cost attachChat's own doc comment names
+// for a card's Attach — so this runs in a command, never inline (the
+// no-IO-in-Update contract attachChat states applies here too).
 func (m *Shell) ensureBoardSession() tea.Cmd {
 	if m.board != nil || m.boardErr != "" || m.boardOpening {
 		return nil
@@ -73,11 +71,11 @@ func (m *Shell) ensureBoardSession() tea.Cmd {
 // override that reuse, not race it.
 //
 // eng is read off m.engine before the returned command runs, on the
-// Update goroutine — never inside the closure below — the same
-// discipline chooseAgentCLI (agentpicker.go) keeps its own field read
-// under for the identical reason: once a command is running on its own
-// goroutine, a Shell field it touches can be read by Update on the very
-// next frame, and nothing serializes the two.
+// Update goroutine — never inside the closure below — the discipline
+// every command in this package that needs a Shell field follows: once a
+// command is running on its own goroutine, a Shell field it touches can
+// be read by Update on the very next frame, and nothing serializes the
+// two.
 //
 // The four fields reset here are every piece of state a stale board
 // session left behind that a fresh one must not inherit: boardOpening so
@@ -117,10 +115,9 @@ func (m *Shell) reopenBoard(opts engine.BoardOpts) tea.Cmd {
 }
 
 // boardTabPlaceholder is what the agent tab shows before the board
-// session has opened, or instead of one that failed to — the board
-// thread's counterpart to agenttab.go's agentTabPlaceholder, kept
-// separate (rather than reused) because it reads m.board/m.boardErr, its
-// own two fields, not m.agent/m.agentErr.
+// session has opened, or instead of one that failed to — reading
+// m.board/m.boardErr, the two fields that carry the board session's own
+// two-state contract (nil/non-nil, plus the error string).
 func (m *Shell) boardTabPlaceholder(w, h int) string {
 	msg := m.styles.Muted.Render("starting the board session…")
 	if m.boardErr != "" {
@@ -506,8 +503,8 @@ func (m *Shell) interruptBoardSession() tea.Cmd {
 
 // boardClearCommand is the board conversation's command word: typed
 // rather than bound to a key, because it is the line a person arriving
-// from a hosted CLI already has in their fingers — the agent tab used
-// to BE that CLI (agenttab.go), and /clear is what it answered there.
+// from a coding CLI already has in their fingers — /clear is a familiar
+// command from that world, and the board conversation answers to it too.
 // It is spelled here for the keybar row that names it (keymap.go); the
 // running of it lives with the rest of the vocabulary, in the board
 // command dispatcher (boardcomplete.go), which claims the word
@@ -519,9 +516,9 @@ const boardClearCommand = "/clear"
 // it ran up all belong to the session, so the honest way to clear them
 // is to close it and open another — engine.OpenBoard reuses a live
 // session (its own doc comment), and only ever starts a new backend once
-// the old one is gone. It is the same close-and-reopen the agent picker
-// already does when the chosen CLI changes (shell.go, agentChosenMsg),
-// asked for directly instead of as a side effect of picking.
+// the old one is gone. It is the same close-and-reopen reopenBoard does
+// for /profile and /model, asked for directly instead of as a side
+// effect of switching.
 //
 // A turn in flight is ended by it. That is the point rather than a
 // wrinkle — a person clearing a conversation is saying they are done
@@ -544,7 +541,8 @@ func (m *Shell) clearBoardConversation() tea.Cmd {
 	// A failed open is cleared along with a live session: ensureBoardSession
 	// refuses to retry past boardErr, so leaving it set here would turn
 	// "start over" into "stay broken" for the one user who most wants a
-	// retry (agentChosenMsg clears it for the same reason).
+	// retry. reopenBoard clears it for the same reason; between them they
+	// are the two ways back from a failed open.
 	m.boardErr = ""
 	m.boardScroll = 0
 	m.boardInput.Reset()

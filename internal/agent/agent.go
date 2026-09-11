@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 // Role is a named capability slot a profile maps to a concrete model.
@@ -273,6 +274,76 @@ func (c WriteCage) Describe() string {
 // route every Send error through failRun, which turned a user typing a
 // second thought while the spinner was up into a dead stage.
 var ErrBusy = errors.New("a turn is already in progress")
+
+// RunFailure is a session's terminal error when its backend genuinely
+// failed a turn — a non-zero exit, a process that died mid-session, a
+// structured error the backend reported itself — as opposed to ErrBusy's
+// refusal. It exists because "opencode run failed: exit status 1" is the
+// whole of what Go's exec package hands back on its own: a process's exit
+// code says THAT it failed, never why, and why is almost always sitting
+// in the backend's own stderr (or, for a CLI that is not authenticated or
+// not on PATH, in plain text ahead of any JSON on stdout). Every adapter
+// used to fold whatever it had into one fmt.Errorf string — readable
+// once, on a screen wide enough, but not a shape a caller could act on:
+// the engine persists it verbatim and the UI renders it under a session's
+// ✗, and neither could single out "here is the diagnosis" from "here is
+// the verb that failed" without re-parsing a sentence no adapter promised
+// to keep stable.
+//
+// Diagnostic is the bounded, sanitized tail of whatever the backend
+// itself produced — captured at the source via capWriter (a fixed-size
+// ring for a long-lived child's stderr) or boundTail (applied to a
+// single turn's captured output before this is constructed) — never the
+// full, unbounded stream. It may be empty: a backend that failed
+// silently (no stderr, a clean non-zero exit) leaves nothing to show, and
+// Error() falls back to Err's own message in that case, matching every
+// adapter's previous behavior.
+//
+// FirstTurn marks a failure on the session's first turn: no prior turn
+// on this session ever reached a clean idle. It is the signal a caller
+// needs to tell "this backend is probably misconfigured" (bad auth, a
+// broken profile, an unreachable endpoint — the failure mode a brand
+// new user hits first) from "this backend broke mid-task", and to offer
+// `gummi doctor` — the one place gummi actually explains a broken
+// backend (it checks auth, the profile, and per-role reachability) —
+// instead of just "try again", which fails the identical way for the
+// identical reason.
+//
+// A caller that wants to render the diagnosis on its own terms — the
+// engine's failRun, then the UI under a session's ✗ — should
+// errors.As for *RunFailure and read Diagnostic/FirstTurn directly
+// rather than parsing them back out of a string. A caller that only
+// wants the traditional one-line summary can still call Error().
+type RunFailure struct {
+	// Backend names the adapter ("opencode", "codex", "claude", "zz",
+	// "copilot", the headless command's basename) for Error()'s prefix.
+	Backend string
+	// Diagnostic is the bounded, sanitized detail captured from the
+	// backend — its stderr tail, or a structured error message the
+	// backend reported natively. Empty when the backend gave gummi
+	// nothing to show.
+	Diagnostic string
+	// FirstTurn is true when no turn on this session ever reached a
+	// clean idle before this one failed.
+	FirstTurn bool
+	// Err is the underlying failure Unwrap exposes — an *exec.ExitError,
+	// a scan error, or an SDK-reported error — so errors.As/errors.Is
+	// still reach it through a RunFailure.
+	Err error
+}
+
+func (e *RunFailure) Error() string {
+	detail := e.Diagnostic
+	if detail == "" && e.Err != nil {
+		detail = e.Err.Error()
+	}
+	if detail == "" {
+		detail = "no diagnostics"
+	}
+	return fmt.Sprintf("%s run failed: %s", e.Backend, detail)
+}
+
+func (e *RunFailure) Unwrap() error { return e.Err }
 
 // Session is one live agent conversation bound to a feature + stage.
 type Session interface {

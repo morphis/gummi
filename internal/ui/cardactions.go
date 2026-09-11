@@ -229,13 +229,16 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		runWhy = fmt.Sprintf("follow the live agent stream — pid %d owns this run", r.Foreign.PID)
 	}
 
-	advanceLabel, advanceWhy := "advance", "advance stage (gate; from verify it lands the branch on main)"
+	advanceLabel, advanceWhy := "advance", "move the card to its next stage"
+	if in.stage == domain.StageVerify {
+		advanceWhy = "approve — squash-merge the branch and land it on " + r.baseBranch()
+	}
 	if research && doneStage {
 		// FD-081: a done RS card has nothing left to advance — g re-runs
 		// decompose instead (keymap.go).
 		advanceLabel, advanceWhy = "decompose", "on a done RS: re-run decompose"
 	}
-	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval)
+	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval, r.baseBranch())
 
 	bounceWhy := "send it back to " + string(work) + " for rework"
 	if in.stage == domain.StagePlan {
@@ -290,7 +293,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			!doneStage || research,
 		},
 		{
-			"bounce", "b", "bounce", bounceWhy, false,
+			// the label is "send back", not "bounce": the decision block
+			// (decision.go) already says "send it back" for this exact act,
+			// and §5 of the round 2 UX drive settled on that one name
+			// everywhere — keymap.go's b key agrees. The id stays "bounce":
+			// that is what the Shell switches on, not what a reader sees.
+			"bounce", "b", "send back", bounceWhy, false,
 			in.stage == domain.StageVerify ||
 				in.stage == domain.StageImplement ||
 				(in.stage == domain.StagePlan && in.escalated),
@@ -300,7 +308,10 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			research || needsWT,
 		},
 		{
-			"envelope", "u", "envelope", "set the budget envelope (credits; 0 = uncapped)", false,
+			// the id and the dialog it opens (envelope.go) both keep the old
+			// name internally; the label and why are the only parts a reader
+			// sees, so those are what §5 renames to "budget".
+			"envelope", "u", "budget", "set the card's budget (credits; 0 = uncapped)", false,
 			true,
 		},
 		// no accelerator, for the same reason duplicate has none: this is a
@@ -332,25 +343,25 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"inbox", "i", "inbox", "open the needs-you inbox", false,
 			in.attn != "",
 		},
-		// no accelerator: u is the envelope DIALOG on the board, and this
+		// no accelerator: u is the budget DIALOG on the board, and this
 		// is the one-keystroke top-up-and-resume the inbox reaches with
 		// its own u — the same engine.TopUp, offered at the stop instead
 		// of behind a pointer to another tab. Only a card actually stopped
-		// on its envelope has anything to top up.
+		// on its budget has anything to top up.
 		{
-			"topup", "", "top up", "raise the envelope and pick the stage back up", false,
+			"topup", "", "top up", "raise the budget and pick the stage back up", false,
 			in.attn == attnBudget,
 		},
 		{
-			"attach", "a", "attach", "raw-attach the agent CLI in the worktree", false,
+			"attach", "a", "attach", "open a terminal agent in this card's worktree", false,
 			r.HasWorktree,
 		},
 		{
-			"rebase", "r", "rebase", "rebase branch onto main (conflicts hand off to an agent)", false,
+			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts hand off to an agent)", false,
 			needsWT,
 		},
 		{
-			"merge", "m", "merge", "squash-merge branch into main (review & approve the drafted message)", false,
+			"merge", "m", "merge", "squash-merge branch into " + r.baseBranch() + " (review & approve the drafted message)", false,
 			needsWT && r.HasWorktree && !r.Landed,
 		},
 		{
@@ -358,7 +369,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			needsWT && r.HasWorktree && !r.Landed,
 		},
 		{
-			"clean", "c", "clean up", "branch landed on main — remove the worktree and branch", true,
+			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,
 			needsWT && r.Landed,
 		},
 		// no accelerator, same reasoning as duplicate/gate below: the
@@ -521,12 +532,20 @@ func pauseLabelWhy(in nextInput) (label, why string) {
 // mode, the same "name what pressing it does" adaptation runLabelWhy and
 // pauseLabelWhy already give run/pause. mode is r.F.GateApproval as
 // stored, and empty reads as attended like everywhere else, so the label
-// names the one move available from where the card actually is.
-func gateLabelWhy(mode string) (label, why string) {
+// names the one move available from where the card actually is. base is
+// the branch this card lands on (r.baseBranch()) — the "it never lands
+// on main" guarantee has to say the checkout's real trunk, not assert
+// "main" (REVIEW-ux-drive-2026-09-10-round2.md §3.4).
+//
+// The autopilot-on label used to be "take back the gates" — a phrase
+// nothing on screen defines. §5 of the round 2 UX drive asked for what
+// it actually does instead: you stop autopilot, and every gate goes back
+// to waiting on you.
+func gateLabelWhy(mode string, base string) (label, why string) {
 	if mode == domain.GateAutopilot {
-		return "take back the gates", "stop at every gate again — you decide each crossing (tightens control)"
+		return "stop autopilot", "stop at every gate again — you decide each crossing (tightens control)"
 	}
-	return "hand to autopilot", "let this card run to a verified branch unattended (loosens control — it never lands on main)"
+	return "hand to autopilot", "let this card run to a verified branch unattended (loosens control — it never lands on " + base + ")"
 }
 
 // markerWidth is the width of the per-row cursor marker ("▸ " / "  ");

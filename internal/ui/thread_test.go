@@ -164,17 +164,37 @@ func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
 }
 
 // TestPinnedSpecLineNamesOpenQuestions checks the pinned line's anchor
-// (section) and its open-%%-count badge.
+// (section) and its open-comment-count badge.
+//
+// It used to assert "2 open %%" — the artifact's own file syntax for a
+// comment marker, not a word — which a reader who has never opened the
+// file cannot read (2026-09-10 round-2 review, §5). Rewritten to pin
+// "2 open comments" instead of dropping the case: the pluralized count
+// is still the thing worth locking down, just spelled the way the rest
+// of the page spells anything else.
 func TestPinnedSpecLineNamesOpenQuestions(t *testing.T) {
 	r := featureRow{
 		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan},
 		OpenSpecQs: 2,
 	}
 	line := ansi.Strip(pinnedSpecLine(m0Styles(), r, 80))
-	for _, want := range []string{"spec", "Chosen approach", "2 open %%", "s"} {
+	for _, want := range []string{"spec", "Chosen approach", "2 open comments", "s"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("pinned spec line %q missing %q", line, want)
 		}
+	}
+
+	// the singular reads as a word too, not "1 open comments"
+	r1 := featureRow{
+		F:          domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan},
+		OpenSpecQs: 1,
+	}
+	line1 := ansi.Strip(pinnedSpecLine(m0Styles(), r1, 80))
+	if !strings.Contains(line1, "1 open comment ") {
+		t.Errorf("pinned spec line %q missing singular %q", line1, "1 open comment")
+	}
+	if strings.Contains(line1, "1 open comments") {
+		t.Errorf("pinned spec line %q pluralized a single open comment", line1)
 	}
 
 	// a stage with no natural section (todo) renders nothing to pin.
@@ -475,8 +495,11 @@ func TestThreadInputOwnsTheKeyboardOnOpen(t *testing.T) {
 	if got := m.threadInput.Value(); got != "g and v are just letters here" {
 		t.Fatalf("esc discarded the draft: %q", got)
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), "BACKLOG") {
-		t.Error("esc did not land back on the backlog list")
+	// BACKLOG was renamed to BOARD: the tab that opens this screen says
+	// "board" and its own help overlay reads "keys · board" already, so
+	// the header used to be the odd one out (round 2 UX drive, §6).
+	if !strings.Contains(ansi.Strip(m.View().Content), "BOARD") {
+		t.Error("esc did not land back on the board list")
 	}
 }
 
@@ -847,17 +870,22 @@ func TestSlashMenuIncludesCardActionsOnCardPage(t *testing.T) {
 	if !ok {
 		t.Fatalf("/envelope did not open the command menu: %T", m.Overlay.Top())
 	}
+	// The action's LABEL is "budget" now — a spend cap stopped being called
+	// an envelope on every surface a reader meets. Its id and verb name are
+	// still "envelope", which is why "/envelope" above still routes here:
+	// the word a script or a habit types keeps working, the word on screen
+	// is the plain one.
 	var found *command
 	for i, c := range cm.cmds {
-		if c.label == "envelope" {
+		if c.label == "budget" {
 			found = &cm.cmds[i]
 		}
 	}
 	if found == nil {
-		t.Fatal("command menu has no envelope entry on a card page — cardactions.go's inventory did not merge in")
+		t.Fatal("command menu has no budget entry on a card page — cardactions.go's inventory did not merge in")
 	}
 	if !found.available {
-		t.Fatalf("envelope entry = %+v, want available", *found)
+		t.Fatalf("budget entry = %+v, want available", *found)
 	}
 	if found.key != "u" {
 		t.Fatalf("envelope entry key = %q, want the card action's own key %q", found.key, "u")

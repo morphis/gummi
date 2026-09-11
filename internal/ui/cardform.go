@@ -141,13 +141,17 @@ var cardKinds = []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindRes
 
 // cardIDPrefix is what the `becomes` line shows for each kind: the id's
 // prefix without a number, since the number is minted only at Create.
+// FD/BG/RS are never spelled out anywhere else in the UI, so becomesLine
+// prints the kind word right beside the prefix here — this dialog is
+// where the id is minted, and the one place that owes the reader the
+// expansion.
 var cardIDPrefix = map[domain.Kind]string{domain.KindFeature: "FD", domain.KindBug: "BG", domain.KindResearch: "RS"}
 
 // newCardForm builds the door. kind presets the kind row; repos and
 // hasDefault shape the repo row as in every other creation dialog;
 // lastRepo preselects the repo chosen last time this session (a name
 // that is not configured is ignored); cands are the cards the `after`
-// row may name; defaultEnvelope prefills the envelope.
+// row may name; defaultEnvelope prefills the budget.
 func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, lastRepo string, cands []afterCand, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *cardForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
@@ -190,16 +194,29 @@ func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, la
 	} else {
 		d.setFocus(cardStopText)
 	}
-	d.text.Placeholder = cardPlaceholder
+	d.text.Placeholder = cardPlaceholderFor(kind)
 	return d
 }
 
-// cardPlaceholder is the whole manual: what the box accepts, in three
-// lines, shown only while it is empty.
-const cardPlaceholder = "Describe it. The first line is the title.\n\n" +
-	"  #123 or an issue link on the first line: alt+g imports it\n" +
-	"  bug headings: Steps to reproduce · Expected · Actual · Environment\n" +
-	"  feature: ## Acceptance seeds the verification plan"
+// cardPlaceholderFor is the box's manual for one kind, shown only while
+// the box is empty. It used to be one constant that listed a bug's
+// headings and a feature's `## Acceptance` line together regardless of
+// which kind was selected — a research card saw both hints and neither
+// applied, and a feature card saw the bug headings it would never use.
+// setKind refreshes this whenever the kind row moves, so only the
+// selected kind's own hint is ever on screen.
+func cardPlaceholderFor(k domain.Kind) string {
+	head := "Describe it. The first line is the title.\n\n" +
+		"  #123 or an issue link on the first line: alt+g imports it\n"
+	switch k {
+	case domain.KindBug:
+		return head + "  headings: Steps to reproduce · Expected · Actual · Environment"
+	case domain.KindResearch:
+		return head + "  the rest becomes the research brief"
+	default: // domain.KindFeature
+		return head + "  ## Acceptance seeds the verification plan"
+	}
+}
 
 // ID implements overlay.Dialog.
 func (d *cardForm) ID() string { return "new-card" }
@@ -283,9 +300,12 @@ func (d *cardForm) setFocus(f int) {
 }
 
 // setKind moves the kind row. A severity stop that no longer exists
-// hands focus to the next row rather than dangling.
+// hands focus to the next row rather than dangling. The placeholder is
+// re-picked too — it teaches what the free text turns into, and that
+// differs by kind (see cardPlaceholderFor).
 func (d *cardForm) setKind(k domain.Kind) {
 	d.kind = k
+	d.text.Placeholder = cardPlaceholderFor(k)
 	if d.focus == cardStopSeverity && k != domain.KindBug {
 		d.setFocus(cardStopAfter)
 	}
@@ -654,13 +674,17 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	var env *int
 	trimmed := strings.TrimSpace(d.env.Value())
 	if trimmed == "" && d.kind == domain.KindResearch {
-		d.errText = "envelope required — a research card carries no default budget"
+		// "budget", like the row label and the collapsed "runs as"
+		// readout above it. A refusal is the one string in this dialog a
+		// reader is guaranteed to stop and read, so it is the last place
+		// that should still be calling a spend cap an envelope.
+		d.errText = "budget required — a research card carries no default"
 		return false, nil
 	}
 	if trimmed != "" {
 		n, err := strconv.Atoi(trimmed)
 		if err != nil || n < 0 {
-			d.errText = "envelope must be a non-negative number of credits"
+			d.errText = "budget must be a non-negative number of credits"
 			return false, nil
 		}
 		env = &n
@@ -686,7 +710,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 
 // HandlePaste implements overlay.Paster: pasted text goes into the text
 // while it's focused, newlines intact — and into the after filter or the
-// envelope when those are.
+// budget when those are.
 func (d *cardForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	switch d.focus {
 	case cardStopText:
@@ -749,7 +773,7 @@ func choices(s *theme.Styles, focused bool, opts []string, idx int, unsetLabel s
 // optionLabel is an expanded option row's label cell: indented under
 // "runs as", banded when its row has focus — and, since the band alone
 // used to be the only tell, carrying a leading ▸ too. The rows here
-// (envelope, profile, severity, after) each show their own value with
+// (budget, profile, severity, runs after) each show their own value with
 // choices()' own "▸" beside whichever option is picked, on every row,
 // focused or not — that answers "what is this row set to", never "which
 // row is tab on right now". A reader driving the dialog with no working
@@ -758,7 +782,12 @@ func choices(s *theme.Styles, focused bool, opts []string, idx int, unsetLabel s
 // actually on; the label's own margin is that mark, and it costs no
 // width — "  ▸ " and "    " are both four columns.
 func optionLabel(s *theme.Styles, focused bool, label string) string {
-	cell := fmt.Sprintf("%-10s", label)
+	// 11, not 10: "runs after" (the old "after") is itself 10 characters,
+	// and a %-10s cell would then butt the label straight up against the
+	// row's value with no gap at all ("runs after—   tab to..."). Every
+	// other label here is shorter than 10, so the extra column only ever
+	// shows up as one more space of padding for them.
+	cell := fmt.Sprintf("%-11s", label)
 	if focused {
 		return "  ▸ " + s.Band(cell, 0, true)
 	}
@@ -809,8 +838,23 @@ func (d *cardForm) fromLine(s *theme.Styles) string {
 	return cardLabel(s, "from") + s.Faint.Render("looks like ") + ref.String() + s.Faint.Render(" · ") + s.KeyHint.Render("alt+g") + s.Faint.Render(" import it")
 }
 
-// becomesLine reads back the card the text would create: prefix and
-// slug, with a bug's severity. No number — that is minted at Create.
+// becomesLine reads back the card the text would create: the id prefix
+// (with the kind word beside it, so FD/BG/RS are spelled out at least
+// once, right where the id is minted), the derived title, and a bug's
+// severity. No number — that is minted at Create.
+//
+// This used to show the branch slug instead of the title, which hid a
+// live truncation: DeriveTitle caps a title at maxTitleLen characters
+// (internal/domain/feature.go), keeping the untruncated text in the
+// card's OneLiner — but the truncated title is what the board, the card
+// header, the artifact's H1 and every notice actually show, and the
+// slug is derived from that same truncated title anyway. Showing the
+// title instead means the cut is visible here, before Create, exactly
+// where a person can still do something about it: DeriveTitle already
+// appends an ellipsis when it cuts, so this line needs no truncation
+// logic of its own. The slug stays the least interesting half of the
+// line — worth confirming (via Slugify) that Create would accept it,
+// not worth a reader's attention — so it is no longer drawn at all.
 func (d *cardForm) becomesLine(s *theme.Styles) string {
 	desc := strings.TrimSpace(d.text.Value())
 	if desc == "" {
@@ -820,11 +864,10 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 		return cardLabel(s, "becomes") + s.Faint.Render("— import the reference first, or describe the card")
 	}
 	title, _, _ := domain.SplitFreeform(desc)
-	slug, err := domain.Slugify(title)
-	if err != nil {
+	if _, err := domain.Slugify(title); err != nil {
 		return cardLabel(s, "becomes") + s.Error.Render("the first line needs a letter or digit to make a title")
 	}
-	out := cardIDPrefix[d.kind] + " · " + slug
+	out := cardIDPrefix[d.kind] + " (" + string(d.kind) + ") · " + title
 	if d.kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
 		out += " · severity " + string(bugSeverityChoices[d.sev])
 		if d.imported != nil && d.imported.prop.Severity == bugSeverityChoices[d.sev] {
@@ -839,15 +882,15 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 	env := strings.TrimSpace(d.env.Value())
 	switch {
 	case env == "" && d.kind == domain.KindResearch:
-		env = s.Error.Render("envelope required")
+		env = s.Error.Render("budget required")
 	case env == "":
-		env = "default envelope"
+		env = "default budget"
 	default:
 		env += " credits"
 	}
 	out := env + " · " + d.profiles[d.profile]
 	if len(d.after) > 0 {
-		out += " · after " + joinIDs(d.after)
+		out += " · runs after " + joinIDs(d.after)
 	}
 	return cardLabel(s, "runs as") + out + "   " + s.KeyHint.Render("alt+o") + s.Faint.Render(" edit")
 }
@@ -860,8 +903,8 @@ func joinIDs(ids []domain.FeatureID) string {
 	return strings.Join(parts, ", ")
 }
 
-// optionRows are the expanded options: envelope, profile, severity (bugs),
-// after — and the after list while that row has focus.
+// optionRows are the expanded options: budget, profile, severity (bugs),
+// runs after — and the after list while that row has focus.
 func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 	hint := envelopeHintCapped
 	if d.kind == domain.KindResearch {
@@ -869,7 +912,7 @@ func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 	}
 	rows := []string{
 		cardLabel(s, "runs as"),
-		optionLabel(s, d.focus == cardStopEnvelope, "envelope") + d.env.View() + " " + s.Faint.Render(hint),
+		optionLabel(s, d.focus == cardStopEnvelope, "budget") + d.env.View() + " " + s.Faint.Render(hint),
 		optionLabel(s, d.focus == cardStopProfile, "profile") + choices(s, d.focus == cardStopProfile, d.profiles, d.profile, "", false),
 	}
 	if d.kind == domain.KindBug {
@@ -886,7 +929,12 @@ func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 	for i, id := range d.after {
 		chips[i] = s.KeyHint.Render(string(id))
 	}
-	line := optionLabel(s, d.focus == cardStopAfter, "after") + strings.Join(chips, " ")
+	// "after" read as an unlabelled dash to anyone who hadn't already
+	// tabbed onto it and found the dependency picker underneath — it
+	// named neither what the row was nor what filling it in would do.
+	// "runs after" names the relationship on sight; the collapsed hint
+	// spells out the effect rather than just the key.
+	line := optionLabel(s, d.focus == cardStopAfter, "runs after") + strings.Join(chips, " ")
 	switch {
 	case d.focus == cardStopAfter:
 		if len(chips) > 0 {
@@ -894,7 +942,7 @@ func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 		}
 		line += s.KeyHint.Render("/ ") + d.afterFilter.View()
 	case len(chips) == 0:
-		line += s.Faint.Render("—   tab to add")
+		line += s.Faint.Render("—   tab to wait on another card")
 	}
 	rows = append(rows, line)
 	if d.focus == cardStopAfter {

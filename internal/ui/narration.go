@@ -232,6 +232,18 @@ func whyItStopped(in nextInput) string {
 		if in.verdictFloorReason != "" {
 			return "The " + stage + " session stopped: " + sanitize(in.verdictFloorReason) + "."
 		}
+		if in.backendNeverStarted {
+			// The failure a first-time user hits most and can act on
+			// least: the coding CLI died before producing a single turn,
+			// so nothing is wrong with this card and the only offered
+			// action — retry — runs the same broken command. `gummi
+			// doctor` is the one place in the product that explains a
+			// backend that will not start, so the sentence names it.
+			// It is said HERE and not as an action row because the answer
+			// set is a closed four (stageActions), and this is advice,
+			// not a fifth answer.
+			return "The " + stage + " session's backend never started — this is a setup problem, not a problem with the card. Run `gummi doctor` to check auth, the profile and model reachability."
+		}
 		return "The " + stage + " session errored before it finished."
 	case in.attn == attnBudget:
 		return "The " + stage + " stage reached its envelope and stopped."
@@ -253,6 +265,19 @@ func whyItStopped(in nextInput) string {
 	// whatever verify thought, and saying "verify passed" above a row
 	// that reads "you cannot cross yet" would be two sentences about
 	// different cards.
+	//
+	// §1.3: this used to return on the first non-zero of the three
+	// counts below, so a reader who resolved the ONE blocker it named
+	// found a second, never-mentioned one waiting in its place the
+	// moment they came back — the page always understated what stood
+	// between them and the gate. blockerSentence names every kind that
+	// is actually blocking, in one sentence, whenever more than one of
+	// them applies at once; with only one kind present the sentence
+	// below it is unchanged; grammar and the artifact noun still come
+	// from the same plural/isAre/art this file already had.
+	if blockingKinds(in) > 1 {
+		return blockerSentence(in, art)
+	}
 	if in.openSpecQs > 0 {
 		return itoa(in.openSpecQs) + " open comment" + plural(in.openSpecQs) + " in the " + art + " " +
 			isAre(in.openSpecQs) + " holding the gate shut."
@@ -404,6 +429,80 @@ func isAre(n int) string {
 		return "is"
 	}
 	return "are"
+}
+
+// blockingKinds counts how many DIFFERENT kinds of blocker are holding
+// the gate shut — spec comments, diff comments, undrafted sections —
+// not how many items there are within a kind. whyItStopped's ordinary
+// branches already agree a verb with a single kind's own count (two open
+// spec comments still reads as one sentence); this is what tells that
+// case apart from the one blockerSentence exists for, where more than
+// one KIND applies at once and the reader has never been told about all
+// of them in the same breath.
+func blockingKinds(in nextInput) int {
+	n := 0
+	if in.openSpecQs > 0 {
+		n++
+	}
+	if in.openDiffComments > 0 {
+		n++
+	}
+	if len(in.undrafted) > 0 {
+		n++
+	}
+	return n
+}
+
+// blockerSentence names every blocker holding the gate shut, in one
+// sentence, for the case whyItStopped's single-kind branches cannot say
+// on their own: two or three kinds of blocker at once.
+//
+// §1.3 found the old code returning on the first non-zero count it
+// checked — a user resolved the one spec comment the page named, and a
+// diff comment they were never told about immediately took its place.
+// Order still matches blockedGate's own priority (nextsteps.go) — spec,
+// then diff, then undrafted — since that is still which ACTION a reader
+// is offered first when more than one blocker applies; this sentence
+// only stops hiding the rest of them while that ordering still picks one
+// to act on.
+func blockerSentence(in nextInput, art string) string {
+	var parts []string
+	if in.openSpecQs > 0 {
+		parts = append(parts, itoa(in.openSpecQs)+" comment"+plural(in.openSpecQs)+" in the "+art)
+	}
+	if in.openDiffComments > 0 {
+		noun := " comment" + plural(in.openDiffComments)
+		if len(parts) > 0 {
+			// the noun already named itself in the spec clause above —
+			// repeating it here read as two sentences glued together
+			// rather than one about comments in two places
+			noun = ""
+		}
+		parts = append(parts, itoa(in.openDiffComments)+noun+" on the diff")
+	}
+	if len(in.undrafted) > 0 {
+		parts = append(parts, strings.Join(in.undrafted, " and ")+" left blank in the "+art)
+	}
+	total := in.openSpecQs + in.openDiffComments + len(in.undrafted)
+	return joinList(parts) + " " + isAre(total) + " holding the gate shut."
+}
+
+// joinList joins parts English-style: one part reads as itself, two as
+// "a and b", three or more as "a, b, and c". blockerSentence and
+// otherBlockersNote (nextsteps.go) both name a variable-length list of
+// blockers in one clause, so the join lives once here rather than at
+// each call site.
+func joinList(parts []string) string {
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	case 2:
+		return parts[0] + " and " + parts[1]
+	default:
+		return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
+	}
 }
 
 // itoa64 formats an event sequence for an anchor.

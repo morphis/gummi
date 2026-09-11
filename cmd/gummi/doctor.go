@@ -263,7 +263,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// cache; --deep runs a live, TTL-cached probe per effective model.
 	checks = append(checks, reachChecks(ws, profiles, opts, time.Now())...)
 
-	// 6. envelope
+	// 6. budget (GUMMI_ENVELOPE)
 	checks = append(checks, envelopeCheck())
 
 	// 7. lock (only meaningful once a workspace exists)
@@ -504,30 +504,36 @@ func reachChecks(ws state.Workspace, profiles config.Profiles, opts doctorOpts, 
 
 // envelopeCheck validates GUMMI_ENVELOPE. It never fails readiness: a run
 // can still take --envelope N, and the run itself enforces the requirement.
+//
+// The check REPORTS itself as "budget", not "envelope". The env var and
+// the flag keep their names — they are an API scripts already call — but
+// the word a human reads is the plain one, matching the TUI, which stopped
+// calling a spend cap an "envelope" for the same reason: nobody outside
+// this codebase knows what an envelope is.
 func envelopeCheck() doctorCheck {
 	v := strings.TrimSpace(os.Getenv("GUMMI_ENVELOPE"))
 	if v == "" {
 		return doctorCheck{
-			Name: "envelope", Status: statusWarn,
-			Detail:      fmt.Sprintf("GUMMI_ENVELOPE is unset (the board prefills %d credits; headless runs have no default)", ui.DefaultEnvelopeCredits),
-			Remediation: "pass --envelope N per run, or export GUMMI_ENVELOPE=<credits> (headless runs refuse to start without one)",
+			Name: "budget", Status: statusWarn,
+			Detail:      fmt.Sprintf("GUMMI_ENVELOPE is unset — no default spend budget (the board prefills %d credits; headless runs have none)", ui.DefaultEnvelopeCredits),
+			Remediation: "pass --envelope N per run, or export GUMMI_ENVELOPE=<credits> (headless runs refuse to start without a budget)",
 		}
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		return doctorCheck{
-			Name: "envelope", Status: statusWarn, Detail: "GUMMI_ENVELOPE=" + v + " is not a positive integer",
+			Name: "budget", Status: statusWarn, Detail: "GUMMI_ENVELOPE=" + v + " is not a positive integer",
 			Remediation: "set GUMMI_ENVELOPE to a positive credit count",
 		}
 	}
 	if float64(n) < domain.TurnReserveCredits {
 		return doctorCheck{
-			Name: "envelope", Status: statusWarn,
+			Name: "budget", Status: statusWarn,
 			Detail:      fmt.Sprintf("GUMMI_ENVELOPE=%d is below one agent turn (~%d credits)", n, int(domain.TurnReserveCredits)),
 			Remediation: "raise it so stage budgets aren't floored at a single turn and overshoot the envelope",
 		}
 	}
-	return doctorCheck{Name: "envelope", Status: statusOK, Detail: fmt.Sprintf("envelope: %d credits", n)}
+	return doctorCheck{Name: "budget", Status: statusOK, Detail: fmt.Sprintf("spend budget: %d credits per run", n)}
 }
 
 // lockCheck probes the workspace's exclusive lock and releases it

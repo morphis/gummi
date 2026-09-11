@@ -18,7 +18,11 @@
 // all markers under one anchor form a thread. A resolution closes only
 // the markers ABOVE it in the run (and itself); a comment below every
 // resolution stays open. Resolving one comment never closes the others
-// sharing the anchor, and a later question reopens the thread.
+// sharing the anchor, and a later question reopens the thread. A
+// `@user` marker is the exception: only a `@user` resolution (what the
+// `x` key writes) can close it — a reviewer's or architect's "resolved"
+// closes markers among themselves but leaves a human's comment open. See
+// Threads for why.
 package spec
 
 import (
@@ -84,24 +88,74 @@ var (
 	resolvedRe = regexp.MustCompile(`(?i)^resolved\s*(?:$|[:—–]|-(?:\s|$))`)
 )
 
+// isIndented reports whether a line begins with whitespace — the signal
+// that it belongs to the marker above it rather than standing as content
+// of its own (Parse's anchoring rule).
+func isIndented(raw string) bool {
+	return raw != "" && (raw[0] == ' ' || raw[0] == '\t')
+}
+
 // IsMarkerLine reports whether a raw line is a %% marker.
 func IsMarkerLine(line string) bool {
 	return strings.HasPrefix(strings.TrimSpace(line), "%%")
 }
 
 // Parse reads a spec document into lines + markers.
+//
+// ANCHORING, and the one exception to it. A marker attaches to the
+// nearest preceding non-marker, non-blank line; consecutive markers
+// therefore share an anchor and form one thread. The exception is an
+// INDENTED line inside a run of markers, which is read as a continuation
+// of the marker above it rather than as new content to anchor to.
+//
+// That exception is not cosmetic — without it a thread silently
+// re-splits under an edit nobody made to it. Observed on a live drive:
+// a user commented on a line and later resolved their own comment, which
+// wrote the pair
+//
+//	%% @user: Name the flag -n, not --limit
+//	%% @user: resolved
+//
+// as one closed thread. The verify pass then appended its evidence under
+// the first marker, indented:
+//
+//	%% @user: Name the flag -n, not --limit
+//	  RESULT: PASS. printed exactly 10 rows.
+//	%% @user: resolved
+//
+// and that plain line became an anchor, so the resolution split away from
+// the comment it resolved and the comment REOPENED — the gate shut again
+// over a decision the human had already closed, with nothing on any
+// screen to say why. Thread membership must not depend on what an agent
+// appends near a thread afterwards.
+//
+// Indentation is the signal because it is the one the writers already
+// use: gummi's own AddComment writes markers at column 0, and the
+// continuation prose an agent appends under a marker is indented under
+// it. An unindented line is ordinary new content and still anchors, which
+// is what keeps a marker on the NEXT paragraph from being swallowed into
+// the previous conversation.
 func Parse(content string) Doc {
 	lines := strings.Split(content, "\n")
 	d := Doc{Lines: lines}
 	anchor := 0
+	inRun := false // inside a run of markers (and their indented continuations)
 	for i, raw := range lines {
 		n := i + 1
 		if !IsMarkerLine(raw) {
-			if strings.TrimSpace(raw) != "" {
-				anchor = n
+			if strings.TrimSpace(raw) == "" {
+				// A blank line has never reset the anchor — hand-edited
+				// docs space their markers out — and it does not end a
+				// run either, for the same reason.
+				continue
 			}
+			if inRun && isIndented(raw) {
+				continue // a continuation of the marker above it
+			}
+			anchor, inRun = n, false
 			continue
 		}
+		inRun = true
 		m := markerRe.FindStringSubmatch(raw)
 		mk := Marker{Line: n, Anchor: anchor}
 		if m != nil {
@@ -133,18 +187,41 @@ func (d Doc) Threads() []Thread {
 	// question reopens the thread. Scan bottom-up so a resolution
 	// propagates upward and a thread is resolved only when every marker
 	// in it is.
+	//
+	// A `@user` marker gets a second, narrower gate: it only closes under
+	// a `@user` resolution. Without this, a reviewer filing its own
+	// finding on the same anchor line and an architect later resolving
+	// that finding ("resolved — added the missing check") silently closed
+	// the human's untouched comment above it too, because every marker on
+	// one anchor is one thread and any resolution closed everything above
+	// it regardless of author. The gate-blocking check (UserOpenThreads)
+	// then saw nothing open and let the gate through unanswered. Agent
+	// markers keep the original behaviour among themselves — an
+	// architect's resolution still closes a reviewer's finding above it —
+	// only a human comment now requires a human's own resolution.
 	for i := range out {
 		t := &out[i]
 		t.Resolved = true
-		closed := false // a resolution seen below resolves everything above
+		closedAny := false    // a resolution by any author, seen below (closes agent markers)
+		closedByUser := false // a @user resolution, seen below (closes @user markers)
 		for j := len(t.Markers) - 1; j >= 0; j-- {
-			if closed {
-				t.Markers[j].Resolved = true
+			m := &t.Markers[j]
+			userResolution := m.Resolved && m.Author == "user"
+			switch {
+			case m.Author == "user":
+				if closedByUser {
+					m.Resolved = true
+				}
+			case closedAny:
+				m.Resolved = true
 			}
-			if t.Markers[j].Resolved {
-				closed = true
+			if m.Resolved {
+				closedAny = true
 			}
-			if !t.Markers[j].Resolved {
+			if userResolution {
+				closedByUser = true
+			}
+			if !m.Resolved {
 				t.Resolved = false
 			}
 		}
@@ -508,12 +585,18 @@ func expectedVsActual(r domain.BugReport) string {
 
 // renderBugProvenance writes the "Reported via …" header for a bug: the
 // source, its external reference, and the severity. Nothing is written
-// when there is neither provenance nor severity.
+// when there is neither provenance nor severity, nor for the "Reported
+// via manual" line on one typed by hand in the new-card dialog (Source:
+// "manual") — the person who just typed it already knows where it came
+// from, mirroring renderProvenance's treatment of a hand-typed feature.
+// Severity still renders on a manual report when set: it is triage
+// information the person supplied, not a provenance claim.
 func renderBugProvenance(b *strings.Builder, p domain.BugProvenance, sev domain.Severity) {
-	if p.Empty() && sev == "" {
+	showSource := !p.Empty() && p.Source != "manual"
+	if !showSource && sev == "" {
 		return
 	}
-	if !p.Empty() {
+	if showSource {
 		b.WriteString("> _Reported")
 		if p.Source != "" {
 			fmt.Fprintf(b, " via %s", p.Source)
@@ -524,10 +607,10 @@ func renderBugProvenance(b *strings.Builder, p domain.BugProvenance, sev domain.
 		b.WriteString("_\n")
 	}
 	if sev != "" {
-		if p.Empty() {
-			fmt.Fprintf(b, "> Severity: %s\n", sev)
-		} else {
+		if showSource {
 			fmt.Fprintf(b, ">\n> Severity: %s\n", sev)
+		} else {
+			fmt.Fprintf(b, "> Severity: %s\n", sev)
 		}
 	}
 	b.WriteString("\n")

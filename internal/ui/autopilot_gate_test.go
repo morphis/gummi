@@ -525,7 +525,7 @@ func TestAutopilotDialogButtonsAreReachable(t *testing.T) {
 	submitted := ""
 	newDialog := func() *autopilotDialog {
 		submitted = ""
-		return newAutopilotDialog(f, plan, func(mode string) tea.Cmd {
+		return newAutopilotDialog(f, plan, "main", func(mode string) tea.Cmd {
 			submitted = mode
 			return nil
 		})

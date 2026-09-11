@@ -30,7 +30,7 @@ type ingestFlagValues struct {
 func registerIngestFlags(fs *flag.FlagSet) *ingestFlagValues {
 	return &ingestFlagValues{
 		profile:  fs.String("profile", "", "profile the new features adopt (default: first configured)"),
-		envelope: fs.Int("envelope", 0, "credit envelope per feature (0 = none; falls back to GUMMI_ENVELOPE)"),
+		envelope: fs.Int("envelope", 0, "spend budget per card, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
 		yes:      fs.Bool("yes", false, "materialize without the confirmation prompt"),
 		repo:     fs.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; required when `repos:` is configured)"),
 	}

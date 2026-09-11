@@ -146,11 +146,17 @@ func (d *quitResumeDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // it spent any — the corrective-round budget, worded the same way
 // autopilotBody (autopilot.go) already does: rounds spent against
 // verdict.MaxRounds(domain.RoundKindCorrective), never hardcoded.
+//
+// "corrective rounds", not "corrections". The budget had three names on
+// three screens — the card header's "⟲ N of M corrective rounds", the
+// autopilot dialog's "up to M corrective rounds", and this line's
+// "corrections" — for one concept nobody can guess from any of them.
+// One name is the least a reader is owed.
 func cardLine(c engine.QuitStoppedCard, idWidth, titleWidth int) string {
 	line := "  " + padRight(string(c.Feature.ID), idWidth) + "  " +
 		padRight(c.Feature.Title, titleWidth) + "  " + string(c.Feature.Stage)
 	if c.Corrective > 0 {
-		line += fmt.Sprintf(" · %d of %d corrections spent", c.Corrective, verdict.MaxRounds(domain.RoundKindCorrective))
+		line += fmt.Sprintf(" · %d of %d corrective rounds spent", c.Corrective, verdict.MaxRounds(domain.RoundKindCorrective))
 	}
 	return line
 }

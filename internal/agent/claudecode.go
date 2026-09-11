@@ -317,6 +317,25 @@ type claudeSession struct {
 	prevCostUSD map[string]float64 // per-model cumulative costUSD at the last result
 	estimated   map[string]float64 // per-model credits estimated mid-turn, un-settled
 	ctxTokens   int64              // main model's last request: input+cache tokens
+	// hadIdle marks that some prior turn on this session reached a clean
+	// idle — RunFailure.FirstTurn on a later failure reads the negation
+	// of this.
+	hadIdle bool
+}
+
+// markHadIdle records that some turn on this session reached a clean
+// idle — RunFailure.FirstTurn on a later failure reads the negation of
+// this.
+func (s *claudeSession) markHadIdle() {
+	s.mu.Lock()
+	s.hadIdle = true
+	s.mu.Unlock()
+}
+
+func (s *claudeSession) hadIdleValue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hadIdle
 }
 
 // Pid implements agent.OSProcess: cmd is set once at construction and never
@@ -407,14 +426,14 @@ func (s *claudeSession) read(stdout io.Reader) {
 	if scanErr != nil {
 		final = Event{Kind: EventError, Err: fmt.Errorf("claude stream aborted: %w", scanErr)}
 	} else {
-		detail := strings.TrimSpace(s.stderr.String())
-		if detail == "" && waitErr != nil {
-			detail = waitErr.Error()
+		err := waitErr
+		if err == nil {
+			err = errors.New("process exited unexpectedly")
 		}
-		if detail == "" {
-			detail = "process exited unexpectedly"
-		}
-		final = Event{Kind: EventError, Err: fmt.Errorf("claude exited mid-session: %s", detail)}
+		final = Event{Kind: EventError, Err: &RunFailure{
+			Backend: "claude", Diagnostic: strings.TrimSpace(s.stderr.String()),
+			FirstTurn: !s.hadIdleValue(), Err: err,
+		}}
 	}
 	select {
 	case s.raw <- final:
@@ -685,11 +704,12 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 			}
 			detail = strings.Join(parts, "; ")
 		}
-		if detail == "" {
-			detail = l.Subtype
-		}
-		return append(out, Event{Kind: EventError, Err: fmt.Errorf("claude turn failed (%s): %s", l.Subtype, detail)})
+		return append(out, Event{Kind: EventError, Err: &RunFailure{
+			Backend: "claude", Diagnostic: boundTail(detail, false),
+			FirstTurn: !s.hadIdleValue(), Err: fmt.Errorf("turn failed (%s)", l.Subtype),
+		}})
 	}
+	s.markHadIdle()
 	return append(out, Event{Kind: EventIdle})
 }
 

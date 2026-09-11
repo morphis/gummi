@@ -115,11 +115,10 @@ func (m *Shell) globalCommands() []command {
 		{id: "n", name: "new", label: "New card", key: "n", available: attached},
 		{id: "B", name: "bug", label: "New bug", key: "B", available: attached},
 		{id: "R", name: "research", label: "New research card", key: "R", available: attached},
-		{id: "I", name: "ingest", label: "Ingest a spec into features", key: "I", available: attached && m.engine != nil},
+		{id: "I", name: "ingest", label: "Split a document into cards", key: "I", available: attached && m.engine != nil},
 		{id: "G", name: "import", label: "Import a GitHub issue as a bug", key: "G", available: attached && m.engine != nil},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
-		{id: "agent-cli", name: "agent", label: agentChooseCommandLabel, key: "", available: attached},
 		{id: "board-profile", name: "profile", label: "Switch the board's profile", key: "", available: attached && m.engine != nil},
 		{id: "board-model", name: "model", label: "Switch the board's model", key: "", available: attached && m.engine != nil},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: "?", available: true},
@@ -152,8 +151,7 @@ func (m *Shell) globalCommands() []command {
 // set is not currently offering degrades to the "/" menu pre-filtered by
 // the word, so the word has to find the row. A label alone cannot be
 // trusted to — several of them adapt to card state ("hand to autopilot"
-// / "take back the gates"), and one of the two wordings would always
-// miss.
+// / "stop autopilot"), and one of the two wordings would always miss.
 //
 // These land in command.alias, not command.name: name is what the BOARD
 // thread's slash vocabulary is built from, and a card's actions have no
@@ -237,7 +235,7 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		return nil
 	case "topup":
 		// the same act the inbox's u performs, reached from the stop
-		// itself: raise the envelope and let the stage pick up where it
+		// itself: raise the budget and let the stage pick up where it
 		// stopped (shell.go's topUpBudget).
 		if r, ok := m.selected(); ok {
 			return m.topUpBudget(r.F.ID)
@@ -273,7 +271,7 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 		cancelLabel:  "Cancel",
 		confirmLabel: "Duplicate",
 		question:     "duplicate " + string(f.ID) + "?",
-		detail:       f.Title + " — fresh copy in todo (same skips, profile, envelope); this card stays",
+		detail:       f.Title + " — fresh copy in todo (same skips, profile, budget); this card stays",
 		onConfirm:    func() tea.Cmd { return m.duplicateFeature(f.ID) },
 	})
 	return nil

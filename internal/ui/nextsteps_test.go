@@ -41,6 +41,17 @@ func TestNextActionsByState(t *testing.T) {
 		{"paused picks the stage back up", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter"},
 		{"failure retries", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter"},
 		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StatePaused}, "enter"},
+		// §1.1a: pausing a card AFTER its gate already fired is a stop
+		// mid-decision, not a reason to hide the decision. BG-002 passed
+		// verify, was parked, and lost "land on main" from the page
+		// entirely — the paused branch used to return a single row before
+		// ever reaching the stage switch below. Now a paused card whose
+		// stage has already finished (attnGate here) still gets that
+		// stage's own answer set, with the resume row riding where "stop
+		// here" would otherwise sit — an already-stopped card has no more
+		// use for a second way to stop.
+		{"paused after a passed verify gate keeps the landing decision", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, attn: attnGate, verdict: verdictPass, hasWorktree: true}, "g b enter"},
+		{"paused after an approved plan keeps the decision, not just the resume", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StatePaused, attn: attnGate}, "g enter"},
 		// the budget stop's two answers are keyless: top up (no
 		// accelerator — u is the envelope dialog) and, with no session to
 		// stop, nothing else.
@@ -52,7 +63,16 @@ func TestNextActionsByState(t *testing.T) {
 		// switch is a card setting — neither is an answer to "what now",
 		// and both used to take a row here.
 		{"design stage talks and approves", nextInput{stage: domain.StagePlan, kind: feat}, "enter g"},
-		{"design gate offers the same approval", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "enter g"},
+		// §3.3: a FINISHED design gate leads with the decision (approve),
+		// not the paid re-run of the architect — the narration's own
+		// sentence here reads "ready for your decision", and the verify
+		// gate already leads with its decision the same way. An
+		// unfinished stop (the case just above) still talks first,
+		// because there approve has nothing to approve yet — this test
+		// used to expect "enter g" for both, which was the bug the finding
+		// named: the pre-selected action at a finished gate was the
+		// expensive one.
+		{"design gate offers the same approval", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate}, "g enter"},
 		// "send it back" appears at the design stage only while the
 		// architect is live to receive the turn that carries it.
 		{"live design stage can send it back", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StateInteractive, live: true}, "g "},
@@ -341,5 +361,87 @@ func TestCardActionsForPromotesPullReview(t *testing.T) {
 	}
 	if found.folded {
 		t.Error("prpull should be promoted (unfolded) once nextActions ranks it")
+	}
+}
+
+// TestWhyItStoppedNamesEveryBlocker is §1.3: a stop with more than one
+// kind of blocker used to name only the first one whyItStopped checked
+// (spec, then diff, then undrafted) — a user resolved the one spec
+// comment the page named, and a diff comment they were never told about
+// immediately took its place. With two kinds present the sentence now
+// names both, in the priority order blockedGate still uses to pick which
+// ACTION to offer; with only one kind present (the ordinary case) the
+// sentence is unchanged.
+func TestWhyItStoppedNamesEveryBlocker(t *testing.T) {
+	only := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, openSpecQs: 1}
+	if got, want := whyItStopped(only), "1 open comment in the spec is holding the gate shut."; got != want {
+		t.Errorf("single blocker = %q, want %q (unchanged)", got, want)
+	}
+
+	both := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, openSpecQs: 1, openDiffComments: 1}
+	if got, want := whyItStopped(both), "1 comment in the spec and 1 on the diff are holding the gate shut."; got != want {
+		t.Errorf("spec+diff blocker = %q, want %q", got, want)
+	}
+
+	// the action row underneath is still ONE row (s resolves the spec,
+	// d resolves the diff — there is no single key for both), but its why
+	// now says there is more to it than what pressing s alone will clear.
+	acts := nextActions(both)
+	if !strings.Contains(acts[0].why, "plus 1 on the diff") {
+		t.Errorf("blocked-gate why with a second blocker = %q, want it to name the diff too", acts[0].why)
+	}
+
+	all3 := nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate,
+		openSpecQs: 2, openDiffComments: 1, undrafted: []string{"Chosen approach"}}
+	got := whyItStopped(all3)
+	if !strings.Contains(got, "2 comments in the spec") || !strings.Contains(got, "1 on the diff") ||
+		!strings.Contains(got, "Chosen approach left blank in the spec") || !strings.HasSuffix(got, "are holding the gate shut.") {
+		t.Errorf("three-way blocker sentence = %q", got)
+	}
+}
+
+// TestImplementRunWhyDropsRestartOnAFirstArrival is §3.2's second half:
+// "(or restart)" only reads true once implement has actually run before.
+// verifyBounces is the one edge that lands a card back in this branch a
+// second time (a failed verify sent back for rework); the very first
+// arrival, straight off approving the plan, has nothing to restart yet.
+func TestImplementRunWhyDropsRestartOnAFirstArrival(t *testing.T) {
+	first := nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindFeature})
+	if strings.Contains(first[0].why, "restart") {
+		t.Errorf("first arrival at implement = %q, want no mention of restarting", first[0].why)
+	}
+	restart := nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindFeature, verifyBounces: 1})
+	if !strings.Contains(restart[0].why, "restart") {
+		t.Errorf("implement after a verify bounce = %q, want it to offer a restart too", restart[0].why)
+	}
+}
+
+// TestTodoAndApproveRowsPromiseOnlyWhatTheyDo covers §3.1 and §3.2's
+// first half: both rows' arm is advance, which only moves the stage
+// marker — no agent runs on that keypress. The old wording ("start …
+// the agent reads the card", "hands the card to the agent stages")
+// promised the read/handoff would happen on THIS keypress; live, the
+// next screen's own row ("start the architect" / "run implement") was
+// the actual start, one keypress later. Neither row may claim what only
+// the next screen's talk/run row actually does, and "agent stages" is
+// gone — the implementer is named instead.
+func TestTodoAndApproveRowsPromiseOnlyWhatTheyDo(t *testing.T) {
+	todo := nextActions(nextInput{stage: domain.StageTodo, kind: domain.KindFeature})[0]
+	if strings.Contains(todo.why, "reads the card") {
+		t.Errorf("todo row why = %q, want it to promise only the move into plan", todo.why)
+	}
+	if !strings.Contains(todo.why, "moves the card into plan") {
+		t.Errorf("todo row why = %q, want it to say what advance actually does", todo.why)
+	}
+
+	approve := nextActions(nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate})[0]
+	if approve.label != "approve" {
+		t.Fatalf("finished design gate lead = %q, want approve leading (§3.3)", approve.label)
+	}
+	if strings.Contains(approve.why, "agent stages") {
+		t.Errorf("approve row why = %q, want the jargon gone", approve.why)
+	}
+	if !strings.Contains(approve.why, "implementer") {
+		t.Errorf("approve row why = %q, want it to name the implementer", approve.why)
 	}
 }

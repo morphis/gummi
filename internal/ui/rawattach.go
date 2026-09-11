@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -78,10 +79,27 @@ func (m *Shell) attachRaw(f domain.Feature) tea.Cmd {
 	}
 	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) //nolint:gosec // argv is operator config (GUMMI_ATTACH_CMD), not repo/agent input
 	cmd.Dir = dir
+	name := argv[0]
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		if err != nil {
-			return noticeMsg{text: "raw agent exited: " + sanitize(err.Error()), isErr: true}
+		if err == nil {
+			return noticeMsg{text: fmt.Sprintf("%s: back from %s", f.ID, name), reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: resumed from raw %s", f.ID, argv[0]), reload: true}
+		// A NON-ZERO EXIT IS NOT NECESSARILY A FAILURE. Every hosted CLI
+		// here exits non-zero when the person at the keyboard declines
+		// something — dismissing Claude Code's "do you trust the files in
+		// this folder?" prompt with esc leaves status 1 — and reporting
+		// that back in red as "raw agent exited: exit status 1" told a
+		// user who had just cancelled on purpose that something broke.
+		// gummi cannot tell a decline from a crash (the child owns its
+		// own exit codes and says nothing else), so it stops asserting
+		// either: the notice reports what happened, not a verdict, and it
+		// is not an error style. A CLI that genuinely failed to start
+		// never reaches here — resolveAttach's problem branch above
+		// catches that, and it IS an error.
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return noticeMsg{text: fmt.Sprintf("%s: %s exited without finishing (status %d)", f.ID, name, exit.ExitCode()), reload: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s: could not run %s — %s", f.ID, name, sanitize(err.Error())), isErr: true}
 	})
 }

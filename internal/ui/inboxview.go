@@ -197,8 +197,16 @@ func (m *Shell) inboxView(w, h int) string {
 	var b strings.Builder
 	line := func(str string) { b.WriteString(ansi.Truncate(str, w, "…") + "\n") }
 
+	// "N open decision(s)" used to label the header no matter what sat in
+	// the queue — a live drive caught it reading "1 open decision" over a
+	// RUN FAILURE row, which nobody decides, it just gets fixed. The
+	// queue mixes four kinds (attnGate, attnFailure, attnQuestion,
+	// attnBudget in inbox.go) and only some of them are actually a
+	// decision, so the header names the umbrella the row labels
+	// themselves (inboxRowLabel) already use — "item" — rather than
+	// asserting a kind that may not hold for the row on screen.
 	line(" " + s.PaneTitleActive.Render("NEEDS YOU") + "  " +
-		s.Faint.Render("·  "+strconv.Itoa(len(items))+" open decision"+plural(len(items))+" · oldest first"))
+		s.Faint.Render("·  "+strconv.Itoa(len(items))+" open item"+plural(len(items))+" · oldest first"))
 	line("")
 
 	// the label is a column, not a prefix: padded to the widest of them so

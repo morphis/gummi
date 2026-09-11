@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -11,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // commitMsgDialog collects the squash-merge commit message before the
@@ -22,11 +24,22 @@ import (
 // The human gate is unchanged: nothing lands except on an explicit
 // ctrl+s.
 type commitMsgDialog struct {
-	feature  domain.FeatureID
-	f        domain.Feature
-	branch   string
-	input    textarea.Model
-	onSubmit func(message string) tea.Cmd
+	feature domain.FeatureID
+	f       domain.Feature
+	branch  string
+	// baseBranch is the branch this merge actually lands on. It is not a
+	// constructor parameter: both call sites (shell.go's openSquashDialog
+	// and its mergeReadyMsg handler) are *Shell methods with m in scope,
+	// so the intended wiring is a one-line `d.baseBranch = m.baseBranch(f)`
+	// right after construction — a field, not a signature change, so nothing
+	// outside this file has to change to add it. Left unset it falls back
+	// to worktree.DefaultBaseBranchName (base()), same as everywhere else
+	// this fallback appears, so a merge dialog with nobody wiring it yet
+	// still says something rather than nothing (REVIEW-ux-drive-2026-09-10-
+	// round2.md §3.4).
+	baseBranch string
+	input      textarea.Model
+	onSubmit   func(message string) tea.Cmd
 	// draft runs a read-only, best-effort scribe pass for the landing
 	// message under a caller-provided context (so esc cancels it); a nil
 	// backend or any failure returns an empty draft.
@@ -36,7 +49,14 @@ type commitMsgDialog struct {
 	gen      int
 	cancel   context.CancelFunc
 	drafting bool // a draft pass is in flight — show the "drafting…" affordance
-	modified bool // the user has typed; never overwrite their keystrokes
+	// startedAt is when the current draft pass began (startDraft), so the
+	// "drafting…" line can show elapsed time and an animated glyph instead
+	// of static text a 90-second wait is indistinguishable from a hang
+	// behind. This dialog has no *Shell to read the package's shared frame
+	// clock (m.frame) off, so the glyph is derived from wall-clock time
+	// instead of that shared cadence — see spinnerGlyph.
+	startedAt time.Time
+	modified  bool // the user has typed; never overwrite their keystrokes
 	// armed is set by the first merge() attempt against non-empty,
 	// unmodified text (a scribe draft the operator hasn't reviewed) and
 	// requires a second attempt to actually land it. Editing the box
@@ -74,6 +94,34 @@ func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft f
 	}
 }
 
+// base is the branch this merge lands on, falling back to
+// worktree.DefaultBaseBranchName the way every other reader of an
+// unset/unattached baseBranch does (see the field's own doc comment).
+func (d *commitMsgDialog) base() string {
+	if d.baseBranch != "" {
+		return d.baseBranch
+	}
+	return worktree.DefaultBaseBranchName
+}
+
+// spinnerGlyph is the "drafting…" line's activity marker. The package's
+// shared spinner (spinner.go) advances off m.frame, which only ticks
+// while Shell.spinnerActive() is true — this dialog is not one of the
+// states that function checks, and wiring it in is a spinner.go/shell.go
+// change outside this file's scope for this pass. Deriving the frame
+// from wall-clock time instead means the glyph is correct whenever View
+// happens to render (any keypress, the eventual reply), even without a
+// dedicated tick loop keeping it live between them — a real improvement
+// over the static text this replaces, short of the continuous animation
+// a shared-loop wiring would give it.
+func (d *commitMsgDialog) spinnerGlyph() string {
+	if d.startedAt.IsZero() {
+		return spinnerFrames[0]
+	}
+	n := int(time.Since(d.startedAt) / spinnerInterval)
+	return spinnerFrames[n%len(spinnerFrames)]
+}
+
 // startDraft launches a fresh best-effort draft pass for this dialog and
 // returns the command to run it. A stale in-flight pass is cancelled
 // first. The arriving commitDraftMsg carries the generation, so apply
@@ -89,6 +137,7 @@ func (d *commitMsgDialog) startDraft() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.drafting = true
+	d.startedAt = time.Now()
 	d.reason = ""
 	d.armed = false // a fresh pass invalidates any earlier arm
 	f := d.f
@@ -253,7 +302,7 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("squash-merge "+string(d.feature)) + "\n")
-	b.WriteString(s.Subtle.Render(d.branch+" → main") + "\n\n")
+	b.WriteString(s.Subtle.Render(d.branch+" → "+d.base()) + "\n\n")
 	b.WriteString(d.input.View() + "\n")
 	// Say when the message continues past the box. Approving something
 	// you cannot see all of is the failure this guards, and a reader with
@@ -263,9 +312,29 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	}
 	switch {
 	case d.armed && !d.modified:
-		b.WriteString("\n" + s.Warning.Render("unreviewed draft — ctrl+s again to land without reviewing"))
+		// "unreviewed" used to accuse the reader of not reading a draft
+		// that was, in the observed drive, sitting fully visible on
+		// screen — what this guard actually checks is that the text is
+		// untouched, so it says that instead.
+		b.WriteString("\n" + s.Warning.Render("this is the scribe's draft, untouched — ctrl+s again to land it as written"))
 	case d.drafting && !d.modified:
-		b.WriteString("\n" + s.Faint.Render("drafting a suggested message… (edit below to keep yours)"))
+		// A live spinner and elapsed clock, not static text: this pass
+		// took ~90s the first time and ~2min the second in the round 2
+		// drive, with nothing on screen to say it was still working
+		// rather than hung. d.spinnerGlyph derives its frame from
+		// wall-clock time rather than the package's shared m.frame clock
+		// (spinner.go's spinnerActive doesn't know about this dialog —
+		// wiring that in is outside this file), so it is correct whenever
+		// this renders even without a dedicated tick loop keeping it
+		// live between renders.
+		//
+		// The old parenthetical — "(edit below to keep yours)" — read
+		// backwards: there is nothing "below" yet while this is still
+		// running, and "keep yours" described a race the reader can't
+		// see. This says what typing actually does: it stops the draft
+		// from overwriting what's been typed.
+		line := d.spinnerGlyph() + " " + withElapsed("drafting a suggested message", time.Now(), d.startedAt)
+		b.WriteString("\n" + s.Faint.Render(line+" — type your own and it won't be overwritten"))
 	case d.reason != "":
 		// a deliberate guard rejection is a correctness guard firing, not a
 		// fault — warn rather than alarm, and never offer to fix a profile.

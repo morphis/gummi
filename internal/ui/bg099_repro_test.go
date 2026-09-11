@@ -41,7 +41,7 @@ func TestBG099PlanNeverPromisesAStageItHandsBack(t *testing.T) {
 			// autopilot only: attended's body says one thing — every gate
 			// waits for you — because that IS the mode. Naming a stage
 			// list under it would describe a run it never performs.
-			body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
+			body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot, "main"), " ")
 			runs := "runs " + englishList(plan.remaining)
 			if !strings.Contains(body, runs) {
 				t.Errorf("body does not name what it runs (%q)\n%s", runs, body)

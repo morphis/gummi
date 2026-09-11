@@ -113,6 +113,33 @@ func TestSeededBugTemplate_DiscussionSection(t *testing.T) {
 	}
 }
 
+// TestSeededBugTemplate_ManualProvenanceHidden covers REVIEW
+// §3.6 (2026-09-10 round-2 UX drive): a bug typed by hand into the
+// new-card dialog carries Source: "manual", and rendering "Reported via
+// manual" back at the person who just typed it is noise, not
+// information — they already know where it came from. Severity is
+// still worth showing when the person set one: it's triage information,
+// not a provenance claim.
+func TestSeededBugTemplate_ManualProvenanceHidden(t *testing.T) {
+	f := &domain.Feature{ID: "BG-002", Num: 2, Kind: domain.KindBug, Title: "Off by one", Slug: "off-by-one", Stage: domain.StageTodo}
+	r := domain.BugReport{Description: "tally count reports one character too many"}
+
+	out := SeededBugTemplate(f, r, domain.BugProvenance{Source: "manual"}, "")
+	if strings.Contains(out, "Reported via") {
+		t.Errorf("manual bug report should not carry a provenance line\n---\n%s", out)
+	}
+
+	// severity still renders on a manual report, and without the blank
+	// "provenance line" connector since there is no provenance line above it.
+	withSev := SeededBugTemplate(f, r, domain.BugProvenance{Source: "manual"}, domain.SeverityHigh)
+	if strings.Contains(withSev, "Reported via") {
+		t.Errorf("manual bug report should not carry a provenance line\n---\n%s", withSev)
+	}
+	if !strings.Contains(withSev, "> Severity: high") {
+		t.Errorf("manual bug report with a severity should still render it\n---\n%s", withSev)
+	}
+}
+
 func TestSeededBugTemplate_NoDiscussionSection(t *testing.T) {
 	f := &domain.Feature{ID: "BG-020", Num: 20, Kind: domain.KindBug, Title: "Login loop", Slug: "login-loop", Stage: domain.StageTodo}
 	out := SeededBugTemplate(f, domain.BugReport{Description: "something broke"}, domain.BugProvenance{}, "")

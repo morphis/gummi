@@ -90,10 +90,10 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 	return s.CardSpent()
 }
 
-// budgetSummary formats the budget: spend against the envelope plus
-// what's left — every stage draws from the same pool, so one remainder
-// is the whole story. A top-up raises the envelope itself (durably, in
-// the store), so these figures already reflect it.
+// budgetSummary formats the budget: what the card has spent against what
+// it was given — every stage draws from the same pool, so one pair is the
+// whole story. A top-up raises the budget itself (durably, in the store),
+// so these figures already reflect it.
 //
 // live is the running session's view of the card's total (0 = none), and
 // it wins over f's when there is one. f comes from the board's row
@@ -103,23 +103,28 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 // budget arithmetic reads the store, so a stale figure here is exactly
 // the case where the card claims headroom the stage was already denied.
 //
-// The "· N left" clause is dropped on a card that hasn't spent anything
-// yet: with spent at 0, left is just the envelope again, and "0 / 2000
-// credits · 2000 left" says the same number twice. Once spend is
-// nonzero the two figures diverge and the remainder earns its place.
+// THERE IS NO "· N left" CLAUSE. There used to be, and it never said
+// anything the two figures beside it did not: "324 / 2400 credits ·
+// 2076 left" is one subtraction printed twice. It was dropped at zero
+// spend for exactly that reason ("0 / 2000 credits · 2000 left" repeats
+// the envelope), and the same argument holds at every other value — the
+// reader is not being told a third fact, they are being shown the
+// arithmetic.
+//
+// The columns it cost were not free. This string sits in the card
+// masthead, which measures the badge cluster FIRST and gives the title
+// whatever is left (threadHeader, thread.go): at 120 columns the
+// redundant clause was pushing a card's own title down to eight
+// characters — "FD-001 · tally to…". Spending a fifth of the widest line
+// on the screen to restate a number is what made the title the least
+// legible thing on a page about that card.
 func budgetSummary(f domain.Feature, live float64) string {
 	env := float64(f.Budget.Envelope)
 	spent := f.Spend.CreditEquivalent()
 	if live > 0 {
 		spent = live
 	}
-	s := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
-	if spent > 0 {
-		if left := f.Budget.Remaining(spent); left > 0 {
-			s += fmt.Sprintf("  ·  %g left", roundSpend(left))
-		}
-	}
-	return s
+	return fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
 }
 
 // featureSpend formats the full metered cost for the dashboard. A credit

@@ -72,18 +72,28 @@ func TestBudgetThresholdRefreshesTheBoardsSpend(t *testing.T) {
 // session's own view of the card total over its snapshot. This is the
 // number the engine enforces against: the hint the agent is given says
 // what budgetSummary must agree with.
+// REWRITTEN: budgetSummary no longer prints a "· N left" remainder, so
+// this asserts the same precedence against the figure that remains — the
+// spend itself. The remainder was one subtraction printed twice beside
+// the two numbers it came from, and it cost the card masthead the columns
+// its title needed (budgetSummary's own doc comment has the argument).
+// What is pinned here is unchanged and is the point of the test: a live
+// session's view of the card total beats the board row's stale snapshot.
 func TestBudgetSummaryPrefersTheLiveTotal(t *testing.T) {
 	f := domain.Feature{ID: "BG-007", Budget: domain.Budget{Envelope: 2000}}
 	f.Spend.Credits = 339.1
 
-	if got := budgetSummary(f, 0); !strings.Contains(got, "1660.9 left") {
+	if got := budgetSummary(f, 0); !strings.Contains(got, "339.1 / 2000 credits") {
 		t.Errorf("with no live session the row is all there is: %q", got)
 	}
 	got := budgetSummary(f, 622)
-	if !strings.Contains(got, "1378 left") {
-		t.Errorf("budgetSummary(live 622) = %q, want the live remainder (1378)", got)
+	if !strings.Contains(got, "622 / 2000 credits") {
+		t.Errorf("budgetSummary(live 622) = %q, want the live total", got)
 	}
-	if strings.Contains(got, "1660.9") {
-		t.Errorf("budgetSummary kept the stale remainder: %q", got)
+	if strings.Contains(got, "339.1") {
+		t.Errorf("budgetSummary kept the stale total: %q", got)
+	}
+	if strings.Contains(got, "left") {
+		t.Errorf("budgetSummary reintroduced the redundant remainder: %q", got)
 	}
 }

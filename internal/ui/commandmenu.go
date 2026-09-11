@@ -77,8 +77,9 @@ func (m *commandMenu) ID() string { return "command-menu" }
 // The name is what makes the on-screen rule's degradation land
 // (threadinput.go): "/autopilot" opens this menu with "autopilot" in the
 // filter, and the card action it means wears the label "hand to
-// autopilot" — or, on a card already handed over, "take back the gates",
-// which shares not one letter with the word that was typed. Matching the
+// autopilot" — or, on a card already handed over, "stop autopilot".
+// Before that label was plain English it read "take back the gates",
+// which shared not one letter with the word that was typed. Matching the
 // name is what keeps the pre-filtered menu one enter from firing rather
 // than empty.
 func commandMatches(c command, q string) bool {

@@ -190,34 +190,6 @@ func TestBoardTabStillCyclesWithoutAPopup(t *testing.T) {
 	}
 }
 
-// TestBoardAgentValuesCompleteInline is the argument tier: once "/agent"
-// is a whole word, the popup offers the CLI names instead of asking for
-// a string. The names are agentcli.Known's fixed set; which of them are
-// installed depends on the machine, so only the names are asserted.
-func TestBoardAgentValuesCompleteInline(t *testing.T) {
-	m := boardTabWithSlash(t)
-	m = typeString(t, m, "agent ")
-
-	if m.boardComplete == nil {
-		t.Fatal(`"/agent " did not open the value picker`)
-	}
-	if !m.boardComplete.value {
-		t.Error("the popup opened on the command tier, not the value tier")
-	}
-	var got []string
-	for _, r := range m.boardComplete.rows {
-		got = append(got, r.name)
-	}
-	if strings.Join(got, ",") != "copilot,claude,codex,opencode,zz" {
-		t.Errorf("value rows = %v, want the five known CLIs", got)
-	}
-
-	m = typeString(t, m, "cop")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if got := m.boardInput.Value(); got != "/agent copilot" {
-		t.Errorf("composer after completing a value = %q, want %q", got, "/agent copilot")
-	}
-}
 
 // TestBoardCommandWithoutValuesTakesFreeText: only a command that
 // actually has a value list opens the second tier, AND — the half this

@@ -366,7 +366,7 @@ func TestContractHintStatesBoundary(t *testing.T) {
 	f := feature(7, "Boundary", domain.StageImplement)
 	path := "/project/example/spec.md"
 	for _, role := range []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer} {
-		h := unwrap(contractHint(f, path, role))
+		h := unwrap(contractHint(f, path, role, flavorStage))
 		if !strings.Contains(h, "is gummi-managed and lives outside your working directory") {
 			t.Errorf("%s: artifact not named gummi-managed and located outside cwd", role)
 		}
@@ -387,6 +387,35 @@ func TestContractHintStatesBoundary(t *testing.T) {
 		}
 		if !strings.Contains(h, "the workflow wins") {
 			t.Errorf("%s: missing repo-instructions precedence paragraph (the workflow wins)", role)
+		}
+	}
+}
+
+// TestContractHintNamesTheMediatedWritePath guards against a real,
+// paid-tokens regression from the 2026-09-10 card-thread drive: both a
+// reviewer and an architect session burned a turn discovering, by
+// trial and error, that their own Edit tool cannot write the artifact
+// (several backends' write tools are caged to the working directory —
+// WriteCagePaths — and refuse a path outside it, even though a read at
+// the same path can succeed). contractHint used to invite exactly that
+// mistake ("read and edit the artifact in place there"); it must
+// instead name gummi's own mediated tools as the write path and never
+// claim a direct file edit will work.
+func TestContractHintNamesTheMediatedWritePath(t *testing.T) {
+	f := feature(7, "Boundary", domain.StageImplement)
+	path := "/project/example/spec.md"
+	for _, role := range []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer} {
+		h := unwrap(contractHint(f, path, role, flavorStage))
+		for _, tool := range []string{"spec_view", "spec_replace_section", "spec_annotate"} {
+			if !strings.Contains(h, tool) {
+				t.Errorf("%s: contract hint does not name %s as the artifact's write path", role, tool)
+			}
+		}
+		if !strings.Contains(h, "cage their write tools") {
+			t.Errorf("%s: contract hint does not warn that a write tool may be caged to the working directory", role)
+		}
+		if strings.Contains(h, "read and edit the artifact in place") {
+			t.Errorf("%s: contract hint still invites a direct file edit gummi cannot guarantee", role)
 		}
 	}
 }

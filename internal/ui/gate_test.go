@@ -95,8 +95,12 @@ func TestGateActionLabelReflectsCurrentMode(t *testing.T) {
 		t.Fatalf("no gate action found for mode %q", mode)
 		return ""
 	}
-	if got := label(domain.GateAutopilot); got != "take back the gates" {
-		t.Errorf("label for autopilot = %q, want %q", got, "take back the gates")
+	// "stop autopilot", not the old "take back the gates" — a phrase that
+	// named an internal concept (who approves the gates) rather than the
+	// thing the reader wants done, and shared not one word with the
+	// "hand to autopilot" it undoes.
+	if got := label(domain.GateAutopilot); got != "stop autopilot" {
+		t.Errorf("label for autopilot = %q, want %q", got, "stop autopilot")
 	}
 	if got := label(domain.GateAttended); got != "hand to autopilot" {
 		t.Errorf("label for attended = %q, want %q", got, "hand to autopilot")

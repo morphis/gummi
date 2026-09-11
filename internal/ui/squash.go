@@ -49,7 +49,7 @@ func (m *Shell) prepareSquash(f domain.Feature) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return squashReadyMsg{f: f, err: err}
 		} else if landed {
-			return squashReadyMsg{f: f, err: squashNoticeErr{text: string(f.ID) + " already landed on main — press c to clean up"}}
+			return squashReadyMsg{f: f, err: squashNoticeErr{text: string(f.ID) + " already landed on main — " + cleanUpNudge}}
 		}
 		openThreads, prURL, err := m.probeOpenReviewThreads(ctx, f)
 		if err != nil {
@@ -68,7 +68,7 @@ func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return noticeMsg{text: string(f.ID) + " squash failed: " + err.Error(), isErr: true}
 		} else if landed {
-			return noticeMsg{text: string(f.ID) + " already landed on main — press c to clean up", isErr: true}
+			return noticeMsg{text: string(f.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
 		}
 		mgr, err := m.wt.ManagerFor(ctx, &f)
 		if err != nil {

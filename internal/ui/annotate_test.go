@@ -13,21 +13,41 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 )
 
+// TestCompileOpenQuestions pins what "request changes" sends the agent.
+//
+// REWRITTEN for the thread rule spec.Doc.Threads now enforces: a `@user`
+// marker is closed only by a `@user` resolution, never by an agent's.
+// This test used to assert the opposite — that `%% @architect: resolved`
+// took a human's comment out of the compiled turn — which is the hole
+// that let a card cross its gate with the user's objection unanswered
+// (REVIEW-ux-drive-2026-09-10-round2.md §1.2). An agent-resolved user
+// comment therefore still compiles in, and only the human pressing x
+// takes it out.
+//
+// The corollary — that `R` on an already-answered comment sends it back
+// again — is handled on screen rather than here: the artifact surface
+// says the agent has answered and names x before R (specview.go).
 func TestCompileOpenQuestions(t *testing.T) {
 	doc := spec.Parse("Title\n%% @user(2026-07-04): per-device or synced?\n\nBody\n%% @user: what about webviews?\n%% @architect: resolved — covered\n")
 	turn := compileOpenQuestions(doc)
 	if !strings.Contains(turn, "per-device or synced?") {
 		t.Errorf("compiled turn missing the open question:\n%s", turn)
 	}
-	if strings.Contains(turn, "webviews") {
-		t.Errorf("compiled turn included a resolved thread:\n%s", turn)
+	if !strings.Contains(turn, "webviews") {
+		t.Errorf("an architect's resolution closed a user's comment; only a user resolution may:\n%s", turn)
 	}
 	if strings.Contains(turn, "L2") == false {
 		t.Errorf("compiled turn missing the line reference:\n%s", turn)
 	}
-	// nothing open → empty
-	if compileOpenQuestions(spec.Parse("Body\n%% @user: q\n%% @a: resolved — y\n")) != "" {
-		t.Error("resolved-only doc should compile to empty")
+	// a user's OWN resolution does close it — and with nothing else open
+	// the turn is empty, so R has nothing to send.
+	if got := compileOpenQuestions(spec.Parse("Body\n%% @user: q\n%% @user: resolved — y\n")); got != "" {
+		t.Errorf("user-resolved doc should compile to empty, got:\n%s", got)
+	}
+	// an agent thread with no human in it keeps the old behaviour: the
+	// agents' own resolutions close each other's findings.
+	if got := compileOpenQuestions(spec.Parse("Body\n%% @reviewer: q\n%% @architect: resolved — y\n")); got != "" {
+		t.Errorf("agent-only resolved thread should compile to empty, got:\n%s", got)
 	}
 }
 

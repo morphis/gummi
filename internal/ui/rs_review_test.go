@@ -333,7 +333,7 @@ func TestRS_Form_EnterEmptyEnvelopeErrors(t *testing.T) {
 	if submitted {
 		t.Fatal("onSubmit ran with an empty envelope")
 	}
-	if !strings.Contains(form.errText, "envelope required") {
+	if !strings.Contains(form.errText, "budget required") {
 		t.Errorf("errText = %q, want an envelope-required refusal", form.errText)
 	}
 }

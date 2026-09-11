@@ -81,9 +81,11 @@ func TestBaselineNoticeNamesTheOptOutOn127(t *testing.T) {
 		t.Errorf("exit-2 notice offers the opt-out for a command that ran: %q", got.text)
 	}
 
-	// All-green stays quiet.
+	// All-green stays quiet. "check(s) ... pass" used to render literally
+	// as "all 1 repo check(s) pass" on a single-check repo (round 2 UX
+	// drive, §6) — the noun and its verb now both agree with the count.
 	got = baselineNotice(id, []verify.Result{{Name: "build", OK: true, Status: verify.StatusPass}})
-	if got.isErr || !strings.Contains(got.text, "all 1 repo check(s) pass") {
+	if got.isErr || !strings.Contains(got.text, "all 1 repo check passes") {
 		t.Errorf("all-pass notice = %q (isErr=%v), want the quiet summary", got.text, got.isErr)
 	}
 }

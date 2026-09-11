@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -655,6 +656,54 @@ func TestZZStreamAbortsWithoutDone(t *testing.T) {
 	case ev := <-sess.Events():
 		if ev.Kind != EventError {
 			t.Fatalf("kind = %v, want EventError", ev.Kind)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for error")
+	}
+}
+
+// TestZZRunFailureCarriesStderr pins §1.4 of the 2026-09-10 UX drive for
+// the zz adapter: a non-zero exit must surface as a *RunFailure carrying
+// the child's own stderr rather than a bare exit code, with FirstTurn
+// true since nothing on this session ever reached idle before it.
+func TestZZRunFailureCarriesStderr(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "zz")
+	script := "#!/bin/sh\n" +
+		"echo 'zz: provider stanza missing api_key' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	z, err := NewZZ(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer z.Close()
+	sess, err := z.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-sess.Events():
+		if ev.Kind != EventError {
+			t.Fatalf("kind = %v, want EventError", ev.Kind)
+		}
+		var rf *RunFailure
+		if !errors.As(ev.Err, &rf) {
+			t.Fatalf("Err = %v (%T), want a *RunFailure", ev.Err, ev.Err)
+		}
+		if rf.Backend != "zz" {
+			t.Errorf("Backend = %q, want zz", rf.Backend)
+		}
+		if !rf.FirstTurn {
+			t.Error("FirstTurn = false on the session's first Send")
+		}
+		if !strings.Contains(rf.Diagnostic, "provider stanza missing api_key") {
+			t.Errorf("Diagnostic = %q, missing the child's stderr", rf.Diagnostic)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for error")

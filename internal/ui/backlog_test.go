@@ -150,8 +150,12 @@ func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
 	if m.cardOpen {
 		t.Fatal("esc on the card page should return to the backlog in one press")
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), "BACKLOG") {
-		t.Error("esc did not land back on the backlog list")
+	// The header used to print "BACKLOG" while the tab that opens this
+	// screen is labelled "board" and its own help overlay titles itself
+	// "keys · board" — one screen, three names (round 2 UX drive, §6).
+	// BOARD is now the one the header prints too.
+	if !strings.Contains(ansi.Strip(m.View().Content), "BOARD") {
+		t.Error("esc did not land back on the board list")
 	}
 }
 
@@ -270,9 +274,13 @@ func TestBacklogScrollsToTheSelection(t *testing.T) {
 func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	m := populatedShell(120, 34)
 
+	// The surface is named "board" — the same word the tab, the page
+	// header and the ? overlay's title now use. It answered "backlog"
+	// while the header said BACKLOG and the tab said board, which was
+	// three names for one screen (round 2 UX drive §5, §6).
 	name, bs := m.activeSurface()
-	if name != "backlog" {
-		t.Fatalf("active surface = %q, want backlog", name)
+	if name != "board" {
+		t.Fatalf("active surface = %q, want board", name)
 	}
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "enter", "open card")
@@ -292,7 +300,7 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertLabel(t, bs, "enter", "run implement")
 	// esc leaves the page from the line — there is no accelerator layer
 	// between the composer and the backlog any more
-	assertLabel(t, bs, "esc", "backlog")
+	assertLabel(t, bs, "esc", "board")
 	assertLabel(t, bs, "alt+j/k", "prev/next")
 
 	// that layer still exists for a card another process drives, which
@@ -301,7 +309,7 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	_, bs = m.activeSurface()
 	assertNoKey(t, bs, "→")
 	assertLabel(t, bs, "enter", "run action")
-	assertLabel(t, bs, "esc", "backlog")
+	assertLabel(t, bs, "esc", "board")
 	assertLabel(t, bs, "J/K", "prev/next")
 
 	// with no decision open (a done card), enter is back to send: a bare

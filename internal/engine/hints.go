@@ -147,16 +147,16 @@ func researchReadOnly(f domain.Feature) bool {
 func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	switch flavor {
 	case flavorCritique:
-		h := []string{contractHint(f, specPath, agent.RoleReviewer), critiqueHint(f)}
+		h := []string{contractHint(f, specPath, agent.RoleReviewer, flavorCritique), critiqueHint(f)}
 		if gate := gateAskHint(f); gate != "" {
 			h = append(h, gate)
 		}
 		return h
 	case flavorRebase:
-		return []string{contractHint(f, specPath, agent.RoleImplementer), rebaseHint()}
+		return []string{contractHint(f, specPath, agent.RoleImplementer, flavorRebase), rebaseHint()}
 	}
 	role, _ := roleForStage(f)
-	hints := []string{contractHint(f, specPath, role)}
+	hints := []string{contractHint(f, specPath, role, flavor)}
 	if f.Kind == domain.KindResearch {
 		hints = append(hints, researchWorkingDirGuard)
 	}
@@ -599,11 +599,52 @@ a report about work the check runner already proved is spend with no
 verdict attached.` + verdict)
 }
 
-// contractHint is the stage-independent contract: the authoritative
+// mediatedTools names the gummi tools this card's sessions can actually
+// reach, for the contract hint's sentence about them.
+//
+// It is not a fixed list. A read-only research session is served a
+// STRIPPED tool set (filterReadOnlyTools, asktool.go): spec_replace_section
+// and spec_annotate are structurally absent from opts.Tools, from MCP
+// list_tools, and from the per-stage tool hint. Naming them anyway in the
+// contract — the first thing every session reads — told a research
+// reviewer to record its findings with a tool it does not have, which is
+// the same class of wrong instruction this paragraph was rewritten to
+// remove (it used to tell three of six backends they could edit the
+// artifact in place, which their write cage refuses).
+//
+// The rest of the sentence still hedges with "on any stage that offers
+// them", because which of the writeable tools a given stage carries is
+// the per-stage hint's business, not this one's.
+func mediatedTools(f domain.Feature, flavor runFlavor) string {
+	switch flavor {
+	case flavorCritique:
+		// A critique judges; it does not rewrite. stageTools serves it
+		// submit_verdict and spec_annotate and nothing else — and on a
+		// read-only research card filterReadOnlyTools takes the annotate
+		// away too, leaving it with no way to touch the artifact at all.
+		if researchReadOnly(f) || f.Kind == domain.KindResearch {
+			return "none — this pass reads the document and returns a verdict; " +
+				"it is not served any tool that writes to the artifact"
+		}
+		return "`spec_annotate` to attach a finding as a `%%` marker — and only that"
+	case flavorRebase:
+		return "none — this pass resolves a rebase in the working directory " +
+			"and is served no artifact tools"
+	}
+	view := "`spec_view` to read a section (or the whole document)"
+	if researchReadOnly(f) {
+		return view + " — and only that: this session is read-only, so the " +
+			"artifact-writing tools are not served to it at all"
+	}
+	return view + ", `spec_replace_section` to rewrite one, `spec_annotate` " +
+		"to attach an open question or note as a `%%` marker"
+}
+
+// contractHint is the stage-independent contract// contractHint is the stage-independent contract: the authoritative
 // facts and the artifact/marker conventions the agent must not re-derive.
 // The artifact is a spec for features, a bug report for bugs; the two
 // carry different sections but the same %% marker grammar.
-func contractHint(f domain.Feature, specPath string, role agent.Role) string {
+func contractHint(f domain.Feature, specPath string, role agent.Role, flavor runFlavor) string {
 	noun, artifact, sections := "feature", "spec (the design doc)", featureSections
 	short := "spec"
 	if f.Kind == domain.KindBug {
@@ -629,16 +670,23 @@ func contractHint(f domain.Feature, specPath string, role agent.Role) string {
 state database, source code, or design docs.
 
 The %s's %s is gummi-managed and lives outside your working
-directory, at %s. Keep that path for opening the file: read and edit
-the artifact in place there, and let annotations flow through it. It is
-the only writeable surface gummi exposes outside the working directory
-— code changes belong in the working directory (cwd) and only there.
+directory, at %s — named here so you know what you are working from,
+not as an invitation to reach it with your own file tools. Several
+backends cage their write tools to the working directory and refuse a
+write to a path outside it even though the file sits right there and a
+plain read there may still succeed — do not assume your edit tool can
+reach it just because your read tool did. Read and write it only
+through gummi's own tools instead: %s — never a direct file edit, on
+any stage that offers them (the next part of your instructions says
+which you have). It is the only reliably writeable surface gummi
+exposes outside the working directory — code changes belong in the
+working directory (cwd) and only there.
 It exists — gummi materializes it from its template — and it is the
 single source of truth: read it, work from it, keep it current. Its
 sections, in order: %s. %s
 
 Open questions and annotations are `+"`%%%%`"+` marker lines in the %s,
-one line each:`, noun, artifact, specPath, sections, seededLine, artifact)
+one line each:`, noun, artifact, specPath, mediatedTools(f, flavor), sections, seededLine, artifact)
 	b.WriteString(`
   %% @` + string(role) + `: <question or note>
   %% @` + string(role) + `: resolved — <answer>     (resolves its thread)

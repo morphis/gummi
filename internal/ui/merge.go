@@ -64,7 +64,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return mergeReadyMsg{err: err}
 		} else if landed {
-			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on main — press c to clean up")}
+			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on main — " + cleanUpNudge)}
 		}
 		// pre-land provenance scan: warn (never block) when branch commits
 		// carry agent attribution — the squash discards their messages, but
@@ -98,7 +98,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if landed {
-			return noticeMsg{text: string(f.ID) + " already landed on main — press c to clean up", isErr: true}
+			return noticeMsg{text: string(f.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
 		}
 		if _, err := m.wt.SquashMerge(ctx, &f, message); err != nil {
 			var ce *worktree.MergeConflictError
@@ -118,9 +118,9 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into main, but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — press c to clean up", reload: true, clearInbox: f.ID}
+			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 		}
-		return noticeMsg{text: string(f.ID) + " squash-merged into main — press c to clean up", reload: true, clearInbox: f.ID}
+		return noticeMsg{text: string(f.ID) + " squash-merged into main — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 	})
 }
 

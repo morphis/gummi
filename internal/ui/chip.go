@@ -94,7 +94,7 @@ func (m *Shell) chipLines(s *theme.Styles, r featureRow, p *reentryReading, widt
 	// the tail of it — the stage the card ends up at — is the half a
 	// narrow terminal would otherwise cut off
 	var arrow []string
-	for i, l := range strings.Split(wrapText(chipAct(f, p), max(width-4, 8)), "\n") {
+	for i, l := range strings.Split(wrapText(chipAct(f, r.baseBranch(), p), max(width-4, 8)), "\n") {
 		if i == 0 {
 			arrow = append(arrow, " "+s.PaneTitleActive.Render("→")+" "+s.Base.Render(l))
 		} else {
@@ -201,7 +201,10 @@ func readingNoun(out reentry.Outcome) string {
 }
 
 // chipAct is the arrow line: the act, named by where the card ends up.
-func chipAct(f domain.Feature, p *reentryReading) string {
+// base is the branch f actually lands on (r.baseBranch(), the row's own
+// fallback-safe resolution of Shell.baseBranch) — never asserted as
+// "main" here (REVIEW-ux-drive-2026-09-10-round2.md §3.4).
+func chipAct(f domain.Feature, base string, p *reentryReading) string {
 	out := p.out
 	art := artifactNoun(f.Kind)
 	switch out.Action {
@@ -220,7 +223,7 @@ func chipAct(f domain.Feature, p *reentryReading) string {
 		return "run " + string(out.Target) + " again with your line."
 	case reentry.Advance:
 		if out.Target == domain.StageDone {
-			return "land on main — squash-merge the branch and mark " + string(f.ID) + " done."
+			return "land on " + base + " — squash-merge the branch and mark " + string(f.ID) + " done."
 		}
 		label := p.forward
 		if label == "" {
@@ -307,7 +310,7 @@ func lastRunCost(r featureRow, stage domain.Stage) string {
 	}
 	if r.F.Budget.Envelope > 0 {
 		left := r.F.Budget.Remaining(r.F.Spend.CreditEquivalent())
-		b.WriteString("; " + itoa(int(left+0.5)) + " are left in the envelope")
+		b.WriteString("; " + itoa(int(left+0.5)) + " are left in the budget")
 	}
 	b.WriteString(".")
 	return b.String()

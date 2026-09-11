@@ -119,6 +119,39 @@ func (m *Manager) Root() string { return m.wsRoot }
 // commands run against — the base for agent workdirs and the main checkout.
 func (m *Manager) RepoRoot() string { return m.repo }
 
+// DefaultBaseBranchName is what the UI says when the checkout's branch
+// cannot be read — a detached HEAD, or a repository with no commits yet.
+// It is the name the copy used to hardcode everywhere, so nothing reads
+// worse than it did before this existed.
+const DefaultBaseBranchName = "main"
+
+// BaseBranch names the branch the main checkout currently has out — the
+// branch every card's work lands on.
+//
+// It is DECORATIVE. gummi never operates on a branch name: Create forks
+// from the checkout's HEAD, Landed compares against HEAD, and the merge
+// runs in the checkout as it stands. This exists only so the sentences
+// that tell a human what is about to happen can say "master" to a repo
+// on master instead of asserting "main" and being wrong about the single
+// most consequential action in the product.
+//
+// Unreadable HEAD reports DefaultBaseBranchName rather than an error:
+// a name the UI cannot get is a copy problem, never a reason to refuse a
+// merge that git itself would accept.
+func (m *Manager) BaseBranch(ctx context.Context) string {
+	out, err := runGit(ctx, m.repo, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return DefaultBaseBranchName
+	}
+	name := strings.TrimSpace(out)
+	// "HEAD" is what --abbrev-ref reports for a detached checkout: a SHA
+	// is not a name a sentence can use.
+	if name == "" || name == "HEAD" {
+		return DefaultBaseBranchName
+	}
+	return name
+}
+
 // worktreesDir is the directory all feature worktrees must live in.
 func (m *Manager) worktreesDir() string {
 	return filepath.Join(m.wsRoot, ".gummi", "worktrees")

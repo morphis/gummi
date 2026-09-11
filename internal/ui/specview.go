@@ -9,12 +9,14 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // specView is the spec surface state: one feature's design doc, shown as
@@ -123,7 +125,12 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 // marker line and reloads the doc. Same writer discipline as
 // addSpecComment: serialize under the per-file lock, re-read the current
 // file, splice, and write atomically.
-func (m *Shell) resolveSpecComment(line int) tea.Cmd {
+//
+// reason is the one-line answer the user typed into the resolve dialog
+// (empty when they left it blank); it is folded into the resolution
+// marker itself (see resolveWithReason) rather than dropped, so a bare
+// "resolved" is a choice the user made, not the only option gummi offered.
+func (m *Shell) resolveSpecComment(line int, reason string) tea.Cmd {
 	sv := m.spec
 	if sv == nil {
 		return nil
@@ -138,7 +145,7 @@ func (m *Shell) resolveSpecComment(line int) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		out, err := spec.ResolveComment(string(raw), line, "user", date)
+		out, err := resolveWithReason(string(raw), line, "user", date, reason)
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
@@ -147,6 +154,145 @@ func (m *Shell) resolveSpecComment(line int) tea.Cmd {
 		}
 		return reload()
 	}
+}
+
+// resolveWithReason closes the marker at line, same placement rule as
+// spec.ResolveComment (immediately after line, so a resolution closes only
+// the markers above it in the run — see spec.Doc.Threads) — but lets the
+// caller record why, instead of always writing the bare word. An architect
+// complained, in the drive this fix comes from, that the follow-up marker
+// "just says resolved without recording the answer"; an empty reason still
+// falls back to plain "resolved" so resolving stays a one-key action, it
+// just no longer forces the terse form when the user has something to say.
+//
+// This duplicates spec.ResolveComment's splice locally rather than adding
+// a reason parameter to it: that function is part of the shared marker
+// grammar (internal/spec) that Doc.Parse and Doc.Threads read back, and a
+// reason is only a UI convenience — it does not change what counts as a
+// resolution (resolvedRe still matches "resolved" followed by an em dash),
+// so it does not belong in that package's contract.
+func resolveWithReason(content string, line int, author, date, reason string) (string, error) {
+	lines := strings.Split(content, "\n")
+	if line < 1 || line > len(lines) {
+		return "", fmt.Errorf("line %d out of range (1..%d)", line, len(lines))
+	}
+	if !spec.IsMarkerLine(lines[line-1]) {
+		return "", fmt.Errorf("line %d is not a marker", line)
+	}
+	text := "resolved"
+	if reason = strings.TrimSpace(reason); reason != "" {
+		text = "resolved — " + reason
+	}
+	res := fmt.Sprintf("%%%% @%s(%s): %s", author, date, text)
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:line]...)
+	out = append(out, res)
+	out = append(out, lines[line:]...)
+	return strings.Join(out, "\n"), nil
+}
+
+// resolveDialog collects an optional one-line reason when resolving a
+// comment thread ('x'). It is a distinct type from commentDialog rather
+// than a shared one with an extra flag: an empty comment is a no-op
+// cancel (there is nothing to write), but an empty resolve reason is
+// still a resolve (that is the whole point — see resolveWithReason), so
+// the two dialogs disagree about what enter-with-nothing-typed does and
+// cannot share one submit rule. It also shows the anchor — the comment
+// text being resolved — so the user can see what they are agreeing to
+// close without holding the source pane's rendering of it in their head.
+type resolveDialog struct {
+	anchor   string
+	input    textinput.Model
+	buttons  *buttonRow
+	focus    int
+	onSubmit func(reason string) tea.Cmd
+}
+
+func newResolveDialog(anchor string, onSubmit func(string) tea.Cmd) *resolveDialog {
+	in := textinput.New()
+	in.Placeholder = "reason (optional)"
+	in.CharLimit = 200
+	in.SetWidth(48)
+	in.Focus()
+	return &resolveDialog{
+		anchor: anchor, input: in, onSubmit: onSubmit,
+		buttons: newButtonRow(button{label: "Cancel"}, button{label: "Resolve"}),
+	}
+}
+
+// ID implements overlay.Dialog.
+func (d *resolveDialog) ID() string { return "spec-resolve" }
+
+// submit fires onSubmit unconditionally — unlike commentDialog, an empty
+// value here is not a cancel, it is a resolve with no reason given, which
+// resolveWithReason turns into the plain "resolved" wording.
+func (d *resolveDialog) submit() (bool, tea.Cmd) {
+	return true, d.onSubmit(strings.TrimSpace(d.input.Value()))
+}
+
+// HandleKey implements overlay.Dialog.
+func (d *resolveDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		return true, nil
+	case "tab", "shift+tab":
+		// only two stops, so tab and shift+tab are the same toggle
+		d.setFocus((d.focus + 1) % 2)
+		return false, nil
+	}
+	if d.focus == commentFieldButtons {
+		switch key.String() {
+		case "left", "h":
+			d.buttons.Move(-1)
+			return false, nil
+		case "right", "l":
+			d.buttons.Move(1)
+			return false, nil
+		case "enter":
+			if d.buttons.Cursor() == 0 {
+				return true, nil
+			}
+			return d.submit()
+		}
+		return false, nil
+	}
+	if key.String() == "enter" {
+		return d.submit()
+	}
+	d.input, _ = d.input.Update(key)
+	return false, nil
+}
+
+// setFocus moves focus between the input and the button row, keeping the
+// textinput's own focus/blur in sync with which one is drawn active.
+func (d *resolveDialog) setFocus(f int) {
+	d.focus = f
+	if f == commentFieldInput {
+		d.input.Focus()
+	} else {
+		d.input.Blur()
+	}
+}
+
+// HandlePaste implements overlay.Paster.
+func (d *resolveDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	if d.focus == commentFieldInput {
+		d.input, _ = d.input.Update(msg)
+	}
+	return nil
+}
+
+// View implements overlay.Dialog.
+func (d *resolveDialog) View(s *theme.Styles, w, h int) string {
+	var b strings.Builder
+	b.WriteString(s.DialogTitle.Render("resolve") + "\n\n")
+	if d.anchor != "" {
+		b.WriteString(s.Subtle.Render(ansi.Truncate(d.anchor, 60, "…")) + "\n\n")
+	}
+	b.WriteString(d.input.View() + "\n\n")
+	b.WriteString(d.buttons.View(s, d.focus == commentFieldButtons) + "\n\n")
+	b.WriteString(s.Faint.Render("enter resolve · tab buttons · esc cancel"))
+	return s.DialogFrame.Render(b.String())
 }
 
 // approveSurface leaves the active spec/diff surface and runs the same
@@ -212,10 +358,10 @@ func (sv *specView) bindings() []binding {
 	bs := []binding{
 		{key: "j/k ↓↑", label: "line", help: "move the line cursor"},
 		{key: "pgup/pgdn", label: "page", help: "move the line cursor by a page"},
-		{key: "R", label: "request changes", help: "send the open %% questions to the architect", bar: true},
+		{key: "R", label: "request changes", help: "send the open comments to the architect", bar: true},
 		{key: "c", label: "comment", help: "comment on the cursor line", bar: true},
-		{key: "x", label: "resolve", help: "resolve the %% thread at the cursor", bar: true},
-		{key: "n/p", label: "markers", help: "jump between %% markers", bar: true},
+		{key: "x", label: "resolve", help: "resolve the comment thread at the cursor", bar: true},
+		{key: "n/p", label: "comments", help: "jump between comments", bar: true},
 		{key: "e", label: "editor", help: "open in $EDITOR at the cursor line"},
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "back to the board (also q)", bar: true},
@@ -232,7 +378,7 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 	case "e":
 		return m.editSpec()
 	case "R":
-		// request changes: send the open %% questions to the architect
+		// request changes: send the open comments to the architect
 		return m.requestSpecChanges(sv)
 	case "g":
 		// cross the gate: leave the surface and run the board's g
@@ -264,9 +410,32 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 			m.notice = noticeMsg{text: "already resolved"}
 			return nil
 		}
-		return m.resolveSpecComment(sv.cursor)
+		// resolving used to write a bare "%% @user(date): resolved" with no
+		// way to say why — the same contentless marker an architect
+		// complained about when an agent did it. The dialog accepts empty
+		// (enter with nothing typed still resolves, falling back to the old
+		// bare wording) so resolving stays a one-key action; it just is no
+		// longer the only shape resolving can take.
+		line := sv.cursor
+		anchor := markerTextAt(sv.doc, line)
+		m.Overlay.Push(newResolveDialog(anchor, func(reason string) tea.Cmd {
+			return m.resolveSpecComment(line, reason)
+		}))
 	}
 	return nil
+}
+
+// markerTextAt returns the marker text at the given source line, or ""
+// when the line carries no marker — the resolve dialog's anchor, so the
+// user can see which comment they are about to close without having to
+// keep the source pane's own rendering of it in their head.
+func markerTextAt(doc spec.Doc, line int) string {
+	for _, mk := range doc.Markers {
+		if mk.Line == line {
+			return mk.Text
+		}
+	}
+	return ""
 }
 
 func (sv *specView) setCursor(n int) {
@@ -313,10 +482,22 @@ func (m *Shell) specViewRender(w, h int) string {
 	// calling both "spec" renamed the document between the line that
 	// pointed at it and the header of the thing it opened.
 	head := s.Title.Render(string(sv.f.ID)) + " " + s.Base.Render("· "+artifactNoun(sv.f.Kind))
-	if open := len(sv.doc.OpenQuestions()); open > 0 {
+	if open := sv.needsAttentionCount(); open > 0 {
 		head += " " + s.Warning.Render(fmt.Sprintf("✎ %d open", open))
 	}
 	b.WriteString("\n" + head + "\n")
+	// Mirrors diffViewRender's own loop-prevention line (diffrender.go):
+	// once every open blocking comment already carries the agent's own
+	// answer, R's own advice — send the open comments to the agent — would
+	// spend a full rework round re-sending threads that are already
+	// settled. Doc.Threads only lets a @user resolution close a @user
+	// marker, so the open count alone cannot tell the reader the agent has
+	// already been here; said here, at the surface holding both keys, not
+	// at todo where there is no gate this could re-block (see the
+	// blockingLabel swap in renderStatus).
+	if sv.f.Stage != domain.StageTodo && sv.blockingAnswered() {
+		b.WriteString(s.Warning.Render("  every open comment has already been answered — x resolves one that the answer addressed; R sends them back again") + "\n")
+	}
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
 	// the status header used to belong to read mode alone, which meant
@@ -349,19 +530,95 @@ func reviewerMarker(t spec.Thread) *spec.Marker {
 	return found
 }
 
+// agentAnsweredOpenUser reports whether an agent wrote its own resolution
+// marker after a thread's still-open @user comment. Only a @user
+// resolution can close a @user marker (Doc.Threads) — an agent resolving
+// its own reviewer thread on a shared anchor used to silently close a
+// human's untouched comment above it too, which is the hole that fix
+// closed. The correct fix leaves the human's comment open until the human
+// answers it, but it also means an agent that DID address the comment (it
+// just cannot say "resolved" and have that count) leaves no visible trace
+// that anything happened — the open marker looks identical whether the
+// agent read it and replied, or never saw it. Scanning for the agent's
+// own resolution after the human's marker in document order recovers
+// that difference so the surface can say which one this is.
+func agentAnsweredOpenUser(t spec.Thread) bool {
+	um := userMarker(t)
+	if um == nil {
+		return false
+	}
+	after := false
+	for _, mk := range t.Markers {
+		if after && mk.Author != "user" && mk.Resolved {
+			return true
+		}
+		if mk.Line == um.Line {
+			after = true
+		}
+	}
+	return false
+}
+
+// blockingAnswered reports whether every currently open, gate-blocking
+// @user thread already has an agent's answer behind it (agentAnsweredOpenUser)
+// — the state that makes R's own advice wrong: sending the same comments
+// to the agent again would spend a full rework round on threads it has
+// already addressed, because nothing but the human's own x can close
+// them now. False on a card with no open blocking threads at all — there
+// is nothing to have answered.
+func (sv *specView) blockingAnswered() bool {
+	blocking := sv.doc.UserOpenThreads()
+	if len(blocking) == 0 {
+		return false
+	}
+	for _, t := range blocking {
+		if !agentAnsweredOpenUser(t) {
+			return false
+		}
+	}
+	return true
+}
+
+// needsAttentionCount is the headline's open-thread count: threads that
+// actually need a person — a human's own comment, or a reviewer finding
+// that has to be weighed before approving. spec.Doc.OpenQuestions also
+// counts the template's own `%% @gummi: …` scaffolding prompts (every
+// blank section of a fresh draft carries one), which are real open
+// threads by the file's grammar but not a problem anyone caused: on a
+// card where nothing has run yet, those prompts are the whole document,
+// and folding them into the headline made a brand-new card read as
+// already having several open issues. They still render, under "agent
+// notes (non-blocking)" in renderStatus — this only keeps them out of the
+// number a reader takes as "things I or a gate are waiting on".
+func (sv *specView) needsAttentionCount() int {
+	n := 0
+	for _, t := range sv.doc.OpenQuestions() {
+		if userMarker(t) != nil || reviewerMarker(t) != nil {
+			n++
+		}
+	}
+	return n
+}
+
 // renderStatus renders the fixed header: live dependency status, then
-// the open threads split into three groups by who authored them. An
-// unresolved @user comment blocks the approval gate (DESIGN §6.1) — the
-// gate math counts only those threads, so a reader must be able to tell
-// which group that is. The other two groups are both agent-authored and
-// neither gates, but they are not the same thing: a @reviewer finding is
-// the critique's own verdict on the artifact and needs weighing before
-// approving, while an @architect/@gummi thread (template prompts, notes)
-// is ordinary scaffolding. Grouping by the marker's role rather than by
-// scanning finding text for words like "blocking" is what keeps this
-// honest — free text a reviewer writes is not a contract gummi can
-// pattern-match without eventually mislabeling a finding that happens
-// not to start with the expected word.
+// the open threads split into three groups by who authored them. From the
+// plan stage on, an unresolved @user comment blocks the approval gate
+// (DESIGN §6.1) — the gate math counts only those threads, so a reader
+// must be able to tell which group that is. At todo the same group is
+// authored by the user but does NOT block anything: engine.Advance
+// itself does not gate the todo→plan edge on comments (leaving todo is
+// not a gate — nothing has run yet for a comment to object to), so the
+// group's heading has to say something true at that stage instead of
+// "blocks approval" with no approval pending. The other two groups are
+// both agent-authored and neither ever gates, but they are not the same
+// thing: a @reviewer finding is the critique's own verdict on the
+// artifact and needs weighing before approving, while an
+// @architect/@gummi thread (template prompts, notes) is ordinary
+// scaffolding. Grouping by the marker's role rather than by scanning
+// finding text for words like "blocking" is what keeps this honest — free
+// text a reviewer writes is not a contract gummi can pattern-match
+// without eventually mislabeling a finding that happens not to start with
+// the expected word.
 func (sv *specView) renderStatus(m *Shell, w int) string {
 	s := m.styles
 	var b strings.Builder
@@ -395,7 +652,15 @@ func (sv *specView) renderStatus(m *Shell, w int) string {
 		}
 		b.WriteString("\n")
 	}
-	renderThreadGroup("blocks approval (you)", blocking, userMarker)
+	// "blocks approval" is only true from plan on — see renderStatus's own
+	// doc comment. At todo it is read by the next run instead, so the
+	// label has to swap with the stage rather than being pinned to the one
+	// wording that happens to be right most of the time.
+	blockingLabel := "blocks approval (you)"
+	if sv.f.Stage == domain.StageTodo {
+		blockingLabel = "read by the next run (you)"
+	}
+	renderThreadGroup(blockingLabel, blocking, userMarker)
 	renderThreadGroup("reviewer findings — weigh before approving", reviewed, reviewerMarker)
 	renderThreadGroup("agent notes (non-blocking)", agentNotes, nil)
 	return b.String()

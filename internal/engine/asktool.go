@@ -1121,6 +1121,26 @@ func (e *Engine) appendAskEvent(s *Session, ask *Ask, answer, by string) {
 // returning an activity note describing what happened (empty when there
 // was no anchor to write). Failures degrade to a note, never an error:
 // the answer already reached the agent.
+//
+// A missing or no-longer-unique anchor (spec.FindAnchor fails closed on
+// either) used to drop the answer on the floor: the note said "skipped"
+// and nothing was written, so the one place the workflow promises the
+// decision lives — the artifact — never got it, and the only trace was
+// a terse technical line ("spec capture skipped: ...") landing in the
+// user's transcript looking like part of the conversation. Both halves
+// are wrong: the answer must land SOMEWHERE deterministic even when the
+// named anchor cannot be found, and whatever reaches the transcript
+// must say what happened to the user's answer in plain words, not name
+// gummi-internal machinery ("spec capture", "anchor") the user never
+// agreed to know about.
+//
+// The deterministic fallback is the end of the document: AddComment
+// only requires a line within range, and "the last line" is the one
+// position that is always valid and always the same place, so an
+// answer that cannot go where the model asked for still goes somewhere
+// a person (or the next stage) will find it on their next pass over
+// the artifact, tagged with the anchor text that missed so it can be
+// moved by hand.
 func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	anchor := strings.TrimSpace(ask.SpecAnchor)
 	if anchor == "" {
@@ -1134,24 +1154,71 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	defer unlock()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "spec capture skipped: " + err.Error()
+		return AnswerNotSavedPrefix + err.Error()
 	}
-	line, ok := spec.FindAnchor(string(raw), anchor)
+	date := e.now().Format("2006-01-02")
+	content := string(raw)
+	line, ok := spec.FindAnchor(content, anchor)
+	text := "resolved — " + answer
 	if !ok {
-		return fmt.Sprintf("spec capture skipped: %q not found (or not unique) — note it in the spec yourself", anchor)
+		// FindAnchor fails closed on zero matches (the line moved or was
+		// edited away since the question was asked) and on multiple
+		// matches (the snippet is no longer unique) alike — either way
+		// there is no single line left to resolve, so fail open instead:
+		// append a fresh note rather than resolving one that cannot be
+		// found.
+		lines := strings.Split(content, "\n")
+		line = len(lines)
+		text = fmt.Sprintf("answered %q — %s (appended: the spec no longer has one line matching that anchor)", anchor, answer)
 	}
-	out, err := spec.AddComment(string(raw), line, "user", e.now().Format("2006-01-02"), "resolved — "+answer)
+	out, err := spec.AddComment(content, line, "user", date, text)
 	if err != nil {
-		return "spec capture skipped: " + err.Error()
+		return AnswerNotSavedPrefix + err.Error()
 	}
 	if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
-		return "spec capture failed: " + err.Error()
+		return AnswerNotSavedPrefix + err.Error()
+	}
+	if !ok {
+		return fmt.Sprintf("%s%q — that text no longer matches a single line there, so it was "+
+			"appended at the end of the document instead", AnswerAppendedPrefix, anchor)
 	}
 	return AnswerCapturedNote
 }
 
-// AnswerCapturedNote is the activity note captureAnswer records when an
-// ask_user answer with a spec_anchor lands as a resolved %% marker. The
-// chat surface folds it into the answer's own bubble rather than showing
-// both the answer and this note (the answer would otherwise read twice).
-const AnswerCapturedNote = "recorded your answer in the spec"
+// The three notes captureAnswer can record, and the one predicate that
+// recognizes any of them.
+//
+// They exist as exported constants because the chat surface has to tell
+// an answer note apart from an ordinary tool line to render either one
+// correctly: the clean note is folded into the answer's own bubble (the
+// answer would otherwise read twice), while the two unhappy notes stay
+// on screen — they are the only place the user learns their answer did
+// not go where the question said it would. Either way the bubble carries
+// the outcome, so two answers to the same question never render one with
+// a status and the other with nothing.
+//
+// Matching on prose is not ideal, but the alternative is a typed field on
+// every transcript message for a distinction only this one surface makes.
+// Keeping the notes' spellings here, next to the code that writes them,
+// is what stops the two from drifting apart silently.
+const (
+	// AnswerCapturedNote: the answer landed as a resolved %% marker at
+	// the anchor the ask named. The happy path.
+	AnswerCapturedNote = "recorded your answer in the spec"
+	// AnswerAppendedPrefix: the anchor no longer matched exactly one
+	// line, so the answer went to the end of the document instead. Saved,
+	// but not where the reader will look for it.
+	AnswerAppendedPrefix = "your answer is saved in the spec, but not next to "
+	// AnswerNotSavedPrefix: the artifact could not be written at all. The
+	// agent still got the answer; the record did not.
+	AnswerNotSavedPrefix = "your answer could not be saved to the spec (it still reached the agent): "
+)
+
+// IsAnswerNote reports whether an activity note is captureAnswer's, in
+// any of its three outcomes — what the chat surface keys its folding and
+// its bubble suffix off.
+func IsAnswerNote(note string) bool {
+	return note == AnswerCapturedNote ||
+		strings.HasPrefix(note, AnswerAppendedPrefix) ||
+		strings.HasPrefix(note, AnswerNotSavedPrefix)
+}

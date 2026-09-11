@@ -316,6 +316,124 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 	}
 }
 
+// TestSpecViewToDoUserGroupNotBlocking: at todo, engine.Advance does not
+// gate the todo→plan edge on comments (there is no approval yet for one
+// to block — see engine/advance.go's own comment on that edge), so a
+// user's comment there must not be labelled "blocks approval". From plan
+// on, the same group is the real blocker and keeps that heading — see
+// TestSpecViewSeparatesBlockingThreads, which pins Stage: StagePlan.
+func TestSpecViewToDoUserGroupNotBlocking(t *testing.T) {
+	content := "## Problem\n\nWhat this should do.\n" +
+		"%% @user(2026-09-10): keep the naming short.\n"
+	id, _ := domain.NewFeatureID(1)
+	sv := &specView{
+		f:       domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StageTodo},
+		path:    "p.md",
+		content: content,
+		doc:     spec.Parse(content),
+		cursor:  1,
+	}
+	m := NewShell(theme.GummiDark(), "t")
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = model.(*Shell)
+	m.spec = sv
+	out := stripANSI(sv.renderStatus(m, 90))
+	if strings.Contains(out, "blocks approval") {
+		t.Errorf("todo-stage comment still labelled as blocking approval:\n%s", out)
+	}
+	if !strings.Contains(out, "read by the next run (you)") {
+		t.Errorf("missing the todo-stage heading:\n%s", out)
+	}
+	if !strings.Contains(out, "keep the naming short.") {
+		t.Errorf("comment itself missing from the group:\n%s", out)
+	}
+}
+
+// TestSpecHeadlineCountExcludesAgentNotes: needsAttentionCount (the
+// header's "N open") only counts threads a person actually has to do
+// something about — a user comment or a reviewer finding. The template's
+// own `%% @gummi: …` scaffolding prompts are open threads by
+// spec.Doc.OpenQuestions (nothing has resolved them), but they are not a
+// problem a fresh card has — before this fix a brand-new draft, all
+// template prompts and no real comments, read as "N open" in the exact
+// same warning color a real blocker gets.
+func TestSpecHeadlineCountExcludesAgentNotes(t *testing.T) {
+	m := specWorkspace(t)
+	m = openSpecFor(t, m)
+	// fresh draft: every open thread is a %% @gummi: template prompt
+	if len(m.spec.doc.UserOpenThreads()) != 0 {
+		t.Fatalf("setup: expected no user threads on a fresh draft, got %d", len(m.spec.doc.UserOpenThreads()))
+	}
+	if got := m.spec.needsAttentionCount(); got != 0 {
+		t.Errorf("needsAttentionCount on a fresh draft = %d, want 0 (all agent notes)", got)
+	}
+	if strings.Contains(stripANSI(m.View().Content), "✎") {
+		t.Errorf("headline still shows an open count on a fresh draft:\n%s", stripANSI(m.View().Content))
+	}
+	// a real user comment brings the count to 1, even with the template
+	// prompts still sitting there unresolved
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "needs a real answer")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.spec.needsAttentionCount(); got != 1 {
+		t.Errorf("needsAttentionCount after one user comment = %d, want 1", got)
+	}
+	if len(m.spec.doc.OpenQuestions()) <= 1 {
+		t.Fatalf("setup: expected the template prompts to still be open threads too")
+	}
+}
+
+// TestSpecBlockingAnsweredBanner: once an agent has written its own
+// resolution after every open @user comment, Doc.Threads still leaves
+// those comments open (only a @user resolution closes a @user marker —
+// see agentAnsweredOpenUser's doc comment), so the surface has to say
+// this itself or R's own advice sends the same, already-addressed
+// comments back for no reason. Mirrors diffViewRender's equivalent line
+// in diffrender.go.
+func TestSpecBlockingAnsweredBanner(t *testing.T) {
+	content := "## Problem\n\nQuestion.\n" +
+		"%% @user(2026-09-10): name the flag -n, not --limit.\n" +
+		"%% @architect: resolved — renamed to -n.\n"
+	id, _ := domain.NewFeatureID(1)
+	sv := &specView{
+		f:       domain.Feature{ID: id, Num: 1, Title: "x", Slug: "x", Stage: domain.StagePlan},
+		path:    "p.md",
+		content: content,
+		doc:     spec.Parse(content),
+		cursor:  1,
+	}
+	m := NewShell(theme.GummiDark(), "t")
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = model.(*Shell)
+	m.spec = sv
+	if !sv.blockingAnswered() {
+		t.Fatal("blockingAnswered = false, want true: the architect resolved after the open @user marker")
+	}
+	out := stripANSI(m.specViewRender(100, 30))
+	if !strings.Contains(out, "already been answered") {
+		t.Errorf("missing the answered-banner line:\n%s", out)
+	}
+	// the same thread is still open — only x, not another R, can close it
+	if len(sv.doc.UserOpenThreads()) != 1 {
+		t.Errorf("agent's resolution closed the @user marker: open = %d, want 1", len(sv.doc.UserOpenThreads()))
+	}
+
+	// at todo the banner does not apply — there is no gate for it to
+	// re-block, and requestSpecChanges at todo isn't "sending it back"
+	sv.f.Stage = domain.StageTodo
+	out = stripANSI(m.specViewRender(100, 30))
+	if strings.Contains(out, "already been answered") {
+		t.Errorf("answered-banner shown at todo, where nothing gates:\n%s", out)
+	}
+}
+
+// TestSpecResolveComment: x opens a dialog for an optional one-line reason
+// rather than writing the resolution immediately — an architect once
+// complained that the equivalent agent-written marker "just says resolved
+// without recording the answer", and the fix applies to the human's own
+// x too. Submitting with nothing typed still resolves (this test's case),
+// falling back to the old bare wording, so resolving stays a one-key-plus-
+// enter action even when the user has nothing to add.
 func TestSpecResolveComment(t *testing.T) {
 	m := specWorkspace(t)
 	m = openSpecFor(t, m)
@@ -326,9 +444,17 @@ func TestSpecResolveComment(t *testing.T) {
 	if len(m.spec.doc.UserOpenThreads()) != 1 {
 		t.Fatalf("open user threads = %d, want 1", len(m.spec.doc.UserOpenThreads()))
 	}
-	// move the cursor onto the marker (threaded under line 1) and resolve
+	// move the cursor onto the marker (threaded under line 1), open the
+	// resolve dialog, and submit with no reason typed
 	m = press(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.Overlay.Top() == nil {
+		t.Fatal("x did not open the resolve dialog")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("resolve dialog did not close")
+	}
 	want := "%% @user(2026-07-03): resolved"
 	if !strings.Contains(m.spec.content, want) {
 		t.Fatalf("resolution not written:\n%s", m.spec.content)
@@ -340,16 +466,78 @@ func TestSpecResolveComment(t *testing.T) {
 	if len(m.spec.doc.UserOpenThreads()) != 0 {
 		t.Errorf("open user threads after resolve = %d, want 0", len(m.spec.doc.UserOpenThreads()))
 	}
-	// x on the now-resolved thread → already resolved
+	// x on the now-resolved thread → already resolved, no dialog
 	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("x on a resolved thread opened a dialog")
+	}
 	if !strings.Contains(m.notice.text, "already resolved") {
 		t.Errorf("x on a resolved thread: notice = %q", m.notice.text)
 	}
-	// x on a content line → no marker
+	// x on a content line → no marker, no dialog
 	m.spec.cursor = 5
 	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("x on a content line opened a dialog")
+	}
 	if !strings.Contains(m.notice.text, "no marker") {
 		t.Errorf("x on a content line: notice = %q", m.notice.text)
+	}
+}
+
+// TestSpecResolveCommentWithReason: a reason typed into the resolve
+// dialog lands in the marker itself, after an em dash — the form
+// resolveWithReason writes and spec's own resolvedRe still recognizes as
+// a resolution (it matches "resolved" followed by ":", "—", "–" or "- ").
+// esc still cancels without writing or resolving anything, same as the
+// comment dialog.
+func TestSpecResolveCommentWithReason(t *testing.T) {
+	m := specWorkspace(t)
+	m = openSpecFor(t, m)
+	content := "## Problem\nQuestion A.\n" +
+		"%% @user(2026-08-16): keep or drop?\n\n" +
+		"## Approach\nQuestion B.\n" +
+		"%% @user(2026-08-16): which default?\n"
+	if err := os.WriteFile(m.spec.path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.spec.content = content
+	m.spec.doc = spec.Parse(content)
+
+	// resolve the first marker with a reason
+	m.spec.cursor = 3
+	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.Overlay.Top() == nil {
+		t.Fatal("x did not open the resolve dialog")
+	}
+	m = typeString(t, m, "kept as-is, see L2")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	want := "%% @user(2026-07-03): resolved — kept as-is, see L2"
+	if !strings.Contains(m.spec.content, want) {
+		t.Fatalf("resolution with reason not written:\n%s", m.spec.content)
+	}
+	if len(m.spec.doc.UserOpenThreads()) != 1 {
+		t.Fatalf("open user threads after resolving the first = %d, want 1", len(m.spec.doc.UserOpenThreads()))
+	}
+
+	// esc on the second marker's resolve dialog cancels without writing or
+	// resolving
+	for _, mk := range m.spec.doc.Markers {
+		if mk.Text == "which default?" {
+			m.spec.cursor = mk.Line
+		}
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = typeString(t, m, "never written")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.Overlay.HasDialogs() {
+		t.Fatal("esc did not close the resolve dialog")
+	}
+	if strings.Contains(m.spec.content, "never written") {
+		t.Fatal("cancelled resolve dialog wrote its reason")
+	}
+	if len(m.spec.doc.UserOpenThreads()) != 1 {
+		t.Errorf("cancelled resolve dialog changed open threads: %d, want 1 (still the second)", len(m.spec.doc.UserOpenThreads()))
 	}
 }
 
@@ -370,9 +558,11 @@ func TestSpecResolveFirstOfTwoMarkers(t *testing.T) {
 	if len(m.spec.doc.UserOpenThreads()) != 1 {
 		t.Fatalf("setup: user open threads = %d, want 1", len(m.spec.doc.UserOpenThreads()))
 	}
-	// put the cursor on the FIRST marker (line 3) and resolve it
+	// put the cursor on the FIRST marker (line 3), open the resolve
+	// dialog and submit with no reason
 	m.spec.cursor = 3
 	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(m.spec.content, "%% @user(2026-07-03): resolved") {
 		t.Fatalf("resolution not written:\n%s", m.spec.content)
 	}

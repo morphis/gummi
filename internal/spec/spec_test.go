@@ -46,21 +46,32 @@ func TestParseMarkers(t *testing.T) {
 	}
 }
 
+// TestThreadsAndOpenQuestions used to assert that thread 0 (the `sample`
+// fixture's @user question, answered only by "@architect: resolved") came
+// back resolved. That was the old, and wrong, rule: any author's
+// resolution closed every marker above it on the shared anchor, human
+// comments included. That is exactly the bug the 2026-09-10 round-2 UX
+// drive hit live (REVIEW §1.2) — an architect's "resolved —" on a
+// reviewer's finding silently closed a human's untouched comment sharing
+// the anchor, and the gate opened unanswered. The rule now is: only a
+// @user resolution closes a @user marker, so thread 0 must stay open
+// until the user (or the `x` key, which writes a @user resolution)
+// closes it themselves.
 func TestThreadsAndOpenQuestions(t *testing.T) {
 	d := Parse(sample)
 	threads := d.Threads()
 	if len(threads) != 2 {
 		t.Fatalf("got %d threads, want 2: %+v", len(threads), threads)
 	}
-	if !threads[0].Resolved {
-		t.Error("thread 0 has a resolution marker; should be resolved")
+	if threads[0].Resolved {
+		t.Error("thread 0's @user marker is only answered by @architect, not @user; should stay open")
 	}
 	if threads[1].Resolved {
 		t.Error("thread 1 has no resolution; should be open")
 	}
 	open := d.OpenQuestions()
-	if len(open) != 1 || open[0].Anchor != 9 {
-		t.Fatalf("open questions = %+v, want the anchor-9 thread", open)
+	if len(open) != 2 {
+		t.Fatalf("open questions = %+v, want both threads (anchor 3's unanswered @user comment + anchor 9)", open)
 	}
 }
 
@@ -251,28 +262,159 @@ func TestTemplateParsesWithOpenQuestions(t *testing.T) {
 	}
 }
 
+// TestResolutionDoesNotCloseLaterComment covers two user comments on one
+// anchor line, an agent resolution between them, and a later comment
+// below the resolution reopening the thread. It used to also demonstrate
+// (without asserting) that the architect's resolution closed the FIRST
+// comment, per-marker, "above it in the run" — that was the old rule.
+// Under the current rule a non-@user resolution never closes a @user
+// marker at all, so neither user comment is closed here: both the
+// "per-device or synced?" question and the later "what about SSR?" one
+// stay open. What this test actually pins — that a single resolution
+// must not unblock the gate while a later, un-addressed comment sits
+// below it — still holds, and is asserted explicitly for both markers
+// below.
 func TestResolutionDoesNotCloseLaterComment(t *testing.T) {
-	// Two user comments on one anchor line; the agent resolves the first
-	// and a later comment is added below the resolution, reopening the
-	// thread. A single resolution must not unblock the gate while the
-	// second comment is unanswered.
 	doc := "## Problem\n\nThe toggle persists via localStorage.\n" +
 		"%% @user(2026-08-16): per-device or synced?\n" +
 		"%% @architect: resolved — per-device.\n" +
 		"%% @user(2026-08-16): what about SSR?\n"
 	d := Parse(doc)
 
-	if got := len(d.Threads()); got != 1 {
+	threads := d.Threads()
+	if got := len(threads); got != 1 {
 		t.Fatalf("Threads() = %d, want 1 (one anchor line)", got)
+	}
+	if threads[0].Resolved {
+		t.Error("thread reports resolved, but neither @user comment was answered by a human")
+	}
+	for _, mk := range threads[0].Markers {
+		if mk.Author == "user" && mk.Resolved {
+			t.Errorf("marker %q closed by a non-@user resolution", mk.Text)
+		}
 	}
 
 	open := d.UserOpenThreads()
 	if len(open) != 1 {
-		t.Fatalf("UserOpenThreads() = %d, want 1 (SSR question is unanswered, gate must stay shut)", len(open))
+		t.Fatalf("UserOpenThreads() = %d, want 1 (both questions unanswered, gate must stay shut)", len(open))
 	}
 
+	// UnresolvedUserMarker reports the LAST unresolved @user marker in the
+	// thread — the SSR question — even though the per-device question is
+	// also still open; callers that need every open comment use the
+	// thread's Markers directly.
 	m := UnresolvedUserMarker(open[0])
 	if m == nil || m.Text != "what about SSR?" {
 		t.Fatalf("unresolved user marker = %+v, want the SSR comment", m)
+	}
+}
+
+// TestArchitectResolutionDoesNotCloseUserComment reproduces the exact
+// live failure from the 2026-09-10 round-2 UX drive (REVIEW §1.2): the
+// user commented on the spec ("Name the flag -n, not --limit"), a
+// reviewer later filed its own finding on the SAME anchor line, and the
+// architect's "resolved —" for the reviewer's finding closed the human's
+// comment too, because every marker sharing an anchor is one thread and
+// (under the old rule) any author's resolution closed everything above
+// it. The gate then opened with the user's comment never addressed by
+// anyone. The thread must stay open and UserOpenThreads must still
+// report it; the reviewer's own finding, being agent-to-agent, is still
+// correctly closed by the architect — agents keep the old behaviour
+// among themselves.
+func TestArchitectResolutionDoesNotCloseUserComment(t *testing.T) {
+	doc := "## Verification plan\n\n" +
+		"- the default is still ten when -n is not given\n" +
+		"%% @user(2026-09-10): Name the flag -n, not --limit — short flags fit the rest of this CLI.\n" +
+		"%% @reviewer(2026-09-10): blocking — add a machine-run `go test ./...` check to this section.\n" +
+		"%% @architect: resolved — added `go build ./...` and `go test ./...` as machine-run checks below.\n"
+	d := Parse(doc)
+
+	threads := d.Threads()
+	if len(threads) != 1 {
+		t.Fatalf("Threads() = %d, want 1 (one anchor line)", len(threads))
+	}
+	if threads[0].Resolved {
+		t.Error("thread reports resolved, but the @user comment was never answered by a human")
+	}
+
+	open := d.UserOpenThreads()
+	if len(open) != 1 {
+		t.Fatalf("UserOpenThreads() = %d, want 1 (the gate must stay shut)", len(open))
+	}
+	m := UnresolvedUserMarker(open[0])
+	if m == nil || !strings.Contains(m.Text, "-n, not --limit") {
+		t.Fatalf("unresolved user marker = %+v, want the flag-naming comment", m)
+	}
+
+	for _, mk := range threads[0].Markers {
+		if mk.Author == "reviewer" && !mk.Resolved {
+			t.Error("reviewer's finding is agent-to-agent and should still be closed by the architect's resolution")
+		}
+	}
+}
+
+// TestIndentedContinuationDoesNotResplitAThread pins Parse's one
+// exception to anchoring, and the live defect that earned it.
+//
+// A user commented and then resolved their own comment — one closed
+// thread. The verify pass later appended its evidence UNDER the first
+// marker, indented. That plain line used to become an anchor, splitting
+// the resolution away from the comment it resolved, so the comment
+// reopened and the gate shut again over a decision the human had already
+// closed. Thread membership must not move because of what an agent
+// appended near the thread afterwards.
+func TestIndentedContinuationDoesNotResplitAThread(t *testing.T) {
+	const anchorLine = "- the default is still ten when -n is not given\n"
+	closed := anchorLine +
+		"%% @user: Name the flag -n, not --limit\n" +
+		"%% @user: resolved\n"
+	withEvidence := anchorLine +
+		"%% @user: Name the flag -n, not --limit\n" +
+		"  RESULT: PASS. printed exactly 10 rows.\n" +
+		"%% @user: resolved\n"
+
+	for _, tc := range []struct {
+		name string
+		doc  string
+	}{
+		{"as the user left it", closed},
+		{"after verify appended its evidence", withEvidence},
+	} {
+		d := Parse(tc.doc)
+		if got := len(d.Threads()); got != 1 {
+			t.Errorf("%s: %d threads, want 1 — the continuation line re-anchored", tc.name, got)
+		}
+		if got := len(d.UserOpenThreads()); got != 0 {
+			t.Errorf("%s: %d open user threads, want 0 — a resolved comment reopened", tc.name, got)
+		}
+	}
+}
+
+// TestUnindentedContentStillAnchors is the other half of the rule: only
+// an INDENTED line is a continuation. New content at column 0 starts a
+// new anchor as it always has, so a marker on the next paragraph is not
+// swallowed into the previous conversation.
+func TestUnindentedContentStillAnchors(t *testing.T) {
+	d := Parse("first line\n%% @user: about the first\nsecond line\n%% @user: about the second\n")
+	threads := d.Threads()
+	if len(threads) != 2 {
+		t.Fatalf("%d threads, want 2 — unindented content must still anchor", len(threads))
+	}
+	if threads[0].Anchor == threads[1].Anchor {
+		t.Errorf("both markers anchored to line %d; they annotate different lines", threads[0].Anchor)
+	}
+}
+
+// TestContinuationRunEndsAtTheNextContentLine keeps the exception
+// bounded: once unindented content ends the run, a later indented line
+// (a nested list item, say) is ordinary content again and anchors.
+func TestContinuationRunEndsAtTheNextContentLine(t *testing.T) {
+	d := Parse("parent\n%% @user: q\n  continuation of the marker\nnext paragraph\n  - an indented child bullet\n%% @user: about the child\n")
+	threads := d.Threads()
+	if len(threads) != 2 {
+		t.Fatalf("%d threads, want 2", len(threads))
+	}
+	if want := 5; threads[1].Anchor != want {
+		t.Errorf("second thread anchored to line %d, want %d (the child bullet)", threads[1].Anchor, want)
 	}
 }

@@ -309,7 +309,8 @@ func TestCommitMsgDialogTypingAfterArmingSubmitsWithoutFurtherConfirm(t *testing
 
 // TestCommitMsgDialogHidesDraftingHintOnceModified pins the drafting
 // affordance to an unmodified box: once the operator types, the hint
-// must not claim "edit below to keep yours" over their own keystrokes.
+// must not claim it won't be overwritten while the draft it's warning
+// about has already been overwritten by hand.
 func TestCommitMsgDialogHidesDraftingHintOnceModified(t *testing.T) {
 	d := newTestCommitMsgDialog(t)
 	d.startDraft()

@@ -2,9 +2,11 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -433,5 +435,121 @@ func TestCitationNumbersMatchTheMarks(t *testing.T) {
 		if c.a.empty() && strings.Contains(c.text, "[alt+") {
 			t.Errorf("an uncited claim carries a mark: %q", c.text)
 		}
+	}
+}
+
+// TestAltACitationFindsAPeriodClosedInsideTheLiveSession is the actual
+// mechanism behind §2.2 of the 2026-09-10 round-2 review ("alt+a — open
+// cited — is dead", the "verify run is paused… autopilot crossed 3
+// gates" example). A period that opened AND closed entirely inside the
+// stage session still shown live (sessionFor stays non-nil once a
+// session exists, running or paused — engine.go's own doc on why "there
+// is a session here" outlives the run) is drawn by appendStretchCloses,
+// which used to draw the pair but never report back which row the open
+// line landed on. A citation anchored at such a period's opening event
+// armed anchorTo/anchorFrom, the render drew the rule anyway, and
+// anchorIdx stayed -1 regardless — so alt+a cleared the anchor and
+// moved nothing, from the top of the thread or from anywhere else,
+// because the anchor could never survive a second attempt either.
+//
+// The card's log is built directly (like stretchThread in
+// stretchrender_test.go) rather than driven through the fixture's fake
+// agent: only whether sessionFor(id) is non-nil needs to be real here,
+// not the period's own mechanics.
+func TestAltACitationFindsAPeriodClosedInsideTheLiveSession(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		// The scribe branch is not optional. advanceTo crosses the spec
+		// approval that runs check discovery, which is a scribe one-shot,
+		// and engine/discover.go waits on it: a Responder that never
+		// idles for RoleScribe blocks that select forever and hangs the
+		// whole package, not just this test.
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "wiring the toggle."},
+			{Kind: agent.EventToolCall, Tool: "edit theme.go"},
+		}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageImplement)
+	m = openAndAttach(t, m)
+	waitForActivity(t, eng)
+
+	id := m.rows[0].F.ID
+	if s := m.sessionFor(id); s == nil || s.Interactive {
+		t.Fatalf("setup: want a live non-interactive session for %s, got %+v", id, s)
+	}
+
+	base := m.now()
+	enter, _ := json.Marshal(map[string]string{"role": "implementer", "model": "claude-sonnet"})
+	msg, _ := json.Marshal(map[string]string{"author": "implementer", "content": "wiring the toggle."})
+	events := withSeqs([]state.CardEvent{
+		{Kind: state.EventStageEnter, Stage: domain.StageImplement, At: base, Payload: string(enter)},
+		{Kind: state.EventMessage, Stage: domain.StageImplement, At: base.Add(time.Second), Payload: string(msg)},
+		evTookOver("auto", base.Add(2*time.Second)),
+		evHandedBack("you turned autopilot off", base.Add(3*time.Second)),
+	})
+	m.cardEvents[id] = events
+	seq := events[2].Seq // the took-over event: the period's opening citation
+
+	r := m.rows[0]
+	r.Events = events
+	m.cardOpen = true
+
+	if ok := m.scrollThreadToEvent(r, seq); !ok {
+		t.Fatal("scrollThreadToEvent refused a citation at a real period's opening event")
+	}
+	if m.anchorTo != id {
+		t.Fatalf("anchorTo = %q, want %q armed", m.anchorTo, id)
+	}
+
+	m.threadScroll = 0
+	_ = m.threadView(100, 30)
+
+	if m.threadScroll == 0 {
+		t.Fatal("alt+a on the period's opening event did not move the thread — appendStretchCloses drew the rule but never reported where")
+	}
+	if m.anchorTo != "" {
+		t.Fatalf("anchorTo = %q, want cleared once the jump lands", m.anchorTo)
+	}
+}
+
+// TestAltACitationToANonPeriodEventNoticesRatherThanSwallowsTheKey pins
+// the one shape an event citation can still genuinely fail to resolve
+// after the fix above: a seq that names a real event on the card
+// (gatherEvidence already refuses anything else at generation time) but
+// not one that opens any autopilot period — the only thing an event
+// citation is ever generated for (scrollThreadToEvent's own doc
+// comment). openAnchor must say so rather than clear the key with
+// nothing on screen to show for it, the same refusal a diff citation
+// with no diff already makes (openAnchor's "diff" case, two lines up in
+// citations.go).
+func TestAltACitationToANonPeriodEventNoticesRatherThanSwallowsTheKey(t *testing.T) {
+	m := gatedVerifyCard(t, agent.NewFake("ok"))
+	r := m.rows[0]
+
+	var seq int64 = -1
+	for _, ev := range m.cardEvents[r.F.ID] {
+		if ev.Kind != state.EventAutopilot {
+			seq = ev.Seq
+			break
+		}
+	}
+	if seq < 0 {
+		t.Fatal("setup: no non-autopilot event on this card's log to cite")
+	}
+	r.Events = m.cardEvents[r.F.ID]
+	m.cardOpen = true
+
+	cmd := m.openAnchor(r, anchor{kind: "event", ref: strconv.FormatInt(seq, 10)})
+	if cmd != nil {
+		t.Error("an unresolvable event citation returned a command; want nil, notice only")
+	}
+	if m.anchorTo != "" {
+		t.Fatalf("anchorTo = %q, want none armed for an event that opens no period", m.anchorTo)
+	}
+	if !strings.Contains(m.notice.text, "nothing on this page opens at that citation") {
+		t.Errorf("notice = %q, want the citation's failure explained instead of swallowed", m.notice.text)
 	}
 }

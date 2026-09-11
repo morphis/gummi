@@ -8,6 +8,7 @@ package ui
 // requirement of the card, not of the pane that happened to hold it.
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -32,9 +33,12 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		// tool calls render as compact ticker lines, in order with the
 		// messages around them; consecutive ones group without blanks.
 		if msg.Author == engine.AuthorTool {
-			// the spec-capture note is folded into the answer bubble above
+			// The CLEAN answer note is folded into the answer bubble above
 			// it (see AuthorUser), so an answer isn't recorded twice — once
-			// as its own chat message and again as this note.
+			// as its own chat message and again as this note. The two
+			// unhappy notes are NOT folded: they are the only place the
+			// user learns their answer did not land where the question
+			// said it would, so they stay on screen and say why.
 			if msg.Content == engine.AnswerCapturedNote && i > 0 && snap.Transcript[i-1].Author == engine.AuthorUser {
 				continue
 			}
@@ -51,11 +55,17 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		switch msg.Author {
 		case engine.AuthorUser:
 			label = s.KeyHint.Render("you")
-			// an answer captured into the spec is marked in place instead of
-			// trailed by a separate "recorded…" note (deduped above)
-			if i+1 < len(snap.Transcript) && snap.Transcript[i+1].Author == engine.AuthorTool &&
-				snap.Transcript[i+1].Content == engine.AnswerCapturedNote {
-				label += " " + s.Faint.Render("· recorded in the spec")
+			// EVERY answer to an ask carries its outcome, not just the
+			// happy one. The suffix used to appear only for a clean
+			// capture, so a typed answer read "you · recorded in the spec"
+			// and a picked option — whose capture had quietly failed —
+			// read a bare "you". Two answers to the same question, one
+			// with a status and one with nothing, and the reader's fair
+			// conclusion was that the picked one was recorded nowhere.
+			if i+1 < len(snap.Transcript) && snap.Transcript[i+1].Author == engine.AuthorTool {
+				if suffix := answerOutcome(snap.Transcript[i+1].Content); suffix != "" {
+					label += " " + s.Faint.Render(suffix)
+				}
 			}
 		case engine.AuthorSystem:
 			// the label is what marks a turn as gummi's own; the body is
@@ -134,6 +144,27 @@ func toolMarker(s *theme.Styles, st engine.ToolStatus) string {
 	}
 }
 
+// answerOutcome is the short status an answer's own bubble wears, taken
+// from the activity note captureAnswer left beside it. Empty for anything
+// that is not an answer note — an ask with no spec anchor has no outcome
+// to report, and an ordinary tool call following an answer is not about
+// the answer at all.
+//
+// The wording is deliberately shorter than the note it summarizes: the
+// unhappy notes stay on screen right below and carry the detail, so the
+// bubble only has to say which of the three happened.
+func answerOutcome(note string) string {
+	switch {
+	case note == engine.AnswerCapturedNote:
+		return "· recorded in the spec"
+	case strings.HasPrefix(note, engine.AnswerAppendedPrefix):
+		return "· saved at the end of the spec"
+	case strings.HasPrefix(note, engine.AnswerNotSavedPrefix):
+		return "· not saved to the spec"
+	}
+	return ""
+}
+
 // toolLineView styles one activity-ticker line, truncated ANSI-aware to
 // width. A tool call arrives composed as "name  detail" (the engine's
 // toolLine, double-space separator): the name renders Muted and the
@@ -141,11 +172,41 @@ func toolMarker(s *theme.Styles, st engine.ToolStatus) string {
 // arguments receding behind them. Lines without that shape — check
 // results, budget nudges, notes — stay single-style Faint as before.
 func toolLineView(s *theme.Styles, content string, width int) string {
+	content = plainToolNames(content)
 	name, detail, ok := strings.Cut(content, "  ")
 	if !ok || name == "" || strings.Contains(name, " ") {
 		return s.Faint.Render(ansi.Truncate(content, width, "…"))
 	}
 	return ansi.Truncate(s.Muted.Render(name)+"  "+s.Faint.Render(detail), width, "…")
+}
+
+// mcpToolPrefix matches the wire spelling of an MCP tool name —
+// mcp__<server>__<tool> — anywhere in an activity line.
+//
+// The prefix is a transport detail of how a tool reaches the backend, and
+// it is the backend's own naming, not gummi's. On screen it turned every
+// one of gummi's own tools into line noise:
+//
+//	· ToolSearch  select:mcp__gummi__spec_view,mcp__gummi__ask_user,mcp__gummi__spec_rep…
+//	· mcp__gummi__spec_replace_section
+//
+// — where the reader wants "spec_view", "ask_user", "spec_replace_section".
+// Worse, the prefix is 12 characters of nothing repeated per name, so the
+// truncation that keeps the line inside the pane spends most of its budget
+// on it and elides the part that says what happened.
+var mcpToolPrefix = regexp.MustCompile(`\bmcp__[A-Za-z0-9_.-]+?__`)
+
+// plainToolNames strips MCP transport prefixes from an activity line.
+//
+// It rewrites the DISPLAY only — nothing downstream reads these lines back
+// — and it touches nothing else, so a genuinely foreign tool (Bash, Read,
+// Glob, Edit) still renders under the name the backend actually ran, which
+// is the name a reader would grep for.
+func plainToolNames(content string) string {
+	if !strings.Contains(content, "mcp__") {
+		return content
+	}
+	return mcpToolPrefix.ReplaceAllString(content, "")
 }
 
 // errLines caps a wrapped error so it can't crowd out the transcript.

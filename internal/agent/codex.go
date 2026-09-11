@@ -101,6 +101,25 @@ type codexSession struct {
 	primed, interrupted, closed bool
 	closeOnce                   sync.Once
 	started                     map[string]bool
+	// hadIdle marks that some prior turn on this session reached a clean
+	// idle — RunFailure.FirstTurn on a later failure reads the negation
+	// of this.
+	hadIdle bool
+}
+
+// markHadIdle records that some turn on this session reached a clean
+// idle — RunFailure.FirstTurn on a later failure reads the negation of
+// this.
+func (s *codexSession) markHadIdle() {
+	s.mu.Lock()
+	s.hadIdle = true
+	s.mu.Unlock()
+}
+
+func (s *codexSession) hadIdleValue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hadIdle
 }
 
 func (s *codexSession) Events() <-chan Event { return s.events }
@@ -164,8 +183,10 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("codex stdout: %w", err)
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	// capWriter, not strings.Builder: bounded in memory regardless of how
+	// chatty a failing child gets.
+	stderr := &capWriter{max: 16 << 10}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
 		s.mu.Unlock()
@@ -173,7 +194,7 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 	}
 	s.cancel = cancel
 	s.mu.Unlock()
-	go s.readTurn(cmd, stdout, &stderr, cancel)
+	go s.readTurn(cmd, stdout, stderr, cancel)
 	return nil
 }
 
@@ -254,6 +275,7 @@ func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stri
 		return
 	}
 	if aborted {
+		s.markHadIdle()
 		s.emit(Event{Kind: EventIdle})
 		return
 	}
@@ -262,13 +284,21 @@ func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stri
 		return
 	}
 	if waitErr != nil {
-		s.emit(Event{Kind: EventError, Err: fmt.Errorf("codex exec failed: %s", diagnostic(stderr.String(), waitErr.Error()))})
+		s.emit(Event{Kind: EventError, Err: &RunFailure{
+			Backend: "codex", Diagnostic: diagnostic(stderr.String(), ""),
+			FirstTurn: !s.hadIdleValue(), Err: waitErr,
+		}})
 		return
 	}
 	if !terminal {
-		s.emit(Event{Kind: EventError, Err: fmt.Errorf("codex exec exited without a terminal turn event: %s", diagnostic(stderr.String(), "no diagnostics"))})
+		s.emit(Event{Kind: EventError, Err: &RunFailure{
+			Backend: "codex", Diagnostic: diagnostic(stderr.String(), ""),
+			FirstTurn: !s.hadIdleValue(),
+			Err:       errors.New("exited without a terminal turn event"),
+		}})
 		return
 	}
+	s.markHadIdle()
 	s.emit(Event{Kind: EventIdle})
 }
 

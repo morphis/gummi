@@ -163,6 +163,26 @@ func TestCardLineNeverShellsGH(t *testing.T) {
 	}
 }
 
+// TestCardLineLandedSurvivesCleanup locks in the round 2 UX drive's §8
+// finding: r.Landed is msgs.go's cheap, worktree-gated signal (it is only
+// computed while wt.Exists, so clean-up deleting the branch resets it to
+// false) — but domain.Feature.LandedSHA is the permanent record,
+// stamped once at merge time and never cleared. A card with no worktree
+// left and no fresh r.Landed, but a recorded LandedSHA, must still read
+// "landed": that is exactly the state a cleaned-up, once-landed card is
+// in, and it must not look like an abandoned one.
+func TestCardLineLandedSurvivesCleanup(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	r := row(42, "dark mode", domain.StageDone, "thrifty", false) // no worktree: cleaned up
+	r.Landed = false                                              // msgs.go: canHaveLanded needs wt.Exists
+	r.F.LandedSHA = "abc1234"                                     // SquashMerge's permanent stamp
+
+	line := m.cardLine(r, 1, false, true, 100)
+	if !strings.Contains(line, "landed") {
+		t.Errorf("card line = %q, want the landed marker to survive clean-up via LandedSHA", line)
+	}
+}
+
 // TestCardLineGateMarker: the ⚡ badge marks only an explicit "auto"
 // gate-approval mode. Empty reads as auto everywhere else in the code
 // (domain.ValidGateApproval). Attended is the default and what empty

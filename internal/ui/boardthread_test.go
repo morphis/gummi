@@ -246,22 +246,6 @@ func TestQuitWhileBoardBusyConfirmsFirst(t *testing.T) {
 	}
 }
 
-// TestAgentChoiceClearsBoardFailure: boardErr is what ensureBoardSession
-// refuses to retry past, so a single failed open used to disable the tab
-// for the rest of the process. Choosing an agent is the fix for the
-// commonest cause of that failure, so it has to clear the flag — the
-// same reset agentChosenMsg already did for the pty's agentErr.
-func TestAgentChoiceClearsBoardFailure(t *testing.T) {
-	m, _ := agentWorkspace(t, agent.NewFake("hi"))
-	m.boardErr = "no agent configured (set a model/provider to enable agents)"
-
-	model, _ := m.Update(agentChosenMsg{name: "claude"})
-	m = model.(*Shell)
-
-	if m.boardErr != "" {
-		t.Errorf("boardErr = %q, want it cleared so the next visit retries", m.boardErr)
-	}
-}
 
 // composerBottomGap reports how many rows sit between the composer's ┃
 // and the bottom of the rendered frame — the status bar plus whatever

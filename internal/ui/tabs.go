@@ -24,22 +24,15 @@ const (
 	// TabInbox is the needs-attention queue, promoted out of its modal
 	// overlay onto a tab of its own (stage 2; a placeholder until then).
 	TabInbox
-	// TabAgent hosts a pty running the user's own coding CLI, composited
-	// straight into the screen buffer (stage 3; a placeholder until then).
+	// TabAgent hosts gummi's own board conversation — an in-process
+	// engine.BoardSession, not a hosted external program (boardthread.go).
 	TabAgent
 )
 
-// tabDef names one tab in the bar: its identity, its label, and whether
-// it hands the keyboard to a program gummi does not control.
+// tabDef names one tab in the bar: its identity and its label.
 type tabDef struct {
 	id    Tab
 	label string
-	// foreign marks a tab that hosts someone else's keymap. gummi keeps
-	// only the tab switches there and passes the rest to the hosted
-	// program; ctrl+g locks the keyboard to hand over those too. It is
-	// what the lock indicator and the bar's hint key off, so a second
-	// hosted pane later declares itself here rather than editing them.
-	foreign bool
 }
 
 // tabDefs is the tab bar's contents, left to right after the wordmark.
@@ -47,18 +40,8 @@ func (m *Shell) tabDefs() []tabDef {
 	return []tabDef{
 		{id: TabBoard, label: "board"},
 		{id: TabInbox, label: "inbox"},
-		{id: TabAgent, label: "agent", foreign: true},
+		{id: TabAgent, label: "agent"},
 	}
-}
-
-// foreignTab reports whether t hands the keyboard to a hosted program.
-func (m *Shell) foreignTab(t Tab) bool {
-	for _, td := range m.tabDefs() {
-		if td.id == t {
-			return td.foreign
-		}
-	}
-	return false
 }
 
 // setTab switches the active tab, clamping to a valid one. cardOpen
@@ -93,31 +76,17 @@ func (m *Shell) setTab(t Tab) {
 	m.tab = t
 }
 
-// nextTab cycles every tab in tabDefs, the agent tab included.
-//
-// It briefly skipped the agent tab, and for a real reason: cycling onto
-// a tab that will not cycle you back off it is a one-way door, and that
-// is exactly what happened while the hosted CLI held tab unconditionally.
-// The keyboard lock removes the reason rather than the tab. Unlocked —
-// the default, and the state you arrive in — tab is gummi's, so the cycle
-// always continues; a user who wants the CLI's own tab completion asks
-// for it with ctrl+g and gets a lock indicator saying so. Nobody is ever
-// stuck somewhere they did not choose to be.
+// nextTab cycles every tab in tabDefs, the agent tab included. Every tab
+// is gummi's own keymap now, so cycling through the agent tab is no
+// different from cycling through any other — there is no hosted program
+// underneath it that could hold tab and turn the cycle into a one-way
+// door.
 func (m *Shell) nextTab() tea.Cmd {
 	defs := m.tabDefs()
-	// noted before the switch: this is the case where tab was pressed at
-	// a CLI prompt, meaning completion, and moved the user instead. That
-	// is the most likely moment anyone ever wants the lock, so it is the
-	// moment worth naming it.
-	leftHosted := m.hostedKeyboard()
 	// Tab is an index into tabDefs by construction and setTab keeps it in
 	// range, so the successor is plain modular arithmetic over the same
 	// slice the bar draws from — a fourth tab needs no edit here.
-	cmd := m.gotoTab(defs[(int(m.tab)+1)%len(defs)].id)
-	if leftHosted && !m.lockUsed && !m.foreignTab(m.tab) {
-		m.notice = noticeMsg{text: lockLeftNotice}
-	}
-	return cmd
+	return m.gotoTab(defs[(int(m.tab)+1)%len(defs)].id)
 }
 
 // tabBadge names the small marker a tab wears next to its label, and
@@ -139,16 +108,9 @@ func (m *Shell) tabBadge(t Tab) (text string, alert bool) {
 		}
 		return "✉" + strconv.Itoa(n), alert
 	case TabAgent:
-		// the lock is the one thing about this tab worth a badge: it
-		// changes what every other key on the keyboard does, so it has to
-		// be legible from the other tabs too, not just while you are on
-		// it. Alert-weighted for the same reason.
-		if m.locked && m.agent != nil {
-			return "⬤ locked", true
-		}
-		// stage 3 wires unread-output tracking (a "·" once the pty has
-		// produced output the user hasn't looked at); nothing to show
-		// before there is an agent view to watch.
+		// nothing to show yet — a future unread-output marker (a "·" once
+		// the board thread has produced output the user hasn't looked at)
+		// belongs here, but no such tracking exists today.
 		return "", false
 	default:
 		return "", false
@@ -191,23 +153,8 @@ func (m *Shell) tabBarView(w int) string {
 	// It cannot live in the status bar's hint row: that row is already
 	// full at 120 columns, and it is the wrong place anyway — how to
 	// reach a tab belongs beside the tabs.
-	//
-	// The hint states what is true *now*, never a general rule: a bar
-	// that kept advertising the tab cycle while the keyboard was locked
-	// would be telling the user to press the one key that cannot work.
-	// That is precisely how the old one-way door went unnoticed.
 	hint := s.Muted.Render("tab") + s.Faint.Render(" cycle · ") +
 		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
-	switch {
-	case m.keyboardLocked():
-		hint = s.Warning.Render("⬤ locked") + s.Faint.Render(" — all input to the agent · ") +
-			s.Muted.Render("ctrl+g") + s.Faint.Render(" unlock")
-	case m.hostedKeyboard():
-		// "lock" alone says nothing to someone who does not already know
-		// what is locked. Name the trade instead: this is the key that
-		// gives tab to the program you are looking at.
-		hint += s.Faint.Render(" · ") + s.Muted.Render("ctrl+g") + s.Faint.Render(" tab→agent")
-	}
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint
 	}

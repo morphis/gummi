@@ -166,6 +166,11 @@ type opencodeSession struct {
 	interrupted bool               // the current turn was killed by Interrupt (not a failure)
 	closed      bool
 	closeOnce   sync.Once
+	// hadIdle marks that some prior turn on this session reached a clean
+	// idle — the signal RunFailure.FirstTurn is built from: a failure
+	// before this is ever true is the "misconfigured backend" shape a
+	// brand new user hits first, not a mid-task crash.
+	hadIdle bool
 }
 
 func (s *opencodeSession) Events() <-chan Event { return s.events }
@@ -265,8 +270,11 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("opencode stdout: %w", err)
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	// capWriter, not strings.Builder: a misconfigured backend can spew
+	// arbitrarily to stderr before it gives up, and this capture must
+	// stay bounded in memory regardless of how chatty the failure is.
+	stderr := &capWriter{max: 16 << 10}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
 		s.mu.Unlock()
@@ -275,7 +283,7 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
-	go s.readTurn(cmd, stdout, &stderr, cancel)
+	go s.readTurn(cmd, stdout, stderr, cancel)
 	return nil
 }
 
@@ -332,6 +340,7 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 	// an interrupted turn ends idle (the orchestrator's pause/budget path
 	// already recorded why); only a non-zero exit we didn't cause is an error.
 	if aborted {
+		s.markHadIdle()
 		s.emit(Event{Kind: EventIdle})
 		return
 	}
@@ -342,11 +351,10 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 		return
 	}
 	if waitErr != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail == "" {
-			detail = waitErr.Error()
-		}
-		s.emit(Event{Kind: EventError, Err: fmt.Errorf("opencode run failed: %s", detail)})
+		s.emit(Event{Kind: EventError, Err: &RunFailure{
+			Backend: "opencode", Diagnostic: strings.TrimSpace(stderr.String()),
+			FirstTurn: !s.hadIdleValue(), Err: waitErr,
+		}})
 		return
 	}
 	// a clean exit that produced zero events (no text, no tool call, no
@@ -354,10 +362,14 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 	// real empty pass. Surface it so the operator can tell an outage from a
 	// genuine unclear verdict on sight instead of getting the generic bucket.
 	if !sawAny {
-		s.emit(Event{Kind: EventError, Err: fmt.Errorf(
-			"opencode run produced no output (backend/gateway may have failed silently)")})
+		s.emit(Event{Kind: EventError, Err: &RunFailure{
+			Backend: "opencode", Diagnostic: strings.TrimSpace(stderr.String()),
+			FirstTurn: !s.hadIdleValue(),
+			Err:       errors.New("produced no output (backend/gateway may have failed silently)"),
+		}})
 		return
 	}
+	s.markHadIdle()
 	s.emit(Event{Kind: EventIdle})
 }
 
@@ -366,6 +378,21 @@ func (s *opencodeSession) emit(e Event) {
 	case s.raw <- e:
 	case <-s.stop:
 	}
+}
+
+// markHadIdle records that some turn on this session reached a clean
+// idle — RunFailure.FirstTurn on a later failure reads the negation of
+// this.
+func (s *opencodeSession) markHadIdle() {
+	s.mu.Lock()
+	s.hadIdle = true
+	s.mu.Unlock()
+}
+
+func (s *opencodeSession) hadIdleValue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hadIdle
 }
 
 // ocEvent is one line of `opencode run --format json`.

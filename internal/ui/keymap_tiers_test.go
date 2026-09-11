@@ -216,32 +216,6 @@ func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
 	}
 }
 
-// lockedAgentShell is a shell parked on the agent tab with a live hosted
-// child, in the given lock state. The child is a stub: these tests are
-// about who *receives* a key, which agentKey answers before any pty is
-// involved.
-//
-// ensureAgent is called explicitly, before the tab switch rather than
-// relying on it (gotoTab's own doc comment): the agent tab now opens the
-// board's own conversation on arrival instead of the hosted pty
-// (boardthread.go), so spawning the pty and entering the tab are two
-// separate steps. Spawning first — the pty-hosting code these tests
-// exercise doesn't care what tab is active when it starts — also means
-// gotoTab's own offerLock (called right after the tab switch) actually
-// finds a live child, the same as it would have found synchronously
-// under the old wiring.
-func lockedAgentShell(t *testing.T, locked bool) *Shell {
-	t.Helper()
-	m := hostedShell(t, "sleep 30")
-	m.ensureAgent()
-	pressAlt(m, '3')
-	if m.agent == nil {
-		t.Fatal("the agent tab did not spawn a child")
-	}
-	m.locked = locked
-	return m
-}
-
 // TestTabCycleCoversEveryTab: the cycle skipped the agent tab for a
 // while, because the hosted CLI held tab unconditionally and cycling
 // onto a tab that will not cycle you off it is a one-way door. The lock
@@ -258,95 +232,20 @@ func TestTabCycleCoversEveryTab(t *testing.T) {
 	}
 }
 
-// TestUnlockedAgentTabKeepsOnlyTheTabSwitches: arriving at the agent tab
-// must not cost the user a keystroke or a mode. gummi claims tab and
-// alt+N there and nothing else, so typing works immediately and ? , esc
-// and ctrl+c reach the CLI the user is looking at.
-func TestUnlockedAgentTabKeepsOnlyTheTabSwitches(t *testing.T) {
-	m := lockedAgentShell(t, false)
-	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	if m.tab != TabBoard {
-		t.Fatalf("unlocked, tab should cycle off the agent tab, got %v", m.tab)
-	}
-	m = lockedAgentShell(t, false)
-	m.handleKey(tea.KeyPressMsg{Code: '?', Text: "?"})
-	if m.Overlay.Contains("help") {
-		t.Error("unlocked, ? must reach the hosted CLI — it is ordinary punctuation there")
-	}
-}
-
-// TestLockedAgentTabKeepsNothingButCtrlG is the lock's whole contract.
-// Every key the user could otherwise use to leave goes to the CLI, which
-// is the point: it is how its own tab completion is reached.
-func TestLockedAgentTabKeepsNothingButCtrlG(t *testing.T) {
-	m := lockedAgentShell(t, true)
-	for _, msg := range []tea.KeyPressMsg{
-		{Code: tea.KeyTab},
-		{Code: '1', Mod: tea.ModAlt},
-		{Code: '2', Mod: tea.ModAlt},
-		{Code: '?', Text: "?"},
-		{Code: 'q', Text: "q"},
-	} {
-		m.handleKey(msg)
-		if m.tab != TabAgent {
-			t.Fatalf("%v left the agent tab while locked", msg)
-		}
-		if m.Overlay.HasDialogs() {
-			t.Fatalf("%v raised a gummi dialog while locked", msg)
-		}
-	}
-}
-
-// TestCtrlGAlwaysUnlocks: a lock you can enter but not leave is the trap
-// this mechanism exists to remove, so ctrl+g is answered above the
-// overlay stack and in both states.
-func TestCtrlGAlwaysUnlocks(t *testing.T) {
-	m := lockedAgentShell(t, true)
-	m.Overlay.Push(m.helpOverlay()) // even with a dialog in the way
-	model, _ := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
-	if model.(*Shell).locked {
-		t.Fatal("ctrl+g did not unlock")
-	}
-	model, _ = model.(*Shell).Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
-	if !model.(*Shell).locked {
-		t.Fatal("ctrl+g did not lock again")
-	}
-}
-
 // TestLockIsInertWithoutAHostedChild: a lock left set over a dead child
 // would swallow every key with nothing to receive them — unrecoverable
-// rather than modal. On a tab with nothing to lock, ctrl+g says what it
-// is for instead of doing nothing.
-func TestLockIsInertWithoutAHostedChild(t *testing.T) {
-	m := populatedShell(100, 30)
-	m.locked = true
-	if m.keyboardLocked() {
-		t.Error("the lock must be inert on a tab with no hosted child")
-	}
-	m.locked = false
-	m.toggleLock()
-	if m.locked {
-		t.Error("ctrl+g locked a tab with nothing to lock")
-	}
-	if !strings.Contains(m.notice.text, "ctrl+g") {
-		t.Errorf("ctrl+g on the board should explain itself, got %q", m.notice.text)
-	}
-}
 
 // TestAltSlashOpensHelpWhereQuestionMarkCannot: ? is the convenient help
 // key, but it is also ordinary punctuation, so it has to yield wherever
-// the user types prose — the chat box, the bug-import filter, the hosted
-// CLI. Those are the surfaces whose key rules are least guessable, which
-// left help unreachable in the three places it was most wanted.
+// the user types prose — the chat box, the bug-import filter. Those are
+// the surfaces whose key rules are least guessable, which left help
+// unreachable in the places it was most wanted.
+//
+// This used to assert the same thing over a hosted pty on the agent tab
+// as well. That pty is gone; the tab hosts the board's own conversation,
+// whose composer is an ordinary text field covered by the loop below.
 func TestAltSlashOpensHelpWhereQuestionMarkCannot(t *testing.T) {
 	altSlash := tea.KeyPressMsg{Code: '/', Mod: tea.ModAlt}
-
-	agent := hostedShell(t, "sleep 30")
-	pressAlt(agent, '3')
-	agent.handleKey(altSlash)
-	if !agent.Overlay.Contains("help") {
-		t.Error("alt+/ must open help on the agent tab, where ? is the CLI's")
-	}
 
 	for name, m := range openSurfaces(t) {
 		t.Run(name, func(t *testing.T) {
@@ -358,27 +257,18 @@ func TestAltSlashOpensHelpWhereQuestionMarkCannot(t *testing.T) {
 	}
 }
 
-// TestAltSlashYieldsToALockedAgent: it is a tier-1 key, not a second
-// ctrl+g. Locked means gummi keeps exactly one key, and adding a quiet
-// second one would make the lock's contract a lie again.
-func TestAltSlashYieldsToALockedAgent(t *testing.T) {
-	m := lockedAgentShell(t, true)
-	m.handleKey(tea.KeyPressMsg{Code: '/', Mod: tea.ModAlt})
-	if m.Overlay.Contains("help") {
-		t.Error("alt+/ must reach the hosted CLI while locked")
-	}
-}
-
-// TestADeadAgentTabAnswersNothing: a foreign tab whose child never
-// started still has gummi holding the keyboard, and the answer has to be
+// TestADeadAgentTabAnswersNothing: the agent tab before its session has
+// opened still has gummi holding the keyboard, and the answer has to be
 // "nothing". It used to fall through to the inbox's keymap, so from a
-// tab showing "starting your agent…" an x silently dismissed an inbox
-// item, enter jumped to a card and switched tabs, and u spent budget.
+// tab showing "starting the board session…" an x silently dismissed an
+// inbox item, enter jumped to a card and switched tabs, and u spent
+// budget. The precondition used to read "no hosted child"; the hosted
+// child is gone, and an unopened board session is the same state.
 func TestADeadAgentTabAnswersNothing(t *testing.T) {
 	m := attachedBoard(t, 120, 34)
 	m.setTab(TabAgent)
-	if m.agent != nil {
-		t.Fatal("precondition: expected no hosted child")
+	if m.board != nil {
+		t.Fatal("precondition: expected no open board session")
 	}
 	for _, k := range []tea.KeyPressMsg{
 		{Code: 'x', Text: "x"},
@@ -396,109 +286,6 @@ func TestADeadAgentTabAnswersNothing(t *testing.T) {
 			t.Errorf("%v reached the inbox from the agent tab", k)
 		}
 		m.inbox.remove("FD-001")
-	}
-}
-
-// TestTheLockIsOfferedOnArrival: a lock nobody knows about is the same
-// as no lock. The moment worth naming it is just before the user reaches
-// for a key gummi is holding — which is when they land on the tab.
-func TestTheLockIsOfferedOnArrival(t *testing.T) {
-	m := hostedShell(t, "sleep 30")
-	m.ensureAgent() // spawn first — see lockedAgentShell's own comment
-	pressAlt(m, '3')
-	if m.notice.text != lockOfferNotice {
-		t.Fatalf("arriving at the agent tab: notice = %q, want the lock offer", m.notice.text)
-	}
-	// and by the cycle, not only by alt+3 — both routes go through gotoTab
-	// precisely so they cannot drift apart on this.
-	m2 := hostedShell(t, "sleep 30")
-	m2.ensureAgent()
-	for m2.tab != TabAgent {
-		m2.nextTab()
-	}
-	if m2.notice.text != lockOfferNotice {
-		t.Fatalf("cycling onto the agent tab: notice = %q, want the lock offer", m2.notice.text)
-	}
-}
-
-// TestTabLeavingTheAgentExplainsItself is the other moment: tab pressed
-// at a CLI prompt means completion, and it moved the user instead. That
-// surprise is the strongest reason anyone ever wants the lock, so it is
-// the strongest place to name it.
-func TestTabLeavingTheAgentExplainsItself(t *testing.T) {
-	m := hostedShell(t, "sleep 30")
-	m.ensureAgent() // spawn first — see lockedAgentShell's own comment
-	pressAlt(m, '3')
-	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	if m.tab == TabAgent {
-		t.Fatal("tab should still cycle — teaching must not cost the keypress")
-	}
-	if m.notice.text != lockLeftNotice {
-		t.Fatalf("after tab left the agent: notice = %q, want the explanation", m.notice.text)
-	}
-}
-
-// TestTheLockStopsTeachingOnceUsed: it is an offer, not a nag. Having
-// worked it once is proof it landed, so the notices retire — while a
-// user who never tries it keeps being told, since they never learned.
-func TestTheLockStopsTeachingOnceUsed(t *testing.T) {
-	m := hostedShell(t, "sleep 30")
-	m.ensureAgent() // spawn first — see lockedAgentShell's own comment
-	pressAlt(m, '3')
-	m.toggleLock()
-	m.toggleLock()
-	if !m.lockUsed {
-		t.Fatal("working the lock should retire the lesson")
-	}
-	m.notice = noticeMsg{}
-	pressAlt(m, '1')
-	pressAlt(m, '3')
-	if m.notice.text != "" {
-		t.Errorf("re-arriving after using the lock: notice = %q, want silence", m.notice.text)
-	}
-	m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	if m.notice.text != "" {
-		t.Errorf("tab away after using the lock: notice = %q, want silence", m.notice.text)
-	}
-}
-
-// TestTheLockHintNamesThePayoff: "lock" says nothing to someone who does
-// not already know what is locked, which is exactly the person the hint
-// is for. It has to name the trade.
-func TestTheLockHintNamesThePayoff(t *testing.T) {
-	m := lockedAgentShell(t, false)
-	hints := stripANSI(m.tabBarView(120)) + stripANSI(m.statusView(120))
-	if !strings.Contains(hints, "tab→agent") {
-		t.Errorf("the unlocked hint must say what ctrl+g buys:\n%s", hints)
-	}
-}
-
-// TestTheLockIsVisible: the lock changes what every other key does, so
-// it cannot be silent. It has to be legible from the other tabs too —
-// hence the tab-bar badge, not just the hint.
-func TestTheLockIsVisible(t *testing.T) {
-	m := lockedAgentShell(t, false)
-	unlocked := stripANSI(m.tabBarView(120)) + stripANSI(m.statusView(120))
-	if !strings.Contains(unlocked, "ctrl+g") {
-		t.Errorf("unlocked, the bar should offer the lock:\n%s", unlocked)
-	}
-	if strings.Contains(unlocked, "locked") {
-		t.Errorf("unlocked, nothing should claim otherwise:\n%s", unlocked)
-	}
-
-	m.locked = true
-	bar, status := stripANSI(m.tabBarView(120)), stripANSI(m.statusView(120))
-	if !strings.Contains(bar, "locked") {
-		t.Errorf("the tab bar must show the lock:\n%s", bar)
-	}
-	if !strings.Contains(status, "locked") || !strings.Contains(status, "ctrl+g") {
-		t.Errorf("the status bar must show the lock and its way out:\n%s", status)
-	}
-	// legible from another tab: the lock survives the switch, so the badge
-	// has to as well.
-	m.setTab(TabBoard)
-	if b := stripANSI(m.tabBarView(120)); !strings.Contains(b, "locked") {
-		t.Errorf("the agent tab's lock badge must show from other tabs:\n%s", b)
 	}
 }
 

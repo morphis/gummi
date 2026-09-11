@@ -105,7 +105,12 @@ func TestSquashRefusedWhenLanded(t *testing.T) {
 	m = pump(t, m, m.loadRows)
 
 	m = pressSquash(t, m)
-	if !m.notice.isErr || m.notice.text != "FD-001 already landed on main — press c to clean up" {
+	// The guard used to say "press c to clean up" — true only on the
+	// board. This same notice reaches the card page too (prepareMerge's
+	// twin guard, and squashMergeFeature's), where c types into the
+	// composer instead (§2.3), so the wording now names the action
+	// ("clean up") rather than a key that only works on one surface.
+	if !m.notice.isErr || m.notice.text != "FD-001 already landed on main — "+cleanUpNudge {
 		t.Fatalf("notice = %q (err=%v), want landed guard", m.notice.text, m.notice.isErr)
 	}
 	if m.Overlay.Top() != nil {

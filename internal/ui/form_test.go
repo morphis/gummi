@@ -173,8 +173,13 @@ func TestCardFormAltOTogglesOptions(t *testing.T) {
 	if !form.expanded || form.focus != cardStopText {
 		t.Fatalf("alt+o from the text: expanded=%v focus=%d", form.expanded, form.focus)
 	}
+	// "envelope" was renamed to "budget" (the spend-cap word settled on
+	// in REVIEW-ux-drive-2026-09-10-round2.md §5) and "after" to "runs
+	// after" (§4: unlabelled, the row read as an unguessable bare dash
+	// until tabbed onto); this list names the rows the expanded view
+	// must draw now.
 	view := ansi.Strip(form.View(s, 100, 30))
-	for _, want := range []string{"envelope", "profile", "severity", "after"} {
+	for _, want := range []string{"budget", "profile", "severity", "runs after"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("expanded options missing %q:\n%s", want, view)
 		}
@@ -263,14 +268,28 @@ func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 	}
 }
 
-// TestCardFormBecomesLine reads back prefix and slug live, and the slug
-// refusal before enter.
+// TestCardFormBecomesLine reads back the id prefix (with the kind word
+// beside it — FD/BG/RS are never expanded anywhere else in the UI) and
+// the derived title live, and the slug refusal before enter. It used to
+// assert the branch slug ("BG · login-loops"); the line now shows the
+// title instead, because the slug hid that a long first line gets
+// silently cut to domain.maxTitleLen before the board, the card header
+// or any notice ever shows it — see REVIEW-ux-drive-2026-09-10-round2.md
+// §4. "Login loops" is short enough that DeriveTitle returns it
+// unchanged, so this case alone can't tell a title from a slug; a
+// second case below drives a first line past maxTitleLen and checks for
+// DeriveTitle's own truncation ellipsis, which is what makes the cut
+// visible on this line now.
 func TestCardFormBecomesLine(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	form := door(domain.KindBug, nil)
 	form.SetText("Login loops")
-	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "becomes  BG · login-loops") {
+	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "becomes  BG (bug) · Login loops") {
 		t.Errorf("becomes line missing:\n%s", v)
+	}
+	form.SetText("tally count reports one character too many when a file has no trailing newline")
+	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "becomes  BG (bug) · tally count reports one character too many when a file has…") {
+		t.Errorf("becomes line does not show the truncated title with its ellipsis:\n%s", v)
 	}
 	form.SetText("???")
 	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "letter or digit") {

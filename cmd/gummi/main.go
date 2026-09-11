@@ -124,29 +124,18 @@ func runBoard() error {
 	// The configured managed repositories feed the new-card forms' repo
 	// selector; the default is always implicit, so only named repos here.
 	shell.SetRepoNames(pool.Names())
-	// The agent tab's hosted-CLI choice: a prior picker answer persisted
-	// to config.yaml's `agent:` key, or empty when nothing has been
-	// chosen yet — in which case the board asks on the first visit to
-	// that tab, not before the first frame (Shell.gotoTab).
-	shell.SetAgentConfig(configuredAgentCLI(ws), ws.ConfigFile())
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
+	//
+	// Nothing binds a workspace MCP endpoint here any more. This used to,
+	// so that a coding CLI hosted in the agent tab could drive *this*
+	// gummi rather than starting a second one. That pty is gone, and the
+	// board session that replaced it binds its own endpoint when it
+	// starts (engine.BoardSession) — which is why mcpworkspace.go's
+	// socket path carries a nonce in the first place.
 	if eng, _, cleanup := buildEngine(store, pool, ws, locks); eng != nil {
 		shell.AttachEngine(eng)
 		defer cleanup()
-		// The workspace MCP endpoint is what lets a coding agent hosted in
-		// the agent tab drive *this* gummi rather than starting a second
-		// one: its `gummi __mcp --workspace` child dials this socket and
-		// every tool call lands on the engine above, sharing its card
-		// locks instead of contending for them. Best-effort, like the
-		// engine itself — a board that cannot bind it still runs, the
-		// hosted agent just gets no gummi tools.
-		if sock, teardown, err := eng.StartWorkspaceMCPEndpoint(); err != nil {
-			fmt.Fprintf(os.Stderr, "gummi: workspace agent tools unavailable: %v\n", err)
-		} else {
-			shell.SetAgentMCPSock(sock)
-			defer teardown()
-		}
 	}
 	// layer-3 budget: new features get this credit envelope, drawn on by
 	// every stage until it runs dry and a human gate offers a top-up.
@@ -369,28 +358,6 @@ func profileNames(ws state.Workspace) []string {
 		return nil
 	}
 	return profiles.Names()
-}
-
-// configuredAgentCLI returns the layered `agent:` value (config.Config.Agent)
-// for the agent tab's picker precedence — the third rung, below
-// GUMMI_ATTACH_CMD/GUMMI_AGENT and above the picker itself (see
-// ui.Shell.resolveAgentAttach). It is deliberately independent of
-// newEngineFromEnv's own config load: that one governs the engine's
-// permissions/sandbox/instructions, an entirely separate concern from
-// which CLI a human hosts in their own tab, and the two must never be
-// merged into one load just because they happen to read the same file.
-func configuredAgentCLI(ws state.Workspace) string {
-	userPath, err := config.UserConfigPath()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "gummi:", err)
-		userPath = ""
-	}
-	cfg, _, err := config.LoadLayered(userPath, ws.ConfigFile())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "gummi:", err)
-		return ""
-	}
-	return cfg.Agent
 }
 
 // defaultBackendName returns the backend name selected by GUMMI_AGENT

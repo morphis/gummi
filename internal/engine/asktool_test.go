@@ -210,15 +210,22 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 	_ = s
 }
 
+// TestAskUserBadAnchorStillAnswers covers a missing anchor: the answer
+// must still land in the spec — appended at the end, deterministically —
+// rather than being silently dropped, and the activity note that reaches
+// the transcript must say so in plain words rather than gummi-internal
+// jargon ("spec capture skipped").
 func TestAskUserBadAnchorStillAnswers(t *testing.T) {
+	f := feature(1, "Dark mode", domain.StagePlan)
 	args := askArgs(t, Ask{
 		Question:   "Persist where?",
 		Options:    []AskOption{{Label: "per-device"}},
 		SpecAnchor: "no such line anywhere",
 	})
 	e := newEngine(t, clientToolFake(args))
+	e.now = fixedNow
 	ctx := context.Background()
-	if _, err := e.Attach(ctx, feature(1, "Dark mode", domain.StagePlan)); err != nil {
+	if _, err := e.Attach(ctx, f); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, e, EventQuestion)
@@ -226,15 +233,79 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
 		t.Fatalf("answer with bad anchor failed: %v", err)
 	}
-	// the skip is noted in activity
-	var noted bool
+
+	// the answer is not dropped: it lands at the end of the document.
+	draft := specDraftPath(e, f)
+	raw, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "%% @user(2026-07-04): answered \"no such line anywhere\" — per-device") {
+		t.Errorf("answer not appended to spec on a bad anchor:\n%s", raw)
+	}
+
+	// the note in plain words — no "spec capture" jargon — explains where
+	// the answer actually landed.
+	var note string
 	for _, a := range e.Get("FD-001").Snapshot().Activity {
-		if strings.Contains(a, "spec capture skipped") {
-			noted = true
+		if strings.Contains(a, "per-device") || strings.Contains(a, "no such line anywhere") {
+			note = a
 		}
 	}
-	if !noted {
-		t.Error("bad-anchor skip not noted in activity")
+	if note == "" {
+		t.Fatal("bad-anchor answer not noted in activity")
+	}
+	if strings.Contains(note, "spec capture") {
+		t.Errorf("activity note still uses gummi-internal jargon: %q", note)
+	}
+	if !strings.Contains(note, "saved") || !strings.Contains(note, "end of the document") {
+		t.Errorf("activity note does not say in plain words where the answer landed: %q", note)
+	}
+}
+
+// TestAskUserAnchorNotUniqueStillAnswers covers FindAnchor's OTHER
+// failure mode — the snippet matches more than one content line — which
+// must degrade exactly like a missing anchor: appended, never dropped.
+// The draft is rewritten with a deliberately duplicated line between
+// Attach and Answer so the anchor is ambiguous at capture time, exactly
+// as spec.FindAnchor's own doc comment describes ("zero or multiple
+// matches return ok=false").
+func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
+	f := feature(1, "Dark mode", domain.StagePlan)
+	const anchor = "duplicated on purpose"
+	args := askArgs(t, Ask{
+		Question:   "Persist where?",
+		Options:    []AskOption{{Label: "per-device"}},
+		SpecAnchor: anchor,
+	})
+	e := newEngine(t, clientToolFake(args))
+	e.now = fixedNow
+	ctx := context.Background()
+	if _, err := e.Attach(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventQuestion)
+
+	draft := specDraftPath(e, f)
+	raw, err := os.ReadFile(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup := string(raw) + "\nline one, " + anchor + "\nline two, " + anchor + "\n"
+	if err := os.WriteFile(draft, []byte(dup), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.Answer(ctx, "FD-001", "per-device"); err != nil {
+		t.Fatalf("answer with ambiguous anchor failed: %v", err)
+	}
+
+	raw, err = os.ReadFile(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), fmt.Sprintf("answered %q — per-device", anchor)) {
+		t.Errorf("answer not appended to spec on an ambiguous anchor:\n%s", raw)
 	}
 }
 

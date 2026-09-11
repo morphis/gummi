@@ -65,7 +65,7 @@ func TestBG101NoTakeoverWithNothingRunning(t *testing.T) {
 	if head := autopilotHeader(f, plan); strings.Contains(head, "already underway") {
 		t.Errorf("the dialog calls a card with nothing running underway: %q", head)
 	}
-	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
+	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot, "main"), " ")
 	if strings.Contains(body, "what "+string(f.ID)+" is doing right now") {
 		t.Errorf("the dialog describes work in progress on a card doing nothing: %q", body)
 	}

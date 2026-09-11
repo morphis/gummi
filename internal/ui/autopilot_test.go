@@ -87,7 +87,11 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		to:        domain.StagePlan,
 		remaining: []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify},
 	}
-	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
+	// base is deliberately not "main": this pins the wiring, not just a
+	// fallback value that happens to read right (REVIEW-ux-drive-2026-09-
+	// 10-round2.md §3.4 — the literal "main" used to be hardcoded here
+	// regardless of what openAutopilot actually resolved).
+	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot, "master"), " ")
 
 	wantCorrective := verdict.MaxRounds(domain.RoundKindCorrective)
 	if wantCorrective != 5 {
@@ -99,9 +103,15 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		// remainder and nothing is named as a stage it will only open.
 		"plan, implement and verify",
 		"5 corrective rounds",
-		"2400 credit envelope",
-		"parks to the inbox if it can't finish",
-		"never lands on main",
+		// "envelope" and "parks to the inbox" were §5's own two renames
+		// for this dialog: "budget" (matching the new-card dialog) and
+		// "stops and leaves the card in the inbox" (plain enough that a
+		// reader does not have to already know what "the inbox" is), and
+		// the round count now says what running out of it means instead
+		// of leaving that to guesswork.
+		"2400 credit budget",
+		"stops and leaves the card in the inbox",
+		"never lands on master",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body %q does not mention %q", body, want)
@@ -109,15 +119,17 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 	}
 }
 
-// TestAutopilotBodyNoEnvelopeWhenUncapped: an envelope clause only
-// belongs in the body when the card actually carries one (f.Budget.
-// Envelope > 0) — DESIGN's own "0 = no cap" reading.
+// TestAutopilotBodyNoEnvelopeWhenUncapped: a budget clause only belongs
+// in the body when the card actually carries one (f.Budget.Envelope >
+// 0) — DESIGN's own "0 = no cap" reading. Named for the field
+// (Budget.Envelope) that still carries the old word internally; the
+// prose it checks for says "budget" (§5).
 func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
 	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan}}
-	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
-	if strings.Contains(body, "credit envelope") {
-		t.Errorf("body mentions a credit envelope for an uncapped card: %q", body)
+	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot, "main"), " ")
+	if strings.Contains(body, "credit budget") {
+		t.Errorf("body mentions a credit budget for an uncapped card: %q", body)
 	}
 }
 
@@ -127,7 +139,7 @@ func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 func TestAutopilotBodyOffNeverStarts(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
 	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan}}
-	body := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")
+	body := strings.Join(autopilotBody(f, plan, domain.GateAttended, "main"), " ")
 	if strings.Contains(body, "corrective rounds") || strings.Contains(body, "runs brainstorm") {
 		t.Errorf("off's body should not describe a run: %q", body)
 	}
@@ -452,7 +464,7 @@ func TestAutopilotDialogConfirmSubmitsAutopilot(t *testing.T) {
 	var got string
 	f := domain.Feature{ID: "FD-001", GateApproval: domain.GateAttended}
 	plan := autopilotPlan{bucket: "running"}
-	d := newAutopilotDialog(f, plan, func(mode string) tea.Cmd {
+	d := newAutopilotDialog(f, plan, "main", func(mode string) tea.Cmd {
 		got = mode
 		return nil
 	})
@@ -469,7 +481,7 @@ func TestAutopilotDialogConfirmSubmitsAutopilot(t *testing.T) {
 	// leave a notice, so cancelling one confirmation never reads like
 	// confirming another (see TestAutopilotDialogEscCancelsWithoutSubmitting).
 	got = ""
-	d = newAutopilotDialog(f, plan, func(mode string) tea.Cmd { got = mode; return nil })
+	d = newAutopilotDialog(f, plan, "main", func(mode string) tea.Cmd { got = mode; return nil })
 	d.HandleKey(tea.KeyPressMsg{Text: "left"})
 	done, cmd := d.HandleKey(tea.KeyPressMsg{Text: "enter"})
 	if !done {
@@ -494,7 +506,7 @@ func TestAutopilotDialogConfirmSubmitsAutopilot(t *testing.T) {
 func TestAutopilotDialogEscCancelsWithoutSubmitting(t *testing.T) {
 	called := false
 	f := domain.Feature{ID: "FD-001"}
-	d := newAutopilotDialog(f, autopilotPlan{bucket: "running"}, func(string) tea.Cmd {
+	d := newAutopilotDialog(f, autopilotPlan{bucket: "running"}, "main", func(string) tea.Cmd {
 		called = true
 		return nil
 	})
@@ -523,7 +535,7 @@ func TestAutopilotOverlayGolden(t *testing.T) {
 	m := populatedShell(100, 30)
 	m.sel = 0
 	f := m.rows[0].F
-	m.Overlay.Push(newAutopilotDialog(f, m.planAutopilot(f), func(string) tea.Cmd { return nil }))
+	m.Overlay.Push(newAutopilotDialog(f, m.planAutopilot(f), m.baseBranch(f), func(string) tea.Cmd { return nil }))
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
@@ -556,8 +568,8 @@ func TestAutopilotBodyDistinguishesAttendedFromAutopilot(t *testing.T) {
 	// ahead of it is the one case where neither promise is made.
 	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan, domain.StagePlan, domain.StagePlan}}
 
-	autopilot := strings.Join(autopilotBody(f, plan, domain.GateAutopilot), " ")
-	attended := strings.Join(autopilotBody(f, plan, domain.GateAttended), " ")
+	autopilot := strings.Join(autopilotBody(f, plan, domain.GateAutopilot, "main"), " ")
+	attended := strings.Join(autopilotBody(f, plan, domain.GateAttended, "main"), " ")
 
 	if !strings.Contains(autopilot, "without you") {
 		t.Errorf("autopilot body does not say it runs without you: %q", autopilot)
@@ -579,7 +591,7 @@ func TestAutopilotBodyDistinguishesAttendedFromAutopilot(t *testing.T) {
 	// autopilot is the mode that walks away, so it carries the guarantees;
 	// attended stops at everything, so it has nothing to guarantee about
 	// what it does unsupervised.
-	if !strings.Contains(autopilot, "never lands on main") || !strings.Contains(autopilot, "parks to the inbox") {
+	if !strings.Contains(autopilot, "never lands on main") || !strings.Contains(autopilot, "stops and leaves the card in the inbox") {
 		t.Errorf("autopilot body drops a guarantee: %q", autopilot)
 	}
 }

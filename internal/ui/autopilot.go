@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // The `A` dialog: point autopilot at a card and the card runs — not at
@@ -279,13 +280,28 @@ func autopilotHeader(f domain.Feature, plan autopilotPlan) string {
 // autopilotBody names the concrete consequence of setting mode on f
 // right now — never the mode's abstract definition, which the stop list
 // above it already gives. off never starts anything, so it gets no
-// stage list, no budget, and no envelope: there is nothing concrete to
-// name. Every other mode says which stages run next, the shared
-// corrective budget (verdict.MaxRounds, never hardcoded), the card's own
-// envelope when it has one, and — unconditionally, because these are the
-// two guarantees that make the switch safe to use at all — that it parks
-// to the inbox if it can't finish and that it never lands on main.
-func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
+// stage list and no budget: there is nothing concrete to name. Every
+// other mode says which stages run next, the shared corrective-round
+// budget (verdict.MaxRounds, never hardcoded) and what happens if it
+// runs out before the card is done, the card's own spend budget when it
+// has one, and — unconditionally, because this is the other guarantee
+// that makes the switch safe to use at all — that it never lands on
+// base (the branch f actually lands on; see autopilotDialog.baseBranch,
+// resolved by openAutopilot — this used to assert the literal "main",
+// which was simply wrong on a repo checked out on anything else:
+// REVIEW-ux-drive-2026-09-10-round2.md §3.4).
+//
+// "envelope" used to be this function's word for the card's own spend
+// cap ("inside a %d credit envelope"), and "it parks to the inbox" its
+// word for what happens when a run can't finish. Round 2's §5 renamed
+// both in every dialog a user reads: the cap is "budget" (matching the
+// new-card dialog and cardform.go's own note on the word), and the stop
+// is "it stops and leaves the card in the inbox" — plain enough that
+// nobody has to already know what "the inbox" is a name for. The
+// corrective-round sentence below also used to end at the round count
+// alone; §5 flagged that a reader cannot guess what happens at the
+// limit, so it now says so in the same sentence that states the number.
+func autopilotBody(f domain.Feature, plan autopilotPlan, mode string, base string) []string {
 	if autopilotModeFor(mode) == domain.GateAttended {
 		return []string{"attended never starts anything on its own — every gate, including this one, waits for you."}
 	}
@@ -299,16 +315,16 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 		if plan.working {
 			lead = fmt.Sprintf("setting %s doesn't change what %s is doing right now — only how its next gate is handled.", mode, f.ID)
 		}
-		return []string{lead, "it parks to the inbox if it can't finish, and it never lands on main."}
+		return []string{lead, "if it can't finish, it stops and leaves the card in the inbox — and it never lands on " + base + "."}
 	}
 
 	// This is what someone reads before leaving the room, so it has to be
 	// exactly what autopilot will do — not a description of a mode. It
 	// names the stages it will run unattended and, separately, the ones it
 	// will only open and hand back.
-	envelope := ""
+	budget := ""
 	if f.Budget.Envelope > 0 {
-		envelope = fmt.Sprintf(", inside a %d credit envelope", f.Budget.Envelope)
+		budget = fmt.Sprintf(", inside a %d credit budget", f.Budget.Envelope)
 	}
 	// Every remaining stage is one autopilot may run: no stage needs a
 	// person by nature any more, so the list that used to split in two —
@@ -329,10 +345,10 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string) []string {
 	runs := plan.remaining
 	var out []string
 	if len(runs) > 0 {
-		out = append(out, fmt.Sprintf("%s it on autopilot runs %s without you — up to %d corrective rounds%s.",
-			verb, englishList(runs), verdict.MaxRounds(domain.RoundKindCorrective), envelope))
+		out = append(out, fmt.Sprintf("%s it on autopilot runs %s without you — up to %d corrective rounds%s. Run out before it passes and it stops and leaves the card in the inbox for you.",
+			verb, englishList(runs), verdict.MaxRounds(domain.RoundKindCorrective), budget))
 	}
-	return append(out, "it parks to the inbox if it can't finish, and it never lands on main.")
+	return append(out, "it never lands on "+base+".")
 }
 
 // autopilotAnswers reports whether mode answers a decision of kind on
@@ -481,6 +497,11 @@ const autopilotDialogWidth = 62
 type autopilotDialog struct {
 	feature domain.Feature
 	plan    autopilotPlan
+	// baseBranch is the branch feature actually lands on (openAutopilot's
+	// m.baseBranch(f)) — the body's "it never lands on main" guarantee
+	// has to name the checkout's real trunk (REVIEW-ux-drive-2026-09-10-
+	// round2.md §3.4), never a hardcoded literal.
+	baseBranch string
 	// buttons is the dialog's own row, held rather than rebuilt each
 	// frame. It used to be constructed inside View with its cursor forced
 	// to the confirm every time, so Cancel was drawn as a control you
@@ -490,13 +511,23 @@ type autopilotDialog struct {
 	onSubmit func(mode string) tea.Cmd
 }
 
-func newAutopilotDialog(f domain.Feature, plan autopilotPlan, onSubmit func(string) tea.Cmd) *autopilotDialog {
+// base is baseBranch with the same fallback Shell.baseBranch and
+// featureRow.baseBranch carry, for a dialog a test built without going
+// through openAutopilot.
+func (d *autopilotDialog) base() string {
+	if d.baseBranch != "" {
+		return d.baseBranch
+	}
+	return worktree.DefaultBaseBranchName
+}
+
+func newAutopilotDialog(f domain.Feature, plan autopilotPlan, base string, onSubmit func(string) tea.Cmd) *autopilotDialog {
 	// the confirm leads: opening this switch is already the intent to
 	// change something, so the row starts on the doing button and ←→ is
 	// the way back out of it.
 	buttons := newButtonRow(button{label: "Cancel"}, button{label: plan.confirmLabel()})
 	buttons.SetCursor(1)
-	return &autopilotDialog{feature: f, plan: plan, buttons: buttons, onSubmit: onSubmit}
+	return &autopilotDialog{feature: f, plan: plan, baseBranch: base, buttons: buttons, onSubmit: onSubmit}
 }
 
 // openAutopilot pushes the overlay for f, computing its plan once so the
@@ -505,7 +536,7 @@ func newAutopilotDialog(f domain.Feature, plan autopilotPlan, onSubmit func(stri
 // card action it replaces (boardactions.go's runCardAction).
 func (m *Shell) openAutopilot(f domain.Feature) tea.Cmd {
 	plan := m.planAutopilot(f)
-	m.Overlay.Push(newAutopilotDialog(f, plan, func(mode string) tea.Cmd {
+	m.Overlay.Push(newAutopilotDialog(f, plan, m.baseBranch(f), func(mode string) tea.Cmd {
 		return m.startAutopilot(f, mode, plan)
 	}))
 	return nil
@@ -651,7 +682,7 @@ func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString(s.DialogTitle.Render(title) + "\n\n")
 
 	b.WriteString(s.Faint.Render(dashRule(autopilotHeader(d.feature, d.plan), width)) + "\n")
-	for _, l := range autopilotBody(d.feature, d.plan, domain.GateAutopilot) {
+	for _, l := range autopilotBody(d.feature, d.plan, domain.GateAutopilot, d.base()) {
 		for _, wl := range strings.Split(wrapText(l, width), "\n") {
 			b.WriteString(s.Subtle.Render(wl) + "\n")
 		}

@@ -186,6 +186,19 @@ func (p *Pool) manager(ctx context.Context, root string) (*Manager, error) {
 // `wt.Method(ctx, &f)` shape), routing through the pool so a multi-repo
 // board's operations always hit the card's own repo.
 
+// BaseBranch names the branch repo `name` (the empty name selects the
+// workspace default) currently has out, for the UI's copy. It never
+// fails: an unconfigured name or an unreadable HEAD reports
+// DefaultBaseBranchName, because a sentence that cannot name the branch
+// still has to say something.
+func (p *Pool) BaseBranch(ctx context.Context, name string) string {
+	wt, err := p.ManagerForName(ctx, name)
+	if err != nil || wt == nil {
+		return DefaultBaseBranchName
+	}
+	return wt.BaseBranch(ctx)
+}
+
 func (p *Pool) Path(f *domain.Feature) (string, error) {
 	wt, err := p.ManagerFor(context.Background(), f)
 	if err != nil {

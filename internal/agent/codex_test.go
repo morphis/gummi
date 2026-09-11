@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,6 +41,64 @@ func TestCodexMalformedAndFailure(t *testing.T) {
 	}
 	if _, terminal, err := s.mapLine([]byte(`{"type":"turn.failed","error":{"message":"boom"}}`)); err == nil || !terminal || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("failure = %v, %v", terminal, err)
+	}
+}
+
+// TestCodexRunFailureCarriesStderr pins §1.4 of the 2026-09-10 UX drive
+// for the codex adapter: a non-zero exit must surface as a *RunFailure
+// carrying the child's own stderr, not a bare "exit status 1" — and
+// FirstTurn must be true, since nothing on this session ever reached
+// idle before the failure.
+func TestCodexRunFailureCarriesStderr(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "codex")
+	script := "#!/bin/sh\n" +
+		"echo 'codex: auth token expired, run `codex login`' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewCodex(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	sess, err := c.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "gpt-x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case ev := <-sess.Events():
+			if ev.Kind == EventIdle {
+				t.Fatal("expected EventError, got EventIdle")
+			}
+			if ev.Kind != EventError {
+				continue
+			}
+			var rf *RunFailure
+			if !errors.As(ev.Err, &rf) {
+				t.Fatalf("Err = %v (%T), want a *RunFailure", ev.Err, ev.Err)
+			}
+			if rf.Backend != "codex" {
+				t.Errorf("Backend = %q, want codex", rf.Backend)
+			}
+			if !rf.FirstTurn {
+				t.Error("FirstTurn = false on the session's first Send")
+			}
+			if !strings.Contains(rf.Diagnostic, "auth token expired") {
+				t.Errorf("Diagnostic = %q, missing the child's stderr", rf.Diagnostic)
+			}
+			if !strings.Contains(ev.Err.Error(), "auth token expired") {
+				t.Errorf("Error() = %q, does not fold the diagnostic in", ev.Err.Error())
+			}
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for EventError")
+		}
 	}
 }
 

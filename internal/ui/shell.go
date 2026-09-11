@@ -57,6 +57,14 @@ type Shell struct {
 	// workspace wiring (nil store means detached: splash only)
 	store *state.Store
 	wt    *worktree.Pool
+	// baseBranches names, per repo (the empty key is the workspace
+	// default), the branch that repo's main checkout has out — the branch
+	// a card lands on. Resolved once in Attach and never re-read: it is
+	// copy, it is wanted in render paths that must not shell out to git,
+	// and a trunk does not get renamed under a running board. Read it
+	// through baseBranch, never directly — a missing entry has to answer
+	// with a name.
+	baseBranches map[string]string
 	ws    state.Workspace
 
 	rows []featureRow
@@ -66,35 +74,16 @@ type Shell struct {
 	// page-within-a-tab — the selected card opened full width — and
 	// belongs to no other tab.
 	tab Tab
-	// agent is the hosted CLI on TabAgent, spawned lazily on first visit
-	// (agenttab.go). nil means it has not been opened yet, or could not
-	// start — agentErr says which.
-	agent     *agentView
-	agentErr  agentSpawnErr
-	agentSock string // workspace MCP socket handed to the hosted CLI
-	// agentMCPCleanup tears down whatever HostedMCPAttach allocated for the
-	// current m.agent (an opencode temp config file; a no-op for every
-	// other backend) — see agenttab.go's ensureAgent/closeAgent, the only
-	// two places it is ever set or called. Never nil while m.agent is
-	// non-nil and MCP wiring was attempted; nil otherwise.
-	agentMCPCleanup func()
-	// agentSpawnedAt is when the current m.agent was started (ensureAgent,
-	// agenttab.go). The agentExitedMsg handler compares it against m.now()
-	// to tell a real, useful session from a CLI that fails at startup and
-	// would otherwise spin (see agentCrashLoopWindow).
-	agentSpawnedAt time.Time
 	// board is the engine's workspace-scoped conversation
-	// (engine/boardsession.go) — gummi's own surface on TabAgent,
-	// replacing the hosted pty above. nil until ensureBoardSession's
-	// spawn command lands (boardOpenedMsg), or if it failed — boardErr
-	// says why, the same two-state contract agentErr keeps for the pty
-	// it is retiring. boardOpening guards against dispatching a second
-	// spawn command while the first is still in flight: engine.OpenBoard
-	// is itself idempotent once it returns (a second call while one is
-	// live just hands back the existing session), but gotoTab can be
-	// called again — a quick tab bounce — before that first reply has
-	// landed, and nothing else remembers that a spawn is already
-	// outstanding.
+	// (engine/boardsession.go) — gummi's own surface on TabAgent. nil
+	// until ensureBoardSession's spawn command lands (boardOpenedMsg), or
+	// if it failed — boardErr says why. boardOpening guards against
+	// dispatching a second spawn command while the first is still in
+	// flight: engine.OpenBoard is itself idempotent once it returns (a
+	// second call while one is live just hands back the existing
+	// session), but gotoTab can be called again — a quick tab bounce —
+	// before that first reply has landed, and nothing else remembers that
+	// a spawn is already outstanding.
 	board        *engine.BoardSession
 	boardErr     string
 	boardOpening bool
@@ -124,37 +113,7 @@ type Shell struct {
 	// move to leave a popup standing over a line that no longer starts
 	// with "/".
 	boardComplete *completion
-	// locked is the input lock over a foreign tab (tabs.go's
-	// tabDef.foreign), modelled on zellij's ctrl+g: locked, gummi keeps
-	// nothing at all but ctrl+g itself, so tab, alt+1/2/3 and ? all reach
-	// the hosted CLI, and the mouse goes to it too. Unlocked — the
-	// default — gummi keeps only the tab switches and passes every other
-	// key through, which is enough to type at the agent but not to use
-	// its tab completion, and leaves the mouse to the terminal's own
-	// selection.
-	//
-	// It is one flag rather than per-tab state because it is a mode of
-	// the keyboard, not a property of a pane: what it answers is "who am
-	// I typing at", and there is only ever one answer at a time.
-	locked bool
-	// lockUsed records that the user has worked the lock at least once.
-	// Until then gummi says what ctrl+g is for on every arrival at a
-	// hosted tab, and again if tab is what moved them off one — a lock
-	// nobody knows about is the same as no lock, and the two moments it
-	// matters are just before you reach for the CLI's tab and just after
-	// it did something else. One press retires the lesson: it is an
-	// offer, not a nag, and having taken it once is proof it landed.
-	lockUsed bool
-	// agentConfigName is the workspace's persisted `agent:` choice
-	// (config.Config.Agent, loaded once at startup via SetAgentConfig) —
-	// the third rung of resolveAgentAttach's precedence, below
-	// GUMMI_ATTACH_CMD/GUMMI_AGENT and above the picker. agentConfigPath
-	// is where a picker choice gets written back (config.SetAgent);
-	// empty disables persistence (a detached shell in tests has nowhere
-	// to write), and the choice still applies for the rest of this run.
-	agentConfigName string
-	agentConfigPath string
-	cardOpen        bool
+	cardOpen      bool
 	// threadInput is the card page's persistent message/verb box
 	// (thread.go, threadinput.go): a Shell field rather than one rebuilt
 	// per render so an unsent draft survives leaving and returning to the
@@ -514,9 +473,41 @@ func NewShell(t theme.Theme, version string) *Shell {
 // board functionality.
 func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace) {
 	m.store, m.wt, m.ws = store, wt, ws
+	m.resolveBaseBranches()
 	// the rounds persistence seam defaults to the real store; tests may
 	// swap in a failing store to prove the fail-closed path.
 	m.roundStore = store
+}
+
+// resolveBaseBranches reads each configured repository's current branch
+// name once, at attach. Every name a card can carry is resolved here so
+// baseBranch below is a map lookup: it is called from render paths, and
+// a render path may not run git.
+func (m *Shell) resolveBaseBranches() {
+	if m.wt == nil {
+		return
+	}
+	ctx := context.Background()
+	m.baseBranches = map[string]string{"": m.wt.BaseBranch(ctx, "")}
+	for _, name := range m.wt.Names() {
+		m.baseBranches[name] = m.wt.BaseBranch(ctx, name)
+	}
+}
+
+// baseBranch names the branch f lands on, for prose. Every caller that
+// used to write the literal "main" goes through here.
+//
+// It answers with worktree.DefaultBaseBranchName for a card whose repo
+// resolved to nothing and for a Shell that was never attached (the test
+// scaffolds), so a sentence built from it is never missing a word.
+func (m *Shell) baseBranch(f domain.Feature) string {
+	if name, ok := m.baseBranches[f.Repo]; ok && name != "" {
+		return name
+	}
+	if name, ok := m.baseBranches[""]; ok && name != "" {
+		return name
+	}
+	return worktree.DefaultBaseBranchName
 }
 
 // cardLocked runs fn holding the card's lock for its whole duration, so a
@@ -675,6 +666,11 @@ func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 		}
 		return m.engine.DraftCommitMessage(dctx, feature)
 	})
+	// The dialog names the branch this lands on. It is a field rather than
+	// a constructor argument (commitMsgDialog.baseBranch has the why), and
+	// this is the wiring: without it the dialog falls back to saying "main"
+	// at a repo whose trunk is master.
+	d.baseBranch = m.baseBranch(f)
 	m.Overlay.Push(d)
 	return d.startDraft()
 }
@@ -1409,57 +1405,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width, m.height = msg.Width, msg.Height
 		m.layout = m.computeLayout()
-		// the hosted CLI has to learn the new pane size from both halves
-		// of the pty pair, or it keeps drawing at the old width.
-		if m.agent != nil {
-			w, h := m.agentPaneSize()
-			if err := m.agent.Resize(w, h); err != nil {
-				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-		}
 		return m, nil
-
-	case agentOutputMsg:
-		// a repaint happens for free on any message; re-arm the listener
-		// or the tab goes deaf after its first chunk.
-		if m.agent == nil || msg.view != m.agent {
-			return m, nil
-		}
-		return m, m.agent.Wait()
-
-	case agentExitedMsg:
-		if m.agent == nil || msg.view != m.agent {
-			return m, nil
-		}
-		// A hosted CLI ending its own session (the user typed /exit, or an
-		// autonomous run finished) shouldn't leave a dead pane sitting on
-		// the tab — respawn it right away, same as the first visit.
-		//
-		// Guard against a crash loop first, though: a CLI that fails at
-		// startup (bad auth, a missing config file, an incompatible flag)
-		// exits almost immediately, and respawning that unconditionally
-		// would spin forever, each attempt burning a process start and
-		// scrolling the same failure past the user with no chance to read
-		// it. agentCrashLoopWindow draws the line — an exit within it reads
-		// as "never really started"; past it, as a session that ran and
-		// ended, worth restarting.
-		if elapsed := m.now().Sub(m.agentSpawnedAt); elapsed < agentCrashLoopWindow {
-			text := fmt.Sprintf("agent exited %s after starting — not restarting (looks like a crash loop)",
-				elapsed.Round(time.Millisecond))
-			if msg.err != nil {
-				text += ": " + sanitize(msg.err.Error())
-			}
-			m.agent = nil
-			m.agentErr = agentSpawnErr(text)
-			return m, nil
-		}
-		text := "agent exited"
-		if msg.err != nil {
-			text += ": " + sanitize(msg.err.Error())
-		}
-		m.notice = noticeMsg{text: text, isErr: msg.err != nil}
-		m.agent = nil
-		return m, m.ensureAgent()
 
 	case boardOpenedMsg:
 		// ensureBoardSession's spawn ran in a command (OpenBoard can
@@ -1493,41 +1439,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// guard), so it has to come back clean here too or a successful
 		// respawn would still be treated as a dead tab forever after.
 		m.boardErr = ""
-		return m, nil
-
-	case agentPickerLoadedMsg:
-		m.Overlay.Push(newAgentPickerDialog(msg.agents, m.agentConfigName, m.chooseAgentCLI))
-		return m, nil
-
-	case agentChosenMsg:
-		if msg.err != nil {
-			m.notice = noticeMsg{text: "saving agent choice: " + sanitize(msg.err.Error()), isErr: true}
-			return m, nil
-		}
-		m.agentConfigName = msg.name
-		// The hosted CLI may already be running under the old choice (or
-		// sitting on a spawn error from having none) — close it so the
-		// next visit to the agent tab respawns under the new selection
-		// instead of keeping a stale process or a stale error message on
-		// screen forever.
-		m.closeAgent()
-		m.agentErr = ""
-		// Same reset for the board thread's own failure, and for the same
-		// reason: boardErr is what ensureBoardSession refuses to retry
-		// past, so without clearing it here a single failed open — no
-		// agent configured, an endpoint that would not bind — disabled
-		// the tab for the rest of the process even after the user fixed
-		// the very thing it was complaining about. Picking an agent IS
-		// that fix, in the common case.
-		m.boardErr = ""
-		if m.board != nil {
-			// the live session belongs to the old choice; drop it so the
-			// next visit opens one on the new backend rather than leaving
-			// a conversation whose header names an agent you just changed.
-			_ = m.board.Close()
-			m.board = nil
-		}
-		m.notice = noticeMsg{text: "agent tab: " + msg.name + " chosen"}
 		return m, nil
 
 	case rowsMsg:
@@ -1633,6 +1544,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.engine.DraftCommitMessage(dctx, feature)
 		})
+		d.baseBranch = m.baseBranch(f) // see openSquashDialog's own wiring
 		m.Overlay.Push(d)
 		// start the draft pass off the render loop; the dialog is already
 		// open and editable, and the draft fills only while unmodified.
@@ -1816,8 +1728,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// failed): baseline whatever block the artifact now carries.
 		m.scribeSettled(msg.id)
 		if msg.n > 0 {
-			m.notice = noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check(s) into the %s",
-				msg.id, msg.n, artifactNoun(msg.id.Kind()))}
+			// plural (receipt.go) is "" for exactly one check and "s"
+			// otherwise — "check(s)" read as literal punctuation on
+			// screen instead of agreeing with msg.n the way every other
+			// count on this notice's neighbors does.
+			m.notice = noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check%s into the %s",
+				msg.id, msg.n, plural(msg.n), artifactNoun(msg.id.Kind()))}
 		}
 		m.baselining[msg.id] = true
 		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
@@ -2152,25 +2068,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// open dialog's text input (which is what happened) left no way
 		// out of a modal but esc.
 		if msg.String() == "ctrl+c" {
-			// On a foreign tab ctrl+c belongs to the hosted CLI — it is
-			// the key its users reach for most, and gummi taking it would
-			// break interrupting a run. This is not a special case for
-			// ctrl+c but the general pass-through rule (handleKey): gummi
-			// keeps the tab switches and hands over the rest. alt+1 then q
-			// still quits from inside the tab, and ctrl+g first if locked.
-			if m.hostedKeyboard() {
-				return m, m.agentKey(msg)
-			}
 			return m, m.quitCmd()
-		}
-		// ctrl+g is hoisted for the opposite reason to ctrl+c: it is the
-		// one key gummi never yields, in either state. A lock you can
-		// enter but not leave is the trap this whole mechanism exists to
-		// remove, so nothing — not an overlay, not the hosted CLI — is
-		// allowed between the user and the way out.
-		if msg.String() == "ctrl+g" {
-			m.toggleLock()
-			return m, nil
 		}
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
 			return m, cmd
@@ -2182,14 +2080,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, m.handlePaste(msg)
-
-	case tea.MouseMsg:
-		// gummi's own surfaces are keyboard-only by design, so the mouse
-		// has exactly one destination: a hosted CLI that has the input
-		// lock. Everywhere else the event is dropped and the terminal's
-		// native selection is left alone — see forwardMouse.
-		m.forwardMouse(msg)
-		return m, nil
 	}
 	return m, nil
 }
@@ -2197,13 +2087,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handlePaste routes bracketed-paste text to whichever pane input is
 // editing; a paste with no input focused is dropped.
 func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
-	// the hosted CLI brackets pastes itself (x/vt honours the child's own
-	// bracketed-paste mode), so hand it the text rather than any of
-	// gummi's inputs while its tab is up.
-	if m.hostedKeyboard() {
-		m.agent.Paste(msg.Content)
-		return nil
-	}
 	// Scoped to the board tab, exactly as handleKey scopes the same
 	// surface (its boardSurfacesLive gate). Both composers can report
 	// Focused() at once — a card page stays open across a tab switch and
@@ -2306,12 +2189,11 @@ func (m *Shell) quitCmd() tea.Cmd {
 
 // quitNow is quitCmd's actual exit: it stops every live autopilot
 // session (best-effort, and a no-op when there is nothing to stop — see
-// engine.Engine.StopForQuit), closes the hosted CLI, and quits.
+// engine.Engine.StopForQuit) and quits.
 func (m *Shell) quitNow() tea.Cmd {
 	if m.engine != nil {
 		m.engine.StopForQuit(context.Background())
 	}
-	m.closeAgent()
 	return tea.Quit
 }
 
@@ -2395,19 +2277,8 @@ func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
 //	        because each surface binds it the same way, not because it is
 //	        intercepted; these two are the ones no surface may redefine.
 //	tier 3  everything below — the active surface's own verbs.
-//
-// The hosted CLI on the agent tab is the one deliberate exception: it
-// owns its whole keymap, so past the tier-1 switch every key goes to the
-// child. Taking tab or ? from it would break keys its users need.
 func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
-	// A locked keyboard is answered before anything: locked means gummi
-	// keeps nothing but ctrl+g, which update already took above the
-	// overlay. Even the tier-1 tab switches go to the hosted CLI, which
-	// is the point — it is how its own tab completion, ? and esc reach it.
-	if m.keyboardLocked() {
-		return m.agentKey(msg)
-	}
 	switch key {
 	case "alt+1":
 		return m.gotoTab(TabBoard)
@@ -2419,10 +2290,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		// the help key that is always gummi's. ? is the convenient one,
 		// but it is also ordinary punctuation, so it has to yield wherever
 		// the user is typing prose — the chat box, the bug-import filter,
-		// the hosted CLI. Those are exactly the surfaces whose key rules
-		// are least guessable, which left the help unreachable in the
-		// three places it was most wanted. alt is the prefix for keys a
-		// multiplexer or a hosted pty won't have claimed (DESIGN).
+		// the board's own composer. Those are exactly the surfaces whose
+		// key rules are least guessable, which left the help unreachable
+		// in the places it was most wanted. alt is the prefix for keys a
+		// terminal multiplexer won't have claimed (DESIGN).
 		m.Overlay.Push(m.helpOverlay())
 		return nil
 	}
@@ -2437,14 +2308,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return m.handleBoardInputKey(msg)
 		}
 		return m.nextTab()
-	}
-	// An unlocked foreign tab keeps everything gummi did not just claim.
-	// That is a short list on purpose — the tab switches and nothing else
-	// — so typing at the agent works without a mode, and ?, esc, enter and
-	// ctrl+c all land where the user is looking. Only tab is gummi's, and
-	// ctrl+g is how you hand that one over too.
-	if m.hostedKeyboard() {
-		return m.agentKey(msg)
 	}
 	if key == "?" && !m.textEntry() {
 		m.Overlay.Push(m.helpOverlay())
@@ -2507,15 +2370,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	//   - before the q-quits-from-the-board-root check right below: with
 	//     no route here, typing "q" into a board message would fall
 	//     through to that check and quit gummi outright, mid-sentence.
-	//     hostedKeyboard() above does NOT save this the way it saves the
-	//     hosted pty's keys — it requires m.agent != nil, and nothing
-	//     spawns m.agent any more (gotoTab's own comment), so it is
-	//     always false on this tab now.
 	//   - before boardKey below: boardKey returns nil outright for any
-	//     tab but TabBoard (its own comment — "a foreign tab that reaches
-	//     this far has no live child"), which predates this surface and
-	//     would otherwise just swallow the keystroke having done nothing
-	//     with it.
+	//     tab but TabBoard (its own comment), which predates this surface
+	//     and would otherwise just swallow the keystroke having done
+	//     nothing with it.
 	if m.tab == TabAgent && m.boardInput.Focused() {
 		return m.handleBoardInputKey(msg)
 	}
@@ -2548,55 +2406,20 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // on a tab switch would be its own, worse bug.
 func (m *Shell) boardSurfacesLive() bool { return m.tab == TabBoard }
 
-// hostedKeyboard reports whether a hosted program is on screen and able
-// to take keys — a foreign tab (tabs.go) with a live child.
-func (m *Shell) hostedKeyboard() bool {
-	return m.foreignTab(m.tab) && m.agent != nil
-}
-
-// keyboardLocked reports whether the keyboard is handed wholesale to the
-// hosted program. The lock is only real where there is something to hand
-// it to: a lock left set over a dead child would swallow every key with
-// nothing to receive them, which is unrecoverable rather than modal.
-func (m *Shell) keyboardLocked() bool { return m.locked && m.hostedKeyboard() }
-
-// toggleLock flips the keyboard lock, refusing where there is nothing to
-// lock. The refusal says what the key is for rather than doing nothing:
-// ctrl+g is reserved everywhere, so a user who presses it on the board
-// has already decided it means something and deserves to learn what.
-func (m *Shell) toggleLock() {
-	if !m.hostedKeyboard() {
-		m.notice = noticeMsg{text: "ctrl+g locks the agent tab — nothing to lock here"}
-		return
-	}
-	m.locked = !m.locked
-	m.lockUsed = true
-	m.clearTransientNotice()
-}
-
-// Notices that name the lock. Both stay under noticeThreshold so they
-// ride as a quiet status pill rather than taking rows off the pane —
-// this is an offer, and an offer that reformats the screen is a nag.
-const (
-	// lockOfferNotice greets an arrival at a hosted tab: said before the
-	// user reaches for a key gummi is holding, which is the only time
-	// saying it is any use.
-	lockOfferNotice = "ctrl+g hands tab, alt+N + mouse to the agent"
-	// lockLeftNotice explains the surprise in the other direction — tab
-	// was pressed at a CLI prompt and moved the user instead of
-	// completing. It names the key that would have done what they meant.
-	lockLeftNotice = "tab left the agent — ctrl+g keeps it there"
-)
-
-// offerLock names the lock on arrival at a hosted tab, while the user
-// has yet to use it. Silent once locked (the indicator says it far
-// better) and silent with no child, where there is nothing to offer.
-func (m *Shell) offerLock() {
-	if m.lockUsed || m.locked || !m.hostedKeyboard() {
-		return
-	}
-	m.notice = noticeMsg{text: lockOfferNotice}
-}
+// cleanUpNudge is the tail of every notice telling the reader a landed
+// branch is waiting to be cleaned up (merge.go, squash.go, and the
+// board's own m/z guards below). It used to read "press c to clean up",
+// which is only true on the board: c is the cleanup key there, but these
+// same notices land on the card page too — right where a user stands the
+// moment they merge — and on that surface c types the letter into the
+// thread composer, with enter ready to send it to an agent (§2.3). "clean
+// up" is also the action's own name (nextsteps.go's landed-card action
+// row, and the board's own key label in keymap.go), so naming the action
+// instead of a key is truthful on both surfaces without rebinding
+// anything — the composer keeping every printable key on the card page
+// is a deliberate design decision, not an oversight this notice should
+// paper over.
+const cleanUpNudge = "clean up removes the worktree and branch"
 
 // gotoTab switches to t and does the arrival work every route into a tab
 // shares, so alt+N and the tab cycle cannot drift apart on it.
@@ -2611,19 +2434,12 @@ func (m *Shell) gotoTab(t Tab) tea.Cmd {
 		// focusThreadInput this never refuses.
 		m.boardInput.Focus()
 	}
-	if !m.foreignTab(m.tab) {
+	if m.tab != TabAgent {
 		return nil
 	}
-	// Spawning is deferred to the first visit so a board that never
-	// opens the tab never pays for a backend process. This used to call
-	// ensureAgent (the hosted pty) — that path stays in agenttab.go for
-	// the later phase that retires it outright, but nothing calls it any
-	// more: m.agent must stay nil so hostedKeyboard() stays false and the
-	// old pty draw branch (Shell.draw) goes dead on its own instead of
-	// racing this surface for the tab.
-	cmd := m.ensureBoardSession()
-	m.offerLock()
-	return cmd
+	// Spawning is deferred to the first visit so a board that never opens
+	// the tab never pays for a backend process.
+	return m.ensureBoardSession()
 }
 
 // textEntry reports whether the surface holding the keyboard is taking
@@ -2631,9 +2447,7 @@ func (m *Shell) gotoTab(t Tab) tea.Cmd {
 // modifier chord (alt+N) or a key no text field wants (tab), but a
 // question mark is ordinary punctuation, and a user typing "should we
 // retry?" into a chat must get the character rather than the help
-// overlay. The agent tab is not listed because it never reaches here —
-// hostedKeyboard hands the hosted CLI every key gummi has not claimed,
-// ? among them.
+// overlay.
 func (m *Shell) textEntry() bool {
 	// The board thread's composer (TabAgent) is checked ahead of the
 	// boardSurfacesLive gate below, which is scoped to m.tab == TabBoard
@@ -2647,7 +2461,19 @@ func (m *Shell) textEntry() bool {
 	if !m.boardSurfacesLive() {
 		return false
 	}
-	if m.cardOpen && m.threadInput.Focused() {
+	// The thread composer stays focused for as long as the card page is
+	// open, including while a spec or diff review surface is drawn over
+	// it and answering the keyboard itself (handleKey's tier 3: m.spec
+	// and m.diff are checked before the cardOpen-and-focused thread-input
+	// fallback). Reporting textEntry here regardless used to make "?"
+	// (both surfaces list it in their own key table, footer and all) type
+	// a literal "?" into a draft nobody was looking at instead of opening
+	// help — the one key their tables advertised that did nothing (§2.1).
+	// The reason this function exists is "don't steal a printable key
+	// from someone typing prose", and that reason does not hold when a
+	// review surface, not the composer, is what the user is actually
+	// looking at and typing into.
+	if m.cardOpen && m.threadInput.Focused() && m.spec == nil && m.diff == nil {
 		return true
 	}
 	return m.bugIngest != nil && m.bugIngest.filtering
@@ -2667,14 +2493,15 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 		return m.inboxKey(key)
 	}
 	if m.tab != TabBoard {
-		// A foreign tab that reaches this far has no live child — the CLI
-		// failed to start, or none is chosen yet (a live one is answered
-		// in handleKey, which still has the real KeyPressMsg it needs).
-		// gummi holds the keyboard here but has nothing to spend it on,
-		// and "nothing" is the answer: this used to fall through to the
-		// inbox's keymap, so on the agent tab x silently dismissed an
-		// inbox item, enter jumped to a card and switched tabs, and u
-		// topped up a budget — all from a tab showing none of it.
+		// TabAgent's own composer claims the keyboard the instant it is
+		// focused (handleKey), which is true for as long as the tab has
+		// been visited at all — so this is the defensive fallback for a
+		// stray key that somehow arrives before that. gummi holds the
+		// keyboard here but has nothing to spend it on, and "nothing" is
+		// the answer: this used to fall through to the inbox's keymap, so
+		// on the agent tab x silently dismissed an inbox item, enter
+		// jumped to a card and switched tabs, and u topped up a budget —
+		// all from a tab showing none of it.
 		return nil
 	}
 	// reconcile before anything can act: m.sel is written from half a
@@ -2822,15 +2649,6 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			return m.openAutopilot(r.F)
 		}
-	case "agent-cli":
-		// Menu-only, and dispatched on an id rather than a letter on
-		// purpose: A already means "approve the gate" in the spec, diff
-		// and ingest views, and choosing a CLI is a rare action that does
-		// not deserve a board key which reads as approve everywhere else.
-		// Unlike every other case here it also belongs to no card, so it
-		// works with nothing selected (an empty board's splash answers
-		// space too).
-		return m.openAgentPickerCmd()
 	case "j", "down":
 		m.moveSel(1)
 	case "k", "up":
@@ -2947,7 +2765,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if r.Landed {
-				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — press c to clean up", isErr: true}
+				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
 				return nil
 			}
 			if m.mergePrep {
@@ -2973,7 +2791,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if r.Landed {
-				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — press c to clean up", isErr: true}
+				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
 				return nil
 			}
 			if m.squashPrep {
@@ -3215,14 +3033,12 @@ func (m *Shell) View() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = m.styles.Theme.BgBase
 	v.WindowTitle = "gummi"
-	// Mouse reporting is requested per-frame, and only while the input
-	// lock is on. Asking for it unconditionally would suppress the
-	// terminal's own click-drag selection across the whole program — a
-	// steep price on surfaces that have no use for a mouse at all, and
-	// on an agent tab whose CLI may not want one either.
-	if m.keyboardLocked() {
-		v.MouseMode = tea.MouseModeCellMotion
-	}
+	// Mouse reporting is never requested. It used to be, per-frame, while
+	// the agent tab's keyboard lock was on — the lock existed to hand a
+	// hosted pty every key and every click. That pty is gone, and asking
+	// for mouse reporting unconditionally would suppress the terminal's
+	// own click-drag selection across the whole program, which no surface
+	// here has a use for.
 
 	if m.width <= 0 || m.height <= 0 {
 		return v
@@ -3237,7 +3053,6 @@ func (m *Shell) View() tea.View {
 		lines[i] = strings.TrimRight(l, " ")
 	}
 	v.Content = strings.Join(lines, "\n")
-	v.Cursor = m.agentCursor()
 	return v
 }
 
@@ -3283,16 +3098,10 @@ func (m *Shell) draw(scr uv.Screen) {
 	// a long error/remedy is wrapped into a band above the status bar
 	// rather than truncated into a one-line pill ("set permiss…"); it
 	// borrows the bottom rows of the main pane. Short notices stay pills.
-	// the agent tab paints cells, not a string: its emulator composites
-	// straight into scr so the hosted CLI's own truecolor survives. Every
-	// other surface goes through mainView below.
-	if m.hostedKeyboard() {
-		m.drawAgentTab(scr)
-		uv.NewStyledString(m.statusView(l.Status.Dx())).Draw(scr, l.Status)
-		uv.NewStyledString(m.tabBarView(l.Tabs.Dx())).Draw(scr, l.Tabs)
-		m.Overlay.Draw(scr, l.Area, s)
-		return
-	}
+	// Every surface goes through mainView below. There used to be a
+	// branch above it for the agent tab, which painted a hosted pty's
+	// cells straight into scr so its truecolor survived; the tab hosts an
+	// in-process board session now, which is an ordinary string surface.
 	band := m.noticeBand(max(l.Main.Dx()-3, 0))
 	mainH := l.Main.Dy()
 	if len(band) > 0 {
@@ -3537,7 +3346,25 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		// period would stay open until the next thing you happened to do
 		// on the card, dating the handback to whenever that was.
 		m.logAutopilot(f.ID, state.AutopilotHandedBack, "you parked it", f.GateApproval)
-		return noticeMsg{text: string(f.ID) + " paused", clearInbox: f.ID}
+		// Pausing stops the *agent*; it does not answer the *question* a
+		// pending attention item is asking, and clearing the item
+		// unconditionally used to conflate the two. A card parked at a
+		// finished gate (attnGate) is the sharpest case: BG-002 passed
+		// verify, the user chose "stop here — park it", and the inbox
+		// went on to say "nothing needs you" while a landable branch sat
+		// waiting for the one action gummi never automates (§1.1). An
+		// attnFailure and an attnBudget are the same shape — a session
+		// erroring or hitting its envelope is a stop pausing an
+		// already-non-running session does not resolve either, so both
+		// must survive too. attnQuestion is the one kind that genuinely
+		// goes away: the item exists only because a live agent was
+		// waiting on an answer, and pausing stops that very agent, so
+		// there is nothing left to answer. Only that kind clears here.
+		clear := domain.FeatureID("")
+		if it, ok := m.inbox.get(f.ID); ok && it.Kind == attnQuestion {
+			clear = f.ID
+		}
+		return noticeMsg{text: string(f.ID) + " paused", clearInbox: clear}
 	}
 }
 
@@ -3847,16 +3674,13 @@ func (m *Shell) mainView(w, h int) string {
 }
 
 func (m *Shell) statusView(w int) string {
-	// the leading pill normally just names the program. While the
-	// keyboard is locked it says so instead, in the alert weight: the
-	// lock changes what every other key does, and the one place a user
-	// already looks to find out what a key will do is this row.
-	mode := statusbar.Pill{Text: "gummi", Kind: statusbar.KindMode}
-	if m.keyboardLocked() {
-		mode = statusbar.Pill{Text: "⬤ locked · ctrl+g", Kind: statusbar.KindAlert}
-	}
+	// The leading pill names the program. It used to say "⬤ locked ·
+	// ctrl+g" instead while the agent tab's keyboard lock was engaged —
+	// the lock changed what every other key did, so the row a user checks
+	// to find out what a key will do had to say so. Both the lock and the
+	// pty it fed are gone.
 	pills := []statusbar.Pill{
-		mode,
+		{Text: "gummi", Kind: statusbar.KindMode},
 		{Text: m.boardCounts(), Kind: statusbar.KindNeutral},
 	}
 	if run := m.runCounts(); run != "" {

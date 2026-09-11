@@ -2,9 +2,11 @@ package ui
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -95,11 +97,17 @@ type nextInput struct {
 	// blocker instead of pointing vaguely at the artifact.
 	verdictFloorReason string
 
-	reviewRound      int    // automatic review→fix rounds burned so far
-	verifyBounces    int    // verify→work bounces already burned (each one a failed verify)
-	failedCheck      string // first failing manual `v` check, "" if none
-	openSpecQs       int    // open user %% threads in the artifact (block gates)
-	openDiffComments int    // unresolved diff annotations (block gates)
+	reviewRound   int    // automatic review→fix rounds burned so far
+	verifyBounces int    // verify→work bounces already burned (each one a failed verify)
+	failedCheck   string // first failing manual `v` check, "" if none
+	// backendNeverStarted marks the failure a first-time user hits most
+	// and can act on least: the coding CLI died before this stage's first
+	// turn (agent.RunFailure.FirstTurn), so nothing is wrong with the
+	// card — the backend is not set up. Re-running is the one thing
+	// guaranteed not to help, and it used to be the only thing offered.
+	backendNeverStarted bool
+	openSpecQs          int // open user %% threads in the artifact (block gates)
+	openDiffComments    int // unresolved diff annotations (block gates)
 	// undrafted names the required section(s) the departing stage left
 	// blank — the artifact half of the same gate, resolved through the
 	// engine's own predicate so the panel can name what is missing before
@@ -210,6 +218,8 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 			in.verdict = sessionVerdict(snap)
 		}
 		in.verdictFloorReason = snap.VerdictFloorReason
+		var rf *agent.RunFailure
+		in.backendNeverStarted = errors.As(snap.Err, &rf) && rf.FirstTurn
 	}
 	// No session at all — a restart took it — but the log still says how
 	// the stage ended. The exit's verdict stands in for the session's,
@@ -256,6 +266,16 @@ func escalatedGateVerdict(v reviewVerdict, escalated bool) reviewVerdict {
 // leads with the same lever the gate itself demands: the stage's writer
 // run again, now that the panel knows what is missing before approve is
 // tried and refused.
+//
+// It still returns exactly one row — spec, then diff, then undrafted, in
+// that priority — because that is genuinely the one lever this row can
+// pull: `s` resolves the spec, `d` resolves the diff, and there is no
+// single key that does both. But §1.3 found whyItStopped's sentence
+// naming only the first blocker it checked, so a reader who resolved the
+// one THIS row named found a second one waiting, never mentioned
+// anywhere on the page. otherBlockersNote is the fix at this end of the
+// same bug: the row's own why now says when there is more to it, even
+// though only one of them is what enter runs next.
 func blockedGate(in nextInput) *nextAction {
 	// A BLOCKER DESCRIBES A GATE, AND THERE IS NO GATE UNTIL THE STAGE
 	// HAS PRODUCED SOMETHING TO APPROVE. Before that, an open comment is
@@ -272,13 +292,13 @@ func blockedGate(in nextInput) *nextAction {
 	if in.openSpecQs > 0 {
 		a := nextStep("spec", "s", "resolve open comments",
 			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" "+blockVerb(in.openSpecQs)+
-				" the gate — R requests changes")
+				" the gate"+otherBlockersNote(in, "spec")+" — R requests changes")
 		return &a
 	}
 	if in.openDiffComments > 0 {
 		a := nextStep("diff", "d", "resolve diff comments",
 			itoa(in.openDiffComments)+" open "+blockVerb(in.openDiffComments)+
-				" the gate — R requests changes, x resolves")
+				" the gate"+otherBlockersNote(in, "diff")+" — R requests changes, x resolves")
 		return &a
 	}
 	if len(in.undrafted) > 0 {
@@ -289,10 +309,36 @@ func blockedGate(in nextInput) *nextAction {
 		}
 		a := nextStep("run", "enter", label,
 			blank+" "+be+" required in the "+artifactNoun(in.kind)+" and still blank — the gate stays shut until "+
-				subject+" "+be+" drafted; enter runs the stage to draft "+object)
+				subject+" "+be+" drafted"+otherBlockersNote(in, "undrafted")+"; enter runs the stage to draft "+object)
 		return &a
 	}
 	return nil
+}
+
+// otherBlockersNote names the blockers blockedGate's own row is NOT
+// about, so that row's why does not repeat §1.3's mistake at one remove:
+// whyItStopped's sentence now names every blocker holding the gate shut,
+// but the action row underneath it used to name only its own — resolving
+// it could still leave the gate shut on something this row never
+// mentioned. which is the kind the row already covers, so its own count
+// is not echoed back at it. Empty for the ordinary case, one blocker
+// alone, so the row's why is unchanged wherever there is nothing else to
+// disclose.
+func otherBlockersNote(in nextInput, which string) string {
+	var extras []string
+	if which != "spec" && in.openSpecQs > 0 {
+		extras = append(extras, itoa(in.openSpecQs)+" in the "+artifactNoun(in.kind))
+	}
+	if which != "diff" && in.openDiffComments > 0 {
+		extras = append(extras, itoa(in.openDiffComments)+" on the diff")
+	}
+	if which != "undrafted" && len(in.undrafted) > 0 {
+		extras = append(extras, strings.Join(in.undrafted, ", ")+" still blank")
+	}
+	if len(extras) == 0 {
+		return ""
+	}
+	return " (plus " + joinList(extras) + ")"
 }
 
 // blockVerb agrees the blocker count's verb. One open comment blocks the
@@ -432,30 +478,63 @@ func stageActions(in nextInput) []nextAction {
 		return nil
 	case engine.StateRunning:
 		if in.hasAsk {
-			return append([]nextAction{answerIt()}, stopHere(in)...)
+			return append([]nextAction{answerIt()}, stopOrResume(in)...)
 		}
 		return nil
 	case engine.StatePaused:
-		// already stopped by hand: picking it back up is the only answer,
-		// and "stop here" would be a row offering what has already
-		// happened. attach is plumbing — it is in the inventory and
-		// answers /attach, it is not one of the four.
-		return []nextAction{nextStep("run", "enter", "pick it back up",
-			"the run is paused — a fresh run picks "+string(in.stage)+" back up")}
+		if !in.finished() {
+			// stopped by hand before the stage produced anything: picking
+			// it back up is the only answer, and "stop here" would be a
+			// row offering what has already happened. attach is plumbing
+			// — it is in the inventory and answers /attach, it is not one
+			// of the four.
+			return []nextAction{nextStep("run", "enter", "pick it back up",
+				"the run is paused — a fresh run picks "+string(in.stage)+" back up")}
+		}
+		// §1.1a: pausing stops a RUN. It does not un-pass a verify, or
+		// withdraw a design waiting on approval — the stage's own gate
+		// already fired, and finished() says so. The old comment above
+		// ("picking it back up is the only answer") was true of a paused
+		// run and false of a paused card sitting at a finished gate: a
+		// card parked right after verify passed used to lose "land on
+		// main" from the page entirely, because this case returned before
+		// the stage switch below ever ran. Falling through instead lets
+		// that switch render the gate's own answer set as it would for
+		// any other finished stop; stopOrResume (used throughout that
+		// switch in place of stopHere) is what puts "pick it back up"
+		// back on the page, as the re-run row, rather than as the only
+		// row.
 	}
 
 	// failures, budget stops, and questions override stage guidance.
+	//
+	// attnFailure and attnQuestion keep plain stopHere here, not
+	// stopOrResume: each already carries its own id "run" / key "enter"
+	// row ("try again", answerIt's "answer it"), so on the rare paused+
+	// finished-by-exit combination stopOrResume's "pick it back up" would
+	// duplicate it — the same reason StagePlan's talk keeps stopHere,
+	// above. attnBudget's own row is keyless ("topup"), so it has nothing
+	// to duplicate and keeps stopOrResume.
 	switch in.attn {
 	case attnFailure:
-		return append([]nextAction{nextStep("run", "enter", "try again",
-			"the session errored — a fresh run retries "+string(in.stage))}, stopHere(in)...)
+		// A backend that never produced a turn gets a different why: a
+		// retry runs the same command that just failed, and the reason it
+		// failed is not on this card. The ANSWER SET is unchanged — the
+		// pointer at `gummi doctor` belongs in the narration, which may
+		// say anything and change nothing (stageActions' own contract),
+		// not in a fifth arm.
+		why := "the session errored — a fresh run retries " + string(in.stage)
+		if in.backendNeverStarted {
+			why = "the backend never started — a retry runs the same command"
+		}
+		return append([]nextAction{nextStep("run", "enter", "try again", why)}, stopHere(in)...)
 	case attnBudget:
 		// the two honest answers to an exhausted envelope, offered where
 		// the stop is rather than as a pointer at the inbox tab: raise it
 		// and carry on, or stop here. The inbox reaches the same top-up
 		// with u; this is the same act, not a second one.
 		return append([]nextAction{nextStep("topup", "", "top up and go on",
-			"raise the envelope — "+string(in.stage)+" picks up where it stopped")}, stopHere(in)...)
+			"raise the envelope — "+string(in.stage)+" picks up where it stopped")}, stopOrResume(in)...)
 	case attnQuestion:
 		return append([]nextAction{answerIt()}, stopHere(in)...)
 	}
@@ -466,20 +545,61 @@ func stageActions(in nextInput) []nextAction {
 	case domain.StageTodo:
 		// "the plan stage", the strip's own word for where this goes —
 		// not "flow", which is a noun nothing else on the screen uses.
-		return []nextAction{nextStep("advance", "g", "start", "opens the plan stage — the agent reads the card, and any comments on it")}
+		//
+		// §3.1: the row's arm is advance, and advance only moves the stage
+		// marker — no agent runs on this keypress. The old label and why
+		// ("start — opens the plan stage — the agent reads the card, and
+		// any comments on it") promised the read would happen here; live,
+		// it produced a screen whose OWN row read "start the architect" —
+		// the real start, one keypress later, and the plan stage's own
+		// talkAction is what actually promises the agent will read the
+		// card. Say only what enter does on THIS screen.
+		return []nextAction{nextStep("advance", "g", "open the plan stage",
+			"moves the card into plan — start the agent there to have it read the card, and any comments on it")}
 
 	case domain.StagePlan:
 		// The design stage. Its answers are: get the conversation going,
 		// approve what it wrote, send it back, or stop. Reading the
 		// artifact it wrote — and the code a design stage may already have
 		// put on the card's branch — are the artifact and diff tabs.
-		acts := talkAction(in, designPartner(in.kind), "shape the "+artifactNoun(in.kind)+" until it convinces you")
+		// talk (below) already carries its own "resume" wording once
+		// in.sess is StatePaused (talkAction's own verb switch), so this
+		// branch keeps stopHere rather than stopOrResume: stopHere already
+		// returns nil for a paused session, and stopOrResume's generic
+		// "pick it back up" would otherwise double up with "resume the
+		// architect" as two rows for the one same act.
+		talk := talkAction(in, designPartner(in.kind), "shape the "+artifactNoun(in.kind)+" until it convinces you")
 		if b := blockedGate(in); b != nil {
 			// "you cannot cross yet" is a different sentence, not another
 			// way forward: it leads, and the rest still follows it.
-			return append(append([]nextAction{*b}, acts...), stopHere(in)...)
+			return append(append([]nextAction{*b}, talk...), stopHere(in)...)
 		}
-		acts = append(acts, nextStep("advance", "g", "approve", "hands the card to the agent stages"))
+		// §3.2: approve's arm is also advance — it moves the card into
+		// implement and stops there, the same promise-only-what-happens
+		// fix as §3.1's todo row above. "hands the card to the agent
+		// stages" oversold it (nothing ran until a second keypress
+		// started the implementer) and "agent stages" is jargon nothing
+		// else on the screen uses; name the agent that actually runs
+		// next.
+		approve := nextStep("advance", "g", "approve",
+			"moves the card into implement — start the implementer there to begin")
+		var acts []nextAction
+		if finished {
+			// §3.3: this stop's own narration reads "plan is ready for
+			// your decision" — and the decision is approve (or send it
+			// back), not another paid pass through the architect. Leading
+			// with talk here put that re-run under the cursor at exactly
+			// the stop whose own sentence says the opposite; the verify
+			// gate already gets this right (its clean pass leads with
+			// "land on main"). A finished design gate is the same shape,
+			// so it leads with the decision the same way. Only the ORDER
+			// changes, and only in this one state — nothing here is
+			// added, dropped, or renamed, and an unfinished stop still
+			// talks first, because there is nothing to approve yet.
+			acts = append([]nextAction{approve}, talk...)
+		} else {
+			acts = append(talk, approve)
+		}
 		// Only worth offering while the architect is here to receive it —
 		// with no session the "start" row above is the way in.
 		if in.live {
@@ -492,10 +612,27 @@ func stageActions(in nextInput) []nextAction {
 		if !finished {
 			// nothing has been produced yet, so there is nothing to send
 			// back: the rewind to plan is /bounce, in the inventory.
-			return append([]nextAction{nextStep("run", "enter", "run "+string(in.stage),
-				"no active run — start (or restart) the stage")}, stopHere(in)...)
+			//
+			// §3.2: "(or restart)" used to show unconditionally, including
+			// on the very first arrival here straight off approving the
+			// plan — where there is nothing yet TO restart. verifyBounces
+			// is the one edge that lands a card back in this branch a
+			// second time (a failed verify sent back to implement for
+			// rework); nothing else that reaches this branch has run
+			// implement before, so it is what tells "first run" and
+			// "restart" apart.
+			why := "no active run — start the stage"
+			if in.verifyBounces > 0 {
+				why = "no active run — start (or restart) the stage"
+			}
+			return append([]nextAction{nextStep("run", "enter", "run "+string(in.stage), why)}, stopOrResume(in)...)
 		}
 		if b := blockedGate(in); b != nil {
+			// blockedGate's undrafted-sections row also wears id "run" /
+			// key "enter" (it is the redraft run, nextsteps.go's own
+			// blockedGate) — stopHere, not stopOrResume, so a paused card
+			// blocked on a blank section does not get a second, competing
+			// "enter" row underneath its own.
 			return append([]nextAction{*b}, stopHere(in)...)
 		}
 		acts := []nextAction{
@@ -507,14 +644,17 @@ func stageActions(in nextInput) []nextAction {
 			sendBackStep("run", "",
 				"re-runs "+string(in.stage)+" with what is wrong — your line goes with it"),
 		}
-		return append(acts, stopHere(in)...)
+		return append(acts, stopOrResume(in)...)
 
 	case domain.StageVerify:
 		if !finished {
 			return append([]nextAction{nextStep("run", "enter", "run verify",
-				"no active run — runs the checks and the verification plan")}, stopHere(in)...)
+				"no active run — runs the checks and the verification plan")}, stopOrResume(in)...)
 		}
 		if b := blockedGate(in); b != nil {
+			// same reason as StageImplement's blockedGate branch above:
+			// the undrafted-sections row can itself wear id "run" / key
+			// "enter", so this stays stopHere rather than stopOrResume.
 			return append([]nextAction{
 				*b,
 				sendBackStep("bounce", "b", "or send the open items back as rework"),
@@ -526,12 +666,15 @@ func stageActions(in nextInput) []nextAction {
 			return append([]nextAction{
 				sendBackStep("bounce", "b", "the failure is the implementation's fault — your line goes with it"),
 				nextStep("advance", "g", "land anyway", "overrule if the failure does not hold up"),
-			}, stopHere(in)...)
+			}, stopOrResume(in)...)
 		}
 		// blocked: the environment can't run the plan, so rework can't
 		// help — steer at the environment, not the bounce. The blocker
 		// itself is the narration's first sentence now (narration.go).
 		if in.verdict == verdictBlocked {
+			// "re-run verify" here is itself id "run" / key "enter" — the
+			// same collision the blockedGate branches above guard against
+			// — so this stays stopHere rather than stopOrResume too.
 			return append([]nextAction{
 				nextStep("run", "enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"),
 				nextStep("advance", "g", "land anyway", "only if you verified it by hand — verify never proved this build"),
@@ -551,13 +694,13 @@ func stageActions(in nextInput) []nextAction {
 			return append([]nextAction{
 				sendBackStep("bounce", "b", "send the failures back as rework — your line goes with them"),
 				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
-			}, stopHere(in)...)
+			}, stopOrResume(in)...)
 		}
 		if in.kind == domain.KindResearch {
 			return append([]nextAction{
 				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
 				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
-			}, stopHere(in)...)
+			}, stopOrResume(in)...)
 		}
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"
 		if in.verdict == verdictPass {
@@ -570,7 +713,7 @@ func stageActions(in nextInput) []nextAction {
 		return append([]nextAction{
 			gate,
 			sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
-		}, stopHere(in)...)
+		}, stopOrResume(in)...)
 	}
 	return nil
 }
@@ -614,6 +757,37 @@ func stopHere(in nextInput) []nextAction {
 		why = "free the slot — enter re-runs the stage later"
 	}
 	return []nextAction{nextStep("pause", "p", "stop here", why)}
+}
+
+// stopOrResume is stopHere's answer for every session state except a
+// paused one, where "pick it back up" takes its place instead.
+//
+// stopHere already returns nil for a paused session — it has already
+// stopped, so a second "stop here" row would offer what already
+// happened. §1.1a found that this meant a paused card at a FINISHED gate
+// rode with NOTHING in its place: the paused branch above used to return
+// early with a single "pick it back up" row and never reach the stage
+// switch at all, so the gate's own decision (land on main, approve, send
+// it back) disappeared along with it. Now that the paused branch falls
+// through into the same switch every other stop uses, every call site
+// below that used to append stopHere's row appends this one instead, so
+// a paused-but-finished stop still carries its way back into the run
+// beside the decision it is actually waiting on.
+//
+// Several call sites deliberately keep plain stopHere instead, because
+// they already carry their own id "run" / key "enter" row and this one
+// would only duplicate it: the design stage (talkAction grows its own
+// "resume the architect" wording once in.sess is StatePaused), implement's
+// and verify's blockedGate branches (the undrafted-sections row is itself
+// id "run" / key "enter" — nextsteps.go's own blockedGate), verify's
+// blocked-environment branch ("re-run verify" is the same id and key),
+// and attnFailure/attnQuestion ("try again", "answer it").
+func stopOrResume(in nextInput) []nextAction {
+	if in.sess == engine.StatePaused {
+		return []nextAction{nextStep("run", "enter", "pick it back up",
+			"the run is paused — a fresh run picks "+string(in.stage)+" back up")}
+	}
+	return stopHere(in)
 }
 
 // noun names the work item kind for prose.
