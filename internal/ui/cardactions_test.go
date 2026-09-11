@@ -65,7 +65,7 @@ func TestCardActionsForOrdering(t *testing.T) {
 	// (spec, diff) and plumbing (verify, attach, the autopilot switch)
 	// are in the tail now rather than ranked among the answers — they are
 	// the card page's tabs and its inventory, not answers to "what now".
-	tail := "run deps spec diff verify envelope gate ask inbox attach rebase merge squash prlink duplicate delete"
+	tail := "run deps spec diff verify envelope gate ask inbox attach rebase handoff merge squash prlink duplicate delete"
 	want := "bounce advance " + tail
 	if got != want {
 		t.Fatalf("order mismatch:\n got  %q\n want %q", got, want)
@@ -96,7 +96,9 @@ func TestCardActionsForFoldsTheTail(t *testing.T) {
 
 	acts := cardActionsFor(in, r)
 	promoted := foldedOnly(acts, false)
-	if got, want := idsOf(promoted), "advance bounce"; got != want {
+	// hand-off rides between them: on a clean verify the answer set is
+	// the three endings-or-rework, and it is the second of them.
+	if got, want := idsOf(promoted), "advance handoff bounce"; got != want {
 		t.Fatalf("promoted tier:\n got  %q\n want %q", got, want)
 	}
 	if n := len(foldedOnly(acts, true)); n < foldMin {

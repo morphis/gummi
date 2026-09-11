@@ -466,97 +466,117 @@ func blockedMsg(actor string, id domain.FeatureID, text string) tea.Msg {
 // including which actor Store.Transition records on the gate event.
 func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
-		// A static board (no coding agent) still advances: engine.Advance
-		// touches only the store, worktrees, and workspace, so a transient
-		// agent-less engine runs the same floor and closes. When an engine
-		// is wired, its Advance also drops the stale stage session.
-		eng := m.engine
-		if eng == nil {
-			eng = engine.New(engine.Config{Store: m.store, Pool: m.wt, Workspace: m.ws})
-			defer func() { _ = eng.Close() }()
-		}
-		res, err := eng.Advance(ctx, id, actor)
-		if err != nil {
-			// actor-aware like the blocked statuses below, and for the same
-			// reason: the caller that tried this crossing skipped its own
-			// raiseAttention on the strength of the attempt, so an error
-			// that only became a notice would leave the card with an open
-			// decision row, nothing in the needs-you queue, and no sign
-			// anything had gone wrong until the next restart re-seeded it.
-			return blockedMsg(actor, id, sanitize(err.Error()))
-		}
-		switch res.Status {
-		case engine.StatusNoop:
-			return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id), clearInbox: id}
-		case engine.StatusBlockedQuestions:
-			// unresolved user %% annotations block every human gate — g
-			// re-gates only once they resolve (DESIGN §6.1).
-			surface := "spec"
-			if res.Feature.Kind == domain.KindBug {
-				surface = "report"
-			}
-			text := fmt.Sprintf("%s: %d open comment%s %s approval — x resolves one, R sends them back to the agent (in the %s view)", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers), surface)
-			return blockedMsg(actor, id, text)
-		case engine.StatusBlockedDiff:
-			text := fmt.Sprintf("%s: %d open diff comment%s %s approval — x resolves one, R sends them back to the agent", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
-			return blockedMsg(actor, id, text)
-		case engine.StatusBlockedOmission:
-			return blockedMsg(actor, id, res.Reason)
-		case engine.StatusBlockedUndrafted:
-			text := fmt.Sprintf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted", id, res.From, strings.Join(res.Undrafted, ", "))
-			return blockedMsg(actor, id, text)
-		case engine.StatusBlockedDependency:
-			names := make([]string, 0, len(res.BlockingDeps))
-			for _, d := range res.BlockingDeps {
-				names = append(names, d.String())
-			}
-			text := fmt.Sprintf("%s: blocked by unmet dependency %s — land it before this card can start coding", id, strings.Join(names, ", "))
-			return blockedMsg(actor, id, text)
-		case engine.StatusBlockedDocument:
-			// the deterministic citation/coverage floor (internal/verifydoc)
-			// failed — the document stays at verify rather than reaching done
-			// on a broken citation or an unmapped brief question.
-			rep := res.DocumentReport
-			text := fmt.Sprintf("%s: document floor failed — %d open thread(s), %d broken citation(s), %d unmapped question(s)",
-				id, rep.OpenThreads, len(rep.Citations), len(rep.Coverage))
-			return blockedMsg(actor, id, text)
-		case engine.StatusNeedsMerge:
-			// verify→done is the user's "this feature is done" decision: the
-			// merge flow (user-written message → squash merge) finishes the
-			// transition to Done itself. Autopilot never reaches this branch
-			// — autopilotForward excludes verify, because landing on main
-			// stays a keypress (DESIGN §10.17) — so it is never worth a
-			// blockedMsg-style fork; a mergeThenDoneMsg is the right answer
-			// for whichever actor somehow got here.
-			return mergeThenDoneMsg{f: res.Feature}
-		}
-		// StatusAdvanced: show the transition notice, then kick off the
-		// background one-shot passes — check discovery whenever a fresh
-		// worktree was created (both kinds), and the scribe envelope pass on
-		// spec approval in estimation mode only (an explicit GUMMI_ENVELOPE
-		// wins, so the UI default gates it here, not the engine).
-		note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
-		discover := res.EnteredWorktree
-		est := res.From == domain.StagePlan && m.envelope == 0
-		continueTo := domain.Stage("")
-		if actor == state.ActorAutopilot && autonomousStage(res.To) {
-			continueTo = res.To
-		}
-		if discover || est {
-			// the crossing entered a worktree, so the background one-shot
-			// passes go first — but the continuation rides along rather
-			// than being dropped here. Entering a worktree is exactly what
-			// a spec approval does, which made this the branch autopilot's
-			// own handover took, and it used to end the story: the gate
-			// crossed and nothing behind it ever started.
-			return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est, continueTo: continueTo}
-		}
-		if continueTo != "" {
-			return autopilotContinueMsg{id: id, to: continueTo, note: note}
-		}
-		return noticeMsg{text: note, reload: true, clearInbox: id}
+		return m.withEngine(func(eng *engine.Engine) tea.Msg {
+			res, err := eng.Advance(context.Background(), id, actor)
+			return m.advanceOutcome(id, actor, res, err)
+		})
 	}
+}
+
+// withEngine runs fn against the board's engine, standing a transient
+// agent-less one up when the board has none.
+//
+// A static board (no coding agent) still crosses gates: engine.Advance
+// touches only the store, worktrees, and workspace, so a throwaway engine
+// runs the same floor and closes. When an engine IS wired, its Advance
+// also drops the stale stage session, which the transient one cannot —
+// hence the preference rather than always building one.
+func (m *Shell) withEngine(fn func(*engine.Engine) tea.Msg) tea.Msg {
+	eng := m.engine
+	if eng == nil {
+		eng = engine.New(engine.Config{Store: m.store, Pool: m.wt, Workspace: m.ws})
+		defer func() { _ = eng.Close() }()
+	}
+	return fn(eng)
+}
+
+// advanceOutcome maps one engine.Advance result to the board's notices
+// and follow-on commands. It is a function rather than the closure body
+// it grew up as because a hand-off crosses the SAME gate by another door
+// (engine.HandOff, which stamps and then advances): the floor is shared
+// at the engine, and this is the other half — one place deciding what a
+// blocked gate, an entered worktree, or an owed landing looks like on
+// screen, whichever verb asked for the crossing.
+func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.AdvanceResult, err error) tea.Msg {
+	if err != nil {
+		// actor-aware like the blocked statuses below, and for the same
+		// reason: the caller that tried this crossing skipped its own
+		// raiseAttention on the strength of the attempt, so an error
+		// that only became a notice would leave the card with an open
+		// decision row, nothing in the needs-you queue, and no sign
+		// anything had gone wrong until the next restart re-seeded it.
+		return blockedMsg(actor, id, sanitize(err.Error()))
+	}
+	switch res.Status {
+	case engine.StatusNoop:
+		return noticeMsg{text: fmt.Sprintf("%s is done — nothing to advance", id), clearInbox: id}
+	case engine.StatusBlockedQuestions:
+		// unresolved user %% annotations block every human gate — g
+		// re-gates only once they resolve (DESIGN §6.1).
+		surface := "spec"
+		if res.Feature.Kind == domain.KindBug {
+			surface = "report"
+		}
+		text := fmt.Sprintf("%s: %d open comment%s %s approval — x resolves one, R sends them back to the agent (in the %s view)", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers), surface)
+		return blockedMsg(actor, id, text)
+	case engine.StatusBlockedDiff:
+		text := fmt.Sprintf("%s: %d open diff comment%s %s approval — x resolves one, R sends them back to the agent", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
+		return blockedMsg(actor, id, text)
+	case engine.StatusBlockedOmission:
+		return blockedMsg(actor, id, res.Reason)
+	case engine.StatusBlockedUndrafted:
+		text := fmt.Sprintf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted", id, res.From, strings.Join(res.Undrafted, ", "))
+		return blockedMsg(actor, id, text)
+	case engine.StatusBlockedDependency:
+		names := make([]string, 0, len(res.BlockingDeps))
+		for _, d := range res.BlockingDeps {
+			names = append(names, d.String())
+		}
+		text := fmt.Sprintf("%s: blocked by unmet dependency %s — land it before this card can start coding", id, strings.Join(names, ", "))
+		return blockedMsg(actor, id, text)
+	case engine.StatusBlockedDocument:
+		// the deterministic citation/coverage floor (internal/verifydoc)
+		// failed — the document stays at verify rather than reaching done
+		// on a broken citation or an unmapped brief question.
+		rep := res.DocumentReport
+		text := fmt.Sprintf("%s: document floor failed — %d open thread(s), %d broken citation(s), %d unmapped question(s)",
+			id, rep.OpenThreads, len(rep.Citations), len(rep.Coverage))
+		return blockedMsg(actor, id, text)
+	case engine.StatusNeedsMerge:
+		// verify→done is the user's "this feature is done" decision: the
+		// merge flow (user-written message → squash merge) finishes the
+		// transition to Done itself. Autopilot never reaches this branch
+		// — autopilotForward excludes verify, because landing on main
+		// stays a keypress (DESIGN §10.17) — so it is never worth a
+		// blockedMsg-style fork; a mergeThenDoneMsg is the right answer
+		// for whichever actor somehow got here.
+		return mergeThenDoneMsg{f: res.Feature}
+	}
+	// StatusAdvanced: show the transition notice, then kick off the
+	// background one-shot passes — check discovery whenever a fresh
+	// worktree was created (both kinds), and the scribe envelope pass on
+	// spec approval in estimation mode only (an explicit GUMMI_ENVELOPE
+	// wins, so the UI default gates it here, not the engine).
+	note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
+	discover := res.EnteredWorktree
+	est := res.From == domain.StagePlan && m.envelope == 0
+	continueTo := domain.Stage("")
+	if actor == state.ActorAutopilot && autonomousStage(res.To) {
+		continueTo = res.To
+	}
+	if discover || est {
+		// the crossing entered a worktree, so the background one-shot
+		// passes go first — but the continuation rides along rather
+		// than being dropped here. Entering a worktree is exactly what
+		// a spec approval does, which made this the branch autopilot's
+		// own handover took, and it used to end the story: the gate
+		// crossed and nothing behind it ever started.
+		return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est, continueTo: continueTo}
+	}
+	if continueTo != "" {
+		return autopilotContinueMsg{id: id, to: continueTo, note: note}
+	}
+	return noticeMsg{text: note, reload: true, clearInbox: id}
 }
 
 // worktreeEnteredMsg is emitted when an approval gate moves a feature

@@ -332,7 +332,13 @@ func verifyStopped(in nextInput, art string) string {
 		return "Verify gave no clear verdict, and the loop gave up rather than passing it." + loopBreaker(in)
 	}
 	if in.verdict == verdictPass {
-		return "Verify passed — the branch is ready to land" + excusedClause(in.excusedChecks) + "."
+		// "ready to land" named one of the three answers below it as
+		// though it were the state itself. The work being ready is the
+		// state; who lands it is the question the rows ask, and a reader
+		// who is going to hand the branch off should not be told the
+		// screen has already decided.
+		return "Verify passed — the work is ready" + excusedClause(in.excusedChecks) +
+			". Decide how it leaves gummi."
 	}
 	return ""
 }

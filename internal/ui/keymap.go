@@ -202,7 +202,7 @@ func (m *Shell) helpOverlay() *helpDialog {
 // covered) reads as the last group rather than silently vanishing.
 var boardHelpKeyGroup = map[string]int{
 	// moves the card through its workflow, or spends credits on it now
-	"enter": 0, "p": 0, "g": 0, "b": 0, "v": 0, "u": 0, "A": 0,
+	"enter": 0, "p": 0, "g": 0, "h": 0, "b": 0, "v": 0, "u": 0, "A": 0,
 	// reads the card without changing anything
 	"s": 1, "d": 1, "t": 1, "i": 1,
 	// branch/worktree plumbing
@@ -349,6 +349,10 @@ func (m *Shell) boardBindings() []binding {
 		{key: "s", label: "spec", help: "spec — comment, resolve and approve in place"},
 		{key: "d", label: "diff", help: "diff — comment, resolve and approve in place"},
 		advance,
+		// the third ending, beside advance's landing — it reads next to
+		// the key it is an alternative to rather than down among the git
+		// plumbing, which is where its first draft put it.
+		{key: "h", label: "hand off", help: handOffHelp},
 		bounce,
 		{key: "v", label: "verify", help: "run verify checks"},
 		{key: "u", label: "budget", help: "set the card's budget (credits; 0 = uncapped)"},
@@ -358,7 +362,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)"},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "open the needs-you inbox"},
-		{key: "r", label: "rebase", help: "rebase branch onto " + base + " (conflicts hand off to an agent)"},
+		{key: "r", label: "rebase", help: "rebase branch onto " + base + " (conflicts go to an agent)"},
 		{key: "m", label: "merge", help: "squash-merge branch into " + base + " (review & approve the drafted message)"},
 		{key: "z", label: "squash", help: "collapse the branch to one commit in place (review & approve the drafted message)"},
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
@@ -401,7 +405,7 @@ func (m *Shell) boardBindings() []binding {
 		filtered := bs[:0:0]
 		for _, b := range bs {
 			switch b.key {
-			case "a", "d", "r", "m", "c", "z":
+			case "a", "d", "h", "r", "m", "c", "z":
 				continue
 			}
 			filtered = append(filtered, b)

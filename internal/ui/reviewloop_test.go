@@ -199,11 +199,13 @@ func TestVerifyPassRaisesCleanGate(t *testing.T) {
 	if !strings.Contains(it.Text, "passed") {
 		t.Errorf("gate text does not say it passed: %q", it.Text)
 	}
-	// g lands, b sends it back, p parks the settled session. Reading the
-	// diff before landing is the card page's diff tab, not a row here.
+	// g lands, h hands the branch off, b sends it back, p parks the
+	// settled session; the trailing keyless row is "link PR…", the third
+	// ending's route. Reading the diff before landing is the card page's
+	// diff tab, not a row here.
 	acts := nextActions(m.nextInputFor(m.rows[0]))
-	if keysOf(acts) != "g b p" {
-		t.Fatalf("pass suggestions = %q, want g b p", keysOf(acts))
+	if keysOf(acts) != "g h b p " {
+		t.Fatalf("pass suggestions = %q, want g h b p ", keysOf(acts))
 	}
 	if !strings.Contains(acts[0].why, "verify passed") {
 		t.Errorf("landing why does not carry the verdict: %q", acts[0].why)

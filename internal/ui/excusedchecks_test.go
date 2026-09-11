@@ -20,7 +20,7 @@ func TestVerifyPassNamesTheExcusedChecks(t *testing.T) {
 		attn: attnGate, verdict: verdictPass,
 	}
 	clean := verifyStopped(in, "spec")
-	if clean != "Verify passed — the branch is ready to land." {
+	if clean != "Verify passed — the work is ready. Decide how it leaves gummi." {
 		t.Errorf("a branch born clean changed wording: %q", clean)
 	}
 
@@ -29,7 +29,7 @@ func TestVerifyPassNamesTheExcusedChecks(t *testing.T) {
 	if !strings.Contains(one, "lint") || !strings.Contains(one, "excused") {
 		t.Errorf("the excused check is not named: %q", one)
 	}
-	if !strings.HasPrefix(one, "Verify passed — the branch is ready to land") {
+	if !strings.HasPrefix(one, "Verify passed — the work is ready") {
 		t.Errorf("the clause replaced the sentence instead of narrowing it: %q", one)
 	}
 

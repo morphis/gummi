@@ -51,7 +51,7 @@ func TestNextActionsByState(t *testing.T) {
 		// stage's own answer set, with the resume row riding where "stop
 		// here" would otherwise sit — an already-stopped card has no more
 		// use for a second way to stop.
-		{"paused after a passed verify gate keeps the landing decision", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, attn: attnGate, verdict: verdictPass, hasWorktree: true}, "g b enter"},
+		{"paused after a passed verify gate keeps the landing decision", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, attn: attnGate, verdict: verdictPass, hasWorktree: true}, "g h b enter "},
 		{"paused after an approved plan keeps the decision, not just the resume", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StatePaused, attn: attnGate}, "g enter"},
 		// the budget stop's two answers are keyless: top up (no
 		// accelerator — u is the envelope dialog) and, with no session to
@@ -97,8 +97,14 @@ func TestNextActionsByState(t *testing.T) {
 		// re-runs the stage in place with the line as its note).
 		{"implement gate advances or sends it back", nextInput{stage: domain.StageImplement, kind: feat, attn: attnGate}, "g "},
 
-		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g b"},
-		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g b"},
+		// h is hand-off: on a finished verify the question is how the work
+		// leaves gummi, and landing is one of three answers to it. The
+		// trailing keyless row on a card with a worktree is prlink, the
+		// third — a route to an ending rather than an ending, so it rides
+		// above the fold without joining the answer set (see
+		// appendLinkPRSuggestion).
+		{"verify gate clean lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate}, "g h b"},
+		{"verify pass verdict lands", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, verdict: verdictPass}, "g h b"},
 		// send it back leads, land-anyway follows. Reading the evidence is
 		// the artifact tab, and the repeated-failure guard is a sentence in
 		// the narration now rather than a re-ranking of these two rows.
@@ -110,12 +116,12 @@ func TestNextActionsByState(t *testing.T) {
 		{"verify gate with open comments resolves", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, openDiffComments: 1}, "d b"},
 		// a settled session is one "stop here" can still park, so this is
 		// the one verify row that carries the third answer.
-		{"cleared inbox still reads as finished", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StateDone}, "g b p"},
-		{"bug verify sends it back", nextInput{stage: domain.StageVerify, kind: bug, attn: attnGate}, "g b"},
+		{"cleared inbox still reads as finished", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StateDone}, "g h b p"},
+		{"bug verify sends it back", nextInput{stage: domain.StageVerify, kind: bug, attn: attnGate}, "g h b"},
 		// the trailing empty key is prpull, which nextActions appends for a
 		// linked card. It is not in the answer set — stageActions does not
 		// return it — but it still rides above the fold in the inventory.
-		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g b "},
+		{"verify linked lands on PR", nextInput{stage: domain.StageVerify, kind: feat, attn: attnGate, pullRequest: linkedRef}, "g h b "},
 	}
 	for _, c := range cases {
 		if got := keysOf(nextActions(c.in)); got != c.want {
@@ -240,6 +246,10 @@ func TestNextInputForAssembly(t *testing.T) {
 		// branch the card actually merges onto instead of the literal "main"
 		// (round 3 §5.2). An unattached Shell answers with the default name.
 		base: worktree.DefaultBaseBranchName,
+		// branch comes from the card's own record for the same reason: the
+		// hand-off row names the branch it keeps, and a sentence about a
+		// branch has to carry its name.
+		branch: row.F.BranchName(),
 	}
 	// undrafted is a slice (one blocker per blank section), so the struct
 	// no longer compares with ==; DeepEqual keeps the assembly pinned.
