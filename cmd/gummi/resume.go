@@ -104,7 +104,7 @@ type resumeFlagValues struct {
 func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 	return &resumeFlagValues{
 		answer:         fs.String("answer", "", "answer a delegated ask_user question"),
-		envelope:       fs.Int("envelope", 0, "raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)"),
+		envelope:       fs.Int("envelope", 0, "raise the credit budget before resuming (required to clear a stage that ran out; never lowers it)"),
 		approve:        fs.Bool("approve", false, "approve a caller design gate"),
 		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
 		bounce:         fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's `b` key)"),

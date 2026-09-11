@@ -277,7 +277,11 @@ func TestDeriveTitle(t *testing.T) {
 		{"Dark mode toggle", "Dark mode toggle"},
 		{"Add a healthz endpoint. It returns status and version.", "Add a healthz endpoint"},
 		{"  spaced   out   words  ", "spaced out words"},
-		{"Support idempotency keys on transfers so retried requests never double-charge the account", "Support idempotency keys on transfers so retried requests…"},
+		// an ordinary hand-written one-liner survives whole now: the cap
+		// was 60, which cut titles this shape in half (round 3 §3.3).
+		{"Support idempotency keys on transfers so retried requests never double-charge the account", "Support idempotency keys on transfers so retried requests never double-charge the account"},
+		// past the cap it still truncates on a word boundary, visibly
+		{"Support idempotency keys on transfers so retried requests never double-charge the account even when the upstream gateway replays them", "Support idempotency keys on transfers so retried requests never double-charge the account even when…"},
 		{"Bump to v1.2.3 across the board", "Bump to v1.2.3 across the board"},
 		{"", ""},
 	}

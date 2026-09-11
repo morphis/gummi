@@ -280,7 +280,7 @@ func TestIngestReportsProgress(t *testing.T) {
 		t.Errorf("tool/delta/thinking steps missing (tool=%v delta=%v thinking=%v): %+v",
 			sawTool, sawDelta, sawThinking, steps)
 	}
-	if last := steps[len(steps)-1]; last.Kind != IngestStepNote || !strings.Contains(last.Text, "2 feature(s)") {
+	if last := steps[len(steps)-1]; last.Kind != IngestStepNote || !strings.Contains(last.Text, "2 cards") {
 		t.Errorf("last step should be the proposal-received note, got %+v", last)
 	}
 }

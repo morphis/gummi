@@ -68,8 +68,16 @@ func TestInboxTabEnterJumpsToCard(t *testing.T) {
 	if !m.cardOpen {
 		t.Fatal("enter should open the card page — the decision is pinned there, not on the backlog row")
 	}
-	if m.inbox.len() != 0 {
-		t.Fatal("enter should clear the item it jumped to")
+	// The item SURVIVES the jump. It used to be cleared here, on the
+	// grounds that the card page pins the decision and so the queue row is
+	// redundant — true while the reader is on that page, false the moment
+	// they press esc. Round 3 §1.2 did exactly that with an unanswered
+	// question open and found the board row unmarked, the status bar saying
+	// "running" and the inbox saying "nothing needs you" while the agent
+	// sat blocked on a human. Reading is not answering; every kind has a
+	// real clearing path on the act itself, and x is still "not now".
+	if m.inbox.len() != 1 {
+		t.Fatal("enter should leave the item queued — jumping to a card is not answering it")
 	}
 }
 

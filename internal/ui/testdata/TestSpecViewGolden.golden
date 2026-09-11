@@ -2,14 +2,14 @@
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;255;96;255;1mFD-001[39;22m [38;2;247;246;251m· spec[39m                                                                                     [m
 [48;2;32;31;38m  [38;2;58;57;67m────────────────────────────────────────────────────────────────────────────[39m                      [m
-[48;2;32;31;38m  [38;2;191;188;200;1magent notes (non-blocking)[39;22m                                                                        [m
+[48;2;32;31;38m  [38;2;191;188;200;1mprompts the stages will answer — nothing waiting on you[39;22m                                           [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mwhat hurts today? who feels it?[38;2;96;95;107m  L5[39m                                                           [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mwhat this feature deliberately won't do — scope boundaries prevent gold-plating[38;2;96;95;107m  L9[39m           [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mat least two candidates, with tradeoffs[38;2;96;95;107m  L13[39m                                                  [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mconverge on one during the plan stage[38;2;96;95;107m  L17[39m                                                    [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mimplement checkpoints here — what's done, what's left, where to resume[38;2;96;95;107m  L23[39m                   [m
 [48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mreviewer findings land here; the implementer resolves each one[38;2;96;95;107m  L27[39m                           [m
-[48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mthe repo's build/test/lint commands land here as a gummi-checks block at approval (auto-…[38;2;96;95;107m  L31[m
+[48;2;32;31;38m  [38;2;232;254;150m  ☐ [38;2;191;188;200mthe repo's build/test/lint commands land here as a gummi-checks block at approval (…[38;2;96;95;107m  L31[39m     [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;107;80;255m▸[38;2;247;246;251;48;2;90;78;127m 1[39;48;2;32;31;38m  [38;2;255;96;255;1m# FD-001: Dark mode[39;22m                                                                          [m
 [48;2;32;31;38m   [38;2;96;95;107m 2[39m                                                                                               [m

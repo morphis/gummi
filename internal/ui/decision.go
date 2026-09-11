@@ -243,10 +243,24 @@ func askPickerOptions(ask *engine.Ask) []pickerOption {
 // actions. Selection state is explicit so neither caller has to fake the
 // other's model merely to reuse its renderer.
 // pickerQuestionLines caps how far a question may wrap onto its own
-// rows. Two is enough for the questions the guide actually poses, and a
-// cap is what stops a long one from eating the answers it is asking
-// about.
-const pickerQuestionLines = 2
+// rows. A cap is still what stops a long one from eating the answers it
+// is asking about; two was the wrong number for it.
+//
+// "Two is enough for the questions the guide actually poses" was this
+// constant's justification and it did not survive contact: all four
+// ask_user questions in round 3's drive overran it, and in three of them
+// what fell off the end was the actual question — the summary was on
+// screen and "Ready to move on to diagnosing the root cause?" was not,
+// along with the question mark. Nothing else carries the text either: the
+// inbox row is one line, pgup scrolls the transcript and leaves the pinned
+// block alone, and only the card_events row has it in full. A control
+// whose whole job is to ask something must be able to finish the sentence.
+//
+// Four is sized off those four questions (the longest needed three at 120
+// columns) with one row of slack, and it is still a cap — the options
+// underneath are what the reader cannot do without, and expandHighlighted
+// spends what is left on the selected one.
+const pickerQuestionLines = 4
 
 // pickerHead renders the control's opening rows: the title, with the
 // question beside it when it fits and beneath it when it does not.
@@ -368,7 +382,7 @@ func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, pi
 func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	switch kind {
 	case decisionBudget:
-		return string(r.F.Stage) + " reached its envelope."
+		return string(r.F.Stage) + " ran out of budget."
 	case decisionVerify:
 		if in.verdict == verdictPass {
 			// A research card has no branch, so there is nothing to land

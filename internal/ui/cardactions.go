@@ -229,7 +229,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		runWhy = fmt.Sprintf("follow the live agent stream — pid %d owns this run", r.Foreign.PID)
 	}
 
-	advanceLabel, advanceWhy := "advance", "move the card to its next stage"
+	advanceLabel, advanceWhy := "next stage", "move the card to its next stage"
 	if in.stage == domain.StageVerify {
 		advanceWhy = "approve — squash-merge the branch and land it on " + r.baseBranch()
 	}
@@ -281,11 +281,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// a word appearing nowhere else on its page. The id stays
 			// "spec": that is what the Shell switches on, not what a
 			// reader sees.
-			"spec", "s", artifactNoun(in.kind), "read or annotate the " + artifactNoun(in.kind) + " (tab toggles annotate)", false,
+			"spec", "s", artifactNoun(in.kind), "read or comment on the " + artifactNoun(in.kind) + " (tab toggles commenting)", false,
 			true,
 		},
 		{
-			"diff", "d", "diff", "read or annotate the diff (tab toggles annotate)", false,
+			"diff", "d", "diff", "read or comment on the diff (tab toggles commenting)", false,
 			needsWT,
 		},
 		{

@@ -530,7 +530,7 @@ func envelopeCheck() doctorCheck {
 		return doctorCheck{
 			Name: "budget", Status: statusWarn,
 			Detail:      fmt.Sprintf("GUMMI_ENVELOPE=%d is below one agent turn (~%d credits)", n, int(domain.TurnReserveCredits)),
-			Remediation: "raise it so stage budgets aren't floored at a single turn and overshoot the envelope",
+			Remediation: "raise it so stage budgets aren't floored at a single turn and overshoot the cap",
 		}
 	}
 	return doctorCheck{Name: "budget", Status: statusOK, Detail: fmt.Sprintf("spend budget: %d credits per run", n)}

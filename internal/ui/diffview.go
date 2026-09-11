@@ -334,9 +334,19 @@ func (m *Shell) handleDiffKey(key string) tea.Cmd {
 	case "D":
 		return m.deleteDiffAnnotation()
 	case "c":
-		m.Overlay.Push(newCommentDialog(func(text string) tea.Cmd {
+		m.Overlay.Push(newCommentDialog(dv.lineText(dv.cursor), func(text string) tea.Cmd {
 			return m.addDiffComment(text)
 		}))
 	}
 	return nil
+}
+
+// lineText is the unified diff's 1-based line n, trimmed, or "" when n is
+// out of range — the anchor the comment dialog shows, the same fact
+// specView.lineText reports for the artifact.
+func (dv *diffView) lineText(n int) string {
+	if dv == nil || n < 1 || n > len(dv.lines) {
+		return ""
+	}
+	return strings.TrimSpace(dv.lines[n-1])
 }

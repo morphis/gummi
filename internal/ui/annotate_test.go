@@ -69,8 +69,11 @@ func TestUserAnnotationBlocksSpecApproval(t *testing.T) {
 	if m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatalf("open user annotation did not block approval (stage=%s)", m.rows[0].F.Stage)
 	}
-	if !strings.Contains(m.notice.text, "open question") {
-		t.Errorf("notice = %q, want a blocking message", m.notice.text)
+	// "open comment", not "open question": the artifact's own word for these
+	// is comment everywhere else on screen, and the notice now names the key
+	// that can actually clear a @user marker (round 3 §1.4).
+	if !strings.Contains(m.notice.text, "open comment") || !strings.Contains(m.notice.text, "x resolves one") {
+		t.Errorf("notice = %q, want a blocking message naming x", m.notice.text)
 	}
 
 	// resolve it, then approval proceeds
@@ -144,8 +147,11 @@ func TestUserAnnotationBlocksWorkStageGate(t *testing.T) {
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("open user annotation did not block the work gate (stage=%s)", m.rows[0].F.Stage)
 	}
-	if !strings.Contains(m.notice.text, "open question") {
-		t.Errorf("notice = %q, want a blocking message", m.notice.text)
+	// "open comment", not "open question": the artifact's own word for these
+	// is comment everywhere else on screen, and the notice now names the key
+	// that can actually clear a @user marker (round 3 §1.4).
+	if !strings.Contains(m.notice.text, "open comment") || !strings.Contains(m.notice.text, "x resolves one") {
+		t.Errorf("notice = %q, want a blocking message naming x", m.notice.text)
 	}
 
 	// resolve it, then the gate opens

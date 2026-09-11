@@ -65,7 +65,7 @@ type Shell struct {
 	// through baseBranch, never directly — a missing entry has to answer
 	// with a name.
 	baseBranches map[string]string
-	ws    state.Workspace
+	ws           state.Workspace
 
 	rows []featureRow
 	sel  int
@@ -510,6 +510,21 @@ func (m *Shell) baseBranch(f domain.Feature) string {
 	return worktree.DefaultBaseBranchName
 }
 
+// baseBranchOf is baseBranch keyed by card id, for the callers that hold
+// an id rather than a Feature. It reads the card's repo off the loaded
+// row when there is one and otherwise answers for the default repository,
+// which is the right answer in the single-repo workspace that is the
+// common case and a safe one elsewhere: the alternative these callers had
+// was the literal "main".
+func (m *Shell) baseBranchOf(id domain.FeatureID) string {
+	for _, r := range m.rows {
+		if r.F.ID == id {
+			return m.baseBranch(r.F)
+		}
+	}
+	return m.baseBranch(domain.Feature{})
+}
+
 // cardLocked runs fn holding the card's lock for its whole duration, so a
 // git verb this board runs can't interleave with a headless
 // run/resume/merge/clean of the same card (each of which takes the very
@@ -715,7 +730,7 @@ func (m *Shell) reconstructInbox() {
 			// claiming a result nothing recorded.
 			m.inbox.seed(attnItem{
 				Feature: id, Kind: attnGate,
-				Text: gateReason(snap.Feature.Stage, id.Kind(), !snap.Feature.VerifiedAt.IsZero()),
+				Text: gateReason(snap.Feature.Stage, id.Kind(), !snap.Feature.VerifiedAt.IsZero(), m.baseBranch(snap.Feature)),
 			})
 		}
 	}
@@ -1298,7 +1313,7 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// is dead for this call. It is false rather than true so that if
 		// that ever stops being true, the wording degrades to "verify
 		// finished" instead of silently asserting a pass.
-		text := gateReason(ev.Stage, ev.Feature.Kind(), false)
+		text := gateReason(ev.Stage, ev.Feature.Kind(), false, m.baseBranchOf(ev.Feature))
 		if cmd, attempted := m.autopilotCrossGate(s.Snapshot().Feature, text); attempted {
 			return cmd
 		}
@@ -1757,7 +1772,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.blended == 0 {
 			return m, nil
 		}
-		m.notice = noticeMsg{text: fmt.Sprintf("%s: scribe sized the envelope at %d credits", msg.id, msg.blended), reload: true}
+		m.notice = noticeMsg{text: fmt.Sprintf("%s: scribe sized the budget at %d credits", msg.id, msg.blended), reload: true}
 		return m, m.loadRows
 
 	case baselineDoneMsg:
@@ -1816,6 +1831,21 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if line, ok := spec.HeadingLine(msg.content, want); ok {
 			sv.cursor = line
+		}
+		// A SHUT GATE OUTRANKS THE STAGE'S OWN SECTION. When the artifact
+		// carries open @user comments, those comments are the reason the
+		// card cannot move and the reason the reader was sent here — the
+		// decision block's only row says so ("resolve open comments — N
+		// open … x resolves one"). Landing on the stage's heading instead
+		// dropped the reader mid-document with the blockers off-screen at
+		// L76 and L105, reachable only by walking n through every
+		// resolution and template placeholder between (round 3 §3.5: seven
+		// presses to reach the first one). A citation still wins — that is
+		// a place the reader asked for by name.
+		if !jumped {
+			if line, ok := firstBlockingComment(sv); ok {
+				sv.cursor = line
+			}
 		}
 		if m.spec != nil && m.spec.path == msg.path && !jumped {
 			// reload in place: keep the cursor, clamped in case the doc
@@ -2259,7 +2289,7 @@ func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
 	}
 	return tea.Batch(
 		m.resumeCard(f),
-		func() tea.Msg { return noticeMsg{text: string(id) + ": envelope raised — resuming", reload: true} },
+		func() tea.Msg { return noticeMsg{text: string(id) + ": budget raised — resuming", reload: true} },
 	)
 }
 
@@ -3506,7 +3536,7 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: string(id) + " topped up — resuming", reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s topped up — envelope raised to %d credits, resuming",
+		return noticeMsg{text: fmt.Sprintf("%s topped up — budget raised to %d credits, resuming",
 			id, f.Budget.Envelope), reload: true}
 	}
 }
@@ -3542,9 +3572,9 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		if to == 0 {
-			return noticeMsg{text: string(id) + ": envelope removed — spend is uncapped", reload: true}
+			return noticeMsg{text: string(id) + ": budget removed — spend is uncapped", reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: envelope set to %d credits (applies from the next agent session)", id, to), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s: budget set to %d credits (applies from the next agent session)", id, to), reload: true}
 	}
 }
 
@@ -3703,7 +3733,13 @@ func (m *Shell) statusView(w int) string {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " squashing", Kind: statusbar.KindNeutral})
 	}
 	if n := m.inbox.len(); n > 0 {
-		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + " need you", Kind: statusbar.KindAlert})
+		// agrees with its own count: "✉ 1 need you" was on the most-read
+		// line on screen (round 3 §5.5).
+		need := " need you"
+		if n == 1 {
+			need = " needs you"
+		}
+		pills = append(pills, statusbar.Pill{Text: "✉ " + strconv.Itoa(n) + need, Kind: statusbar.KindAlert})
 	}
 	if m.notice.text != "" && !m.noticeInBand() {
 		kind := statusbar.KindNeutral

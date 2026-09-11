@@ -368,8 +368,18 @@ const (
 	promptChosen       = "%% @gummi: converge on one during the plan stage"
 	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
 	promptReview       = "%% @gummi: reviewer findings land here; the implementer resolves each one"
-	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered and baselined); add the feature-specific live checks that prove this works — tag steps that can't run in the local worktree with [CI-only] or [env: <prereq>]"
+	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered and baselined)" + checksShape + "; add the feature-specific live checks that prove this works — tag steps that can't run in the local worktree with [CI-only] or [env: <prereq>]"
 )
+
+// checksShape spells the gummi-checks entry format for the roles that
+// WRITE the block, not just the one that first discovers it. The schema
+// example used to live only in engine's discoverPrompt, which the scribe
+// reads; an architect asked to revise the checks (what a review comment
+// about them provokes) had never been shown a shape and wrote a plain
+// YAML list of command strings, which does not parse — round 3 §1.5, where
+// the malformed block then let the card through approval with no baseline
+// at all. Both section prompts below carry it now.
+const checksShape = " — each entry is `- name: <short name>` with `cmd: <command>` on the next line"
 
 // Template renders the initial (blank) spec draft for a feature.
 func Template(f *domain.Feature) string {
@@ -511,8 +521,8 @@ const (
 	promptBugReview    = "%% @gummi: reviewer findings land here; the fix addresses each one"
 	// The verify contract for a bug: the deterministic quality floor plus
 	// the bug-specific proof (repro gone + regression test).
-	promptBugVerify = "%% @gummi: the discovered gummi-checks commands always run. The reproduction " +
-		"above must no longer reproduce, and a regression test must lock the fix in."
+	promptBugVerify = "%% @gummi: the discovered gummi-checks commands always run" + checksShape +
+		". The reproduction above must no longer reproduce, and a regression test must lock the fix in."
 )
 
 // BugTemplate renders the initial (blank) bug report for a bug.

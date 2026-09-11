@@ -558,7 +558,10 @@ func TestEstimateEnvelopeFromHistory(t *testing.T) {
 		t.Fatalf("estimate: envelope=%d credits=%d samples=%d, want 150/150/1", f.Budget.Envelope, credits, samples)
 	}
 	notice := (AdvanceResult{EstimatedCredits: credits, EstimateSamples: samples}).EstimateNotice()
-	if want := " · envelope estimated at 150 credits from 1 metered feature(s)"; notice != want {
+	// "budget", and "card" agreeing with its count: this line is read at
+	// every spec approval and carried both of round 2's leftovers (round 3
+	// §5.1, §5.5).
+	if want := " · budget estimated at 150 credits from 1 metered card"; notice != want {
 		t.Fatalf("notice = %q, want %q", notice, want)
 	}
 	if got, _ := store.GetFeature(ctx, f.ID); got.Budget.Envelope != 150 {

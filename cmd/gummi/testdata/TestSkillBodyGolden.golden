@@ -92,7 +92,7 @@ gummi resume <id|ref> [decision]
     --approve                 approve a caller design gate
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --bounce                  rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)
-    --envelope int            raise the credit envelope before resuming (required to clear an exhausted stage; never lowers it)
+    --envelope int            raise the credit budget before resuming (required to clear a stage that ran out; never lowers it)
     --gate-approval string    who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)
     --note string             addendum to the reborn stage's kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
@@ -170,7 +170,7 @@ and exits with a **typed status**. Branch on the exit code:
 | 2 | `question` | a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>` |
 | 3 | `blocked` | open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back |
 | 4 | `escalation` | rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage. A verify-fail (or review cap-hit) carries `next: resume <id> --bounce --note "<why>"`, which rewinds the feature to implement/fix and drives review→verify again |
-| 5 | `exhausted` | credit envelope dry — `resume <id> --envelope N` (N larger than the dry envelope) raises it and continues |
+| 5 | `exhausted` | credit budget dry — `resume <id> --envelope N` (N larger than the dry budget) raises it and continues |
 | 6 | `timeout` | a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage |
 
 **Capture that exit code directly — never through a pipe.** `gummi run … | tee

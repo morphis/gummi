@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // The verdict grammar — the type, both regexes, parse, the session
@@ -102,7 +103,7 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	var stamp tea.Cmd
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
-		m.raiseAttention(id, attnGate, gateReason(domain.StageVerify, id.Kind(), true))
+		m.raiseAttention(id, attnGate, gateReason(domain.StageVerify, id.Kind(), true, m.baseBranchOf(id)))
 		// The excused-checks cache is otherwise filled on a board load, so
 		// the frame that first says "verify passed" — the one most likely
 		// to be read, because it is the one that just changed — was the
@@ -474,9 +475,9 @@ func ordinal(n int) string {
 // It stays short on purpose — inboxview's rows spend their width on this
 // text, and inboxRowText trims the leading stage word the row's own label
 // has already printed, so every wording here keeps the stage first.
-func gateReason(stage domain.Stage, k domain.Kind, verifyPassed bool) string {
+func gateReason(stage domain.Stage, k domain.Kind, verifyPassed bool, base string) string {
 	if stage == domain.StageVerify {
-		return verifyGateReason(k, verifyPassed)
+		return verifyGateReason(k, verifyPassed, base)
 	}
 	return string(stage) + " finished — review & advance"
 }
@@ -502,7 +503,7 @@ func gateReason(stage domain.Stage, k domain.Kind, verifyPassed bool) string {
 // rejected — worse than the vague wording this replaced. So the outcome
 // word is the caller's to supply, while the act ("land on main") is
 // unconditional, which is the half the reader was missing.
-func verifyGateReason(k domain.Kind, passed bool) string {
+func verifyGateReason(k domain.Kind, passed bool, base string) string {
 	lead := "verify finished"
 	if passed {
 		lead = "verify passed"
@@ -510,7 +511,14 @@ func verifyGateReason(k domain.Kind, passed bool) string {
 	if k == domain.KindResearch {
 		return lead + " — review & mark it done"
 	}
-	return lead + " — review & land on main"
+	// base, not the literal "main". This row is the inbox's half of the
+	// landing gate, and round 3 drove a `master` repo where it read
+	// "review & land on main" beside a help overlay and a merge dialog
+	// that both said master (§5.2). Empty only from a test scaffold.
+	if base == "" {
+		base = worktree.DefaultBaseBranchName
+	}
+	return lead + " — review & land on " + base
 }
 
 // forwardEdge is the primary forward stage out of f's current stage — the

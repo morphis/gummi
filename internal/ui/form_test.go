@@ -287,8 +287,8 @@ func TestCardFormBecomesLine(t *testing.T) {
 	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "becomes  BG (bug) · Login loops") {
 		t.Errorf("becomes line missing:\n%s", v)
 	}
-	form.SetText("tally count reports one character too many when a file has no trailing newline")
-	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "becomes  BG (bug) · tally count reports one character too many when a file has…") {
+	form.SetText("tally count reports one character too many when a file has no trailing newline and the operator was hoping for a number they could actually reconcile against the ledger")
+	if v := ansi.Strip(form.View(s, 120, 30)); !strings.Contains(v, "becomes  BG (bug) · tally count reports one character too many when a file has no trailing newline and the operator was…") {
 		t.Errorf("becomes line does not show the truncated title with its ellipsis:\n%s", v)
 	}
 	form.SetText("???")

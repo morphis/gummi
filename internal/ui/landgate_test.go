@@ -22,7 +22,7 @@ func verifyMergeFixture(t *testing.T) *Shell {
 	m = pump(t, m, m.loadRows)
 	m.inbox.put(attnItem{
 		Feature: "FD-001", Kind: attnGate,
-		Text: gateReason(domain.StageVerify, domain.KindFeature, true),
+		Text: gateReason(domain.StageVerify, domain.KindFeature, true, ""),
 	})
 	return m
 }

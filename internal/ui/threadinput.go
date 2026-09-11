@@ -1063,7 +1063,7 @@ func (m *Shell) threadInputBindings() []binding {
 				}
 			}
 			bs := []binding{
-				{key: "↑↓", label: "choose", help: "move through the open decision — ↑ off the top opens the action inventory (dependencies, envelope, duplicate, delete, repo, rebase, auto-approve-gates…)", bar: true},
+				{key: "↑↓", label: "choose", help: "move through the open decision — ↑ off the top opens the action inventory (dependencies, budget, duplicate, delete, repo, rebase, auto-approve-gates…)", bar: true},
 				{key: "1-9", label: "choose", help: "jump the highlight straight to that option — still just selects; enter commits"},
 				// sticky (F15): this row names what enter actually commits —
 				// an option label that can read "start the architect", an

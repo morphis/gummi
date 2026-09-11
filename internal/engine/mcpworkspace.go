@@ -667,7 +667,7 @@ func consultTools() []agent.ToolDef {
 func consultStatusTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: cardStatusToolName,
-		Description: "Read-only snapshot of this card: stage, branch state, spend/envelope, " +
+		Description: "Read-only snapshot of this card: stage, branch state, spend/budget, " +
 			"verified/done/running flags, and open gate blockers (unanswered spec questions, " +
 			"unresolved diff comments). Returns a JSON object. Always answers for the one card " +
 			"this conversation is bound to — there is no id to name a different one.",
@@ -731,7 +731,7 @@ func boardListTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: boardListToolName,
 		Description: "List every card in this workspace's backlog: id, kind, title, stage, " +
-			"spend/envelope, and whether it is verified or done. Returns a JSON array. Use this " +
+			"spend/budget, and whether it is verified or done. Returns a JSON array. Use this " +
 			"to see what exists before acting on a specific card.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{}},
 	}
@@ -740,7 +740,7 @@ func boardListTool() agent.ToolDef {
 func cardStatusTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: cardStatusToolName,
-		Description: "Read-only snapshot of one card: stage, branch state, spend/envelope, " +
+		Description: "Read-only snapshot of one card: stage, branch state, spend/budget, " +
 			"verified/done/running flags, and open gate blockers (unanswered spec questions, " +
 			"unresolved diff comments). Returns a JSON object. Takes no lock — safe to poll a " +
 			"card this process, or another gummi process, is actively driving.",
@@ -807,7 +807,7 @@ func cardRunTool() agent.ToolDef {
 func cardResumeTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: cardResumeToolName,
-		Description: "Resume a parked autonomous stage (after a timeout or an exhausted-envelope " +
+		Description: "Resume a parked autonomous stage (after a timeout or an exhausted-budget " +
 			"pause) in THIS gummi process — same caveats as card_run. note, if given, is appended " +
 			"to the fresh session's kickoff so it starts by addressing it.",
 		Parameters: map[string]any{
@@ -837,7 +837,7 @@ func cardNewTool() agent.ToolDef {
 				"kind":        map[string]any{"type": "string", "description": "One of feature, bug, research."},
 				"description": map[string]any{"type": "string", "description": "Free-form description. The first line becomes the title; anything beyond it seeds the design draft."},
 				"profile":     map[string]any{"type": "string", "description": "Optional model-role profile (workspace default if omitted)."},
-				"envelope":    map[string]any{"type": "integer", "description": "Optional credit envelope; omit or 0 for no cap."},
+				"envelope":    map[string]any{"type": "integer", "description": "Optional credit budget; omit or 0 for no cap."},
 				"repo":        map[string]any{"type": "string", "description": "Optional configured repo name (workspace default if omitted)."},
 				"gate_approval": map[string]any{
 					"type":        "string",

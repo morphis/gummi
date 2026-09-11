@@ -57,14 +57,28 @@ func inboxOldestFirst(items []attnItem) []attnItem {
 	return sorted
 }
 
-// inboxJump switches to the board tab with the named feature selected,
-// clears its attention item, and opens the card page: the decision is
-// pinned above the composer there (decision.go's openDecisionBlock), so
-// opening the page is opening the card at its decision — the inbox dialog's
-// old onJump callback (openInbox, pre-tab), now called directly by the
-// tab's own enter handler instead of through a pushed-dialog closure.
+// inboxJump switches to the board tab with the named feature selected and
+// opens the card page: the decision is pinned above the composer there
+// (decision.go's openDecisionBlock), so opening the page is opening the
+// card at its decision — the inbox dialog's old onJump callback (openInbox,
+// pre-tab), now called directly by the tab's own enter handler instead of
+// through a pushed-dialog closure.
+//
+// It does NOT clear the attention item. It used to, on the grounds that the
+// pinned decision makes the queue row redundant — true while the reader is
+// on the page, false the moment they press esc. Round 3 §1.2 walked it:
+// enter on an unanswered question, read it, esc to think about it, and the
+// board row carried no marker, the status bar said "running" and the inbox
+// said "nothing needs you" while the agent sat blocked on a human. That is
+// verbatim the state shell.go's EventAsk arm says must never happen; that
+// fix closed the raise path and this one reopened it a keypress later.
+//
+// Reading a question is not answering it, and every kind has a real clearing
+// path already — a gate on Advance (msgs.go), a question on the answer
+// (decision.go), a budget on the top-up (shell.go's topUpBudget), a failure
+// on the retry — so the row now survives until the thing it is asking about
+// is actually done. x is still there for "not now".
 func (m *Shell) inboxJump(id domain.FeatureID) tea.Cmd {
-	m.inbox.remove(id)
 	m.setTab(TabBoard)
 	for i, r := range m.rows {
 		if r.F.ID == id {
@@ -112,6 +126,47 @@ func (m *Shell) inboxKey(key string) tea.Cmd {
 		if m.inboxSel < len(items) && items[m.inboxSel].Kind == attnBudget {
 			return m.topUpBudget(items[m.inboxSel].Feature)
 		}
+	default:
+		return m.inboxSuggestedKey(key, items)
+	}
+	return nil
+}
+
+// inboxSuggestedKey runs the selected row's own suggested action when the
+// key pressed is the key that row advertises.
+//
+// The ↳ line under the selected row is rendered from the same nextAction
+// the card page builds, key column included — "g approve — moves the card
+// into implement", "g land on main — verify passed". Those keys worked on
+// the card page and nowhere else, so the inbox spent a line telling the
+// reader to press something that did nothing at all: no movement, no
+// notice, not even a refusal (round 3 §2.1). Rather than strip the key
+// from the hint — it is the most useful thing on the row — the surface
+// now honours whatever it printed, by construction: the same suggestFor
+// the renderer reads decides what the key does, so the two cannot drift.
+//
+// The card is selected first because runCardAction (boardactions.go)
+// works against the board's selection, the way it does when the same row
+// is activated from the card page.
+func (m *Shell) inboxSuggestedKey(key string, items []attnItem) tea.Cmd {
+	if key == "" || m.inboxSel >= len(items) {
+		return nil
+	}
+	id := items[m.inboxSel].Feature
+	acts := m.suggestFor(id)
+	if len(acts) == 0 || acts[0].key != key {
+		return nil
+	}
+	for i, r := range m.rows {
+		if r.F.ID != id {
+			continue
+		}
+		m.sel = i
+		m.syncActionFocus()
+		a := acts[0]
+		return m.runCardAction(cardAction{
+			id: a.id, key: a.key, label: a.label, why: a.detail, danger: a.danger,
+		})
 	}
 	return nil
 }
@@ -124,7 +179,7 @@ func (m *Shell) inboxBindings() []binding {
 		{key: "j/k ↓↑", label: "select", help: "select item", bar: true},
 		{key: "enter", label: "go", help: "open the card at its decision, clearing this item", bar: true},
 		{key: "x", label: "dismiss", help: "clear this item without acting on it", bar: true},
-		{key: "u", label: "top up", help: "raise the envelope and resume (budget items only)"},
+		{key: "u", label: "top up", help: "raise the budget and resume (budget items only)"},
 		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
 		{key: "i", label: "inbox", help: "stay on the needs-attention queue"},
 		// The inbox is a tab, not a modal, so cycling away IS its way out —

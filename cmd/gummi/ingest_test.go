@@ -23,11 +23,11 @@ func TestRenderProposalFlagsUnmapped(t *testing.T) {
 	renderProposal(&b, res)
 	out := b.String()
 	for _, want := range []string{
-		"Proposed 2 feature(s)",
+		"Proposed 2 cards",
 		"1. Auth",
 		"from: Security",
 		"needs: Auth",
-		"1 open question(s)",
+		"1 open comment",
 		"Coverage: 1 mapped · 1 out-of-scope · 1 unmapped",
 		"! UNMAPPED: gdpr export — unclear owner",
 	} {

@@ -119,9 +119,13 @@ func (m *Shell) globalCommands() []command {
 		{id: "G", name: "import", label: "Import a GitHub issue as a bug", key: "G", available: attached && m.engine != nil},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
-		{id: "board-profile", name: "profile", label: "Switch the board's profile", key: "", available: attached && m.engine != nil},
-		{id: "board-model", name: "model", label: "Switch the board's model", key: "", available: attached && m.engine != nil},
-		{id: "?", name: "keys", label: "Show the keys for this surface", key: "?", available: true},
+		// Named for what they actually change. "Switch the board's
+		// profile/model" reads as the default for new cards; it is the agent
+		// TAB's own chat session, and picking either silently jumped there
+		// (round 3 §5.5).
+		{id: "board-profile", name: "profile", label: "Switch the agent tab's profile", key: "", available: attached && m.engine != nil},
+		{id: "board-model", name: "model", label: "Switch the agent tab's model", key: "", available: attached && m.engine != nil},
+		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},
 	}
 	if m.cardOpen {
@@ -195,6 +199,23 @@ func (m *Shell) cardCommands(existing []command) []command {
 		out = append(out, command{id: id, alias: cardCommandNames[a.id], label: a.label, key: a.key, available: true})
 	}
 	return out
+}
+
+// helpKeyFor names the key that actually opens the help table on the
+// surface the reader is looking at.
+//
+// The card page's composer owns every printable key, so ? types a "?"
+// there and the chord is alt+/ — which the card table's own last row says
+// ("alt+/  this table — ? types here rather than opening help"). The menu
+// row advertised ? regardless, so on the one surface where help is hardest
+// to find, the only thing pointing at it named a key that does nothing,
+// and the right key was documented exclusively inside the table you needed
+// it to reach (round 3 §2.3).
+func helpKeyFor(cardOpen bool) string {
+	if cardOpen {
+		return "alt+/"
+	}
+	return "?"
 }
 
 // runCommand is the space menu's invoke path. q and ? are answered by
@@ -291,6 +312,19 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// the newly revealed actions start one ↓ away.
 		m.actionsExpanded = !m.actionsExpanded
 		return nil
+	case "topup":
+		// A budget stop offers exactly two rows — this one and "stop
+		// here" — so an id this switch does not know is not a missing
+		// convenience, it is the card page having no way forward at all
+		// (round 3 §1.1: enter on the only forward row did nothing, twice,
+		// with no notice). The row is keyless by construction
+		// (nextsteps.go's attnBudget arm), so the a.key shortcut above
+		// cannot catch it either; runCommand carries the same case for the
+		// space menu, and both route to the one act (shell.go's
+		// topUpBudget) the inbox's u performs.
+		if r, ok := m.selected(); ok {
+			return m.topUpBudget(r.F.ID)
+		}
 	case "duplicate":
 		return m.confirmDuplicate()
 	case "profile":

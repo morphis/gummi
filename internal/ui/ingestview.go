@@ -238,7 +238,7 @@ func (m *Shell) approveIngest() tea.Cmd {
 		id:           "confirm-ingest",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Materialize",
-		question:     fmt.Sprintf("materialize %d feature(s) into todo?", n),
+		question:     fmt.Sprintf("create %d card%s in todo?", n, plural(n)),
 		detail:       detail,
 		onConfirm:    m.materializeIngest,
 	})
@@ -262,7 +262,7 @@ func (m *Shell) materializeIngest() tea.Cmd {
 			if err != nil {
 				return noticeMsg{text: "decompose: " + sanitize(err.Error()), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("minted %d feature(s) from %s's decomposition", len(created), cardID), reload: true}
+			return noticeMsg{text: fmt.Sprintf("created %d card%s from %s", len(created), plural(len(created)), cardID), reload: true}
 		}
 	}
 	opts := engine.MaterializeOpts{Profile: iv.profile, Envelope: iv.envelope, Repo: iv.repo}
@@ -271,7 +271,7 @@ func (m *Shell) materializeIngest() tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: "ingest: " + sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("ingested %d feature(s) into todo", len(created)), reload: true}
+		return noticeMsg{text: fmt.Sprintf("created %d card%s in todo", len(created), plural(len(created))), reload: true}
 	}
 }
 

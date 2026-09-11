@@ -12,7 +12,7 @@ import (
 // flags). With no subcommand the root launches the TUI board, preserving
 // the default behavior of the old hand-rolled dispatch.
 var rootCmd = &cobra.Command{
-	Use:   "gummi",
+	Use: "gummi",
 	// "Meta-harness" was the Short line for a long time. It is what gummi
 	// is to the people who build it and nothing at all to someone typing
 	// --help for the first time, and the Long text pointed at a design-doc

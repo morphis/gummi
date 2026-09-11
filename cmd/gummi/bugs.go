@@ -187,7 +187,7 @@ func runBugIngest(args []string) error {
 	}
 
 	if !*f.yes {
-		if !confirm(os.Stdin, os.Stdout, fmt.Sprintf("Materialize %d bug(s) into todo?", len(res.Proposals))) {
+		if !confirm(os.Stdin, os.Stdout, fmt.Sprintf("Create %d bug%s in todo?", len(res.Proposals), cardPlural(len(res.Proposals)))) {
 			fmt.Println("Aborted — nothing created.")
 			return nil
 		}
@@ -319,7 +319,7 @@ func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal
 		return fmt.Errorf("materialize (created %d before failing): %w", len(created), err)
 	}
 	if len(created) > 0 {
-		fmt.Printf("Created %d bug(s) in todo. Open gummi to run them.\n", len(created))
+		fmt.Printf("Created %d bug%s in todo. Open gummi to run them.\n", len(created), cardPlural(len(created)))
 	}
 	return nil
 }
@@ -327,7 +327,7 @@ func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal
 // renderBugProposals prints the fresh proposals and a note of any skipped
 // (already-imported) ones, so a re-ingest shows what it already had.
 func renderBugProposals(w io.Writer, res engine.BugIngestResult) {
-	fmt.Fprintf(w, "\nProposed %d bug(s):\n", len(res.Proposals))
+	fmt.Fprintf(w, "\nProposed %d bug%s:\n", len(res.Proposals), cardPlural(len(res.Proposals)))
 	for i, p := range res.Proposals {
 		fmt.Fprintf(w, "\n  %2d. %s\n", i+1, clean(p.Title))
 		if p.OneLiner != "" {

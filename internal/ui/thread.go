@@ -982,13 +982,27 @@ func autopilotLabel(mode string) string {
 // the card's current stage belongs to — the plan critique loop at Plan,
 // the shared review→fix loop everywhere else a round has been burned.
 // Empty once nothing has run yet.
+//
+// It NAMES ITS LOOP, for the reason correctiveLabel's doc comment gives
+// and then only half-applied: "two unlabelled badges of the same shape
+// side by side would be two numbers nobody could tell apart". Labelling
+// one of the two does not tell a reader what the other one is, and round 3
+// put them on the masthead together —
+//
+//	⟲ 1 of 3   ⟲ 3 of 5 corrective rounds
+//
+// — with a third number ("reworking (round 1)") in the status bar under
+// them and a help legend that has one ⟲ entry describing only one of the
+// two. The denominator also changes silently from maxPlanRounds to
+// maxReviewRounds as the card crosses into implement, which is only
+// legible once the badge says which loop it is counting.
 func roundLabel(m *Shell, f domain.Feature) string {
-	kind, roundCap := domain.RoundKindReview, maxReviewRounds
+	kind, roundCap, loop := domain.RoundKindReview, maxReviewRounds, "review rounds"
 	if f.Stage == domain.StagePlan {
-		kind, roundCap = domain.RoundKindPlan, maxPlanRounds
+		kind, roundCap, loop = domain.RoundKindPlan, maxPlanRounds, "plan rounds"
 	}
 	if n := m.round(f.ID, kind); n > 0 {
-		return "⟲ " + itoa(n) + " of " + itoa(roundCap)
+		return "⟲ " + itoa(n) + " of " + itoa(roundCap) + " " + loop
 	}
 	return ""
 }

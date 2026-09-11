@@ -246,8 +246,10 @@ func TestPickBindings(t *testing.T) {
 	m = openDepsPick(t, m)
 
 	name, bs := m.activeSurface()
-	if name != "deps" {
-		t.Fatalf("activeSurface = %q, want deps", name)
+	// "dependencies", not "deps" — the picker's own heading and badge
+	// stopped abbreviating (round 3 §5.5) and the help title follows.
+	if name != "dependencies" {
+		t.Fatalf("activeSurface = %q, want dependencies", name)
 	}
 	has := func(key string) bool {
 		for _, b := range bs {

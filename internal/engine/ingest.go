@@ -160,7 +160,7 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile, repo string, p
 	if err != nil {
 		return domain.IngestResult{}, err
 	}
-	emit(IngestStepNote, fmt.Sprintf("proposal received — %d feature(s)", len(res.Proposals)))
+	emit(IngestStepNote, fmt.Sprintf("proposal received — %d card%s", len(res.Proposals), cardPlural(len(res.Proposals))))
 	res.SourcePath = relPath
 	return res, nil
 }

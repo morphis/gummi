@@ -75,7 +75,7 @@ func (m *Shell) activeSurface() (string, []binding) {
 	case live && m.bugIngest != nil:
 		return "import bugs", m.bugIngest.bindings()
 	case live && m.deps != nil:
-		return "deps", m.deps.bindings()
+		return "dependencies", m.deps.bindings()
 	case live && m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
 	// the inbox and agent tabs own the main pane whenever they're active.
@@ -144,11 +144,36 @@ func (m *Shell) agentBindings() []binding {
 // ordinary punctuation the user is trying to type. Those are exactly the
 // surfaces whose key rules are least guessable, so leaving them with no
 // route to their own table was the worst place to leave one.
+// bar: true, so the row reaches the STATUS BAR and not only the table it
+// describes. Without it the card page offered no route to help anywhere on
+// screen: ? types into the composer, the bar never named an alternative,
+// and the space menu's "Show the keys for this surface" row advertised ? —
+// so alt+/ was documented in exactly one place, the last row of the table
+// you needed it to open (round 3 §2.3). It goes last in the table, which
+// is what makes it the first hint the bar sheds when it is tight
+// (statusbar.Render drops from the second-to-last backwards): help earns a
+// slot when there is room, never at the cost of what enter does.
 func withHelpKey(bs []binding) []binding {
-	return append(bs, binding{
+	help := binding{
 		key: "alt+/", label: "help",
 		help: "this table — ? types here rather than opening help",
-	})
+		bar:  true,
+	}
+	if len(bs) == 0 {
+		return []binding{help}
+	}
+	// SPLICED ABOVE THE LAST ROW, not appended after it — withCardTabs'
+	// convention, for withCardTabs' reason. Every table here ends with its
+	// way out, and the status bar sheds hints from the second-to-last
+	// backwards precisely so that row outlives the rest. Appending help
+	// made IT last and pushed esc into the first slot to be dropped: the
+	// card page's bar went from "… · esc board" to "… · alt+/ help" with
+	// no way out named at all. Second-to-last is the right place for help
+	// anyway — it is the first thing a tight bar should give up.
+	out := make([]binding, 0, len(bs)+1)
+	out = append(out, bs[:len(bs)-1]...)
+	out = append(out, help)
+	return append(out, bs[len(bs)-1])
 }
 
 // helpOverlay builds the ? dialog for whichever surface is active.
@@ -250,7 +275,7 @@ func boardHelpRows(bs []binding) [][2]string {
 	heading("glyphs")
 	rows = append(rows, boardGlyphLegend()...)
 	rows = append(rows,
-		[2]string{"⟲", "corrective rounds burned so far on the current loop"},
+		[2]string{"⟲", "rounds burned so far — the badge names which loop it counts (plan, review, or corrective)"},
 		[2]string{"~", "estimated — not yet the metered spend"},
 	)
 	return rows
@@ -274,7 +299,12 @@ func (m *Shell) boardBindings() []binding {
 	enter := binding{key: "enter", label: "chat", help: "chat (brainstorm/spec) · run (autonomous)", bar: true}
 	pause := binding{key: "p", label: "pause", help: "pause the running agent; else open the dependency picker"}
 	peek := binding{key: "t", label: "open", help: "open the card's thread without starting or attaching anything"}
-	advance := binding{key: "g", label: "advance", help: "move the card to its next stage", bar: true}
+	// "next stage", not "advance". g wore four names at once — "advance" in
+	// the board footer, the action inventory and the slash menu, "approve" in
+	// the artifact and diff footers, "land on <base>" in the decision block —
+	// and this table's own help row was the only place that said it in words
+	// (round 3 §5.3). The label now says what the help says.
+	advance := binding{key: "g", label: "next stage", help: "move the card to its next stage", bar: true}
 	if r, ok := m.selected(); ok && r.F.Stage == domain.StageVerify {
 		advance.help = "approve — squash-merge the branch and land it on " + base
 	}

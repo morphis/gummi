@@ -290,7 +290,7 @@ func (m *Shell) depPickerView(w, h int) string {
 	s := m.styles
 	var b strings.Builder
 	head := s.Title.Render("dependencies") + " " + s.Base.Render("· "+string(dp.f.ID)) +
-		"  " + s.Pill.Render(fmt.Sprintf("%d deps", dp.attachedCount()))
+		"  " + s.Pill.Render(dependencyCount(dp.attachedCount()))
 	b.WriteString("\n" + head + "\n")
 	b.WriteString(s.Separator.Render(strings.Repeat("─", max(min(w, 76), 0))) + "\n")
 
@@ -403,4 +403,14 @@ func depOutcome(c depCandidate) string {
 		return "press x to remove this dependency"
 	}
 	return ""
+}
+
+// dependencyCount spells the picker's own badge. "deps" is gummi's
+// shorthand, not a word, and "1 deps" is not English either — round 3 §5.5
+// caught both on the same pill.
+func dependencyCount(n int) string {
+	if n == 1 {
+		return "1 dependency"
+	}
+	return itoa(n) + " dependencies"
 }

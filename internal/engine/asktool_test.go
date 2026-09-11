@@ -240,8 +240,17 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "%% @user(2026-07-04): answered \"no such line anywhere\" — per-device") {
+	// The appended note is spelled as a RESOLUTION. It used to read
+	// `answered "<anchor>" — <answer>`, which spec.Parse does not recognise
+	// as closing anything, so gummi's own record of the user's answer
+	// opened a @user thread — and an open @user thread shuts the approval
+	// gate only a human can reopen (round 3 §1.3). The position is
+	// unchanged; only the wording was gating the card.
+	if !strings.Contains(string(raw), `%% @user(2026-07-04): resolved — per-device (recorded here: the line this answered, "no such line anywhere", is no longer in the document)`) {
 		t.Errorf("answer not appended to spec on a bad anchor:\n%s", raw)
+	}
+	if open := countOpenUserThreads(t, string(raw)); open != 0 {
+		t.Errorf("the appended answer left %d open user thread(s) — it must not block the gate:\n%s", open, raw)
 	}
 
 	// the note in plain words — no "spec capture" jargon — explains where
@@ -304,9 +313,29 @@ func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), fmt.Sprintf("answered %q — per-device", anchor)) {
+	if !strings.Contains(string(raw), fmt.Sprintf("resolved — per-device (recorded here: the line this answered, %q, is no longer in the document)", anchor)) {
 		t.Errorf("answer not appended to spec on an ambiguous anchor:\n%s", raw)
 	}
+	if open := countOpenUserThreads(t, string(raw)); open != 0 {
+		t.Errorf("the appended answer left %d open user thread(s) — it must not block the gate:\n%s", open, raw)
+	}
+}
+
+// countOpenUserThreads is the gate's own arithmetic: unresolved @user
+// threads are what engine.Advance refuses on, so a note gummi writes on
+// the user's behalf has to leave the count where it found it.
+func countOpenUserThreads(t *testing.T, content string) int {
+	t.Helper()
+	n := 0
+	for _, th := range spec.Parse(content).OpenQuestions() {
+		for _, mk := range th.Markers {
+			if mk.Author == "user" {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
 
 func TestConventionAskPath(t *testing.T) {

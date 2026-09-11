@@ -45,25 +45,52 @@ func (d *helpDialog) View(s *theme.Styles, w, h int) string {
 	for _, r := range d.rows {
 		keyW = max(keyW, ansi.StringWidth(r[0]))
 	}
+	// The frame is a rounded border plus Padding(1, 2) — 6 columns of
+	// chrome — and the key gutter takes keyW+2 more. What is left is what
+	// a help line may use.
+	//
+	// w used to be ignored entirely: rows were written at their natural
+	// width and the frame grew past the pane, so the `keys · card` table
+	// rendered on a 120-column terminal with no right border at all and
+	// its first row cut mid-word (round 3 §2.4). The board's table fits by
+	// luck; the card's longest row is around 150 columns and does not. A
+	// help line that does not fit now wraps under the text column, which
+	// is where a reader looks for its continuation.
+	//
+	// Wrapping is applied BEFORE the vertical window, and the window
+	// counts display lines rather than table rows: a row that takes two
+	// lines used to be able to push the last row of a scrolled table off
+	// the bottom of the pane, which is the same clipping one axis over.
+	textW := max(w-6-keyW-2, 20)
+	var lines []string
+	for _, r := range d.rows {
+		gutter := s.KeyHint.Render(padRight(r[0], keyW)) + "  "
+		wrapped := strings.Split(wrapText(r[1], textW), "\n")
+		lines = append(lines, gutter+s.Subtle.Render(wrapped[0]))
+		for _, cont := range wrapped[1:] {
+			lines = append(lines, strings.Repeat(" ", keyW+2)+s.Subtle.Render(cont))
+		}
+	}
+
 	// chrome: title, blank, blank, hint, plus the frame's border and
-	// padding — what is left is what the rows may use.
+	// padding — what is left is what the lines may use.
 	budget := max(h-6, 1)
-	clipped := len(d.rows) > budget
+	clipped := len(lines) > budget
 	if clipped {
-		d.scroll = min(max(d.scroll, 0), len(d.rows)-budget)
+		d.scroll = min(max(d.scroll, 0), len(lines)-budget)
 	} else {
 		d.scroll = 0
 	}
 
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render(d.title) + "\n\n")
-	for _, r := range d.rows[d.scroll:min(d.scroll+budget, len(d.rows))] {
-		b.WriteString(s.KeyHint.Render(padRight(r[0], keyW)) + "  " + s.Subtle.Render(r[1]) + "\n")
+	for _, l := range lines[d.scroll:min(d.scroll+budget, len(lines))] {
+		b.WriteString(l + "\n")
 	}
 	hint := "esc close"
 	if clipped {
 		hint = fmt.Sprintf("↑↓ scroll · %d–%d of %d · esc close",
-			d.scroll+1, min(d.scroll+budget, len(d.rows)), len(d.rows))
+			d.scroll+1, min(d.scroll+budget, len(lines)), len(lines))
 	}
 	b.WriteString("\n" + s.Faint.Render(hint))
 	return s.DialogFrame.Render(b.String())
@@ -150,6 +177,9 @@ func (d *confirmDialog) View(s *theme.Styles, w, h int) string {
 		b.WriteString(s.Subtle.Render(d.detail) + "\n")
 	}
 	b.WriteString("\n" + row.View(s, true) + "\n")
-	b.WriteString("\n" + s.Faint.Render("enter select · ←/→ move · y/n accelerators · esc cancel"))
+	// "y / n", not "y/n accelerators". Round 2 §5 listed "accelerators" as
+	// a word the reader will not know and this is the last dialog carrying
+	// it — on the confirm boxes, which is where a first-time user meets it.
+	b.WriteString("\n" + s.Faint.Render("enter select · ←/→ move · y / n · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }

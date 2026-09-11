@@ -25,7 +25,7 @@ import (
 
 // ErrDecomposeExhausted is returned when the RS card's remaining credit
 // envelope admits no further decompose session.
-var ErrDecomposeExhausted = errors.New("decompose: RS card's credit envelope is exhausted")
+var ErrDecomposeExhausted = errors.New("decompose: RS card's credit budget is exhausted")
 
 // ErrDecomposeProposalCountMismatch is returned by MintProposals when the
 // proposal count no longer matches the doc's unsettled row count — a doc

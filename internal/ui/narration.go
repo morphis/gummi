@@ -246,7 +246,12 @@ func whyItStopped(in nextInput) string {
 		}
 		return "The " + stage + " session errored before it finished."
 	case in.attn == attnBudget:
-		return "The " + stage + " stage reached its envelope and stopped."
+		// "budget", the word every surface that SETS one uses. "envelope" was
+		// replaced across the creation surfaces in round 2 and left standing on
+		// every surface that reports RUNNING OUT — which is where a reader meets
+		// it for the first time, six lines under a transcript line that says
+		// "budget reached" about the same event (round 3 §5.1).
+		return "The " + stage + " stage ran out of budget and stopped."
 	case in.sess == engine.StatePaused:
 		return "The " + stage + " run is paused."
 	}

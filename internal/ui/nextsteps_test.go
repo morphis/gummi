@@ -9,6 +9,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // keysOf flattens a suggestion list to its key sequence for compact
@@ -235,6 +236,10 @@ func TestNextInputForAssembly(t *testing.T) {
 		reviewRound: 2, failedCheck: "unit",
 		openSpecQs: 1, openDiffComments: 2,
 		undrafted: []string{"Verification plan"},
+		// base is resolved at assembly now, so the landing row can name the
+		// branch the card actually merges onto instead of the literal "main"
+		// (round 3 §5.2). An unattached Shell answers with the default name.
+		base: worktree.DefaultBaseBranchName,
 	}
 	// undrafted is a slice (one blocker per blank section), so the struct
 	// no longer compares with ==; DeepEqual keeps the assembly pinned.

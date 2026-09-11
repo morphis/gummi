@@ -139,7 +139,9 @@ func TestBacklogEnterOpensAndEscCloses(t *testing.T) {
 	if !strings.Contains(view, string(sel)) {
 		t.Errorf("card page does not show the selected card %s:\n%s", sel, view)
 	}
-	if !strings.Contains(view, "esc backlog") {
+	// "esc board" — the breadcrumb and this page's own status bar used to
+	// disagree about the name of the screen behind it (round 3 §5.4).
+	if !strings.Contains(view, "esc board") {
 		t.Errorf("card page has no way back in its breadcrumb:\n%s", view)
 	}
 

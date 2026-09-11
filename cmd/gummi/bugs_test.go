@@ -26,7 +26,7 @@ func TestRenderBugProposals(t *testing.T) {
 	renderBugProposals(&b, res)
 	out := b.String()
 	for _, want := range []string{
-		"Proposed 2 bug(s)",
+		"Proposed 2 bugs",
 		"1. Login loops",
 		"SSO bounce",
 		"severity high",

@@ -11,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // The status bar answers "what keys exist"; this file answers "what
@@ -121,6 +122,26 @@ type nextInput struct {
 	// (state.ExcusedChecks). Read from the shell's per-card cache, never
 	// from the store — this is assembled on the render path.
 	excusedChecks []string
+
+	// base is the branch this card lands on, resolved once at attach
+	// (Shell.baseBranch). The landing row used to write the literal
+	// "main": round 3 drove a `master` repo and got "land on main" on the
+	// decision block and in the inbox while the help overlay and the merge
+	// dialog on the same screen said master — the one row where the name
+	// of the branch is the consequence. Empty only in a test scaffold,
+	// where baseStep falls back to the default name rather than emitting a
+	// sentence with a hole in it.
+	base string
+}
+
+// landBase names the branch a landing row merges onto. nextInput carries
+// it, so the row is built from the card's own repository rather than from
+// a literal that happens to be right most of the time.
+func (in nextInput) landBase() string {
+	if in.base == "" {
+		return worktree.DefaultBaseBranchName
+	}
+	return in.base
 }
 
 // finished reports whether the card's current stage has produced its
@@ -198,6 +219,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		pullRequest:      r.F.PullRequest,
 		exited:           r.Exited,
 		excusedChecks:    m.excusedChecks[r.F.ID],
+		base:             m.baseBranch(r.F),
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
@@ -290,15 +312,24 @@ func blockedGate(in nextInput) *nextAction {
 		return nil
 	}
 	if in.openSpecQs > 0 {
+		// x FIRST, and named at all. The blockers here are @user markers,
+		// and a @user marker closes only under a @user resolution
+		// (spec.Parse) — so R, which sends them back to the agent, is the
+		// one thing that provably cannot clear this gate no matter how
+		// well the agent answers. Round 3 §1.4 walked it: the architect
+		// addressed the comment and wrote its own "resolved —" directly
+		// beneath, the gate stayed shut, and the only key the row named was
+		// the one that would send it round again. The diff row has said
+		// "x resolves" all along; this is the row where it is load-bearing.
 		a := nextStep("spec", "s", "resolve open comments",
 			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" "+blockVerb(in.openSpecQs)+
-				" the gate"+otherBlockersNote(in, "spec")+" — R requests changes")
+				" the gate"+otherBlockersNote(in, "spec")+" — x resolves one, R sends them back to the agent")
 		return &a
 	}
 	if in.openDiffComments > 0 {
 		a := nextStep("diff", "d", "resolve diff comments",
 			itoa(in.openDiffComments)+" open "+blockVerb(in.openDiffComments)+
-				" the gate"+otherBlockersNote(in, "diff")+" — R requests changes, x resolves")
+				" the gate"+otherBlockersNote(in, "diff")+" — x resolves one, R sends them back to the agent")
 		return &a
 	}
 	if len(in.undrafted) > 0 {
@@ -463,7 +494,7 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 // though the narration above them is not).
 func stageActions(in nextInput) []nextAction {
 	if in.landed {
-		a := nextStep("clean", "c", "clean up", "branch landed on main — remove the worktree and branch")
+		a := nextStep("clean", "c", "clean up", "branch landed on "+in.landBase()+" — remove the worktree and branch")
 		a.danger = true
 		return []nextAction{a}
 	}
@@ -534,7 +565,7 @@ func stageActions(in nextInput) []nextAction {
 		// and carry on, or stop here. The inbox reaches the same top-up
 		// with u; this is the same act, not a second one.
 		return append([]nextAction{nextStep("topup", "", "top up and go on",
-			"raise the envelope — "+string(in.stage)+" picks up where it stopped")}, stopOrResume(in)...)
+			"raise the budget — "+string(in.stage)+" picks up where it stopped")}, stopOrResume(in)...)
 	case attnQuestion:
 		return append([]nextAction{answerIt()}, stopHere(in)...)
 	}
@@ -636,7 +667,7 @@ func stageActions(in nextInput) []nextAction {
 			return append([]nextAction{*b}, stopHere(in)...)
 		}
 		acts := []nextAction{
-			nextStep("advance", "g", "advance to verify", "the critique passed — run the checks"),
+			nextStep("advance", "g", "start verify", "the critique passed — run the checks"),
 			// re-runs the stage in place rather than rewinding to it: the
 			// work stage's critique iterates the stage, so there is no edge
 			// to take. The bigger hammer — the whole plan, not this pass —
@@ -706,7 +737,7 @@ func stageActions(in nextInput) []nextAction {
 		if in.verdict == verdictPass {
 			why = "verify passed — " + why
 		}
-		gate := nextStep("advance", "g", "land on main", why)
+		gate := nextStep("advance", "g", "land on "+in.landBase(), why)
 		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
 			gate = nextStep("advance", "g", "merge the PR", hint)
 		}

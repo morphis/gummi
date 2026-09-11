@@ -2033,9 +2033,9 @@ func (e *Engine) exhaust(s *Session) {
 	// goes down where the stop happens, so both loops see it by
 	// construction. Best-effort: the park above is already durable.
 	if e.cfg.Store != nil {
-		question := string(s.Feature.Stage) + " reached its envelope."
+		question := string(s.Feature.Stage) + " ran out of budget."
 		if committed {
-			question = string(s.Feature.Stage) + " reached its envelope with work committed."
+			question = string(s.Feature.Stage) + " ran out of budget with work committed."
 		}
 		_ = e.cfg.Store.OpenDecision(context.Background(), s.Feature.ID, s.Feature.Stage,
 			state.DecisionPayload{

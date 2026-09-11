@@ -397,7 +397,7 @@ func (m *Shell) handleSpecKey(key string) tea.Cmd {
 		sv.jumpMarker(-1)
 	case "c":
 		line := sv.cursor
-		m.Overlay.Push(newCommentDialog(func(text string) tea.Cmd {
+		m.Overlay.Push(newCommentDialog(sv.lineText(line), func(text string) tea.Cmd {
 			return m.addSpecComment(line, text)
 		}))
 	case "x":
@@ -647,8 +647,18 @@ func (sv *specView) renderStatus(m *Shell, w int) string {
 					mk = *found
 				}
 			}
-			b.WriteString(s.Warning.Render("  ☐ ") + s.Subtle.Render(ansi.Truncate(mk.Text, max(w-8, 4), "…")) +
-				s.Faint.Render("  L"+strconv.Itoa(mk.Line)) + "\n")
+			// The line reference is reserved out of the width BEFORE the
+			// text is truncated into it. It used to be appended after a
+			// truncate to w-8, making the row w+2 wide, and the pane then
+			// clipped the tail — which is the one part of the row with no
+			// ellipsis to admit it had been cut, so "L105" rendered as
+			// "L10" and sent the reader ninety-five lines wrong (round 3
+			// §3.2; the same row read correctly at 160 columns, which is
+			// what made it look like a content problem).
+			ref := "  L" + strconv.Itoa(mk.Line)
+			textW := max(w-8-ansi.StringWidth(ref), 4)
+			b.WriteString(s.Warning.Render("  ☐ ") + s.Subtle.Render(ansi.Truncate(mk.Text, textW, "…")) +
+				s.Faint.Render(ref) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -662,7 +672,15 @@ func (sv *specView) renderStatus(m *Shell, w int) string {
 	}
 	renderThreadGroup(blockingLabel, blocking, userMarker)
 	renderThreadGroup("reviewer findings — weigh before approving", reviewed, reviewerMarker)
-	renderThreadGroup("agent notes (non-blocking)", agentNotes, nil)
+	// "prompts", not "agent notes (non-blocking)". On a fresh card this
+	// group is the TEMPLATE's own unanswered questions — "exact steps to
+	// reproduce", "what should happen, vs what actually happens?" — and
+	// heading them "notes" over a column of empty checkboxes made a
+	// brand-new bug report open looking like seven unfinished tasks
+	// somebody else had left behind (round 3 §5.6). "non-blocking" is the
+	// gate's vocabulary; what the reader needs to know is that nothing is
+	// waiting on them.
+	renderThreadGroup("prompts the stages will answer — nothing waiting on you", agentNotes, nil)
 	return b.String()
 }
 
@@ -803,4 +821,36 @@ func (sv *specView) renderSource(m *Shell, w, h int) string {
 		}
 	}
 	return b.String()
+}
+
+// firstBlockingComment reports the line of the first open @user comment in
+// sv's artifact — the group renderStatus heads "blocks approval (you)" —
+// so the surface can open where the blocker is rather than where the stage
+// is. Absent before plan, where an open user comment blocks nothing
+// (renderStatus's own rule, and the reason its heading swaps there): at
+// todo the comment is a note for the next run, not something to clear.
+//
+// It reads the threads in document order, which is the order the panel
+// lists them in, so "the first one" means the same thing in both places.
+func firstBlockingComment(sv *specView) (int, bool) {
+	if sv == nil || sv.f.Stage == domain.StageTodo {
+		return 0, false
+	}
+	for _, t := range sv.doc.OpenQuestions() {
+		if mk := userMarker(t); mk != nil {
+			return mk.Line, true
+		}
+	}
+	return 0, false
+}
+
+// lineText is the artifact's 1-based line n, trimmed, or "" when n is out
+// of range — what the comment dialog shows as the anchor it will attach
+// to. Trimmed because the dialog has one short row for it and a wrapped
+// table row's leading whitespace would spend most of it.
+func (sv *specView) lineText(n int) string {
+	if sv == nil || n < 1 || n > len(sv.doc.Lines) {
+		return ""
+	}
+	return strings.TrimSpace(sv.doc.Lines[n-1])
 }

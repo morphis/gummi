@@ -117,7 +117,7 @@ func runIngest(args []string) error {
 	renderProposal(os.Stdout, res)
 
 	if !*f.yes {
-		prompt := fmt.Sprintf("Materialize %d feature(s) into todo?", len(res.Proposals))
+		prompt := fmt.Sprintf("Create %d card%s in todo?", len(res.Proposals), cardPlural(len(res.Proposals)))
 		if len(res.Unmapped()) > 0 {
 			prompt = fmt.Sprintf("%d requirement(s) are UNMAPPED. %s", len(res.Unmapped()), prompt)
 		}
@@ -134,7 +134,7 @@ func runIngest(args []string) error {
 	if err != nil {
 		return fmt.Errorf("materialize (created %d before failing): %w", len(created), err)
 	}
-	fmt.Printf("Created %d feature(s) in todo. Open gummi to run them.\n", len(created))
+	fmt.Printf("Created %d card%s in todo. Open gummi to run them.\n", len(created), cardPlural(len(created)))
 	return nil
 }
 
@@ -149,7 +149,7 @@ func cmpOrDefault(s string) string {
 // one-liner, source refs, dependencies, and open-question count, then the
 // coverage map with any unmapped requirements flagged loudly.
 func renderProposal(w io.Writer, res domain.IngestResult) {
-	fmt.Fprintf(w, "\nProposed %d feature(s):\n", len(res.Proposals))
+	fmt.Fprintf(w, "\nProposed %d card%s:\n", len(res.Proposals), cardPlural(len(res.Proposals)))
 	for i, p := range res.Proposals {
 		fmt.Fprintf(w, "\n  %2d. %s\n", i+1, clean(p.Title))
 		if p.OneLiner != "" {
@@ -163,7 +163,7 @@ func renderProposal(w io.Writer, res domain.IngestResult) {
 		}
 		var tags []string
 		if n := len(p.Draft.OpenQuestions); n > 0 {
-			tags = append(tags, fmt.Sprintf("%d open question(s)", n))
+			tags = append(tags, fmt.Sprintf("%d open comment%s", n, cardPlural(n)))
 		}
 		if len(tags) > 0 {
 			fmt.Fprintf(w, "      [%s]\n", strings.Join(tags, " · "))

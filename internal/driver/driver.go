@@ -1510,7 +1510,7 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	if bySpend := int(math.Ceil(f.Spend.Credits * 1.2)); bySpend > suggested {
 		suggested = bySpend
 	}
-	d.logPark(f, state.ParkReasonNeedsYou, fmt.Sprintf("exhausted its %d-credit envelope at %s.", f.Budget.Envelope, f.Stage))
+	d.logPark(f, state.ParkReasonNeedsYou, fmt.Sprintf("ran out of its %d-credit budget at %s.", f.Budget.Envelope, f.Stage))
 	d.out.emit(exhaustedEvent{
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),

@@ -21,7 +21,7 @@ import (
 func TestGateReasonNamesLandingOnlyAtVerify(t *testing.T) {
 	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
 		for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
-			got := gateReason(stage, kind, true)
+			got := gateReason(stage, kind, true, "")
 			if !strings.HasPrefix(got, string(stage)+" ") {
 				t.Errorf("%s/%s: %q does not lead with its stage", stage, kind, got)
 			}
@@ -30,9 +30,9 @@ func TestGateReasonNamesLandingOnlyAtVerify(t *testing.T) {
 			if lands != wantLands {
 				t.Errorf("%s/%s: %q offers landing = %v, want %v", stage, kind, got, lands, wantLands)
 			}
-			if stage == domain.StageVerify && got != verifyGateReason(kind, true) {
+			if stage == domain.StageVerify && got != verifyGateReason(kind, true, "") {
 				t.Errorf("%s/%s: verify wording %q forked from verifyGateReason %q",
-					stage, kind, got, verifyGateReason(kind, true))
+					stage, kind, got, verifyGateReason(kind, true, ""))
 			}
 		}
 	}
@@ -96,16 +96,16 @@ func TestReconstructedVerifyGateSaysItLands(t *testing.T) {
 		}
 	}
 	// ...and only the stamped one claims an outcome
-	if want := verifyGateReason(domain.KindFeature, true); got[fPassed.ID] != want {
+	if want := verifyGateReason(domain.KindFeature, true, ""); got[fPassed.ID] != want {
 		t.Errorf("stamped verify gate = %q, want %q", got[fPassed.ID], want)
 	}
-	if want := verifyGateReason(domain.KindFeature, false); got[fUnknown.ID] != want {
+	if want := verifyGateReason(domain.KindFeature, false, ""); got[fUnknown.ID] != want {
 		t.Errorf("unstamped verify gate = %q, want %q", got[fUnknown.ID], want)
 	}
 	if strings.Contains(got[fUnknown.ID], "passed") {
 		t.Errorf("an unstamped verify gate claims it passed: %q", got[fUnknown.ID])
 	}
-	if want := gateReason(domain.StageImplement, domain.KindFeature, true); got[fImplement.ID] != want {
+	if want := gateReason(domain.StageImplement, domain.KindFeature, true, ""); got[fImplement.ID] != want {
 		t.Errorf("reconstructed implement gate = %q, want %q", got[fImplement.ID], want)
 	}
 	if strings.Contains(got[fImplement.ID], "land on main") {
@@ -120,7 +120,7 @@ func TestReconstructedVerifyGateSaysItLands(t *testing.T) {
 func TestLiveGateWordingMatchesTheReconstructedOne(t *testing.T) {
 	m := runVerify(t, "All checks green.\nVERDICT: pass")
 	it := verifyGate(t, m)
-	if want := gateReason(domain.StageVerify, domain.KindFeature, true); it.Text != want {
+	if want := gateReason(domain.StageVerify, domain.KindFeature, true, ""); it.Text != want {
 		t.Errorf("live verify gate = %q, want the shared wording %q", it.Text, want)
 	}
 }

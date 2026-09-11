@@ -496,10 +496,10 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 			if res.Feature.Kind == domain.KindBug {
 				surface = "report"
 			}
-			text := fmt.Sprintf("%s: %d open question(s) block approval — resolve them or press R in the %s view", id, res.Blockers, surface)
+			text := fmt.Sprintf("%s: %d open comment%s %s approval — x resolves one, R sends them back to the agent (in the %s view)", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers), surface)
 			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedDiff:
-			text := fmt.Sprintf("%s: %d open diff comment(s) block approval — resolve them (x) or press R in the diff view", id, res.Blockers)
+			text := fmt.Sprintf("%s: %d open diff comment%s %s approval — x resolves one, R sends them back to the agent", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
 			return blockedMsg(actor, id, text)
 		case engine.StatusBlockedOmission:
 			return blockedMsg(actor, id, res.Reason)

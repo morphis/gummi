@@ -1078,7 +1078,12 @@ func (d *cardForm) hint() string {
 		} else if _, ok := d.reference(); ok {
 			g = "alt+g import"
 		}
-		return "tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
+		// shift+tab is named here, not just tab. The composer is where focus
+		// starts and `kind` is the row directly ABOVE it — one shift+tab
+		// away and five tabs the other way round the cycle. A reader who
+		// types a bug description, sees "becomes  FD (feature) · …" and
+		// wants to fix it was being shown only the long way (round 3 §6).
+		return "tab/shift+tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
 	case cardStopEnvelope:
 		return "type a number of credits · alt+o collapse · tab next · esc cancel"
 	case cardStopProfile:

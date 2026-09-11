@@ -121,7 +121,7 @@ func (d *envelopeDialog) resumeNotice() tea.Cmd {
 	if d.onResume == nil {
 		return func() tea.Msg {
 			return noticeMsg{text: fmt.Sprintf(
-				"%s: envelope raised — pick it back up from the inbox (i) or `gummi resume %s`", id, id)}
+				"%s: budget raised — pick it back up from the inbox (i) or `gummi resume %s`", id, id)}
 		}
 	}
 	return d.onResume()
@@ -207,14 +207,14 @@ func (d *envelopeDialog) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 func (d *envelopeDialog) View(s *theme.Styles, w, h int) string {
 	if d.askResume {
 		var b strings.Builder
-		b.WriteString(s.DialogTitle.Render("envelope · "+string(d.feature.ID)) + "\n\n")
+		b.WriteString(s.DialogTitle.Render("budget · "+string(d.feature.ID)) + "\n\n")
 		b.WriteString(fmt.Sprintf("raised to %d — resume %s on autopilot?", d.resumeTo, d.feature.ID) + "\n")
 		b.WriteString("\n" + d.resumeButtons.View(s, true) + "\n")
 		b.WriteString("\n" + s.Faint.Render("y/enter resume · n/esc not now"))
 		return s.DialogFrame.Render(b.String())
 	}
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("envelope · "+string(d.feature.ID)) + "\n\n")
+	b.WriteString(s.DialogTitle.Render("budget · "+string(d.feature.ID)) + "\n\n")
 	spent := d.feature.Spend.CreditEquivalent()
 	now := "uncapped"
 	if d.feature.Budget.Envelope > 0 {

@@ -476,7 +476,12 @@ func (m *Shell) cardPageView(w, h int) string {
 	// before the strip). What survives a narrow terminal is the tabs,
 	// which have no other sign of themselves on the page.
 	crumb := m.cardTabBar(cardTabThread, w) + "   " +
-		s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" backlog") +
+		// "board", the name activeSurface, the tab bar, the page title and
+		// this page's OWN status bar all use. It read "‹ esc backlog" at the
+		// top of the card page and "esc board" at the bottom of the same
+		// screen (round 3 §5.4) — the last survivor of round 2's one-name
+		// sweep, and the one place both names were visible at once.
+		s.Faint.Render("‹ ") + s.KeyHint.Render("esc") + s.Faint.Render(" board") +
 		s.Faint.Render("  ·  "+strconv.Itoa(pos)+" of "+strconv.Itoa(len(order))) +
 		"  " + s.KeyHint.Render(step) + s.Faint.Render(" prev/next card")
 	line := ansi.Truncate(crumb, w, "…")

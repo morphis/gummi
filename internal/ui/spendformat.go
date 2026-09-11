@@ -124,7 +124,17 @@ func budgetSummary(f domain.Feature, live float64) string {
 	if live > 0 {
 		spent = live
 	}
-	return fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
+	out := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
+	// A budget stop reads "171.1 / 150 credits", which is true and looks
+	// broken. The overshoot is real and expected — a turn already in flight
+	// finishes, and TurnReserveCredits is sized for exactly that — but the
+	// masthead never said so, so the one number a reader checks after a stop
+	// appears to have failed at arithmetic (round 3 §4.2). Two words, only
+	// when it is actually over.
+	if env > 0 && roundSpend(spent) > env {
+		out += " (over)"
+	}
+	return out
 }
 
 // featureSpend formats the full metered cost for the dashboard. A credit

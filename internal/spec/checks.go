@@ -45,7 +45,7 @@ func ParseChecks(content string) (checks []domain.Check, found bool, err error) 
 	}
 	var raw []domain.Check
 	if err := yaml.Unmarshal([]byte(m[1]), &raw); err != nil {
-		return nil, true, fmt.Errorf("gummi-checks block does not parse: %w", err)
+		return nil, true, fmt.Errorf("gummi-checks block does not parse: %s", checksShapeError(err))
 	}
 	for _, c := range raw {
 		if strings.TrimSpace(c.Cmd) == "" {
@@ -60,6 +60,32 @@ func ParseChecks(content string) (checks []domain.Check, found bool, err error) 
 		checks = append(checks, c)
 	}
 	return checks, true, nil
+}
+
+// checksShapeError turns a yaml decode failure on the checks block into a
+// sentence the person reading it can act on.
+//
+// The raw error is written for whoever wrote the Go type — round 3 §1.5
+// put "cannot unmarshal !!str `go buil...` into domain.Check" on screen,
+// four times, at a user who has never heard of domain.Check and is given
+// no way to learn what the block should look like. Every fact needed to
+// fix it is here and none of it was being said.
+//
+// The plain-string list is called out by name because it is the mistake
+// that actually happens: the schema example lives in the discovery prompt,
+// which only the scribe ever reads, so an architect asked to REWRITE the
+// block (which is what a review comment about the checks provokes) writes
+// the obvious thing — a YAML list of command strings — and the block stops
+// parsing. spec.go's section prompts now carry the shape too, so this
+// error is the second line of defence rather than the only one.
+func checksShapeError(err error) string {
+	msg := "each entry needs a name: and a cmd:, like\n" +
+		"    - name: test\n" +
+		"      cmd: go test ./..."
+	if strings.Contains(err.Error(), "cannot unmarshal !!str") {
+		return "the entries are plain command strings, not name/cmd pairs — " + msg
+	}
+	return msg + "\n  (" + err.Error() + ")"
 }
 
 // validateCheckTimeout rejects malformed or over-ceiling per-check timeout

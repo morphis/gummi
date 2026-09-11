@@ -502,7 +502,22 @@ const maxSlugLen = 40
 
 // maxTitleLen bounds a derived card title so a long description doesn't
 // become the whole title (the full text is kept in OneLiner).
-const maxTitleLen = 60
+//
+// It was 60, which is under a git subject line and well under what people
+// actually type. The new-card dialog says "Describe it. The first line is
+// the title", and round 3 typed a perfectly ordinary 64-character bug
+// title under that promise — "ledger sum -category food reports nothing
+// when the file says Food" — and got it cut, ellipsis and all, into the
+// features row, the board, the card header, the notices, and the H1 of the
+// committed bug report, which then quoted the full title two lines below
+// its own mangled heading. The cut is permanent and there is no way to
+// decline it.
+//
+// 100 covers a hand-written one-liner (git's own soft subject limit is 50,
+// GitHub issue titles routinely run past 80) while still bounding someone
+// who pastes a paragraph into the first line. The BRANCH name is not
+// affected either way: maxSlugLen caps that separately at 40.
+const maxTitleLen = 100
 
 // DeriveTitle reduces a free-text description to a concise card title:
 // its first sentence, or the first maxTitleLen characters on a word

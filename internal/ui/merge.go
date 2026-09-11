@@ -64,7 +64,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return mergeReadyMsg{err: err}
 		} else if landed {
-			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on main — " + cleanUpNudge)}
+			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
 		}
 		// pre-land provenance scan: warn (never block) when branch commits
 		// carry agent attribution — the squash discards their messages, but
@@ -109,18 +109,24 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 			}
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
+		// The branch name these three sentences report is the card's own
+		// base, not the literal "main" they used to carry: on a `master`
+		// repo the merge dialog said "… → master" and the notice it
+		// produced one keypress later said "squash-merged into main"
+		// (round 3 §5.2).
+		base := m.baseBranch(f)
 		if thenDone {
 			if _, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user"); err != nil {
-				// the branch IS on main; the card just did not move. That is
-				// still the state the inbox item was asking about, so it is
+				// the branch IS on the base; the card just did not move. That
+				// is still the state the inbox item was asking about, so it is
 				// cleared here too — leaving it up would keep inviting a
 				// second landing of work already landed.
-				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into main, but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
+				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into " + base + ", but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: string(f.ID) + " squash-merged into main → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+			return noticeMsg{text: string(f.ID) + " squash-merged into " + base + " → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 		}
-		return noticeMsg{text: string(f.ID) + " squash-merged into main — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+		return noticeMsg{text: string(f.ID) + " squash-merged into " + base + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 	})
 }
 

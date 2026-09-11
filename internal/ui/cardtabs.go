@@ -177,6 +177,21 @@ func (m *Shell) cardCitationKey(key string) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
+	// Events is populated for the selected card only, lazily, and on a
+	// COPY of the row — threadView does it at thread.go's render and
+	// nothing writes it back to m.rows. So a row straight out of
+	// m.selected() carries an empty Events slice, and every event citation
+	// resolved against nothing: scrollThreadToEvent walked an empty list,
+	// found no stretch opening at the cited seq and answered "nothing on
+	// this page opens at that citation" — including when the status bar
+	// itself was advertising "alt+a open cited" (round 3 §2.2).
+	//
+	// The mark is generated from m.cardEvents (narration.go's
+	// unattendedClaim reads the cache directly), so resolving against the
+	// same cache is what makes the printed mark and the key agree —
+	// narration.go's invariant 3, which was true of the generator and
+	// false of the opener.
+	r.Events = m.cardEvents[r.F.ID]
 	cmd := m.openCitation(r, n)
 	// Answered either way: the chord belongs to this tier, and letting an
 	// unmatched one fall through would type an alt-digit into the

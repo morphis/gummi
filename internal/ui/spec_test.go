@@ -298,7 +298,11 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 	// the three groups render in this order: user, reviewer, agent notes
 	bi := strings.Index(out, "blocks approval")
 	ri := strings.Index(out, "reviewer findings")
-	ai := strings.Index(out, "agent notes")
+	// the third group is headed "prompts the stages will answer" now: on a
+	// fresh card these are the TEMPLATE's unanswered questions, and calling
+	// them "agent notes (non-blocking)" over empty checkboxes made a new
+	// card look like abandoned work (round 3 §5.6).
+	ai := strings.Index(out, "prompts the stages will answer")
 	if bi < 0 || ri < 0 || ai < 0 || !(bi < ri && ri < ai) {
 		t.Errorf("group order wrong (blocks=%d reviewer=%d agent=%d):\n%s", bi, ri, ai, out)
 	}
@@ -613,8 +617,8 @@ func TestSpecApproveFromSurface(t *testing.T) {
 	if f2.Stage != domain.StagePlan {
 		t.Errorf("open marker did not hold the gate: stage = %s, want plan", f2.Stage)
 	}
-	if !strings.Contains(m2.notice.text, "block approval") {
-		t.Errorf("blocked notice = %q, want a blocking message", m2.notice.text)
+	if !strings.Contains(m2.notice.text, "approval") || !strings.Contains(m2.notice.text, "x resolves one") {
+		t.Errorf("blocked notice = %q, want a blocking message naming x", m2.notice.text)
 	}
 }
 

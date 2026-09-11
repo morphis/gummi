@@ -449,8 +449,14 @@ func (r AdvanceResult) EstimateNotice() string {
 	if r.EstimatedCredits <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(" · envelope estimated at %d credits from %d metered feature(s)",
-		r.EstimatedCredits, r.EstimateSamples)
+	// "card(s)" was the last of round 2's §6 plural sweep to survive, on a
+	// line the user reads at every spec approval.
+	plural := "s"
+	if r.EstimateSamples == 1 {
+		plural = ""
+	}
+	return fmt.Sprintf(" · budget estimated at %d credits from %d metered card%s",
+		r.EstimatedCredits, r.EstimateSamples, plural)
 }
 
 // artifactFile resolves where an item's design artifact lives right now:

@@ -380,7 +380,8 @@ func renderStatus(w io.Writer, v statusView) {
 		fmt.Fprintf(w, "            %-9s %-11s %8s  %s\n",
 			sp.Stage, sp.Role, trimCredits(sp.Credits), sp.Model)
 	}
-	fmt.Fprintf(w, "  Blockers: %d open question(s) · %d open diff comment(s)\n", v.Blockers.OpenQuestions, v.Blockers.OpenDiff)
+	fmt.Fprintf(w, "  Blockers: %d open comment%s · %d open diff comment%s\n",
+		v.Blockers.OpenQuestions, cardPlural(v.Blockers.OpenQuestions), v.Blockers.OpenDiff, cardPlural(v.Blockers.OpenDiff))
 	if r := v.Rounds; r.Plan > 0 || r.Review > 0 || r.Corrective > 0 {
 		fmt.Fprintf(w, "  Rounds:   plan %d · review %d · corrective %d\n", r.Plan, r.Review, r.Corrective)
 	}

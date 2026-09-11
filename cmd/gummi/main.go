@@ -143,7 +143,7 @@ func runBoard() error {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			if float64(n) < domain.TurnReserveCredits {
 				fmt.Fprintf(os.Stderr, "gummi: GUMMI_ENVELOPE=%d is below one agent turn (~%d credits); "+
-					"stage budgets will be floored at a turn and overshoot the envelope\n", n, int(domain.TurnReserveCredits))
+					"stage budgets will be floored at a turn and overshoot the cap\n", n, int(domain.TurnReserveCredits))
 			}
 			shell.SetEnvelope(n)
 		}

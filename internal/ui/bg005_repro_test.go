@@ -198,7 +198,9 @@ func TestBG005MisleadingDecisionSurvivesOtherBlockers(t *testing.T) {
 		if strings.Contains(q, "review & approve") {
 			t.Errorf("open gate decision invites an approval the gate refuses: %q", q)
 		}
-		if !strings.Contains(q, "block approval") {
+		// "blocks"/"block" agrees with the count now (round 3 §5.5), so the
+		// assertion asks for the claim rather than one conjugation of it.
+		if !strings.Contains(q, "approval") {
 			t.Errorf("open gate decision does not name the blocker: %q", q)
 		}
 	}

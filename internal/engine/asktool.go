@@ -1169,7 +1169,17 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 		// found.
 		lines := strings.Split(content, "\n")
 		line = len(lines)
-		text = fmt.Sprintf("answered %q — %s (appended: the spec no longer has one line matching that anchor)", anchor, answer)
+		// Still spelled as a RESOLUTION. The happy path above writes
+		// "resolved — <answer>", which spec.Parse closes; this branch used
+		// to write "answered …" instead, which Parse reads as a fresh open
+		// @user thread — and an open @user thread shuts the approval gate
+		// that only a human can reopen. So answering gummi's own question
+		// filed a blocking comment against the person who answered it, at
+		// the end of a document where they would not think to look (round 3
+		// §1.3; the plan reviewer hit it too and called it "leftover
+		// bookkeeping" it had no way to clear). The fallback POSITION is
+		// right and stays; only its wording was gating the card.
+		text = fmt.Sprintf("resolved — %s (recorded here: the line this answered, %q, is no longer in the document)", answer, anchor)
 	}
 	out, err := spec.AddComment(content, line, "user", date, text)
 	if err != nil {

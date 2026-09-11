@@ -15,7 +15,7 @@ import (
 // runCmd implements `gummi run [flags] "<description>"`.
 var runCmd = &cobra.Command{
 	Use:   "run [flags] \"<description>\"",
-	Short: "Headlessly drive one feature to a verified branch",
+	Short: "Headlessly drive one card to a verified branch",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRun(buildFlagArgs(cmd, args))
 	},
@@ -33,7 +33,7 @@ var researchCmd = &cobra.Command{
 // resumeCmd implements `gummi resume <id|ref> [decision]`.
 var resumeCmd = &cobra.Command{
 	Use:   "resume <id|ref> [decision]",
-	Short: "Rehydrate a parked feature and drive it on",
+	Short: "Pick a parked card back up and drive it on",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runResume(resumeArgv(cmd, args))
 	},
@@ -103,7 +103,7 @@ var commitCmd = &cobra.Command{
 // statusCmd implements `gummi status <id|ref> [--json]`.
 var statusCmd = &cobra.Command{
 	Use:   "status <id|ref> [--json]",
-	Short: "Show a feature's stage, spend, and branch state",
+	Short: "Show a card's stage, spend, and branch state",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runStatus(buildFlagArgs(cmd, args))
 	},
@@ -121,7 +121,7 @@ var watchCmd = &cobra.Command{
 // specCmd implements `gummi spec <id|ref>`.
 var specCmd = &cobra.Command{
 	Use:   "spec <id|ref>",
-	Short: "Dump a work item's current design artifact",
+	Short: "Dump a card's current design artifact",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSpec(buildFlagArgs(cmd, args))
 	},
@@ -130,7 +130,7 @@ var specCmd = &cobra.Command{
 // diffCmd implements `gummi diff <id|ref>`.
 var diffCmd = &cobra.Command{
 	Use:   "diff <id|ref>",
-	Short: "Dump a feature's worktree diff against main",
+	Short: "Dump a card's worktree diff against its base branch",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runDiff(buildFlagArgs(cmd, args))
 	},
@@ -157,7 +157,7 @@ var initCmd = &cobra.Command{
 // ingestCmd implements `gummi ingest [flags] <spec-file>`.
 var ingestCmd = &cobra.Command{
 	Use:   "ingest [flags] <spec-file>",
-	Short: "Decompose a spec into feature proposals and materialize them",
+	Short: "Split a document into cards",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runIngest(buildFlagArgs(cmd, args))
 	},
