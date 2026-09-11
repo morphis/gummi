@@ -175,8 +175,16 @@ Stage semantics:
   block in the Verification plan, auto-discovered by a one-shot scribe
   pass when approval creates the worktree, then human-gated and edited
   like any other spec content (the implementer updates it when a change
-  alters how the repo builds/tests). Results recorded in the spec.
-  Deterministic floor, adaptive ceiling.
+  alters how the repo builds/tests). Because it is a strict-YAML island
+  inside a section three roles rewrite as prose, gummi **parses it
+  forgivingly and renders it canonically**: `%%` markers that land inside
+  the fence are dropped, `[env: …]`/`[CI-only]` tags glued to an entry are
+  stripped (they are a plan defect the reviewer still flags, but they
+  never become part of the command), tab indentation and a flush-left
+  `cmd:` are re-indented, and a plain value holding a colon-space is
+  quoted. A block that still will not parse is reported wherever it is
+  read — never swallowed into "this card has no checks". Results recorded
+  in the spec. Deterministic floor, adaptive ceiling.
 - **Done** — you decide the feature is done. A verified card has **three
   endings**, and the answer set at the verify gate offers all three
   rather than assuming the first:

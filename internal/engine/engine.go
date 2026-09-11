@@ -1218,12 +1218,23 @@ func (e *Engine) runEnvProbes(s *Session) string {
 // returns a compact summary to hand the verify agent (empty when the artifact
 // carries no checks or can't be read — the verify agent then discovers and
 // runs them itself, per its stage hint).
+//
+// A block that does not parse is reported, not swallowed. It used to fall
+// through the dropped error into len(checks) == 0 and read as "this card
+// has no checks", so the deterministic floor ran zero commands and said
+// nothing about why — the parse error was loud exactly once, at the
+// approval gate, and silent for the rest of the card's life.
 func (e *Engine) runSpecChecks(s *Session) string {
 	raw, err := os.ReadFile(s.SpecPath())
 	if err != nil {
 		return ""
 	}
-	checks, _, _ := spec.ParseChecks(string(raw))
+	checks, _, parseErr := spec.ParseChecks(string(raw))
+	if parseErr != nil {
+		return "gummi could not run the artifact's gummi-checks: " + parseErr.Error() +
+			"\nThis is a plan defect. Repair the block in the Verification section, append a bullet there reading " +
+			"`finding: gummi-checks does not parse`, run the repaired commands yourself, and set your verdict to fail."
+	}
 	if len(checks) == 0 {
 		return ""
 	}

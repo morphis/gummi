@@ -92,7 +92,13 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 	if err != nil {
 		return unavailable(fmt.Sprintf("reading the spec failed (%v) — resume to let the agent verify", err)), nil
 	}
-	checks, _, _ := spec.ParseChecks(string(raw))
+	checks, _, parseErr := spec.ParseChecks(string(raw))
+	if parseErr != nil {
+		// "lists no checks" is the wrong sentence for a block that lists
+		// several and merely fails to parse: it sends the reader looking
+		// for a missing block instead of at the broken one.
+		return unavailable(parseErr.Error() + " — fix the block, or resume to let the agent verify"), nil
+	}
 	if len(checks) == 0 {
 		return unavailable("the spec lists no gummi-checks to re-run — resume to let the agent verify"), nil
 	}
