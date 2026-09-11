@@ -118,10 +118,12 @@ the board. Then:
    worktree.
 4. Watch it work. `d` shows the diff. `b` bounces the work back with
    your notes.
-5. Done means a verified branch. Press `m` to squash-merge it into main.
-   gummi drafts the landing message from the spec; you edit and approve
-   it. Or merge outside gummi: it notices either way and offers cleanup
-   with `c`.
+5. Done means a verified branch, and the card asks how it leaves gummi.
+   Press `g` (or `m`) to squash-merge it into main — gummi drafts the
+   landing message from the spec; you edit and approve it. Press `h` to
+   hand it off instead: the card closes and the branch stays yours, to
+   push, PR by hand or cherry-pick. Or merge outside gummi: it notices
+   either way and offers cleanup with `c`.
 
 The keys you need first:
 
@@ -133,7 +135,7 @@ The keys you need first:
 | `s` / `d` | spec / diff, with comments in place |
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
-| `m` / `c` | squash-merge into main / clean up a landed branch |
+| `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
 | `i` | the needs-attention inbox |
 | `tab`, `alt+1/2/3` | the board, inbox and agent tabs |
 | `?` or `alt+/` | the full key table |
@@ -227,6 +229,7 @@ agent's recommended answer instead of stopping on a question.
 | `status`, `watch`, `spec`, `diff` | read-only; they take no lock |
 | `verify <id>` | re-run the checks on a verified branch |
 | `merge <id> -m <msg\|->` | land the branch as one squash commit |
+| `handoff <id>` | close a verified card and keep its branch — nothing lands |
 | `squash`, `commit`, `clean` | collapse the branch, commit stray changes, remove a landed worktree |
 | `pr link\|unlink\|status\|comments` | land through a PR you opened; gummi never writes to GitHub |
 | `deps add\|rm\|list` | dependency edges between cards |
