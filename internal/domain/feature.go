@@ -267,6 +267,18 @@ type Feature struct {
 	// StageDone, which a merge sets: a verified branch is ready to land, not
 	// yet landed.
 	VerifiedAt time.Time
+	// HandedOffAt is stamped when someone ends a card WITHOUT landing it:
+	// the card moves to done and its branch stays where it is, theirs to
+	// push, PR, cherry-pick or sit on. Zero on every other card.
+	//
+	// It is one stored fact rather than an ending enum because the other
+	// endings already have their own records: a local landing is
+	// LandedSHA, a PR landing is PullRequest plus whatever main says, and
+	// a card that was simply dropped carries none of the three. Together
+	// they answer "how did this end" for any done card, which is the
+	// question a done card could not answer at all while Done and "the
+	// squash merge happened" were the same event.
+	HandedOffAt time.Time
 	// ForkPoint is the commit SHA that was `git merge-base main <branch>`
 	// when the item's worktree was created — the anchor used to detect
 	// fork-point drift (main rewound past the recorded fork). Empty until
@@ -418,6 +430,12 @@ func (f *Feature) GateMode() string {
 	}
 	return GateAttended
 }
+
+// HandedOff reports whether the card was ended by hand-off — closed with
+// its branch deliberately left unlanded. It is the predicate every
+// surface asks (the board badge, the clean-up refusal, Advance's fourth
+// skip), phrased once so none of them tests the timestamp by hand.
+func (f *Feature) HandedOff() bool { return !f.HandedOffAt.IsZero() }
 
 // BranchName is the feature's git branch: gummi/FD-042-slug.
 func (f *Feature) BranchName() string {

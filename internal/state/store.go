@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS features (
 	skip_diagnose   INTEGER NOT NULL DEFAULT 0,
 	quick           INTEGER NOT NULL DEFAULT 0,
 	verified_at     TEXT NOT NULL DEFAULT '',
+	handed_off_at   TEXT NOT NULL DEFAULT '',
 	gate_approval   TEXT NOT NULL DEFAULT '',
 	severity        TEXT NOT NULL DEFAULT '',
 	fork_point      TEXT NOT NULL DEFAULT '',
@@ -383,6 +384,7 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			skip_diagnose   INTEGER NOT NULL DEFAULT 0,
 			quick           INTEGER NOT NULL DEFAULT 0,
 			verified_at     TEXT NOT NULL DEFAULT '',
+			handed_off_at   TEXT NOT NULL DEFAULT '',
 			gate_approval   TEXT NOT NULL DEFAULT '',
 			severity        TEXT NOT NULL DEFAULT '',
 			fork_point      TEXT NOT NULL DEFAULT '',
@@ -400,14 +402,14 @@ func rebuildRoundsKeyed(db *sql.DB) error {
 			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
-			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
+			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval,
 			 severity, fork_point, landed_sha, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha)
 		 SELECT id, num, title, one_liner, slug, stage,
 			 skip_brainstorm, skip_plan, profile,
 			 budget_envelope, budget_spent, spend_credits, spend_est, spend_in, spend_out,
 			 spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 			 created_at, updated_at,
-			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval,
+			 kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval,
 			 severity, fork_point, landed_sha, commit_draft_fail, repo, pr_repo, pr_number, pr_url, pr_head_sha
 		 FROM features`,
 		`DROP TABLE features`,
@@ -507,6 +509,7 @@ var migrations = []string{
 	`ALTER TABLE sessions ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN quick INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN verified_at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN handed_off_at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN gate_approval TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN severity TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''`,
@@ -608,7 +611,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha`
 
 // writtenFeatureColumns returns the set of feature columns the store
@@ -631,7 +634,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
-	var id, stage, created, updated, kind, verified, severity string
+	var id, stage, created, updated, kind, verified, handedOff, severity string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -643,7 +646,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
+		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA)
 	if err != nil {
 		return f, err
@@ -663,6 +666,13 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	if verified != "" {
 		if f.VerifiedAt, err = time.Parse(timeFmt, verified); err != nil {
 			return f, fmt.Errorf("feature %s: corrupt verified_at %q: %w", id, verified, err)
+		}
+	}
+	// handed_off_at is empty on every card but one ended by hand-off, and
+	// is read back exactly the way verified_at is.
+	if handedOff != "" {
+		if f.HandedOffAt, err = time.Parse(timeFmt, handedOff); err != nil {
+			return f, fmt.Errorf("feature %s: corrupt handed_off_at %q: %w", id, handedOff, err)
 		}
 	}
 	// A corrupt row (hand-edited DB, bad migration) must fail here, not
@@ -726,6 +736,34 @@ func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.T
 		t.UTC().Format(timeFmt), string(id))
 	if err != nil {
 		return fmt.Errorf("marking %s verified: %w", id, err)
+	}
+	return nil
+}
+
+// SetHandedOffAt stamps when a card was ended by hand-off: closed with its
+// branch deliberately left unlanded. Like SetVerifiedAt it is a side-channel
+// write and does not move the stage — the caller crosses the verify→done
+// gate through Advance, which reads this stamp as its permission to cross
+// without a landing. Writing it is therefore the first of the two steps, not
+// a record of the second.
+func (s *Store) SetHandedOffAt(ctx context.Context, id domain.FeatureID, t time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET handed_off_at = ? WHERE id = ?`,
+		t.UTC().Format(timeFmt), string(id))
+	if err != nil {
+		return fmt.Errorf("marking %s handed off: %w", id, err)
+	}
+	return nil
+}
+
+// ClearHandedOffAt removes the hand-off stamp — the undo behind landing a
+// handed-off card after all. A card that was handed off and then squash-
+// merged is landed, not handed off, and its board row must say so.
+func (s *Store) ClearHandedOffAt(ctx context.Context, id domain.FeatureID) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET handed_off_at = '' WHERE id = ?`, string(id))
+	if err != nil {
+		return fmt.Errorf("clearing the hand-off stamp on %s: %w", id, err)
 	}
 	return nil
 }
