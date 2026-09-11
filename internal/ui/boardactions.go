@@ -167,6 +167,7 @@ var cardCommandNames = map[string]string{
 	"pause":   "park pause",
 	"verify":  "verify",
 	"rebase":  "rebase",
+	"handoff": "handoff keep hand off",
 	"merge":   "land merge",
 	"squash":  "squash",
 	"clean":   "clean",

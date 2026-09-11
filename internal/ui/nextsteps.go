@@ -132,6 +132,21 @@ type nextInput struct {
 	// where baseStep falls back to the default name rather than emitting a
 	// sentence with a hole in it.
 	base string
+	// branch is the card's own git branch, carried for the one row whose
+	// whole point is what happens to it: hand-off keeps this, by name, so
+	// a reader about to go push something is not left to derive it. Empty
+	// only in a test scaffold, where keptBranch() says "the branch".
+	branch string
+}
+
+// keptBranch names the branch a hand-off keeps, falling back to the
+// generic noun rather than emitting a sentence with a hole in it — the
+// same contract landBase() has for the trunk's name.
+func (in nextInput) keptBranch() string {
+	if in.branch == "" {
+		return "the branch"
+	}
+	return in.branch
 }
 
 // landBase names the branch a landing row merges onto. nextInput carries
@@ -220,6 +235,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		exited:           r.Exited,
 		excusedChecks:    m.excusedChecks[r.F.ID],
 		base:             m.baseBranch(r.F),
+		branch:           r.F.BranchName(),
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
@@ -428,7 +444,46 @@ func talkAction(in nextInput, who, why string) []nextAction {
 // its place above the fold in the inventory without becoming an answer
 // to "what now".
 func nextActions(in nextInput) []nextAction {
-	return appendPullReviewSuggestion(stageActions(in), in)
+	return appendLinkPRSuggestion(appendPullReviewSuggestion(stageActions(in), in), in)
+}
+
+// appendLinkPRSuggestion raises "link PR…" out of the fold on a finished,
+// unlinked card — the one moment linking is the move, and the one place
+// nobody could find it.
+//
+// Landing through a PR is the third ending a verified card has, but it is
+// a ROUTE to an ending rather than an ending itself: linking merges
+// nothing, and rendering it beside "land on main" as an equal answer to
+// "how does this leave gummi" would reopen exactly the blur
+// appendPullReviewSuggestion's own comment argues against. So it rides
+// the same seam prpull does — promoted in the action inventory, absent
+// from the picker — which also keeps the answer set at the four the
+// design gates it to.
+func appendLinkPRSuggestion(acts []nextAction, in nextInput) []nextAction {
+	if !in.pullRequest.Empty() || !in.hasWorktree || in.landed {
+		return acts
+	}
+	// Offered exactly where hand-off is, by asking the answer set rather
+	// than by restating its conditions: both answer "how does this leave
+	// gummi", which is a question only a card at the clean end of verify
+	// is being asked. A failed verify has not reached it — the answers
+	// there are still fix-it or overrule-it — and a linked PR raised on
+	// work that did not pass is not a route anyone wants suggested.
+	if !hasAction(acts, "handoff") {
+		return acts
+	}
+	return append(acts, nextStep("prlink", "", "link PR…",
+		"land it on GitHub instead — gummi follows the PR and waits for "+in.landBase()))
+}
+
+// hasAction reports whether an answer set contains the row with this id.
+func hasAction(acts []nextAction, id string) bool {
+	for _, a := range acts {
+		if a.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 // appendPullReviewSuggestion adds the "pull PR review" nudge whenever the
@@ -733,16 +788,36 @@ func stageActions(in nextInput) []nextAction {
 				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
 			}, stopOrResume(in)...)
 		}
+		// The card is finished and the question is no longer "is this
+		// good" but "how does this leave gummi". There are three honest
+		// answers to that, and this arm used to hold one: landing. The
+		// others were a keyless verb nobody finds (link a PR) and nothing
+		// at all (keep the branch), which is how a finished card ended up
+		// with `D` — delete, which destroys the branch — as the only way
+		// to say "I'll take it from here".
+		//
+		// Landing stays first, and stays what g does: it is still the
+		// recommendation on a clean pass. Hand-off is not a warning and is
+		// not folded; it is the second answer to the question just asked.
 		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"
 		if in.verdict == verdictPass {
 			why = "verify passed — " + why
 		}
 		gate := nextStep("advance", "g", "land on "+in.landBase(), why)
+		keep := nextStep("handoff", "h", "hand off",
+			"close the card and keep "+in.keptBranch()+" — you push, PR or cherry-pick it")
 		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
 			gate = nextStep("advance", "g", "merge the PR", hint)
+			// With a PR open, hand-off is usually the real answer rather
+			// than the alternative one: gummi never writes to GitHub, so
+			// the landing is already someone else's, and waiting at verify
+			// for your own `git pull` is not a workflow step.
+			keep = nextStep("handoff", "h", "hand off",
+				"close the card now — the PR carries it from here")
 		}
 		return append([]nextAction{
 			gate,
+			keep,
 			sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
 		}, stopOrResume(in)...)
 	}

@@ -47,10 +47,17 @@ type mergeReadyMsg struct {
 func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		// a card lands either via its linked PR or locally, never both.
+		// A card lands either via its linked PR or locally, never both.
+		//
+		// This refusal is the whole of what `g` could do on a linked card
+		// until hand-off existed: the row said "merge the PR" and the key
+		// said no, with an unlink as the only move it named. Both real
+		// moves are named now — finish the landing on GitHub and pull, or
+		// end the card here and let the PR carry it — because a reader who
+		// opened a PR is usually done with gummi, not stuck.
 		if !f.PullRequest.Empty() {
-			return mergeReadyMsg{err: fmt.Errorf("%s is linked to %s#%d (%s); land it via the PR, or run `gummi pr unlink %s` to land it locally instead",
-				f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.ID)}
+			return mergeReadyMsg{err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or press h to close the card and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
+				f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f), f.ID)}
 		}
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
 			return mergeReadyMsg{err: err}
@@ -115,6 +122,15 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		// produced one keypress later said "squash-merged into main"
 		// (round 3 §5.2).
 		base := m.baseBranch(f)
+		// Landing after a hand-off retracts it. The two endings are
+		// mutually exclusive — the branch is on the base now — and the
+		// stamp is what every surface reads to say how the card ended, so
+		// leaving it would badge a landed card as handed off forever.
+		if f.HandedOff() {
+			if err := m.store.ClearHandedOffAt(ctx, f.ID); err != nil {
+				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into " + base + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
+			}
+		}
 		if thenDone {
 			if _, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user"); err != nil {
 				// the branch IS on the base; the card just did not move. That

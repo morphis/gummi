@@ -638,7 +638,13 @@ var verbActionIDs = map[string]string{
 	// the action it actually performs (verbKeys sends it to "m"), it is
 	// never in the answer set and always degrades to the menu, where the
 	// merge row answers to "land" by name.
-	"land":      "merge",
+	"land": "merge",
+	// handoff maps to its own id, and unlike land it IS in the answer set
+	// wherever it is legal: hand-off is offered at exactly one stage, the
+	// one where the row is on screen, so "/handoff" fires from the same
+	// place the reader is already looking rather than degrading to a menu
+	// for a row two lines above the composer.
+	"handoff":   "handoff",
 	"changes":   "changes",
 	"bounce":    "bounce",
 	"park":      "pause",
@@ -783,6 +789,7 @@ var verbKeys = map[string]string{
 	"spec":    "s",
 	"verify":  "v",
 	"land":    "m",
+	"handoff": "h",
 	"rebase":  "r",
 	"clean":   "c",
 	"squash":  "z",

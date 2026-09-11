@@ -1690,6 +1690,26 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rewordGateDecision(msg.id, msg.text)
 		return m, m.loadRows
 
+	case handOffReadyMsg:
+		// the preflight passed (or did not): open the confirm that names
+		// what a hand-off keeps, changes and unblocks. Nothing has been
+		// committed, stamped or transitioned yet — all three wait on the
+		// confirm, so esc here leaves the card exactly as it was.
+		if msg.err != nil {
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			return m, nil
+		}
+		f := msg.f
+		m.Overlay.Push(&confirmDialog{
+			id:           "confirm-handoff",
+			cancelLabel:  "Cancel",
+			confirmLabel: "Hand off",
+			question:     "hand off " + string(f.ID) + "?",
+			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents),
+			onConfirm:    func() tea.Cmd { return m.handOffFeature(f) },
+		})
+		return m, nil
+
 	case mergeThenDoneMsg:
 		// the verify→done gate routes through the merge flow: collect the
 		// user's commit message, then land + transition on ctrl+s.
@@ -2788,6 +2808,23 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			return m.rebaseFeature(r.F)
 		}
+	case "h":
+		if r, ok := m.selected(); ok {
+			if n := branchVerbRefusal(r, "hand-off"); n != nil {
+				m.notice = *n
+				return nil
+			}
+			// Stage-shaped, like the driver's own precondition: hand-off is
+			// an ENDING, and a card that has not finished has nothing to end
+			// — it has work to do, or a `D` coming. The other verbs on this
+			// screen are things you do to a card mid-flight; this one closes
+			// it, so it asks the same question the landing gate asks.
+			if r.F.Stage != domain.StageVerify {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": hand-off ends a verified card — this one is at " + string(r.F.Stage), isErr: true}
+				return nil
+			}
+			return m.prepareHandOff(r.F)
+		}
 	case "m":
 		if r, ok := m.selected(); ok {
 			if n := branchVerbRefusal(r, "merge"); n != nil {
@@ -2839,7 +2876,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if !r.Landed {
-				m.notice = noticeMsg{text: string(r.F.ID) + " hasn't landed on main yet", isErr: true}
+				// A handed-off card gets the honest sentence rather than
+				// "hasn't landed yet", which reads as a wait: nothing is
+				// coming, the branch was kept on purpose, and cleaning up
+				// would delete the one thing the reader chose to keep.
+				if r.F.HandedOff() {
+					m.notice = noticeMsg{text: string(r.F.ID) + " was handed off, not landed — cleaning up would delete " + r.F.BranchName(), isErr: true}
+					return nil
+				}
+				m.notice = noticeMsg{text: string(r.F.ID) + " hasn't landed on " + r.baseBranch() + " yet", isErr: true}
 				return nil
 			}
 			f := r.F

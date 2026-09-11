@@ -103,7 +103,7 @@ func TestRestartedVerifyStillPresentsAsFinished(t *testing.T) {
 	if d := m.openDecision(m.rows[0]); d == nil || d.kind != decisionVerify {
 		t.Errorf("decision kind = %+v, want the verify decision", d)
 	}
-	if narr := m.cardNarration(in, m.rows[0]); len(narr) == 0 || narr[0].text != "Verify passed — the branch is ready to land." {
+	if narr := m.cardNarration(in, m.rows[0]); len(narr) == 0 || narr[0].text != "Verify passed — the work is ready. Decide how it leaves gummi." {
 		t.Errorf("narration = %+v, want the pass", narr)
 	}
 	_ = id

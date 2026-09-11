@@ -226,6 +226,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	landed := ""
 	if r.Landed || r.F.LandedSHA != "" {
 		landed = " " + s.Success.Render("landed")
+	} else if r.F.HandedOff() {
+		// The other half of the same permanent question. Without it a
+		// deliberate hand-off and an abandoned card read identically in
+		// DONE — both are "done, never landed" — which is the whole
+		// distinction the ending was invented to make. It is deliberately
+		// not Success paint: nothing merged, and the row should not claim
+		// the same outcome as one that did.
+		landed = " " + s.Info.Render("handed off")
 	}
 	// a card linked to an outbound PR gets a compact badge, kept visually
 	// separate from (and never replacing) the landed marker — the read is
@@ -287,6 +295,8 @@ func boardGlyphLegend() [][2]string {
 		{"⎇", "worktree present"},
 		{"⏸", "paused — a run the user stopped"},
 		{"✉ ✗ ? $", "needs you: gate · run failure · question · budget"},
+		{"landed", "the branch was squash-merged onto the base branch"},
+		{"handed off", "the card was closed with its branch deliberately kept — nothing landed"},
 	}
 }
 

@@ -167,6 +167,12 @@ var promotedActions = map[string]bool{}
 // other process would either fight the change or never see it — so it is
 // withheld while the drive lasts, not disabled forever.
 //
+// handOffHelp is the one sentence the hand-off verb wears everywhere —
+// the action inventory, the board's key table, the ? overlay. It names
+// what is kept before what is lost, because keeping the branch is the
+// whole reason anyone reaches for it.
+const handOffHelp = "close the card and keep the branch — nothing lands"
+
 // foreignBlockedKeys is the same rule stated as accelerators, for the
 // board's key handler (shell.go's boardVerb). The two must stay in
 // lockstep: an action absent from the list but answered by its key is
@@ -187,6 +193,7 @@ var foreignBlockedKeys = map[string]bool{
 	"u": true, // envelope
 	"o": true, // repo picker
 	"r": true, // rebase
+	"h": true, // hand off
 	"m": true, // merge
 	"z": true, // squash
 	"c": true, // clean
@@ -357,8 +364,17 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			r.HasWorktree,
 		},
 		{
-			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts hand off to an agent)", false,
+			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts go to an agent)", false,
 			needsWT,
+		},
+		// The third ending, and the reason it is offered only at verify
+		// while merge is offered at any stage: `m` lands a branch, which
+		// is a thing you might do at any point, but hand-off CLOSES the
+		// card. There is nothing to close before the work is finished —
+		// an unfinished card that nobody wants is a `D`, not an ending.
+		{
+			"handoff", "h", "hand off", handOffHelp, false,
+			needsWT && r.HasWorktree && !r.Landed && in.stage == domain.StageVerify,
 		},
 		{
 			"merge", "m", "merge", "squash-merge branch into " + r.baseBranch() + " (review & approve the drafted message)", false,

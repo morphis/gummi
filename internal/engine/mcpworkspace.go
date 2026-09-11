@@ -441,19 +441,24 @@ type cardIDArgs struct {
 
 // cardStatusItem is card_status's JSON object result.
 type cardStatusItem struct {
-	ID               string  `json:"id"`
-	Kind             string  `json:"kind"`
-	Title            string  `json:"title"`
-	Stage            string  `json:"stage"`
-	Branch           string  `json:"branch"`
-	BranchState      string  `json:"branch_state"`
-	SpendCredits     float64 `json:"spend_credits"`
-	Envelope         int     `json:"envelope"`
-	Verified         bool    `json:"verified"`
-	Done             bool    `json:"done"`
-	Running          bool    `json:"running"`
-	OpenQuestions    int     `json:"open_questions"`
-	OpenDiffComments int     `json:"open_diff_comments"`
+	ID           string  `json:"id"`
+	Kind         string  `json:"kind"`
+	Title        string  `json:"title"`
+	Stage        string  `json:"stage"`
+	Branch       string  `json:"branch"`
+	BranchState  string  `json:"branch_state"`
+	SpendCredits float64 `json:"spend_credits"`
+	Envelope     int     `json:"envelope"`
+	Verified     bool    `json:"verified"`
+	// Done means the card is CLOSED. A done card reached that state by
+	// landing, through its PR, or by hand-off — branch_state and
+	// handed_off say which; "done" alone has not meant "merged" since
+	// hand-off existed.
+	Done             bool `json:"done"`
+	HandedOff        bool `json:"handed_off"`
+	Running          bool `json:"running"`
+	OpenQuestions    int  `json:"open_questions"`
+	OpenDiffComments int  `json:"open_diff_comments"`
 }
 
 // cardStatus answers card_status: the same snapshot `gummi status`
@@ -481,6 +486,7 @@ func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, 
 		Branch: f.BranchName(), BranchState: workspaceBranchState(ctx, e.pool, &f),
 		SpendCredits: f.Spend.Credits, Envelope: f.Budget.Envelope,
 		Verified: !f.VerifiedAt.IsZero(), Done: f.Stage == domain.StageDone,
+		HandedOff:        f.HandedOff(),
 		Running:          state.ProcessAlive(state.ReadPIDFile(e.cfg.Workspace.PIDFile(f.ID))),
 		OpenQuestions:    specOpen,
 		OpenDiffComments: diffOpen,
