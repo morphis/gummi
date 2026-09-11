@@ -176,3 +176,144 @@ func TestUpsertChecksNoSectionErrors(t *testing.T) {
 		t.Error("expected an error for a doc without a Verification section")
 	}
 }
+
+// TestParseChecksRepairsAgentMistakes covers the three malformations
+// observed in real artifacts. Each one used to take the whole block down
+// — and with it the approval-time baseline — for a block whose intent
+// was never in doubt.
+func TestParseChecksRepairsAgentMistakes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want []domain.Check
+	}{{
+		name: "skip tag inside the block",
+		// [env: docker] carries a colon-space: "mapping values are not
+		// allowed in this context" at the block's 4th line.
+		body: "- name: build\n  cmd: go build ./...\n- name: e2e\n  cmd: ./e2e.sh [env: docker]\n",
+		want: []domain.Check{{Name: "build", Cmd: "go build ./..."}, {Name: "e2e", Cmd: "./e2e.sh"}},
+	}, {
+		name: "CI-only tag inside the block",
+		body: "- name: build\n  cmd: go build ./... [CI-only]\n",
+		want: []domain.Check{{Name: "build", Cmd: "go build ./..."}},
+	}, {
+		name: "reviewer marker inside the fence",
+		body: "- name: lint\n  cmd: make lint\n%% @reviewer(2026-09-06): PASS: all green\n",
+		want: []domain.Check{{Name: "lint", Cmd: "make lint"}},
+	}, {
+		name: "unquoted colon in a command",
+		body: "- name: note\n  cmd: echo done: ok\n",
+		want: []domain.Check{{Name: "note", Cmd: "echo done: ok"}},
+	}, {
+		name: "unquoted colon in a name",
+		body: "- name: verify: repro gone\n  cmd: ./repro.sh\n",
+		want: []domain.Check{{Name: "verify: repro gone", Cmd: "./repro.sh"}},
+	}, {
+		name: "continuation key flush left",
+		// "with cmd: <command> on the next line", taken literally
+		body: "- name: build\ncmd: go build ./...\n- name: test\ncmd: go test ./...\n",
+		want: []domain.Check{{Name: "build", Cmd: "go build ./..."}, {Name: "test", Cmd: "go test ./..."}},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			checks, found, err := ParseChecks("```gummi-checks\n" + tc.body + "```\n")
+			if !found {
+				t.Fatal("block not found")
+			}
+			if err != nil {
+				t.Fatalf("repairable block still errored: %v", err)
+			}
+			if len(checks) != len(tc.want) {
+				t.Fatalf("checks = %+v, want %+v", checks, tc.want)
+			}
+			for i := range tc.want {
+				if checks[i] != tc.want[i] {
+					t.Errorf("check %d = %+v, want %+v", i, checks[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestParseChecksRepairLeavesGoodBlocksAlone guards against the repair
+// rewriting a block that was already correct.
+func TestParseChecksRepairLeavesGoodBlocksAlone(t *testing.T) {
+	f := false
+	in := []domain.Check{
+		{Name: "build", Cmd: "go build ./..."},
+		{Name: "tricky", Cmd: `sh -c "echo 'a: b' && exit 1"`},
+		{Name: "npm", Cmd: "npm run test:unit"},
+		{Name: "new", Cmd: "go test ./internal/ui/ -run TestX", Timeout: "6m", Baseline: &f},
+	}
+	out, _, err := ParseChecks(RenderChecks(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != len(in) {
+		t.Fatalf("got %+v", out)
+	}
+	for i := range in {
+		if out[i].Name != in[i].Name || out[i].Cmd != in[i].Cmd || out[i].Timeout != in[i].Timeout {
+			t.Errorf("check %d = %+v, want %+v", i, out[i], in[i])
+		}
+	}
+	if _, changed := repairChecksBlock("- name: build\n  cmd: go build ./...\n"); changed {
+		t.Error("repair touched a well-formed block")
+	}
+}
+
+// TestChecksErrorQuotesTheOffendingLine: "line 4" counts from inside the
+// fence, so the reader has nothing to count against — the text has to
+// come with it.
+func TestChecksErrorQuotesTheOffendingLine(t *testing.T) {
+	doc := "```gummi-checks\n- name: build\n  cmd: go build ./...\n- name: broken\n  cmd: [oops\n```\n"
+	_, found, err := ParseChecks(doc)
+	if !found || err == nil {
+		t.Fatalf("expected a surfaced error, got found=%v err=%v", found, err)
+	}
+	if !strings.Contains(err.Error(), "block line") {
+		t.Errorf("error does not say the line is fence-relative: %v", err)
+	}
+	if !strings.Contains(err.Error(), "name: broken") {
+		t.Errorf("error does not quote the offending line: %v", err)
+	}
+}
+
+// TestParseChecksRepairsTabIndent: YAML forbids tabs in indentation, and
+// an agent that reaches for one takes the block down with it.
+func TestParseChecksRepairsTabIndent(t *testing.T) {
+	checks, _, err := ParseChecks("```gummi-checks\n- name: build\n\tcmd: go build ./...\n```\n")
+	if err != nil {
+		t.Fatalf("tab-indented block still errored: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Cmd != "go build ./..." {
+		t.Errorf("checks = %+v", checks)
+	}
+}
+
+// TestParseChecksRepairLeavesBlockScalarsAlone: a literal scalar's body
+// is the command, not structure — a line inside it that happens to open
+// with "cmd: " must survive verbatim.
+func TestParseChecksRepairLeavesBlockScalarsAlone(t *testing.T) {
+	doc := "```gummi-checks\n" +
+		"- name: multi\n" +
+		"  cmd: |\n" +
+		"    go test ./...\n" +
+		"    echo cmd: done\n" +
+		"- name: after\n" +
+		"  cmd: go vet ./... [env: go]\n" +
+		"```\n"
+	checks, _, err := ParseChecks(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %+v", checks)
+	}
+	if !strings.Contains(checks[0].Cmd, "echo cmd: done") {
+		t.Errorf("block scalar body was rewritten: %q", checks[0].Cmd)
+	}
+	// and the entry after the scalar is still repaired
+	if checks[1].Cmd != "go vet ./..." {
+		t.Errorf("repair did not resume after the block scalar: %q", checks[1].Cmd)
+	}
+}

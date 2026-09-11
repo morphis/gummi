@@ -379,7 +379,14 @@ const (
 // YAML list of command strings, which does not parse — round 3 §1.5, where
 // the malformed block then let the card through approval with no baseline
 // at all. Both section prompts below carry it now.
-const checksShape = " — each entry is `- name: <short name>` with `cmd: <command>` on the next line"
+//
+// "on the next line" was doing real damage on its own: taken literally it
+// says nothing about indentation, and a cmd: written flush left is not a
+// continuation of the entry above it. The colon clause is the other half —
+// a plain value holding a colon-space is the single most common way this
+// block stops parsing. ParseChecks repairs both, but a prompt that asks
+// for the right thing beats a parser that forgives the wrong one.
+const checksShape = " — each entry is `- name: <short name>` with `cmd: <command>` indented two spaces beneath it, and any value containing a colon wrapped in single quotes"
 
 // Template renders the initial (blank) spec draft for a feature.
 func Template(f *domain.Feature) string {

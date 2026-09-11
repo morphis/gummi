@@ -251,8 +251,12 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	critique := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorCritique), "\n"))
 	for _, want := range []string{
 		"%% @user:",
-		"inside the gummi-checks block corrupts it",
-		"tags belong on prose live-check lines only",
+		// a tag in the block no longer breaks the parse — ParseChecks
+		// strips it — so the rule is stated as what it costs: the entry
+		// is not the check it reads as.
+		"inside the gummi-checks block is a defect",
+		"strips it before running the entry",
+		"tags belong on prose live-check lines",
 		"never a tag inside the gummi-checks block",
 		"VERDICT: pass", "VERDICT: changes",
 		// one-pass discipline + turn budget: bounds intra-session cost

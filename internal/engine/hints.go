@@ -354,12 +354,14 @@ Then judge the plan through four lenses in one pass:
                   allowed-skip tag: [CI-only] (never runs locally) or
                   [env: <prereq>] (runs only when <prereq> is
                   present). A tag such as [CI-only] or [env: <prereq>]
-                  inside the gummi-checks block corrupts it — tags
-                  belong on prose live-check lines only; move any you
-                  find. Fix it by adding the right tag or rewriting
-                  the step so the verify agent can execute it — an
-                  unrunnable plan strands verify in a fail loop no
-                  re-implementation can exit.
+                  inside the gummi-checks block is a defect: gummi
+                  strips it before running the entry, so it grants no
+                  skip and the command that runs is not the line as
+                  written — tags belong on prose live-check lines
+                  only; move any you find. Fix an unrunnable step by
+                  adding the right tag or rewriting it so the verify
+                  agent can execute it — an unrunnable plan strands
+                  verify in a fail loop no re-implementation can exit.
 
 Write each blocking finding as its own ` + "`%% @reviewer:`" + ` marker
 anchored to the plan line it indicts, opening with the label
@@ -549,7 +551,9 @@ skip permission: run the check or return fail. If every live check is
 blocked because every [env:] prerequisite probed clean ABSENT, the
 verdict is blocked, not pass and not fail — a plan that proved nothing
 did not pass. A tag inside the gummi-checks block itself is a plan
-defect: append a bullet to the Verification section reading ` + "`finding: gummi-checks tag defect — <tag> inside the block at <line>`" + `
+defect — gummi strips it before running the entry, so it grants no
+skip and the command that ran is not the line as written: append a
+bullet to the Verification section reading ` + "`finding: gummi-checks tag defect — <tag> inside the block at <line>`" + `
 and set your verdict to fail; do not honor the tag as a permission
 to skip. Make the call, record the evidence, and end your final message
 with a verdict on its own line, exactly one of:
