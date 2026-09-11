@@ -78,7 +78,19 @@ type statusView struct {
 	// Distinct from Done (== merged): a CI caller polls `verified` to know a
 	// run reached its verified branch, since the headless driver never merges.
 	Verified bool `json:"verified"`
-	Done     bool `json:"done"`
+	// Done means the card is CLOSED, not that anything merged. It used to
+	// mean both, because the only way out of verify was a squash merge;
+	// two of the three endings a verified card now has reach done without
+	// gummi merging anything (a landing on GitHub, and a hand-off). A
+	// caller that wants "is this on the base branch" reads branch_state
+	// ("landed"), not this.
+	Done bool `json:"done"`
+	// HandedOff is true when the card was closed with its branch
+	// deliberately left unlanded — the third ending, where the caller owns
+	// whatever happens to the branch next. A done card is landed, handed
+	// off, or ended through its PR; this is the one of the three the store
+	// records directly.
+	HandedOff bool `json:"handed_off"`
 	// Running reports whether something is currently driving this card:
 	// either the pid recorded at this card's pid file
 	// (.gummi/state/locks/<id>.pid) is still alive — a headless run/resume
@@ -210,6 +222,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		BranchState:     branchState(ctx, wt, f),
 		Verified:        !f.VerifiedAt.IsZero(),
 		Done:            f.Stage == domain.StageDone,
+		HandedOff:       f.HandedOff(),
 		Running:         cardRunning(ws, f.ID),
 		PullRequest:     f.PullRequest.StatusPayload(),
 		PullRequestLine: f.PullRequest.PlainLine(),
@@ -371,6 +384,12 @@ func renderStatus(w io.Writer, v statusView) {
 	if len(v.ExcusedChecks) > 0 {
 		fmt.Fprintf(w, "  Excused:  %s (already failing on the fresh branch; not gated at verify)\n",
 			strings.Join(v.ExcusedChecks, ", "))
+	}
+	if v.HandedOff {
+		// Under Verified for the same reason Excused is: it qualifies what
+		// happened after the pass. Only on a handed-off card — every other
+		// card's ending is already legible from Stage and the branch state.
+		fmt.Fprintf(w, "  Ending:   handed off — %s kept, nothing landed\n", v.Branch)
 	}
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)

@@ -406,12 +406,21 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 
 	// the verified-branch precondition, stricter than the TUI's any-stage m
 	// key: this command exists to land a verified branch.
-	if f.Stage == domain.StageDone {
-		return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
-	}
-	if f.Stage != domain.StageVerify || f.VerifiedAt.IsZero() {
-		return d.fail(ctx, string(id),
-			fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
+	//
+	// A HANDED-OFF card is the one exception, and it is exactly the TUI's:
+	// hand-off closes the card with its branch left unlanded, and landing
+	// it after all stays available for as long as the branch is there. Such
+	// a card is at done with a verified stamp already on it, so both
+	// preconditions below would refuse it on a technicality rather than on
+	// anything about the branch.
+	if !f.HandedOff() {
+		if f.Stage == domain.StageDone {
+			return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
+		}
+		if f.Stage != domain.StageVerify || f.VerifiedAt.IsZero() {
+			return d.fail(ctx, string(id),
+				fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
+		}
 	}
 	// a card lands either via its linked PR or locally, never both: refuse
 	// before any git mutation, naming the PR and the unlink escape.
@@ -468,8 +477,19 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 		}
 		return d.fail(ctx, string(id), err)
 	}
-	if _, err := d.store.Transition(ctx, id, domain.StageDone, d.actor); err != nil {
-		return d.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
+	// Landing retracts a hand-off: the card ended on main after all, and
+	// the stamp is what every surface reads to say how it ended.
+	if f.HandedOff() {
+		if err := d.store.ClearHandedOffAt(ctx, id); err != nil {
+			return d.fail(ctx, string(id), fmt.Errorf("landed %s but clearing its hand-off mark failed: %w", id, err))
+		}
+	}
+	// A handed-off card is already at done; only a card arriving from
+	// verify has a transition to record.
+	if f.Stage != domain.StageDone {
+		if _, err := d.store.Transition(ctx, id, domain.StageDone, d.actor); err != nil {
+			return d.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
+		}
 	}
 	d.out.emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha})
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
@@ -495,6 +515,10 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 		return d.fail(ctx, string(id), err)
 	}
 	if !landed {
+		if f.HandedOff() {
+			return d.fail(ctx, string(id),
+				fmt.Errorf("%s was handed off, not landed — cleaning up would delete %s", id, f.BranchName()))
+		}
 		return d.fail(ctx, string(id), fmt.Errorf("%s has not landed on main — nothing to clean", id))
 	}
 	if dirty, err := wt.TrackedDirty(ctx, &f); err != nil {
@@ -528,6 +552,67 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	}
 	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName()})
 	return Outcome{Status: StatusDone, ID: string(id)}, nil
+}
+
+// HandOff ends a card without landing it — the headless counterpart of the
+// TUI's h key and the third ending a verified card has. The branch stays
+// exactly where it is and the card moves to done; the caller owns whatever
+// happens to the branch next (a push, a PR opened by hand, a cherry-pick,
+// or nothing at all).
+//
+// The engine owns the three steps (final checkpoint commit, the hand-off
+// stamp, then Advance through the unchanged gate floor); this maps the
+// result to NDJSON + Outcome. A gate blocker is NOT a hand-off: the card
+// stays at verify and the refusal is reported as the error it is, because
+// waiving the landing never waived the quality floor.
+func (d *Driver) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, error) {
+	f, err := d.store.GetFeature(ctx, id)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	if f.Stage == domain.StageDone {
+		return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
+	}
+	if f.Kind == domain.KindResearch {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s carries no branch to hand off; advance it instead", id))
+	}
+	// the verified-branch precondition, the same one Merge applies: this
+	// verb ends a card that finished, not one abandoned mid-flight.
+	if f.Stage != domain.StageVerify || f.VerifiedAt.IsZero() {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
+	}
+
+	res, err := d.eng.HandOff(ctx, id, d.actor)
+	if err != nil {
+		return d.fail(ctx, string(id), err)
+	}
+	if res.Status != engine.StatusAdvanced {
+		return d.fail(ctx, string(id), handOffRefusal(id, res))
+	}
+	d.out.emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
+	return Outcome{Status: StatusDone, ID: string(id)}, nil
+}
+
+// handOffRefusal turns a non-advancing gate result into the sentence a
+// headless caller gets. Every one of these is a floor a hand-off does not
+// waive, so each names what to resolve rather than how to force it.
+func handOffRefusal(id domain.FeatureID, res engine.AdvanceResult) error {
+	switch res.Status {
+	case engine.StatusBlockedQuestions:
+		return fmt.Errorf("%s has %d unresolved spec thread(s) blocking the gate", id, res.Blockers)
+	case engine.StatusBlockedDiff:
+		return fmt.Errorf("%s has %d unresolved diff annotation(s) blocking the gate", id, res.Blockers)
+	case engine.StatusBlockedOmission:
+		return fmt.Errorf("%s: %s", id, res.Reason)
+	case engine.StatusBlockedUndrafted:
+		return fmt.Errorf("%s: %s wrote nothing in %s — the gate stays shut until the section is drafted",
+			id, res.From, strings.Join(res.Undrafted, ", "))
+	case engine.StatusNoop:
+		return fmt.Errorf("%s has nothing left to advance", id)
+	}
+	return fmt.Errorf("%s: the verify gate refused the hand-off", id)
 }
 
 // Squash collapses a card's branch to a single commit carrying the

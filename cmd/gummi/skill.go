@@ -224,6 +224,7 @@ func commandGrammar() string {
 	b.WriteString("\n")
 	writeCmd("gummi squash <id|ref> -m <message|->", flagLines(func(fs *flag.FlagSet) { registerSquashFlags(fs) }))
 	b.WriteString("\n")
+	b.WriteString("gummi handoff <id|ref>\n\n")
 	b.WriteString("gummi clean <id|ref>\n\n")
 	writeCmd("gummi status <id|ref>", flagLines(func(fs *flag.FlagSet) { registerStatusFlags(fs) }))
 	b.WriteString("\n")

@@ -54,6 +54,7 @@ func init() {
 	rootCmd.AddCommand(mergeCmd)
 	rootCmd.AddCommand(squashCmd)
 	rootCmd.AddCommand(commitCmd)
+	rootCmd.AddCommand(handoffCmd)
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(watchCmd)

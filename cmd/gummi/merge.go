@@ -101,13 +101,43 @@ func runClean(args []string) error {
 	})
 }
 
+// runHandOff implements `gummi handoff <id|ref>`: the headless counterpart of
+// the TUI's h key. It ends a verified card WITHOUT landing it — the branch
+// stays exactly where it is, the card moves to done, and the caller owns
+// whatever happens to the branch next. It refuses anything that is not at a
+// verified branch, and every gate floor that holds a landing holds a hand-off
+// too: waiving the merge never waived the quality bar.
+func runHandOff(args []string) error {
+	fs := flag.NewFlagSet("handoff", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: gummi handoff <id|ref>")
+		fmt.Fprintln(os.Stderr, "  close a verified card and keep its branch — nothing lands")
+	}
+	idArg, err := idFirstArg(fs, args)
+	if err != nil {
+		return err
+	}
+	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
+		f, err := resolveFeatureID(ctx, store, idArg)
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if err != nil {
+			return driver.Outcome{}, err
+		}
+		defer release()
+		return d.HandOff(ctx, f.ID)
+	})
+}
+
 // withLandingWorkspace wires the workspace, store, worktree manager, and a
-// minimal driver for the headless merge/clean verbs, then hands it to fn and
-// maps the Outcome to a process exit. It mirrors withRunEngine but
-// deliberately starts no agent: merge/clean only touch the workspace, store,
-// and worktree manager. Each fn resolves its card and holds that card's
-// per-card lock, so landing one card never races a drive or another landing
-// of a different card. The driver still needs an engine object for its
+// minimal driver for the headless landing verbs (merge, handoff, clean), then
+// hands it to fn and maps the Outcome to a process exit. It mirrors
+// withRunEngine but deliberately starts no agent: none of them run a
+// session — they only touch the workspace, store, and worktree manager.
+// Each fn resolves its card and holds that card's per-card lock, so landing
+// one card never races a drive or another landing of a different card. The driver still needs an engine object for its
 // gate-floor checks, so one is built with no agents — the engine is only
 // ever read from here, never run.
 func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store, state.Workspace, *worktree.Pool) (driver.Outcome, error)) error {
@@ -132,7 +162,7 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 	if err != nil {
 		return err
 	}
-	// no agents: the driver's Merge/Clean never run a session.
+	// no agents: the driver's Merge/HandOff/Clean never run a session.
 	eng := engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	defer func() { _ = eng.Close() }()
 

@@ -113,6 +113,8 @@ gummi squash <id|ref> -m <message|->
     --m string        collapsed commit message (required; - reads from stdin)
     --message string  long form of -m
 
+gummi handoff <id|ref>
+
 gummi clean <id|ref>
 
 gummi status <id|ref>
