@@ -177,18 +177,44 @@ Stage semantics:
   like any other spec content (the implementer updates it when a change
   alters how the repo builds/tests). Results recorded in the spec.
   Deterministic floor, adaptive ceiling.
-- **Done** — you decide the feature is done: advancing out of Verify
-  squash-merges the branch into main as a single commit whose message gummi
-  drafts from the spec and the branch — you review, edit, and approve it
-  before anything lands. A PR merge is a first-class landing route
-  alongside gummi's own squash merge, and works under any of GitHub's
-  three merge methods — squash merge, merge commit, or rebase merge. The
-  trigger is your `git pull` on main: no new verb, no `pr merge` shim —
-  the existing verify→done gate carries the flow, and the fork-point
-  invariant continues to hold because a fast-forward pull keeps the
-  recorded fork point an ancestor of main. A branch that lands this way
-  (or any other manual merge) skips straight to Done. gummi then offers
-  worktree cleanup + spec archival.
+- **Done** — you decide the feature is done. A verified card has **three
+  endings**, and the answer set at the verify gate offers all three
+  rather than assuming the first:
+  - **Land on main** (`g`, or `m` at any stage; `gummi merge`) —
+    advancing out of Verify squash-merges the branch into main as a
+    single commit whose message gummi drafts from the spec and the
+    branch; you review, edit, and approve it before anything lands.
+  - **Land through a PR** — a PR merge is a first-class landing route
+    alongside gummi's own squash merge, and works under any of GitHub's
+    three merge methods — squash merge, merge commit, or rebase merge.
+    The trigger is your `git pull` on main: no new verb, no `pr merge`
+    shim — the existing verify→done gate carries the flow, and the
+    fork-point invariant continues to hold because a fast-forward pull
+    keeps the recorded fork point an ancestor of main. A branch that
+    lands this way (or any other manual merge) skips straight to Done.
+    `link PR…` rises out of the action inventory's fold at a clean
+    verify, which is the one moment linking is the move.
+  - **Hand off** (`h`, `/handoff`; `gummi handoff`) — the card closes and
+    the branch stays exactly where it is: yours to push, PR by hand,
+    cherry-pick, or keep. gummi commits a final checkpoint so nothing
+    loose is left on the branch, stamps `handed_off_at`, and crosses the
+    same gate with the landing waived and **every other floor intact** —
+    open `%%` threads, open diff annotations, the omission gate and the
+    document floor all still hold it. Landing it after all stays
+    available for as long as the branch exists, and retracts the stamp.
+    Cleanup refuses a handed-off card: `c` would delete the branch that
+    was kept on purpose.
+
+  Because of the last two, **Done means the card is closed, not that
+  anything merged.** The board badges which ending a card took (`landed`
+  / `handed off`), and `status --json` carries `branch_state`,
+  `handed_off`, and `done` as three separate facts. gummi then offers
+  worktree cleanup + spec archival on a landed card.
+
+  One consequence is named at the hand-off confirm rather than blocked:
+  a dependency is met at `Stage == done`, so handing a card off frees its
+  dependents to start from a base branch that does not carry its work.
+  The confirm names them; the choice is the user's.
 
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.
@@ -1915,8 +1941,12 @@ caller must decide, then exits.
   `run`/`resume` never merge; `gummi merge <id> -m <message>` is the headless
   counterpart of the TUI's `m`, requiring the card at a verified branch and a
   Conventional Commits message with no diff dump or agent attribution before
-  it will touch git. `gummi clean <id>` is the counterpart of `c`, removing a
-  landed card's worktree and branch. `gummi commit <id> -m <message>` commits
+  it will touch git. `gummi handoff <id>` is the counterpart of `h` — it ends
+  a verified card WITHOUT landing it (final checkpoint, `handed_off` stamp,
+  the same gate floor), emits a `handed off` event naming the branch the
+  caller now owns, and is the only way to close a card from a script without
+  either merging it or destroying its work. `gummi clean <id>` is the
+  counterpart of `c`, removing a landed card's worktree and branch. `gummi commit <id> -m <message>` commits
   a card's own uncommitted worktree changes onto its own branch, with no
   PR-linked or stage precondition, so a dirty card can be readied for
   `squash` (or, unlinked, `merge`) without raw git. All three hold the same
@@ -1950,9 +1980,12 @@ caller must decide, then exits.
   conflate: `verified` — the verify gate passed and the branch is **ready to
   land** (stamped when the floor reaches the stop-at-verified gate, and false
   while verify is still in flight, so an already-ahead branch mid-run never
-  false-positives) — and `done` — the branch was **squash-merged** into main.
-  A headless run ends at `verified:true`/`done:false`; only a land flips
-  `done`. It also carries **why** a card stopped, so an unattended driver
+  false-positives) — and `done` — the card is **closed**. `done` does not
+  mean "merged": two of the three endings reach it without gummi merging
+  anything, so a poller that wants "is this on the trunk" reads
+  `branch_state == "landed"`, and `handed_off` tells it the card was closed
+  with its branch deliberately kept. A headless run ends at
+  `verified:true`/`done:false`; only a land or a hand-off flips `done`. It also carries **why** a card stopped, so an unattended driver
   never has to parse the event stream to find out: `escalation` is the
   newest open decision (its kind, the question verbatim, and the stage it
   was raised in) or absent when nothing is waiting; `rounds` is the

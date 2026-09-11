@@ -60,6 +60,7 @@ Other `run` flags:
 | `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
+| `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands |
 | `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
@@ -131,16 +132,47 @@ Conventional Commits `type(scope): summary` with no diff dump and no agent
 attribution, or the command refuses before touching git. On success it
 emits a `merged` event with the landed sha and moves the card to `done`.
 
+### Ending a card without landing it
+
+Landing is one of three endings, not the only one. When the branch is
+yours to take — you will push it, open the PR by hand, cherry-pick two
+commits out of it, or simply keep it — `handoff` closes the card and
+leaves the branch exactly where it is:
+
+```sh
+gummi handoff FD-042
+{"event":"handed off","id":"FD-042","branch":"gummi/FD-042-json-export"}
+```
+
+It commits a final checkpoint first (the branch is the deliverable, so
+loose work must not be left behind), stamps `handed_off`, and crosses the
+same verify→done gate with the landing waived and **every other floor
+intact**: open `%%` threads, open diff annotations, the omission gate and
+the document floor all still refuse it. Landing it after all stays
+available for as long as the branch exists (`gummi merge` accepts a
+handed-off card and retracts the stamp).
+
+Before this verb the only way to say "I'll take it from here" was to
+delete the card, which destroys the branch.
+
 `clean <id>` is the board's `c` key: it removes a landed card's worktree
 and branch and keeps the card as a done entry. It refuses anything that
-has not actually landed, or that carries tracked-dirty rework.
+has not actually landed — including a handed-off card, where cleaning up
+would delete the branch that was kept on purpose — or that carries
+tracked-dirty rework.
 
-`status --json` carries two distinct terminal signals. `verified:true`
-means the verify gate passed and the branch is ready to land; this is
-where a headless run stops and what a CI caller polls for. `done:true`
-means the branch was squash-merged into main, by the board's `m`, by
-`gummi merge`, or by hand. After a headless run expect `verified:true`
-with `done:false` until you merge.
+`status --json` carries these terminal signals separately, and a poller
+must not conflate them:
+
+| field | means |
+|---|---|
+| `verified: true` | the verify gate passed and the branch is ready to land — where a headless run stops, and what a CI caller polls for |
+| `done: true` | the card is **closed**: landed, ended through its PR, or handed off. It does not mean anything merged |
+| `branch_state: "landed"` | the branch is on the trunk — the field to read for "did this merge" |
+| `handed_off: true` | the card was closed with its branch deliberately kept |
+
+After a headless run expect `verified:true` with `done:false` until you
+merge or hand off.
 
 ## Landing through a PR
 
