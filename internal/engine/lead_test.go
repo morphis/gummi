@@ -374,3 +374,26 @@ func TestGoalReworkCarriesTheReviewsFindings(t *testing.T) {
 		t.Fatalf("the lead's rework carries what the review found: %+v", last)
 	}
 }
+
+func TestLeadCardChecksShowsFailureOutput(t *testing.T) {
+	e, store, _, g := leadEngine(t, &fakeNoTools{agent.NewFake("")})
+	ctx := context.Background()
+	add := func(label, status, output string) {
+		raw, _ := json.Marshal(map[string]string{"label": label})
+		if err := store.AppendEvent(ctx, state.CardEvent{Feature: "FD-002", Stage: domain.StageImplement, Kind: state.EventTool, Status: status, At: e.now(), Payload: string(raw), Output: output}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("check tracked-files-exact: FAIL (exit 2)", state.StatusFail, "old run")
+	add("check calc-untracked: pass", state.StatusOK, "")
+	add("check tracked-files-exact: FAIL (exit 2)", state.StatusFail, "sh: 1: Syntax error: \"(\" unexpected")
+	view, _ := e.GoalView(ctx, g.ID)
+	lt := &leadTurn{e: e, view: view}
+	out, err := lt.dispatch(ctx, "card_checks", json.RawMessage(`{"card":"FD-002"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Syntax error") || strings.Contains(out, "old run") || !strings.Contains(out, "calc-untracked: pass") {
+		t.Fatalf("card_checks = %q", out)
+	}
+}

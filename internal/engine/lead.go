@@ -519,6 +519,7 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 		leadTool("goal_doc", "Read the goal doc, or one section of it.", map[string]any{"section": str("A section title, e.g. Objective; empty for the whole doc.")}),
 		leadTool("card_spec", "Read a goal card's spec, bug report or research document.", map[string]any{"card": card}, "card"),
 		leadTool("card_diff", "Read a goal card's diff against the goal branch (summary and the start of the patch).", map[string]any{"card": card}, "card"),
+		leadTool("card_checks", "Read a goal card's latest check results, with the output of the ones that failed — what a card's own claim that its checks pass can be held to.", map[string]any{"card": card}, "card"),
 		leadTool("goal_diff", "Read the goal branch's combined diff against main (summary and the start of the patch) — what a review of the goal reads.", map[string]any{}),
 		leadTool("card_create", "Create a card inside the goal. It must serve at least one done-when item; its envelope comes out of what the goal has left to give.",
 			map[string]any{
@@ -670,6 +671,13 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		stat, _ := wt.DiffStat(ctx, &c.Feature)
 		diff, _ := wt.Diff(ctx, &c.Feature)
 		return clip(stat+"\n\n"+diff, 12000), nil
+
+	case "card_checks":
+		c, err := cardOf()
+		if err != nil {
+			return "", err
+		}
+		return e.cardCheckResults(ctx, c.Feature.ID)
 
 	case "goal_diff":
 		wt, err := e.mgr(ctx, &goal)
@@ -1225,4 +1233,51 @@ func (e *Engine) startToolEndpoint(ctx context.Context, id domain.FeatureID, lab
 		})
 	}
 	return path, teardown, nil
+}
+
+// cardCheckResults renders a card's most recent check run — the "check
+// <name>: <status>" tool rows its stages record — newest run first, with
+// the captured output of every failure.
+func (e *Engine) cardCheckResults(ctx context.Context, id domain.FeatureID) (string, error) {
+	events, err := e.cfg.Store.Events(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	type row struct{ label, output string }
+	var run []row
+	seen := map[string]bool{}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != state.EventTool {
+			continue
+		}
+		var p struct {
+			Label string `json:"label"`
+		}
+		if json.Unmarshal([]byte(ev.Payload), &p) != nil || !strings.HasPrefix(p.Label, "check ") {
+			continue
+		}
+		name, _, _ := strings.Cut(strings.TrimPrefix(p.Label, "check "), ":")
+		if seen[name] {
+			continue // an older run of a check already reported
+		}
+		seen[name] = true
+		out := ""
+		if ev.Status == state.StatusFail {
+			out = ev.Output
+		}
+		run = append(run, row{p.Label, out})
+	}
+	if len(run) == 0 {
+		return "no check results recorded for " + string(id) + " yet", nil
+	}
+	var b strings.Builder
+	for _, r := range run {
+		b.WriteString("- " + r.label + "\n")
+		if strings.TrimSpace(r.output) != "" {
+			b.WriteString(clip(r.output, 1500) + "\n")
+		}
+	}
+	b.WriteString("\nChecks run under sh -c in the card's worktree; a command that only works in bash fails here.")
+	return b.String(), nil
 }
