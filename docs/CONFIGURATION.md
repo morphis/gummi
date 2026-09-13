@@ -98,6 +98,11 @@ profiles:
     scribe:      { backend: zz, model: qwen2.5-coder-32b, provider: local-llama-cpp }
 ```
 
+A fifth role, `lead`, runs a goal's judgment (see the README's goals
+section). It is optional: a profile with no `lead:` runs its goals' leads on
+the architect's backend and model. A lead needs a backend that reaches
+tools — native client tools or MCP — or the goal runs on its rules alone.
+
 `backend:` is optional; a role without one uses `GUMMI_AGENT`.
 `output_token_max` caps a role's output tokens per turn. `provider:` and
 `think:` are zz-only, described above. Provider config (endpoints, keys,

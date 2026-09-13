@@ -50,6 +50,7 @@ Other `run` flags:
 |---|---|
 | `gummi run [flags] "<description>"` | create and drive one feature to a verified branch |
 | `gummi research [flags] "<question>"` | create and drive one research card |
+| `gummi goal [flags] "<objective>"` | agree a goal, then let it run its cards on one branch until it is ready for you |
 | `gummi resume <id\|ref> [decision]` | apply a decision and drive on |
 | `gummi resume <id\|ref> --say "<line>"` | read a line the way the card page would and report what it would do, as a `say` event, without acting |
 | `gummi status <id\|ref> [--json]` | stage, blockers, spend, branch state |
@@ -57,10 +58,10 @@ Other `run` flags:
 | `gummi spec <id\|ref>` | the current spec or report markdown |
 | `gummi diff <id\|ref>` | the worktree diff against main |
 | `gummi verify <id\|ref>` | re-run the checks on a verified branch and finalize its card |
-| `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit |
+| `gummi merge <id\|ref> -m <message\|->` | land a verified branch as one squash commit (a goal: one merge commit, `-m` optional) |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
-| `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands |
+| `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands (a goal not yet ready is abandoned) |
 | `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
@@ -111,6 +112,20 @@ branches on:
 - `--say "<line>"` reads a line the way the card page reads typed text and
   reports the routing as a `say` event without acting. Use it to see what
   a sentence would do before you commit to a verb.
+
+A goal takes three more, one at a time:
+
+- `--goal-note "<text>"` hands a running goal's lead a note. It lands in the
+  goal doc's Notes and the lead reads it on its next turn; the goal stays
+  silent.
+- `--reverse D-N` reverses a decision for review and sends the goal back to
+  its cards. Add `--request-changes "<why>"` to say why.
+- `--wrap-up` tells a running goal to finish now: nothing new starts,
+  verified cards land, the rest is dropped, and it comes back partial.
+
+On a goal that is ready for you, `--request-changes "<notes>"` sends it back
+to its cards with the notes, and `--envelope N` raises its budget — the one
+move of its ceiling, and only a person makes it.
 
 ## Landing
 
@@ -173,6 +188,60 @@ must not conflate them:
 
 After a headless run expect `verified:true` with `done:false` until you
 merge or hand off.
+
+## Goals
+
+A goal is a card whose work is other cards. You describe an outcome and a
+budget, agree what "done" means, and gummi runs the cards that get there on
+one shared branch and comes back when the result is ready for you.
+
+```sh
+gummi goal --envelope 4000 "Export works offline"
+gummi goal --envelope 4000 --plan-file goal.md "Export works offline"
+```
+
+**Plan.** The goal's plan is a conversation with the architect, and it
+stops at its gate like any card's (`question`, exit 2; `--gate-approval
+autopilot --autonomous` lets the architect settle it unattended). The goal
+doc it writes carries the objective, a **done-when** list — checkable
+statements, each with a `check:` command or `judge: true` — the limits, a
+rough cost per item, the lanes, and the cards, each serving at least one
+done-when item. A row with an existing card's `id:` hands that card to the
+goal. The gate refuses a done-when item nothing can check, an item no card
+serves, and a card list the budget cannot fund.
+
+**Run.** Approving the plan starts the goal, and from there it runs itself.
+It mints its cards and runs each on autopilot on the goal branch
+`gummi/GL-NNN-slug`, up to its lanes. When a card verifies it lands on the
+goal branch as one commit — after the goal branch catches up with main, and
+after the card is rebased and re-checked if the goal branch moved under
+it. The goal's **lead** (the `lead` role, or the architect's model) answers
+the cards' questions, reads their plans before they implement, re-plans
+stuck and exhausted cards, records **decisions for review** for every call
+a user of the result would notice, declines reviewer findings with a
+reason, and files what it finds outside the goal as open-board cards. The
+stream carries a `goal` event for each step and a `verified` event for each
+card; a card's `verified` is not the goal's `done`.
+
+**Budget.** The envelope is the goal's whole budget and a hard ceiling. Each
+card gets an envelope out of it; a landed or dropped card returns what it
+did not spend; the lead's turns count; nothing is ever raised past the
+ceiling. A reserve is held back for the goal's own review and verify. When
+the budget runs down to it, the goal wraps up: verified cards land, the rest
+are dropped, and it comes back partial.
+
+**Hand-over.** When its cards have settled, the goal reviews and verifies
+the combined branch. The run exits `done` with the hand-over on the event's
+`goal` object — done-when items met, partial or whole, cards landed and
+dropped, decisions for review, and the full report — and `status --json`
+carries the same report under `goal`. From there:
+
+```sh
+gummi merge GL-004                                   # one merge commit on main over its cards' commits
+gummi resume GL-004 --request-changes "<notes>"     # back to its cards, with the notes
+gummi resume GL-004 --reverse D-2                    # take the other way on a decision
+gummi handoff GL-004                                 # close it, keep the branch
+```
 
 ## Landing through a PR
 

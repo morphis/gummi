@@ -1235,9 +1235,13 @@ have.
 - Not a general agent framework — it orchestrates *existing* coding agents.
 - Not a cloud service — single-binary local tool, state in your repo.
 - Not tmux — gummi owns its sessions; raw attach is the escape hatch.
-- Not a merge pipeline — the one integration gummi does is the squash
-  merge onto local main when you accept a feature; PRs, pushing, and
-  releasing stay in your hands. A card may name and read the PR it
+- Not a merge pipeline — the one integration gummi does onto local main
+  is the landing you accept: a feature's squash merge, or a goal's merge
+  commit over its cards' commits. The one other merge it makes on its own
+  is inside a goal (§17): a goal card lands on the goal branch, and the
+  goal branch catches up with main — both gummi-owned, local branches
+  that reach main only through that same accepted landing. PRs, pushing,
+  and releasing stay in your hands. A card may name and read the PR it
   lands through — linking it and pulling its review threads in as diff
   annotations — but gummi still never writes to GitHub: no PR creation,
   no push, no merge, no thread resolution, no CI gating.
@@ -1501,6 +1505,38 @@ Decided in the design interview (2026-07-03):
     control — a card with nothing running — becomes a decision like any
     other, so a bare composer means exactly one thing: an agent is
     working and there is nothing to decide.
+
+20. **A goal is a card whose work is other cards** (§17), decided in the
+    goal interview (2026-09-13). It walks the one graph: the plan is the
+    one conversation a person has with it, its implement stage is
+    *conducted* rather than written, and its verify checks the combined
+    branch. Five existing rules bend for it, each deliberately and each
+    only inside a goal:
+    - **gummi merges onto a branch that is not main, on its own**: a
+      goal card's squash landing goes onto the goal branch, and the goal
+      branch merges main in to keep up. Main still moves only on a
+      person's landing (§7).
+    - **Autopilot creates work inside a goal**: decision 17 has autopilot
+      park before a research document becomes cards, because creating
+      work is not redoing it. Inside a goal the approved plan is that
+      approval — the lead may mint cards, but only cards that serve an
+      agreed done-when item, only inside the goal, and only within its
+      budget.
+    - **A dependency is met without landing on main**: inside a goal,
+      "done" for a card means landed on the goal branch.
+    - **Something other than a person answers a card's questions**: the
+      goal's lead does, and every call a user would notice is recorded as
+      a decision for review and shown at the hand-over.
+    - **A landing on main is a merge commit** over the cards' commits, not
+      one squash, so `git log --first-parent` reads one line per goal and
+      any one card can be reverted.
+
+    What does not bend: no implementation without an approved plan (each
+    card's own plan crosses its own gate, and the lead reads it first), no
+    landing without review and verify (each card's, and the goal's own on
+    the combined branch), the budget is a ceiling no agent raises, and a
+    sandbox refusal is a refusal — the lead plans around it, never widens
+    a card's reach.
 
 Still open:
 
@@ -2160,3 +2196,107 @@ driver). Where a repo's instructions ask for something the workflow
 forbids — "always merge your own branch," "skip review for small
 changes" — the workflow wins, and the agent says so rather than silently
 complying or silently ignoring the repo.
+
+## 17. Goals — the fourth kind
+
+A goal (`GL-NNN`) is a card whose work is other cards. You describe an
+outcome and a budget, agree what "done" means, and walk away; gummi works
+out which features, bugs and research that takes, runs them on one shared
+branch, and comes back when there is a working, verified result to judge.
+Decision 20 records the rules it bends.
+
+### 17.1 The shape
+
+```
+todo ──▶ plan ──────────▶ implement ─────────▶ verify ─────────▶ done
+         agree the goal   the lead runs the    check the         you land it,
+         with the         goal's cards on      combined branch   send notes back,
+         architect        the goal branch      against done-when or hand it off
+         ▲ you            (silent)             (silent)          ▲ you
+```
+
+- **Plan** is the architect's conversation. The goal doc
+  (`.gummi/goals/GL-NNN-slug.md`) carries the objective, a
+  `gummi-done-when` block (each item `says` a statement and has either a
+  `check:` command or `judge: true`), limits, a budget section with a rough
+  cost per item and a `gummi-goal` block naming the lanes, and a
+  `gummi-cards` block — one row per card, each serving at least one item;
+  a row with an existing card's `id` attaches it. The gate
+  (`goalPlanProblems`) refuses an item nothing can check, an item no card
+  serves, an attachment that belongs elsewhere, and a card list the budget
+  cannot fund. Crossing it (`startGoal`) mints and attaches the cards, puts
+  every done-when command into the doc's `gummi-checks` (never baselined),
+  and hands the goal to autopilot.
+- **Implement** has no stage session. `Engine.GoalTick` builds a snapshot,
+  asks the pure `goalpolicy.Decide`, and executes: land one verified card,
+  raise or drop cards, run a lead turn, start ready cards up to the lanes,
+  wrap up, or finish by starting the goal's review. The driving loop — the
+  board, or the headless driver's goroutine per card — starts the cards a
+  tick names through its ordinary autopilot path. A run of the goal's
+  implement stage (a review's changes, a failed verify, your send-back) is
+  recorded as rework the lead reads, never a session.
+- **Verify** runs the goal's checks on the goal worktree and the goal's
+  verify contract: judge the judged items, record each item met or not, and
+  write and run the try-it guide. A goal whose verify does not pass goes
+  back to its cards for its rework rounds, then stops ready for you,
+  partial.
+- **Done** is a merge commit on main (`LandGoal`: a last catch-up with main,
+  the checks again if it brought anything in, then `MergeGoal`), a
+  hand-off, or an abandonment.
+
+### 17.2 The goal branch
+
+Nothing in `internal/worktree` names a trunk: every "main" is `HEAD` of
+`Manager.repo`. So a goal card resolves (`Pool.ManagerFor`) to a manager
+whose repo is the goal's worktree. With no other change its branch forks
+from the goal branch, `SquashMerge` lands it there as one commit,
+`Landed`/`BranchAhead`/`Diff` read against the goal branch, and the
+dependency gate's "met at done" means "landed on the goal branch". The
+goal catches up with main by *merging* main in (`CatchUpGoal`), never by
+rebasing, so no running card's recorded fork point drifts; a conflict gets
+an implementer pass in the goal worktree, and gummi concludes the merge
+only when nothing is left unmerged. Attaching or detaching a started card
+moves its own commits with `rebase --onto` (`RebaseOnto`). Once a goal has
+ended and its worktree is gone, its cards fall back to the repository's
+manager.
+
+### 17.3 The budget
+
+The goal envelope is a hard ceiling (`goalpolicy.Ledger`):
+
+```
+available = envelope − goal's own spend − Σ held by cards − reserve
+held      = a live card's max(envelope, spend); a landed or dropped card's spend
+```
+
+Minting leaves a tenth of the pool ungiven, for lead turns and raises. A
+card is raised only from `available`; lead turns are capped by it; the
+reserve (the lead's `reserve_set` estimate, else 15% of the budget, at
+least 100) belongs to the goal's own review and verify. `available < 0`
+wraps the goal up. Only a person raises the ceiling, and a raise lifts a
+wrap-up the budget forced.
+
+### 17.4 The lead
+
+A lead turn is a short synchronous session on `agent.RoleLead` (falling
+back to the architect's backend and model), in the goal worktree, acting
+only through goal tools — client tools natively, MCP through a per-turn
+endpoint. The conductor wakes it for a kickoff, your notes, rework, stuck
+and exhausted cards, and findings to settle; the hooks `GoalAnswer` and
+`GoalPlanCheck` put it between a goal card and a person for questions and
+plan checks, falling back to what a plain autopilot card would do. Every
+tool writes the goal log (`card_events` of kind `goal`), and every turn is
+booked to the goal card. Three failed turns in a row wrap the goal up.
+
+### 17.5 Silence and the hand-over
+
+A goal card's stops (escalations, failures, exhausted envelopes) are
+recorded where the conductor reads them and wake the goal; they never reach
+the inbox. The goal's own verify is the one stop that does: *ready for you*,
+whole or partial. The hand-over (`GoalReport`) is one structure every
+surface renders — the goal page, `status --json`, the headless `done`
+event, and the goal doc's Report section: each done-when item met or not
+met with its evidence, the cards with their landed commits and diff stats,
+the decisions for review, declined findings, what was found along the way,
+the try-it guide, and the budget tree.
+

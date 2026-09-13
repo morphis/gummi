@@ -47,9 +47,10 @@ todo → plan → implement → verify → done
 feature   FD-NNN   design the change, build it, prove it
 bug       BG-NNN   reproduce and diagnose, fix, prove
 research  RS-NNN   shape the question, gather evidence, check the citations
+goal      GL-NNN   agree what done means, run the cards that get there, prove the whole
 ```
 
-All three kinds walk the same stages. The kind changes what each stage
+All four kinds walk the same stages. The kind changes what each stage
 writes and what its gate demands, not the route.
 
 - **Plan is a conversation.** The architect works the problem through
@@ -129,7 +130,8 @@ The keys you need first:
 
 | key | does |
 |---|---|
-| `n` | new card — feature, bug or research; paste a GitHub issue link and `alt+g` imports it (`B` / `R` / `G` preset bug / research / browse issues) |
+| `n` | new card — feature, bug, research or goal; paste a GitHub issue link and `alt+g` imports it (`B` / `R` / `G` preset bug / research / browse issues) |
+| `f` | fold or unfold a goal's cards on the board |
 | `enter` | open the selected card; in the card, send what you typed |
 | `↑` | the card's actions, when nothing is typed |
 | `s` / `d` | spec / diff, with comments in place |
@@ -194,6 +196,45 @@ Autopilot runs inside the board process, so quitting stops it. The quit
 dialog names the running cards, and reopening asks once whether to pick
 them up.
 
+## Goals
+
+A goal is a card whose work is other cards. You give it an outcome and a
+budget; it comes back with one working branch.
+
+```
+todo → plan ─────────────▶ implement ──────────────▶ verify ─────────▶ done
+       agree the goal       its cards run on the      the combined     you land it,
+       with the architect   goal branch (silent)      branch (silent)  send it back,
+       ▲ you                                                            or hand it off ▲ you
+```
+
+- **Plan is the one conversation.** The architect agrees the objective with
+  you, a **done-when** list of checkable statements, the limits, a rough
+  cost per item against the budget, how many cards may run at once, and
+  the cards — each serving a done-when item. Name an existing card's id to
+  hand it to the goal.
+- **Then it runs itself.** Approving the plan mints the cards and runs each
+  on autopilot on the goal branch. A verified card lands there as one
+  commit. The goal branch keeps up with main between landings. The goal's
+  **lead** — an agent on the `lead` role, or the architect's model —
+  answers the cards' questions, reads their plans before they implement,
+  re-plans stuck and exhausted cards, and records a **decision for review**
+  for every call a user of the result would notice. None of it reaches
+  your inbox.
+- **The budget is a hard ceiling.** The lead splits it across the cards and
+  can raise a card from what is left, never past the ceiling. A reserve is
+  held back so the goal always finishes cleanly: when the budget runs down
+  to it, verified work lands, the rest is dropped, and the goal comes back
+  **partial**.
+- **You can still reach in.** Type into a running goal and the lead reads
+  it as a note. Take over one of its cards with `A`. Stop it.
+- **Ready for you** is the one stop that reaches you. The goal page shows
+  each done-when item met or not met with its evidence, a try-it guide, the
+  decisions for review, the declined reviewer findings, what was found
+  along the way, the diff by card, and the spend. Land it (`g`: one merge
+  commit over its cards' commits), send it back to its cards with your
+  notes (`b`), reverse a decision, or hand it off (`h`).
+
 ## Bringing in existing work
 
 - **Spec ingestion** (`I`, or `gummi ingest <file>`): an architect agent
@@ -224,6 +265,7 @@ agent's recommended answer instead of stopping on a question.
 | verb | |
 |---|---|
 | `run`, `research` | create and drive a feature or research card |
+| `goal` | agree a goal, then drive it until it is ready for you |
 | `resume <id> --approve` / `--request-changes …` / `--answer …` / `--bounce` | apply a decision and drive on |
 | `resume <id> --say "<line>"` | report how the card page would read a line, without acting |
 | `status`, `watch`, `spec`, `diff` | read-only; they take no lock |
