@@ -397,3 +397,35 @@ func TestLeadCardChecksShowsFailureOutput(t *testing.T) {
 		t.Fatalf("card_checks = %q", out)
 	}
 }
+
+// A lead that keeps sending a stuck card back does not keep it alive
+// forever: turns spent on it count until it crosses a stage.
+func TestSendBacksDoNotResetTheStuckCount(t *testing.T) {
+	lf := newLeadFake(func(prompt string) []agent.Event {
+		if strings.Contains(prompt, "is stuck") {
+			return []agent.Event{toolCall("1", "card_send_back", map[string]any{"card": "FD-002", "note": "try again"})}
+		}
+		return nil
+	})
+	e, store, _, g := leadEngine(t, lf)
+	ctx := context.Background()
+	tick(t, e, g.ID) // kickoff, starts FD-002
+	if _, err := store.Transition(ctx, "FD-002", domain.StagePlan, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	var dropped bool
+	for i := 0; i < 4 && !dropped; i++ {
+		if err := store.AppendPark(ctx, "FD-002", domain.StagePlan, state.ParkReasonGaveUp, "critique cap", "", e.now()); err != nil {
+			t.Fatal(err)
+		}
+		r := tick(t, e, g.ID)
+		for _, a := range r.Actions {
+			if a.Kind == goalpolicy.Drop && a.Card == "FD-002" {
+				dropped = true
+			}
+		}
+	}
+	if !dropped {
+		t.Fatal("after its lead turns a card stuck at the same stage is dropped, send-backs or not")
+	}
+}

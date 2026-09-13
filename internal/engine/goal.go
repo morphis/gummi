@@ -209,8 +209,15 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		if gc.State == goalpolicy.Verified {
 			gc.Findings = e.openReviewerFindings(&c)
 		}
-		// lead turns that saw this card since its state last changed
-		since := max(lastTouch[c.ID], marks.Park.Seq, marks.StageEnter.Seq)
+		// lead turns that saw this card since it last crossed a stage: a
+		// send-back or a restart is the lead acting on the same problem, not
+		// the card getting past it, so neither resets the count — otherwise
+		// a lead that keeps sending a card back would never let it be dropped
+		since := marks.Gate.Seq
+		if gc.State == goalpolicy.Verified {
+			// a verified card's problem is its findings, first seen at verify
+			since = max(since, marks.StageEnter.Seq)
+		}
 		for _, seq := range leadSeen[c.ID] {
 			if seq > since {
 				gc.LeadTries++
