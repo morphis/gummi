@@ -48,8 +48,11 @@ type GoalReportCard struct {
 	Serves   []string         `json:"serves,omitempty"`
 	Commit   string           `json:"commit,omitempty"` // the landed commit on the goal branch
 	Subject  string           `json:"subject,omitempty"`
-	Reason   string           `json:"reason,omitempty"`
-	Attached bool             `json:"attached,omitempty"`
+	// Stat is the landed commit's file summary — the card's section of the
+	// goal's diff by card. `git show <commit>` is the whole of it.
+	Stat     string `json:"stat,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Attached bool   `json:"attached,omitempty"`
 }
 
 // GoalLogLine is a log entry as the report lists it.
@@ -110,7 +113,20 @@ func (e *Engine) GoalReport(ctx context.Context, goalID domain.FeatureID) (GoalR
 	if err != nil {
 		return GoalReport{}, err
 	}
-	return buildGoalReport(view), nil
+	r := buildGoalReport(view)
+	// the diff by card: each landed card's commit, summarized
+	if main, merr := e.mgr(ctx, &view.Goal); merr == nil {
+		for i, c := range r.Cards {
+			if c.Commit == "" {
+				continue
+			}
+			if stat, serr := main.CommitStat(ctx, c.Commit); serr == nil {
+				_, body, _ := strings.Cut(stat, "\n")
+				r.Cards[i].Stat = strings.TrimSpace(body)
+			}
+		}
+	}
+	return r, nil
 }
 
 func buildGoalReport(v GoalView) GoalReport {
@@ -268,6 +284,19 @@ func RenderGoalReport(r GoalReport) string {
 			b.WriteString(": " + c.Reason)
 		}
 		fmt.Fprintf(&b, " · %.0f of %d credits\n", c.Spent, c.Envelope)
+	}
+
+	var stats []GoalReportCard
+	for _, c := range r.Cards {
+		if c.Stat != "" {
+			stats = append(stats, c)
+		}
+	}
+	if len(stats) > 0 {
+		b.WriteString("\n### Diff by card\n\n")
+		for _, c := range stats {
+			fmt.Fprintf(&b, "%s %s — `git show %s`\n\n```\n%s\n```\n\n", c.ID, c.Title, shortSHA(c.Commit), c.Stat)
+		}
 	}
 
 	if len(r.Decisions) > 0 {

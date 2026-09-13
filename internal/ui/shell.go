@@ -3695,6 +3695,14 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
+		if id.Kind() == domain.KindGoal {
+			// a goal's budget is its ceiling: only raised, and the goal is
+			// told, so a wrap-up it forced can be reconsidered
+			if err := m.engine.RaiseGoalBudget(context.Background(), id, to); err != nil {
+				return noticeMsg{text: err.Error(), isErr: true}
+			}
+			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %d credits", id, to), reload: true}
+		}
 		if err := m.engine.RaiseEnvelope(context.Background(), id, to); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}

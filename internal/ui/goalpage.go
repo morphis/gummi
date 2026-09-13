@@ -195,6 +195,11 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 		switch {
 		case c.Commit != "":
 			add("       " + s.Faint.Render(clip("landed as "+shortHash(c.Commit)+" "+c.Subject, 8)))
+			for _, line := range strings.Split(c.Stat, "\n") {
+				if strings.TrimSpace(line) != "" {
+					add("       " + s.Faint.Render(clip(strings.TrimSpace(line), 8)))
+				}
+			}
 		case c.Reason != "":
 			add("       " + s.Faint.Render(clip(c.Reason, 8)))
 		}
