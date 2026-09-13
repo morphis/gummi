@@ -345,6 +345,10 @@ type Engine struct {
 	envMu      sync.Mutex
 	envNotices []string
 	envWarn    func(string)
+
+	// goalLocks serializes the conductor per goal (goal.go's goalLock).
+	goalLocksMu sync.Mutex
+	goalLocks   map[domain.FeatureID]*sync.Mutex
 }
 
 // New builds an engine from the config. The caller owns every agent's
@@ -364,12 +368,31 @@ func New(cfg Config) *Engine {
 	}
 	var dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
 	if pool != nil {
+		if cfg.Store != nil {
+			// a goal card resolves through its goal's worktree; the pool
+			// asks the store whether a goal whose worktree is gone has ended
+			pool.SetGoalLookup(cfg.Store.GetFeature)
+		}
 		dirtyPathsFn = func(ctx context.Context, f *domain.Feature) ([]string, error) {
 			wt, err := pool.ManagerFor(ctx, f)
 			if err != nil {
 				return nil, err
 			}
-			return wt.MainDirtyPaths(ctx)
+			paths, err := wt.MainDirtyPaths(ctx)
+			if err != nil || f.GoalID == "" {
+				return paths, err
+			}
+			// a goal card's "main" is its goal's worktree; the real main
+			// checkout is still off limits, so watch both
+			repo, rerr := pool.ManagerForName(ctx, f.Repo)
+			if rerr != nil {
+				return paths, nil
+			}
+			more, merr := repo.MainDirtyPaths(ctx)
+			if merr != nil {
+				return paths, nil
+			}
+			return append(paths, more...), nil
 		}
 	} else {
 		dirtyPathsFn = func(_ context.Context, _ *domain.Feature) ([]string, error) {
@@ -788,6 +811,19 @@ func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string
 // run is the shared autonomous-run path behind RunWith, RunCritique,
 // and RunRebase.
 func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
+	// A goal's implement stage is conducted, not written: there is no
+	// stage agent to run. A run of it — the driving loop starting the
+	// stage, or a review's changes and a failed verify sending the goal
+	// back — records the note as work the goal owes and asks the loop to
+	// tick the goal instead.
+	if f.IsGoal() && f.Stage == domain.StageImplement && flavor == flavorStage {
+		if strings.TrimSpace(note) != "" && e.cfg.Store != nil {
+			e.goalLog(context.Background(), f.ID, state.GoalPayload{Action: state.GoalRework, Detail: note, By: ActorGoal})
+		}
+		e.Drop(f.ID)
+		e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventGoal})
+		return nil
+	}
 	role, ok := roleForStage(f)
 	if !ok {
 		return noAgentAtStage(f.Stage)
@@ -1263,6 +1299,8 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	var b strings.Builder
 	preexisting := false
 	var liveFailures []string
+	var recorded []goalCheckResult
+	defer func() { e.recordGoalChecks(s.Feature, recorded) }()
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		var status string
@@ -1285,6 +1323,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
+		recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status})
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK && len(r.Output) > 0 {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))

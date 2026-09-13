@@ -49,6 +49,17 @@ func (e *Engine) stageBudget(f domain.Feature, creditRate float64) float64 {
 			// to a full turn would let a non-decompose session spend into the
 			// reserved block — exactly what the floor exists to prevent.
 		}
+		// A goal's own stages (its plan, review and verify) spend what its
+		// cards do not hold — the reserve included, which exists for them.
+		if cur.IsGoal() {
+			if view, err := e.goalView(context.Background(), cur); err == nil {
+				b := view.Ledger.OwnBudget()
+				if reserve := e.turnReserve(); b > 0 && b < reserve {
+					b = reserve
+				}
+				return max(0, b)
+			}
+		}
 		b := cur.Budget.Remaining(cur.Spend.CreditEquivalentAt(creditRate))
 		if reserve := e.turnReserve(); b > 0 && b < reserve {
 			b = reserve

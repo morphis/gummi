@@ -90,7 +90,7 @@ func (p *Pool) Root() string { return p.root }
 func WrapSingle(m *Manager) *Pool {
 	return &Pool{
 		root: m.Root(), defaultRoot: m.RepoRoot(),
-		byName: map[string]string{}, fs: nil, exclude: false,
+		byName: map[string]string{}, fs: m.forkStore, exclude: false,
 		byRoot: map[string]*Manager{m.RepoRoot(): m},
 	}
 }

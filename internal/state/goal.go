@@ -48,6 +48,8 @@ const (
 	GoalReversed     = "reversed" // you reversed a decision for review
 	GoalRefused      = "refused"  // a card's out-of-sandbox request was refused
 	GoalLeadNote     = "lead"     // a free line from the lead for the log
+	GoalRework       = "rework"   // work the goal owes: a review's changes, a failed verify, your send-back
+	GoalChecks       = "checks"   // the goal's verify-stage check results (Detail is JSON)
 )
 
 // GoalPayload is the JSON shape of an EventGoal event. Only the fields an
@@ -276,4 +278,75 @@ func parseOptTime(v string) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	return time.Parse(timeFmt, v)
+}
+
+// ClearVerifiedAt removes a card's verified stamp: its goal sent the
+// verified branch back to work (the goal branch moved under it, or its
+// checks stopped passing there), so it is no longer ready to land.
+func (s *Store) ClearVerifiedAt(ctx context.Context, id domain.FeatureID) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET verified_at = '' WHERE id = ?`, string(id))
+	if err != nil {
+		return fmt.Errorf("clearing the verified stamp on %s: %w", id, err)
+	}
+	return nil
+}
+
+// CardMark is the newest event of one kind on a card.
+type CardMark struct {
+	Seq     int64
+	At      time.Time
+	Stage   domain.Stage
+	Payload string
+}
+
+// CardMarks is the newest park, stage entry and gate crossing on a card —
+// what a goal reads to tell a card that stopped and is waiting from one
+// that is merely between two steps.
+type CardMarks struct {
+	Park, StageEnter, Gate CardMark
+}
+
+// ParkReason decodes the newest park's reason and detail.
+func (m CardMarks) ParkReason() (reason, detail string) {
+	if m.Park.Seq == 0 {
+		return "", ""
+	}
+	var p ParkPayload
+	_ = json.Unmarshal([]byte(m.Park.Payload), &p)
+	return p.Reason, p.Detail
+}
+
+// LatestCardMarks reads a card's CardMarks.
+func (s *Store) LatestCardMarks(ctx context.Context, id domain.FeatureID) (CardMarks, error) {
+	var out CardMarks
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.kind, e.seq, e.at, e.stage, e.payload FROM card_events e
+		JOIN (SELECT kind, MAX(seq) AS seq FROM card_events
+		      WHERE feature_id = ? AND kind IN (?, ?, ?) GROUP BY kind) m
+		ON e.seq = m.seq`,
+		string(id), EventPark, EventStageEnter, EventGate)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, at, stage, payload string
+		var mk CardMark
+		if err := rows.Scan(&kind, &mk.Seq, &at, &stage, &payload); err != nil {
+			return out, err
+		}
+		if mk.At, err = time.Parse(timeFmt, at); err != nil {
+			return out, fmt.Errorf("corrupt card_events timestamp %q: %w", at, err)
+		}
+		mk.Stage, mk.Payload = domain.Stage(stage), payload
+		switch kind {
+		case EventPark:
+			out.Park = mk
+		case EventStageEnter:
+			out.StageEnter = mk
+		case EventGate:
+			out.Gate = mk
+		}
+	}
+	return out, rows.Err()
 }

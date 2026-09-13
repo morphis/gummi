@@ -38,6 +38,14 @@ const (
 	// consult reply with instead of borrowing whatever role the card's
 	// last stage session happened to run under.
 	RoleConsult Role = "consult"
+	// RoleLead runs a goal (domain.KindGoal): an event-driven orchestrator
+	// that wakes on what happened to the goal's cards, reads the goal doc,
+	// and acts through goal tools — creating, dropping, raising and sending
+	// back cards, answering their questions, recording decisions for
+	// review. It is not a stage role either (a goal's implement stage is
+	// conducted, not written), and a profile need not declare it: an
+	// undeclared lead falls back to the architect's backend and model.
+	RoleLead Role = "lead"
 )
 
 // Permission is the policy a session applies to tool calls. gummi's

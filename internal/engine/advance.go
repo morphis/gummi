@@ -55,6 +55,10 @@ const (
 	// drafted nothing, auto-approved, and implement started from a stub).
 	// Undrafted names the sections; the stage stays put.
 	StatusBlockedUndrafted
+	// StatusBlockedGoalPlan: a goal's plan→implement gate, where the goal
+	// doc's done-when list, card list or budget is not fit to start
+	// (goalPlanProblems). Reason names the first problem.
+	StatusBlockedGoalPlan
 )
 
 // BlockingDep names a single outstanding dependency blocking a card's
@@ -201,6 +205,16 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		}
 	}
 
+	// A goal's design gate also owes a plan gummi can run: a checkable
+	// done-when list, a card list that serves it, and a budget that can
+	// fund the cards. The prose check above cannot see the fenced blocks.
+	if f.IsGoal() && f.Stage == domain.StagePlan && next == domain.StageImplement {
+		if problem := e.goalPlanProblems(ctx, f); problem != "" {
+			res.Status, res.Reason = StatusBlockedGoalPlan, problem
+			return res, nil
+		}
+	}
+
 	// Advancing out of Verify is the "this feature is done" decision: the
 	// branch lands on main as one squash commit before the record moves to
 	// Done. Advance never merges — it reports that a landing is owed. A
@@ -304,6 +318,15 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		// (DESIGN §5.1). This is the design→work crossing, which is the
 		// only place it was ever owed.
 		res.EstimatedCredits, res.EstimateSamples = e.estimateEnvelope(ctx, &f)
+		// A goal starts here: its cards are minted or attached, its
+		// done-when commands join its checks, and it hands itself to
+		// autopilot. Before the transition, so a goal that could not start
+		// stays at plan rather than conducting nothing.
+		if f.IsGoal() {
+			if gerr := e.startGoal(ctx, &f); gerr != nil {
+				return res, fmt.Errorf("starting goal %s: %w", f.ID, gerr)
+			}
+		}
 	}
 
 	// Leaving the work stage hands the diff to something that judges it —
@@ -332,6 +355,9 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 	res.Feature = f
 	res.Feature.Stage = next
 	res.Status = StatusAdvanced
+	if f.IsGoal() && next == domain.StageImplement {
+		e.send(Event{Feature: id, Stage: next, Kind: EventGoal})
+	}
 	return res, nil
 }
 

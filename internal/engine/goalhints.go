@@ -1,0 +1,132 @@
+package engine
+
+import "strings"
+
+// goalSections mirrors spec.GoalTemplate's section order.
+const goalSections = "Objective · Done when · Limits · Budget · Cards · Notes · Try it · " +
+	"Review · Verification plan · Report"
+
+// goalPlanHint is a goal's design contract: the one conversation a person
+// has with a goal before it runs on its own. It agrees three things — the
+// objective, what "done" means in checkable terms, and the cards that get
+// there — and estimates what that costs against the budget.
+func goalPlanHint() string {
+	return strings.TrimSpace(`
+Stage: Plan — the goal conversation (interactive; the user is in gummi's
+chat pane). This goal will run on its own once the user approves this
+plan: gummi creates the cards you list, runs each on autopilot on a
+shared goal branch, lands each one there as one commit, and checks the
+combined branch. The user comes back at the end. So this conversation is
+the only time to agree what the goal is — make it count.
+
+Your job, in this order, one question per turn with your recommended
+answer attached, looking facts up in the repo yourself instead of
+asking:
+1. Objective — the outcome, in the user's words: what will be true when
+   this goal is met.
+2. Done when — the checkable statements that say it is met. Write them
+   into the gummi-done-when block, one row each: id (DW-1, DW-2, …),
+   says (the statement), and exactly one of check (a shell command,
+   runnable in the repo, that exits 0 only when the statement holds) or
+   judge: true (a statement verify reads against the combined diff, for
+   what no command can prove). Prefer commands. An item nobody can check
+   is not an item; the gate refuses one.
+3. Limits — out of scope, constraints, things not to touch.
+4. Cards — the work, one gummi-cards row each: title, one_liner, kind
+   (feature, bug or research), serves (the DW ids it is for — every card
+   serves at least one and every item is served), depends_on (titles of
+   rows that must land first), and envelope (credits; leave it out to let
+   the goal split its budget). A card is PR-sized: one coherent change
+   an autopilot can plan, build and verify alone. To hand an existing
+   board card to the goal, give its row that card's id; only the user may
+   do that, so ask.
+5. Budget — for each done-when item, a rough cost range in credits, and
+   a plain warning when the budget looks too small for the list. The
+   warning never blocks; the user may approve anyway. Set lanes in the
+   gummi-goal block: how many cards may run at once (default 2; fewer
+   when the cards touch the same code).
+
+Keep the doc current as answers arrive through gummi's spec tools. Leave
+Notes, Try it, Review, Verification plan and Report alone — they are
+filled later. Do not start any of the work, and do not create cards
+yourself: approving the plan is what creates them.`)
+}
+
+// goalPlanCritiqueHint refutes a goal plan before a person approves it.
+func goalPlanCritiqueHint() string {
+	return strings.TrimSpace(`
+Stage: Goal plan critique (autonomous, fresh context). The goal doc's
+plan was just written. It will run unattended once approved, so refute
+it now. Do not fix it yourself.
+
+One pass, three lenses, blocking findings only:
+  checkable   — every done-when item has a command that really proves its
+                statement (exits 0 only when it holds, runs in the repo,
+                is not trivially true) or is a genuine judgment call
+  covered     — the cards together meet every item; no card is outside
+                the objective or the limits; dependencies are in the right
+                order; no two cards will fight over the same code while
+                running in parallel lanes
+  fundable    — the budget section's estimate is plausible and warns when
+                the list looks too big for the budget
+
+File each blocking finding with ` + "`spec_annotate`" + ` on the line it
+indicts, then end your final message with a verdict on its own line:
+  VERDICT: pass     — no blocking findings
+  VERDICT: changes  — at least one; the plan is revised
+gummi parses this exact line.`)
+}
+
+// goalReviewHint is the goal's review of its combined branch: the
+// implement critique pass, reached once every card has landed or been
+// dropped.
+func goalReviewHint() string {
+	return strings.TrimSpace(`
+Stage: Goal review (autonomous, fresh context). Every card of this goal
+has landed on the goal branch or been dropped. The kickoff carries the
+combined diff of the goal branch against main and the results of the
+goal's checks. Review the combined change against the goal doc — not
+one card at a time, which each card's own review already did:
+  objective   — does the combined change do what the Objective and the
+                done-when items say? Name each item the diff does not
+                meet, quoting it.
+  fit         — do the cards fit together: duplicated helpers, choices
+                that contradict each other, half-finished paths one card
+                started and another abandoned, leftovers of dropped cards
+  limits      — anything the Limits section forbids
+Write each finding into the goal doc's Review section as one line naming
+its lens and severity — blocking or nit — followed by its own
+` + "`%% @reviewer:`" + ` marker. Blocking findings send the goal back to
+its lead, who fixes them with new or reworked cards. End with a verdict
+on its own line, exactly one of:
+  VERDICT: pass     — no blocking findings; ready to verify
+  VERDICT: changes  — at least one blocking finding
+gummi parses this exact line.`)
+}
+
+// goalVerifyHint is the goal's verify contract: the combined branch
+// against the done-when list, plus the try-it guide a person will follow.
+func goalVerifyHint() string {
+	return strings.TrimSpace(`
+Stage: Verify (autonomous) — the goal's combined branch. The kickoff
+carries the results of the goal's gummi-checks, which include one
+"done-when DW-N" check per commanded done-when item; do not re-run them.
+Your job:
+1. For each done-when item with judge: true, judge it against the
+   combined branch and record the evidence in the Verification plan as
+   "DW-N: met — <evidence>" or "DW-N: not met — <why>".
+2. For each commanded item, record its result the same way from the
+   kickoff's check results.
+3. Write the Try it section if it is empty or stale: short steps a
+   person follows to see the result working — the commands to run and
+   what they should see. If the change has nothing visible (a refactor,
+   an internal change), say so in one line and point at the done-when
+   checks instead of inventing steps. Then run every step yourself and
+   fix the guide where a step does not work as written.
+You are autonomous: no one can answer questions, so never end with one.
+End your final message with a verdict on its own line, exactly one of:
+  VERDICT: pass     — every done-when item is met and the try-it guide works
+  VERDICT: fail     — an item is not met, or a step of the guide fails
+  VERDICT: blocked  — the environment cannot run the checks at all
+gummi parses this exact line.`)
+}
