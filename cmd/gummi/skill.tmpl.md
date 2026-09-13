@@ -232,6 +232,41 @@ mints each proposed FD and moves the RS card to `done`; `gummi resume RS-NNN
 and emits a fresh `question`. `gummi status RS-NNN` and `gummi spec RS-NNN`
 work the same as for any other card.
 
+## Goals: `gummi goal`
+
+`gummi goal --envelope N "<objective>"` mints one GL goal: a card whose work
+is other cards. It runs the plan conversation first — the architect agrees
+the objective, a done-when list of checkable statements, the limits, and the
+cards that get there, each serving a done-when item — and stops at its plan
+gate like any card (`question`, exit 2, unless `--gate-approval autopilot
+--autonomous`). `--plan-file <path>` starts from a goal doc you wrote.
+
+Approving the plan starts the goal, and from there it runs itself. It creates
+its cards, runs each on autopilot on the goal branch `gummi/GL-NNN-slug`, and
+lands each one there as one commit. The goal's lead answers the cards'
+questions, reads their plans, and re-plans when a card gets stuck. Then it
+reviews and verifies the combined branch. The envelope is the goal's whole
+budget and a hard ceiling. While it runs, the stream carries `goal` events
+(what each step did) and `verified` events for its cards. A card's `verified`
+is not the goal's `done`.
+
+The run exits `done` (0) when the goal is ready for you. The `done` event's
+`goal` object says how many done-when items were met, whether the goal is
+`partial`, which cards landed and which were dropped, and carries the full
+report. `gummi status GL-NNN --json` has the same report under `goal`,
+including the `decisions_for_review` the lead made on your behalf. Put those
+in front of the human. From there:
+
+- `gummi merge GL-NNN` lands the goal on main as one merge commit over its
+  cards' commits (`-m` optional — gummi writes it).
+- `gummi resume GL-NNN --request-changes "<notes>"` sends it back to its
+  cards with the notes; add `--envelope N` to give it more budget.
+- `gummi resume GL-NNN --reverse D-N` reverses a decision for review.
+- `gummi handoff GL-NNN` closes it without landing; the branch stays.
+
+While a goal runs, `gummi resume GL-NNN --goal-note "<text>"` hands its lead a
+note, and `--wrap-up` tells it to finish now.
+
 ## Worktrees, and re-attaching a proven branch
 
 Each feature is checked out in its **own linked git worktree** under

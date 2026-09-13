@@ -146,6 +146,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	// the last log entry that touched each card, and the pre-goal spend of
 	// attached cards (it does not count against the goal)
 	lastTouch := map[domain.FeatureID]int64{}
+	lastTouchAt := map[domain.FeatureID]time.Time{}
 	attachSpent := map[domain.FeatureID]int{}
 	dropReason := map[domain.FeatureID]string{}
 	leadSeen := map[domain.FeatureID][]int64{}
@@ -156,6 +157,9 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		case state.GoalStarted, state.GoalBounced, state.GoalRaised, state.GoalAnswered,
 			state.GoalPlanApproved, state.GoalAttached, state.GoalMinted:
 			lastTouch[en.Card] = en.Seq
+			if en.Action != state.GoalMinted && en.Action != state.GoalAttached {
+				lastTouchAt[en.Card] = en.At
+			}
 		case state.GoalDropped:
 			dropReason[en.Card] = en.Detail
 		case state.GoalLeadTurn:
@@ -198,7 +202,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		if merr != nil {
 			return v, merr
 		}
-		gc.State, gc.Reason = e.goalCardState(ctx, c, marks, open[c.ID], lastTouch[c.ID], now)
+		gc.State, gc.Reason = e.goalCardState(ctx, c, marks, open[c.ID], lastTouch[c.ID], lastTouchAt[c.ID], now)
 		if gc.State == goalpolicy.Dropped && gc.Reason == "" {
 			gc.Reason = dropReason[c.ID]
 		}
@@ -271,7 +275,7 @@ func (e *Engine) goalWrapReason(log []state.GoalEntry) string {
 
 // goalCardState classifies one goal card for the conductor. lastTouch is
 // the seq of the newest goal log entry that acted on the card.
-func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks state.CardMarks, open []state.OpenDecision, lastTouch int64, now time.Time) (goalpolicy.CardState, string) {
+func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks state.CardMarks, open []state.OpenDecision, lastTouch int64, touchedAt, now time.Time) (goalpolicy.CardState, string) {
 	if c.GoalDropped() {
 		return goalpolicy.Dropped, ""
 	}
@@ -305,7 +309,14 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 		return goalpolicy.Stuck, detail
 	}
 	if c.Stage == domain.StageTodo {
-		return goalpolicy.Waiting, ""
+		if touchedAt.IsZero() {
+			return goalpolicy.Waiting, ""
+		}
+		// told to start and not started yet: the driving loop has it
+		if now.Sub(touchedAt) > goalIdleGrace {
+			return goalpolicy.Stuck, "was started but never began its plan"
+		}
+		return goalpolicy.Running, ""
 	}
 	if c.Stage == domain.StageVerify && !c.VerifiedAt.IsZero() &&
 		(marks.StageEnter.Stage != domain.StageVerify || !c.VerifiedAt.Before(marks.StageEnter.At)) {
@@ -317,6 +328,9 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 	last := marks.StageEnter.At
 	if marks.Gate.At.After(last) {
 		last = marks.Gate.At
+	}
+	if touchedAt.After(last) {
+		last = touchedAt
 	}
 	if !last.IsZero() && now.Sub(last) > goalIdleGrace {
 		return goalpolicy.Stuck, "stopped with nothing running"

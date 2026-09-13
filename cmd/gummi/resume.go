@@ -41,6 +41,9 @@ func runResume(args []string) error {
 	if err != nil {
 		return err
 	}
+	if in, err = goalResumeInput(in, *rv.goalNote, *rv.reverse, *rv.wrapUp, isSet(fs, "goal-note"), isSet(fs, "reverse")); err != nil {
+		return err
+	}
 	gate, ok := domain.NormalizeGateApproval(*rv.gate)
 	if !ok {
 		return fmt.Errorf(
@@ -97,6 +100,8 @@ type resumeFlagValues struct {
 	verbose                      *bool
 	envelope                     *int
 	timeout                      *time.Duration
+	goalNote, reverse            *string
+	wrapUp                       *bool
 }
 
 // registerResumeFlags binds `gummi resume`'s flags onto fs and returns
@@ -116,7 +121,46 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		verbose:        fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:            fs.String("ref", "", "external correlation id, echoed in the stream"),
 		until:          fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
+		goalNote:       fs.String("goal-note", "", "goals: add a note to a running goal; its lead reads it on its next turn"),
+		reverse:        fs.String("reverse", "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why"),
+		wrapUp:         fs.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped"),
 	}
+}
+
+// goalResumeInput folds the goal-only resume flags into in. --goal-note and
+// --wrap-up stand alone; --reverse may carry a --request-changes reason.
+func goalResumeInput(in driver.ResumeInput, goalNote, reverse string, wrapUp, noteSet, reverseSet bool) (driver.ResumeInput, error) {
+	n := 0
+	if noteSet {
+		n++
+	}
+	if reverseSet {
+		n++
+	}
+	if wrapUp {
+		n++
+	}
+	if n == 0 {
+		return in, nil
+	}
+	if n > 1 {
+		return in, fmt.Errorf("give at most one of --goal-note, --reverse, --wrap-up")
+	}
+	others := in.Answer != nil || in.Approve || in.Bounce != nil || in.Say != nil || (in.RequestChanges != nil && !reverseSet)
+	if others {
+		return in, fmt.Errorf("--goal-note, --reverse and --wrap-up do not combine with another decision flag")
+	}
+	switch {
+	case noteSet:
+		note := goalNote
+		in.Note = &note
+	case reverseSet:
+		ref := reverse
+		in.Reverse = &ref
+	case wrapUp:
+		in.WrapUp = true
+	}
+	return in, nil
 }
 
 // resumeInput builds the ResumeInput from the mutually exclusive decision

@@ -65,7 +65,7 @@ func resolveFeatureID(ctx context.Context, store *state.Store, arg string) (doma
 	}
 	f, err := store.FeatureByExternalRef(ctx, arg)
 	if err != nil {
-		return domain.Feature{}, fmt.Errorf("no work item %q (not an FD-NNN/BG-NNN id, and no feature carries it as --ref): %w", arg, err)
+		return domain.Feature{}, fmt.Errorf("no work item %q (not an FD-NNN/BG-NNN/RS-NNN/GL-NNN id, and no card carries it as --ref): %w", arg, err)
 	}
 	return f, nil
 }

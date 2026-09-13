@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/engine"
@@ -48,7 +49,10 @@ func runMerge(args []string) error {
 		return err
 	}
 	message := *mv.message
-	if message == "" {
+	// a goal lands as a merge commit gummi writes from the goal and its
+	// cards, so -m is optional for one
+	isGoal := strings.HasPrefix(strings.ToUpper(idArg), "GL-")
+	if message == "" && !isGoal {
 		return fmt.Errorf("merge needs a commit message: pass -m <message> (or -m - to read one from stdin)")
 	}
 	if message == "-" {

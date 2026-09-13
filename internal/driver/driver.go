@@ -54,6 +54,9 @@ type Options struct {
 	// Repo is the managed repository the created card belongs to (a
 	// configured `repos:` name, or "" for the workspace default).
 	Repo string
+	// GoalDoc, for a goal, is a complete goal doc to start the plan from
+	// (--plan-file) instead of the template seeded with the objective.
+	GoalDoc string
 }
 
 // Driver runs one feature through the engine's gate floor headlessly. It
@@ -82,6 +85,12 @@ type Driver struct {
 	curStage        domain.Stage // stage currently being driven (for verbose activity lines)
 	activityCur     int          // cursor into the live session's activity feed
 	sentTurn        bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
+
+	// events is the stream this driver reads when it is not the engine's
+	// own (a goal's cards share one process, split by hub); nil reads
+	// engine.Events() directly.
+	events <-chan engine.Event
+	hub    *eventHub
 }
 
 // roundKey is the fast-path round-counter map's key: one entry per
@@ -211,6 +220,14 @@ type ResumeInput struct {
 	// stops without acting. It is how a script sees a reading without a
 	// screen to read a chip off; the explicit flags stay the way to act.
 	Say *string
+	// Goals only. Note adds one of your notes to a running goal (its lead
+	// reads it next); Reverse reverses a decision for review ("D-3") and
+	// sends the goal back; WrapUp tells a running goal to finish now. A
+	// RequestChanges on a goal that is ready for you sends it back with
+	// the notes, and Envelope raises the goal budget.
+	Note    *string
+	Reverse *string
+	WrapUp  bool
 }
 
 // Resume rehydrates the engine's persisted sessions, applies the caller's
@@ -266,6 +283,19 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 			return d.fail(ctx, string(id), fmt.Errorf(
 				"%s has no open question to answer — it waits at a design gate (--approve/--request-changes) or an escalation (--bounce)", id))
 		}
+	}
+
+	if f.IsGoal() {
+		if out, handled, err := d.resumeGoal(ctx, f, in); handled || err != nil {
+			if err != nil {
+				return d.fail(ctx, string(id), err)
+			}
+			return out, nil
+		}
+		return d.drive(ctx, id)
+	}
+	if in.Note != nil || in.Reverse != nil || in.WrapUp {
+		return d.fail(ctx, string(id), fmt.Errorf("%s is not a goal; --note, --reverse and --wrap-up apply to goals", id))
 	}
 
 	// --envelope raises the feature's credit budget before the parked stage
@@ -398,6 +428,9 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
 		return d.fail(ctx, string(id), err)
+	}
+	if f.IsGoal() {
+		return d.mergeGoal(ctx, f, message)
 	}
 	wt, err := d.eng.WorktreesFor(ctx, &f)
 	if err != nil {
@@ -576,6 +609,19 @@ func (d *Driver) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, err
 	if f.Kind == domain.KindResearch {
 		return d.fail(ctx, string(id),
 			fmt.Errorf("%s carries no branch to hand off; advance it instead", id))
+	}
+	if f.IsGoal() && (f.Stage != domain.StageVerify || f.VerifiedAt.IsZero()) {
+		// a goal handed off before it is ready is abandoned: its unfinished
+		// cards are dropped and its branch is kept
+		res, err := d.eng.AbandonGoal(ctx, id, d.actor)
+		if err != nil {
+			return d.fail(ctx, string(id), err)
+		}
+		if res.Status != engine.StatusAdvanced {
+			return d.fail(ctx, string(id), handOffRefusal(id, res))
+		}
+		d.out.emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
+		return Outcome{Status: StatusDone, ID: string(id)}, nil
 	}
 	// the verified-branch precondition, the same one Merge applies: this
 	// verb ends a card that finished, not one abandoned mid-flight.
@@ -772,10 +818,13 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 		}
 
 		var out Outcome
-		switch f.Stage {
-		case domain.StagePlan:
+		switch {
+		case f.IsGoal() && f.Stage == domain.StageImplement:
+			// a goal's implement stage is conducted, not written
+			out, err = d.driveGoal(ctx, f)
+		case f.Stage == domain.StagePlan:
 			out, err = d.driveDesign(ctx, f)
-		case domain.StageTodo:
+		case f.Stage == domain.StageTodo:
 			// todo is a pure kickoff gate (no agent action): advance into the
 			// flow's first real stage. This is "start", not a design decision,
 			// so it always auto-crosses regardless of --gate-approval.
@@ -926,6 +975,14 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 			}
 			if d.opts.Autonomous {
 				rec := engine.RecommendedOption(ask)
+				// a goal card's question goes to its goal's lead first; the
+				// answerer on record stays the unattended loop (no person
+				// typed it), and the goal's log names the lead
+				if f.InGoal() {
+					if ans, ok, gerr := d.eng.GoalAnswer(ctx, f.ID, ask); gerr == nil && ok && ans != "" {
+						rec = ans
+					}
+				}
 				// the answerer declares itself: the record must say an
 				// unattended loop took it, whoever's stored mode the card
 				// runs under, or the morning receipt under-counts it.
@@ -1111,6 +1168,11 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			// stop at the verified branch: Advance reports NeedsMerge (branch
 			// ahead) or transitions to Done (nothing to land). Never merges.
 			return d.crossGate(ctx, f)
+		case f.IsGoal():
+			// a goal's verify that did not pass goes back to its cards, or —
+			// partial already, or out of rework rounds — stops ready for you
+			// with what was not met on the report
+			return d.goalVerifyNotPassed(ctx, f, out.Reason)
 		case out.Reason == "verify-blocked":
 			return d.escalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
 		case out.Reason == "verify-fail":
@@ -1209,6 +1271,11 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 			return Outcome{}, err
 		}
 		d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: reworkLabel(f.Stage), Round: d.round(f.ID, kind)})
+		if f.IsGoal() && f.Stage == domain.StageImplement {
+			// a goal's rework is its lead's, recorded by RunWith: conduct
+			// the stage again rather than await a session that never runs
+			return Outcome{}, nil
+		}
 		return d.awaitRework(ctx, f)
 	default: // Park: the cap was hit, or the verdict was unclear
 		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
@@ -1337,6 +1404,14 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 		})
 		return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 	}
+	// a goal card's plan is read by its goal's lead before it implements
+	if f.InGoal() && f.Stage == domain.StagePlan {
+		if approve, note, ok, err := d.eng.GoalPlanCheck(ctx, f.ID); err == nil && ok && !approve {
+			d.opening = "The goal's lead sent this plan back before implementation: " + note
+			d.out.emit(gateEvent{Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(f.Stage), Decision: "sent back by the goal's lead"})
+			return Outcome{}, nil
+		}
+	}
 	return d.autoAdvance(ctx, f)
 }
 
@@ -1463,13 +1538,24 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
 		f = got
 	}
+	if f.InGoal() && f.Stage != domain.StageDone {
+		// a goal card's verified branch is its goal's to land, not a stop
+		// for a person: no park, and no `done` a caller could mistake for
+		// the goal's own
+		d.out.emit(verifiedEvent{Event: "verified", ID: string(f.ID), Goal: string(f.GoalID), Branch: f.BranchName(), Spent: f.Spend.Credits})
+		return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
+	}
 	d.logPark(f, state.ParkReasonNeedsYou, "reached the landing gate — the branch is ready to merge.")
-	d.out.emit(doneEvent{
+	ev := doneEvent{
 		Event: "done", ID: string(f.ID), Branch: f.BranchName(),
 		Spec: f.ArtifactPath(), Spent: f.Spend.Credits, ReviewRounds: d.reviewsRun,
 		Message:     f.PullRequest.NextStepsHint(true),
 		PullRequest: f.PullRequest.StatusPayload(),
-	})
+	}
+	if f.IsGoal() {
+		ev.Goal = d.goalDone(ctx, f)
+	}
+	d.out.emit(ev)
 	return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
 }
 
@@ -1866,6 +1952,7 @@ func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc strin
 		Kind: kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
+		GoalDoc: d.opts.GoalDoc,
 	})
 }
 
@@ -2050,7 +2137,7 @@ func (d *Driver) awaitStage(ctx context.Context, id domain.FeatureID) (stageEnd,
 			return stageEnd{}, ctx.Err()
 		case <-tick:
 			return stageEnd{kind: endTimeout}, nil
-		case ev, ok := <-d.eng.Events():
+		case ev, ok := <-d.stream():
 			if !ok {
 				return stageEnd{kind: endError, err: errors.New("engine event stream closed")}, nil
 			}

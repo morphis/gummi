@@ -87,6 +87,18 @@ gummi research [flags] "<brief>"
     --until string            stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
     --verbose                 add per-tool-call activity lines to the stream
 
+gummi goal [flags] "<objective>"
+    --autonomous              let the architect take its recommended answer instead of asking during the plan conversation
+    --envelope int            the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)
+    --gate-approval string    who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)
+    --plan-file string        a complete goal doc to start the plan conversation from (a file path, or - for stdin)
+    --profile string          profile mapping roles to models, the lead included (default: first configured)
+    --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
+    --repo string             managed repository for the goal and all its cards (a configured repos: name; required when repos: is configured)
+    --stage-timeout duration  per-stage inactivity timeout for the goal and each of its cards (0 disables)
+    --until string            stop cleanly before the goal's plan is approved (only "plan" is a valid stop)
+    --verbose                 add per-tool-call activity lines to the stream
+
 gummi resume <id|ref> [decision]
     --answer string           answer a delegated ask_user question
     --approve                 approve a caller design gate
@@ -94,13 +106,16 @@ gummi resume <id|ref> [decision]
     --bounce                  rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)
     --envelope int            raise the credit budget before resuming (required to clear a stage that ran out; never lowers it)
     --gate-approval string    who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)
+    --goal-note string        goals: add a note to a running goal; its lead reads it on its next turn
     --note string             addendum to the reborn stage's kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
     --request-changes string  send a caller design gate back with a note
+    --reverse string          goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why
     --say string              read a line the way the card page would and report what it would do, as a say event, without acting
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
     --until string            stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)
     --verbose                 add per-tool-call activity lines to the stream
+    --wrap-up                 goals: finish now — nothing new starts, verified work lands, the rest is dropped
 
 gummi verify <id|ref>
 
@@ -309,6 +324,41 @@ mints each proposed FD and moves the RS card to `done`; `gummi resume RS-NNN
 --request-changes "<note>"` re-runs the decompose pass with the note attached
 and emits a fresh `question`. `gummi status RS-NNN` and `gummi spec RS-NNN`
 work the same as for any other card.
+
+## Goals: `gummi goal`
+
+`gummi goal --envelope N "<objective>"` mints one GL goal: a card whose work
+is other cards. It runs the plan conversation first — the architect agrees
+the objective, a done-when list of checkable statements, the limits, and the
+cards that get there, each serving a done-when item — and stops at its plan
+gate like any card (`question`, exit 2, unless `--gate-approval autopilot
+--autonomous`). `--plan-file <path>` starts from a goal doc you wrote.
+
+Approving the plan starts the goal, and from there it runs itself. It creates
+its cards, runs each on autopilot on the goal branch `gummi/GL-NNN-slug`, and
+lands each one there as one commit. The goal's lead answers the cards'
+questions, reads their plans, and re-plans when a card gets stuck. Then it
+reviews and verifies the combined branch. The envelope is the goal's whole
+budget and a hard ceiling. While it runs, the stream carries `goal` events
+(what each step did) and `verified` events for its cards. A card's `verified`
+is not the goal's `done`.
+
+The run exits `done` (0) when the goal is ready for you. The `done` event's
+`goal` object says how many done-when items were met, whether the goal is
+`partial`, which cards landed and which were dropped, and carries the full
+report. `gummi status GL-NNN --json` has the same report under `goal`,
+including the `decisions_for_review` the lead made on your behalf. Put those
+in front of the human. From there:
+
+- `gummi merge GL-NNN` lands the goal on main as one merge commit over its
+  cards' commits (`-m` optional — gummi writes it).
+- `gummi resume GL-NNN --request-changes "<notes>"` sends it back to its
+  cards with the notes; add `--envelope N` to give it more budget.
+- `gummi resume GL-NNN --reverse D-N` reverses a decision for review.
+- `gummi handoff GL-NNN` closes it without landing; the branch stays.
+
+While a goal runs, `gummi resume GL-NNN --goal-note "<text>"` hands its lead a
+note, and `--wrap-up` tells it to finish now.
 
 ## Worktrees, and re-attaching a proven branch
 

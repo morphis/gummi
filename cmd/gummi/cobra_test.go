@@ -193,6 +193,7 @@ func TestCobraFlagsMirrorCanonical(t *testing.T) {
 	}{
 		{name: "run", cmd: runCmd, register: func(fs *flag.FlagSet) { registerRunFlags(fs) }},
 		{name: "research", cmd: researchCmd, register: func(fs *flag.FlagSet) { registerResearchFlags(fs) }},
+		{name: "goal", cmd: goalCmd, register: func(fs *flag.FlagSet) { registerGoalFlags(fs) }},
 		{name: "resume", cmd: resumeCmd, register: func(fs *flag.FlagSet) { registerResumeFlags(fs) }},
 		{name: "ingest", cmd: ingestCmd, register: func(fs *flag.FlagSet) { registerIngestFlags(fs) }},
 		{name: "bugs new", cmd: bugsNewCmd, register: func(fs *flag.FlagSet) { registerBugsNewFlags(fs) }},

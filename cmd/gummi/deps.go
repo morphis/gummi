@@ -71,7 +71,7 @@ func resolveDepsID(ctx context.Context, store *state.Store, arg string) (domain.
 			return f.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no card %q (not an FD-NNN/BG-NNN id, and no feature or bug carries it as a title or slug)", arg)
+	return "", fmt.Errorf("no card %q (not an FD-NNN/BG-NNN/RS-NNN/GL-NNN id, and no card carries it as a title or slug)", arg)
 }
 
 // runDepsAdd implements `gummi deps add <dependent> <depends-on>`: record

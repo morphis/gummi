@@ -55,6 +55,15 @@ func resumeArgv(cmd *cobra.Command, args []string) []string {
 	return argv
 }
 
+// goalCmd implements `gummi goal [flags] "<objective>"`.
+var goalCmd = &cobra.Command{
+	Use:   `goal [flags] "<objective>"`,
+	Short: "Agree a goal, then let it run its cards on one branch until it is ready for you",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runGoal(buildFlagArgs(cmd, args))
+	},
+}
+
 // verifyCmd implements `gummi verify <id|ref>`.
 var verifyCmd = &cobra.Command{
 	Use:   "verify <id|ref>",
@@ -296,6 +305,7 @@ func init() {
 	bindRunFlags(runCmd)
 	bindResearchFlags(researchCmd)
 	bindResumeFlags(resumeCmd)
+	bindGoalFlags(goalCmd)
 	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")
 	squashCmd.Flags().StringP("message", "m", "", "collapsed commit message (required; - reads from stdin)")
 	squashCmd.Flags().Bool("force", false, "proceed even if the linked PR has open review threads")
@@ -370,9 +380,27 @@ func bindIngestFlags(cmd *cobra.Command) {
 	f.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; required when `repos:` is configured)")
 }
 
+// bindGoalFlags mirrors registerGoalFlags.
+func bindGoalFlags(cmd *cobra.Command) {
+	f := cmd.Flags()
+	f.Int("envelope", 0, "the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)")
+	f.String("profile", "", "profile mapping roles to models, the lead included (default: first configured)")
+	f.String("gate-approval", driver.GateAttended, "who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)")
+	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout for the goal and each of its cards (0 disables)")
+	f.Bool("autonomous", false, "let the architect take its recommended answer instead of asking during the plan conversation")
+	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
+	f.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
+	f.String("repo", "", "managed repository for the goal and all its cards (a configured `repos:` name; required when `repos:` is configured)")
+	f.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
+	f.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)")
+}
+
 // bindResumeFlags mirrors registerResumeFlags.
 func bindResumeFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
+	f.String("goal-note", "", "goals: add a note to a running goal; its lead reads it on its next turn")
+	f.String("reverse", "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why")
+	f.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped")
 	f.String("answer", "", "answer a delegated ask_user question")
 	f.Int("envelope", 0, "raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)")
 	f.Bool("approve", false, "approve a caller design gate")

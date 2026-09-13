@@ -332,6 +332,21 @@ type doneEvent struct {
 	// PullRequest mirrors the linked PullRequestRef verbatim, same shape as
 	// `status --json`'s pull_request object; absent when unlinked.
 	PullRequest any `json:"pull_request,omitempty"`
+	// Goal is a goal's hand-over: how many done-when items were met,
+	// whether it is partial, which cards landed and which were dropped.
+	// Absent for every other kind.
+	Goal *goalDoneEvent `json:"goal,omitempty"`
+}
+
+// verifiedEvent reports a goal card reaching its verified branch: its goal
+// lands it on the goal branch next. It stands in for `done`, which is the
+// goal's own terminal event.
+type verifiedEvent struct {
+	Event  string  `json:"event"`
+	ID     string  `json:"id"`
+	Goal   string  `json:"goal"`
+	Branch string  `json:"branch"`
+	Spent  float64 `json:"spent_credits"`
 }
 
 // mergedEvent reports a successful headless landing: the feature branch was

@@ -1300,7 +1300,11 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	preexisting := false
 	var liveFailures []string
 	var recorded []goalCheckResult
-	defer func() { e.recordGoalChecks(s.Feature, recorded) }()
+	defer func() {
+		if s.Feature.Stage == domain.StageVerify {
+			e.recordGoalChecks(s.Feature, recorded)
+		}
+	}()
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		var status string
@@ -1338,7 +1342,10 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// model's self-reported pass can never outrank gummi's own machine
 	// judgement — mirrors the floor gateVerifyVerdict already stamps for
 	// the env-omission condition.
-	if len(liveFailures) > 0 {
+	// A goal's review is the exception: its checks include the done-when
+	// commands, which a partial goal fails by definition — the review judges
+	// the combined diff, and verify is where an unmet item counts.
+	if len(liveFailures) > 0 && !(s.Feature.IsGoal() && s.Critique) {
 		s.setVerdictFloor("blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
 	}
 	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +

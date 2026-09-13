@@ -459,3 +459,64 @@ func TestGoalNoteAndReverse(t *testing.T) {
 		t.Fatal("reversing a decision that does not exist must fail")
 	}
 }
+
+func TestGoalReportAtTheHandOver(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	root := wt.Root()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v", res.Status, err)
+	}
+	cards := goalCards(t, store, g.ID)
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, root, cards[0].ID, "cache.txt")
+	tick(t, e, g.ID)
+	// the docs card is dropped: DW-2 is served by nothing left
+	view, _ := e.GoalView(ctx, g.ID)
+	docsCard, _ := view.Card(cards[1].ID)
+	if err := e.goalDrop(ctx, view.Goal, docsCard.Feature, "no docs needed", "lead"); err != nil {
+		t.Fatal(err)
+	}
+	e.goalLog(ctx, g.ID, state.GoalPayload{Action: state.GoalDecision, Detail: "skip the docs page", Alternative: "write CACHE.md", By: "lead"})
+	e.goalLog(ctx, g.ID, state.GoalPayload{Action: state.GoalDeclined, Card: cards[0].ID, Ref: "rename cache dir", Detail: "the name is fine", By: "lead"})
+	r := tick(t, e, g.ID)
+	if !r.Finished {
+		t.Fatalf("actions %v", r.Actions)
+	}
+	e.Drop(g.ID)
+	if _, err := store.Transition(ctx, g.ID, domain.StageVerify, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	e.recordGoalChecks(view.Goal, []goalCheckResult{{Name: "done-when DW-1", OK: true, Status: "pass"}})
+	res, err := e.Advance(ctx, g.ID, "auto")
+	if err != nil || res.Status != StatusNeedsMerge {
+		t.Fatalf("verify gate: %v %v %q", res.Status, err, res.Reason)
+	}
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Ready || rep.Partial != "1 card(s) dropped" {
+		t.Fatalf("report = %+v", rep)
+	}
+	if met, total := rep.Met(); met != 1 || total != 2 {
+		t.Fatalf("met %d of %d: %+v", met, total, rep.DoneWhen)
+	}
+	if rep.DoneWhen[1].Status != DoneWhenNotMet || !strings.Contains(rep.DoneWhen[1].Evidence, "dropped") {
+		t.Fatalf("DW-2 = %+v", rep.DoneWhen[1])
+	}
+	if len(rep.Decisions) != 1 || rep.Decisions[0].Ref != "D-1" || len(rep.Declined) != 1 {
+		t.Fatalf("decisions %+v declined %+v", rep.Decisions, rep.Declined)
+	}
+	if rep.Cards[0].Commit == "" || rep.Cards[1].State != "dropped" {
+		t.Fatalf("cards = %+v", rep.Cards)
+	}
+	raw, _ := os.ReadFile(filepath.Join(root, g.ArtifactPath()))
+	body, _ := spec.ViewSection(string(raw), spec.GoalSectionReport)
+	for _, want := range []string{"1 of 2 done-when items met", "✓ DW-1", "✗ DW-2", "D-1 skip the docs page", "Declined findings"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("report section lacks %q:\n%s", want, body)
+		}
+	}
+}

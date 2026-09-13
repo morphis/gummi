@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -143,6 +144,16 @@ type statusView struct {
 	// across rounds, so a bounced implement stage reports both passes as
 	// one figure. Rounds above is what tells you how many passes that is.
 	StageSpend []statusStageSpend `json:"stage_spend,omitempty"`
+	// GoalID is the goal this card belongs to; FoundBy the goal that filed
+	// it as found along the way. Both absent on an ordinary card.
+	GoalID  string `json:"goal_id,omitempty"`
+	FoundBy string `json:"found_by,omitempty"`
+	// Goal is a goal's hand-over, as it stands now: its budget tree, its
+	// done-when items and their status, its cards, the decisions for
+	// review, declined findings and what it found along the way. `ready`
+	// inside it is true when the goal is waiting for you. Absent for every
+	// other kind.
+	Goal *engine.GoalReport `json:"goal,omitempty"`
 }
 
 // statusEscalation is the open decision that parked the card, in the
@@ -230,7 +241,26 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		Rounds:          roundCounts(ctx, store, f),
 		ExcusedChecks:   excusedChecks(ctx, store, f),
 		StageSpend:      stageSpendRows(ctx, store, f),
+		GoalID:          string(f.GoalID),
+		FoundBy:         string(f.FoundBy),
+		Goal:            goalReport(ctx, store, wt, ws, f),
 	}
+}
+
+// goalReport reads a goal's hand-over through an agent-less engine — the
+// goal view is the engine's, and status runs none of its sessions. Nil for
+// any other kind, or when the report cannot be read.
+func goalReport(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace, f *domain.Feature) *engine.GoalReport {
+	if !f.IsGoal() {
+		return nil
+	}
+	eng := engine.New(engine.Config{Store: store, Pool: wt, Workspace: ws})
+	defer eng.Close()
+	r, err := eng.GoalReport(ctx, f.ID)
+	if err != nil {
+		return nil
+	}
+	return &r
 }
 
 // openEscalation reads the newest still-open decision on the card — the
@@ -412,6 +442,37 @@ func renderStatus(w io.Writer, v statusView) {
 	}
 	if v.PullRequestLine != "" {
 		fmt.Fprintf(w, "  pr: %s\n", v.PullRequestLine)
+	}
+	if v.GoalID != "" {
+		fmt.Fprintf(w, "  Goal:     %s\n", v.GoalID)
+	}
+	if v.FoundBy != "" {
+		fmt.Fprintf(w, "  Found by: %s\n", v.FoundBy)
+	}
+	if g := v.Goal; g != nil {
+		met, total := g.Met()
+		state := "running"
+		switch {
+		case g.Ready:
+			state = "ready for you"
+		case g.WrappingUp:
+			state = "wrapping up"
+		}
+		if g.Partial != "" {
+			state += " — partial: " + g.Partial
+		}
+		fmt.Fprintf(w, "  Goal:     %s · %d of %d done-when met · %d lanes\n", state, met, total, g.Lanes)
+		fmt.Fprintf(w, "  Budget:   %d · goal %s · cards %s · reserve %d · left to give %s\n",
+			g.Budget.Envelope, trimCredits(g.Budget.Own), trimCredits(g.Budget.CardSpent), g.Budget.Reserve, trimCredits(g.Budget.Available))
+		for _, d := range g.DoneWhen {
+			fmt.Fprintf(w, "            %s %s — %s\n", d.ID, d.Status, d.Says)
+		}
+		for _, c := range g.Cards {
+			fmt.Fprintf(w, "            %s %-9s %s\n", c.ID, c.State, c.Title)
+		}
+		if n := len(g.Decisions); n > 0 {
+			fmt.Fprintf(w, "  Decisions for review: %d\n", n)
+		}
 	}
 }
 

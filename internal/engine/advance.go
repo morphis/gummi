@@ -269,6 +269,11 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 							}
 							res.Feature.VerifiedAt = now
 						}
+						// a goal ready for you hands over: its report is
+						// written into the goal doc at the moment it is
+						if f.IsGoal() {
+							_, _ = e.WriteGoalReport(ctx, id)
+						}
 						return res, nil
 					}
 				}
