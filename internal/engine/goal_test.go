@@ -520,3 +520,30 @@ func TestGoalReportAtTheHandOver(t *testing.T) {
 		}
 	}
 }
+
+func TestRaisingTheBudgetLiftsABudgetWrapUp(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v", res.Status, err)
+	}
+	if err := e.goalWrapUp(ctx, g.ID, "the budget reached the reserve", ActorGoal); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RaiseGoalBudget(ctx, g.ID, 6000); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.GetFeature(ctx, g.ID); got.Goal.WrappingUp() {
+		t.Fatal("more budget lifts a wrap-up forced by the budget")
+	}
+	if err := e.StopGoal(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RaiseGoalBudget(ctx, g.ID, 7000); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.GetFeature(ctx, g.ID); !got.Goal.WrappingUp() {
+		t.Fatal("a stop you asked for stands through a raise")
+	}
+}

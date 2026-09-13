@@ -1157,6 +1157,20 @@ func (e *Engine) RaiseGoalBudget(ctx context.Context, goalID domain.FeatureID, t
 		return err
 	}
 	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalRaised, From: from, To: to, Detail: "you raised the goal budget", By: "user"})
+	// a wrap-up the goal forced on itself for lack of budget is lifted by
+	// more budget; one you or its lead asked for stands
+	if goal.Stage == domain.StageImplement && goal.Goal.WrappingUp() {
+		if log, lerr := e.cfg.Store.GoalLog(ctx, goalID); lerr == nil {
+			for i := len(log) - 1; i >= 0; i-- {
+				if log[i].Action == state.GoalWrapUp {
+					if log[i].By == ActorGoal && strings.Contains(log[i].Detail, "budget") {
+						_ = e.cfg.Store.ClearGoalWrapUp(ctx, goalID)
+					}
+					break
+				}
+			}
+		}
+	}
 	e.send(Event{Feature: goalID, Stage: goal.Stage, Kind: EventGoal})
 	return nil
 }
