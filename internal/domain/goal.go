@@ -137,6 +137,20 @@ func DefaultGoalReserve(envelope int) int {
 	return r
 }
 
+// GoalHeadroomPercent is the share of a goal's budget (past its reserve)
+// that minting its cards leaves ungiven: the pool its lead's turns and its
+// later raises come out of. A goal that handed every credit to its cards
+// up front would have nothing left to decide with.
+const GoalHeadroomPercent = 10
+
+// GoalMintPool is what a goal's plan may hand to its cards at the start:
+// the budget less the reserve, what the goal has already spent, and the
+// headroom kept for its lead and later raises.
+func (f *Feature) GoalMintPool(spent float64) float64 {
+	pool := float64(f.Budget.Envelope-f.ReserveCredits()) - spent
+	return pool * float64(100-GoalHeadroomPercent) / 100
+}
+
 // ReserveCredits returns the goal's reserve: the lead's estimate when it
 // has made one, the default formula otherwise.
 func (f *Feature) ReserveCredits() int {

@@ -226,7 +226,17 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		LeadFailures: failures,
 		Reviewing:    e.Get(goal.ID) != nil,
 	}
-	in.LeadAvailable = e.leadAvailable(goal)
+	for _, gc := range v.Cards {
+		in.Cards = append(in.Cards, goalpolicy.Card{
+			ID: gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
+			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings,
+			LeadTries: gc.LeadTries, Reason: gc.Reason,
+		})
+	}
+	v.Ledger = goalpolicy.ComputeLedger(in)
+	// a lead turn spends from what the goal has left to give; with less
+	// than one turn's worth there, the conductor's own rules decide
+	in.LeadAvailable = e.leadAvailable(goal) && v.Ledger.Available >= e.turnReserve()
 	if in.LeadAvailable {
 		if lastLeadAny == 0 && goal.Stage == domain.StageImplement {
 			in.LeadPending = append(in.LeadPending, "kickoff: the goal's cards are minted — read the goal doc and set the goal up")
@@ -245,15 +255,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			}
 		}
 	}
-	for _, gc := range v.Cards {
-		in.Cards = append(in.Cards, goalpolicy.Card{
-			ID: gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
-			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings,
-			LeadTries: gc.LeadTries, Reason: gc.Reason,
-		})
-	}
 	v.Input = in
-	v.Ledger = goalpolicy.ComputeLedger(in)
 	return v, nil
 }
 
@@ -809,7 +811,7 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 	if goal.Budget.Envelope <= 0 {
 		return "the goal has no budget"
 	}
-	pool := float64(goal.Budget.Envelope-goal.ReserveCredits()) - goal.Spend.CreditEquivalent()
+	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent())
 	if _, err := goalpolicy.SplitEnvelopes(want, pool); err != nil && len(want) > 0 {
 		return err.Error()
 	}
@@ -877,7 +879,7 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 			want = append(want, r.Envelope)
 		}
 	}
-	pool := float64(goal.Budget.Envelope-goal.ReserveCredits()) - goal.Spend.CreditEquivalent()
+	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent())
 	envs, err := goalpolicy.SplitEnvelopes(want, pool)
 	if err != nil && len(want) > 0 {
 		return err

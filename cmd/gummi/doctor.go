@@ -443,7 +443,13 @@ func reachChecks(ws state.Workspace, profiles config.Profiles, opts doctorOpts, 
 	}
 	var checks []doctorCheck
 	for _, pname := range profiles.Names() {
-		for _, role := range []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer, agent.RoleScribe} {
+		roles := []agent.Role{agent.RoleArchitect, agent.RoleImplementer, agent.RoleReviewer, agent.RoleScribe}
+		// a goal's lead is probed only where a profile names one; an
+		// undeclared lead runs on the architect's model, already probed
+		if _, declared := profiles.Profiles[pname][string(agent.RoleLead)]; declared {
+			roles = append(roles, agent.RoleLead)
+		}
+		for _, role := range roles {
 			model, backend := resolveRoleModel(profiles, pname, role)
 			if backend == "" {
 				backend = def
