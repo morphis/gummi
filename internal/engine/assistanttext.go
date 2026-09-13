@@ -23,3 +23,14 @@ func (t *assistantText) message(text string) {
 }
 
 func (t *assistantText) String() string { return t.done.String() + t.tail.String() }
+
+// lastAssistantText is the newest complete assistant message in a
+// transcript, "" when there is none.
+func lastAssistantText(ts []Message) string {
+	for i := len(ts) - 1; i >= 0; i-- {
+		if ts[i].Author == AuthorAssistant && strings.TrimSpace(ts[i].Content) != "" {
+			return strings.TrimSpace(ts[i].Content)
+		}
+	}
+	return ""
+}

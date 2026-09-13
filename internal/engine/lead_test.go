@@ -315,3 +315,62 @@ func TestLeadToolEndpointServesGoalTools(t *testing.T) {
 		t.Fatal("a hello for another goal must be refused")
 	}
 }
+
+func TestLeadDecisionRecordedOncePerAnswer(t *testing.T) {
+	lf := newLeadFake(func(prompt string) []agent.Event {
+		if strings.Contains(prompt, "is asking a question") {
+			return []agent.Event{
+				toolCall("1", "card_answer", map[string]any{"answer": "json", "decision": "json by default", "alternative": "table"}),
+				toolCall("2", "decision_record", map[string]any{"card": "FD-002", "decision": "json output by default", "alternative": "table output"}),
+			}
+		}
+		return nil
+	})
+	e, store, _, g := leadEngine(t, lf)
+	ctx := context.Background()
+	ask := &Ask{Question: "Which format?", Options: []AskOption{{Label: "table"}, {Label: "json"}}}
+	if _, _, err := e.GoalAnswer(ctx, "FD-002", ask); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := store.GoalLog(ctx, g.ID)
+	n := 0
+	for _, en := range log {
+		if en.Action == state.GoalDecision {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("one call, one decision for review; got %d", n)
+	}
+}
+
+func TestGoalReworkCarriesTheReviewsFindings(t *testing.T) {
+	ag := agent.NewFake("")
+	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventMessage, Text: "Blocking: a compiled binary `calc` was committed.\nVERDICT: changes"},
+			{Kind: agent.EventIdle},
+		}
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", Persist: true})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v", res.Status, err)
+	}
+	cur, _ := store.GetFeature(ctx, g.ID)
+	if err := e.RunCritique(cur, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, g.ID, StateDone)
+	if err := e.RunWith(cur, "The critique found issues. Address each open thread."); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := store.GoalLog(ctx, g.ID)
+	last := log[len(log)-1]
+	if last.Action != state.GoalRework || !strings.Contains(last.Detail, "compiled binary `calc` was committed") {
+		t.Fatalf("the lead's rework carries what the review found: %+v", last)
+	}
+}

@@ -817,6 +817,17 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 	// back — records the note as work the goal owes and asks the loop to
 	// tick the goal instead.
 	if f.IsGoal() && f.Stage == domain.StageImplement && flavor == flavorStage {
+		// A review that just asked for changes said what it found in its
+		// own words, and those words — not the loop's generic rework note,
+		// which speaks to an implementer about threads — are what the lead
+		// has to act on.
+		if s := e.Get(f.ID); s != nil {
+			if snap := s.Snapshot(); snap.Critique {
+				if found := lastAssistantText(snap.Transcript); found != "" {
+					note = "The goal's review of the combined branch asked for changes. What it found:\n\n" + found
+				}
+			}
+		}
 		if strings.TrimSpace(note) != "" && e.cfg.Store != nil {
 			e.goalLog(context.Background(), f.ID, state.GoalPayload{Action: state.GoalRework, Detail: note, By: ActorGoal})
 		}

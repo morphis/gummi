@@ -90,6 +90,22 @@ type leadTurn struct {
 	approve  *bool
 	planNote string
 	acted    bool
+	// decided holds the decisions this turn already recorded, so a
+	// card_answer's decision is not recorded a second time by a
+	// decision_record for the same card in the same turn
+	decided []state.GoalEntry
+}
+
+// recordedThisTurn names a decision this turn already recorded for card.
+func (lt *leadTurn) recordedThisTurn(card domain.FeatureID) string {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	for _, en := range lt.decided {
+		if en.Card == card {
+			return en.DecisionRef()
+		}
+	}
+	return ""
 }
 
 type leadQuestion struct {
@@ -503,6 +519,7 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 		leadTool("goal_doc", "Read the goal doc, or one section of it.", map[string]any{"section": str("A section title, e.g. Objective; empty for the whole doc.")}),
 		leadTool("card_spec", "Read a goal card's spec, bug report or research document.", map[string]any{"card": card}, "card"),
 		leadTool("card_diff", "Read a goal card's diff against the goal branch (summary and the start of the patch).", map[string]any{"card": card}, "card"),
+		leadTool("goal_diff", "Read the goal branch's combined diff against main (summary and the start of the patch) — what a review of the goal reads.", map[string]any{}),
 		leadTool("card_create", "Create a card inside the goal. It must serve at least one done-when item; its envelope comes out of what the goal has left to give.",
 			map[string]any{
 				"kind":       str("feature (default), bug or research"),
@@ -654,6 +671,15 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		diff, _ := wt.Diff(ctx, &c.Feature)
 		return clip(stat+"\n\n"+diff, 12000), nil
 
+	case "goal_diff":
+		wt, err := e.mgr(ctx, &goal)
+		if err != nil {
+			return "", err
+		}
+		stat, _ := wt.DiffStat(ctx, &goal)
+		diff, _ := wt.Diff(ctx, &goal)
+		return clip(stat+"\n\n"+diff, 12000), nil
+
 	case "card_create":
 		if goal.Goal.WrappingUp() {
 			return "", errors.New("the goal is wrapping up; nothing new starts")
@@ -796,7 +822,10 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		lt.mu.Unlock()
 		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalAnswered, Card: lt.question.card, Detail: clip(lt.question.ask.Question, 200) + " → " + a.Answer, By: "lead"})
 		if strings.TrimSpace(a.Decision) != "" {
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, Card: lt.question.card, Detail: a.Decision, Alternative: a.Alternative, By: "lead"})
+			en := e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, Card: lt.question.card, Detail: a.Decision, Alternative: a.Alternative, By: "lead"})
+			lt.mu.Lock()
+			lt.decided = append(lt.decided, en)
+			lt.mu.Unlock()
 		}
 		return "answer recorded; it is delivered when this turn ends", nil
 
@@ -823,6 +852,9 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 	case "decision_record":
 		if strings.TrimSpace(a.Decision) == "" || strings.TrimSpace(a.Alternative) == "" {
 			return "", errors.New("a decision for review needs the decision and the alternative not taken")
+		}
+		if ref := lt.recordedThisTurn(domain.FeatureID(a.Card)); ref != "" {
+			return "already recorded as " + ref + " this turn (card_answer records the decision it carries)", nil
 		}
 		en := e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, Card: domain.FeatureID(a.Card), Item: a.Item, Detail: a.Decision, Alternative: a.Alternative, By: "lead"})
 		mark()
