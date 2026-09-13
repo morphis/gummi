@@ -401,3 +401,50 @@ func TestMintFeatureAcceptanceHeading(t *testing.T) {
 		t.Errorf("acceptance text left in the Problem section:\n%s", content)
 	}
 }
+
+func TestMintGoalAlwaysSeedsItsDoc(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	ctx := context.Background()
+
+	g, err := Mint(ctx, store, ws, Input{Kind: domain.KindGoal, Description: "Export works offline", Envelope: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.ID.Kind() != domain.KindGoal || !strings.HasPrefix(string(g.ID), "GL-") {
+		t.Fatalf("goal id = %s", g.ID)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&g)))
+	if err != nil {
+		t.Fatalf("a goal is minted with its doc even from one line: %v", err)
+	}
+	obj, ok := spec.ViewSection(string(raw), spec.GoalSectionObjective)
+	if !ok || strings.TrimSpace(obj) != "Export works offline" {
+		t.Fatalf("objective = %q", obj)
+	}
+
+	c, err := Mint(ctx, store, ws, Input{Kind: domain.KindFeature, Description: "local cache", Envelope: 600, Goal: g.ID, FoundBy: g.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.GoalID != g.ID || c.FoundBy != "" {
+		t.Fatalf("a goal card belongs to its goal and is not found by it: %+v", c)
+	}
+	back, _ := store.GetFeature(ctx, c.ID)
+	if back.GoalID != g.ID {
+		t.Fatalf("goal link not persisted")
+	}
+
+	doc := "# custom\n\n## Objective\n\nmine\n"
+	g2, err := Mint(ctx, store, ws, Input{Kind: domain.KindGoal, Description: "Second goal", Envelope: 100, GoalDoc: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&g2)))
+	if string(raw) != doc {
+		t.Fatalf("a supplied goal doc is used verbatim, got %q", raw)
+	}
+
+	if _, err := Mint(ctx, store, ws, Input{Kind: domain.KindGoal, Description: "nested", Goal: g.ID}); err == nil {
+		t.Fatalf("a goal cannot be minted into a goal")
+	}
+}

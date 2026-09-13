@@ -1,0 +1,279 @@
+package state
+
+// Goals (domain.KindGoal) keep their facts here: which cards belong to a
+// goal, how each left it, the goal-only settings, and the goal's own log —
+// every landing, drop, raise, decision for review, declined finding, note
+// and lead turn — as card_events rows of kind EventGoal on the goal card.
+// The goal doc carries the prose (objective, done-when, limits, plan); the
+// store carries what happened.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/morphis/gummi/internal/domain"
+)
+
+// EventGoal is one entry of a goal's log. Its payload is a GoalPayload.
+const EventGoal = "goal"
+
+// Goal log actions: the closed vocabulary of GoalPayload.Action.
+const (
+	GoalMinted       = "minted"        // the goal created a card
+	GoalAttached     = "attached"      // an existing card was handed to the goal
+	GoalStarted      = "started"       // a card was started
+	GoalLanded       = "landed"        // a card landed on the goal branch
+	GoalDropped      = "dropped"       // the goal dropped a card
+	GoalDetached     = "detached"      // an attached card went back to the board
+	GoalRaised       = "raised"        // a card's envelope was raised from the goal budget
+	GoalBounced      = "bounced"       // a card was sent back with a note
+	GoalAnswered     = "answered"      // the lead answered a card's question
+	GoalPlanApproved = "plan-approved" // the lead approved a card's plan
+	GoalDecision     = "decision"      // a decision for review
+	GoalDeclined     = "declined"      // a reviewer finding the lead declined
+	GoalNotMet       = "not-met"       // a done-when item marked not met
+	GoalItemAdded    = "done-when"     // a done-when item added from your note
+	GoalNote         = "note"          // a note you typed into the goal
+	GoalFound        = "found"         // a backlog card filed along the way
+	GoalLeadTurn     = "lead-turn"     // the lead took a turn
+	GoalLeadFailed   = "lead-failed"   // a lead turn failed
+	GoalCaughtUp     = "caught-up"     // the goal branch caught up with main
+	GoalCatchUpFail  = "catch-up-failed"
+	GoalReserve      = "reserve"  // the lead re-estimated the reserve
+	GoalWrapUp       = "wrap-up"  // the goal was told to finish now
+	GoalFinished     = "finished" // the goal's work settled; its review started
+	GoalReversed     = "reversed" // you reversed a decision for review
+	GoalRefused      = "refused"  // a card's out-of-sandbox request was refused
+	GoalLeadNote     = "lead"     // a free line from the lead for the log
+)
+
+// GoalPayload is the JSON shape of an EventGoal event. Only the fields an
+// action uses are set.
+type GoalPayload struct {
+	Action string `json:"action"`
+	// Card is the goal card this entry is about, when it is about one.
+	Card domain.FeatureID `json:"card,omitempty"`
+	// Detail is the sentence the log shows: why, what, or the note itself.
+	Detail string `json:"detail,omitempty"`
+	// N numbers a decision for review (D-N), counted per goal.
+	N int `json:"n,omitempty"`
+	// Alternative is the option a decision did not take.
+	Alternative string `json:"alternative,omitempty"`
+	// Item is a done-when id (DW-N) for not-met, done-when and decision
+	// entries that trade against one.
+	Item string `json:"item,omitempty"`
+	// From and To carry amounts: an envelope raise, a reserve estimate.
+	From int `json:"from,omitempty"`
+	To   int `json:"to,omitempty"`
+	// Ref points at what an entry answers: the decision a reversal
+	// reverses ("D-3"), the finding a decline declines.
+	Ref string `json:"ref,omitempty"`
+	// By is who acted: "lead", "goal" (the conductor's own rule), or
+	// "user".
+	By string `json:"by,omitempty"`
+}
+
+// GoalEntry is one decoded goal log entry with its place in the log.
+type GoalEntry struct {
+	Seq int64
+	At  time.Time
+	GoalPayload
+}
+
+// DecisionRef names a decision for review the way every surface prints it.
+func (e GoalEntry) DecisionRef() string { return fmt.Sprintf("D-%d", e.N) }
+
+// AppendGoalEvent records one entry in goal's log. Decisions are numbered
+// here, inside the store, so two writers can never mint the same D-N.
+func (s *Store) AppendGoalEvent(ctx context.Context, goal domain.FeatureID, p GoalPayload, at time.Time) (GoalEntry, error) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return GoalEntry{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var stage string
+	if err := tx.QueryRowContext(ctx, `SELECT stage FROM features WHERE id = ?`, string(goal)).Scan(&stage); err != nil {
+		return GoalEntry{}, fmt.Errorf("goal %s: %w", goal, err)
+	}
+	if p.Action == GoalDecision && p.N == 0 {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM card_events WHERE feature_id = ? AND kind = ? AND payload LIKE '%"action":"decision"%'`,
+			string(goal), EventGoal).Scan(&n); err != nil {
+			return GoalEntry{}, err
+		}
+		p.N = n + 1
+	}
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return GoalEntry{}, fmt.Errorf("encoding goal event for %s: %w", goal, err)
+	}
+	res, err := tx.ExecContext(ctx, appendEventSQL,
+		string(goal), stage, EventGoal, "", at.UTC().Format(timeFmt), string(payload), "", "")
+	if err != nil {
+		return GoalEntry{}, fmt.Errorf("recording goal event for %s: %w", goal, err)
+	}
+	seq, _ := res.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return GoalEntry{}, err
+	}
+	return GoalEntry{Seq: seq, At: at, GoalPayload: p}, nil
+}
+
+// GoalLog returns goal's log, oldest first.
+func (s *Store) GoalLog(ctx context.Context, goal domain.FeatureID) ([]GoalEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT seq, at, payload FROM card_events WHERE feature_id = ? AND kind = ? ORDER BY seq`,
+		string(goal), EventGoal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GoalEntry
+	for rows.Next() {
+		var e GoalEntry
+		var at, payload string
+		if err := rows.Scan(&e.Seq, &at, &payload); err != nil {
+			return nil, err
+		}
+		if e.At, err = time.Parse(timeFmt, at); err != nil {
+			return nil, fmt.Errorf("corrupt goal event timestamp %q: %w", at, err)
+		}
+		if err := json.Unmarshal([]byte(payload), &e.GoalPayload); err != nil {
+			return nil, fmt.Errorf("corrupt goal event payload %q: %w", payload, err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListGoalCards returns every card that belongs to goal, dropped ones
+// included, lowest number first.
+func (s *Store) ListGoalCards(ctx context.Context, goal domain.FeatureID) ([]domain.Feature, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+featureCols+` FROM features WHERE goal_id = ? ORDER BY num`, string(goal))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Feature
+	for rows.Next() {
+		f, err := scanFeature(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// SetGoal puts card into goal (attached marks an existing card handed to
+// it). Goals do not nest and a card belongs to at most one goal.
+func (s *Store) SetGoal(ctx context.Context, card, goal domain.FeatureID, attached bool) error {
+	if goal.Kind() != domain.KindGoal {
+		return fmt.Errorf("%s is not a goal", goal)
+	}
+	if card.Kind() == domain.KindGoal {
+		return fmt.Errorf("%s: goals do not nest", card)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE features SET goal_id = ?, goal_attached = ?, goal_dropped_at = '' WHERE id = ? AND (goal_id = '' OR goal_id = ?)`,
+		string(goal), attached, string(card), string(goal))
+	if err != nil {
+		return fmt.Errorf("adding %s to %s: %w", card, goal, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("adding %s to %s: the card does not exist or already belongs to another goal", card, goal)
+	}
+	return nil
+}
+
+// ClearGoal takes card out of its goal: back on the open board.
+func (s *Store) ClearGoal(ctx context.Context, card domain.FeatureID) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET goal_id = '', goal_attached = 0, goal_dropped_at = '' WHERE id = ?`, string(card))
+	if err != nil {
+		return fmt.Errorf("taking %s out of its goal: %w", card, err)
+	}
+	return nil
+}
+
+// SetGoalDropped stamps card as dropped by its goal.
+func (s *Store) SetGoalDropped(ctx context.Context, card domain.FeatureID, at time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET goal_dropped_at = ? WHERE id = ?`, at.UTC().Format(timeFmt), string(card))
+	if err != nil {
+		return fmt.Errorf("dropping %s: %w", card, err)
+	}
+	return nil
+}
+
+// SetFoundBy records that goal filed card as found along the way.
+func (s *Store) SetFoundBy(ctx context.Context, card, goal domain.FeatureID) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET found_by = ? WHERE id = ?`, string(goal), string(card))
+	if err != nil {
+		return fmt.Errorf("marking %s found by %s: %w", card, goal, err)
+	}
+	return nil
+}
+
+// SetGoalLanes sets how many of goal's cards may run at once.
+func (s *Store) SetGoalLanes(ctx context.Context, goal domain.FeatureID, lanes int) error {
+	if lanes < 0 {
+		return fmt.Errorf("goal %s: negative lanes", goal)
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET goal_lanes = ? WHERE id = ?`, lanes, string(goal))
+	return err
+}
+
+// SetGoalReserve records the lead's reserve estimate for goal.
+func (s *Store) SetGoalReserve(ctx context.Context, goal domain.FeatureID, credits int) error {
+	if credits < 0 {
+		return fmt.Errorf("goal %s: negative reserve", goal)
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET goal_reserve = ? WHERE id = ?`, credits, string(goal))
+	return err
+}
+
+// SetGoalWrapUp tells goal to finish now. The first stamp wins, so the
+// log keeps the moment it was first told.
+func (s *Store) SetGoalWrapUp(ctx context.Context, goal domain.FeatureID, at time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET goal_wrapup_at = ? WHERE id = ? AND goal_wrapup_at = ''`, at.UTC().Format(timeFmt), string(goal))
+	return err
+}
+
+// ClearGoalWrapUp lifts a wrap-up: the goal was sent back with more budget
+// or notes and may start work again.
+func (s *Store) ClearGoalWrapUp(ctx context.Context, goal domain.FeatureID) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET goal_wrapup_at = '', goal_partial = '' WHERE id = ?`, string(goal))
+	return err
+}
+
+// SetGoalPartial records why goal finished partial ("" = whole).
+func (s *Store) SetGoalPartial(ctx context.Context, goal domain.FeatureID, reason string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET goal_partial = ? WHERE id = ?`, strings.TrimSpace(reason), string(goal))
+	return err
+}
+
+// formatOptTime stores a zero time as the empty string, the convention
+// every optional timestamp column follows.
+func formatOptTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(timeFmt)
+}
+
+// parseOptTime is formatOptTime's reverse.
+func parseOptTime(v string) (time.Time, error) {
+	if v == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(timeFmt, v)
+}

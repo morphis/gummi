@@ -74,7 +74,15 @@ CREATE TABLE IF NOT EXISTS features (
 	pr_repo         TEXT NOT NULL DEFAULT '',
 	pr_number       INTEGER NOT NULL DEFAULT 0,
 	pr_url          TEXT NOT NULL DEFAULT '',
-	pr_head_sha     TEXT NOT NULL DEFAULT ''
+	pr_head_sha     TEXT NOT NULL DEFAULT '',
+	goal_id         TEXT NOT NULL DEFAULT '',
+	goal_attached   INTEGER NOT NULL DEFAULT 0,
+	goal_dropped_at TEXT NOT NULL DEFAULT '',
+	found_by        TEXT NOT NULL DEFAULT '',
+	goal_lanes      INTEGER NOT NULL DEFAULT 0,
+	goal_reserve    INTEGER NOT NULL DEFAULT 0,
+	goal_wrapup_at  TEXT NOT NULL DEFAULT '',
+	goal_partial    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 
@@ -265,12 +273,9 @@ func OpenStore(dbPath string) (*Store, error) {
 	}
 	// Additive column migrations for DBs created by an earlier version;
 	// a duplicate-column error means the column already exists.
-	for _, stmt := range migrations {
-		if _, err := db.ExecContext(context.Background(), stmt); err != nil &&
-			!strings.Contains(err.Error(), "duplicate column") {
-			_ = db.Close()
-			return nil, fmt.Errorf("migrating state db: %w", err)
-		}
+	if err := applyColumnMigrations(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	// After the column migrations: the rebuild copies every current
 	// column, so est_credits must already exist on an old DB.
@@ -281,6 +286,14 @@ func OpenStore(dbPath string) (*Store, error) {
 	if err := rebuildRoundsKeyed(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
+	// The rounds rebuild recreates features from a column list frozen at
+	// the time it was written, so any column added since then is gone on a
+	// database it just rebuilt. Every column migration is idempotent, so
+	// running them again puts those columns back and is a no-op otherwise.
+	if err := applyColumnMigrations(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if err := migrateReviewStage(db); err != nil {
 		_ = db.Close()
@@ -491,6 +504,18 @@ func rebuildStageSpendPK(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// applyColumnMigrations runs every migration, treating a duplicate
+// column as already applied.
+func applyColumnMigrations(db *sql.DB) error {
+	for _, stmt := range migrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrating state db: %w", err)
+		}
+	}
+	return nil
+}
+
 // migrations are idempotent ADD COLUMN statements applied on open.
 var migrations = []string{
 	`ALTER TABLE features ADD COLUMN spend_credits REAL NOT NULL DEFAULT 0`,
@@ -556,6 +581,20 @@ var migrations = []string{
 	`UPDATE features SET gate_approval = 'attended'  WHERE gate_approval IN ('auto', 'caller', 'gates', 'off')`,
 	`UPDATE features SET gate_approval = 'autopilot' WHERE gate_approval = 'full'`,
 	`ALTER TABLE features ADD COLUMN landed_sha TEXT NOT NULL DEFAULT ''`,
+	// Goals (KindGoal): the goal a card belongs to, whether it was handed
+	// to the goal rather than created by it, when the goal dropped it,
+	// which goal filed it as found along the way, and the goal-only
+	// settings. Every column's empty default reads as "not a goal thing",
+	// so no existing row needs a value.
+	`ALTER TABLE features ADD COLUMN goal_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN goal_attached INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN goal_dropped_at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN found_by TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN goal_lanes INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN goal_reserve INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN goal_wrapup_at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN goal_partial TEXT NOT NULL DEFAULT ''`,
+	`CREATE INDEX IF NOT EXISTS features_goal ON features(goal_id)`,
 }
 
 // Close releases the database.
@@ -589,8 +628,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
 			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
-			pr_repo, pr_number, pr_url, pr_head_sha)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			pr_repo, pr_number, pr_url, pr_head_sha,
+			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -599,7 +639,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		// the three false values are skip_triage/skip_diagnose/quick: vestigial
 		string(kind), f.ExternalRef, false, false, false, f.GateApproval,
 		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.Repo,
-		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA)
+		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
+		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
+		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -612,7 +654,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
-	pr_repo, pr_number, pr_url, pr_head_sha`
+	pr_repo, pr_number, pr_url, pr_head_sha,
+	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -635,6 +678,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
+	var goalID, goalDropped, foundBy, goalWrapUp string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -647,10 +691,13 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
 		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
-		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA)
+		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
+		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial)
 	if err != nil {
 		return f, err
 	}
+	f.GoalID = domain.FeatureID(goalID)
+	f.FoundBy = domain.FeatureID(foundBy)
 	f.Severity = domain.Severity(severity)
 	f.ID = domain.FeatureID(id)
 	f.Kind = domain.Kind(kind)
@@ -674,6 +721,12 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		if f.HandedOffAt, err = time.Parse(timeFmt, handedOff); err != nil {
 			return f, fmt.Errorf("feature %s: corrupt handed_off_at %q: %w", id, handedOff, err)
 		}
+	}
+	if f.GoalDroppedAt, err = parseOptTime(goalDropped); err != nil {
+		return f, fmt.Errorf("feature %s: corrupt goal_dropped_at %q: %w", id, goalDropped, err)
+	}
+	if f.Goal.WrapUpAt, err = parseOptTime(goalWrapUp); err != nil {
+		return f, fmt.Errorf("feature %s: corrupt goal_wrapup_at %q: %w", id, goalWrapUp, err)
 	}
 	// A corrupt row (hand-edited DB, bad migration) must fail here, not
 	// flow onward: IDs and slugs feed branch names and worktree paths.

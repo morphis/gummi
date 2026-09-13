@@ -18,6 +18,7 @@ func TestArtifactNounNamesEveryKind(t *testing.T) {
 		KindFeature:  "spec",
 		KindBug:      "bug report",
 		KindResearch: "research document",
+		KindGoal:     "goal doc",
 	}
 	for k, w := range want {
 		if got := k.ArtifactNoun(); got != w {
@@ -33,7 +34,7 @@ func TestArtifactNounNamesEveryKind(t *testing.T) {
 
 	// every kind the type admits has a wording, so a fourth kind cannot
 	// be added without one and silently inherit "spec"
-	for _, k := range []Kind{KindFeature, KindBug, KindResearch} {
+	for _, k := range []Kind{KindFeature, KindBug, KindResearch, KindGoal} {
 		if !k.Valid() {
 			t.Fatalf("precondition: %q is not a valid kind", k)
 		}

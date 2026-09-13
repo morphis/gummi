@@ -603,6 +603,17 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	case kind == domain.KindResearch && to == domain.StageDone:
 		return []string{"Findings"}
 
+	// The goal design gate owes the objective in agreed words. The
+	// done-when list and the card list are structured blocks rather than
+	// prose, so "undrafted" cannot see them — the goal plan gate
+	// (goalPlanProblems) parses and checks those instead.
+	case kind == domain.KindGoal && from == domain.StagePlan && to == domain.StageImplement:
+		return []string{"Objective"}
+	// The goal done gate consumes the verification story of the combined
+	// branch, the same as a feature's.
+	case kind == domain.KindGoal && to == domain.StageDone:
+		return []string{"Verification plan"}
+
 	default:
 		return nil
 	}

@@ -201,6 +201,15 @@ var knownSectionTitles = map[string]struct{}{
 	"direction":   {},
 	"slices":      {},
 	"open risks":  {},
+	// goal doc sections
+	"objective": {},
+	"done when": {},
+	"limits":    {},
+	"budget":    {},
+	"cards":     {},
+	"notes":     {},
+	"try it":    {},
+	"report":    {},
 }
 
 // splitWelds inserts a newline before every mid-line `## ` in line whose glued

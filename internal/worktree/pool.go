@@ -36,6 +36,9 @@ type Pool struct {
 	exclude     bool // run EnsureGummiExcluded on creation (mutating commands)
 	mu          sync.Mutex
 	byRoot      map[string]*Manager
+	// goalLookup resolves a goal card by id, so a card whose goal worktree
+	// is gone can tell an ended goal from a broken one (see goal.go).
+	goalLookup GoalLookup
 }
 
 // NewPool builds the pool from the workspace root, the default repo root, and
@@ -122,8 +125,13 @@ func (p *Pool) Names() []string {
 
 // ManagerFor resolves f's repository (the empty name selects the default) and
 // returns the cached manager for that repo, creating it on first use. A
-// stored-but-unconfigured repo name is a resolution-time error.
+// stored-but-unconfigured repo name is a resolution-time error. A card that
+// belongs to a goal resolves to the manager rooted at the goal's worktree
+// instead, so its branch forks from and lands on the goal branch.
 func (p *Pool) ManagerFor(ctx context.Context, f *domain.Feature) (*Manager, error) {
+	if f.GoalID != "" {
+		return p.managerForGoalCard(ctx, f)
+	}
 	return p.ManagerForName(ctx, f.Repo)
 }
 

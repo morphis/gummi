@@ -96,6 +96,12 @@ const (
 	// stage surveys and writes the document up. It is a third kind with
 	// a dedicated artifact home and no quick one-pass route.
 	KindResearch Kind = "research"
+	// KindGoal is outcome-driven work: a card whose work is other cards.
+	// The design stage agrees the objective and what "done" means; the
+	// build stage is conducted rather than written — the goal's cards run
+	// on a shared goal branch and land there one commit each — and verify
+	// checks the combined branch. It walks the same graph as every kind.
+	KindGoal Kind = "goal"
 )
 
 // prefix is the ID prefix for a kind: FD for features, BG for bugs,
@@ -106,6 +112,8 @@ func (k Kind) prefix() string {
 		return "BG"
 	case KindResearch:
 		return "RS"
+	case KindGoal:
+		return "GL"
 	}
 	return "FD" // KindFeature and the empty default
 }
@@ -129,21 +137,25 @@ func (k Kind) ArtifactNoun() string {
 		return "bug report"
 	case KindResearch:
 		return "research document"
+	case KindGoal:
+		return "goal doc"
 	}
 	return "spec" // KindFeature and the empty default
 }
 
 // Valid reports whether k is a recognized kind (empty is not — callers
 // that accept a default normalize it before validating).
-func (k Kind) Valid() bool { return k == KindFeature || k == KindBug || k == KindResearch }
+func (k Kind) Valid() bool {
+	return k == KindFeature || k == KindBug || k == KindResearch || k == KindGoal
+}
 
 // FeatureID is a work item's identifier, e.g. "FD-042" (feature),
-// "BG-007" (bug), or "RS-003" (research). IDs are minted from the
+// "BG-007" (bug), "RS-003" (research), or "GL-004" (goal). IDs are minted from the
 // monotonic counter in .gummi/seq — shared across kinds, so numbers
 // never collide — and zero-padded to three digits.
 type FeatureID string
 
-var featureIDRe = regexp.MustCompile(`^(FD|BG|RS)-[0-9]{3,}$`)
+var featureIDRe = regexp.MustCompile(`^(FD|BG|RS|GL)-[0-9]{3,}$`)
 
 // Kind reports the work kind an ID's prefix encodes.
 func (id FeatureID) Kind() Kind {
@@ -152,6 +164,8 @@ func (id FeatureID) Kind() Kind {
 		return KindBug
 	case strings.HasPrefix(string(id), "RS-"):
 		return KindResearch
+	case strings.HasPrefix(string(id), "GL-"):
+		return KindGoal
 	default:
 		return KindFeature
 	}
@@ -169,10 +183,10 @@ func NewID(kind Kind, n int) (FeatureID, error) {
 func NewFeatureID(n int) (FeatureID, error) { return NewID(KindFeature, n) }
 
 // ParseFeatureID validates s as a canonical work-item ID (feature, bug,
-// or research).
+// research, or goal).
 func ParseFeatureID(s string) (FeatureID, error) {
 	if !featureIDRe.MatchString(s) {
-		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN, BG-NNN, or RS-NNN)", s)
+		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN, BG-NNN, RS-NNN, or GL-NNN)", s)
 	}
 	return FeatureID(s), nil
 }
@@ -304,7 +318,60 @@ type Feature struct {
 	// local squash-merge (see the driver/UI landing guards): a card lands
 	// either via its PR or locally, never both. Empty() until linked.
 	PullRequest PullRequestRef
+	// GoalID is the goal this card belongs to, empty for a card on the open
+	// board. A goal card's branch forks from the goal's branch and lands
+	// back on it; its budget is carved out of the goal's. Goals do not
+	// nest, so a goal never carries one.
+	GoalID FeatureID
+	// GoalAttached marks a card that existed before its goal and was handed
+	// to it, rather than created by it. Dropping an attached card returns
+	// it to the board with its work kept; dropping one the goal created
+	// closes it inside the goal.
+	GoalAttached bool
+	// GoalDroppedAt is stamped when a goal drops this card: it stays where
+	// it stopped, spends nothing more, and no longer counts toward the
+	// goal. Zero on every card a goal has not dropped.
+	GoalDroppedAt time.Time
+	// FoundBy names the goal that filed this card as something real but
+	// outside its objective ("found along the way"). It is an open-board
+	// card, never worked by that goal.
+	FoundBy FeatureID
+	// Goal holds the settings only a goal card carries. Zero on every
+	// other kind.
+	Goal GoalSettings
 }
+
+// GoalSettings are the goal-only fields of a card: how many of its cards
+// may run at once, the reserve the lead holds back, and how it is ending.
+type GoalSettings struct {
+	// Lanes is how many of the goal's cards may run at the same time. 0
+	// reads as DefaultGoalLanes.
+	Lanes int
+	// Reserve is the lead's current estimate, in credits, of what finishing
+	// cleanly costs. 0 means the lead has not estimated yet and the default
+	// formula (DefaultGoalReserve) applies.
+	Reserve int
+	// WrapUpAt is stamped when the goal must finish now — you stopped it,
+	// its budget reached the reserve, or its lead kept failing. Nothing new
+	// starts after it; verified work lands and the rest is dropped.
+	WrapUpAt time.Time
+	// Partial is why a finished goal is partial, empty while it is whole.
+	Partial string
+}
+
+// DefaultGoalLanes is the lane count a goal gets when its plan names none.
+const DefaultGoalLanes = 2
+
+// LaneCount returns the goal's lanes with the default resolved.
+func (g GoalSettings) LaneCount() int {
+	if g.Lanes <= 0 {
+		return DefaultGoalLanes
+	}
+	return g.Lanes
+}
+
+// WrappingUp reports whether the goal has been told to finish now.
+func (g GoalSettings) WrappingUp() bool { return !g.WrapUpAt.IsZero() }
 
 // PullRequestRef records an outbound pull request a card is linked to: a
 // point-in-time snapshot taken at link time, not a live view. Repo is the
@@ -410,10 +477,21 @@ func (f *Feature) kind() Kind {
 		return KindBug
 	case KindResearch:
 		return KindResearch
+	case KindGoal:
+		return KindGoal
 	default:
 		return KindFeature
 	}
 }
+
+// IsGoal reports whether the card is a goal.
+func (f *Feature) IsGoal() bool { return f.kind() == KindGoal }
+
+// InGoal reports whether the card belongs to a goal.
+func (f *Feature) InGoal() bool { return f.GoalID != "" }
+
+// GoalDropped reports whether the card's goal dropped it.
+func (f *Feature) GoalDropped() bool { return !f.GoalDroppedAt.IsZero() }
 
 // GateMode returns the feature's gate-approval mode with the empty
 // default resolved, the same job kind() does for Kind. Every read of
@@ -466,6 +544,8 @@ func (f *Feature) ArtifactPath() string {
 		return path.Join(".gummi", "bugs", string(f.ID)+"-"+f.Slug+".md")
 	case KindResearch:
 		return path.Join(".gummi", "research", string(f.ID)+"-"+f.Slug+".md")
+	case KindGoal:
+		return path.Join(".gummi", "goals", string(f.ID)+"-"+f.Slug+".md")
 	default:
 		return f.SpecPath()
 	}
@@ -512,6 +592,22 @@ func (f *Feature) Validate() error {
 		if err := f.PullRequest.Validate(); err != nil {
 			return fmt.Errorf("feature %s: %w", f.ID, err)
 		}
+	}
+	if f.GoalID != "" {
+		if f.kind() == KindGoal {
+			return fmt.Errorf("feature %s: goals do not nest (belongs to %s)", f.ID, f.GoalID)
+		}
+		if _, err := ParseFeatureID(string(f.GoalID)); err != nil || f.GoalID.Kind() != KindGoal {
+			return fmt.Errorf("feature %s: goal %q is not a goal id", f.ID, f.GoalID)
+		}
+	}
+	if f.FoundBy != "" {
+		if _, err := ParseFeatureID(string(f.FoundBy)); err != nil || f.FoundBy.Kind() != KindGoal {
+			return fmt.Errorf("feature %s: found-by %q is not a goal id", f.ID, f.FoundBy)
+		}
+	}
+	if f.Goal.Lanes < 0 || f.Goal.Reserve < 0 {
+		return fmt.Errorf("feature %s: negative goal lanes or reserve", f.ID)
 	}
 	return nil
 }

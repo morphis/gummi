@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -114,6 +115,17 @@ type Input struct {
 	// stored field. Mint writes the resolved value rather than the empty
 	// string so nothing downstream has to resolve it again.
 	GateApproval string
+	// Goal mints the card into that goal: its branch will fork from the
+	// goal branch and its budget is carved out of the goal's. Empty mints
+	// an open-board card. A goal cannot be minted into a goal.
+	Goal domain.FeatureID
+	// FoundBy records the goal that filed this open-board card as found
+	// along the way. Ignored when Goal is set.
+	FoundBy domain.FeatureID
+	// GoalDoc, for a goal, is a complete goal doc to start from (headless
+	// --plan-file) instead of the template seeded with the description.
+	// Ignored for every other kind.
+	GoalDoc string
 }
 
 // Mint validates in, mints the next sequence number, builds the
@@ -162,7 +174,32 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if in.Kind == domain.KindBug {
 		f.Severity = in.Severity
 	}
-	if in.Kind == domain.KindResearch {
+	if in.Goal != "" {
+		f.GoalID = in.Goal
+	} else {
+		f.FoundBy = in.FoundBy
+	}
+	if in.Kind == domain.KindGoal {
+		// A goal's objective is the whole description, and the plan
+		// conversation starts from it — so a goal always has a draft, even
+		// from a one-line description, exactly as a research card always
+		// has its document. A caller-supplied goal doc replaces the
+		// template outright; the plan gate checks it like any other.
+		content := in.GoalDoc
+		if strings.TrimSpace(content) == "" {
+			content = spec.SeededGoalTemplate(&f, spec.GoalSeed{Objective: in.Description})
+		}
+		if err := f.Validate(); err != nil {
+			return domain.Feature{}, err
+		}
+		draft := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
+			return domain.Feature{}, err
+		}
+		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
+			return domain.Feature{}, err
+		}
+	} else if in.Kind == domain.KindResearch {
 		artifact := filepath.Join(ws.Root, f.ArtifactPath())
 		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: in.Description}, domain.DraftProvenance{Source: in.Source})
 		if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
