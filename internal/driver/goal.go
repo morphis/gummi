@@ -183,6 +183,10 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 	// each running card's drive, cancellable: a card the goal drops has
 	// its session stopped under it, and its drive must stop waiting too
 	running := map[domain.FeatureID]context.CancelFunc{}
+	// a start for a card whose previous drive has not reported back yet
+	// (the lead sent it back in the same moment its drive stopped) waits
+	// here for that report, rather than being dropped
+	deferred := map[domain.FeatureID]engine.GoalStart{}
 	results := make(chan childResult, 1024)
 	var wg sync.WaitGroup
 	defer func() {
@@ -216,10 +220,7 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 				cancel()
 			}
 		}
-		for _, st := range res.Start {
-			if running[st.ID] != nil {
-				continue
-			}
+		start := func(st engine.GoalStart) {
 			cctx, cancel := context.WithCancel(ctx)
 			running[st.ID] = cancel
 			stream := hub.subscribe(st.ID)
@@ -229,6 +230,13 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 				out, err := d.driveGoalCard(cctx, st, stream)
 				results <- childResult{id: st.ID, out: out, err: err}
 			}(st)
+		}
+		for _, st := range res.Start {
+			if running[st.ID] != nil {
+				deferred[st.ID] = st
+				continue
+			}
+			start(st)
 		}
 		if res.Finished {
 			d.reviewsRun++
@@ -247,6 +255,12 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 				cancel()
 			}
 			delete(running, r.id)
+			if st, ok := deferred[r.id]; ok {
+				// the goal already decided what comes next for this card
+				delete(deferred, r.id)
+				start(st)
+				continue
+			}
 			d.settleGoalCard(ctx, r)
 		case ev, ok := <-d.stream():
 			if !ok {
