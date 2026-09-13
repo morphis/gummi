@@ -471,6 +471,18 @@ func goalStatusText(v GoalView) string {
 		}
 		b.WriteString("\n")
 	}
+	var decisions []string
+	for _, en := range v.Log {
+		if en.Action == state.GoalDecision {
+			decisions = append(decisions, en.DecisionRef()+" "+clip(en.Detail, 160))
+		}
+	}
+	if len(decisions) > 0 {
+		b.WriteString("\nDecisions for review already recorded (do not record one again):\n")
+		for _, d := range decisions {
+			b.WriteString("- " + d + "\n")
+		}
+	}
 	var recent []state.GoalEntry
 	if n := len(v.Log); n > 12 {
 		recent = v.Log[n-12:]

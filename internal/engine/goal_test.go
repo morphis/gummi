@@ -497,7 +497,7 @@ func TestGoalReportAtTheHandOver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rep.Ready || rep.Partial != "1 card(s) dropped" {
+	if !rep.Ready || rep.Partial != "DW-2 lost every card serving it" {
 		t.Fatalf("report = %+v", rep)
 	}
 	if met, total := rep.Met(); met != 1 || total != 2 {
@@ -545,5 +545,38 @@ func TestRaisingTheBudgetLiftsABudgetWrapUp(t *testing.T) {
 	}
 	if got, _ := store.GetFeature(ctx, g.ID); !got.Goal.WrappingUp() {
 		t.Fatal("a stop you asked for stands through a raise")
+	}
+}
+
+// A dropped card the goal replaced leaves nothing unmet: the goal finishes
+// whole. Only an item that lost every card serving it makes it partial.
+func TestDroppedButReplacedCardLeavesTheGoalWhole(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	root := wt.Root()
+	doc := strings.Replace(testGoalDoc, "  depends_on: [local cache for export]\n", "", 1)
+	doc = strings.Replace(doc, "- title: document the cache\n  serves: [DW-2]\n", "- title: document the cache\n  serves: [DW-2]\n- title: docs again\n  serves: [DW-2]\n", 1)
+	g := goalAtPlan(t, store, wt, doc, 6000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	cards := goalCards(t, store, g.ID)
+	view, _ := e.GoalView(ctx, g.ID)
+	docs, _ := view.Card(cards[1].ID)
+	if err := e.goalDrop(ctx, view.Goal, docs.Feature, "replaced", "lead"); err != nil {
+		t.Fatal(err)
+	}
+	verifyCard(t, e, store, root, cards[0].ID, "cache.txt")
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, root, cards[2].ID, "DOCS.md")
+	var finished bool
+	for i := 0; i < 4 && !finished; i++ {
+		finished = tick(t, e, g.ID).Finished
+	}
+	if !finished {
+		t.Fatal("goal should finish")
+	}
+	if got, _ := store.GetFeature(ctx, g.ID); got.Goal.Partial != "" {
+		t.Fatalf("a replaced card leaves the goal whole, got partial %q", got.Goal.Partial)
 	}
 }

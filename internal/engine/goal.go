@@ -750,6 +750,12 @@ func (e *Engine) goalCatchUp(ctx context.Context, goal domain.Feature) {
 // branch — the implement stage's critique pass, which from here runs
 // through the driving loop like any card's.
 func (e *Engine) goalFinish(ctx context.Context, goal domain.Feature, reason string) error {
+	if !goal.Goal.WrappingUp() {
+		// dropped cards make a goal partial only when an agreed item lost
+		// every card that served it: a card the lead replaced left nothing
+		// of the goal unmet
+		reason = e.goalPartialReason(ctx, goal)
+	}
 	if err := e.cfg.Store.SetGoalPartial(ctx, goal.ID, reason); err != nil {
 		return err
 	}
@@ -763,6 +769,35 @@ func (e *Engine) goalFinish(ctx context.Context, goal domain.Feature, reason str
 		return err
 	}
 	return e.RunCritique(cur, "")
+}
+
+// goalPartialReason names the done-when items whose every serving card was
+// dropped, "" when each item still has a card that landed or is running.
+func (e *Engine) goalPartialReason(ctx context.Context, goal domain.Feature) string {
+	view, err := e.goalView(ctx, goal)
+	if err != nil {
+		return ""
+	}
+	alive := map[string]bool{}
+	served := map[string]bool{}
+	for _, c := range view.Cards {
+		for _, s := range c.Serves {
+			served[s] = true
+			if c.State != goalpolicy.Dropped {
+				alive[s] = true
+			}
+		}
+	}
+	var lost []string
+	for _, d := range view.DoneWhen {
+		if served[d.ID] && !alive[d.ID] {
+			lost = append(lost, d.ID)
+		}
+	}
+	if len(lost) == 0 {
+		return ""
+	}
+	return strings.Join(lost, ", ") + " lost every card serving it"
 }
 
 // --- plan gate and start ---------------------------------------------------
