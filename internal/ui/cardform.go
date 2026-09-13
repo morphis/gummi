@@ -137,7 +137,7 @@ const (
 	cardStopButtons
 )
 
-var cardKinds = []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch}
+var cardKinds = []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch, domain.KindGoal}
 
 // cardIDPrefix is what the `becomes` line shows for each kind: the id's
 // prefix without a number, since the number is minted only at Create.
@@ -145,7 +145,7 @@ var cardKinds = []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindRes
 // prints the kind word right beside the prefix here — this dialog is
 // where the id is minted, and the one place that owes the reader the
 // expansion.
-var cardIDPrefix = map[domain.Kind]string{domain.KindFeature: "FD", domain.KindBug: "BG", domain.KindResearch: "RS"}
+var cardIDPrefix = map[domain.Kind]string{domain.KindFeature: "FD", domain.KindBug: "BG", domain.KindResearch: "RS", domain.KindGoal: "GL"}
 
 // newCardForm builds the door. kind presets the kind row; repos and
 // hasDefault shape the repo row as in every other creation dialog;
@@ -213,6 +213,10 @@ func cardPlaceholderFor(k domain.Kind) string {
 		return head + "  headings: Steps to reproduce · Expected · Actual · Environment"
 	case domain.KindResearch:
 		return head + "  the rest becomes the research brief"
+	case domain.KindGoal:
+		return "Describe the outcome you want. The first line is the title.\n\n" +
+			"  next, the architect agrees with you what done means and which\n" +
+			"  cards get there; then the goal runs them and comes back when ready"
 	default: // domain.KindFeature
 		return head + "  ## Acceptance seeds the verification plan"
 	}
@@ -673,6 +677,10 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	}
 	var env *int
 	trimmed := strings.TrimSpace(d.env.Value())
+	if trimmed == "" && d.kind == domain.KindGoal {
+		d.errText = "budget required — a goal's budget is the ceiling for everything it runs"
+		return false, nil
+	}
 	if trimmed == "" && d.kind == domain.KindResearch {
 		// "budget", like the row label and the collapsed "runs as"
 		// readout above it. A refusal is the one string in this dialog a
@@ -881,7 +889,7 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 func (d *cardForm) runsLine(s *theme.Styles) string {
 	env := strings.TrimSpace(d.env.Value())
 	switch {
-	case env == "" && d.kind == domain.KindResearch:
+	case env == "" && (d.kind == domain.KindResearch || d.kind == domain.KindGoal):
 		env = s.Error.Render("budget required")
 	case env == "":
 		env = "default budget"
@@ -907,7 +915,7 @@ func joinIDs(ids []domain.FeatureID) string {
 // runs after — and the after list while that row has focus.
 func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 	hint := envelopeHintCapped
-	if d.kind == domain.KindResearch {
+	if d.kind == domain.KindResearch || d.kind == domain.KindGoal {
 		hint = envelopeHintRequired
 	}
 	rows := []string{

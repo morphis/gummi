@@ -123,6 +123,10 @@ func TestCardFormKindRowCycles(t *testing.T) {
 	}
 	form.HandleKey(keyRight)
 	form.HandleKey(keyRight)
+	if form.Kind() != domain.KindGoal {
+		t.Fatalf("→ past research = %q, want goal", form.Kind())
+	}
+	form.HandleKey(keyRight)
 	if form.Kind() != domain.KindFeature {
 		t.Fatalf("kind should wrap back to feature, got %q", form.Kind())
 	}

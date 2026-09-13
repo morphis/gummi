@@ -76,6 +76,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "import bugs", m.bugIngest.bindings()
 	case live && m.deps != nil:
 		return "dependencies", m.deps.bindings()
+	case live && m.goalPage != nil:
+		return "goal", m.goalPage.bindings()
 	case live && m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
 	// the inbox and agent tabs own the main pane whenever they're active.

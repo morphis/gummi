@@ -141,6 +141,10 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	}
 	if !m.cardOpen {
 		switch key {
+		case "f":
+			if m.toggleGoalFold() {
+				return nil, true
+			}
 		case "enter", "right", "l":
 			return m.openCard(), true
 		case "g":
@@ -257,6 +261,12 @@ func (m *Shell) backlogEntries() []backlogEntry {
 	var out []backlogEntry
 	var last domain.SuperState
 	for i, idx := range m.displayOrder(m.sortMode) {
+		if m.isFoldedChild(idx) {
+			// a goal's unfolded card rides under its goal, whatever group
+			// its own stage belongs to
+			out = append(out, backlogEntry{card: true, row: idx, shortcut: i + 1})
+			continue
+		}
 		if super := m.rows[idx].F.Stage.SuperState(); i == 0 || super != last {
 			if i > 0 {
 				out = append(out, backlogEntry{})
@@ -512,7 +522,21 @@ func (m *Shell) backlogBindings() []binding {
 		}
 		out = append(out, b)
 	}
+	if m.boardHasGoal() {
+		out = append(out, binding{key: "f", label: "fold goal", help: "fold or unfold the selected goal's cards"})
+	}
 	return append(lead, out...)
+}
+
+// boardHasGoal reports whether any goal is on the board — the one case the
+// fold key means anything.
+func (m *Shell) boardHasGoal() bool {
+	for _, r := range m.rows {
+		if r.F.IsGoal() {
+			return true
+		}
+	}
+	return false
 }
 
 // cardPageBindings is the card page's table: the board's verbs, plus the

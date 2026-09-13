@@ -328,6 +328,18 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "goalstop":
+		if r, ok := m.selected(); ok {
+			return m.confirmStopGoal(r.F)
+		}
+	case "goalreverse":
+		if r, ok := m.selected(); ok {
+			return m.openReverseDecision(r.F)
+		}
+	case "goalpage":
+		if r, ok := m.selected(); ok {
+			return m.openGoalPage(r.F)
+		}
 	case "profile":
 		return m.openCardProfilePicker()
 	case "ask":

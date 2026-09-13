@@ -695,6 +695,14 @@ func stageActions(in nextInput) []nextAction {
 		return append(acts, stopHere(in)...)
 
 	case domain.StageImplement:
+		if in.kind == domain.KindGoal {
+			// a goal's implement stage is conducted: nothing to run by
+			// hand, and typing into the composer is a note to its lead
+			return []nextAction{
+				nextStep("goalstop", "", "stop the goal", "finish now — verified work lands, the rest is dropped, and it comes back partial"),
+				nextStep("goalpage", "", "open the goal page", "the done-when list, the cards, the budget and the lead's log"),
+			}
+		}
 		if !finished {
 			// nothing has been produced yet, so there is nothing to send
 			// back: the rewind to plan is /bounce, in the inventory.
@@ -781,6 +789,15 @@ func stageActions(in nextInput) []nextAction {
 				sendBackStep("bounce", "b", "send the failures back as rework — your line goes with them"),
 				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
 			}, stopOrResume(in)...)
+		}
+		if in.kind == domain.KindGoal {
+			return []nextAction{
+				nextStep("advance", "g", "land on "+in.landBase(), "one merge commit over its cards' commits, after a last catch-up with "+in.landBase()),
+				sendBackStep("bounce", "b", "send it back to its cards — your line goes to its lead"),
+				nextStep("goalreverse", "", "reverse a decision", "pick a decision for review and have the lead take the other way"),
+				nextStep("handoff", "h", "hand off", "close the goal and keep its branch — nothing lands"),
+				nextStep("goalpage", "", "open the goal page", "the report: done-when, cards, decisions, declined findings, spend"),
+			}
 		}
 		if in.kind == domain.KindResearch {
 			return append([]nextAction{

@@ -428,6 +428,10 @@ func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool
 		return nil, false
 	}
 	m.logDecision(f.ID, state.DecisionKindGate, text)
+	// a goal card's plan is read by its goal's lead before it implements
+	if f.Stage == domain.StagePlan && m.goalOf(f.ID) != "" && m.engine != nil {
+		return m.goalPlanCheck(f), true
+	}
 	// the crossing runs in a command, so the gate is open and already
 	// spoken for until it lands — the pinned decision says so rather than
 	// letting it read as waiting for you (decision.go).

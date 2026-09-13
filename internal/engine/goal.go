@@ -296,6 +296,12 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 			return goalpolicy.Exhausted, d.Question
 		}
 	}
+	// verified wins over a park: the board parks a card at its landing gate
+	// the moment verify passes, and for a goal card that gate is the goal's
+	if c.Stage == domain.StageVerify && !c.VerifiedAt.IsZero() &&
+		(marks.StageEnter.Stage != domain.StageVerify || !c.VerifiedAt.Before(marks.StageEnter.At)) {
+		return goalpolicy.Verified, ""
+	}
 	reason, detail := marks.ParkReason()
 	if marks.Park.Seq > max(marks.StageEnter.Seq, marks.Gate.Seq, lastTouch) {
 		if reason == state.ParkReasonQuit {
@@ -317,10 +323,6 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 			return goalpolicy.Stuck, "was started but never began its plan"
 		}
 		return goalpolicy.Running, ""
-	}
-	if c.Stage == domain.StageVerify && !c.VerifiedAt.IsZero() &&
-		(marks.StageEnter.Stage != domain.StageVerify || !c.VerifiedAt.Before(marks.StageEnter.At)) {
-		return goalpolicy.Verified, ""
 	}
 	// started, nothing running, not parked, not verified: between two steps
 	// of the driving loop — or dropped on the floor. Past the grace it is

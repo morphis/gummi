@@ -82,6 +82,10 @@ type featureRow struct {
 	// refresh would be unbounded IO, which is exactly what the row
 	// snapshot above exists to avoid.
 	Events []state.CardEvent
+	// Goal is a goal's hand-over as it stands at load: done-when progress,
+	// its cards and its budget tree. Nil for every other kind, and for a
+	// goal on a board with no engine to read it through.
+	Goal *engine.GoalReport
 }
 
 // baseBranch names the branch r's card lands on, for prose that only has
@@ -231,6 +235,11 @@ func (m *Shell) loadRows() tea.Msg {
 		if events, err := m.store.Events(ctx, f.ID); err == nil {
 			row.AutopilotDriving = autopilotDriving(liveStretches(f, events, m.ws))
 			row.ExitVerdict, row.Exited = stageExited(events, row.History, f.Stage)
+		}
+		if f.IsGoal() && m.engine != nil {
+			if rep, err := m.engine.GoalReport(ctx, f.ID); err == nil {
+				row.Goal = &rep
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -916,6 +925,9 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	f, err := m.store.GetFeature(ctx, id)
 	if err != nil {
 		return func() tea.Msg { return noticeMsg{text: err.Error(), isErr: true} }
+	}
+	if f.IsGoal() && (f.Stage == domain.StageVerify || f.Stage == domain.StageImplement) {
+		return m.sendBackGoal(f, note)
 	}
 	if f.Stage == domain.StagePlan {
 		it, ok := m.inbox.get(id)

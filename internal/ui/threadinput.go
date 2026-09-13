@@ -481,6 +481,12 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	if r.DrivenAbroad {
 		return m.sendConsultMessage(r.F, text)
 	}
+	// a line typed into a running goal is a note for its lead: the goal
+	// has no stage agent to talk to, and the lead reads notes next turn
+	if r.F.IsGoal() && r.F.Stage == domain.StageImplement && m.engine != nil && parseInput(text).Kind == verbNone {
+		m.threadInput.Reset()
+		return m.goalNote(r.F, text)
+	}
 	if d := m.visibleDecision(r); d != nil {
 		m.syncDecision(d)
 		if m.threadFreeForm && d.ask != nil && d.ask.FreeForm {

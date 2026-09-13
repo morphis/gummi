@@ -149,6 +149,11 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		id = s.Warning.Render(string(r.F.ID))
 	case domain.KindResearch:
 		id = s.CardIDResearch.Render(string(r.F.ID))
+	case domain.KindGoal:
+		id = s.Info.Render(string(r.F.ID))
+	}
+	if m.isFoldedChild(m.rowIndex(r.F.ID)) {
+		id = faint.Render("└") + " " + id
 	}
 	badge := ""
 	// a card the Advance gate would block on an unmet direct dependency
@@ -183,6 +188,9 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	}
 	if sev := r.F.Severity; sev != "" {
 		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
+	}
+	if g := goalRowTag(s, r, m.goalOpen[r.F.ID]); g != "" {
+		badge += " " + g
 	}
 	// a card's managed repository badge, naming the configured repo, so
 	// multi-repo boards read at a glance. Cards in the workspace default

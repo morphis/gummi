@@ -221,6 +221,17 @@ type Shell struct {
 	// marking it from the rule table alone would be a standing lie about
 	// a card nothing is going to move.
 	autopilotAnswering map[domain.FeatureID]bool
+
+	// The goal loop (goalloop.go): goals queued for a tick by this update,
+	// goals whose tick is running, and goals owed one more when it lands.
+	goalTickQueue map[domain.FeatureID]bool
+	goalTicking   map[domain.FeatureID]bool
+	goalTickAgain map[domain.FeatureID]bool
+	// goalOpen names the goals whose cards are unfolded under them on the
+	// board. Folded is the default: a goal is one row until you look.
+	goalOpen map[domain.FeatureID]bool
+	// goalPage is the mounted goal page (goalpage.go), nil when closed.
+	goalPage *goalPageView
 	// foreignTicks counts live-drive probes, pacing the slower full row
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
@@ -755,6 +766,14 @@ func exhaustedActivity(activity []string) bool {
 // can take — and it is recorded as one, the same seam the driver's
 // escalations raise through.
 func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
+	// a goal card's stop is its goal's to handle: record it where the goal
+	// reads it and wake the goal, but never queue it for you
+	if g := m.goalOf(id); g != "" {
+		m.logPark(id, state.ParkReasonGaveUp, text)
+		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
+		m.queueGoalTick(g)
+		return
+	}
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.notifier.Alert(string(id) + ": " + text)
 		m.logPark(id, state.ParkReasonGaveUp, text)
@@ -785,6 +804,12 @@ func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) 
 // so parking after a blocked Advance must add the inbox item without
 // minting a second decision row for the same stop.
 func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text string) bool {
+	if g := m.goalOf(id); g != "" {
+		// silent, like raiseEscalation's goal arm: the goal hears it
+		m.logPark(id, state.ParkReasonNeedsYou, text)
+		m.queueGoalTick(g)
+		return false
+	}
 	if !m.inbox.add(id, kind, text) {
 		return false
 	}
@@ -1092,6 +1117,7 @@ func (m *Shell) Init() tea.Cmd {
 		// badges them (and withholds the actions that would fight them)
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
+		cmds = append(cmds, goalPollTick())
 	}
 	return tea.Batch(cmds...)
 }
@@ -1141,7 +1167,12 @@ func (m *Shell) threadShowsFailure(id domain.FeatureID) bool {
 // needs-attention queue, and the automatic review loop. It returns a
 // command for any automatic follow-up (review→fix→review), or nil.
 func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
+	m.goalCardEvent(ev)
 	switch ev.Kind {
+	case engine.EventGoal:
+		// a goal asked to be conducted: it entered implement, took a note,
+		// was sent back or stopped
+		return tea.Batch(m.goalTickCmd(ev.Feature), m.loadRows)
 	case engine.EventBoard:
 		// The board session's state changed — engine.Event's own doc
 		// comment on Feature: EventBoard is the one kind that carries no
@@ -1237,6 +1268,14 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// below, which is about where a *parked* question is shown, not
 		// whether one gets parked at all.
 		if autopilotAnswers(m.autopilotModeFor(ev.Feature), decisionAsk) {
+			// a goal card's question goes to its goal's lead
+			if m.goalOf(ev.Feature) != "" {
+				if s := m.engine.Get(ev.Feature); s != nil {
+					if ask := s.Snapshot().PendingAsk; ask != nil {
+						return m.goalAnswerAsk(ev.Feature, ask)
+					}
+				}
+			}
 			if s := m.engine.Get(ev.Feature); s != nil {
 				if ask := s.Snapshot().PendingAsk; ask != nil {
 					if rec := engine.RecommendedOption(ask); rec != "" {
@@ -1393,6 +1432,9 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, spinnerTick()
 	}
 	model, cmd := m.update(msg)
+	if tick := m.drainGoalTicks(); tick != nil {
+		cmd = tea.Batch(cmd, tick)
+	}
 	if !m.spinning && m.spinnerActive() {
 		m.spinning = true
 		cmd = tea.Batch(cmd, spinnerTick())
@@ -1401,6 +1443,9 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if cmd, ok := m.updateGoal(msg); ok {
+		return m, cmd
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		// BG-057: a width change rewraps the thread body, so the row
@@ -1549,6 +1594,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		f, thenDone := msg.f, msg.thenDone
 		d := newCommitMsgDialog(f, func(message string) tea.Cmd {
+			if f.IsGoal() {
+				return m.landGoal(f, message)
+			}
 			return m.squashMergeFeature(f, message, thenDone)
 		}, func(dctx context.Context, feature domain.Feature) (string, error) {
 			// best-effort: a nil engine or any drafting failure yields an
@@ -1556,6 +1604,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// lets esc cancel an in-flight pass.
 			if m.engine == nil {
 				return "", nil
+			}
+			if feature.IsGoal() {
+				// a goal lands as a merge commit gummi writes from its cards
+				return m.engine.GoalMergeMessage(dctx, feature), nil
 			}
 			return m.engine.DraftCommitMessage(dctx, feature)
 		})
@@ -2405,6 +2457,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.deps != nil {
 			return m.handleDepsKey(key)
 		}
+		if m.goalPage != nil {
+			return m.handleGoalPageKey(key)
+		}
 		if m.cardOpen && m.threadInput.Focused() {
 			return m.handleThreadInputKey(msg)
 		}
@@ -2819,6 +2874,9 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			// — it has work to do, or a `D` coming. The other verbs on this
 			// screen are things you do to a card mid-flight; this one closes
 			// it, so it asks the same question the landing gate asks.
+			if r.F.IsGoal() && r.F.Stage != domain.StageVerify {
+				return m.confirmAbandonGoal(r.F)
+			}
 			if r.F.Stage != domain.StageVerify {
 				m.notice = noticeMsg{text: string(r.F.ID) + ": hand-off ends a verified card — this one is at " + string(r.F.Stage), isErr: true}
 				return nil
@@ -2993,9 +3051,26 @@ func (m *Shell) jumpSel(n int) {
 // every other column keeps chronological order regardless.
 func (m *Shell) displayOrder(mode SortMode) []int {
 	var order []int
+	// a goal's cards sit folded under their goal, not in the groups; a card
+	// whose goal is not loaded falls back to its own group
+	goals := map[domain.FeatureID]bool{}
+	for _, r := range m.rows {
+		if r.F.IsGoal() {
+			goals[r.F.ID] = true
+		}
+	}
+	children := map[domain.FeatureID][]int{}
+	for i, r := range m.rows {
+		if r.F.GoalID != "" && goals[r.F.GoalID] {
+			children[r.F.GoalID] = append(children[r.F.GoalID], i)
+		}
+	}
 	for _, super := range domain.SuperStates {
 		var idxs []int
 		for i, r := range m.rows {
+			if r.F.GoalID != "" && goals[r.F.GoalID] {
+				continue
+			}
 			if r.F.Stage.SuperState() == super {
 				idxs = append(idxs, i)
 			}
@@ -3009,7 +3084,14 @@ func (m *Shell) displayOrder(mode SortMode) []int {
 				return m.rows[idxs[a]].F.CreatedAt.Before(m.rows[idxs[b]].F.CreatedAt)
 			})
 		}
-		order = append(order, idxs...)
+		for _, idx := range idxs {
+			order = append(order, idx)
+			if id := m.rows[idx].F.ID; m.goalOpen[id] {
+				kids := children[id]
+				sort.SliceStable(kids, func(a, b int) bool { return m.rows[kids[a]].F.Num < m.rows[kids[b]].F.Num })
+				order = append(order, kids...)
+			}
+		}
 	}
 	return order
 }
@@ -3712,6 +3794,9 @@ func (m *Shell) mainView(w, h int) string {
 		}
 		if m.deps != nil {
 			return m.depPickerView(w, h)
+		}
+		if m.goalPage != nil {
+			return m.goalPageRender(w, h)
 		}
 		if m.ingestRun != nil && !m.ingestRun.hidden {
 			return m.ingestRunRender(w, h)

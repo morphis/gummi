@@ -100,6 +100,9 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		// rule as dormant; this keeps it switched off).
 		VerifyMayBounce: false,
 	})
+	if id.Kind() == domain.KindGoal {
+		return tea.Batch(m.goalVerifyOutcome(id, out), m.loadRows)
+	}
 	var stamp tea.Cmd
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
