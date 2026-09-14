@@ -153,8 +153,20 @@ func buildGoalReport(v GoalView) GoalReport {
 			if json.Unmarshal([]byte(en.Detail), &rs) == nil {
 				lastChecks = rs
 			}
+			// a check that passes after an item was marked not met settles it
+			for _, d := range v.DoneWhen {
+				for _, c := range rs {
+					if c.OK && d.Check != "" && c.Name == d.CheckName() {
+						delete(notMet, d.ID)
+					}
+				}
+			}
 		case state.GoalNotMet:
 			notMet[en.Item] = en.Detail
+		case state.GoalCheckFixed:
+			// the not-met was about the old command; the repaired one is
+			// judged by the next check run
+			delete(notMet, en.Item)
 		case state.GoalDecision:
 			r.Decisions = append(r.Decisions, GoalLogLine{Ref: en.DecisionRef(), Card: en.Card, Item: en.Item, Detail: en.Detail, Alternative: en.Alternative, By: en.By})
 		case state.GoalDeclined:

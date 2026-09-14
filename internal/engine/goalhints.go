@@ -30,7 +30,12 @@ asking:
    runnable in the repo, that exits 0 only when the statement holds) or
    judge: true (a statement verify reads against the combined diff, for
    what no command can prove). Prefer commands. An item nobody can check
-   is not an item; the gate refuses one.
+   is not an item; the gate refuses one. A check must observe the thing
+   its item names: when an item is about a program's exit code or
+   output, run the program itself, not through a wrapper that reports
+   its own status instead (` + "`go run`" + ` exits 1 for any failure, and
+   runners like npm run or cargo run add their own output) — build it,
+   then run the binary.
 3. Limits — out of scope, constraints, things not to touch.
 4. Cards — the work, one gummi-cards row each: title, one_liner, kind
    (feature, bug or research), serves (the DW ids it is for — every card
@@ -62,7 +67,10 @@ it now. Do not fix it yourself.
 One pass, three lenses, blocking findings only:
   checkable   — every done-when item has a command that really proves its
                 statement (exits 0 only when it holds, runs in the repo,
-                is not trivially true) or is a genuine judgment call
+                is not trivially true, and observes what the item names
+                rather than a wrapper's own status — a check for exit
+                code 2 through ` + "`go run`" + ` can never pass) or is a
+                genuine judgment call
   covered     — the cards together meet every item; no card is outside
                 the objective or the limits; dependencies are in the right
                 order; no two cards will fight over the same code while
@@ -116,7 +124,10 @@ Your job:
    combined branch and record the evidence in the Verification plan as
    "DW-N: met — <evidence>" or "DW-N: not met — <why>".
 2. For each commanded item, record its result the same way from the
-   kickoff's check results.
+   kickoff's check results. The check decides a commanded item: when it
+   failed, the item is not met even if you can show the behaviour another
+   way — record that evidence, and say the command looks unable to
+   observe the item, so the lead can repair the check.
 3. Write the Try it section if it is empty or stale: short steps a
    person follows to see the result working — the commands to run and
    what they should see. If the change has nothing visible (a refactor,

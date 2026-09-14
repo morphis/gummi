@@ -2288,6 +2288,16 @@ plan checks, falling back to what a plain autopilot card would do. Every
 tool writes the goal log (`card_events` of kind `goal`), and every turn is
 booked to the goal card. Three failed turns in a row wrap the goal up.
 
+What a done-when item says is the owner's and no tool changes it. Its
+check's command is only the means of proving it, and an agreed command can
+be unable to — a wrapper that reports its own exit status instead of the
+program's. The lead may repair the command (`done_when_check_fix`), held to
+what makes a check a check: it must fail in a throwaway checkout of main,
+and pass on the goal branch once every card serving the item has settled.
+The repair is a decision for review with the agreed command as its
+alternative, and a check run that passes after an item was marked not met
+settles the item.
+
 ### 17.5 Silence and the hand-over
 
 A goal card's stops (escalations, failures, exhausted envelopes) are

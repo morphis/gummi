@@ -36,6 +36,7 @@ const (
 	GoalDeclined     = "declined"      // a reviewer finding the lead declined
 	GoalNotMet       = "not-met"       // a done-when item marked not met
 	GoalItemAdded    = "done-when"     // a done-when item added from your note
+	GoalCheckFixed   = "check-fixed"   // a done-when item's check command repaired
 	GoalNote         = "note"          // a note you typed into the goal
 	GoalFound        = "found"         // a backlog card filed along the way
 	GoalLeadTurn     = "lead-turn"     // the lead took a turn

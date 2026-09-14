@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/morphis/gummi/internal/mcp"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/verify"
 )
 
 // leadTurnTimeout bounds one lead turn. A lead that cannot decide in this
@@ -372,16 +374,19 @@ add a dependency (dep_add), answer a card's question (card_answer), approve
 or send back a card's plan (card_plan), record a decision for review
 (decision_record), decline a reviewer finding with your reason
 (finding_decline), mark a done-when item not met with evidence
-(done_when_not_met), add a done-when item that one of the owner's notes
-asked for (done_when_add), file an out-of-goal bug or idea on the open
-board (backlog_file), set the reserve you hold back for finishing
-(reserve_set), write the Try it section (goal_doc_write), and wrap the goal
-up now (goal_wrap_up).
+(done_when_not_met), repair the command of a done-when check that cannot
+observe what its item says (done_when_check_fix), add a done-when item
+that one of the owner's notes asked for (done_when_add), file an
+out-of-goal bug or idea on the open board (backlog_file), set the reserve
+you hold back for finishing (reserve_set), write the Try it section
+(goal_doc_write), and wrap the goal up now (goal_wrap_up).
 
-What you never do: go past the goal budget (the tools refuse it), rewrite
-or remove a done-when item the owner agreed, create a card that serves no
-done-when item, take a board card the owner did not attach, or work
-around a sandbox refusal by widening what a card may do — plan around
+What you never do: go past the goal budget (the tools refuse it), change
+what an agreed done-when item says or remove one (repairing a check's
+command so it can observe the item is not that; weakening it so it
+passes is), create a card that serves no done-when item, take a board
+card the owner did not attach, or work around a sandbox refusal by
+widening what a card may do — plan around
 it, or mark the item it blocks not met.
 
 Record a decision for review for every call a user of the result would
@@ -565,6 +570,8 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 		}, "decision", "alternative"),
 		leadTool("finding_decline", "Decline a reviewer finding on a goal card, with your reason. It is listed at the end.", map[string]any{"card": card, "finding": str("The finding, quoted or summarized."), "reason": str("Why it is declined.")}, "card", "finding", "reason"),
 		leadTool("done_when_not_met", "Mark a done-when item not met, with the evidence. The item itself is never changed.", map[string]any{"item": str("DW-N"), "reason": str("Why, with evidence.")}, "item", "reason"),
+		leadTool("done_when_check_fix", "Repair the command of a done-when item's check when the command cannot observe its statement — for example a wrapper like `go run` that replaces the program's exit code with its own. What the item says never changes. The new command must fail on main, and pass on the goal branch once every card serving the item has landed; the repair is listed as a decision for review.",
+			map[string]any{"item": str("DW-N"), "check": str("The repaired command."), "reason": str("Why the agreed command cannot prove the statement, with evidence.")}, "item", "check", "reason"),
 		leadTool("done_when_add", "Add a done-when item one of the owner's notes asked for.", map[string]any{
 			"says": str("The statement."), "check": str("A command that exits 0 when it holds; empty to have verify judge it."),
 			"note": str("The note that asked for it, quoted."),
@@ -905,6 +912,9 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		mark()
 		return a.Item + " marked not met", nil
 
+	case "done_when_check_fix":
+		return lt.fixDoneWhenCheck(ctx, goal, view, a)
+
 	case "done_when_add":
 		hasNote := false
 		for _, en := range view.Log {
@@ -1047,6 +1057,102 @@ func (lt *leadTurn) addDoneWhen(ctx context.Context, goal domain.Feature, view G
 	lt.acted = true
 	lt.mu.Unlock()
 	return "added " + it.ID, nil
+}
+
+// fixDoneWhenCheck repairs the command of a done-when item's check. What
+// the item says is the owner's and never changes; the command is only the
+// means of proving it, and an agreed command can be unable to — a wrapper
+// that swallows the exit code it is meant to observe. So a repair is held
+// to what makes a check a check: it must not already pass on main, where
+// the goal's work is absent, and once every card serving the item has
+// landed it must pass on the goal branch. It is a decision for review,
+// with the agreed command as the alternative not taken.
+func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, view GoalView, a leadArgs) (string, error) {
+	e := lt.e
+	id, cmd := strings.TrimSpace(a.Item), strings.TrimSpace(a.Check)
+	if cmd == "" || strings.TrimSpace(a.Reason) == "" {
+		return "", errors.New("a check repair needs the new command and the reason the agreed one cannot prove the item")
+	}
+	if view.DocPath == "" {
+		return "", errors.New("the goal doc is missing")
+	}
+	raw, err := os.ReadFile(view.DocPath)
+	if err != nil {
+		return "", err
+	}
+	items, _, err := spec.ParseDoneWhen(string(raw))
+	if err != nil {
+		return "", err
+	}
+	idx := -1
+	for i, d := range items {
+		if d.ID == id {
+			idx = i
+		}
+	}
+	switch {
+	case idx < 0:
+		return "", fmt.Errorf("%q is not on the done-when list", a.Item)
+	case items[idx].Check == "":
+		return "", fmt.Errorf("%s is judged, not checked; there is no command to repair", id)
+	case items[idx].Check == cmd:
+		return "", fmt.Errorf("that is %s's agreed command already", id)
+	}
+	old := items[idx]
+	probe := domain.Check{Name: old.CheckName(), Cmd: cmd}
+
+	main, err := e.pool.ManagerFor(ctx, &goal)
+	if err != nil {
+		return "", err
+	}
+	var onMain verify.Result
+	if err := main.WithMainCheckout(ctx, func(dir string) error {
+		onMain = verify.Run(ctx, dir, []domain.Check{probe})[0]
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	if onMain.OK {
+		return "", fmt.Errorf("the new command already passes on main, where none of the goal's work is — it cannot tell whether %s holds", id)
+	}
+	landed := true
+	for _, c := range view.Cards {
+		if slices.Contains(c.Serves, id) && c.State != goalpolicy.Landed && c.State != goalpolicy.Dropped {
+			landed = false
+		}
+	}
+	if landed {
+		dir := filepath.Join(e.pool.Root(), goal.WorktreePath())
+		if res := verify.Run(ctx, dir, []domain.Check{probe})[0]; !res.OK {
+			return "", fmt.Errorf("the new command does not pass on the goal branch (exit %d):\n%s\nIf %s really is not met, mark it not met instead", res.ExitCode, clip(res.Output, 1500), id)
+		}
+	}
+
+	items[idx].Check = cmd
+	doc, err := spec.SetDoneWhen(string(raw), items)
+	if err != nil {
+		return "", err
+	}
+	checks, _, _ := spec.ParseChecks(doc)
+	for i := range checks {
+		if checks[i].Name == old.CheckName() {
+			checks[i].Cmd = cmd
+		}
+	}
+	if doc, err = spec.UpsertChecks(doc, checks); err != nil {
+		return "", err
+	}
+	if err := atomicfile.Write(view.DocPath, []byte(doc), 0o600); err != nil {
+		return "", err
+	}
+	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCheckFixed, Item: id, Detail: a.Reason, Ref: clip(old.Check, 300), By: "lead"})
+	en := e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, Item: id,
+		Detail:      fmt.Sprintf("%s's check now runs `%s`: %s", id, cmd, clip(a.Reason, 400)),
+		Alternative: fmt.Sprintf("the agreed check `%s`", old.Check), By: "lead"})
+	lt.mu.Lock()
+	lt.acted = true
+	lt.mu.Unlock()
+	return fmt.Sprintf("%s's check repaired and recorded as %s; goal verify runs it", id, en.DecisionRef()), nil
 }
 
 // --- catch-up resolver ------------------------------------------------------

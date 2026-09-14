@@ -517,3 +517,101 @@ func TestADroppedGoalCardDoesNotRunOn(t *testing.T) {
 		t.Fatal("the lead does not check the plan of a card its goal dropped")
 	}
 }
+
+// A done-when check whose command cannot observe its item can be repaired,
+// but only into a real check: one that fails on main, and passes on the
+// goal branch once the item's cards are settled. The repair is a decision
+// for review and settles an earlier not-met.
+func TestLeadRepairsADoneWhenCheckOnlyIntoARealCheck(t *testing.T) {
+	e, store, root, g := leadEngine(t, &fakeNoTools{agent.NewFake("")})
+	ctx := context.Background()
+	fix := func(check string) (string, error) {
+		view, err := e.GoalView(ctx, g.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := &leadTurn{e: e, view: view}
+		args, _ := json.Marshal(map[string]string{"item": "DW-1", "check": check, "reason": "the agreed command cannot see it"})
+		return lt.dispatch(ctx, "done_when_check_fix", args)
+	}
+	if _, err := fix("true"); err == nil || !strings.Contains(err.Error(), "already passes on main") {
+		t.Fatalf("a check that passes without the goal's work is refused: %v", err)
+	}
+	if _, err := fix("test -f cache.txt"); err == nil {
+		t.Fatal("repairing to the agreed command is refused")
+	}
+	view, _ := e.GoalView(ctx, g.ID)
+	lt := &leadTurn{e: e, view: view}
+	if _, err := lt.dispatch(ctx, "done_when_not_met", json.RawMessage(`{"item":"DW-1","reason":"the check cannot see it"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	// once every card serving DW-1 is settled, the repair must pass on the goal branch
+	if err := store.SetGoalDropped(ctx, "FD-002", e.now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fix("test -s cache.txt"); err == nil || !strings.Contains(err.Error(), "does not pass on the goal branch") {
+		t.Fatalf("a repair that fails on the goal branch is refused: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, g.WorktreePath(), "cache.txt"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := fix("test -s cache.txt")
+	if err != nil {
+		t.Fatalf("a real check is taken: %v", err)
+	}
+	if !strings.Contains(out, "D-") {
+		t.Fatalf("the repair names its decision: %q", out)
+	}
+	doc, _ := os.ReadFile(filepath.Join(root, g.ArtifactPath()))
+	if !strings.Contains(string(doc), "check: test -s cache.txt") || !strings.Contains(string(doc), "says: the cache file exists") {
+		t.Fatalf("the doc carries the repaired command and the item's words unchanged:\n%s", doc)
+	}
+	checks, _, _ := spec.ParseChecks(string(doc))
+	for _, c := range checks {
+		if c.Name == "done-when DW-1" && c.Cmd != "test -s cache.txt" {
+			t.Fatalf("the goal's check runs the repaired command: %+v", c)
+		}
+	}
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision bool
+	for _, d := range rep.Decisions {
+		decision = decision || (d.Item == "DW-1" && strings.Contains(d.Alternative, "test -f cache.txt"))
+	}
+	if !decision {
+		t.Fatalf("the repair is a decision for review with the agreed command as the alternative: %+v", rep.Decisions)
+	}
+	for _, d := range rep.DoneWhen {
+		// (DW-1 still reads not met here because this test dropped its card)
+		if d.ID == "DW-1" && d.Evidence == "the check cannot see it" {
+			t.Fatalf("a repair settles the not-met about the old command: %+v", d)
+		}
+	}
+}
+
+// An item marked not met is settled by a later check run that passes it,
+// and not by one that came before the mark.
+func TestAPassingCheckAfterANotMetSettlesIt(t *testing.T) {
+	e, _, _, g := leadEngine(t, &fakeNoTools{agent.NewFake("")})
+	ctx := context.Background()
+	status := func() string {
+		rep, err := e.GoalReport(ctx, g.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep.DoneWhen[0].Status
+	}
+	goal := g
+	e.recordGoalChecks(goal, []goalCheckResult{{Name: "done-when DW-1", OK: true, Status: "pass"}})
+	e.goalLog(ctx, g.ID, state.GoalPayload{Action: state.GoalNotMet, Item: "DW-1", Detail: "passes trivially", By: "lead"})
+	if st := status(); st != DoneWhenNotMet {
+		t.Fatalf("a not-met after the checks stands: %s", st)
+	}
+	e.recordGoalChecks(goal, []goalCheckResult{{Name: "done-when DW-1", OK: true, Status: "pass"}})
+	if st := status(); st != DoneWhenMet {
+		t.Fatalf("a later passing check settles it: %s", st)
+	}
+}

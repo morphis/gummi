@@ -357,3 +357,27 @@ func (m *Manager) CommitStat(ctx context.Context, sha string) (string, error) {
 func (m *Manager) CommitPatch(ctx context.Context, sha string) (string, error) {
 	return runGit(ctx, m.repo, "show", "--format=%h %s", sha)
 }
+
+// WithMainCheckout runs fn in a throwaway detached checkout of the main
+// checkout's HEAD, removed afterwards: somewhere a command can be run
+// against main without touching the working tree a person uses.
+func (m *Manager) WithMainCheckout(ctx context.Context, fn func(dir string) error) error {
+	head, err := m.MainHead(ctx)
+	if err != nil {
+		return err
+	}
+	parent, err := os.MkdirTemp("", "gummi-main-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(parent) }()
+	dir := filepath.Join(parent, "main")
+	if _, err := runGit(ctx, m.repo, "worktree", "add", "--detach", dir, head); err != nil {
+		return fmt.Errorf("checking out main: %w", err)
+	}
+	defer func() {
+		_, _ = runGit(context.WithoutCancel(ctx), m.repo, "worktree", "remove", "--force", dir)
+		_, _ = runGit(context.WithoutCancel(ctx), m.repo, "worktree", "prune")
+	}()
+	return fn(dir)
+}

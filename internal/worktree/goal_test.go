@@ -242,3 +242,27 @@ func TestRebaseOntoMovesOnlyTheCardsCommits(t *testing.T) {
 		t.Fatalf("a detached card is anchored on main: %v", err)
 	}
 }
+
+func TestWithMainCheckoutIsThrowaway(t *testing.T) {
+	pool, _, g := goalPool(t)
+	m, err := pool.ManagerFor(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	err = m.WithMainCheckout(context.Background(), func(dir string) error {
+		seen = dir
+		_, err := os.Stat(filepath.Join(dir, "README.md"))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("main checkout: %v", err)
+	}
+	if _, err := os.Stat(seen); !os.IsNotExist(err) {
+		t.Fatalf("the checkout is removed afterwards: %v", err)
+	}
+	out, _ := runGit(context.Background(), m.repo, "worktree", "list")
+	if strings.Contains(out, seen) {
+		t.Fatalf("the checkout is pruned from git's list:\n%s", out)
+	}
+}
