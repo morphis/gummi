@@ -137,18 +137,36 @@ func DefaultGoalReserve(envelope int) int {
 	return r
 }
 
-// GoalHeadroomPercent is the share of a goal's budget (past its reserve)
-// that minting its cards leaves ungiven: the pool its lead's turns and its
-// later raises come out of. A goal that handed every credit to its cards
-// up front would have nothing left to decide with.
+// GoalHeadroomPercent is the least share of a goal's budget (past its
+// reserve) that minting its cards leaves ungiven: the pool its lead's turns
+// and its later raises come out of. A goal that handed every credit to its
+// cards up front would have nothing left to decide with.
 const GoalHeadroomPercent = 10
+
+// GoalLeadTurnsPerCard is how many lead turns the headroom plans for each
+// card: its questions, its plan check, and a look when it lands or sticks.
+// Held envelopes are not spent envelopes, so a headroom that ignores how
+// many cards the lead tends starves the lead half-way through — and a lead
+// with no room cannot answer, check a plan or rescue a stuck card.
+const GoalLeadTurnsPerCard = 4
+
+// GoalHeadroomMaxPercent caps the headroom, so a plan of many cards still
+// gives most of the budget to the cards doing the work.
+const GoalHeadroomMaxPercent = 30
 
 // GoalMintPool is what a goal's plan may hand to its cards at the start:
 // the budget less the reserve, what the goal has already spent, and the
-// headroom kept for its lead and later raises.
-func (f *Feature) GoalMintPool(spent float64) float64 {
+// headroom kept for its lead and later raises — the larger of
+// GoalHeadroomPercent and GoalLeadTurnsPerCard turns per card, never more
+// than GoalHeadroomMaxPercent.
+func (f *Feature) GoalMintPool(spent float64, cards int) float64 {
 	pool := float64(f.Budget.Envelope-f.ReserveCredits()) - spent
-	return pool * float64(100-GoalHeadroomPercent) / 100
+	if pool <= 0 {
+		return pool
+	}
+	headroom := max(pool*GoalHeadroomPercent/100, float64(cards*GoalLeadTurnsPerCard*TurnReserveCredits))
+	headroom = min(headroom, pool*GoalHeadroomMaxPercent/100)
+	return pool - headroom
 }
 
 // ReserveCredits returns the goal's reserve: the lead's estimate when it

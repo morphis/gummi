@@ -432,6 +432,11 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			// (talkAction), where enter's own label already says so.
 			return "no agent attached — choose what happens next."
 		}
+		if r.F.IsGoal() && r.F.Stage == domain.StageImplement {
+			// a goal's implement stage has no session of its own: its cards
+			// run, and the goal comes back to you when they are done
+			return "the goal is running its cards — it comes back to you when they are done."
+		}
 		return "nothing is running — choose what happens next."
 	}
 }

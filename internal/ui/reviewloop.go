@@ -106,6 +106,13 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 	var stamp tea.Cmd
 	switch {
 	case out.Action == gatepolicy.RaiseGate:
+		if m.goalOf(id) != "" {
+			// raising the gate wakes the card's goal, which reads the
+			// verified stamp to tell a card ready to land from one stuck at
+			// a stop; stamped by the async command below, the goal's tick
+			// could read the park first and drop a card that just passed
+			m.stampVerified(id)
+		}
 		m.raiseAttention(id, attnGate, gateReason(domain.StageVerify, id.Kind(), true, m.baseBranchOf(id)))
 		// The excused-checks cache is otherwise filled on a board load, so
 		// the frame that first says "verify passed" — the one most likely
@@ -167,20 +174,35 @@ func (m *Shell) markVerified(id domain.FeatureID) tea.Cmd {
 	if m.store == nil || id.Kind() == domain.KindResearch {
 		return nil
 	}
-	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
-		}
-		if !f.VerifiedAt.IsZero() {
-			return nil
-		}
-		if err := m.store.SetVerifiedAt(ctx, id, m.now().UTC()); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
-		}
+	return func() tea.Msg { return m.writeVerified(id) }
+}
+
+// stampVerified is markVerified done in place, for the one caller whose
+// next step reads the stamp: a goal card's gate wakes its goal.
+func (m *Shell) stampVerified(id domain.FeatureID) {
+	if m.store == nil || id.Kind() == domain.KindResearch {
+		return
+	}
+	if msg := m.writeVerified(id); msg != nil {
+		m.notice = msg.(noticeMsg)
+	}
+}
+
+// writeVerified stamps VerifiedAt unless it is already set, returning a
+// notice when the store refuses.
+func (m *Shell) writeVerified(id domain.FeatureID) tea.Msg {
+	ctx := context.Background()
+	f, err := m.store.GetFeature(ctx, id)
+	if err != nil {
+		return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+	}
+	if !f.VerifiedAt.IsZero() {
 		return nil
 	}
+	if err := m.store.SetVerifiedAt(ctx, id, m.now().UTC()); err != nil {
+		return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+	}
+	return nil
 }
 
 // onPlanDone drives the plan-critique loop when a Plan-stage session

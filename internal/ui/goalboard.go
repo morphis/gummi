@@ -74,10 +74,14 @@ func goalRowTag(s *theme.Styles, r featureRow, open bool) string {
 		cards++
 	}
 	tag := fmt.Sprintf("%d/%d done-when · %d/%d cards · %.0f/%d", met, total, landed, cards, g.Budget.Total, g.Budget.Envelope)
-	if total == 0 && len(g.Cards) == 0 {
+	switch {
+	case total == 0 && len(g.Cards) == 0:
 		// nothing agreed yet: "0/0 done-when · 0/0 cards" would read as a
 		// goal with nothing to do rather than one without a plan
 		tag = fmt.Sprintf("no plan yet · %.0f/%d", g.Budget.Total, g.Budget.Envelope)
+	case len(g.Cards) == 0:
+		// a drafted plan: its cards are made when it is approved
+		tag = fmt.Sprintf("%d done-when · cards made at approval · %.0f/%d", total, g.Budget.Total, g.Budget.Envelope)
 	}
 	switch {
 	case g.Ready && g.Partial != "":

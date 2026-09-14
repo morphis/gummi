@@ -134,3 +134,19 @@ func TestGoalReserveAndLanes(t *testing.T) {
 		t.Fatalf("wrap-up stamp not read")
 	}
 }
+
+func TestGoalMintPoolKeepsRoomForTheLead(t *testing.T) {
+	f := Feature{Kind: KindGoal, Budget: Budget{Envelope: 1500}} // reserve 225
+	// few cards: the 10% floor
+	if got := f.GoalMintPool(0, 1); got != 1275-127.5 {
+		t.Fatalf("one card keeps the 10%% headroom: %v", got)
+	}
+	// two cards: four lead turns each
+	if got := f.GoalMintPool(0, 2); got != 1275-240 {
+		t.Fatalf("two cards keep room for eight lead turns: %v", got)
+	}
+	// many cards: capped at 30%
+	if got := f.GoalMintPool(0, 20); got != 1275-382.5 {
+		t.Fatalf("many cards cap the headroom: %v", got)
+	}
+}

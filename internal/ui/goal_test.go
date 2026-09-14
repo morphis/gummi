@@ -107,6 +107,14 @@ func TestGoalWithoutAPlanSaysSo(t *testing.T) {
 	if tag != "no plan yet · 12/4000" {
 		t.Fatalf("a goal with nothing agreed reads as unplanned, not empty: %q", tag)
 	}
+	g.Goal.DoneWhen = []engine.DoneWhenStatus{{ID: "DW-1"}, {ID: "DW-2"}}
+	if tag := ansi.Strip(goalRowTag(theme.New(theme.GummiDark()), g, false)); tag != "2 done-when · cards made at approval · 12/4000" {
+		t.Fatalf("a drafted plan's cards are not zero, they are not made yet: %q", tag)
+	}
+	run := goalRow(10, "export works offline", domain.StageImplement)
+	if q := decisionQuestion(decisionKind(""), run, nextInput{stage: domain.StageImplement, kind: domain.KindGoal}); strings.Contains(q, "nothing is running") {
+		t.Fatalf("a conducting goal is not idle: %q", q)
+	}
 }
 
 func TestGoalPlanGateNamesTheLead(t *testing.T) {
@@ -316,5 +324,19 @@ func TestGoalMergeIsNotASquash(t *testing.T) {
 	d := newCommitMsgDialog(domain.Feature{ID: "GL-001", Kind: domain.KindGoal, Slug: "x"}, func(string) tea.Cmd { return nil }, nil)
 	if got := ansi.Strip(d.View(theme.New(theme.GummiDark()), 100, 30)); strings.Contains(got, "squash-merge") || !strings.Contains(got, "merge GL-001") {
 		t.Fatalf("the goal's commit dialog names a merge:\n%s", got)
+	}
+}
+
+// A goal card's verify pass wakes its goal, which tells a card ready to
+// land from one stuck at a stop by the verified stamp: the stamp is
+// written before the wake, never by a command racing the goal's tick.
+func TestGoalCardVerifiedStampIsInPlace(t *testing.T) {
+	m, _, store, g := goalWorkspace(t)
+	ctx := context.Background()
+	cards, _ := store.ListGoalCards(ctx, g.ID)
+	m.stampVerified(cards[0].ID) // no command to run: the write is done
+	c, _ := store.GetFeature(ctx, cards[0].ID)
+	if c.VerifiedAt.IsZero() {
+		t.Fatal("stampVerified writes the stamp in place")
 	}
 }
