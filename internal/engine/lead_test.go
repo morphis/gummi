@@ -540,6 +540,7 @@ func TestLeadRepairsADoneWhenCheckOnlyIntoARealCheck(t *testing.T) {
 	if _, err := fix("test -f cache.txt"); err == nil {
 		t.Fatal("repairing to the agreed command is refused")
 	}
+	e.recordGoalChecks(g, []goalCheckResult{{Name: "done-when DW-1", OK: false, Status: "FAIL (exit 1)"}})
 	view, _ := e.GoalView(ctx, g.ID)
 	lt := &leadTurn{e: e, view: view}
 	if _, err := lt.dispatch(ctx, "done_when_not_met", json.RawMessage(`{"item":"DW-1","reason":"the check cannot see it"}`)); err != nil {
@@ -586,7 +587,7 @@ func TestLeadRepairsADoneWhenCheckOnlyIntoARealCheck(t *testing.T) {
 	}
 	for _, d := range rep.DoneWhen {
 		// (DW-1 still reads not met here because this test dropped its card)
-		if d.ID == "DW-1" && d.Evidence == "the check cannot see it" {
+		if d.ID == "DW-1" && (d.Evidence == "the check cannot see it" || strings.HasPrefix(d.Evidence, "check ")) {
 			t.Fatalf("a repair settles the not-met about the old command: %+v", d)
 		}
 	}
@@ -654,5 +655,18 @@ func TestLeadPromptsCarryTheGoalAndThePlan(t *testing.T) {
 	}
 	if clip("éé", 3) != "é…" {
 		t.Fatalf("a cut never splits a rune: %q", clip("éé", 3))
+	}
+}
+
+// A goal's done-when checks come from its done-when block: an agent's
+// rewrite of the gummi-checks copy cannot drop or change them.
+func TestGoalDoneWhenChecksComeFromTheDoneWhenBlock(t *testing.T) {
+	doc := testGoalDoc + "```gummi-checks\n- DW-1: true\n- name: build\n  cmd: go build ./...\n```\n"
+	checks := withDoneWhenChecks(doc, []domain.Check{{Name: "DW-1", Cmd: "true"}, {Name: "build", Cmd: "go build ./..."}})
+	if len(checks) != 2 || checks[0].Name != "done-when DW-1" || checks[0].Cmd != "test -f cache.txt" || checks[1].Name != "build" {
+		t.Fatalf("checks = %+v", checks)
+	}
+	if got := withDoneWhenChecks(testGoalDoc, nil); len(got) != 1 || got[0].Name != "done-when DW-1" {
+		t.Fatalf("a lost copy is restored from the done-when block: %+v", got)
 	}
 }

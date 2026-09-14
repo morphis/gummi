@@ -317,3 +317,17 @@ func TestParseChecksRepairLeavesBlockScalarsAlone(t *testing.T) {
 		t.Errorf("repair did not resume after the block scalar: %q", checks[1].Cmd)
 	}
 }
+
+// An agent rewriting the block by hand writes "- <name>: <command>". That
+// is valid YAML with no name or cmd keys, and read literally every check
+// in it would silently stop running.
+func TestParseChecksReadsTheNameCommandShorthand(t *testing.T) {
+	doc := "## Verification plan\n```gummi-checks\n- DW-1: test \"$(go run . sub 7 2)\" = 5\n- build: go build ./...\n```\n"
+	checks, found, err := ParseChecks(doc)
+	if err != nil || !found || len(checks) != 2 {
+		t.Fatalf("checks = %+v found=%v err=%v", checks, found, err)
+	}
+	if checks[0].Name != "DW-1" || checks[0].Cmd != `test "$(go run . sub 7 2)" = 5` || checks[1].Name != "build" {
+		t.Fatalf("shorthand read as %+v", checks)
+	}
+}

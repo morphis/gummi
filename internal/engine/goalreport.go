@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"regexp"
 	"strings"
 
@@ -164,9 +165,12 @@ func buildGoalReport(v GoalView) GoalReport {
 		case state.GoalNotMet:
 			notMet[en.Item] = en.Detail
 		case state.GoalCheckFixed:
-			// the not-met was about the old command; the repaired one is
-			// judged by the next check run
+			// the not-met and the last result were about the old command;
+			// the repaired one is judged by the next check run
 			delete(notMet, en.Item)
+			lastChecks = slices.DeleteFunc(slices.Clone(lastChecks), func(c goalCheckResult) bool {
+				return c.Name == domain.DoneWhen{ID: en.Item}.CheckName()
+			})
 		case state.GoalDecision:
 			r.Decisions = append(r.Decisions, GoalLogLine{Ref: en.DecisionRef(), Card: en.Card, Item: en.Item, Detail: en.Detail, Alternative: en.Alternative, By: en.By})
 		case state.GoalDeclined:

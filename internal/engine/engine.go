@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1267,6 +1268,35 @@ func (e *Engine) runEnvProbes(s *Session) string {
 	return "Environment prerequisites probed in this worktree:\n" + envprobe.FormatReport(results)
 }
 
+// withDoneWhenChecks makes a goal's check list carry one check per
+// commanded done-when item, with the item's own command. The done-when
+// block is where those commands are agreed (and repaired, by
+// done_when_check_fix); the copy in gummi-checks is only how they reach
+// the runner, and agents edit that block. A copy rewritten into a shape
+// that no longer parses, or into another command, must not silently stop
+// the goal proving its items.
+func withDoneWhenChecks(doc string, checks []domain.Check) []domain.Check {
+	items, _, err := spec.ParseDoneWhen(doc)
+	if err != nil {
+		return checks
+	}
+	out := append([]domain.Check(nil), checks...)
+	no := false
+	for _, it := range items {
+		if it.Check == "" {
+			continue
+		}
+		// an agent's copy may have renamed it to the bare item id
+		i := slices.IndexFunc(out, func(c domain.Check) bool { return c.Name == it.CheckName() || c.Name == it.ID })
+		if i < 0 {
+			out = append(out, domain.Check{Name: it.CheckName(), Cmd: it.Check, Baseline: &no})
+			continue
+		}
+		out[i].Name, out[i].Cmd = it.CheckName(), it.Check
+	}
+	return out
+}
+
 // runSpecChecks executes the artifact's gummi-checks commands in the
 // feature's worktree, records each outcome in the activity feed, and
 // returns a compact summary to hand the verify agent (empty when the artifact
@@ -1284,10 +1314,14 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		return ""
 	}
 	checks, _, parseErr := spec.ParseChecks(string(raw))
-	if parseErr != nil {
+	if parseErr != nil && !s.Feature.IsGoal() {
 		return "gummi could not run the artifact's gummi-checks: " + parseErr.Error() +
 			"\nThis is a plan defect. Repair the block in the Verification section, append a bullet there reading " +
 			"`finding: gummi-checks does not parse`, run the repaired commands yourself, and set your verdict to fail."
+	}
+	if s.Feature.IsGoal() {
+		// a goal's done-when checks run whatever its checks block says
+		checks = withDoneWhenChecks(string(raw), checks)
 	}
 	if len(checks) == 0 {
 		return ""

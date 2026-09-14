@@ -68,6 +68,9 @@ func ParseChecks(content string) (checks []domain.Check, found bool, err error) 
 	if strictErr != nil {
 		return nil, true, fmt.Errorf("gummi-checks block does not parse: %s", checksShapeError(strictErr, body))
 	}
+	if short, ok := decodeShorthandChecks(body); ok && !anyCmd(raw) {
+		raw = short
+	}
 	for _, c := range raw {
 		if strings.TrimSpace(c.Cmd) == "" {
 			continue
@@ -81,6 +84,41 @@ func ParseChecks(content string) (checks []domain.Check, found bool, err error) 
 		checks = append(checks, c)
 	}
 	return checks, true, nil
+}
+
+// decodeShorthandChecks reads the block in the shorthand agents write when
+// they rewrite it by hand — one "- <name>: <command>" line per check. It is
+// valid YAML, so it parses cleanly as checks with no name and no command,
+// and every check it lists would silently stop running. ok is false unless
+// every entry has that shape.
+func decodeShorthandChecks(body string) ([]domain.Check, bool) {
+	var entries []map[string]string
+	if err := yaml.Unmarshal([]byte(body), &entries); err != nil || len(entries) == 0 {
+		return nil, false
+	}
+	out := make([]domain.Check, 0, len(entries))
+	for _, en := range entries {
+		if len(en) != 1 {
+			return nil, false
+		}
+		for k, v := range en {
+			switch k {
+			case "name", "cmd", "timeout", "baseline":
+				return nil, false
+			}
+			out = append(out, domain.Check{Name: k, Cmd: v})
+		}
+	}
+	return out, true
+}
+
+func anyCmd(checks []domain.Check) bool {
+	for _, c := range checks {
+		if strings.TrimSpace(c.Cmd) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // decodeChecks is the raw YAML step, split out so a body can be decoded
