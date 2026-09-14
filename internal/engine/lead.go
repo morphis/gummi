@@ -153,10 +153,12 @@ func clip(s string, n int) string {
 // goal's lead instead of to a person. It returns the answer to deliver;
 // when the lead cannot answer (unavailable, failed, or declined to), the
 // question's recommended option is taken, exactly as a plain autopilot
-// card would. ok is false when id is not a goal card.
+// card would. ok is false when id is not a goal card, or one its goal
+// dropped.
 func (e *Engine) GoalAnswer(ctx context.Context, id domain.FeatureID, ask *Ask) (answer string, ok bool, err error) {
 	card, err := e.cfg.Store.GetFeature(ctx, id)
-	if err != nil || !card.InGoal() || ask == nil {
+	// a card its goal dropped is no longer the lead's to answer for
+	if err != nil || !card.InGoal() || card.GoalDropped() || ask == nil {
 		return "", false, err
 	}
 	goal, err := e.cfg.Store.GetFeature(ctx, card.GoalID)
@@ -197,10 +199,10 @@ func (e *Engine) goalFallbackAnswer(ctx context.Context, goal, card domain.Featu
 // returns whether to cross, and the note to send the plan back with when
 // not. A lead that cannot run, or does not decide, approves: the card's
 // own plan critique already passed. ok is false when id is not a goal
-// card.
+// card, or one its goal dropped.
 func (e *Engine) GoalPlanCheck(ctx context.Context, id domain.FeatureID) (approve bool, note string, ok bool, err error) {
 	card, err := e.cfg.Store.GetFeature(ctx, id)
-	if err != nil || !card.InGoal() {
+	if err != nil || !card.InGoal() || card.GoalDropped() {
 		return true, "", false, err
 	}
 	goal, err := e.cfg.Store.GetFeature(ctx, card.GoalID)

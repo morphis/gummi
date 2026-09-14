@@ -510,4 +510,10 @@ func TestADroppedGoalCardDoesNotRunOn(t *testing.T) {
 	if err := e.Run(card); err == nil || !strings.Contains(err.Error(), "dropped") {
 		t.Fatalf("a dropped goal card must not run on: %v", err)
 	}
+	if _, ok, _ := e.GoalAnswer(ctx, card.ID, &Ask{Question: "Which?", Options: []AskOption{{Label: "a"}}}); ok {
+		t.Fatal("the lead does not answer for a card its goal dropped")
+	}
+	if _, _, ok, _ := e.GoalPlanCheck(ctx, card.ID); ok {
+		t.Fatal("the lead does not check the plan of a card its goal dropped")
+	}
 }
