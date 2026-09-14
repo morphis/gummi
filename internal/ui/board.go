@@ -192,6 +192,11 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if g := goalRowTag(s, r, m.goalOpen[r.F.ID]); g != "" {
 		badge += " " + g
 	}
+	// a card its goal dropped stays listed under the goal but is no longer
+	// part of it; without the mark it reads as work still in flight
+	if r.F.GoalDropped() {
+		badge += " " + faint.Render("⊘ dropped")
+	}
 	// a card's managed repository badge, naming the configured repo, so
 	// multi-repo boards read at a glance. Cards in the workspace default
 	// repo render no badge (the default is implicit); it is metadata only,

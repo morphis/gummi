@@ -137,7 +137,9 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 		return tea.Batch(cmds...), true
 
 	case goalStartMsg:
-		return m.runStageWithNote(msg.f, msg.note), true
+		// The start moved the card off todo behind the board's back; reload
+		// so its row stops reading as waiting.
+		return tea.Batch(m.loadRows, m.runStageWithNote(msg.f, msg.note)), true
 
 	case goalReadyMsg:
 		return m.goalReady(msg.id), true

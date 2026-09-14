@@ -669,6 +669,12 @@ func stageActions(in nextInput) []nextAction {
 		// next.
 		approve := nextStep("advance", "g", "approve",
 			"moves the card into implement — start the implementer there to begin")
+		if in.kind == domain.KindGoal {
+			// a goal has no implementer to start: approving hands the plan
+			// to its lead, which starts the cards on its own
+			approve = nextStep("advance", "g", "approve",
+				"moves the goal into implement — its lead starts the cards and keeps within the budget")
+		}
 		var acts []nextAction
 		if finished {
 			// §3.3: this stop's own narration reads "plan is ready for

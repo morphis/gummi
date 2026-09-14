@@ -12,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
@@ -1114,6 +1115,16 @@ func currentSpecSection(kind domain.Kind, stage domain.Stage) string {
 			return "Fix"
 		case domain.StageVerify:
 			return "Verification"
+		}
+	case domain.KindGoal:
+		switch stage {
+		case domain.StagePlan:
+			// the plan gate is judged on the done-when list first
+			return spec.GoalSectionDoneWhen
+		case domain.StageImplement:
+			return spec.GoalSectionCards
+		case domain.StageVerify:
+			return spec.GoalSectionVerify
 		}
 	case domain.KindResearch:
 		switch stage {

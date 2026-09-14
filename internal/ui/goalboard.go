@@ -63,13 +63,22 @@ func goalRowTag(s *theme.Styles, r featureRow, open bool) string {
 	}
 	g := r.Goal
 	met, total := g.Met()
-	landed := 0
+	landed, cards := 0, 0
 	for _, c := range g.Cards {
-		if c.State == "landed" {
+		switch c.State {
+		case "landed":
 			landed++
+		case "dropped":
+			continue // no longer part of the goal's work
 		}
+		cards++
 	}
-	tag := fmt.Sprintf("%d/%d done-when · %d/%d cards · %.0f/%d", met, total, landed, len(g.Cards), g.Budget.Total, g.Budget.Envelope)
+	tag := fmt.Sprintf("%d/%d done-when · %d/%d cards · %.0f/%d", met, total, landed, cards, g.Budget.Total, g.Budget.Envelope)
+	if total == 0 && len(g.Cards) == 0 {
+		// nothing agreed yet: "0/0 done-when · 0/0 cards" would read as a
+		// goal with nothing to do rather than one without a plan
+		tag = fmt.Sprintf("no plan yet · %.0f/%d", g.Budget.Total, g.Budget.Envelope)
+	}
 	switch {
 	case g.Ready && g.Partial != "":
 		tag += " · ready, partial"
