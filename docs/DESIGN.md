@@ -2260,6 +2260,12 @@ moves its own commits with `rebase --onto` (`RebaseOnto`). Once a goal has
 ended and its worktree is gone, its cards fall back to the repository's
 manager.
 
+A dropped card leaves the goal at once. One you attached goes back to the
+board with its commits moved onto main. One the goal created has no other
+reason to exist, so it is closed where it stands (`CloseGoalDropped`):
+straight to done, stamped handed off with its branch kept, its open
+decisions abandoned — never walked through stages it did not pass.
+
 ### 17.3 The budget
 
 The goal envelope is a hard ceiling (`goalpolicy.Ledger`):

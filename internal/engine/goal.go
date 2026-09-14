@@ -512,9 +512,24 @@ func (e *Engine) goalDrop(ctx context.Context, goal, card domain.Feature, reason
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDropped, Card: card.ID, Detail: reason, By: by})
 	if !card.GoalAttached {
-		return nil
+		return e.goalCloseDropped(ctx, card)
 	}
 	return e.goalDetach(ctx, goal, card)
+}
+
+// goalCloseDropped ends a card the goal created and then dropped. It
+// exists only for the goal, so nothing is left to do with it: it leaves
+// the board's work in flight for done, its branch kept with whatever it
+// had written, the way a hand-off keeps one. Left where it stood it
+// would sit under a finished goal forever, counted as work in progress.
+func (e *Engine) goalCloseDropped(ctx context.Context, card domain.Feature) error {
+	if wt, err := e.mgr(ctx, &card); err == nil {
+		if ok, _ := wt.Exists(ctx, &card); ok {
+			// best effort: the branch keeps what the card had written
+			_, _ = wt.CommitAll(ctx, &card, string(card.ID)+": dropped by its goal")
+		}
+	}
+	return e.cfg.Store.CloseGoalDropped(ctx, card.ID, ActorGoal, e.now())
 }
 
 // goalDetach returns an attached card to the open board.

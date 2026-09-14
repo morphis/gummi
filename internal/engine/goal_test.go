@@ -299,6 +299,25 @@ func TestStopGoalDropsUnfinishedWorkAndFinishesPartial(t *testing.T) {
 		if !c.GoalDropped() {
 			t.Fatalf("%s should be dropped", c.ID)
 		}
+		// a card the goal made and dropped is closed, not left in flight
+		if c.Stage != domain.StageDone || !c.HandedOff() {
+			t.Fatalf("%s is closed with its branch kept: stage %s handed off %v", c.ID, c.Stage, c.HandedOff())
+		}
+	}
+	open, _ := store.OpenDecisions(ctx)
+	for _, c := range goalCards(t, store, g.ID) {
+		if len(open[c.ID]) > 0 {
+			t.Fatalf("a closed card has nothing waiting: %+v", open[c.ID])
+		}
+	}
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range rep.Cards {
+		if c.State != "dropped" {
+			t.Fatalf("the report still says why a closed card left the goal: %+v", c)
+		}
 	}
 	got, _ := store.GetFeature(ctx, g.ID)
 	if got.Goal.Partial != "you stopped the goal" {

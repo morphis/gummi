@@ -9,7 +9,9 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -214,6 +216,45 @@ func (s *Store) SetGoalDropped(ctx context.Context, card domain.FeatureID, at ti
 		return fmt.Errorf("dropping %s: %w", card, err)
 	}
 	return nil
+}
+
+// CloseGoalDropped ends a card its goal dropped: it moves straight to
+// done, stamped handed off (its branch is kept, nothing lands), with one
+// transition and gate crossing from wherever it stood. It deliberately
+// skips the workflow's one-step-at-a-time rule — a dropped card did not
+// pass the stages between, and walking it through them would record
+// crossings that never happened. Moving off its stage abandons whatever
+// decisions it had open there. A card already done is left as it is.
+func (s *Store) CloseGoalDropped(ctx context.Context, card domain.FeatureID, actor string, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after commit
+	f, err := scanFeature(tx.QueryRowContext(ctx, `SELECT `+featureCols+` FROM features WHERE id = ?`, string(card)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%s: %w", card, ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	if f.Stage == domain.StageDone {
+		return nil
+	}
+	now := at.UTC().Format(timeFmt)
+	if _, err := tx.ExecContext(ctx, `UPDATE features SET stage = ?, handed_off_at = ?, updated_at = ? WHERE id = ?`,
+		string(domain.StageDone), now, now, string(card)); err != nil {
+		return fmt.Errorf("closing %s: %w", card, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO transitions (feature_id, from_stage, to_stage, actor, at) VALUES (?,?,?,?,?)`,
+		string(card), string(f.Stage), string(domain.StageDone), actor, now); err != nil {
+		return fmt.Errorf("recording transition for %s: %w", card, err)
+	}
+	if err := appendGateEventTx(ctx, tx, card, f.Stage, domain.StageDone, actor, at.UTC(), ""); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetFoundBy records that goal filed card as found along the way.
