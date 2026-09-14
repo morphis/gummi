@@ -2275,7 +2275,10 @@ available = envelope − goal's own spend − Σ held by cards − reserve
 held      = a live card's max(envelope, spend); a landed or dropped card's spend
 ```
 
-Minting leaves a tenth of the pool ungiven, for lead turns and raises. A
+Minting leaves part of the pool ungiven, for lead turns and raises: four
+lead turns per card, never less than a tenth of the pool nor more than
+three tenths — cards hold their whole envelopes however little they have
+spent, so a lead given a flat tenth runs dry half-way through. A
 card is raised only from `available`; lead turns are capped by it; the
 reserve (the lead's `reserve_set` estimate, else 15% of the budget, at
 least 100) belongs to the goal's own review and verify. `available < 0`
