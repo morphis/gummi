@@ -377,7 +377,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			needsWT && r.HasWorktree && !r.Landed && in.stage == domain.StageVerify,
 		},
 		{
-			"merge", "m", "merge", "squash-merge branch into " + r.baseBranch() + " (review & approve the drafted message)", false,
+			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch()), false,
 			needsWT && r.HasWorktree && !r.Landed,
 		},
 		{
@@ -781,4 +781,13 @@ func (d *cardActionsDialog) View(s *theme.Styles, w, h int) string {
 		d.list.View(s, innerW, listRows, true) + "\n\n" +
 		s.Faint.Render(footer)
 	return s.DialogFrame.Width(frameW).Render(body)
+}
+
+// mergeHelp describes the merge action: a goal lands as one merge commit
+// over its cards' commits, every other card as one squash commit.
+func mergeHelp(kind domain.Kind, base string) string {
+	if kind == domain.KindGoal {
+		return "merge the goal branch into " + base + " over its cards' commits (review & approve the drafted message)"
+	}
+	return "squash-merge branch into " + base + " (review & approve the drafted message)"
 }

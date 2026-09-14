@@ -393,6 +393,9 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			if r.F.Kind == domain.KindResearch {
 				return "verification passed — decide whether the research is done."
 			}
+			if in.goal != nil {
+				return "the goal is ready for you (" + goalMetClause(in.goal) + ") — decide how it leaves gummi."
+			}
 			// Not "ready to land": the picker beneath this offers three
 			// endings and landing is only one of them, so the question
 			// has to be the one the rows actually answer.

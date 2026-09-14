@@ -301,7 +301,12 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	d.input.SetHeight(clamp(h-12, 6, 24))
 
 	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("squash-merge "+string(d.feature)) + "\n")
+	title := "squash-merge "
+	if d.feature.Kind() == domain.KindGoal {
+		// a goal lands as one merge commit over its cards' own commits
+		title = "merge "
+	}
+	b.WriteString(s.DialogTitle.Render(title+string(d.feature)) + "\n")
 	b.WriteString(s.Subtle.Render(d.branch+" → "+d.base()) + "\n\n")
 	b.WriteString(d.input.View() + "\n")
 	// Say when the message continues past the box. Approving something

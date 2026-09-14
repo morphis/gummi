@@ -126,6 +126,16 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 		}
 		return ansi.Truncate(text, room, "…")
 	}
+	// wrap adds text in full, over as many lines as it takes: the evidence
+	// for a done-when item, a drop's reason and a decision are what the
+	// hand-over is read for, and a clipped one hides exactly its point
+	wrap := func(text string, indent int, st func(...string) string) {
+		room := max(w-indent-1, 10)
+		for _, line := range strings.Split(ansi.Wrap(text, room, ""), "\n") {
+			add(strings.Repeat(" ", indent) + st(line))
+		}
+	}
+	plain := func(s ...string) string { return strings.Join(s, "") }
 
 	met, total := r.Met()
 	status := "running"
@@ -168,7 +178,7 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 		if d.Evidence != "" {
 			detail = d.Status + ": " + d.Evidence
 		}
-		add("       " + st.Render(clip(detail, 8)))
+		wrap(detail, 7, st.Render)
 	}
 
 	section("cards")
@@ -201,7 +211,7 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 				}
 			}
 		case c.Reason != "":
-			add("       " + s.Faint.Render(clip(c.Reason, 8)))
+			wrap(c.Reason, 7, s.Faint.Render)
 		}
 	}
 
@@ -212,29 +222,29 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 	if len(r.Decisions) > 0 {
 		section("decisions for review")
 		for _, d := range r.Decisions {
-			line := d.Ref + " " + d.Detail
+			wrap(d.Ref+" "+d.Detail, 3, plain)
 			if d.Alternative != "" {
-				line += s.Faint.Render(" (not: " + d.Alternative + ")")
+				wrap("not: "+d.Alternative, 7, s.Faint.Render)
 			}
-			add("   " + clip(line, 3))
 		}
 	}
 	if len(r.Declined) > 0 {
 		section("declined findings")
 		for _, d := range r.Declined {
-			add("   " + clip(string(d.Card)+" "+d.Finding+s.Faint.Render(" — "+d.Detail), 3))
+			wrap(string(d.Card)+" "+d.Finding, 3, plain)
+			wrap(d.Detail, 7, s.Faint.Render)
 		}
 	}
 	if len(r.Found) > 0 {
 		section("found along the way")
 		for _, d := range r.Found {
-			add("   " + clip(string(d.Card)+" "+d.Detail, 3))
+			wrap(string(d.Card)+" "+d.Detail, 3, plain)
 		}
 	}
 	if r.TryIt != "" {
 		section("try it")
 		for _, line := range strings.Split(r.TryIt, "\n") {
-			add("   " + clip(line, 3))
+			wrap(line, 3, plain)
 		}
 	}
 	if len(gp.log) > 0 {

@@ -64,6 +64,9 @@ type nextInput struct {
 	stage  domain.Stage
 	kind   domain.Kind
 	landed bool
+	// goal is a goal card's report, nil for every other card: a goal's
+	// verify pass is a hand-over whose sentence names what was met
+	goal *engine.GoalReport
 	// hasWorktree is whether the card's worktree exists on disk right
 	// now — the same question cardactions' own attach row asks, and the
 	// only thing that makes attaching a raw agent CLI possible.
@@ -224,6 +227,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	in := nextInput{
 		stage:            r.F.Stage,
 		kind:             r.F.Kind,
+		goal:             r.Goal,
 		landed:           r.Landed,
 		hasWorktree:      r.HasWorktree,
 		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),

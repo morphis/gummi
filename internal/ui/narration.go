@@ -331,6 +331,9 @@ func verifyStopped(in nextInput, art string) string {
 	if in.verdict == verdictUnclear && in.escalated {
 		return "Verify gave no clear verdict, and the loop gave up rather than passing it." + loopBreaker(in)
 	}
+	if in.verdict == verdictPass && in.goal != nil {
+		return "The goal is ready for you — " + goalMetClause(in.goal) + ". Read the report on the goal page, then decide how it leaves gummi."
+	}
 	if in.verdict == verdictPass {
 		// "ready to land" named one of the three answers below it as
 		// though it were the state itself. The work being ready is the
@@ -341,6 +344,17 @@ func verifyStopped(in nextInput, art string) string {
 			". Decide how it leaves gummi."
 	}
 	return ""
+}
+
+// goalMetClause says how much of a goal's done-when list was met, and why
+// it is partial when it is.
+func goalMetClause(g *engine.GoalReport) string {
+	met, total := g.Met()
+	clause := itoa(met) + " of " + itoa(total) + " done-when met"
+	if g.Partial != "" {
+		clause += ", partial: " + sanitize(g.Partial)
+	}
+	return clause
 }
 
 // excusedClause names the checks a clean verify did not actually hold to,

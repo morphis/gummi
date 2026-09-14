@@ -135,7 +135,7 @@ func TestGoalPageRendersTheHandOver(t *testing.T) {
 		goal: domain.Feature{ID: "GL-010", Kind: domain.KindGoal, Title: "export works offline"},
 		report: engine.GoalReport{
 			ID: "GL-010", Title: "export works offline", Stage: domain.StageVerify, Ready: true, Partial: "1 card(s) dropped", Lanes: 2,
-			DoneWhen:  []engine.DoneWhenStatus{{ID: "DW-1", Says: "cache exists", Status: engine.DoneWhenMet, Evidence: "check passed"}, {ID: "DW-2", Says: "docs", Status: engine.DoneWhenNotMet, Evidence: "every card serving it was dropped"}},
+			DoneWhen:  []engine.DoneWhenStatus{{ID: "DW-1", Says: "cache exists", Status: engine.DoneWhenMet, Evidence: "check passed"}, {ID: "DW-2", Says: "docs", Status: engine.DoneWhenNotMet, Evidence: "every card serving it was dropped, and the check as written runs go run, which masks the exit code"}},
 			Cards:     []engine.GoalReportCard{{ID: "FD-011", Title: "local cache", State: "landed", Commit: "abcdef1234", Subject: "feat: local cache"}, {ID: "FD-012", Title: "docs", State: "dropped", Reason: "not needed"}},
 			Decisions: []engine.GoalLogLine{{Ref: "D-1", Detail: "json by default", Alternative: "table"}},
 			Declined:  []engine.GoalLogLine{{Card: "FD-011", Finding: "rename dir", Detail: "fine as is"}},
@@ -149,7 +149,8 @@ func TestGoalPageRendersTheHandOver(t *testing.T) {
 		"ready for you", "partial: 1 card(s) dropped", "1 of 2 done-when met",
 		"DW-1 cache exists", "every card serving it was dropped",
 		"FD-011 local cache", "landed as abcdef1", "not needed",
-		"D-1 json by default", "rename dir", "BG-020", "run export --offline", "landed FD-011",
+		"D-1 json by default", "not: table", "rename dir", "BG-020", "run export --offline", "landed FD-011",
+		"masks the exit code", // long evidence wraps rather than clips
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("goal page lacks %q:\n%s", want, out)
@@ -293,5 +294,27 @@ func TestBoardConductsAGoal(t *testing.T) {
 	}
 	if !noted {
 		t.Fatalf("the line should be a goal note: %+v", log)
+	}
+}
+
+func TestGoalHandOverSaysWhatWasMet(t *testing.T) {
+	g := &engine.GoalReport{DoneWhen: []engine.DoneWhenStatus{{ID: "DW-1", Status: engine.DoneWhenMet}, {ID: "DW-2", Status: engine.DoneWhenNotMet}}}
+	in := nextInput{stage: domain.StageVerify, kind: domain.KindGoal, verdict: verdictPass, goal: g}
+	if got := verifyStopped(in, "goal doc"); !strings.Contains(got, "1 of 2 done-when met") || strings.Contains(got, "Verify passed") {
+		t.Fatalf("a goal's hand-over names what was met, not a plain pass: %q", got)
+	}
+	g.Partial = "1 card(s) dropped"
+	if got := decisionQuestion(decisionVerify, featureRow{F: domain.Feature{Kind: domain.KindGoal}}, in); !strings.Contains(got, "partial: 1 card(s) dropped") {
+		t.Fatalf("a partial goal says so at its decision: %q", got)
+	}
+}
+
+func TestGoalMergeIsNotASquash(t *testing.T) {
+	if got := mergeHelp(domain.KindGoal, "main"); strings.Contains(got, "squash") {
+		t.Fatalf("a goal lands as a merge commit over its cards' commits: %q", got)
+	}
+	d := newCommitMsgDialog(domain.Feature{ID: "GL-001", Kind: domain.KindGoal, Slug: "x"}, func(string) tea.Cmd { return nil }, nil)
+	if got := ansi.Strip(d.View(theme.New(theme.GummiDark()), 100, 30)); strings.Contains(got, "squash-merge") || !strings.Contains(got, "merge GL-001") {
+		t.Fatalf("the goal's commit dialog names a merge:\n%s", got)
 	}
 }
