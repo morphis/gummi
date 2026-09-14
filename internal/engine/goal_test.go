@@ -248,6 +248,15 @@ func TestGoalRunsItsCardsOnTheGoalBranch(t *testing.T) {
 		t.Fatalf("view = %+v", view.Cards)
 	}
 
+	// the goal's own sessions leave scratch in its worktree (a binary built
+	// for a check, captured stderr); none of it is committed or landed
+	if err := os.WriteFile(filepath.Join(goalDir, "err.txt"), []byte("scratch\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.checkpoint(&Session{Feature: gotGoal}); err != nil {
+		t.Fatal(err)
+	}
+
 	// it lands on main as one merge commit over both card commits
 	e.Drop(g.ID)
 	if _, err := store.Transition(ctx, g.ID, domain.StageVerify, "auto"); err != nil {
@@ -262,6 +271,9 @@ func TestGoalRunsItsCardsOnTheGoalBranch(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "cache.txt")); err != nil {
 		t.Fatalf("the goal's work is on main after landing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "err.txt")); err == nil {
+		t.Fatal("scratch the goal's sessions left in its worktree must not land on main")
 	}
 	gotGoal, _ = store.GetFeature(ctx, g.ID)
 	if gotGoal.Stage != domain.StageDone {

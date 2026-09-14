@@ -2518,6 +2518,14 @@ func (e *Engine) checkpoint(s *Session) error {
 	if s.Feature.Kind == domain.KindResearch {
 		return nil
 	}
+	// A goal's branch takes only its cards' landings and gummi's own
+	// catch-up merges. The goal's own sessions — its plan, review and
+	// verify — write nothing that belongs there; what they leave in the
+	// goal worktree is scratch (a binary built to run a check, a captured
+	// stderr), and a checkpoint would commit it onto the branch that lands.
+	if s.Feature.IsGoal() {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)

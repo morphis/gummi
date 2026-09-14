@@ -1261,9 +1261,8 @@ func (e *Engine) LandGoal(ctx context.Context, goalID domain.FeatureID, message,
 	if err != nil {
 		return "", err
 	}
-	if _, err := main.CommitAll(ctx, &goal, "final checkpoint"); err != nil && !errors.Is(err, worktree.ErrNoWorktree) {
-		return "", err
-	}
+	// no final checkpoint: nothing in the goal worktree that is not
+	// committed belongs on the goal branch (see Engine.checkpoint)
 	merged, err := main.CatchUpGoal(ctx, &goal, false)
 	if err != nil {
 		var cc *worktree.CatchUpConflictError
