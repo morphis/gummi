@@ -106,6 +106,10 @@ func attnForDecision(kind string) (k attnKind, escalated bool, ok bool) {
 // Init even asked.
 func (m *Shell) seedInboxFromDecisions(decisions map[domain.FeatureID][]state.OpenDecision) {
 	for id, decs := range decisions {
+		// a goal card's stops are its goal's, after a restart as before it
+		if m.goalOf(id) != "" {
+			continue
+		}
 		dec, ok := rankOpenDecision(decs)
 		if !ok {
 			continue

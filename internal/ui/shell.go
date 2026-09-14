@@ -718,6 +718,9 @@ func (m *Shell) reconstructInbox() {
 		return
 	}
 	for id, s := range m.engine.Sessions() {
+		if m.goalOf(id) != "" {
+			continue // a goal card's stops are its goal's, never yours
+		}
 		snap := s.Snapshot()
 		switch {
 		case snap.Err != nil:

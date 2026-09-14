@@ -221,3 +221,29 @@ func TestInitSeedsDecisionsWithoutAnEngine(t *testing.T) {
 		t.Fatalf("an engine-less board did not seed the headless run's stop: %+v", m.inbox.list())
 	}
 }
+
+// A goal card's stops are its goal's to handle: a restart must not seed
+// them into your inbox when the live board kept them out of it.
+func TestSeedInboxSkipsGoalCards(t *testing.T) {
+	ws, store, wt := uiRepo(t)
+	ctx := context.Background()
+	f := mkFeature(t, store, 1, "goal card", domain.StageVerify)
+	if err := store.SetGoal(ctx, f.ID, "GL-009", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
+		ID: "gate:1", Kind: state.DecisionKindGate, Question: "verify passed — review & land",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	decisions, err := store.OpenDecisions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.Attach(store, wt, ws)
+	m.seedInboxFromDecisions(decisions)
+	if m.inbox.len() != 0 {
+		t.Fatalf("a goal card's stop is not yours: %+v", m.inbox.list())
+	}
+}
