@@ -835,6 +835,13 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventGoal})
 		return nil
 	}
+	// A card its goal dropped does not run on: the drop can land between two
+	// steps of a driving loop that still holds the card from before it.
+	if f.GoalID != "" && e.cfg.Store != nil {
+		if cur, err := e.cfg.Store.GetFeature(context.Background(), f.ID); err == nil && cur.GoalDropped() {
+			return fmt.Errorf("%s was dropped by %s and does not run on", f.ID, cur.GoalID)
+		}
+	}
 	role, ok := roleForStage(f)
 	if !ok {
 		return noAgentAtStage(f.Stage)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -427,5 +428,86 @@ func TestSendBacksDoNotResetTheStuckCount(t *testing.T) {
 	}
 	if !dropped {
 		t.Fatal("after its lead turns a card stuck at the same stage is dropped, send-backs or not")
+	}
+}
+
+// A card that just ended a turn is between two steps of its driving loop,
+// however long ago it entered its stage or the goal last touched it.
+func TestACardBetweenStepsIsNotStuck(t *testing.T) {
+	e, store, _, g := leadEngine(t, newLeadFake(func(string) []agent.Event { return nil }))
+	ctx := context.Background()
+	tick(t, e, g.ID) // kickoff, starts FD-002
+	if _, err := store.Transition(ctx, "FD-002", domain.StagePlan, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(5 * time.Minute)
+	e.now = func() time.Time { return later }
+	if err := store.AppendEvent(ctx, state.CardEvent{Feature: "FD-002", Stage: domain.StagePlan, Kind: state.EventStageExit, At: later, Payload: `{}`}); err != nil {
+		t.Fatal(err)
+	}
+	stateOf := func() goalpolicy.CardState {
+		goal, _ := store.GetFeature(ctx, g.ID)
+		v, err := e.goalView(ctx, goal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gc, _ := v.Card("FD-002")
+		return gc.State
+	}
+	if st := stateOf(); st != goalpolicy.Running {
+		t.Fatalf("a card that just finished a turn is between steps, not %s", st)
+	}
+	later = later.Add(10 * time.Minute)
+	if st := stateOf(); st != goalpolicy.Stuck {
+		t.Fatalf("past the grace with nothing running it is stuck, not %s", st)
+	}
+}
+
+// Answering a card's questions is the lead helping it along, not a try at
+// unsticking it: a card stuck after its questions still gets a lead turn.
+func TestAnsweringACardIsNotATryAtUnstickingIt(t *testing.T) {
+	lf := newLeadFake(func(prompt string) []agent.Event {
+		if strings.Contains(prompt, "is asking a question") {
+			return []agent.Event{toolCall("1", "card_answer", map[string]any{"answer": "b"})}
+		}
+		return nil
+	})
+	e, store, _, g := leadEngine(t, lf)
+	ctx := context.Background()
+	tick(t, e, g.ID) // kickoff, starts FD-002
+	if _, err := store.Transition(ctx, "FD-002", domain.StagePlan, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, ok, err := e.GoalAnswer(ctx, "FD-002", &Ask{Question: "Which?", Options: []AskOption{{Label: "a"}, {Label: "b"}}}); err != nil || !ok {
+			t.Fatalf("answer: %v %v", ok, err)
+		}
+	}
+	if err := store.AppendPark(ctx, "FD-002", domain.StagePlan, state.ParkReasonGaveUp, "critique cap", "", e.now()); err != nil {
+		t.Fatal(err)
+	}
+	r := tick(t, e, g.ID)
+	for _, a := range r.Actions {
+		if a.Kind == goalpolicy.Drop {
+			t.Fatalf("a card whose questions the lead answered is not out of tries: %v", r.Actions)
+		}
+	}
+}
+
+// A drop can land between two steps of a loop still holding the card; the
+// next step refuses to run it.
+func TestADroppedGoalCardDoesNotRunOn(t *testing.T) {
+	e, store, _, g := leadEngine(t, newLeadFake(func(string) []agent.Event { return nil }))
+	ctx := context.Background()
+	tick(t, e, g.ID)
+	card, err := store.GetFeature(ctx, "FD-002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetGoalDropped(ctx, card.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Run(card); err == nil || !strings.Contains(err.Error(), "dropped") {
+		t.Fatalf("a dropped goal card must not run on: %v", err)
 	}
 }

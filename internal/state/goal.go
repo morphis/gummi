@@ -301,9 +301,11 @@ type CardMark struct {
 
 // CardMarks is the newest park, stage entry and gate crossing on a card —
 // what a goal reads to tell a card that stopped and is waiting from one
-// that is merely between two steps.
+// that is merely between two steps. Last is the newest event of any kind:
+// a card that just finished a turn is between steps, however long ago it
+// last crossed a stage.
 type CardMarks struct {
-	Park, StageEnter, Gate CardMark
+	Park, StageEnter, Gate, Last CardMark
 }
 
 // ParkReason decodes the newest park's reason and detail.
@@ -323,8 +325,11 @@ func (s *Store) LatestCardMarks(ctx context.Context, id domain.FeatureID) (CardM
 		SELECT e.kind, e.seq, e.at, e.stage, e.payload FROM card_events e
 		JOIN (SELECT kind, MAX(seq) AS seq FROM card_events
 		      WHERE feature_id = ? AND kind IN (?, ?, ?) GROUP BY kind) m
-		ON e.seq = m.seq`,
-		string(id), EventPark, EventStageEnter, EventGate)
+		ON e.seq = m.seq
+		UNION ALL
+		SELECT '', seq, at, stage, '' FROM (SELECT seq, at, stage FROM card_events
+		      WHERE feature_id = ? ORDER BY seq DESC LIMIT 1)`,
+		string(id), EventPark, EventStageEnter, EventGate, string(id))
 	if err != nil {
 		return out, err
 	}
@@ -346,6 +351,8 @@ func (s *Store) LatestCardMarks(ctx context.Context, id domain.FeatureID) (CardM
 			out.StageEnter = mk
 		case EventGate:
 			out.Gate = mk
+		case "":
+			out.Last = mk
 		}
 	}
 	return out, rows.Err()

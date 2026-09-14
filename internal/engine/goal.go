@@ -163,6 +163,9 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		case state.GoalDropped:
 			dropReason[en.Card] = en.Detail
 		case state.GoalLeadTurn:
+			// only a wake turn names the cards it was woken over in Ref;
+			// a turn answering a card's question or checking its plan
+			// carries the card in Card and is not a try at unsticking it
 			lastLeadOK, lastLeadAny = en.Seq, en.Seq
 			failures = 0
 			for _, id := range strings.Split(en.Ref, ",") {
@@ -340,6 +343,11 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 	}
 	if touchedAt.After(last) {
 		last = touchedAt
+	}
+	// a card that just ended a turn is between steps however long ago it
+	// entered its stage: the grace runs from its newest event
+	if marks.Last.At.After(last) {
+		last = marks.Last.At
 	}
 	if !last.IsZero() && now.Sub(last) > goalIdleGrace {
 		return goalpolicy.Stuck, "stopped with nothing running"

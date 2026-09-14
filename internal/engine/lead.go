@@ -177,7 +177,7 @@ func (e *Engine) GoalAnswer(ctx context.Context, id domain.FeatureID, ask *Ask) 
 		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Card: id, Detail: lerr.Error(), By: ActorGoal})
 		return e.goalFallbackAnswer(ctx, goal, card, ask, fallback, "the lead turn failed"), true, nil
 	}
-	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadTurn, Detail: clip(text, 600), Ref: string(id), By: "lead"})
+	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadTurn, Card: id, Detail: clip(text, 600), By: "lead"})
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 	if !lt.answered {
@@ -220,7 +220,7 @@ func (e *Engine) GoalPlanCheck(ctx context.Context, id domain.FeatureID) (approv
 		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Card: id, Detail: lerr.Error(), By: ActorGoal})
 		return true, "", true, nil
 	}
-	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadTurn, Detail: clip(text, 600), Ref: string(id), By: "lead"})
+	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadTurn, Card: id, Detail: clip(text, 600), By: "lead"})
 	lt.mu.Lock()
 	defer lt.mu.Unlock()
 	if lt.approve != nil && !*lt.approve {
