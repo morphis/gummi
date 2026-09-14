@@ -615,3 +615,44 @@ func TestAPassingCheckAfterANotMetSettlesIt(t *testing.T) {
 		t.Fatalf("a later passing check settles it: %s", st)
 	}
 }
+
+// A lead turn's prompt carries the contract it acts on, so answering a
+// question or checking a plan does not start with tool rounds that fetch it.
+func TestLeadPromptsCarryTheGoalAndThePlan(t *testing.T) {
+	var prompts []string
+	var mu sync.Mutex
+	lf := newLeadFake(func(prompt string) []agent.Event {
+		mu.Lock()
+		prompts = append(prompts, prompt)
+		mu.Unlock()
+		return nil
+	})
+	e, store, root, g := leadEngine(t, lf)
+	ctx := context.Background()
+	cards := goalCards(t, store, g.ID)
+	writeArtifact(t, root, cards[0], "# plan\n\n## Chosen approach\n\nKeep the cache under .cache/ — é\n")
+	if _, _, err := e.GoalAnswer(ctx, cards[0].ID, &Ask{Question: "Which?", Options: []AskOption{{Label: "a"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := e.GoalPlanCheck(ctx, cards[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(prompts) != 2 {
+		t.Fatalf("two lead turns, got %d", len(prompts))
+	}
+	for _, p := range prompts {
+		for _, want := range []string{"Export works with no network.", "No new dependencies.", "DW-1: the cache file exists", cards[0].Title} {
+			if !strings.Contains(p, want) {
+				t.Fatalf("a lead prompt carries the goal (%q):\n%s", want, p)
+			}
+		}
+	}
+	if !strings.Contains(prompts[1], "Keep the cache under .cache/") {
+		t.Fatalf("a plan check carries the plan:\n%s", prompts[1])
+	}
+	if clip("éé", 3) != "é…" {
+		t.Fatalf("a cut never splits a rune: %q", clip("éé", 3))
+	}
+}

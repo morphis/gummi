@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -148,7 +149,15 @@ func clip(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return strings.TrimSpace(s[:n]) + "…"
+	return strings.TrimSpace(s[:runeCut(s, n)]) + "…"
+}
+
+// runeCut backs n off to the start of a rune, so a cut never splits one.
+func runeCut(s string, n int) int {
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return n
 }
 
 // GoalAnswer is the question hook: a goal card's ask_user goes to its
@@ -176,7 +185,7 @@ func (e *Engine) GoalAnswer(ctx context.Context, id domain.FeatureID, ask *Ask) 
 		return e.goalFallbackAnswer(ctx, goal, card, ask, fallback, "no lead turn could run"), true, nil
 	}
 	lt := &leadTurn{e: e, view: view, question: &leadQuestion{card: id, ask: ask}}
-	text, lerr := e.leadSession(ctx, lt, leadQuestionPrompt(card, ask))
+	text, lerr := e.leadSession(ctx, lt, leadQuestionPrompt(view, card, ask))
 	if lerr != nil {
 		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Card: id, Detail: lerr.Error(), By: ActorGoal})
 		return e.goalFallbackAnswer(ctx, goal, card, ask, fallback, "the lead turn failed"), true, nil
@@ -219,7 +228,7 @@ func (e *Engine) GoalPlanCheck(ctx context.Context, id domain.FeatureID) (approv
 		return true, "", true, nil
 	}
 	lt := &leadTurn{e: e, view: view, planCard: id}
-	text, lerr := e.leadSession(ctx, lt, leadPlanPrompt(card))
+	text, lerr := e.leadSession(ctx, lt, leadPlanPrompt(view, card, e.artifactFile(&card)))
 	if lerr != nil {
 		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Card: id, Detail: lerr.Error(), By: ActorGoal})
 		return true, "", true, nil
@@ -358,8 +367,12 @@ func leadHint(goal domain.Feature, docPath string) string {
 You are the lead for goal %s: %s.
 The goal doc at %s is the contract: its Objective, its Done when list,
 its Limits and its Cards were agreed with the person who owns this goal,
-who is not here and will only look at the result at the end. Read it
-with goal_doc (or your file reader) before you act.
+who is not here and will only look at the result at the end. Each turn's
+prompt carries what you need to act on: the goal's status (done-when
+list, cards, budget, decisions, recent log) and the doc's Objective,
+Limits and Notes — and for a plan check, the plan. Read more (goal_doc,
+card_spec, card_diff, card_checks) only when the turn needs something
+that is not there; every extra read makes the turn slower and dearer.
 
 Your job is the goal's judgment, one short turn at a time. gummi runs the
 rest by rule: it starts cards whose dependencies landed, lands verified
@@ -407,11 +420,12 @@ func leadWakePrompt(view GoalView, reasons []string) string {
 	}
 	b.WriteString("\n")
 	b.WriteString(goalStatusText(view))
+	b.WriteString(goalDocBrief(view))
 	b.WriteString("\nDecide and act with the goal tools. If nothing needs doing, say so.")
 	return b.String()
 }
 
-func leadQuestionPrompt(card domain.Feature, ask *Ask) string {
+func leadQuestionPrompt(view GoalView, card domain.Feature, ask *Ask) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Card %s (%s) is asking a question while it works:\n\n%s\n", card.ID, card.Title, ask.Question)
 	if len(ask.Options) > 0 {
@@ -425,15 +439,68 @@ func leadQuestionPrompt(card domain.Feature, ask *Ask) string {
 		}
 	}
 	b.WriteString("\nAnswer it with card_answer, choosing what best serves the goal doc. " +
-		"If a user of the result would notice the choice, include a decision (summary and the alternative you did not take).")
+		"If a user of the result would notice the choice, include a decision (summary and the alternative you did not take).\n\n")
+	b.WriteString(goalStatusText(view))
+	b.WriteString(goalDocBrief(view))
 	return b.String()
 }
 
-func leadPlanPrompt(card domain.Feature) string {
-	return fmt.Sprintf("Card %s (%s) has finished its plan and is about to start implementing. "+
-		"Read its plan with card_spec and check it against the goal doc: does it serve the done-when item(s) "+
+// leadPlanMax bounds the plan a plan check carries in its prompt; a longer
+// one is cut, and the lead reads the rest with card_spec.
+const leadPlanMax = 16000
+
+func leadPlanPrompt(view GoalView, card domain.Feature, planPath string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Card %s (%s) has finished its plan and is about to start implementing. "+
+		"Check its plan against the goal doc: does it serve the done-when item(s) "+
 		"it was created for, stay inside the goal's Limits, and fit the other cards? "+
-		"Then call card_plan exactly once: approve, or send it back with a note saying what to change.", card.ID, card.Title)
+		"Then call card_plan exactly once: approve, or send it back with a note saying what to change.\n", card.ID, card.Title)
+	if raw, err := os.ReadFile(planPath); planPath != "" && err == nil {
+		plan := string(raw)
+		if len(plan) > leadPlanMax {
+			plan = plan[:runeCut(plan, leadPlanMax)] + "\n[… cut here; read the rest with card_spec]"
+		}
+		fmt.Fprintf(&b, "\n--- %s's plan ---\n%s\n--- end of plan ---\n", card.ID, strings.TrimSpace(plan))
+	} else {
+		b.WriteString("\nRead its plan with card_spec.\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(goalStatusText(view))
+	b.WriteString(goalDocBrief(view))
+	return b.String()
+}
+
+// goalDocBriefSections are the goal doc's agreed sections: the contract
+// every lead turn is judged against, carried in its prompt so a turn does
+// not spend a tool round, and a re-read of its whole context, fetching them.
+var goalDocBriefSections = []string{spec.GoalSectionObjective, spec.GoalSectionLimits, spec.GoalSectionNotes}
+
+// goalDocBriefMax bounds one section in the brief.
+const goalDocBriefMax = 4000
+
+// goalDocBrief renders the goal doc's objective, limits and your notes
+// for a lead prompt (the done-when list and cards are in the status).
+func goalDocBrief(v GoalView) string {
+	if v.DocPath == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(v.DocPath)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, name := range goalDocBriefSections {
+		body, ok := spec.ViewSection(string(raw), name)
+		body = strings.TrimSpace(stripPrompt(body))
+		if !ok || body == "" {
+			continue
+		}
+		if len(body) > goalDocBriefMax {
+			body = body[:runeCut(body, goalDocBriefMax)] + "\n[… cut; goal_doc has the rest]"
+		}
+		fmt.Fprintf(&b, "\nGoal doc — %s:\n%s\n", name, body)
+	}
+	return b.String()
 }
 
 // goalStatusText renders a goal view for the lead (and goal_status).

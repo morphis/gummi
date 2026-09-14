@@ -102,6 +102,12 @@ A fifth role, `lead`, runs a goal's judgment (see the README's goals
 section). It is optional: a profile with no `lead:` runs its goals' leads on
 the architect's backend and model. A lead needs a backend that reaches
 tools — native client tools or MCP — or the goal runs on its rules alone.
+Lead turns are many and short — one per card question, plan check and
+event worth a judgment — and each is booked to the goal's budget, so on a
+goal with chatty cards the lead can cost more than any one card. A
+mid-size model is usually enough for it:
+`lead: { backend: claude, model: claude-sonnet-5 }` under an Opus
+architect, for example.
 
 `backend:` is optional; a role without one uses `GUMMI_AGENT`.
 `output_token_max` caps a role's output tokens per turn. `provider:` and
