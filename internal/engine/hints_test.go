@@ -262,9 +262,16 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 		// one-pass discipline + turn budget: bounds intra-session cost
 		// (the outer round cap in reviewloop.go doesn't).
 		"one pass", "≤4 turns",
-		// blocking-only filtering on critique (Review keeps nits): the
-		// critique is a pre-implementation cheap pass, not a full review.
-		"blocking findings only",
+		// The critique is a pre-implementation cheap pass, not a full
+		// review, and "blocking" is a claim about the work rather than
+		// about the document: a plan that would build the right thing
+		// while its own tables disagree with each other costs a replan
+		// and a re-critique for nothing. Three tiers, pinned here
+		// because the whole cost of the pass rides on them: blocking,
+		// an ordinary thread the gate carries, and dropped.
+		"Blocking is a claim about the WORK",
+		"record the rest as ordinary threads",
+		"Nit-tier observations",
 		// audit the plan's Reference mapping instead of walking cited
 		// ADRs/RFCs — the FD-001 completeness-lens re-derivation was
 		// the single largest cost driver.

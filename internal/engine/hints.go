@@ -368,22 +368,32 @@ your lenses have run. Aim to finish in ≤4 turns: read the plan and
 its tables, walk the lenses, file findings via ` + "`spec_annotate`" + `,
 submit the verdict.
 
-Ship blocking findings only. Nit-tier observations (style,
-could-be-tighter, preference) get dropped: if any blocking finding
-lands, the replan drops them anyway; if none lands, the human's
-approval gate is where nits belong.
+Blocking is a claim about the WORK, not about the document. A finding
+is blocking when following this plan would build the wrong thing, miss
+a case it must handle, or strand verify. A plan that would build the
+right thing while its own tables disagree with each other is not
+blocking: every blocking finding costs a full replan and a full
+re-critique, so spend them where the code would come out wrong, and
+record the rest as ordinary threads the approval gate carries to the
+user (a thread whose first word is not "blocking" does not re-run the
+stage). Nit-tier observations — style, could-be-tighter, preference —
+get dropped entirely.
 
 The plan should ship structured tables closing over its references:
 ` + "`Plan claims`" + `, and — when the spec triggers them —
 ` + "`Reference mapping`" + `, ` + "`Skip-gate ledger`" + `,
 ` + "`Downstream handoffs`" + `, ` + "`Out-of-scope confirmations`" + `.
 Read those tables first. For each row, verify the referenced plan
-step exists and does what the row claims; a row without a supporting
-step, or a step whose behavior contradicts its row, is a blocking
-finding. If a table is missing when its trigger applies (the spec
-cites ADRs but there is no Reference mapping, for example), that is
-itself a blocking plan defect — do not attempt to reconstruct the
-missing table.
+step exists and does what the row claims. A row with no step behind it
+at all is blocking — it is work the plan forgot. A row that disagrees
+with a step that is itself right (a golden recomputed a different way,
+a name written twice, a check cited in one table and not the other) is
+bookkeeping: file it as a thread without the blocking label and let the
+approval gate carry it, rather than spending a replan round on the
+spec's own arithmetic. If a table is missing when its trigger applies
+(the spec cites ADRs but there is no Reference mapping, for example),
+that is itself a blocking plan defect — do not attempt to reconstruct
+the missing table.
 
 Then judge the plan through four lenses in one pass:
   security      — attack surface the approach opens: input handling,
@@ -406,8 +416,11 @@ Then judge the plan through four lenses in one pass:
                   doc only to spot-check a row that reads suspicious
                   — never to re-derive its ruleset from scratch.
                   Verify goldens by tracing through the plan's steps
-                  to the value; if the trace does not reach it, the
-                  test is not proven and that is blocking.
+                  to the value. When the trace does not reach it,
+                  which side is wrong decides the tier: a step that
+                  would compute the wrong value is blocking; a right
+                  step under a mis-stated golden is a thread without
+                  the blocking label.
   executability — can the Verification plan run HERE? Probe each live
                   check's prerequisites in this worktree cheaply
                   (imports resolve, tools on PATH, services it names
