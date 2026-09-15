@@ -278,19 +278,36 @@ func (d Doc) MarkerLines() []int {
 	return out
 }
 
-// FindAnchor locates the content line that uniquely contains snippet
-// (trimmed, case-sensitive) and returns its 1-based line number. It
-// requires exactly one match among non-marker, non-blank lines — zero or
-// multiple matches return ok=false, so answer capture fails closed rather
-// than annotating the wrong line. A marker line is never an anchor (its
-// own anchor is the content above it).
+// FindAnchor locates the line that uniquely contains snippet (trimmed,
+// case-sensitive) and returns the 1-based number of the line a comment
+// about it should attach to. Zero or multiple matches return ok=false, so
+// capture fails closed rather than annotating the wrong line.
+//
+// Content lines win: exactly one match among non-marker, non-blank lines
+// resolves to itself. When no content line matches, MARKER lines are
+// searched as a second pass and a unique match resolves to that marker's
+// own line, which AddComment then appends below — joining the marker's
+// thread, where a resolution closes the question above it.
+//
+// That second pass is not a convenience. An agent that asks a question
+// through `ask_user` has almost always just written that question as a
+// `%% @architect:` marker, and the question text is the obvious thing to
+// hand back as the anchor — it is what the answer is about. Searching
+// content lines alone missed every one of those, and the answer was
+// appended at the foot of the document while the thread it answered
+// stayed open in the gate checklist, reading to the next session as if
+// nobody had answered at all.
+//
+// A marker with no content line above it (one opening the document) has
+// no thread a resolution could close and still fails closed.
 func FindAnchor(content, snippet string) (line int, ok bool) {
 	snippet = strings.TrimSpace(snippet)
 	if snippet == "" {
 		return 0, false
 	}
+	lines := strings.Split(content, "\n")
 	found := 0
-	for i, raw := range strings.Split(content, "\n") {
+	for i, raw := range lines {
 		if IsMarkerLine(raw) || strings.TrimSpace(raw) == "" {
 			continue
 		}
@@ -299,10 +316,41 @@ func FindAnchor(content, snippet string) (line int, ok bool) {
 			line = i + 1
 		}
 	}
-	if found != 1 {
+	if found == 1 {
+		return line, true
+	}
+	if found > 1 {
+		// ambiguous among content lines; a marker match cannot
+		// disambiguate it, so stay closed.
+		return 0, false
+	}
+	markers, anchored := 0, false
+	for i, raw := range lines {
+		if !IsMarkerLine(raw) || !strings.Contains(raw, snippet) {
+			continue
+		}
+		markers++
+		line = i + 1
+		anchored = markerAnchorLine(lines, i) != 0
+	}
+	if markers != 1 || !anchored {
 		return 0, false
 	}
 	return line, true
+}
+
+// markerAnchorLine returns the 1-based line a marker at index i attaches
+// to: the nearest preceding non-marker, non-blank line, matching Parse's
+// own anchoring rule. Zero means the marker has no anchor above it, so
+// nothing threads there.
+func markerAnchorLine(lines []string, i int) int {
+	for j := i - 1; j >= 0; j-- {
+		if IsMarkerLine(lines[j]) || strings.TrimSpace(lines[j]) == "" {
+			continue
+		}
+		return j + 1
+	}
+	return 0
 }
 
 // AddComment inserts `%% @author(date): text` into content after the

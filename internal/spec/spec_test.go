@@ -226,9 +226,12 @@ func TestFindAnchor(t *testing.T) {
 	if _, ok := FindAnchor(content, "persists via localStorage"); ok {
 		t.Error("duplicated snippet should not resolve to an anchor")
 	}
-	// snippet only on a marker line is not an anchor
-	if _, ok := FindAnchor(content, "@gummi: note"); ok {
-		t.Error("marker line should never be an anchor")
+	// a snippet found only on a marker line resolves to that marker, so a
+	// resolution joins its thread. This used to fail closed, which sent
+	// every answer to a question the agent had just written as a %% marker
+	// to the foot of the document and left the thread open behind it.
+	if line, ok := FindAnchor(content, "@gummi: note"); !ok || line != 3 {
+		t.Errorf("marker anchor = %d,%v; want 3,true", line, ok)
 	}
 	// missing snippet
 	if _, ok := FindAnchor(content, "nonexistent"); ok {
