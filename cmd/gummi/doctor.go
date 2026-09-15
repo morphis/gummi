@@ -54,11 +54,33 @@ func runDoctor(args []string) error {
 			return err
 		}
 		fmt.Println(string(b))
-		return nil
+	} else {
+		renderDoctor(os.Stdout, report)
 	}
-	renderDoctor(os.Stdout, report)
+	if !report.Ready {
+		return &exitError{code: doctorNotReadyExit}
+	}
 	return nil
 }
+
+// doctorNotReadyExit is what `gummi doctor` exits with when a check FAILED
+// — the workspace is not ready to run.
+//
+// It sits above the driver's status codes (internal/driver.Status.ExitCode
+// uses 1-6) precisely so it cannot be mistaken for one: doctor never drives
+// a card, and "not ready" is not "question" or "timeout".
+//
+// The report itself is the message and has already been printed, in both
+// output shapes, so this carries no stderr line — it rides the same quiet
+// exitError path a driver invocation uses.
+//
+// Before this, doctor printed "not ready" beside a ✗ and exited 0. The
+// documented path parses --json and reads .ready, so a careful caller was
+// fine; everyone else — a person at a terminal, a CI step, a
+// `gummi doctor && gummi run …` — was told a broken workspace was fine.
+// A readiness command whose exit status carries no readiness is a trap set
+// for exactly the audience it is written for.
+const doctorNotReadyExit = 7
 
 // registerDoctorFlags binds `gummi doctor`'s flags, so the skill's grammar
 // generator can enumerate them (see runFlagValues). deep turns on the live

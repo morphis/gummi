@@ -615,6 +615,25 @@ func TestDoctorGuardedFailNoProfiles(t *testing.T) {
 
 // writeProfiles writes a profiles.yaml under the repo's .gummi dir so the
 // report's profile and backend checks parse a real loaded profile set.
+// stubBackendBins puts no-op executables for the named backends on PATH.
+//
+// doctor's backend check asks whether the CLI a profile routes at is
+// actually reachable, which is exactly right in production and a coupling
+// in a test: whether the host running `go test` happens to have copilot or
+// claude installed has nothing to do with the check under test. Two tests
+// asserting that an ADVISORY finding does not clear readiness failed on any
+// machine without a copilot binary, for a reason neither test was about.
+func stubBackendBins(t *testing.T, names ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func writeProfiles(t *testing.T, repo, body string) {
 	t.Helper()
 	dir := filepath.Join(repo, ".gummi")
@@ -1551,7 +1570,22 @@ func TestDoctorEnvSection(t *testing.T) {
 // one holds the data rather than concluding the data is missing.
 func TestDoctorFlagsDecoyDatabase(t *testing.T) {
 	clearDoctorEnv(t)
+	// a workspace that is otherwise ready, so the readiness assertion at
+	// the end is about the decoy file and nothing else
+	t.Setenv("GUMMI_AGENT", "headless")
+	t.Setenv("GUMMI_AGENT_CMD", "fakeagent --serve")
+	t.Setenv("GUMMI_ENVELOPE", "500")
+	stubBackendBins(t, "fakeagent")
 	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: p
+profiles:
+  p:
+    architect: { backend: headless, model: m }
+    implementer: { backend: headless, model: m }
+    reviewer: { backend: headless, model: m }
+    scribe: { backend: headless, model: m }
+`)
 	if r := buildDoctorReport(repo, doctorOpts{}); checkByName(r, "decoy-db").Status != statusOK {
 		t.Fatalf("decoy-db = %+v on a clean workspace, want ok", checkByName(r, "decoy-db"))
 	}
@@ -1585,6 +1619,10 @@ func TestDoctorFlagsDecoyDatabase(t *testing.T) {
 // visible before a role is routed rather than after a run goes wrong.
 func TestDoctorWriteCageReportsTierPerRole(t *testing.T) {
 	clearDoctorEnv(t)
+	// the profiles below name claude, opencode and copilot to exercise the
+	// two cage tiers; whether this host has those CLIs is beside the point
+	t.Setenv("GUMMI_ENVELOPE", "500")
+	stubBackendBins(t, "claude", "opencode", "copilot")
 
 	repo := gitRepo(t)
 	writeProfiles(t, repo, `
