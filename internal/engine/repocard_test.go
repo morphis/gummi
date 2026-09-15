@@ -60,25 +60,76 @@ func TestRepoCardSkipsUntracked(t *testing.T) {
 	}
 }
 
-// Past the listing cap the card summarizes by directory rather than
-// enumerating: a manifest of a large repository is one nobody reads, and it
-// would crowd out the rest of the prompt.
+// Past the listing cap the card summarizes rather than enumerating: a
+// manifest of a large repository is one nobody reads, and it would crowd
+// out the rest of the prompt. What it summarizes is the tree, spent by
+// depth — a card that stops at the top level names no place a session
+// could go.
 func TestRepoCardSummarizesALargeRepo(t *testing.T) {
 	var files []string
-	for i := 0; i < maxRepoCardFiles+40; i++ {
+	for i := 0; i < maxRepoCardEntries+40; i++ {
 		files = append(files, fmt.Sprintf("internal/pkg/f%03d.go", i))
 	}
 	files = append(files, "README.md")
 	root := repoCardRepo(t, files...)
 	card := buildRepoCard(root)
-	if strings.Contains(card, "too many to list") == false {
+	if !strings.Contains(card, "too many to list") {
 		t.Fatalf("large repo was enumerated instead of summarized:\n%s", card)
 	}
-	if !strings.Contains(card, "internal  (") {
-		t.Errorf("summary does not name the biggest directory:\n%s", card)
+	if !strings.Contains(card, "internal/pkg/  (") {
+		t.Errorf("summary stops above the directory that holds the code:\n%s", card)
 	}
-	if n := strings.Count(card, "\n"); n > maxRepoCardDirs+8 {
-		t.Errorf("summary is %d lines; it must stay bounded", n)
+	if !strings.Contains(card, "README.md") {
+		t.Errorf("summary drops a top-level file it had room for:\n%s", card)
+	}
+	if n := strings.Count(card, "\n"); n > maxRepoCardEntries+8 {
+		t.Errorf("summary is %d lines; it must stay inside its budget", n)
+	}
+}
+
+// The budget is spent where the files are: a big directory is expanded
+// until its children are named, while a small one stays one line.
+func TestRepoCardExpandsTowardTheCode(t *testing.T) {
+	var files []string
+	for i := 0; i < 60; i++ {
+		files = append(files, fmt.Sprintf("server/api/handlers/h%02d.go", i))
+	}
+	for i := 0; i < 40; i++ {
+		files = append(files, fmt.Sprintf("server/store/s%02d.go", i))
+	}
+	for i := 0; i < maxRepoCardEntries; i++ {
+		files = append(files, fmt.Sprintf("docs/page%03d.md", i))
+	}
+	lines := summarizeTree(files, maxRepoCardEntries)
+	joined := strings.Join(lines, "\n")
+	if len(lines) > maxRepoCardEntries {
+		t.Fatalf("summary overspent its budget: %d entries", len(lines))
+	}
+	for _, want := range []string{"server/api/handlers/", "server/store/"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("summary never reaches %s:\n%s", want, joined)
+		}
+	}
+	// docs holds the most files but no structure worth expanding past the
+	// budget; it must not have eaten every line.
+	if strings.Count(joined, "docs/page") > 0 && !strings.Contains(joined, "server/api/handlers/") {
+		t.Errorf("budget went to a flat directory instead of the tree:\n%s", joined)
+	}
+}
+
+// A top level wider than the whole budget is truncated largest-first, and
+// says how many entries it dropped rather than showing a silent slice.
+func TestRepoCardTruncatesAnOverwideTopLevel(t *testing.T) {
+	var files []string
+	for i := 0; i < 20; i++ {
+		files = append(files, fmt.Sprintf("d%03d/a.go", i))
+	}
+	lines := summarizeTree(files, 5)
+	if len(lines) > 5 {
+		t.Fatalf("truncated summary overspent its budget: %d entries\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "more top-level entries") {
+		t.Errorf("truncation is silent:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
