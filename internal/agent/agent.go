@@ -176,6 +176,20 @@ type SessionOpts struct {
 	// every other adapter. When empty, an adapter that supports resume falls
 	// back to its previous in-process-only behavior.
 	ResumePath string
+	// ResumeID, when non-empty, is the backend's OWN conversation id for a
+	// session this one continues — the id an Identified adapter reported
+	// earlier, handed back so the backend can pick the conversation up
+	// where it stopped instead of opening a blank one.
+	//
+	// It is distinct from ResumePath, which names a file gummi controls;
+	// this names a conversation the backend controls. It is also not a
+	// request to replay a stage: the engine passes it only where the
+	// in-process session is itself a continuation (a re-attach carrying
+	// the prior transcript), never for a fresh stage run. Adapters that
+	// cannot continue a conversation, or that cannot confirm this one
+	// still exists, ignore it and open fresh — a resume is an optimization
+	// and must never be a way for a session to fail to start.
+	ResumeID string
 	// Workspace marks a board-level session: one bound to the workspace
 	// rather than to any card. It changes exactly one thing for the
 	// adapters that consume it — the gummi MCP child is launched with

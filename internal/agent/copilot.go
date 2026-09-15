@@ -147,7 +147,7 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		cfg.Tools = append(cfg.Tools, copilotTool(td, cs.toolHandler(td.Name)))
 	}
 
-	sess, err := c.client.CreateSession(ctx, cfg)
+	sess, err := c.createOrResume(ctx, cfg, opts.ResumeID)
 	if err != nil {
 		return nil, fmt.Errorf("creating copilot session: %w", err)
 	}
@@ -169,6 +169,49 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	c.sessions = append(c.sessions, cs)
 	c.mu.Unlock()
 	return cs, nil
+}
+
+// createOrResume opens the session, continuing the conversation named by
+// resumeID when there is one.
+//
+// The SDK carries conversation history across processes (ResumeSession
+// "maintains all conversation history"), which is what a restored question
+// needs: without it the session that receives the answer has never seen
+// the question, and spends its first turns re-reading the repository the
+// session that asked already had open.
+//
+// A resume is an optimization and must never be the reason a run fails, so
+// any error — a conversation that was deleted, a server that does not have
+// it, an older CLI — falls through to a fresh session. The cost of being
+// wrong is the tool calls this was trying to save, not the stage.
+func (c *Copilot) createOrResume(ctx context.Context, cfg *copilot.SessionConfig, resumeID string) (*copilot.Session, error) {
+	if resumeID != "" {
+		if sess, err := c.client.ResumeSessionWithOptions(ctx, resumeID, resumeConfigFrom(cfg)); err == nil {
+			return sess, nil
+		}
+	}
+	return c.client.CreateSession(ctx, cfg)
+}
+
+// resumeConfigFrom mirrors a session config onto the resume path.
+//
+// Resuming REPLACES session creation rather than adding to it, so a field
+// left out here is a field the resumed session does not have — and the
+// ones that matter fail quietly rather than loudly: without Tools the
+// model cannot reach ask_user or the spec, without SystemMessage it has no
+// stage contract, without Streaming the session looks frozen. Every field
+// NewSession sets on the create path is set here, and a field added there
+// belongs here too.
+func resumeConfigFrom(cfg *copilot.SessionConfig) *copilot.ResumeSessionConfig {
+	return &copilot.ResumeSessionConfig{
+		Model:               cfg.Model,
+		WorkingDirectory:    cfg.WorkingDirectory,
+		Streaming:           cfg.Streaming,
+		SystemMessage:       cfg.SystemMessage,
+		Tools:               cfg.Tools,
+		OnPermissionRequest: cfg.OnPermissionRequest,
+		SessionLimits:       cfg.SessionLimits,
+	}
 }
 
 // Close implements Agent. It closes every outstanding session (so their

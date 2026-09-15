@@ -70,6 +70,13 @@ func (c *Codex) NewSession(_ context.Context, opts SessionOpts) (Session, error)
 		c: c, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
 		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, workspace: opts.Workspace,
 		raw: make(chan Event, 32), events: make(chan Event), stop: make(chan struct{}),
+		// The thread the engine says this session continues. buildArgs
+		// already knows what to do with a thread id (`codex exec resume
+		// <id>`); until now it could only ever hold one this process had
+		// learned itself, so a session opened after a restart — every
+		// restored question — began a new thread and re-read the repository
+		// the last one had open.
+		threadID: opts.ResumeID, resumed: opts.ResumeID != "",
 	}
 	go s.forward()
 	c.sessions = append(c.sessions, s)
@@ -99,8 +106,13 @@ type codexSession struct {
 	threadID                    string
 	cancel                      context.CancelFunc
 	primed, interrupted, closed bool
-	closeOnce                   sync.Once
-	started                     map[string]bool
+	// resumed marks a thread id handed in by the engine whose first turn
+	// has not landed yet. A codex thread the CLI no longer holds fails the
+	// turn, and a resume must never be the reason a stage fails, so that
+	// first failure drops the id and runs the turn again on a new thread.
+	resumed   bool
+	closeOnce sync.Once
+	started   map[string]bool
 	// hadIdle marks that some prior turn on this session reached a clean
 	// idle — RunFailure.FirstTurn on a later failure reads the negation
 	// of this.
@@ -113,7 +125,31 @@ type codexSession struct {
 func (s *codexSession) markHadIdle() {
 	s.mu.Lock()
 	s.hadIdle = true
+	// the handed-in thread worked; from here a failure is the session's
+	// own, and re-running it would repeat real work
+	s.resumed = false
 	s.mu.Unlock()
+}
+
+// retryWithoutResume drops a handed-in thread id whose first turn failed
+// and runs the same turn again on a new thread, reporting whether it did.
+//
+// A thread the CLI cannot find is indistinguishable here from any other
+// failed turn, and the engine would read it as a failed stage. Since codex
+// is process-per-turn, nothing of this turn survived to be repeated: no
+// events reached the caller (the failure branches are the only callers),
+// so the retry is invisible except as a slower turn. It happens at most
+// once — resumed is cleared before the retry — and the stage hints go back
+// on the wire with it, because a new thread has never seen them.
+func (s *codexSession) retryWithoutResume(msg string) bool {
+	s.mu.Lock()
+	if !s.resumed || s.hadIdle || s.closed {
+		s.mu.Unlock()
+		return false
+	}
+	s.resumed, s.threadID, s.primed = false, "", false
+	s.mu.Unlock()
+	return s.Send(context.Background(), msg) == nil
 }
 
 func (s *codexSession) hadIdleValue() bool {
@@ -194,7 +230,7 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 	}
 	s.cancel = cancel
 	s.mu.Unlock()
-	go s.readTurn(cmd, stdout, stderr, cancel)
+	go s.readTurn(cmd, stdout, stderr, cancel, msg)
 	return nil
 }
 
@@ -235,7 +271,7 @@ func (s *codexSession) buildArgs() ([]string, error) {
 	return args, nil
 }
 
-func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringer, cancel context.CancelFunc) {
+func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringer, cancel context.CancelFunc, msg string) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	terminal := false
@@ -284,6 +320,9 @@ func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stri
 		return
 	}
 	if waitErr != nil {
+		if s.retryWithoutResume(msg) {
+			return
+		}
 		s.emit(Event{Kind: EventError, Err: &RunFailure{
 			Backend: "codex", Diagnostic: diagnostic(stderr.String(), ""),
 			FirstTurn: !s.hadIdleValue(), Err: waitErr,
@@ -291,6 +330,9 @@ func (s *codexSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stri
 		return
 	}
 	if !terminal {
+		if s.retryWithoutResume(msg) {
+			return
+		}
 		s.emit(Event{Kind: EventError, Err: &RunFailure{
 			Backend: "codex", Diagnostic: diagnostic(stderr.String(), ""),
 			FirstTurn: !s.hadIdleValue(),

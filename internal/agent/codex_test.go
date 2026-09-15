@@ -409,3 +409,85 @@ func TestCodexRejectsReadOnly(t *testing.T) {
 		t.Errorf("ReadOnly session error = %v, want a clear read-only rejection", err)
 	}
 }
+
+// A thread id handed in by the engine is what `codex exec resume` runs
+// against: without it a session opened after a restart begins a new thread
+// and re-reads what the last one had open.
+func TestCodexResumesAHandedInThread(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "codex")
+	writeCodexEchoBin(t, bin, log)
+	c, err := NewCodex(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	sess, err := c.NewSession(context.Background(), SessionOpts{
+		WorkDir: t.TempDir(), Model: "gpt-x", ResumeID: "thr_prior",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	waitCodexIdle(t, sess)
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "resume thr_prior") {
+		t.Errorf("argv does not resume the handed-in thread:\n%s", raw)
+	}
+	if id, ok := sess.(Identified); !ok || id.SessionID() != "thr_prior" {
+		t.Errorf("SessionID does not report the thread it is running on")
+	}
+}
+
+// A thread the CLI no longer holds must not fail the stage: the first
+// failed turn drops the id and runs the same turn again on a new thread,
+// with the stage hints back on the wire because a new thread has never
+// seen them.
+func TestCodexDropsAnUnusableThreadAndRetries(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "codex")
+	// fails while resuming, succeeds on a fresh thread
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"$CODEX_LOG\"\n" +
+		"IFS= read -r prompt; printf 'prompt=%s\\n' \"$prompt\" >> \"$CODEX_LOG\"\n" +
+		"case \"$*\" in *resume*) echo 'codex: thread not found' >&2; exit 1;; esac\n" +
+		"printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"thr_new\"}' '{\"type\":\"turn.completed\",\"usage\":{}}'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_LOG", log)
+	c, err := NewCodex(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	sess, err := c.NewSession(context.Background(), SessionOpts{
+		WorkDir: t.TempDir(), Model: "gpt-x", ResumeID: "thr_gone",
+		SystemHints: []string{"STAGE-HINTS"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	waitCodexIdle(t, sess) // the retry's clean turn, not an error
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(raw), "prompt=STAGE-HINTS"); n != 2 {
+		t.Errorf("stage hints rode %d turn(s), want both the resumed attempt and the fresh retry:\n%s", n, raw)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if last := lines[len(lines)-2]; strings.Contains(last, "resume") {
+		t.Errorf("the retry still resumed the dead thread: %q", last)
+	}
+}

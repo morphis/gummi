@@ -22,6 +22,11 @@ type Fake struct {
 	// OnInterrupt, if set, is called each time a session is interrupted
 	// (lets a test observe orchestrator-side budget enforcement).
 	OnInterrupt func()
+	// OnNewSession, if set, is called with the opts of each session as it
+	// opens — the seam for asserting what the engine asked the backend
+	// for (a resumed conversation id, a read-only session) when the
+	// assertion is about the session's SHAPE rather than about a turn.
+	OnNewSession func(opts SessionOpts)
 	// Rate is the fake's reported CreditRate (0 = engine default). Tests
 	// exercising the token-priced fallback set it to price the fake's
 	// synthetic token usage into credits.
@@ -82,6 +87,9 @@ func (f *Fake) NewSession(_ context.Context, opts SessionOpts) (Session, error) 
 	}
 	go s.forward()
 	f.sessions = append(f.sessions, s)
+	if f.OnNewSession != nil {
+		f.OnNewSession(opts)
+	}
 	return s, nil
 }
 

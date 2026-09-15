@@ -111,7 +111,14 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		return nil, fmt.Errorf("opencode adapter: closing session config: %w", err)
 	}
 	s := &opencodeSession{
-		o:              o,
+		o: o,
+		// The session the engine says this one continues. `run --session
+		// <id>` is how opencode carries a conversation between turns, and
+		// it was only ever given an id this process had learned itself: a
+		// session opened after a restart — every restored question — began
+		// a blank conversation and re-read what the last one had open.
+		sessionID:      opts.ResumeID,
+		resumed:        opts.ResumeID != "",
 		workdir:        opts.WorkDir,
 		model:          opts.Model,
 		hints:          opts.SystemHints,
@@ -158,12 +165,17 @@ type opencodeSession struct {
 	events chan Event
 	stop   chan struct{}
 
-	mu          sync.Mutex
-	sessionID   string             // captured from the first turn's events
-	cancel      context.CancelFunc // cancels the in-flight turn's process
-	partLen     map[string]int     // per text-part emitted length, for deltas
-	primed      bool               // system hints injected on the first turn
-	interrupted bool               // the current turn was killed by Interrupt (not a failure)
+	mu        sync.Mutex
+	sessionID string             // captured from the first turn's events
+	cancel    context.CancelFunc // cancels the in-flight turn's process
+	partLen   map[string]int     // per text-part emitted length, for deltas
+	primed    bool               // system hints injected on the first turn
+	// resumed marks a session id handed in by the engine whose first turn
+	// has not landed yet. A session opencode no longer holds fails the
+	// turn, and a resume must never be the reason a stage fails, so that
+	// first failure drops the id and runs the turn again on a fresh one.
+	resumed     bool
+	interrupted bool // the current turn was killed by Interrupt (not a failure)
 	closed      bool
 	closeOnce   sync.Once
 	// hadIdle marks that some prior turn on this session reached a clean
@@ -283,13 +295,13 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
-	go s.readTurn(cmd, stdout, stderr, cancel)
+	go s.readTurn(cmd, stdout, stderr, cancel, msg)
 	return nil
 }
 
 // readTurn maps one `opencode run` process's stdout to events and ends the
 // turn with idle (or error) when the process exits.
-func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringer, cancel context.CancelFunc) {
+func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.Stringer, cancel context.CancelFunc, prompt string) {
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	var msg strings.Builder
@@ -351,6 +363,9 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 		return
 	}
 	if waitErr != nil {
+		if s.retryWithoutResume(prompt) {
+			return
+		}
 		s.emit(Event{Kind: EventError, Err: &RunFailure{
 			Backend: "opencode", Diagnostic: strings.TrimSpace(stderr.String()),
 			FirstTurn: !s.hadIdleValue(), Err: waitErr,
@@ -362,6 +377,9 @@ func (s *opencodeSession) readTurn(cmd *exec.Cmd, stdout io.Reader, stderr fmt.S
 	// real empty pass. Surface it so the operator can tell an outage from a
 	// genuine unclear verdict on sight instead of getting the generic bucket.
 	if !sawAny {
+		if s.retryWithoutResume(prompt) {
+			return
+		}
 		s.emit(Event{Kind: EventError, Err: &RunFailure{
 			Backend: "opencode", Diagnostic: strings.TrimSpace(stderr.String()),
 			FirstTurn: !s.hadIdleValue(),
@@ -386,7 +404,45 @@ func (s *opencodeSession) emit(e Event) {
 func (s *opencodeSession) markHadIdle() {
 	s.mu.Lock()
 	s.hadIdle = true
+	// the handed-in session worked; from here a failure is this session's
+	// own, and re-running the turn would repeat real work
+	s.resumed = false
 	s.mu.Unlock()
+}
+
+// SessionID implements Identified: opencode's own conversation id, learned
+// from the first turn's events.
+//
+// The adapter has always captured it — it is what `--session` carries
+// between turns — but never published it, so the engine could not persist
+// it and every session opened after a restart started blank. Every other
+// process-backed adapter reports this.
+func (s *opencodeSession) SessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionID
+}
+
+// retryWithoutResume drops a handed-in session id whose first turn failed
+// and runs the same turn again on a fresh session, reporting whether it
+// did.
+//
+// A session opencode cannot find is indistinguishable here from any other
+// failed turn, and the engine would read it as a failed stage. opencode is
+// process-per-turn, so nothing of this turn survived to be repeated: no
+// events reached the caller (the failure branches are the only callers).
+// It happens at most once — resumed is cleared before the retry — and
+// primed goes back to false with it, because a fresh session has never
+// seen the stage hints.
+func (s *opencodeSession) retryWithoutResume(msg string) bool {
+	s.mu.Lock()
+	if !s.resumed || s.hadIdle || s.closed {
+		s.mu.Unlock()
+		return false
+	}
+	s.resumed, s.sessionID, s.primed = false, "", false
+	s.mu.Unlock()
+	return s.Send(context.Background(), msg) == nil
 }
 
 func (s *opencodeSession) hadIdleValue() bool {

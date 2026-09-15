@@ -661,8 +661,19 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
 	sctx, cancel := context.WithCancel(context.Background())
 	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, cardUnlock: unlock, startedAt: time.Now()}
+	var priorAgentSession string
 	if prior != nil && prior.Feature.Stage == f.Stage {
 		ps := prior.Snapshot()
+		// The backend conversation is only this session's to continue when
+		// the prior one was the same role doing the same job. A card keeps
+		// ONE session row per stage, so the id sitting there may belong to
+		// the critique pass that ran last (reviewer, flavorCritique) —
+		// handing that conversation to the architect would resume the
+		// wrong side of the argument. The transcript still carries over
+		// either way; only the resume is withheld.
+		if prior.Role == role && prior.flavor() == flavorStage {
+			priorAgentSession = ps.AgentSessionID
+		}
 		s.transcript = append(s.transcript, ps.Transcript...)
 		s.activity = append(s.activity, ps.Activity...)
 		s.spend = ps.Spend
@@ -685,8 +696,19 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 		e.clearResumeTranscript(s, flavorStage)
 	}
 
+	// A reattach continues a conversation: the backend is handed the id of
+	// the one it is continuing, so a restored ask lands in a session that
+	// still has the repository open instead of one that must re-read every
+	// file the last one read before it can act on a one-word answer. A
+	// fresh attach passes nothing — there is no conversation to continue,
+	// and the adapter opens a blank one exactly as it always has.
+	var resumeID string
+	if !fresh {
+		resumeID = priorAgentSession
+	}
+
 	// interactive chat is human-paced: no budget cap.
-	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage, true)
+	sess, specPath, mcpTeardown, err := e.newAgentSession(ctx, f, role, 0, flavorStage, true, resumeID)
 	if err != nil {
 		cancel()
 		unlock()
@@ -982,7 +1004,7 @@ func (e *Engine) startAutonomous(s *Session) {
 	// transcript left at the derived path belongs to an unrelated earlier
 	// attempt and must not leak into this one.
 	e.clearResumeTranscript(s, s.flavor())
-	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor(), s.Interactive)
+	sess, specPath, mcpTeardown, err := e.newAgentSession(context.Background(), s.Feature, s.Role, budget, s.flavor(), s.Interactive, "")
 	if err != nil {
 		s.setError(err)
 		s.setState(StatePaused)
@@ -1533,13 +1555,20 @@ func (e *Engine) trackAgentPID(id domain.FeatureID, sess agent.Session) {
 // backend cannot call client tools — the MCP inbound-endpoint teardown
 // stub, so the caller can bind it to the Session's lifecycle before the
 // child inherits GUMMI_MCP_SOCK.
+// resumeID, when non-empty, is the backend conversation this session
+// continues (see agent.SessionOpts.ResumeID): a reattach carrying a prior
+// transcript hands back the id that transcript came from, so the backend
+// picks up where it stopped instead of rediscovering the repository it
+// already had open. A fresh stage run passes "" — a stage is not one
+// session, and a restart is not a replay.
+//
 // newAgentSession builds the backend session for a stage run. attached
 // reports that this is a chat the user opened (Attach) rather than an
 // autonomous pass: a chat is not budgeted against the card's envelope and
 // is told the ask convention, which is the whole of what "interactive"
 // used to mean. It is a property of the SESSION, not of the stage — chat
 // is available against any stage now, and no stage is a chat by nature.
-func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor, attached bool) (agent.Session, string, func(), error) {
+func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor, attached bool, resumeID string) (agent.Session, string, func(), error) {
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, "", nil, err
@@ -1664,6 +1693,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		FeatureID:      string(f.ID),
 		ReadOnly:       readOnly,
 		ResumePath:     resumeSessionPath(e.cfg.Workspace, f.ID, role, flavor),
+		ResumeID:       resumeID,
 	})
 	if specErr != nil {
 		mcpTeardown()

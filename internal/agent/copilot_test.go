@@ -516,3 +516,40 @@ func TestCopilotToolOverridesBuiltIn(t *testing.T) {
 	}
 }
 
+// Resuming replaces session creation rather than adding to it, so every
+// field the create path sets has to be carried across. The ones that
+// matter fail quietly: a resumed session without Tools cannot reach
+// ask_user or the spec, and without SystemMessage it has no stage
+// contract at all.
+func TestCopilotResumeConfigCarriesTheCreateConfig(t *testing.T) {
+	streaming := true
+	credits := 42.0
+	cfg := &copilot.SessionConfig{
+		Model:               "gpt-x",
+		WorkingDirectory:    "/w/FD-001",
+		Streaming:           &streaming,
+		SystemMessage:       &copilot.SystemMessageConfig{Content: "stage contract"},
+		Tools:               []copilot.Tool{{Name: "ask_user"}},
+		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		SessionLimits:       &copilotrpc.SessionLimitsConfig{MaxAiCredits: &credits},
+	}
+	rc := resumeConfigFrom(cfg)
+	if rc.Model != cfg.Model || rc.WorkingDirectory != cfg.WorkingDirectory {
+		t.Errorf("model/cwd not carried: %+v", rc)
+	}
+	if rc.Streaming == nil || !*rc.Streaming {
+		t.Error("streaming not carried: a resumed session would look frozen")
+	}
+	if rc.SystemMessage == nil || rc.SystemMessage.Content != "stage contract" {
+		t.Error("system message not carried: the resumed session has no stage contract")
+	}
+	if len(rc.Tools) != 1 || rc.Tools[0].Name != "ask_user" {
+		t.Error("client tools not carried: the resumed session cannot reach gummi's tools")
+	}
+	if rc.OnPermissionRequest == nil {
+		t.Error("permission handler not carried: the resumed session would stall on approvals")
+	}
+	if rc.SessionLimits == nil {
+		t.Error("session limits not carried: the credit backstop is gone")
+	}
+}

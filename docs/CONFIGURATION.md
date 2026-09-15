@@ -13,15 +13,33 @@ review.
 
 - **copilot** *(default)*: the official Copilot SDK for Go, driving the
   `copilot` CLI in server mode. Full duplex: streaming, tool-call
-  visibility, client tools, session resume.
+  visibility, client tools, session resume — including across gummi
+  processes, through the SDK's own `ResumeSession`, which keeps the
+  conversation history a restored question would otherwise have to
+  rediscover. A conversation the server no longer has falls back to a
+  fresh session.
 - **claude**: the Claude Code CLI in streaming print mode
   (`GUMMI_CLAUDE_BIN` overrides the binary). Requires `permissions:
   allow-all`; guarded mode is rejected because the CLI's default permission
   mode silently auto-denies tools. Claude Code manages its own endpoint
   routing through its native config (`ANTHROPIC_BASE_URL`, login).
+  Two things gummi asks of the CLI that are worth knowing: it narrows the
+  built-in **tool roster** (`--tools`) to the surface the session's
+  allowlist actually permits — measured on CLI 2.1.x this removes ~35% of
+  every request's prompt and the extra turn the CLI otherwise spends
+  looking up gummi's deferred MCP tools — and, when a session continues a
+  conversation the CLI still holds (a restored question, a reattached
+  chat), it passes `--resume` so that session keeps what it had already
+  read. Both degrade silently: a CLI whose `--help` does not advertise
+  `--tools` keeps the full roster, and a conversation the CLI no longer
+  holds is simply not resumed.
 - **codex**: the Codex CLI (`GUMMI_CODEX_BIN` overrides the binary), using
-  `codex exec --json` JSONL turns and `codex exec resume` while the gummi
-  session is live. Codex owns authentication (`codex login`) and provider
+  `codex exec --json` JSONL turns and `codex exec resume` — for turns
+  within one gummi session, and for a session that continues an earlier
+  one (a restored question, a reattached chat), whose thread gummi hands
+  back so it keeps what it had already read. A thread the CLI no longer
+  holds is dropped and the turn re-runs on a new one, so a stale id costs
+  a slower turn rather than the stage. Codex owns authentication (`codex login`) and provider
   config; gummi passes the profile's model through Codex's `-m` flag and
   never copies credentials. Requires `permissions: allow-all`: the exec
   stream cannot service guarded approval callbacks. Messages appear when
@@ -29,7 +47,10 @@ review.
   stays visible as tool events.
 - **opencode**: the opencode CLI (`GUMMI_OPENCODE_BIN` overrides the
   binary). Provider and model config is owned by opencode itself
-  (`opencode auth`, `opencode.json`).
+  (`opencode auth`, `opencode.json`). Conversations carry across gummi
+  processes through `run --session`, with the same fallback codex has: a
+  session opencode cannot find is dropped and the turn re-runs on a fresh
+  one.
 - **headless**: a generic subprocess adapter for any agent binary speaking
   a small stdio JSON protocol. `GUMMI_AGENT_CMD` is its command line. The
   child inherits gummi's environment and reads its own provider config from

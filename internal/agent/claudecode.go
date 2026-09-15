@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -204,6 +205,14 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
+	// A restored ask, a reattached chat: the engine says which backend
+	// conversation this session continues, and the CLI picks it up rather
+	// than opening one that has never seen the question it is answering.
+	// Guarded by a liveness check — see claudeResumable — because an id
+	// the CLI cannot find is not a slow start, it is a dead turn.
+	if opts.ResumeID != "" && claudeResumable(opts.WorkDir, opts.ResumeID) {
+		args = append(args, "--resume", opts.ResumeID)
+	}
 	if len(opts.SystemHints) > 0 {
 		args = append(args, "--append-system-prompt", strings.Join(opts.SystemHints, "\n\n"))
 	}
@@ -380,6 +389,10 @@ type claudeSession struct {
 	// message_delta events are metered as estimates at the session's
 	// realized USD-per-token rate and subtracted back out at settlement so
 	// cumulative credits always equal the CLI's actual cost.
+	//
+	// sessionID is the exception: the engine reads it through SessionID()
+	// from whatever goroutine is persisting the session, so its write —
+	// and only its write — is taken under mu.
 	sessionID   string
 	mainModel   string             // resolved model id from init (modelUsage key)
 	reqModel    string             // model of the in-flight API request (message_start)
@@ -436,6 +449,80 @@ func (s *claudeSession) stopping() bool {
 	default:
 		return false
 	}
+}
+
+// claudeResumable reports whether the CLI still holds the conversation
+// named by id for a session running in workdir.
+//
+// The check is a file test, not a probe, because the cheap ways to ask the
+// CLI directly all cost a turn: `--resume <unknown-id>` prints "No
+// conversation found", emits an error result, and exits 1 — which the
+// engine reads as a failed stage, not as "start fresh instead". A resume
+// is an optimization (it saves a session the tool calls it would spend
+// re-reading what the last one had open); it must never be the reason a
+// card fails. So this fails CLOSED: anything it cannot confirm — an
+// unreadable config dir, a layout it does not recognize, a transcript the
+// CLI has since cleaned up — means no --resume, and the session opens
+// exactly as it did before this existed.
+func claudeResumable(workdir, id string) bool {
+	if workdir == "" || id == "" {
+		return false
+	}
+	dir := claudeProjectsDir()
+	if dir == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dir, claudeProjectSlug(workdir), id+".jsonl"))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// claudeProjectsDir is where the CLI keeps its per-directory conversation
+// transcripts: $CLAUDE_CONFIG_DIR/projects, or ~/.claude/projects.
+func claudeProjectsDir() string {
+	base := os.Getenv("CLAUDE_CONFIG_DIR")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		base = filepath.Join(home, ".claude")
+	}
+	return filepath.Join(base, "projects")
+}
+
+// claudeProjectSlug mangles a working directory into the CLI's transcript
+// directory name: every character that is not a letter, a digit, or a
+// hyphen becomes a hyphen, so /repo/.gummi/worktrees/FD-001 becomes
+// -repo--gummi-worktrees-FD-001. Verified against the CLI's own on-disk
+// layout; a layout change makes the lookup miss, which costs a resume and
+// nothing else.
+func claudeProjectSlug(dir string) string {
+	var b strings.Builder
+	b.Grow(len(dir))
+	for _, r := range dir {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
+// SessionID implements Identified: the CLI's own conversation id, learned
+// from the system/init line that opens every turn.
+//
+// Without it the engine has nothing to hand back as SessionOpts.ResumeID,
+// so a reattach — a restored question, a chat picked up after a restart —
+// opens a blank conversation and spends its first turns re-reading what
+// the session before it had open. Every other process-backed adapter
+// (copilot, codex, zz) exposes this; the claude adapter captured the id
+// for its metering and never published it.
+func (s *claudeSession) SessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionID
 }
 
 func (s *claudeSession) Events() <-chan Event { return s.events }
@@ -585,8 +672,10 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 		// resolved model id: it is the modelUsage key for settlement and
 		// context, and opts.Model may be an alias ("haiku") or empty.
 		if l.Subtype == "init" {
-			if s.sessionID == "" {
+			if s.SessionID() == "" {
+				s.mu.Lock()
 				s.sessionID = l.SessionID
+				s.mu.Unlock()
 			}
 			if s.mainModel == "" {
 				s.mainModel = l.Model

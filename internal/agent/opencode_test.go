@@ -813,3 +813,125 @@ func TestOpencodeLiveRoundTrip(t *testing.T) {
 		t.Error("no usage event from the turn")
 	}
 }
+
+// A session id handed in by the engine is what `run --session` carries:
+// without it a session opened after a restart begins a blank conversation
+// and re-reads what the last one had open. The adapter also has to publish
+// the id, or the engine can never persist one to hand back.
+func TestOpencodeResumesAHandedInSession(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	argsFile := dir + "/args"
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
+		`echo '{"type":"text","sessionID":"ses_prior","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x", ResumeID: "ses_prior"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	id, ok := sess.(Identified)
+	if !ok {
+		t.Fatal("opencode session does not implement Identified; the engine cannot persist its id")
+	}
+	if id.SessionID() != "ses_prior" {
+		t.Errorf("SessionID() = %q, want the session it was told to continue", id.SessionID())
+	}
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	waitOpencodeIdle(t, sess)
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var resumed bool
+	for i, a := range argv {
+		if a == "--session" && i+1 < len(argv) && argv[i+1] == "ses_prior" {
+			resumed = true
+		}
+	}
+	if !resumed {
+		t.Errorf("argv does not resume the handed-in session:\n%s", data)
+	}
+}
+
+// A session opencode no longer holds must not fail the stage: the first
+// failed turn drops the id and runs the same turn again on a fresh
+// session, with the stage hints back on the wire.
+func TestOpencodeDropsAnUnusableSessionAndRetries(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	argsFile := dir + "/args"
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" >> " + argsFile + "\n" +
+		"case \"$*\" in *--session*) echo 'opencode: unknown session' >&2; exit 1;; esac\n" +
+		`echo '{"type":"text","sessionID":"ses_new","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{
+		WorkDir: t.TempDir(), Model: "x", ResumeID: "ses_gone",
+		SystemHints: []string{"STAGE-HINTS"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	waitOpencodeIdle(t, sess) // the retry's clean turn, not an error
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), "STAGE-HINTS"); n != 2 {
+		t.Errorf("stage hints rode %d turn(s), want the resumed attempt and the fresh retry:\n%s", n, data)
+	}
+	if strings.Count(string(data), "--session") != 1 {
+		t.Errorf("the retry still resumed the dead session:\n%s", data)
+	}
+}
+
+// waitOpencodeIdle drains events until the turn ends, failing on an error
+// event — the retry above must reach idle, not surface the dead session's
+// failure.
+func waitOpencodeIdle(t *testing.T, sess Session) {
+	t.Helper()
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind == EventError {
+				t.Fatalf("turn failed: %v", e.Err)
+			}
+			if e.Kind == EventIdle {
+				return
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("timeout waiting for idle")
+		}
+	}
+}
