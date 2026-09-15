@@ -1408,6 +1408,15 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	if len(liveFailures) > 0 && !(s.Feature.IsGoal() && s.Critique) {
 		s.setVerdictFloor("blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
 	}
+	// What the branch SHIPS, read from the tree rather than from the diff.
+	// A committed build artifact is a fact, and the one part of the floor
+	// that does not vary with the reviewer's model.
+	if findings := e.diffHygiene(s); len(findings) > 0 {
+		b.WriteString(hygieneBlock(findings))
+		if names, blocking := blockingHygiene(findings); blocking {
+			s.setVerdictFloor("fail", "branch ships "+strings.Join(names, ", "))
+		}
+	}
 	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +
 		"checks), record all results in the spec's Verification plan and a summary " +
 		"line in Progress, and report pass or fail with the evidence.")

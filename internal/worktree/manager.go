@@ -1087,6 +1087,90 @@ func (m *Manager) DiffStat(ctx context.Context, f *domain.Feature) (string, erro
 	return runGit(ctx, p, "diff", "--stat", base)
 }
 
+// ChangedFile is one entry of a branch's changed-file list: the path, its
+// size in the worktree, and whether git considers its content binary.
+type ChangedFile struct {
+	Path   string
+	Size   int64
+	Binary bool
+	// Deleted marks a path the branch removed. Its size and binary flag
+	// are meaningless, and a hygiene check must not read them as a file
+	// the branch is shipping.
+	Deleted bool
+}
+
+// ChangedFiles lists the files a feature's branch changes against the
+// point it forked from main — the same range Diff reports, described per
+// file instead of as a patch.
+//
+// It is the machine-readable half of "what is this branch actually
+// shipping", for checks that have to hold whatever a model concludes: a
+// committed build artifact or a stray fixture is a fact about the tree,
+// not a judgement call, and asking a reviewer to notice it in a patch has
+// already been shown not to work.
+func (m *Manager) ChangedFiles(ctx context.Context, f *domain.Feature) ([]ChangedFile, error) {
+	p, base, err := m.diffBase(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	// --numstat prints "-\t-\t<path>" for a binary file and line counts
+	// otherwise, which is git's own answer to "is this binary" and costs
+	// nothing extra alongside the name. -z keeps paths intact: without it
+	// git quotes anything non-ASCII and the path has to be unescaped.
+	out, err := runGit(ctx, p, "diff", "--numstat", "-z", base)
+	if err != nil {
+		return nil, err
+	}
+	var files []ChangedFile
+	for _, cf := range parseNumstatZ(out) {
+		if st, err := os.Stat(filepath.Join(p, cf.Path)); err == nil {
+			cf.Size = st.Size()
+		} else if os.IsNotExist(err) {
+			cf.Deleted = true
+		}
+		files = append(files, cf)
+	}
+	return files, nil
+}
+
+// parseNumstatZ walks `git diff --numstat -z` output.
+//
+// The record shape is not one-per-NUL. An ordinary entry is
+// "<added>\t<deleted>\t<path>\0", but a RENAME writes its counts with an
+// empty path field and then two further NUL-terminated tokens, the old
+// path and the new one: "<added>\t<deleted>\t\0<from>\0<to>\0". Splitting
+// on NUL alone therefore drops every renamed file's destination — which is
+// exactly the file a hygiene check needs to see.
+func parseNumstatZ(out string) []ChangedFile {
+	tok := strings.Split(out, "\x00")
+	var files []ChangedFile
+	for i := 0; i < len(tok); i++ {
+		rec := tok[i]
+		if strings.TrimSpace(rec) == "" {
+			continue
+		}
+		fields := strings.SplitN(rec, "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		cf := ChangedFile{Path: fields[2], Binary: fields[0] == "-" && fields[1] == "-"}
+		if cf.Path == "" {
+			// a rename: the next two tokens are <from> and <to>, and the
+			// destination is the file this branch now ships
+			if i+2 >= len(tok) {
+				continue
+			}
+			cf.Path = tok[i+2]
+			i += 2
+		}
+		if cf.Path == "" {
+			continue
+		}
+		files = append(files, cf)
+	}
+	return files
+}
+
 // DiffBase returns the SHA Diff and DiffStat compare against — the
 // merge-base of main's HEAD and the feature branch. A caller that hands
 // an agent a diff needs it too: without the base, "review the diff" makes

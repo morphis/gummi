@@ -103,7 +103,15 @@ func (v Verdict) String() string {
 // SessionVerdict reads a session's outcome, preferring the structured
 // submit_verdict tool result and falling back to the VERDICT: line for
 // backends/agents that didn't use it. A stamped verdict floor is applied
-// before returning: it only ever downgrades a raw Pass to Blocked.
+// before returning: it only ever downgrades, never promotes.
+//
+// Two floors exist. "blocked" is the environment saying the plan could not
+// be executed here. "fail" is gummi's own machine judgement that the
+// branch is not landable whatever the agent concluded — a committed build
+// artifact, say, which is a fact about the tree rather than an opinion
+// about the code. A fail floor outranks a blocked one: an environment gap
+// can be resolved by running somewhere else, while the branch shipping a
+// binary is true everywhere.
 func SessionVerdict(snap engine.Snapshot) Verdict {
 	var raw Verdict
 	if v := FromTool(snap.Verdict); v != Unclear {
@@ -111,8 +119,15 @@ func SessionVerdict(snap engine.Snapshot) Verdict {
 	} else {
 		raw = Parse(LastAssistant(snap))
 	}
-	if snap.VerdictFloor == "blocked" && raw == Pass {
-		return Blocked
+	switch snap.VerdictFloor {
+	case "fail":
+		if raw == Pass || raw == Blocked {
+			return Fail
+		}
+	case "blocked":
+		if raw == Pass {
+			return Blocked
+		}
 	}
 	return raw
 }
