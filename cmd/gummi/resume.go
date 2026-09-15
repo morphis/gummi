@@ -110,8 +110,8 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 	return &resumeFlagValues{
 		answer:         fs.String("answer", "", "answer a delegated ask_user question"),
 		envelope:       fs.Int("envelope", 0, "raise the credit budget before resuming (required to clear a stage that ran out; never lowers it)"),
-		approve:        fs.Bool("approve", false, "approve a caller design gate"),
-		requestChanges: fs.String("request-changes", "", "send a caller design gate back with a note"),
+		approve:        fs.Bool("approve", false, "approve a design gate handed back by --gate-approval=attended"),
+		requestChanges: fs.String("request-changes", "", "send a design gate back with a note"),
 		bounce:         fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's `b` key)"),
 		note:           fs.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)"),
 		say:            fs.String("say", "", "read a line the way the card page would and report what it would do, as a `say` event, without acting"),

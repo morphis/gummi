@@ -59,7 +59,11 @@ envelope, lock. Repair each item that isn't `ok`:
 - **envelope** — every run needs a credit envelope. Pass `--envelope N` per run,
   or set `GUMMI_ENVELOPE`. A run refuses to start without one.
 
-Re-run `gummi doctor` until it reports `ready: true`, then proceed.
+Re-run `gummi doctor` until it reports `ready: true`, then proceed. It also
+exits **7** while any check is failing and 0 once the workspace is ready, in
+both output shapes, so `gummi doctor --json > d.json; ec=$?` branches without
+parsing. 7 sits outside the run/resume exit table below, so a readiness
+failure can never be mistaken for a drive's typed status.
 
 ## Command grammar
 
@@ -101,7 +105,7 @@ gummi goal [flags] "<objective>"
 
 gummi resume <id|ref> [decision]
     --answer string           answer a delegated ask_user question
-    --approve                 approve a caller design gate
+    --approve                 approve a design gate handed back by --gate-approval=attended
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --bounce                  rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)
     --envelope int            raise the credit budget before resuming (required to clear a stage that ran out; never lowers it)
@@ -109,7 +113,7 @@ gummi resume <id|ref> [decision]
     --goal-note string        goals: add a note to a running goal; its lead reads it on its next turn
     --note string             addendum to the reborn stage's kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
-    --request-changes string  send a caller design gate back with a note
+    --request-changes string  send a design gate back with a note
     --reverse string          goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why
     --say string              read a line the way the card page would and report what it would do, as a say event, without acting
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
@@ -223,8 +227,8 @@ The loop you run:
    - **question (2)** — a design decision was delegated to you. Answer from your
      **task context first**; if unsure, read the spec (`gummi spec <id>`) or diff
      (`gummi diff <id>`); use the `recommended` option only as a tiebreaker. Then
-     `gummi resume <id> --answer "<text-or-option>"`. A caller gate (under
-     `--gate-approval=caller`) is the same shape: `resume <id> --approve` or
+     `gummi resume <id> --answer "<text-or-option>"`. A design gate (the
+     default, `--gate-approval=attended`) is the same shape: `resume <id> --approve` or
      `--request-changes "<note>"`.
    - **blocked (3)** — either open `%%` spec threads or diff comments block a
      gate (resolve them, or `gummi resume <id> --request-changes "<note>"` to
@@ -270,8 +274,8 @@ under `"running"` when you'd rather branch on JSON than a shell probe.
 that matches the terminal event; the wrong verb wastes a stage or stalls:
 
 - `--answer "<text>"` — answers a delegated **`question`** event (an `ask_user`).
-- `--approve` / `--request-changes "<note>"` — decides a caller **`gate`** event
-  (a design gate under `--gate-approval=caller`), and the same pair continues a
+- `--approve` / `--request-changes "<note>"` — decides a **`gate`** event
+  (a design gate, which `--gate-approval=attended` hands back to you), and the same pair continues a
   `--until` **`stopped`** run.
 - `--bounce [--note "<why>"]` — un-parks a verify-fail (or a review cap-hit)
   **`escalation`**: rewinds the feature to its work stage (implement/fix) and

@@ -1677,7 +1677,7 @@ resolves through, `Engine.Advance`: a `StatusBlockedDependency` result sits
 alongside `StatusBlockedQuestions`/`StatusBlockedDiff`, naming each
 outstanding dependency and its current stage (`BlockingDeps`) rather than
 just a count. `GateBlockers` — the read-only pre-check the headless
-`--gate-approval=caller` path uses — reports the same blockage before
+`--gate-approval=attended` path uses — reports the same blockage before
 offering to approve a coding gate. Both TUI and headless drivers route
 through `Advance`, so the gate cannot be bypassed by a future driver; no
 transitive closure is walked (only direct dependencies block), and the design

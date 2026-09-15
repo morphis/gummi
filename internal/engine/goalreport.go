@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/morphis/gummi/internal/atomicfile"

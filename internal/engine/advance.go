@@ -414,7 +414,7 @@ func (e *Engine) unmetDeps(ctx context.Context, id domain.FeatureID) ([]Blocking
 // the outstanding dependencies, that would block advancing id's current
 // gate, without moving it — the read-only view a caller-approval
 // checkpoint needs before offering to cross a gate (the headless driver's
-// --gate-approval=caller path). It reuses the exact floor checks Advance
+// --gate-approval=attended path). It reuses the exact floor checks Advance
 // applies — deps under the same coding-stage condition — so the pre-check
 // and the gate can never disagree.
 func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpen, diffOpen int, deps []BlockingDep, err error) {

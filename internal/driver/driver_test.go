@@ -800,7 +800,7 @@ func TestStageTimeout(t *testing.T) {
 	}
 }
 
-// --gate-approval=caller checkpoints the design gate as a question;
+// --gate-approval=attended checkpoints the design gate as a question;
 // resume --approve crosses it and drives to a verified branch.
 func TestCallerGateApproveResume(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
@@ -844,7 +844,7 @@ func TestCallerGateApproveResume(t *testing.T) {
 // re-enter the stage. The prior run left a live spec session carrying the
 // finished interview; re-attaching would send no turn (the interview is
 // done) and the driver would block until --stage-timeout, then misreport a
-// backend stall. crossGate under --gate-approval=caller re-emits the same
+// backend stall. crossGate under --gate-approval=attended re-emits the same
 // checkpoint the first run produced — instantly, with no turn and no timeout.
 func TestResumeCompletedCallerGateReCheckpoints(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{
@@ -1365,7 +1365,7 @@ func TestBlockedByDependency(t *testing.T) {
 	}
 }
 
-// --gate-approval=caller pre-checks dependencies at the coding gate: it
+// --gate-approval=attended pre-checks dependencies at the coding gate: it
 // reports blocked (naming the dep) instead of offering --approve.
 func TestCallerGatePreCheckDependency(t *testing.T) {
 	h := newHarness(t, true, planApproveScript())

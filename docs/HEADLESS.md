@@ -94,6 +94,12 @@ branches on:
 | `6` | `timeout` | a stage went quiet. Report; resumable |
 | `1` | `error` | setup or agent failure. Nothing partial landed |
 
+`gummi doctor` has its own exit status, outside this table: **7** while any
+check is failing, 0 once the workspace is ready. It applies to `--json` too,
+so a setup step can branch on the exit code instead of parsing `.ready`. The
+code sits above the drive statuses on purpose — a workspace that is not ready
+is not a run that asked a question.
+
 ## Resuming
 
 `gummi resume` carries one decision flag at a time:
@@ -188,6 +194,13 @@ must not conflate them:
 
 After a headless run expect `verified:true` with `done:false` until you
 merge or hand off.
+
+`rounds` on the same payload is a **live counter, not a history**. Each
+loop resets its own count when it completes, so a finished card that took
+three plan rounds still reads `{"plan": 0, "review": 0, "corrective": 0}`.
+The tally of critique passes is `review_rounds` on the terminal `done`
+event. A poller reading `rounds` as "how much rework did this take" will
+read zero every time.
 
 ## Goals
 
