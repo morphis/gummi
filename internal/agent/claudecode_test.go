@@ -933,3 +933,103 @@ func slicesContains(xs []string, target string) bool {
 	}
 	return false
 }
+
+// claudeRosterHelpScript answers --help like a CLI that understands
+// --tools, and otherwise echoes argv the way claudeArgvEchoScript does.
+const claudeRosterHelpScript = `import sys, json, os
+if "--help" in sys.argv:
+    sys.stdout.write("  --tools <tools...>  Specify the list of available tools\n")
+    sys.exit(0)
+def out(o):
+    sys.stdout.write(json.dumps(o)+"\n"); sys.stdout.flush()
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    m = json.loads(line)
+    if m.get("type") != "user": continue
+    text = "argv=" + " ".join(sys.argv[1:]) + " cwd=" + os.getcwd() + " msg=" + m["message"]["content"][0]["text"]
+    out({"type":"assistant","message":{"model":"m","content":[{"type":"text","text":text}]}})
+    out({"type":"result","subtype":"success","is_error":False,"modelUsage":{}})
+`
+
+// claudeRosterArgv runs one turn against a fake CLI and returns the echoed
+// argv line.
+func claudeRosterArgv(t *testing.T, script string, opts SessionOpts) string {
+	t.Helper()
+	ag, err := NewClaudeCode(writeFakeClaude(t, script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	if opts.WorkDir == "" {
+		opts.WorkDir = t.TempDir()
+	}
+	sess, err := ag.NewSession(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(context.Background(), "ping"); err != nil {
+		t.Fatal(err)
+	}
+	var msg string
+	for _, e := range collect(t, sess) {
+		if e.Kind == EventMessage {
+			msg = e.Text
+		}
+	}
+	return msg
+}
+
+// A CLI that understands --tools is told which built-ins to show, so a
+// stage session is not handed (and charged for) a surface its allowlist
+// would deny anyway — and so gummi's MCP tools stay in the prompt instead
+// of behind a per-session lookup turn.
+func TestClaudeCodeNarrowsToolRoster(t *testing.T) {
+	msg := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{Model: "test-model"})
+	want := "--tools " + strings.Join(claudeStageTools(), ",")
+	if !strings.Contains(msg, want) {
+		t.Errorf("argv missing %q: %s", want, msg)
+	}
+	// the roster narrows what is shown; it must not widen what is allowed
+	if !strings.Contains(msg, "--allowedTools Bash Read Grep Glob mcp__gummi") {
+		t.Errorf("roster replaced the allowlist: %s", msg)
+	}
+	for _, bad := range []string{"WebFetch", "WebSearch", "Task"} {
+		if strings.Contains(msg, bad) {
+			t.Errorf("roster names %q, which the allowlist denies: %s", bad, msg)
+		}
+	}
+}
+
+// A ReadOnly session's roster carries no tool that writes.
+func TestClaudeCodeReadOnlyRoster(t *testing.T) {
+	msg := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{ReadOnly: true})
+	want := "--tools " + strings.Join(claudeReadOnlyRoster(), ",")
+	if !strings.Contains(msg, want) {
+		t.Errorf("argv missing %q: %s", want, msg)
+	}
+	rosterAt := strings.Index(msg, "--tools ")
+	allowAt := strings.Index(msg, "--allowedTools ")
+	if rosterAt < 0 || allowAt < 0 || rosterAt > allowAt {
+		t.Errorf("roster must precede the allowlist so the allowlist stays last: %s", msg)
+	}
+	for _, bad := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
+		roster := msg[rosterAt:allowAt]
+		if strings.Contains(roster, bad) {
+			t.Errorf("ReadOnly roster names %q: %s", bad, roster)
+		}
+	}
+}
+
+// A CLI whose --help says nothing about --tools keeps the full roster: an
+// unknown flag would fail every session, and gummi pins no CLI version.
+func TestClaudeCodeSkipsRosterWhenUnsupported(t *testing.T) {
+	msg := claudeRosterArgv(t, claudeArgvEchoScript, SessionOpts{Model: "test-model"})
+	if strings.Contains(msg, "--tools") {
+		t.Errorf("roster passed to a CLI that does not advertise it: %s", msg)
+	}
+	if !strings.Contains(msg, "--allowedTools") {
+		t.Errorf("allowlist went missing: %s", msg)
+	}
+}

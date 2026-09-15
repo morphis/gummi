@@ -47,6 +47,9 @@ type ClaudeCode struct {
 	mu       sync.Mutex
 	sessions []*claudeSession
 	closed   bool
+
+	rosterOnce sync.Once
+	roster     bool
 }
 
 // NewClaudeCode returns an Agent that drives the claude binary (default
@@ -97,6 +100,62 @@ func claudeReadOnlyTools() []string {
 		"mcp__gummi",
 		"Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)",
 	}
+}
+
+// The tool ROSTER is a different lever from the allowlist above, and the
+// two answer different questions. The allowlist says what a session may
+// DO; the roster says what it is TOLD EXISTS. Left alone, the CLI shows a
+// stage session its whole built-in surface — cron, notifications, remote
+// triggers, notebook editing, the web — every definition riding every
+// request, none of it reachable from a session whose job is to edit one
+// file under an allowlist of four tools. Two things follow, both measured
+// against the CLI in its stream-json mode: the prompt carries roughly 8k
+// tokens of tool definitions nobody can use, and the roster is wide enough
+// that the CLI defers gummi's own MCP tools behind a lookup, so every
+// single session opens by spending a turn searching for the four tools it
+// was started to call.
+//
+// So the roster is exactly the permitted surface: the tools the allowlist
+// pre-approves, plus the edit tools acceptEdits approves inside the
+// worktree. A tool a session may not use is not described to it.
+//
+// claudeStageTools is that roster for a normal (worktree, acceptEdits)
+// stage session. MCP tools are not built-ins and are unaffected by
+// --tools; gummi's own reach the session through --mcp-config either way.
+func claudeStageTools() []string {
+	return []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit"}
+}
+
+// claudeReadOnlyRoster is the same idea for a ReadOnly research session:
+// the navigation tools its allowlist permits, and nothing that writes.
+// Bash is named bare here because --tools takes tool names, not the
+// argument-scoped forms --allowedTools takes; the allowlist above is what
+// narrows Bash to read-only git, and it still does.
+func claudeReadOnlyRoster() []string {
+	return []string{"Read", "Grep", "Glob", "Bash"}
+}
+
+// claudeHelpTimeout bounds the one-off --help probe below.
+const claudeHelpTimeout = 10 * time.Second
+
+// supportsToolRoster reports whether this CLI build understands --tools,
+// probed once per adapter and cached. gummi does not pin a CLI version, so
+// a flag that is merely usually present must be checked before it is
+// passed: an unknown flag would fail every session on an older build, and
+// the cost of being wrong is the whole run. A binary that cannot be
+// probed simply keeps the full roster, which is what every session had
+// before this existed.
+func (c *ClaudeCode) supportsToolRoster() bool {
+	c.rosterOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), claudeHelpTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, c.bin, "--help").Output() //nolint:gosec // bin is operator config
+		if err != nil {
+			return
+		}
+		c.roster = strings.Contains(string(out), "--tools")
+	})
+	return c.roster
 }
 
 // NewSession implements Agent: spawn one claude process in opts.WorkDir.
@@ -172,6 +231,17 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// above. And never pass --add-dir for the main checkout: it lifts the
 	// write cage alongside the read allowance. Both invariants are
 	// load-bearing; breaking either silently re-opens the write hole.
+	// The roster (what the session is shown) is narrowed before the
+	// allowlist (what it may do), and never instead of it: --tools filters
+	// built-ins only, so dropping this line would widen the prompt, never
+	// the permissions.
+	if c.supportsToolRoster() {
+		roster := claudeStageTools()
+		if opts.ReadOnly {
+			roster = claudeReadOnlyRoster()
+		}
+		args = append(args, "--tools", strings.Join(roster, ","))
+	}
 	if opts.ReadOnly {
 		args = append(args, "--allowedTools", strings.Join(claudeReadOnlyTools(), " "))
 	} else {
