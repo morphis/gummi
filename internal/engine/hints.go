@@ -118,6 +118,34 @@ The research document is the one durable surface, and gummi's spec tools
 are how you reach it. If a decision needs a change to the repo, record
 it in the document and let an implementation card make it.`
 
+// worktreeBoundaryHint says where a session's work happens and where its
+// throwaway work goes. Both halves came from watching real sessions: a
+// plan session that built a small Go module in /tmp — go.mod, main.go, a
+// compile — to check the arithmetic it was about to write into the plan,
+// and a critique session that cd'd into the MAIN CHECKOUT to run the
+// repo's tests there.
+//
+// Neither is careless. Scratch space is a genuine need, and the main
+// checkout is where a test suite obviously lives. But the write cage is a
+// file-tool cage: a shell command reaches anywhere the process can, so
+// the main checkout — which a person or another card may be working in —
+// is one `cd` away from any session, and nothing else stops it. The
+// worktree is a full checkout of the branch, so there is never a reason
+// to go looking.
+//
+// Scratch stays OUT of the worktree for the opposite reason: the stage's
+// checkpoint commits what the stage leaves behind, so a prototype left in
+// the tree ships with the work.
+const worktreeBoundaryHint = `Your working directory is this card's own worktree — a full checkout of
+its branch — and it is the boundary of your work. Run every command from
+inside it. Never cd into the repository's main checkout, and never write
+outside the worktree except into a temporary directory of your own
+(mktemp -d): whatever the worktree holds when your turn ends is committed
+as the stage's work, and whatever the main checkout holds is someone
+else's. A throwaway program to check a value or confirm an assumption is
+fine, in that temporary directory; building the feature there is not —
+that is the implement stage's job, in this worktree.`
+
 // repoInstructionsPrecedenceHint states the precedence between the managed
 // repo's own instructions (AGENTS.md, CLAUDE.md, or equivalent) and gummi's
 // process rules, settled by FD-017: the repo governs craft, gummi governs
@@ -188,17 +216,22 @@ func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
 	switch flavor {
 	case flavorCritique:
 		h := []string{contractHint(f, specPath, agent.RoleReviewer, flavorCritique), critiqueHint(f)}
+		if f.Kind != domain.KindResearch {
+			h = append(h, worktreeBoundaryHint)
+		}
 		if gate := gateAskHint(f); gate != "" {
 			h = append(h, gate)
 		}
 		return h
 	case flavorRebase:
-		return []string{contractHint(f, specPath, agent.RoleImplementer, flavorRebase), rebaseHint()}
+		return []string{contractHint(f, specPath, agent.RoleImplementer, flavorRebase), rebaseHint(), worktreeBoundaryHint}
 	}
 	role, _ := roleForStage(f)
 	hints := []string{contractHint(f, specPath, role, flavor)}
 	if f.Kind == domain.KindResearch {
 		hints = append(hints, researchWorkingDirGuard)
+	} else {
+		hints = append(hints, worktreeBoundaryHint)
 	}
 
 	switch f.Stage {

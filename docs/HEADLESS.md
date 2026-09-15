@@ -77,6 +77,36 @@ while a run is live. Everything that mutates the workspace (`run`,
 lock, so a headless run and the board never touch the same workspace at
 once.
 
+## Watching a run
+
+`run`, `research`, `diagnose` and `resume` stream NDJSON milestones on
+stdout. `--verbose` adds one `activity` line per tool call. The line worth
+knowing is `stage`, whose `result` names what the card is doing:
+
+```
+{"event":"stage","stage":"plan"}                        the stage's own session
+{"event":"stage","stage":"plan","result":"critiquing"}  the adversarial read
+{"event":"stage","stage":"plan","result":"changes"}     it found something blocking
+{"event":"stage","stage":"plan","round":1,"result":"replanning"}
+{"event":"stage","stage":"plan","result":"pass"}
+{"event":"stage","stage":"plan","result":"discovering checks"}
+{"event":"stage","stage":"plan","result":"baselining checks"}
+{"event":"gate","from":"plan","to":"implement",...}
+```
+
+The last two are the one-shot passes that run at the approval gate — the
+scribe survey that writes the repo's commands into the spec's
+`gummi-checks` block, and the run of those commands that records which
+were already failing. They are model-and-shell work that can take minutes
+on a large repository, which is why they are on the stream: between the
+plan's verdict and the gate crossing, they are the only thing happening.
+
+To measure where a run's spend went rather than watch it, `gummi status
+<id> --json` carries `stage_spend`: one row per (stage, role) with the
+model, the credits, and input/cached/output tokens. It is the supported
+way to answer "what did this card cost, and where" — the `spend` field
+above it is only the total.
+
 ## Exit statuses
 
 Every `run`, `research` and `resume` ends on a typed exit the caller

@@ -507,3 +507,32 @@ func TestResearchContractsMatchMergedOrder(t *testing.T) {
 // stands (or every check acquires the marker defensively).
 func TestSpecHintTeachesBaselineOptOut(t *testing.T) {
 }
+
+// Every stage session that runs in a card's worktree is told the
+// worktree is the boundary: sessions have cd'd into the main checkout to
+// run tests there, and the file cage cannot stop a shell command.
+func TestWorktreeBoundaryReachesEveryWorktreeStage(t *testing.T) {
+	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
+		f := feature(1, "boundary", stage)
+		joined := strings.Join(stageHints(f, "/w/spec.md", flavorStage), "\n")
+		if !strings.Contains(joined, "Never cd into the repository's main checkout") {
+			t.Errorf("%s session is not told where its boundary is", stage)
+		}
+	}
+	// the critique pass too — it reads and runs commands like any other
+	crit := strings.Join(stageHints(feature(1, "boundary", domain.StagePlan), "/w/spec.md", flavorCritique), "\n")
+	if !strings.Contains(crit, "Never cd into the repository's main checkout") {
+		t.Error("the critique pass is not told where its boundary is")
+	}
+	// a research card has its own working-directory guard and must not be
+	// handed a second, contradictory one
+	r := feature(2, "research", domain.StagePlan)
+	r.Kind = domain.KindResearch
+	rh := strings.Join(stageHints(r, "/w/doc.md", flavorStage), "\n")
+	if strings.Contains(rh, "Never cd into the repository's main checkout") {
+		t.Error("a research card got the worktree boundary hint; it has no worktree")
+	}
+	if !strings.Contains(rh, "scratch checkout of main") {
+		t.Error("a research card lost its own working-directory guard")
+	}
+}

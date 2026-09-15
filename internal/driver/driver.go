@@ -1542,9 +1542,17 @@ func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// Both passes are model-and-shell work that can run for minutes on a
+	// large repository, and neither had a line on the stream: a --verbose
+	// drive went silent between the plan's verdict and the gate crossing,
+	// which reads as a hang and was investigated as one. The stage feed
+	// covers sessions the engine owns; these two are the engine's
+	// one-shots, so the driver narrates them itself.
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "discovering checks"})
 	if _, err := d.eng.DiscoverChecks(ctx, f); err != nil {
 		return
 	}
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "baselining checks"})
 	_, _ = d.eng.BaselineChecks(ctx, f)
 }
 
