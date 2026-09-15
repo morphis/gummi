@@ -31,7 +31,7 @@ func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, e1, EventIdle) // kickoff turn
-	go e1.DispatchClientTool(ctx, s1, "ask_user", askArgs(t, Ask{Question: "Persist where?", Options: []AskOption{{Label: "per-device"}}}))
+	go e1.DispatchClientTool(ctx, s1, "ask_user", askArgs(t, Ask{ChangesSection: "Problem", Question: "Persist where?", Options: []AskOption{{Label: "per-device"}}}))
 	waitFor(t, e1, EventQuestion)
 	if err := e1.Answer(ctx, f.ID, "per-device"); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	waitFor(t, e2, EventIdle) // kickoff turn
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go e2.DispatchClientTool(ctx2, s2, "ask_user", askArgs(t, Ask{Question: "Second question?", Options: []AskOption{{Label: "yes"}}}))
+	go e2.DispatchClientTool(ctx2, s2, "ask_user", askArgs(t, Ask{ChangesSection: "Problem", Question: "Second question?", Options: []AskOption{{Label: "yes"}}}))
 	waitFor(t, e2, EventQuestion)
 
 	// The card is genuinely blocked on a second, different question — but

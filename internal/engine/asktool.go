@@ -31,6 +31,11 @@ type Ask struct {
 	MultiPick  bool        `json:"multi_select"`
 	FreeForm   bool        `json:"allow_free_form"`
 	SpecAnchor string      `json:"spec_anchor"`
+	// ChangesSection names the artifact section whose CONTENT differs
+	// depending on the answer. It is the design stage's proof that the
+	// question is a decision rather than a confirmation — see
+	// askChangesSomething.
+	ChangesSection string `json:"changes_section"`
 	// Gate marks this question AS the stage's gate: answering it is the
 	// crossing, rather than a decision the stage then acts on itself.
 	//
@@ -221,6 +226,13 @@ func askUserTool() agent.ToolDef {
 					"type": "string",
 					"description": "Optional: a unique snippet of a spec line this decision belongs to. " +
 						"gummi records the answer as a resolved %% marker under it.",
+				},
+				"changes_section": map[string]any{
+					"type": "string",
+					"description": "At the design stage, required: the name of the spec section whose " +
+						"CONTENT would be different depending on which option is chosen (e.g. " +
+						"\"Chosen approach\", \"Out of scope\"). If you cannot name one, this is not a " +
+						"decision for the user — record your recommendation in the spec and carry on.",
 				},
 			},
 			"required": []any{"question", "options"},
@@ -539,6 +551,54 @@ func (e *Engine) bounceAsk(s *Session, callID, reason string) {
 	e.resolveNow(s, callID, reason)
 }
 
+// askChangesSomething is the design stage's toll on asking a person
+// something: name the artifact section whose content the answer changes,
+// or do not ask.
+//
+// The hints have always said this in prose — "confirmations are not
+// decisions", "every question you ask a person stops the work and waits" —
+// and a model that has just written a recommendation still asks whether
+// the recommendation is acceptable. Prose cannot hold that line, because
+// the model is not disobeying: asking feels cooperative. The check makes
+// the claim checkable instead. A question whose answer changes the Chosen
+// approach, or Out of scope, or the Verification plan, names that section
+// and goes through. A question whose answer changes nothing names nothing,
+// and the model is told to write its recommendation down and continue —
+// which is what it would have done with the answer anyway.
+//
+// It binds only where the cost is a full process restart and only to the
+// stage that owns the artifact's sections: the design stage, and never a
+// gate ask, which IS the crossing rather than a decision inside it.
+func askChangesSomething(s *Session, ask *Ask) (string, bool) {
+	if s == nil || ask == nil || ask.Gate || s.Feature.Stage != domain.StagePlan {
+		return "", true
+	}
+	raw, err := os.ReadFile(s.SpecPath())
+	if err != nil {
+		// no artifact to point at is not the model's fault; asking is the
+		// best it can do
+		return "", true
+	}
+	headings := spec.Headings(string(raw))
+	if len(headings) == 0 {
+		return "", true
+	}
+	named := strings.TrimSpace(ask.ChangesSection)
+	if named == "" {
+		return "this question does not say what it changes. Pass changes_section — the spec " +
+			"section whose content differs depending on the answer (one of: " +
+			strings.Join(headings, ", ") + "). If no section would differ, it is a confirmation, " +
+			"not a decision: write your recommended answer into the spec where the user can see " +
+			"and change it, and carry on without asking", false
+	}
+	if _, ok := spec.HeadingLine(string(raw), named); !ok {
+		return fmt.Sprintf("changes_section %q is not a section of this spec. Use one of: %s — "+
+			"or, if the answer would change none of them, record your recommendation in the spec "+
+			"and carry on without asking", named, strings.Join(headings, ", ")), false
+	}
+	return "", true
+}
+
 // handleAsk turns an ask_user call into a pending question (blocks the
 // agent's turn until Answer). One question at a time: a parallel ask_user
 // while another is pending is bounced with an immediate result — letting
@@ -548,6 +608,10 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	ask, err := parseAsk(tc.ID, tc.Args)
 	if err != nil {
 		e.bounceAsk(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
+		return
+	}
+	if reason, ok := askChangesSomething(s, ask); !ok {
+		e.bounceAsk(s, tc.ID, reason)
 		return
 	}
 	// mint the decision id before the ask installs: the pump goroutine owns
@@ -1222,6 +1286,7 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	content := string(raw)
 	line, ok := spec.FindAnchor(content, anchor)
 	text := "resolved — " + answer
+	fallbackWhere := "at the end of the document"
 	if !ok {
 		// FindAnchor fails closed on zero matches (the line moved or was
 		// edited away since the question was asked) and on multiple
@@ -1231,6 +1296,18 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 		// found.
 		lines := strings.Split(content, "\n")
 		line = len(lines)
+		// The end of the document is the fallback that is always valid;
+		// it is not the fallback that is always useful. A design-stage ask
+		// names the section its answer changes (changes_section), and that
+		// is a second, better address for an answer whose anchor has moved:
+		// the end of the right section is somewhere a reader is actually
+		// looking, while the end of the document is where notes go to be
+		// missed. The document end remains the backstop under it.
+		if sec := strings.TrimSpace(ask.ChangesSection); sec != "" {
+			if last, found := spec.SectionLastLine(content, sec); found {
+				line, fallbackWhere = last, "at the end of "+sec
+			}
+		}
 		// Still spelled as a RESOLUTION. The happy path above writes
 		// "resolved — <answer>", which spec.Parse closes; this branch used
 		// to write "answered …" instead, which Parse reads as a fresh open
@@ -1252,7 +1329,7 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 	}
 	if !ok {
 		return fmt.Sprintf("%s%q — that text no longer matches a single line there, so it was "+
-			"appended at the end of the document instead", AnswerAppendedPrefix, anchor)
+			"appended %s instead", AnswerAppendedPrefix, anchor, fallbackWhere)
 	}
 	return AnswerCapturedNote
 }

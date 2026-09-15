@@ -531,3 +531,26 @@ func TestUndraftedSectionsAllDrafted(t *testing.T) {
 		t.Errorf("undrafted = %v, want nil when nothing is undrafted", undrafted)
 	}
 }
+
+// An answer whose anchor has moved is better placed at the end of the
+// section it belongs to than at the end of the document, so the section's
+// last content line is addressable.
+func TestSectionLastLine(t *testing.T) {
+	doc := "# T\n\n## Problem\n\nit hurts\nquite a lot\n\n## Chosen approach\n\npick one\n\n## Verification plan\n"
+	line, ok := SectionLastLine(doc, "Problem")
+	if !ok {
+		t.Fatal("Problem has no last line")
+	}
+	if got := strings.Split(doc, "\n")[line-1]; got != "quite a lot" {
+		t.Errorf("last line of Problem = %q (line %d), want \"quite a lot\"", got, line)
+	}
+	if l, ok := SectionLastLine(doc, "chosen APPROACH"); !ok || strings.Split(doc, "\n")[l-1] != "pick one" {
+		t.Errorf("section match is not case-insensitive (line %d, ok=%v)", l, ok)
+	}
+	if _, ok := SectionLastLine(doc, "Verification plan"); ok {
+		t.Error("an empty section reported a line to append under")
+	}
+	if _, ok := SectionLastLine(doc, "Marketing"); ok {
+		t.Error("an absent section reported a line")
+	}
+}

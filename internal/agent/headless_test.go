@@ -131,7 +131,7 @@ for line in sys.stdin:
     m=json.loads(line)
     t=m.get("type")
     if t=="send":
-        print(json.dumps({"type":"ask","id":"q1","ask":{"question":"Where?","options":[{"label":"a"},{"label":"b"}]}}), flush=True)
+        print(json.dumps({"type":"ask","id":"q1","ask":{"changes_section":"Problem","question":"Where?","options":[{"label":"a"},{"label":"b"}]}}), flush=True)
     elif t=="resolve":
         print(json.dumps({"type":"message","text":"resolved=%s id=%s"%(m.get("result",""), m.get("id",""))}), flush=True)
         print(json.dumps({"type":"idle"}), flush=True)

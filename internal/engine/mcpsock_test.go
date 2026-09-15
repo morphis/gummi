@@ -255,7 +255,7 @@ func TestMCPSockCallToolInterleave(t *testing.T) {
 	slowID, fastID := c.nextID(), c.nextID()
 	c.send(mcp.Request{
 		JSONRPC: mcp.JSONRPC, ID: jsonRaw(slowID), Method: "call_tool",
-		Params: jsonRaw(`{"name":"ask_user","args":{"question":"pick","options":[{"label":"a"}]}}`),
+		Params: jsonRaw(`{"name":"ask_user","args":{"changes_section":"Problem","question":"pick","options":[{"label":"a"}]}}`),
 	})
 	c.send(mcp.Request{
 		JSONRPC: mcp.JSONRPC, ID: jsonRaw(fastID), Method: "call_tool",

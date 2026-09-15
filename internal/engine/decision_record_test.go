@@ -15,7 +15,7 @@ import (
 // without leaving a row). It is OpenDecisions' open record until the
 // answer event correlates to it.
 func TestAskOpensItsDecisionRow(t *testing.T) {
-	args := askArgs(t, Ask{
+	args := askArgs(t, Ask{ChangesSection: "Problem",
 		Question: "Persist where?",
 		Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
 	})
@@ -53,7 +53,7 @@ func TestAskOpensItsDecisionRow(t *testing.T) {
 // lands, OpenDecisions reports nothing waiting, and the answer event
 // says who answered (by) and which option was chosen (choice).
 func TestAskDecisionClosesOnAnswer(t *testing.T) {
-	args := askArgs(t, Ask{
+	args := askArgs(t, Ask{ChangesSection: "Problem",
 		Question: "Persist where?",
 		Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
 	})

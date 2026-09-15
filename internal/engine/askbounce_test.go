@@ -35,7 +35,7 @@ func TestBouncedAskIsVisibleOnTheCard(t *testing.T) {
 			t.Fatal(err)
 		}
 		// an option with no label: parseAsk rejects it at the boundary
-		args := json.RawMessage(`{"question":"Which?","options":[{"detail":"no label here"}]}`)
+		args := json.RawMessage(`{"changes_section":"Problem","question":"Which?","options":[{"detail":"no label here"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c1", Name: askToolName, Args: args})
 
 		if s.Snapshot().PendingAsk != nil {
@@ -53,12 +53,12 @@ func TestBouncedAskIsVisibleOnTheCard(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		first := json.RawMessage(`{"question":"First?","options":[{"label":"a"},{"label":"b"}]}`)
+		first := json.RawMessage(`{"changes_section":"Problem","question":"First?","options":[{"label":"a"},{"label":"b"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c1", Name: askToolName, Args: first})
 		if s.Snapshot().PendingAsk == nil {
 			t.Fatal("the first ask did not install")
 		}
-		second := json.RawMessage(`{"question":"Second?","options":[{"label":"x"},{"label":"y"}]}`)
+		second := json.RawMessage(`{"changes_section":"Problem","question":"Second?","options":[{"label":"x"},{"label":"y"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c2", Name: askToolName, Args: second})
 
 		if got := s.Snapshot().PendingAsk.Question; got != "First?" {

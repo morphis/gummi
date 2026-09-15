@@ -68,7 +68,7 @@ func TestSendRefusesWithoutFailingTheRun(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		args := json.RawMessage(`{"question":"Which?","options":[{"label":"a"},{"label":"b"}]}`)
+		args := json.RawMessage(`{"changes_section":"Problem","question":"Which?","options":[{"label":"a"},{"label":"b"}]}`)
 		e.handleClientTool(s, &agent.ToolCall{ID: "c1", Name: askToolName, Args: args})
 		if s.Snapshot().PendingAsk == nil {
 			t.Fatal("the ask did not install")

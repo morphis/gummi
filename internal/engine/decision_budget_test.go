@@ -189,7 +189,7 @@ func TestAnswerResumesTheWorkingFlag(t *testing.T) {
 	s.markResolverWaiting(callID)
 	e.handleClientTool(s, &agent.ToolCall{
 		ID: callID, Name: "ask_user",
-		Args: []byte(`{"question":"pick","options":[{"label":"a"},{"label":"b"}]}`),
+		Args: []byte(`{"changes_section":"Problem","question":"pick","options":[{"label":"a"},{"label":"b"}]}`),
 	})
 	if s.Snapshot().PendingAsk == nil {
 		t.Fatal("ask never registered")

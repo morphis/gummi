@@ -304,7 +304,7 @@ func TestThreadConversationGolden(t *testing.T) {
 func askingFake() *agent.Fake {
 	f := agent.NewFake("")
 	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}
-	args := []byte(`{"question":"Persist where?","options":[{"label":"per-device","detail":"localStorage"},{"label":"synced","detail":"account"}],"allow_free_form":true}`)
+	args := []byte(`{"changes_section":"Problem","question":"Persist where?","options":[{"label":"per-device","detail":"localStorage"},{"label":"synced","detail":"account"}],"allow_free_form":true}`)
 	first := true
 	f.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
 		if first {
@@ -323,7 +323,7 @@ func askingFake() *agent.Fake {
 func structuredAskFake() *agent.Fake {
 	f := agent.NewFake("")
 	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}
-	args := []byte(`{"question":"Which rig?","options":[{"label":"rig-a","detail":"the staging box"},{"label":"rig-b","detail":"the prod mirror"}]}`)
+	args := []byte(`{"changes_section":"Problem","question":"Which rig?","options":[{"label":"rig-a","detail":"the staging box"},{"label":"rig-b","detail":"the prod mirror"}]}`)
 	first := true
 	f.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
 		if first {
@@ -343,7 +343,7 @@ func structuredAskFake() *agent.Fake {
 func multiPickFreeFormAskFake() *agent.Fake {
 	f := agent.NewFake("")
 	f.Caps = agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}
-	args := []byte(`{"question":"Persist where?","options":[{"label":"per-device","detail":"localStorage"},{"label":"synced","detail":"account"}],"multi_select":true,"allow_free_form":true}`)
+	args := []byte(`{"changes_section":"Problem","question":"Persist where?","options":[{"label":"per-device","detail":"localStorage"},{"label":"synced","detail":"account"}],"multi_select":true,"allow_free_form":true}`)
 	first := true
 	f.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
 		if first {

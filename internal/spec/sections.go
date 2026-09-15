@@ -71,6 +71,29 @@ func Headings(content string) []string {
 	return out
 }
 
+// SectionLastLine reports the 1-based line number of the last line of the
+// named section's body — the line a note appended to that section belongs
+// under. Blank trailing lines are skipped, so an appended marker lands
+// against content rather than in the gap before the next heading. ok is
+// false when the name matches no top-level heading, or when the section
+// is empty and has no line of its own to append to.
+//
+// It exists for the one case where a caller knows WHICH section an answer
+// belongs to but cannot find the line it was anchored to: landing the
+// answer at the end of the right section beats landing it at the end of
+// the document, which is where a reader is least likely to look for it.
+func SectionLastLine(content, name string) (line int, ok bool) {
+	start, end, _, found := sectionBounds(content, name)
+	if !found {
+		return 0, false
+	}
+	body := strings.TrimRight(content[start:end], "\n \t")
+	if body == "" {
+		return 0, false
+	}
+	return strings.Count(content[:start], "\n") + strings.Count(body, "\n") + 1, true
+}
+
 // ReplaceSection replaces the named section's body — the lines between
 // its `## ` heading and the next top-level `## ` heading or EOF — with
 // body verbatim. The heading line itself is never touched. matchedTitle

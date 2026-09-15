@@ -51,7 +51,7 @@ func clientToolFake(args json.RawMessage) *agent.Fake {
 }
 
 func TestAskUserSurfacesAndResolves(t *testing.T) {
-	args := askArgs(t, Ask{
+	args := askArgs(t, Ask{ChangesSection: "Problem",
 		Question: "Persist where?",
 		Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
 	})
@@ -112,8 +112,8 @@ func TestParallelAsksBounceExtras(t *testing.T) {
 	// calls). The first becomes the pending question; the second must be
 	// bounced with an immediate result — displacing the first would
 	// orphan its blocked tool handler and hang the turn forever.
-	q1 := askArgs(t, Ask{Question: "Persist where?", Options: []AskOption{{Label: "per-device"}, {Label: "synced"}}})
-	q2 := askArgs(t, Ask{Question: "Which theme default?", Options: []AskOption{{Label: "system"}, {Label: "dark"}}})
+	q1 := askArgs(t, Ask{ChangesSection: "Problem", Question: "Persist where?", Options: []AskOption{{Label: "per-device"}, {Label: "synced"}}})
+	q2 := askArgs(t, Ask{ChangesSection: "Problem", Question: "Which theme default?", Options: []AskOption{{Label: "system"}, {Label: "dark"}}})
 	ag := agent.NewFake("")
 	ag.Caps = agent.Capabilities{ClientTools: true, Interrupt: true}
 	first := true
@@ -179,7 +179,7 @@ func TestParallelAsksBounceExtras(t *testing.T) {
 }
 
 func TestAskUserCapturesToSpec(t *testing.T) {
-	args := askArgs(t, Ask{
+	args := askArgs(t, Ask{ChangesSection: "Problem",
 		Question:   "Persist where?",
 		Options:    []AskOption{{Label: "per-device"}, {Label: "synced"}},
 		SpecAnchor: "## Chosen approach",
@@ -217,7 +217,7 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 // jargon ("spec capture skipped").
 func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	f := feature(1, "Dark mode", domain.StagePlan)
-	args := askArgs(t, Ask{
+	args := askArgs(t, Ask{ChangesSection: "Problem",
 		Question:   "Persist where?",
 		Options:    []AskOption{{Label: "per-device"}},
 		SpecAnchor: "no such line anywhere",
@@ -234,7 +234,8 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 		t.Fatalf("answer with bad anchor failed: %v", err)
 	}
 
-	// the answer is not dropped: it lands at the end of the document.
+	// the answer is not dropped: it lands at the end of the section the
+	// ask said it changes, which is where a reader is looking for it.
 	draft := specDraftPath(e, f)
 	raw, err := os.ReadFile(draft)
 	if err != nil {
@@ -267,8 +268,37 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	if strings.Contains(note, "spec capture") {
 		t.Errorf("activity note still uses gummi-internal jargon: %q", note)
 	}
-	if !strings.Contains(note, "saved") || !strings.Contains(note, "end of the document") {
+	if !strings.Contains(note, "saved") || !strings.Contains(note, "end of Problem") {
 		t.Errorf("activity note does not say in plain words where the answer landed: %q", note)
+	}
+}
+
+// With no section named — a gate ask carries none, and none is required
+// of it — the end of the document is still the backstop: always a valid
+// position, always the same one.
+func TestBadAnchorWithNoSectionFallsBackToTheDocumentEnd(t *testing.T) {
+	f := feature(1, "Dark mode", domain.StagePlan)
+	e := newEngine(t, agent.NewFake("ack"))
+	e.now = fixedNow
+	ctx := context.Background()
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := e.captureAnswer(s, &Ask{
+		Question:   "ready?",
+		SpecAnchor: "no such line anywhere",
+		Gate:       true,
+	}, "move on")
+	if !strings.Contains(note, "end of the document") {
+		t.Errorf("note = %q, want the document-end backstop", note)
+	}
+	raw, err := os.ReadFile(specDraftPath(e, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "resolved — move on") {
+		t.Errorf("answer not appended anywhere:\n%s", raw)
 	}
 }
 
@@ -282,7 +312,7 @@ func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
 	f := feature(1, "Dark mode", domain.StagePlan)
 	const anchor = "duplicated on purpose"
-	args := askArgs(t, Ask{
+	args := askArgs(t, Ask{ChangesSection: "Problem",
 		Question:   "Persist where?",
 		Options:    []AskOption{{Label: "per-device"}},
 		SpecAnchor: anchor,
@@ -341,7 +371,7 @@ func countOpenUserThreads(t *testing.T, content string) int {
 func TestConventionAskPath(t *testing.T) {
 	// a backend WITHOUT client tools emits a gummi-ask fenced block
 	block := "Here's my question.\n```gummi-ask\n" +
-		`{"question":"Persist where?","options":[{"label":"per-device"},{"label":"synced"}]}` +
+		`{"changes_section":"Problem","question":"Persist where?","options":[{"label":"per-device"},{"label":"synced"}]}` +
 		"\n```"
 	ag := agent.NewFake(block)
 	ag.Caps = agent.Capabilities{} // no ClientTools
@@ -1252,7 +1282,7 @@ func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 	done := make(chan dcall, 1)
 	go func() {
 		out, derr := e.DispatchClientTool(context.Background(), s, "ask_user",
-			json.RawMessage(`{"question":"theme?","options":[{"label":"dark"}]}`))
+			json.RawMessage(`{"changes_section":"Problem","question":"theme?","options":[{"label":"dark"}]}`))
 		done <- dcall{out, derr}
 	}()
 	deadline := time.After(testWaitTimeout)
@@ -1290,7 +1320,7 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, derr := e.DispatchClientTool(ctx, s, "ask_user",
-			json.RawMessage(`{"question":"q","options":[{"label":"a"}]}`))
+			json.RawMessage(`{"changes_section":"Problem","question":"q","options":[{"label":"a"}]}`))
 		done <- derr
 	}()
 	deadline := time.After(testWaitTimeout)
@@ -1341,7 +1371,7 @@ func TestDeathMidAskClearsLiveness(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, derr := e.DispatchClientTool(epCtx, s, askToolName,
-			json.RawMessage(`{"question":"theme?","options":[{"label":"dark"}]}`))
+			json.RawMessage(`{"changes_section":"Problem","question":"theme?","options":[{"label":"dark"}]}`))
 		done <- derr
 	}()
 	deadline := time.After(testWaitTimeout)
@@ -1470,7 +1500,7 @@ func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 		{domain.GateAttended, state.ActorUser, state.ActorUser},
 		{"", state.ActorUser, state.ActorUser},
 	} {
-		args := askArgs(t, Ask{
+		args := askArgs(t, Ask{ChangesSection: "Problem",
 			Question: "Persist where?",
 			Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
 		})
@@ -1574,16 +1604,16 @@ func TestUnattendedAskHintOnlyOnFull(t *testing.T) {
 // error it can correct.
 func TestParseAskRejectsUnlabelledOption(t *testing.T) {
 	for _, body := range []string{
-		`{"question":"which?","options":[{"label":"","detail":"no label"}]}`,
-		`{"question":"which?","options":[{"label":"ok"},{"label":"   "}]}`,
-		`{"question":"which?","options":[{"detail":"only a detail"}]}`,
+		`{"changes_section":"Problem","question":"which?","options":[{"label":"","detail":"no label"}]}`,
+		`{"changes_section":"Problem","question":"which?","options":[{"label":"ok"},{"label":"   "}]}`,
+		`{"changes_section":"Problem","question":"which?","options":[{"detail":"only a detail"}]}`,
 	} {
 		if _, err := parseAsk("c1", json.RawMessage(body)); err == nil {
 			t.Errorf("parseAsk(%s) = nil error, want a rejection", body)
 		}
 	}
 	// the well-formed case still parses
-	if _, err := parseAsk("c1", json.RawMessage(`{"question":"which?","options":[{"label":"yes"}]}`)); err != nil {
+	if _, err := parseAsk("c1", json.RawMessage(`{"changes_section":"Problem","question":"which?","options":[{"label":"yes"}]}`)); err != nil {
 		t.Errorf("a well-formed ask was rejected: %v", err)
 	}
 }
@@ -1594,7 +1624,7 @@ func TestParseAskRejectsUnlabelledOption(t *testing.T) {
 // ever drawn — a question the person never saw is worse than one with
 // a thin option, which is why the boundary tolerates the shape.
 func TestParseAskAcceptsBareStringOptions(t *testing.T) {
-	body := `{"question":"leave -c D alone?","options":["Leave it (recommended)",{"label":"Guard it","detail":"same guard"}]}`
+	body := `{"changes_section":"Problem","question":"leave -c D alone?","options":["Leave it (recommended)",{"label":"Guard it","detail":"same guard"}]}`
 	a, err := parseAsk("c1", json.RawMessage(body))
 	if err != nil {
 		t.Fatalf("parseAsk rejected bare string options: %v", err)
@@ -1612,7 +1642,7 @@ func TestParseAskAcceptsBareStringOptions(t *testing.T) {
 		t.Errorf("RecommendedOption = %q", got)
 	}
 	// a blank string is still an unlabelled option
-	if _, err := parseAsk("c1", json.RawMessage(`{"question":"q","options":["  "]}`)); err == nil {
+	if _, err := parseAsk("c1", json.RawMessage(`{"changes_section":"Problem","question":"q","options":["  "]}`)); err == nil {
 		t.Errorf("a blank string option was accepted")
 	}
 }
@@ -1622,7 +1652,7 @@ func TestParseAskAcceptsBareStringOptions(t *testing.T) {
 // has to be reliable, and a model-authored option list is not — so the
 // model writes the sentence and the anchor, and gummi writes the choices.
 func TestGateAskOptionsAreGummisNotTheModels(t *testing.T) {
-	body := `{"question":"ship it?","gate":true,"spec_anchor":"the plan",
+	body := `{"changes_section":"Problem","question":"ship it?","gate":true,"spec_anchor":"the plan",
 		"options":[{"label":"ok"},{"label":"lgtm"},{"label":"YOLO"}],
 		"multi_select":true,"allow_free_form":false}`
 	a, err := parseAsk("c1", json.RawMessage(body))
@@ -1645,7 +1675,7 @@ func TestGateAskOptionsAreGummisNotTheModels(t *testing.T) {
 	}
 
 	// an ordinary ask is untouched
-	plain, err := parseAsk("c2", json.RawMessage(`{"question":"which?","options":[{"label":"a"},{"label":"b"}]}`))
+	plain, err := parseAsk("c2", json.RawMessage(`{"changes_section":"Problem","question":"which?","options":[{"label":"a"},{"label":"b"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

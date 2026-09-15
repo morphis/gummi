@@ -218,7 +218,7 @@ func TestMCPEndToEndAskUserRoundTrip(t *testing.T) {
 	var text string
 	go func() {
 		defer close(done)
-		text, _ = child.call("ask_user", `{"question":"theme?","options":[{"label":"dark"},{"label":"light"}]}`)
+		text, _ = child.call("ask_user", `{"changes_section":"Problem","question":"theme?","options":[{"label":"dark"},{"label":"light"}]}`)
 	}()
 
 	deadline := time.After(testWaitTimeout)
@@ -250,7 +250,7 @@ func TestMCPEndToEndConcurrency(t *testing.T) {
 
 	slow := child.nextID()
 	fast := child.nextID()
-	child.send(`{"jsonrpc":"2.0","id":` + slow + `,"method":"tools/call","params":{"name":"ask_user","arguments":{"question":"pick","options":[{"label":"a"}]}}}`)
+	child.send(`{"jsonrpc":"2.0","id":` + slow + `,"method":"tools/call","params":{"name":"ask_user","arguments":{"changes_section":"Problem","question":"pick","options":[{"label":"a"}]}}}`)
 	child.send(`{"jsonrpc":"2.0","id":` + fast + `,"method":"tools/call","params":{"name":"spec_view","arguments":{"section":"Problem"}}}`)
 
 	// the fast response must arrive first, before the ask is answered.
@@ -299,7 +299,7 @@ func TestMCPEndToEndLifecycle(t *testing.T) {
 
 	// put an ask_user in flight so teardown must release it.
 	sendID := child.nextID()
-	child.send(`{"jsonrpc":"2.0","id":` + sendID + `,"method":"tools/call","params":{"name":"ask_user","arguments":{"question":"q","options":[{"label":"a"}]}}}`)
+	child.send(`{"jsonrpc":"2.0","id":` + sendID + `,"method":"tools/call","params":{"name":"ask_user","arguments":{"changes_section":"Problem","question":"q","options":[{"label":"a"}]}}}`)
 	deadline := time.After(testWaitTimeout)
 	for s.Snapshot().PendingAsk == nil {
 		select {
