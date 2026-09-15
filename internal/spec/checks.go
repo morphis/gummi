@@ -347,13 +347,80 @@ func RenderChecks(checks []domain.Check) string {
 	return "```gummi-checks\n" + string(body) + "```"
 }
 
+// ChecksDiscoveryNote marks a gummi-checks block that check discovery
+// wrote, so a later approval can tell its own work from a block someone
+// else authored. It is a YAML comment: the parser ignores it, the repair
+// pass carries it through, and a human reading the spec is told what the
+// block is and that editing it is expected.
+//
+// The distinction matters because the two cases want opposite behaviour.
+// A block discovery wrote is finished business — running discovery again
+// would re-add whatever a reviewer deliberately removed. A block someone
+// ELSE wrote is not: an architect filling this in from the packages it
+// happened to be reading is how a repo-wide test command silently becomes
+// `go test ./one/package/...`, which cannot fail on anything the change
+// broke elsewhere. That block needs discovery merged into it, not skipped.
+const ChecksDiscoveryNote = "# discovered from the repository at approval; edit freely — " +
+	"discovery does not run again over its own block"
+
+// RenderDiscoveredChecks renders a block and stamps it as discovery's own.
+func RenderDiscoveredChecks(checks []domain.Check) string {
+	return "```gummi-checks\n" + ChecksDiscoveryNote + "\n" +
+		strings.TrimPrefix(RenderChecks(checks), "```gummi-checks\n")
+}
+
+// ChecksAreDiscovered reports whether content's gummi-checks block is one
+// check discovery wrote.
+func ChecksAreDiscovered(content string) bool {
+	m := checksFenceRe.FindStringSubmatch(content)
+	if m == nil {
+		return false
+	}
+	return strings.Contains(m[1], ChecksDiscoveryNote)
+}
+
+// MergeChecks folds discovered checks into the ones already recorded.
+// What is already there wins and keeps its order — a command someone wrote
+// or edited is never rewritten or dropped — and a discovered check is
+// appended only when neither its name nor its exact command is present.
+// The result is that discovery can widen a narrow block and can never
+// narrow a wide one.
+func MergeChecks(existing, discovered []domain.Check) []domain.Check {
+	names := make(map[string]bool, len(existing))
+	cmds := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		names[strings.ToLower(strings.TrimSpace(c.Name))] = true
+		cmds[strings.TrimSpace(c.Cmd)] = true
+	}
+	out := append([]domain.Check(nil), existing...)
+	for _, c := range discovered {
+		if names[strings.ToLower(strings.TrimSpace(c.Name))] || cmds[strings.TrimSpace(c.Cmd)] {
+			continue
+		}
+		names[strings.ToLower(strings.TrimSpace(c.Name))] = true
+		cmds[strings.TrimSpace(c.Cmd)] = true
+		out = append(out, c)
+	}
+	return out
+}
+
 // UpsertChecks writes the checks into content as a gummi-checks block:
 // an existing block is replaced in place; otherwise the block is
 // inserted at the top of the Verification section ("## Verification
 // plan" in a spec, "## Verification" in a bug report). An artifact
 // without that section is an error — both templates always carry it.
 func UpsertChecks(content string, checks []domain.Check) (string, error) {
-	block := RenderChecks(checks)
+	return upsertChecksBlock(content, RenderChecks(checks))
+}
+
+// UpsertDiscoveredChecks is UpsertChecks for the block check discovery
+// writes: same placement, stamped so a later approval knows the block is
+// discovery's own work and leaves it alone.
+func UpsertDiscoveredChecks(content string, checks []domain.Check) (string, error) {
+	return upsertChecksBlock(content, RenderDiscoveredChecks(checks))
+}
+
+func upsertChecksBlock(content, block string) (string, error) {
 	if loc := checksFenceRe.FindStringIndex(content); loc != nil {
 		return content[:loc[0]] + block + content[loc[1]:], nil
 	}

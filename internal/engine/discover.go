@@ -16,7 +16,17 @@ import (
 const discoverPrompt = `Survey this repository and determine the fixed commands that build, test,
 and lint it — what a CI pipeline would run. Prefer what the repo already
 wires up (Makefile targets, package-manifest scripts, CI workflow files,
-lint configs) over guesses. Then reply with ONLY this fenced block (a
+lint configs) over guesses.
+
+Each command covers the WHOLE repository, not the part a change happens to
+touch: a test command scoped to one package cannot fail on what the change
+broke in another, which is the only thing this block exists to catch. If a
+whole-repo command cannot run here — it needs a service, a device, or a
+toolchain this container lacks — widen it as far as it does run (naming
+the parts that build, rather than the one package under edit) instead of
+narrowing it to a directory.
+
+Then reply with ONLY this fenced block (a
 YAML list, 1-5 entries) and nothing else:
 
 ` + "```gummi-checks" + `
@@ -68,8 +78,12 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 	if err != nil {
 		return nil, err
 	}
+	// Discovery is skipped only over its OWN block: re-running it there
+	// would re-add commands a reviewer removed on purpose. A block
+	// someone else wrote is merged into instead of honoured as the final
+	// word — see spec.ChecksDiscoveryNote for why the two differ.
 	if raw, err := os.ReadFile(specPath); err == nil {
-		if _, found, _ := spec.ParseChecks(string(raw)); found {
+		if _, found, _ := spec.ParseChecks(string(raw)); found && spec.ChecksAreDiscovered(string(raw)) {
 			return nil, nil
 		}
 	}
@@ -86,7 +100,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		return nil, err
 	}
 	if len(cfg.Checks.Default) > 0 {
-		return e.recordChecks(specPath, spec.RenderChecks(cfg.Checks.Default))
+		return e.recordChecks(specPath, spec.RenderDiscoveredChecks(cfg.Checks.Default))
 	}
 
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
@@ -150,10 +164,13 @@ func (e *Engine) recordChecks(specPath, reply string) ([]domain.Check, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, found, _ := spec.ParseChecks(string(raw)); found {
+	existing, found, _ := spec.ParseChecks(string(raw))
+	if found && spec.ChecksAreDiscovered(string(raw)) {
+		// discovery's own block landed while this pass was running
 		return nil, nil
 	}
-	out, err := spec.UpsertChecks(string(raw), checks)
+	checks = spec.MergeChecks(existing, checks)
+	out, err := spec.UpsertDiscoveredChecks(string(raw), checks)
 	if err != nil {
 		return nil, err
 	}

@@ -175,7 +175,14 @@ Stage semantics:
   block in the Verification plan, auto-discovered by a one-shot scribe
   pass when approval creates the worktree, then human-gated and edited
   like any other spec content (the implementer updates it when a change
-  alters how the repo builds/tests). Because it is a strict-YAML island
+  alters how the repo builds/tests). Discovery **merges rather than
+  defers**: a block it did not write — an architect filling one in from
+  the packages it happened to be editing — is widened with the repo's own
+  commands rather than taken as the final word, because a test command
+  scoped to the change's own directory cannot fail on what the change
+  broke elsewhere. What is already in the block is never rewritten or
+  dropped, and a block discovery itself wrote (it stamps one) is left
+  alone, so a command someone removed on purpose stays removed. Because it is a strict-YAML island
   inside a section three roles rewrite as prose, gummi **parses it
   forgivingly and renders it canonically**: `%%` markers that land inside
   the fence are dropped, `[env: …]`/`[CI-only]` tags glued to an entry are

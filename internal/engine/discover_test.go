@@ -66,13 +66,15 @@ func TestDiscoverChecksWritesBlock(t *testing.T) {
 	}
 }
 
-func TestDiscoverChecksSkipsWhenBlockExists(t *testing.T) {
+// A block discovery itself wrote is finished business: running again
+// would re-add whatever a reviewer removed on purpose, so it spawns no
+// session and changes nothing.
+func TestDiscoverChecksSkipsItsOwnBlock(t *testing.T) {
 	reply := "```gummi-checks\n- name: test\n  cmd: go test ./...\n```"
 	e, f, p, sessions := discoverFixture(t, reply)
 
-	// hand-authored block: discovery must not spawn a session or clobber it
 	raw, _ := os.ReadFile(p)
-	out, err := spec.UpsertChecks(string(raw), []domain.Check{{Name: "mine", Cmd: "make check"}})
+	out, err := spec.UpsertDiscoveredChecks(string(raw), []domain.Check{{Name: "mine", Cmd: "make check"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +87,55 @@ func TestDiscoverChecksSkipsWhenBlockExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if checks != nil {
-		t.Errorf("discovery on an existing block returned %+v", checks)
+		t.Errorf("discovery re-ran over its own block and returned %+v", checks)
 	}
 	if n := atomic.LoadInt32(sessions); n != 0 {
-		t.Errorf("discovery spawned %d session(s) despite an existing block", n)
+		t.Errorf("discovery spawned %d session(s) over its own block", n)
 	}
 	got, _, _ := spec.ParseChecks(readFile(t, p))
 	if len(got) != 1 || got[0].Name != "mine" {
-		t.Errorf("hand-authored block clobbered: %+v", got)
+		t.Errorf("discovery's own block was rewritten: %+v", got)
+	}
+}
+
+// A block SOMEONE ELSE wrote is not the final word on how this repo is
+// tested. An architect filling it in from the packages it happened to be
+// reading is how a repo-wide test command becomes one scoped to the
+// directory under edit — which cannot fail on what the change broke
+// elsewhere. Discovery runs and merges: what is there stays, what is
+// missing is added.
+func TestDiscoverChecksWidensAHandAuthoredBlock(t *testing.T) {
+	reply := "```gummi-checks\n- name: test\n  cmd: go test ./...\n```"
+	e, f, p, sessions := discoverFixture(t, reply)
+
+	raw, _ := os.ReadFile(p)
+	out, err := spec.UpsertChecks(string(raw), []domain.Check{{Name: "mine", Cmd: "go test ./one/pkg/..."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	checks, err := e.DiscoverChecks(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := atomic.LoadInt32(sessions); n != 1 {
+		t.Errorf("discovery spawned %d session(s); a hand-authored block must not suppress it", n)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("merged checks = %+v, want the existing one plus the discovered one", checks)
+	}
+	got, _, _ := spec.ParseChecks(readFile(t, p))
+	if len(got) != 2 || got[0].Name != "mine" || got[0].Cmd != "go test ./one/pkg/..." {
+		t.Errorf("the existing check was not kept first, unchanged: %+v", got)
+	}
+	if got[1].Cmd != "go test ./..." {
+		t.Errorf("the repo-wide command was not added: %+v", got)
+	}
+	if !spec.ChecksAreDiscovered(readFile(t, p)) {
+		t.Errorf("merged block is not stamped as discovery's own:\n%s", readFile(t, p))
 	}
 }
 
@@ -135,7 +178,10 @@ func TestDiscoverChecksUsesConfiguredDefault(t *testing.T) {
 	}
 }
 
-func TestDiscoverChecksConfiguredDefaultNoOpsWhenBlockExists(t *testing.T) {
+// A configured checks.default still never spawns a session, but it does
+// merge into a block someone else wrote, for the same reason discovery
+// does: the operator's commands are the ones this repo is tested with.
+func TestDiscoverChecksConfiguredDefaultMergesIntoAHandAuthoredBlock(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	if err := os.WriteFile(ws.ConfigFile(), []byte("checks:\n  default:\n    - name: build\n      cmd: go build ./...\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -167,15 +213,18 @@ func TestDiscoverChecksConfiguredDefaultNoOpsWhenBlockExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checks != nil {
-		t.Errorf("discovery on existing block returned %+v", checks)
+	if len(checks) != 2 {
+		t.Fatalf("merged checks = %+v, want the existing one plus the configured default", checks)
 	}
 	if n := atomic.LoadInt32(&sessions); n != 0 {
 		t.Errorf("scribe session spawned %d time(s) despite existing block", n)
 	}
 	got, _, _ := spec.ParseChecks(readFile(t, p))
-	if len(got) != 1 || got[0].Name != "mine" {
+	if len(got) != 2 || got[0].Name != "mine" {
 		t.Errorf("existing block clobbered: %+v", got)
+	}
+	if got[1].Cmd != "go build ./..." {
+		t.Errorf("configured default not merged in: %+v", got)
 	}
 }
 

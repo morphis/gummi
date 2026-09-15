@@ -416,7 +416,7 @@ const (
 	promptChosen       = "%% @gummi: converge on one during the plan stage"
 	promptProgress     = "%% @gummi: implement checkpoints here — what's done, what's left, where to resume"
 	promptReview       = "%% @gummi: reviewer findings land here; the implementer resolves each one"
-	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered and baselined)" + checksShape + "; add the feature-specific live checks that prove this works — tag steps that can't run in the local worktree with [CI-only] or [env: <prereq>]"
+	promptVerification = "%% @gummi: the repo's build/test/lint commands land here as a gummi-checks block at approval (auto-discovered and baselined)" + checksShape + " — you do not write that block yourself: one authored from the packages you happen to be editing narrows verify to the change's own neighbourhood, and the point of these commands is to catch what the change broke somewhere else; add the feature-specific live checks that prove this works as prose below it — tag steps that can't run in the local worktree with [CI-only] or [env: <prereq>]"
 )
 
 // checksShape spells the gummi-checks entry format for the roles that
