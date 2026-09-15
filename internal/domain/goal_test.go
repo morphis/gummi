@@ -98,7 +98,8 @@ func TestGoalCardRowValidate(t *testing.T) {
 	bad := []GoalCardRow{
 		{Title: "no serves"},
 		{Title: "wrong serves", Serves: []string{"DW-9"}},
-		{Title: "nested", Kind: KindGoal, Serves: []string{"DW-1"}},
+		{Title: "nested", Kind: string(KindGoal), Serves: []string{"DW-1"}},
+		{Title: "not a type", Kind: "chore", Serves: []string{"DW-1"}},
 		{Title: "nested id", ID: "GL-002", Serves: []string{"DW-1"}},
 		{Serves: []string{"DW-1"}},
 	}

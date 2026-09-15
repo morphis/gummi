@@ -142,3 +142,93 @@ func slicesFence(doc string) string {
 	}
 	return ""
 }
+
+func diagnosisCard() *domain.Feature {
+	return &domain.Feature{
+		ID: "RS-009", Num: 9, Kind: domain.KindResearch, Mode: domain.ModeDiagnosis,
+		Title: "Picker drops answers", OneLiner: "answers vanish and the card parks",
+		Slug: "picker-drops-answers", Stage: domain.StagePlan,
+	}
+}
+
+func TestDiagnosisTemplateGolden(t *testing.T) {
+	golden.RequireEqual(t, []byte(DiagnosisTemplate(diagnosisCard())))
+}
+
+func TestSeededDiagnosisTemplateGolden(t *testing.T) {
+	seed := domain.ResearchSeed{
+		Brief:     "The ask_user picker silently drops answers and parks the card.",
+		Questions: []string{"does it depend on window size?"},
+	}
+	golden.RequireEqual(t, []byte(SeededDiagnosisTemplate(diagnosisCard(), seed, researchProv())))
+}
+
+// TestDiagnosisTemplateCarriesItsOwnSections: the diagnosis document is
+// not the research one with different prompts — it has the sections the
+// diagnosis contract names, and none of the survey's converging ones.
+func TestDiagnosisTemplateCarriesItsOwnSections(t *testing.T) {
+	out := DiagnosisTemplate(diagnosisCard())
+	for _, want := range []string{
+		DiagSectionSymptom, DiagSectionRepro, DiagSectionCons, DiagSectionEvidence,
+		DiagSectionRuledOut, DiagSectionCauses, "Slices", "Out of scope", "Open risks", "Review",
+	} {
+		if _, ok := ViewSection(out, want); !ok {
+			t.Errorf("diagnosis template has no `## %s`", want)
+		}
+	}
+	// the survey's own three: a diagnosis converges on a cause, not on a
+	// direction between options, and its checklist is discovered rather
+	// than asked.
+	for _, unwanted := range []string{"Questions", "Findings", "Options", "Direction"} {
+		if _, ok := ViewSection(out, unwanted); ok {
+			t.Errorf("diagnosis template should not carry `## %s`", unwanted)
+		}
+	}
+}
+
+// TestDiagnosisSlicesScaffoldMintsFixes: the scaffold's one structural
+// difference from the survey's is the field that makes its rows fixes.
+func TestDiagnosisSlicesScaffoldMintsFixes(t *testing.T) {
+	body, ok := ViewSection(DiagnosisTemplate(diagnosisCard()), "Slices")
+	if !ok {
+		t.Fatal("no Slices section")
+	}
+	var rows []struct {
+		Title string `yaml:"title"`
+		Kind  string `yaml:"kind"`
+	}
+	fence := strings.Index(body, "```yaml")
+	if fence < 0 {
+		t.Fatal("the Slices scaffold is not a fenced yaml block")
+	}
+	rest := body[fence+len("```yaml"):]
+	if err := yaml.Unmarshal([]byte(rest[:strings.Index(rest, "```")]), &rows); err != nil {
+		t.Fatalf("the scaffold does not parse as the decompose pass reads it: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Kind != "bug" {
+		t.Fatalf("scaffold rows = %+v, want one row with kind: bug", rows)
+	}
+}
+
+// TestLayoutPerMode: the two modes are one set of readers and two section
+// maps, and nothing else decides where a citation or a checklist lives.
+func TestLayoutPerMode(t *testing.T) {
+	survey := LayoutFor(domain.ModeSurvey)
+	if survey.Evidence != "Findings" || survey.Coverage != "Questions" || survey.DefaultSliceKind != domain.KindFeature {
+		t.Errorf("survey layout = %+v", survey)
+	}
+	diag := LayoutFor(domain.ModeDiagnosis)
+	if diag.Evidence != DiagSectionEvidence || diag.Coverage != DiagSectionCauses || diag.DefaultSliceKind != domain.KindBug {
+		t.Errorf("diagnosis layout = %+v", diag)
+	}
+	// a card with no mode, and every non-research card, read as the survey
+	if got := LayoutOf(researchCard()); got != survey {
+		t.Errorf("an RS card with no mode should read as the survey, got %+v", got)
+	}
+	if got := LayoutOf(diagnosisCard()); got != diag {
+		t.Errorf("a diagnosis card should read as the diagnosis layout, got %+v", got)
+	}
+	if got := LayoutOf(&domain.Feature{ID: "FD-001", Kind: domain.KindFeature}); got != survey {
+		t.Errorf("a feature should read as the survey layout, got %+v", got)
+	}
+}

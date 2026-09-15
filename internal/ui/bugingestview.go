@@ -335,7 +335,7 @@ func (m *Shell) useInForm() tea.Cmd {
 	d := m.pendingCard
 	m.pendingCard = nil
 	if d == nil {
-		d = m.openCardForm(domain.KindBug)
+		d = m.openCardForm(domain.CardType{Kind: domain.KindBug})
 	}
 	if d.repo.multi() && d.repo.name() != bv.params.repo {
 		for j, name := range d.repo.options() {

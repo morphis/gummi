@@ -1932,7 +1932,82 @@ verify (checks pass) ──▶ [decompose → proposal gate → materialize FDs 
   attached, and per-proposal edit/drop/merge stays a TUI-only affordance
   (the existing ingest-review pane, §11.4).
 
-### 13.6 Deferred
+### 13.6 Diagnosis — the second research mode
+
+An open ask and a broken behaviour both need grounding before anything is
+built, but they are not the same document. Research is question-driven:
+Brief → Questions → Findings → Options → Direction. A fault is
+symptom-driven, and the three things it has to record have no slot in
+that shape — how the fault is recognised, what was **ruled out**, and the
+fact that a symptom may have **more than one** cause.
+
+A bug card does not cover it either. A bug presumes one defect, commits
+to fixing it in the same card, and has exactly one `## Root cause`
+section. The case this mode exists for is the one where you do not yet
+know what is wrong, or how many things are wrong: one symptom, two
+independent causes, two fixes.
+
+**It is a mode, not a fifth kind.** Everything structural about a
+diagnosis is a research card already — the RS id, no branch, no worktree,
+the scratch tree (§4.3), the read-only build stage, the agent-free
+document verify (§13.4), the decompose gate (§13.5). A kind would buy an
+id prefix and cost a `== KindResearch` branch at every one of those
+sites. What actually differs is the *contract*, which is what the kind
+already selects — so `domain.ResearchMode` selects it one level down. The
+empty mode is the survey, so no RS card written before diagnosis existed
+needs a backfill.
+
+```
+  todo ──▶ Plan ──────▶ Implement ────────▶ Verify ──────▶ Done
+           (scope the   (investigate:       (citations +   (decompose
+            fault)       read-only, cited)   coverage)      → fix cards)
+```
+
+| section | written by | consumed by |
+|---|---|---|
+| `## Symptom` | the ask, in the requester's own words | Plan, Implement |
+| `## Reproduction` | Plan — how the fault is recognised; "it does not reproduce, here is the log" is a valid answer | the design gate, Implement |
+| `## Constraints` | Plan — time, scope, what must not be touched | the design gate |
+| `## Evidence` | Implement — prose with inline `path:line` citations | §13.4's citation check |
+| `## Ruled out` | Implement — each candidate cause eliminated, and by what | the fix cards, who would otherwise re-walk them |
+| `## Causes` | Implement — one bullet per cause, saying why it produces the symptom | §13.4's coverage check |
+| `## Slices` | Implement — one row per cause, `kind:` defaulting to `bug` | §13.5's decompose gate |
+| `## Out of scope` | Implement — a cause deliberately not fixed, with the reason | §13.4's coverage check |
+
+Three things follow from that table:
+
+- **The readers are shared, the headings are not.** `spec.Layout` is the
+  one place that maps mode → (evidence section, coverage section, default
+  slice kind); `verifydoc` and the gates take a layout rather than knowing
+  either document. A survey cites under Findings and reconciles Questions;
+  a diagnosis cites under Evidence and reconciles Causes. The checks
+  themselves are byte-identical, which is the evidence that this is a
+  layout and not a second implementation.
+- **Coverage reconciles causes.** Every `## Causes` bullet must be
+  answered by a slice's `requirements` or an explicit `## Out of scope`
+  line — so a diagnosis cannot find a cause and then silently drop it.
+- **Slices mint fixes.** `## Slices` rows carry a `kind:`, defaulting to
+  `bug` for a diagnosis and `feature` for a survey, and `Materialize`
+  mints per proposal. A diagnosis's follow-on work arrives as BG cards
+  carrying a bug report; their `## Root cause` stays the `%%` prompt,
+  because the fix card's own design stage is what establishes the cause
+  against the code it is about to change.
+
+**Causes is not required at the done gate**, the same way `## Slices` is
+not required of a survey (§13.5): "I could not establish the cause, and
+here is what I ruled out" is an honest terminal for an investigation, and
+a gate that forbade it would be a gate that rewards inventing a cause.
+`## Evidence` is required at every edge past design, because a diagnosis
+with no evidence has nothing to have shown anything with.
+
+**Where it earns the most is inside a goal.** When a goal card fails
+verify twice, or a done-when check fails for a reason nobody can name,
+the lead's only moves were to bounce with a note or park. A diagnosis is
+the lead's bounded way to convert an unexplained failure into scoped
+work: `card_create` accepts `kind: diagnosis`, it runs read-only for a
+small envelope, and it terminates in rows rather than a diff.
+
+### 13.7 Deferred
 
 - **`investigate` as a borrowed pass on an existing FD/BG** — grounding a
   single feature or bug before planning it, the way plan critique borrows
@@ -1944,6 +2019,16 @@ verify (checks pass) ──▶ [decompose → proposal gate → materialize FDs 
 - **Non-repo research** (web, external docs).
 - **A new TUI review pane for proposals** — the existing ingest-review pane
   is reused meanwhile.
+- **A mode-aware artifact noun** — a diagnosis's document is still called
+  "the research document" by the ~25 surfaces that name it, because
+  `Kind.ArtifactNoun` is keyed on the kind and every one of them must
+  agree (§13.1). Splitting it is a change to the view structs that carry
+  `kind`, not a one-line rename.
+- **A diagnosis that can prove a cause with a failing test** — the mode is
+  read-only by construction, so it proposes fixes rather than
+  demonstrating them. Promoting it to a branch-carrying card is the
+  answer if diagnoses start getting bounced for unproven causes, or if
+  the fix cards keep re-deriving the reproduction from scratch.
 
 ## 14. Non-interactive driver & skill distribution
 

@@ -63,7 +63,7 @@ const (
 		"lanes: 2\n" +
 		"```"
 	cardsScaffold = "```gummi-cards\n" +
-		"# title / one_liner / kind (feature, bug, research) / serves / depends_on / envelope / id (set when minted or attached)\n" +
+		"# title / one_liner / kind (feature, bug, research, diagnosis) / serves / depends_on / envelope / id (set when minted or attached)\n" +
 		"- title: \"\"\n" +
 		"  one_liner: \"\"\n" +
 		"  serves: []\n" +

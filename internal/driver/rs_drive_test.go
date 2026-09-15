@@ -62,7 +62,7 @@ func TestCreateResearchDrivesToDecomposeQuestion(t *testing.T) {
 
 	d := h.driver(Options{})
 	ctx := context.Background()
-	f, err := d.Create(ctx, domain.KindResearch, "grounded look at auth")
+	f, err := d.Create(ctx, domain.CardType{Kind: domain.KindResearch}, "grounded look at auth")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestCreateResearchRequestChangesRerunsDecompose(t *testing.T) {
 
 	d := h.driver(Options{})
 	ctx := context.Background()
-	f, err := d.Create(ctx, domain.KindResearch, "grounded look at auth")
+	f, err := d.Create(ctx, domain.CardType{Kind: domain.KindResearch}, "grounded look at auth")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestDriveResearchUntilPlanStops(t *testing.T) {
 
 	d := h.driver(Options{Until: domain.StagePlan})
 	ctx := context.Background()
-	f, err := d.Create(ctx, domain.KindResearch, "a research topic")
+	f, err := d.Create(ctx, domain.CardType{Kind: domain.KindResearch}, "a research topic")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

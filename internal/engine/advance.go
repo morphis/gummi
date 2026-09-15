@@ -517,9 +517,10 @@ func (e *Engine) artifactFile(f *domain.Feature) string {
 }
 
 // documentReport runs the deterministic verifydoc floor against a research
-// card's artifact: the file map covers only the paths its Findings
-// citations name, read from the card's managed repo checkout, so the
-// report never leaks existence or line counts of any other file.
+// card's artifact: the file map covers only the paths its evidence
+// section's citations name, read from the card's managed repo checkout, so
+// the report never leaks existence or line counts of any other file. The
+// card's mode picks which headings those are (spec.LayoutOf).
 func (e *Engine) documentReport(ctx context.Context, f *domain.Feature) (verifydoc.Report, error) {
 	path := e.artifactFile(f)
 	if path == "" {
@@ -534,8 +535,9 @@ func (e *Engine) documentReport(ctx context.Context, f *domain.Feature) (verifyd
 	if err != nil {
 		return verifydoc.Report{}, err
 	}
-	files := fileMap(wt.RepoRoot(), verifydoc.CitedPaths(artifact))
-	return verifydoc.Check(artifact, files), nil
+	layout := spec.LayoutOf(f)
+	files := fileMap(wt.RepoRoot(), verifydoc.CitedPaths(artifact, layout))
+	return verifydoc.Check(artifact, files, layout), nil
 }
 
 // fileMap reads each cited path's lines from root, keyed by the path as
@@ -577,7 +579,8 @@ func fileMap(root string, paths []string) map[string][]string {
 // keypresses, spending nothing, with every section of its document still
 // holding the `%% @gummi:` prompt the template shipped. The rows below
 // give each research edge the same treatment the other kinds get.
-func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
+func requiredSections(ct domain.CardType, from, to domain.Stage) []string {
+	kind := ct.Kind
 	switch {
 	// The design gate. Its row grew from one section to two when the
 	// GATES shrank from two to one: a feature used to cross spec→plan
@@ -602,7 +605,7 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	// decisions the survey then runs on — not a completeness sweep of the
 	// ten-section template: Brief is the requester's own words, and the
 	// remaining six are later stages' work.
-	case kind == domain.KindResearch && from == domain.StagePlan && to == domain.StageImplement:
+	case ct == (domain.CardType{Kind: domain.KindResearch}) && from == domain.StagePlan && to == domain.StageImplement:
 		return []string{"Questions", "Constraints", "Direction"}
 
 	// The research build gate. investigateHint sends the build stage to
@@ -610,7 +613,7 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	// research document as you go": Findings is that survey, and it is the
 	// section every later check reads — verifydoc resolves its citations,
 	// and with nothing in it there is nothing to resolve.
-	case kind == domain.KindResearch && from == domain.StageImplement && to == domain.StageVerify:
+	case ct == (domain.CardType{Kind: domain.KindResearch}) && from == domain.StageImplement && to == domain.StageVerify:
 		return []string{"Findings"}
 
 	// The research done gate — the edge that decomposes the document into
@@ -631,8 +634,37 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 	// architect. Demanding Slices here would forbid the honest answer
 	// "nothing to build", which is exactly the judgement this stage is
 	// allowed to reach.
-	case kind == domain.KindResearch && to == domain.StageDone:
+	case ct == (domain.CardType{Kind: domain.KindResearch}) && to == domain.StageDone:
 		return []string{"Findings"}
+
+	// The diagnosis gates are the survey's three edges with the diagnosis
+	// document's sections in them — same reasoning, different headings,
+	// which is what makes the mode a layout rather than a second kind.
+	//
+	// The design gate owes Reproduction and Constraints: what the
+	// investigation will recognise the fault by, and the bounds it works
+	// in. Reproduction is demanded even for a fault that will not
+	// reproduce on demand — the gate checks that the stage SAID how the
+	// symptom is recognised, and "seen twice in CI, never locally, here
+	// is the log" is a perfectly good answer to that. What it forbids is
+	// starting the investigation without one.
+	case ct.Mode == domain.ModeDiagnosis && from == domain.StagePlan && to == domain.StageImplement:
+		return []string{spec.DiagSectionRepro, spec.DiagSectionCons}
+
+	// The build gate owes Evidence, exactly as the survey's owes Findings:
+	// it is the section every later check reads, and with nothing in it
+	// the citation check passes vacuously.
+	case ct.Mode == domain.ModeDiagnosis && from == domain.StageImplement && to == domain.StageVerify:
+		return []string{spec.DiagSectionEvidence}
+
+	// The done gate owes Evidence and nothing else. Causes is deliberately
+	// NOT required, for the same reason Slices is not required of a
+	// survey: "I could not find the cause, and here is what I ruled out"
+	// is an honest terminal for an investigation, and a gate that forbade
+	// it would be a gate that rewards inventing a cause. The evidence is
+	// what a diagnosis must have either way.
+	case ct.Mode == domain.ModeDiagnosis && to == domain.StageDone:
+		return []string{spec.DiagSectionEvidence}
 
 	// The goal design gate owes the objective in agreed words. The
 	// done-when list and the card list are structured blocks rather than
@@ -655,8 +687,8 @@ func requiredSections(kind domain.Kind, from, to domain.Stage) []string {
 // half of the undrafted-sections gate, split out so a caller can name the
 // same blocker Advance would refuse on without re-deriving which sections
 // an edge owes. Nil when the edge owes nothing or nothing is blank.
-func UndraftedGateSections(kind domain.Kind, from, to domain.Stage, artifact string) []string {
-	want := requiredSections(kind, from, to)
+func UndraftedGateSections(ct domain.CardType, from, to domain.Stage, artifact string) []string {
+	want := requiredSections(ct, from, to)
 	if len(want) == 0 {
 		return nil
 	}
@@ -678,7 +710,7 @@ func (e *Engine) undraftedBlockingGate(f domain.Feature) []string {
 	if err != nil {
 		return nil
 	}
-	return UndraftedGateSections(f.Kind, f.Stage, e.nextStage(f), string(raw))
+	return UndraftedGateSections(domain.CardTypeOf(&f), f.Stage, e.nextStage(f), string(raw))
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored `%%`

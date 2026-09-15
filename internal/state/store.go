@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS features (
 	goal_lanes      INTEGER NOT NULL DEFAULT 0,
 	goal_reserve    INTEGER NOT NULL DEFAULT 0,
 	goal_wrapup_at  TEXT NOT NULL DEFAULT '',
-	goal_partial    TEXT NOT NULL DEFAULT ''
+	goal_partial    TEXT NOT NULL DEFAULT '',
+	research_mode   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 
@@ -595,6 +596,10 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN goal_wrapup_at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN goal_partial TEXT NOT NULL DEFAULT ''`,
 	`CREATE INDEX IF NOT EXISTS features_goal ON features(goal_id)`,
+	// The research card's contract (domain.ResearchMode): empty is the
+	// survey every RS card written before diagnosis existed was, so no
+	// row needs a value.
+	`ALTER TABLE features ADD COLUMN research_mode TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -629,8 +634,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			budget_envelope, created_at, updated_at,
 			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
 			pr_repo, pr_number, pr_url, pr_head_sha,
-			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
+			research_mode)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -641,7 +647,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
 		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
-		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial)
+		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
+		string(f.Mode))
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -655,7 +662,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	created_at, updated_at,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha,
-	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial`
+	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
+	research_mode`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -678,7 +686,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
-	var goalID, goalDropped, foundBy, goalWrapUp string
+	var goalID, goalDropped, foundBy, goalWrapUp, mode string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -692,10 +700,12 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&created, &updated,
 		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
-		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial)
+		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
+		&mode)
 	if err != nil {
 		return f, err
 	}
+	f.Mode = domain.ResearchMode(mode)
 	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)
 	f.Severity = domain.Severity(severity)

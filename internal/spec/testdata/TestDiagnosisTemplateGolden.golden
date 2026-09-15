@@ -1,0 +1,53 @@
+# RS-009: Picker drops answers
+
+> answers vanish and the card parks
+
+## Symptom
+
+%% @gummi: what goes wrong, in the requester's own words — what was seen, where, and how often
+
+## Reproduction
+
+%% @gummi: how to see it happen; when it cannot be reproduced on demand, say so and name what the evidence is instead
+
+## Constraints
+
+%% @gummi: the bounds of the investigation (time, scope, what must not be touched)
+
+## Evidence
+
+%% @gummi: what the investigation observed — prose with inline `path:line` / `path:start-end` citations
+
+## Ruled out
+
+%% @gummi: candidate causes eliminated, and what eliminated each — this is what stops the fix cards re-walking dead ends
+
+## Causes
+
+%% @gummi: the causes found — one bullet each, saying why it produces the symptom; a symptom with two causes gets two bullets
+
+## Slices
+
+%% @gummi: the follow-on work, one row per cause — see the scaffold below
+
+```yaml
+# title / one-liner / kind (bug, feature) / depends-on / requirements (the causes this settles) / id (back-annotated)
+- title: example fix
+  one-liner: what it changes
+  kind: bug
+  depends-on: []
+  requirements: []
+  id: ""
+```
+
+## Out of scope
+
+%% @gummi: what this diagnosis deliberately won't explain or fix — each line is `- key: prose`
+
+## Open risks
+
+%% @gummi: open risks and what would de-risk each
+
+## Review
+
+%% @gummi: reviewer findings land here; the investigator resolves each one

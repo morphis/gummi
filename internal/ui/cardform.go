@@ -28,7 +28,7 @@ import (
 //
 // PROPOSAL-new-card.md holds the rationale and the settled decisions.
 type cardForm struct {
-	kind domain.Kind
+	ct domain.CardType
 
 	repo repoPicker
 	// origins caches each repository's parsed origin, resolved through
@@ -137,27 +137,23 @@ const (
 	cardStopButtons
 )
 
-var cardKinds = []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch, domain.KindGoal}
-
-// cardIDPrefix is what the `becomes` line shows for each kind: the id's
-// prefix without a number, since the number is minted only at Create.
-// FD/BG/RS are never spelled out anywhere else in the UI, so becomesLine
-// prints the kind word right beside the prefix here — this dialog is
-// where the id is minted, and the one place that owes the reader the
-// expansion.
-var cardIDPrefix = map[domain.Kind]string{domain.KindFeature: "FD", domain.KindBug: "BG", domain.KindResearch: "RS", domain.KindGoal: "GL"}
+// The kind row's choices are domain.CardTypes, which is five entries for
+// four kinds: research appears twice, once as the survey and once as the
+// diagnosis. They share the RS prefix because they are one kind, so the
+// `becomes` line's prefix does not tell them apart — the kind word
+// beside it does.
 
 // newCardForm builds the door. kind presets the kind row; repos and
 // hasDefault shape the repo row as in every other creation dialog;
 // lastRepo preselects the repo chosen last time this session (a name
 // that is not configured is ignored); cands are the cards the `after`
 // row may name; defaultEnvelope prefills the budget.
-func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, lastRepo string, cands []afterCand, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *cardForm {
+func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, lastRepo string, cands []afterCand, defaultEnvelope int, onSubmit func(formResult) tea.Cmd) *cardForm {
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
 	}
-	if !kind.Valid() {
-		kind = domain.KindFeature
+	if !ct.Valid() {
+		ct = domain.CardType{Kind: domain.KindFeature}
 	}
 	text := textarea.New()
 	text.CharLimit = 4096
@@ -180,7 +176,7 @@ func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, la
 		}
 	}
 	d := &cardForm{
-		kind: kind, repo: repo, origins: map[string]repoOrigin{},
+		ct: ct, repo: repo, origins: map[string]repoOrigin{},
 		text: text, env: env, profiles: profiles,
 		afterCands: cands, afterFilter: filter,
 		buttons:  newButtonRow(button{label: "Cancel"}, button{label: "Create"}, button{label: "Create & autopilot"}),
@@ -194,7 +190,7 @@ func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, la
 	} else {
 		d.setFocus(cardStopText)
 	}
-	d.text.Placeholder = cardPlaceholderFor(kind)
+	d.text.Placeholder = cardPlaceholderFor(ct)
 	return d
 }
 
@@ -205,10 +201,13 @@ func newCardForm(kind domain.Kind, profiles, repos []string, hasDefault bool, la
 // applied, and a feature card saw the bug headings it would never use.
 // setKind refreshes this whenever the kind row moves, so only the
 // selected kind's own hint is ever on screen.
-func cardPlaceholderFor(k domain.Kind) string {
+func cardPlaceholderFor(c domain.CardType) string {
 	head := "Describe it. The first line is the title.\n\n" +
 		"  #123 or an issue link on the first line: alt+g imports it\n"
-	switch k {
+	if c.Mode == domain.ModeDiagnosis {
+		return head + "  the rest becomes the symptom — what you saw, where, how often"
+	}
+	switch c.Kind {
 	case domain.KindBug:
 		return head + "  headings: Steps to reproduce · Expected · Actual · Environment"
 	case domain.KindResearch:
@@ -241,8 +240,11 @@ func (d *cardForm) SetText(s string) { d.text.SetValue(s) }
 // Text is the box's current content.
 func (d *cardForm) Text() string { return d.text.Value() }
 
-// Kind is the kind row's current choice.
-func (d *cardForm) Kind() domain.Kind { return d.kind }
+// Kind is the kind the row's current choice mints.
+func (d *cardForm) Kind() domain.Kind { return d.ct.Kind }
+
+// CardType is the row's current choice, kind and research mode together.
+func (d *cardForm) CardType() domain.CardType { return d.ct }
 
 // stops is the live focus ring, in tab order.
 func (d *cardForm) stops() []int {
@@ -253,7 +255,7 @@ func (d *cardForm) stops() []int {
 	s = append(s, cardStopText)
 	if d.expanded {
 		s = append(s, cardStopEnvelope, cardStopProfile)
-		if d.kind == domain.KindBug {
+		if d.ct.Kind == domain.KindBug {
 			s = append(s, cardStopSeverity)
 		}
 		s = append(s, cardStopAfter)
@@ -307,23 +309,23 @@ func (d *cardForm) setFocus(f int) {
 // hands focus to the next row rather than dangling. The placeholder is
 // re-picked too — it teaches what the free text turns into, and that
 // differs by kind (see cardPlaceholderFor).
-func (d *cardForm) setKind(k domain.Kind) {
-	d.kind = k
-	d.text.Placeholder = cardPlaceholderFor(k)
-	if d.focus == cardStopSeverity && k != domain.KindBug {
+func (d *cardForm) setKind(c domain.CardType) {
+	d.ct = c
+	d.text.Placeholder = cardPlaceholderFor(c)
+	if d.focus == cardStopSeverity && c.Kind != domain.KindBug {
 		d.setFocus(cardStopAfter)
 	}
 }
 
 func (d *cardForm) cycleKind(delta int) {
-	n := len(cardKinds)
+	n := len(domain.CardTypes)
 	i := 0
-	for j, k := range cardKinds {
-		if k == d.kind {
+	for j, c := range domain.CardTypes {
+		if c == d.ct {
 			i = j
 		}
 	}
-	d.setKind(cardKinds[((i+delta)%n+n)%n])
+	d.setKind(domain.CardTypes[((i+delta)%n+n)%n])
 }
 
 // origin resolves the chosen repo's origin, caching per name. The zero
@@ -677,11 +679,11 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	}
 	var env *int
 	trimmed := strings.TrimSpace(d.env.Value())
-	if trimmed == "" && d.kind == domain.KindGoal {
+	if trimmed == "" && d.ct.Kind == domain.KindGoal {
 		d.errText = "budget required — a goal's budget is the ceiling for everything it runs"
 		return false, nil
 	}
-	if trimmed == "" && d.kind == domain.KindResearch {
+	if trimmed == "" && d.ct.Kind == domain.KindResearch {
 		// "budget", like the row label and the collapsed "runs as"
 		// readout above it. A refusal is the one string in this dialog a
 		// reader is guaranteed to stop and read, so it is the last place
@@ -698,11 +700,11 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		env = &n
 	}
 	res := formResult{
-		Kind: d.kind, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
+		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.repo.name(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Start: start, FromPicker: d.fromPicker,
 	}
-	if d.kind == domain.KindBug {
+	if d.ct.Kind == domain.KindBug {
 		res.Severity = bugSeverityChoices[d.sev]
 	}
 	if d.imported != nil {
@@ -875,8 +877,8 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 	if _, err := domain.Slugify(title); err != nil {
 		return cardLabel(s, "becomes") + s.Error.Render("the first line needs a letter or digit to make a title")
 	}
-	out := cardIDPrefix[d.kind] + " (" + string(d.kind) + ") · " + title
-	if d.kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
+	out := d.ct.Prefix() + " (" + d.ct.Name() + ") · " + title
+	if d.ct.Kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
 		out += " · severity " + string(bugSeverityChoices[d.sev])
 		if d.imported != nil && d.imported.prop.Severity == bugSeverityChoices[d.sev] {
 			out += s.Faint.Render(" from label")
@@ -889,7 +891,7 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 func (d *cardForm) runsLine(s *theme.Styles) string {
 	env := strings.TrimSpace(d.env.Value())
 	switch {
-	case env == "" && (d.kind == domain.KindResearch || d.kind == domain.KindGoal):
+	case env == "" && (d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal):
 		env = s.Error.Render("budget required")
 	case env == "":
 		env = "default budget"
@@ -915,7 +917,7 @@ func joinIDs(ids []domain.FeatureID) string {
 // runs after — and the after list while that row has focus.
 func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 	hint := envelopeHintCapped
-	if d.kind == domain.KindResearch || d.kind == domain.KindGoal {
+	if d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal {
 		hint = envelopeHintRequired
 	}
 	rows := []string{
@@ -923,7 +925,7 @@ func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 		optionLabel(s, d.focus == cardStopEnvelope, "budget") + d.env.View() + " " + s.Faint.Render(hint),
 		optionLabel(s, d.focus == cardStopProfile, "profile") + choices(s, d.focus == cardStopProfile, d.profiles, d.profile, "", false),
 	}
-	if d.kind == domain.KindBug {
+	if d.ct.Kind == domain.KindBug {
 		labels := make([]string, len(bugSeverityChoices))
 		for i, sev := range bugSeverityChoices {
 			labels[i] = string(sev)
@@ -996,11 +998,11 @@ func (d *cardForm) afterListRows(s *theme.Styles, width int) []string {
 
 // View implements overlay.Dialog.
 func (d *cardForm) View(s *theme.Styles, w, h int) string {
-	kinds := make([]string, len(cardKinds))
+	kinds := make([]string, len(domain.CardTypes))
 	kindIdx := 0
-	for i, k := range cardKinds {
-		kinds[i] = string(k)
-		if k == d.kind {
+	for i, c := range domain.CardTypes {
+		kinds[i] = c.Name()
+		if c == d.ct {
 			kindIdx = i
 		}
 	}

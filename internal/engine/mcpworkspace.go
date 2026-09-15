@@ -616,9 +616,12 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("card_new: %w", err)
 	}
-	kind := domain.Kind(a.Kind)
-	if !kind.Valid() {
-		return "", fmt.Errorf("card_new: kind must be one of feature, bug, research (got %q)", a.Kind)
+	// The accepted set is unchanged apart from the new name: every
+	// domain.CardType, goal included (Valid() has always admitted it, and
+	// cardmint.Mint has always seeded a goal doc for it).
+	ct, ok := domain.ParseCardType(a.Kind)
+	if !ok {
+		return "", fmt.Errorf("card_new: kind must be one of feature, bug, research, diagnosis, goal (got %q)", a.Kind)
 	}
 	if strings.TrimSpace(a.Description) == "" {
 		return "", fmt.Errorf("card_new: description is required")
@@ -632,7 +635,7 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 		gate = norm
 	}
 	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
-		Kind: kind, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
+		Kind: ct.Kind, Mode: ct.Mode, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
 		Repo: a.Repo, RequireRepo: e.RequireRepo, GateApproval: gate,
 	})
 	if err != nil {
@@ -840,7 +843,7 @@ func cardNewTool() agent.ToolDef {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"kind":        map[string]any{"type": "string", "description": "One of feature, bug, research."},
+				"kind":        map[string]any{"type": "string", "description": "One of feature, bug, research, diagnosis, goal."},
 				"description": map[string]any{"type": "string", "description": "Free-form description. The first line becomes the title; anything beyond it seeds the design draft."},
 				"profile":     map[string]any{"type": "string", "description": "Optional model-role profile (workspace default if omitted)."},
 				"envelope":    map[string]any{"type": "integer", "description": "Optional credit budget; omit or 0 for no cap."},

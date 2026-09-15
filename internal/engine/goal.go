@@ -970,8 +970,12 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	for i := range rows {
 		r := &rows[i]
 		if r.ID == "" {
+			// Validate has already refused every row whose kind does not
+			// resolve, so the discard here can only be the feature default.
+			ct, _ := r.EffectiveType()
 			f, merr := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
-				Kind:         r.EffectiveKind(),
+				Kind:         ct.Kind,
+				Mode:         ct.Mode,
 				Description:  goalCardDescription(*goal, *r, itemText),
 				Profile:      goal.Profile,
 				Envelope:     envs[next],

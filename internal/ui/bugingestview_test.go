@@ -160,7 +160,7 @@ func TestBugImportEscUnwindsOneLevelAtATime(t *testing.T) {
 	if m.bugIngest.filtering {
 		t.Error("esc while filtering should move focus to the list")
 	}
-	parked := door(domain.KindBug, nil)
+	parked := door(domain.CardType{Kind: domain.KindBug}, nil)
 	m.pendingCard = parked
 	m.handleBugIngestKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.bugIngest != nil {

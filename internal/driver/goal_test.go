@@ -72,7 +72,7 @@ func TestDriveGoalEndToEnd(t *testing.T) {
 	h := goalHarness(t)
 	ctx := context.Background()
 	d := h.driver(Options{Envelope: 4000, Autonomous: true, GoalDoc: driverGoalDoc})
-	g, err := d.Create(ctx, domain.KindGoal, "Export works offline")
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestResumeGoalFlagsRefuseOtherCards(t *testing.T) {
 	h := newHarness(t, false, nil)
 	ctx := context.Background()
 	d := h.driver(Options{Until: domain.StagePlan})
-	f, err := d.Create(ctx, domain.KindFeature, "plain card")
+	f, err := d.Create(ctx, domain.CardType{Kind: domain.KindFeature}, "plain card")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestDriveGoalThatCannotMeetAnItemEndsPartial(t *testing.T) {
 	ctx := context.Background()
 	doc := strings.Replace(driverGoalDoc, "  depends_on: [local cache]\n", "", 1)
 	d := h.driver(Options{Envelope: 6000, Autonomous: true, GoalDoc: doc})
-	g, err := d.Create(ctx, domain.KindGoal, "Export works offline")
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
 	if err != nil {
 		t.Fatal(err)
 	}

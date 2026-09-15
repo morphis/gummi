@@ -23,12 +23,17 @@ type MaterializeOpts struct {
 	Repo string
 }
 
-// Materialize turns an approved IngestResult into real features (DESIGN
+// Materialize turns an approved IngestResult into real cards (DESIGN
 // §11.4, phase C): each proposal is minted into the todo backlog and its
 // draft is seeded with the extracted content, provenance, and
 // dependencies. IDs are minted in a first pass so dependency references
-// can resolve to FD-IDs; features are then created and their drafts
-// written. Returns the created features in proposal order.
+// can resolve to real ids; cards are then created and their drafts
+// written. Returns the created cards in proposal order.
+//
+// A proposal carries the kind it mints (domain.FeatureProposal.MintKind):
+// features for a spec ingest and a survey's slices, bugs for a
+// diagnosis's. Only those two — a decomposition that minted research or a
+// goal would be widening its own reach.
 //
 // Best-effort on failure: features created before an error are returned
 // alongside it, so a mid-batch failure leaves a diagnosable partial state
@@ -44,12 +49,18 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 	// bad title fails the batch cleanly instead of after consuming feature
 	// numbers for the proposals ahead of it.
 	slugs := make([]string, len(res.Proposals))
+	kinds := make([]domain.Kind, len(res.Proposals))
 	for i, p := range res.Proposals {
 		s, err := p.Slug()
 		if err != nil {
 			return nil, fmt.Errorf("proposal %q: %w", p.Title, err)
 		}
 		slugs[i] = s
+		// Same pre-flight reasoning as the slug: an unmintable kind fails
+		// the batch before any number is consumed.
+		if kinds[i], err = p.MintKind(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Pass 1: mint an ID/slug for every proposal, and index by title so
@@ -64,13 +75,13 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 		if err != nil {
 			return nil, err
 		}
-		id, err := domain.NewFeatureID(num)
+		id, err := domain.NewID(kinds[i], num)
 		if err != nil {
 			return nil, err
 		}
 		f := domain.Feature{
 			ID: id, Num: num, Title: p.Title, OneLiner: p.OneLiner, Slug: slugs[i],
-			Kind: domain.KindFeature, Stage: workflow.Initial(), Profile: opts.Profile,
+			Kind: kinds[i], Stage: workflow.Initial(), Profile: opts.Profile,
 			// Explicit for the same reason MaterializeBugs is: an ingested
 			// proposal carries no gate mandate of its own, and a stored
 			// empty string is a value every reader has to resolve rather
@@ -124,15 +135,29 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 	return created, nil
 }
 
-// writeSeededDraft materializes a feature's pre-populated draft under
-// .gummi/state/drafts/ (where drafts live until spec approval).
+// writeSeededDraft materializes a card's pre-populated draft under
+// .gummi/state/drafts/ (where drafts live until the design is approved).
+//
+// A bug gets the bug report shape, seeded through the same
+// domain.ParseBugBody path a typed or imported bug takes: the decompose
+// pass writes a slice's problem as prose, and a fix card whose report
+// spelled that prose into Summary/Reproduction/Expected vs actual is one
+// its design stage can start from. Its Root cause stays the %% prompt —
+// the diagnosis that proposed the row knows the cause, but the fix card's
+// design stage is what has to establish it against the code it is about
+// to change.
 func (e *Engine) writeSeededDraft(f domain.Feature, seed domain.DraftSeed, prov domain.DraftProvenance) error {
 	dir := e.cfg.Workspace.DraftsDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, spec.DraftFilename(&f))
-	return atomicfile.Write(path, []byte(spec.SeededTemplate(&f, seed, prov)), 0o600)
+	content := spec.SeededTemplate(&f, seed, prov)
+	if f.Kind == domain.KindBug {
+		report := domain.ParseBugBody(seed.Problem)
+		content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: prov.Source}, "")
+	}
+	return atomicfile.Write(path, []byte(content), 0o600)
 }
 
 // resolveDeps maps depends_on titles to "FD-NNN slug" labels where the

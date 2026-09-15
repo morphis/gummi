@@ -18,7 +18,7 @@ import (
 // Every stop now gets its own hint, and (kind/repo/buttons already did
 // this) every one of them names the row it is on.
 func TestCardFormHintNamesEachStop(t *testing.T) {
-	d := newCardForm(domain.KindBug, nil, nil, true, "", nil, 2400, nil)
+	d := newCardForm(domain.CardType{Kind: domain.KindBug}, nil, nil, true, "", nil, 2400, nil)
 	d.expanded = true
 
 	cases := []struct {

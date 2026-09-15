@@ -273,7 +273,7 @@ func rsCardShell(t *testing.T, repo string) (*Shell, domain.Feature) {
 // --- Step 1: the new-card dialog, research preset ---
 
 func rsDoor(profiles, repos []string, hasDefault bool, onSubmit func(formResult) tea.Cmd) *cardForm {
-	return newCardForm(domain.KindResearch, profiles, repos, hasDefault, "", nil, 1000, onSubmit)
+	return newCardForm(domain.CardType{Kind: domain.KindResearch}, profiles, repos, hasDefault, "", nil, 1000, onSubmit)
 }
 
 func TestRS_Form_SubmitCarriesBrief(t *testing.T) {

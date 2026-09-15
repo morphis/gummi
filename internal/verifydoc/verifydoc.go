@@ -1,10 +1,17 @@
 // Package verifydoc is the zero-token, deterministic Verify floor for a
 // research document (FD-076): no open user `%%` threads, every inline
-// `path:line` / `path:start-end` citation in Findings resolves against the
-// managed repo checkout, and the brief's Questions reconcile against the
-// Slices/Out of scope contract. No agent, model, or API is ever invoked —
-// Check is a pure function over the artifact text and a caller-supplied
-// view of the repo's files.
+// `path:line` / `path:start-end` citation in the evidence section resolves
+// against the managed repo checkout, and the document's checklist
+// reconciles against the Slices/Out of scope contract. No agent, model, or
+// API is ever invoked — Check is a pure function over the artifact text
+// and a caller-supplied view of the repo's files.
+//
+// Which headings those two sections are found under depends on the card's
+// research mode and is not this package's business to know: the caller
+// passes a spec.Layout. A survey cites under `## Findings` and reconciles
+// `## Questions`; a diagnosis cites under `## Evidence` and reconciles
+// `## Causes`. The checks themselves are identical, which is the reason
+// the mode is a layout rather than a second implementation.
 //
 // Citation format: a backtick-quoted `path:line` or `path:start-end` token
 // inside the Findings section, optionally followed (after only whitespace)
@@ -16,10 +23,10 @@
 //	return retryLoop()
 //	```
 //
-// Coverage contract: every bullet under `## Questions` must be answered —
-// its trimmed text must appear verbatim either in some slice's
-// `requirements` list (`## Slices`, fenced `yaml`) or as the key of an
-// explicit `- key: prose` line under `## Out of scope`.
+// Coverage contract: every bullet under the layout's coverage section must
+// be answered — its trimmed text must appear verbatim either in some
+// slice's `requirements` list (`## Slices`, fenced `yaml`) or as the key of
+// an explicit `- key: prose` line under `## Out of scope`.
 package verifydoc
 
 import (
@@ -52,8 +59,9 @@ type CitationIssue struct {
 	Reason   string
 }
 
-// CoverageIssue names one brief question with neither a slice nor an
-// out-of-scope line answering it.
+// CoverageIssue names one coverage-section bullet — a survey's question,
+// a diagnosis's cause — with neither a slice nor an out-of-scope line
+// answering it.
 type CoverageIssue struct {
 	Item   string // the unmapped Questions bullet, verbatim
 	Reason string
@@ -64,12 +72,12 @@ type CoverageIssue struct {
 // repo: cited path -> its current lines (0-indexed slice, 1-based line
 // numbers in citations). Checks run in order — open threads, citations,
 // coverage — and every issue found is aggregated into one report.
-func Check(artifact string, files map[string][]string) Report {
+func Check(artifact string, files map[string][]string, l spec.Layout) Report {
 	doc := spec.Parse(artifact)
 	return Report{
 		OpenThreads: len(doc.UserOpenThreads()),
-		Citations:   findCitations(artifact, files),
-		Coverage:    findCoverage(artifact),
+		Citations:   findCitations(artifact, files, l),
+		Coverage:    findCoverage(artifact, l),
 	}
 }
 
@@ -77,10 +85,10 @@ func Check(artifact string, files map[string][]string) Report {
 // token. Paths never contain a backtick, whitespace, or colon.
 var citationRe = regexp.MustCompile("`([^`\\s:]+):(\\d+)(?:-(\\d+))?`")
 
-// findCitations scans the artifact's Findings section for citation tokens,
+// findCitations scans the artifact's evidence section for citation tokens,
 // in document order, and resolves each against files.
-func findCitations(artifact string, files map[string][]string) []CitationIssue {
-	body, ok := spec.ViewSection(artifact, "Findings")
+func findCitations(artifact string, files map[string][]string, l spec.Layout) []CitationIssue {
+	body, ok := spec.ViewSection(artifact, l.Evidence)
 	if !ok {
 		return nil
 	}
@@ -102,12 +110,13 @@ func findCitations(artifact string, files map[string][]string) []CitationIssue {
 }
 
 // CitedPaths returns the distinct, document-order paths named by every
-// citation token in the artifact's Findings section, whether or not the
+// citation token in the artifact's evidence section, whether or not the
 // citation ultimately resolves. Callers use this to build the files map
 // Check needs — reading only the paths a citation actually names, never
-// the whole checkout.
-func CitedPaths(artifact string) []string {
-	body, ok := spec.ViewSection(artifact, "Findings")
+// the whole checkout. Pass the same layout both calls use, or the files
+// map will be built from a section Check does not read.
+func CitedPaths(artifact string, l spec.Layout) []string {
+	body, ok := spec.ViewSection(artifact, l.Evidence)
 	if !ok {
 		return nil
 	}
@@ -242,11 +251,11 @@ type sliceEntry struct {
 
 var yamlFenceRe = regexp.MustCompile("(?s)```ya?ml\\s*\\n(.*?)```")
 
-// findCoverage reconciles every `## Questions` bullet against the union of
-// every slice's `requirements` entries and every `## Out of scope` line's
-// key, in document order.
-func findCoverage(artifact string) []CoverageIssue {
-	questions := bullets(artifact, "Questions")
+// findCoverage reconciles every bullet in the layout's coverage section
+// against the union of every slice's `requirements` entries and every
+// `## Out of scope` line's key, in document order.
+func findCoverage(artifact string, l spec.Layout) []CoverageIssue {
+	questions := bullets(artifact, l.Coverage)
 	if len(questions) == 0 {
 		return nil
 	}

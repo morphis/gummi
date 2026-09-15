@@ -324,3 +324,95 @@ func TestIngestResearchThroughMaterialize(t *testing.T) {
 		t.Errorf("draft[1] in-batch dependency not resolved to FD-ID:\n%s", draft1)
 	}
 }
+
+// diagnosisCard is researchCard in the diagnosis mode.
+func diagnosisCardFixture(num int, title string) domain.Feature {
+	f := researchCard(num, title)
+	f.Mode = domain.ModeDiagnosis
+	return f
+}
+
+const diagSlices = "# RS-002: picker drops answers\n\n" +
+	"## Slices\n\n" +
+	"```yaml\n" +
+	"- title: reject unlabelled options\n" +
+	"  one-liner: refuse the malformed call at parseAsk\n" +
+	"  requirements: [an unlabelled option is unanswerable]\n" +
+	"  id: \"\"\n" +
+	"- title: say why the picker refused\n" +
+	"  one-liner: explain the drop instead of swallowing it\n" +
+	"  kind: feature\n" +
+	"  requirements: [did not fit reads as does not exist]\n" +
+	"  id: \"\"\n" +
+	"```\n"
+
+// TestDiagnosisSlicesMintFixes: a diagnosis's rows default to bugs, which
+// is the difference from a survey that the whole mode exists for, and a
+// row that names a kind still wins — a diagnosis that finds a missing
+// guard rather than a broken one proposes a feature.
+func TestDiagnosisSlicesMintFixes(t *testing.T) {
+	e, root := ingestResearchEngine(t)
+	card := diagnosisCardFixture(2, "picker drops answers")
+	writeResearchArtifact(t, root, card, diagSlices)
+
+	res, err := e.IngestResearch(context.Background(), card)
+	if err != nil {
+		t.Fatalf("IngestResearch: %v", err)
+	}
+	if len(res.Proposals) != 2 {
+		t.Fatalf("proposals = %d, want 2", len(res.Proposals))
+	}
+	if res.Proposals[0].Kind != domain.KindBug {
+		t.Errorf("a diagnosis row with no kind = %q, want bug", res.Proposals[0].Kind)
+	}
+	if res.Proposals[1].Kind != domain.KindFeature {
+		t.Errorf("an explicit `kind: feature` row = %q, want feature", res.Proposals[1].Kind)
+	}
+}
+
+// TestSurveySlicesStillMintFeatures: the default the other way round, so
+// the mode is what changed and not the parser.
+func TestSurveySlicesStillMintFeatures(t *testing.T) {
+	e, root := ingestResearchEngine(t)
+	card := researchCard(3, "widget perf")
+	writeResearchArtifact(t, root, card, slicesHappyPath)
+
+	res, err := e.IngestResearch(context.Background(), card)
+	if err != nil {
+		t.Fatalf("IngestResearch: %v", err)
+	}
+	for i, p := range res.Proposals {
+		if p.Kind != domain.KindFeature {
+			t.Errorf("survey proposal %d = %q, want feature", i, p.Kind)
+		}
+	}
+}
+
+// TestSliceKindRefusedLoudly: a row naming a kind a decomposition may not
+// mint fails the whole pass rather than quietly becoming a feature.
+func TestSliceKindRefusedLoudly(t *testing.T) {
+	e, root := ingestResearchEngine(t)
+	card := diagnosisCardFixture(4, "bad kind")
+	writeResearchArtifact(t, root, card, strings.Replace(diagSlices, "  kind: feature\n", "  kind: goal\n", 1))
+
+	if _, err := e.IngestResearch(context.Background(), card); err == nil {
+		t.Fatal("a `kind: goal` slice row should be refused")
+	} else if !strings.Contains(err.Error(), "goal") {
+		t.Errorf("the refusal should name the offending kind: %v", err)
+	}
+}
+
+// TestDiagnosisScaffoldRowSkipped: the diagnosis template's own example
+// row is scaffold, the same way the survey's is, so an untouched document
+// decomposes to nothing rather than to one card called "example fix".
+func TestDiagnosisScaffoldRowSkipped(t *testing.T) {
+	e, root := ingestResearchEngine(t)
+	card := diagnosisCardFixture(5, "untouched")
+	writeResearchArtifact(t, root, card, spec.DiagnosisTemplate(&card))
+
+	if _, err := e.IngestResearch(context.Background(), card); err == nil {
+		t.Fatal("an untouched diagnosis document has no usable proposals")
+	} else if !strings.Contains(err.Error(), "no usable proposals") {
+		t.Errorf("unexpected refusal: %v", err)
+	}
+}

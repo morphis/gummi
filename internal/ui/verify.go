@@ -210,8 +210,9 @@ func (m *Shell) runDocVerify(f domain.Feature) tea.Cmd {
 		return nil
 	}
 	artifact := string(raw)
-	files := readCitedFiles(mgr.RepoRoot(), verifydoc.CitedPaths(artifact))
-	report := verifydoc.Check(artifact, files)
+	layout := spec.LayoutOf(&f)
+	files := readCitedFiles(mgr.RepoRoot(), verifydoc.CitedPaths(artifact, layout))
+	report := verifydoc.Check(artifact, files, layout)
 	if report.Pass() {
 		m.notice = noticeMsg{text: string(f.ID) + ": document verify — clean"}
 		return nil

@@ -943,7 +943,7 @@ func TestRequiredSections(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := requiredSections(c.kind, c.from, c.to)
+			got := requiredSections(domain.CardType{Kind: c.kind}, c.from, c.to)
 			if len(got) != len(c.want) {
 				t.Fatalf("requiredSections(%s, %s, %s) = %v, want %v", c.kind, c.from, c.to, got, c.want)
 			}
@@ -1080,7 +1080,7 @@ func TestResearchGatesOweSectionsOnEveryEdge(t *testing.T) {
 		{"done", domain.StageVerify, domain.StageDone, []string{"Findings"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := UndraftedGateSections(domain.KindResearch, tc.from, tc.to, blank)
+			got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, tc.from, tc.to, blank)
 			if len(got) != len(tc.want) {
 				t.Fatalf("undrafted = %v, want %v", got, tc.want)
 			}
@@ -1110,7 +1110,7 @@ func TestResearchGatesPassOnADraftedDocument(t *testing.T) {
 		{domain.StageImplement, domain.StageVerify},
 		{domain.StageVerify, domain.StageDone},
 	} {
-		if got := UndraftedGateSections(domain.KindResearch, edge[0], edge[1], doc); got != nil {
+		if got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, edge[0], edge[1], doc); got != nil {
 			t.Errorf("%s→%s: undrafted = %v, want none", edge[0], edge[1], got)
 		}
 	}
@@ -1130,12 +1130,12 @@ func TestResearchDoneGateAllowsAZeroSliceCard(t *testing.T) {
 		"## Findings\n\nThe retry path re-enters the meter at `internal/meter.go:42`.\n\n" +
 		"## Slices\n\n%% @gummi: the proposed follow-on work, one row per slice\n"
 
-	if got := UndraftedGateSections(domain.KindResearch, domain.StageVerify, domain.StageDone, doc); len(got) != 0 {
+	if got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, domain.StageVerify, domain.StageDone, doc); len(got) != 0 {
 		t.Fatalf("undrafted = %v, want none: a surveyed card with nothing to mint still reaches done", got)
 	}
 	// The evidence is still owed, so the gate has not simply been switched off.
 	empty := "# RS-003: quota accounting\n\n## Findings\n\n%% @gummi: what the investigation learned\n"
-	if got := UndraftedGateSections(domain.KindResearch, domain.StageVerify, domain.StageDone, empty); len(got) != 1 || got[0] != "Findings" {
+	if got := UndraftedGateSections(domain.CardType{Kind: domain.KindResearch}, domain.StageVerify, domain.StageDone, empty); len(got) != 1 || got[0] != "Findings" {
 		t.Fatalf("undrafted = %v, want [Findings]", got)
 	}
 }
@@ -1205,5 +1205,59 @@ func TestAdvanceFromTodoIgnoresComments(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "also cover the rm command?") {
 		t.Fatalf("the user's comment did not survive the crossing:\n%s", raw)
+	}
+}
+
+// TestDiagnosisGateSections: the diagnosis edges owe their own sections,
+// and the survey's rows are untouched — the two are selected by the mode,
+// not by the kind they share.
+func TestDiagnosisGateSections(t *testing.T) {
+	diag := domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}
+	survey := domain.CardType{Kind: domain.KindResearch}
+	for _, tc := range []struct {
+		name     string
+		ct       domain.CardType
+		from, to domain.Stage
+		want     []string
+	}{
+		{"diagnosis design", diag, domain.StagePlan, domain.StageImplement, []string{"Reproduction", "Constraints"}},
+		{"diagnosis build", diag, domain.StageImplement, domain.StageVerify, []string{"Evidence"}},
+		{"diagnosis done", diag, domain.StageVerify, domain.StageDone, []string{"Evidence"}},
+		{"diagnosis kickoff owes nothing", diag, domain.StageTodo, domain.StagePlan, nil},
+		{"survey design is unchanged", survey, domain.StagePlan, domain.StageImplement, []string{"Questions", "Constraints", "Direction"}},
+		{"survey done is unchanged", survey, domain.StageVerify, domain.StageDone, []string{"Findings"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := requiredSections(tc.ct, tc.from, tc.to)
+			if len(got) != len(tc.want) {
+				t.Fatalf("requiredSections = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("requiredSections = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestBlankDiagnosisIsUndraftedAtEveryGate: the reason the rows above
+// exist. A diagnosis document nobody wrote in must not walk todo→done on
+// four keypresses any more than a blank research one may.
+func TestBlankDiagnosisIsUndraftedAtEveryGate(t *testing.T) {
+	card := domain.Feature{
+		ID: "RS-009", Num: 9, Kind: domain.KindResearch, Mode: domain.ModeDiagnosis,
+		Title: "why", Slug: "why", Stage: domain.StagePlan,
+	}
+	blank := spec.DiagnosisTemplate(&card)
+	ct := domain.CardTypeOf(&card)
+	for _, tc := range []struct{ from, to domain.Stage }{
+		{domain.StagePlan, domain.StageImplement},
+		{domain.StageImplement, domain.StageVerify},
+		{domain.StageVerify, domain.StageDone},
+	} {
+		if got := UndraftedGateSections(ct, tc.from, tc.to, blank); len(got) == 0 {
+			t.Errorf("%s→%s: a blank diagnosis should be refused, got nothing undrafted", tc.from, tc.to)
+		}
 	}
 }

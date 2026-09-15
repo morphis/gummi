@@ -204,3 +204,77 @@ func TestMaterializeUnknownRepo(t *testing.T) {
 		t.Errorf("no features should exist after a rejected batch, got %d", len(all))
 	}
 }
+
+// TestMaterializeMintsBugProposalsAsBugs: the mint honours each
+// proposal's kind, so a diagnosis's slices arrive on the board as BG
+// cards carrying a bug report — not FD cards carrying a spec.
+func TestMaterializeMintsBugProposalsAsBugs(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	res := domain.IngestResult{
+		SourcePath: "RS-009 picker-drops-answers",
+		Proposals: []domain.FeatureProposal{
+			{
+				Title: "Reject unlabelled options", OneLiner: "refuse the malformed call",
+				Kind:  domain.KindBug,
+				Draft: domain.DraftSeed{Problem: "An option with no label renders a blank row.\n\n## Steps to reproduce\n\nemit an option without a label"},
+			},
+			{Title: "Explain the refusal", OneLiner: "say why", Draft: domain.DraftSeed{Problem: "The keystroke vanishes."}},
+		},
+	}
+	created, err := e.Materialize(context.Background(), res, MaterializeOpts{Envelope: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("created %d, want 2", len(created))
+	}
+	if created[0].Kind != domain.KindBug || !strings.HasPrefix(string(created[0].ID), "BG-") {
+		t.Errorf("proposal[0] minted as %s %s, want a BG bug", created[0].Kind, created[0].ID)
+	}
+	if created[1].Kind != domain.KindFeature || !strings.HasPrefix(string(created[1].ID), "FD-") {
+		t.Errorf("proposal[1] minted as %s %s, want an FD feature", created[1].Kind, created[1].ID)
+	}
+	// the bug's draft is a bug report, and the seed's headings routed into
+	// its sections the same way a typed or imported bug's do
+	draft, err := os.ReadFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&created[0])))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(draft)
+	for _, want := range []string{"## Summary", "## Reproduction", "## Root cause"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the bug's draft has no %s:\n%s", want, body)
+		}
+	}
+	if repro, ok := spec.ViewSection(body, "Reproduction"); !ok || !strings.Contains(repro, "emit an option without a label") {
+		t.Errorf("the seed's reproduction heading did not route into the report: %q", repro)
+	}
+	// Root cause stays the prompt: the diagnosis knows the cause, but the
+	// fix card's own design stage is what establishes it against the code.
+	if got := spec.UndraftedSections(body, []string{"Root cause"}); len(got) != 1 {
+		t.Error("Root cause should still be the %% prompt on a minted fix card")
+	}
+}
+
+// TestMaterializeRefusesAnUnmintableProposalKind: before any number is
+// consumed, matching the slug pre-flight beside it.
+func TestMaterializeRefusesAnUnmintableProposalKind(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	res := domain.IngestResult{Proposals: []domain.FeatureProposal{{Title: "a goal", Kind: domain.KindGoal}}}
+	if _, err := e.Materialize(context.Background(), res, MaterializeOpts{Envelope: 200}); err == nil {
+		t.Fatal("a goal proposal should be refused")
+	}
+	all, err := store.ListFeatures(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Errorf("a refused batch minted %d cards", len(all))
+	}
+}

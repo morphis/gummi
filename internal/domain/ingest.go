@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // Ingestion turns an existing document (a PRD, a design doc) into a set
 // of pre-seeded features (DESIGN §11). An architect pass decomposes the
 // source into PR-sized slices; gummi reviews and materializes them. The
@@ -26,6 +28,25 @@ type FeatureProposal struct {
 	SourceRefs []string // section headings / ranges this slice came from
 	DependsOn  []string // titles of other proposals this one needs; resolved to enforced feature_deps edges by Materialize
 	Draft      DraftSeed
+	// Kind is what this proposal mints. Empty reads as KindFeature, which
+	// is what every spec-ingest proposal is and what a survey's slices
+	// are; a diagnosis's slices are fixes, so its rows carry KindBug.
+	// Only KindFeature and KindBug can be minted this way — a proposal
+	// that minted a research card or a goal would be a decomposition that
+	// widened its own reach.
+	Kind Kind
+}
+
+// MintKind resolves the kind this proposal mints, defaulting the empty
+// value and refusing the two kinds a decomposition may not create.
+func (p FeatureProposal) MintKind() (Kind, error) {
+	switch p.Kind {
+	case "", KindFeature:
+		return KindFeature, nil
+	case KindBug:
+		return KindBug, nil
+	}
+	return "", fmt.Errorf("proposal %q: cannot mint a %s card from a slice row", p.Title, p.Kind)
 }
 
 // Slug derives the proposal's branch/filename slug from its title, with

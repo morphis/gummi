@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -43,8 +44,8 @@ func TestCreationDialogsPrefillDefaultEnvelope(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	want := strconv.Itoa(DefaultEnvelopeCredits)
 	views := map[string]string{}
-	for _, kind := range cardKinds {
-		views[string(kind)] = newCardForm(kind, nil, nil, true, "", nil, DefaultEnvelopeCredits, nil).View(s, 80, 24)
+	for _, ct := range domain.CardTypes {
+		views[ct.Name()] = newCardForm(ct, nil, nil, true, "", nil, DefaultEnvelopeCredits, nil).View(s, 80, 24)
 	}
 	for name, view := range views {
 		if !strings.Contains(view, want) {

@@ -85,7 +85,7 @@ func TestCreateFeatureRequiresRepoWhenNoDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = d.createFeature(context.Background(), domain.KindFeature, "a card with nowhere to live")
+	_, err = d.createFeature(context.Background(), domain.CardType{Kind: domain.KindFeature}, "a card with nowhere to live")
 	if err == nil {
 		t.Fatal("createFeature succeeded with no repo named and no default configured")
 	}
@@ -107,7 +107,7 @@ func TestCreateFeatureRequiresRepoWhenNoDefault(t *testing.T) {
 func TestCreateFeatureAcceptsNamedRepo(t *testing.T) {
 	d, _, _ := reposOnlyDriver(t, Options{Repo: "b"})
 
-	f, err := d.createFeature(context.Background(), domain.KindFeature, "a card that names its repo")
+	f, err := d.createFeature(context.Background(), domain.CardType{Kind: domain.KindFeature}, "a card that names its repo")
 	if err != nil {
 		t.Fatalf("createFeature with --repo b: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestCreateFeatureAcceptsNamedRepo(t *testing.T) {
 func TestCreateFeatureRejectsUnknownRepoWithoutPromisingADefault(t *testing.T) {
 	d, _, _ := reposOnlyDriver(t, Options{Repo: "nope"})
 
-	_, err := d.createFeature(context.Background(), domain.KindFeature, "a card in a repo that isn't there")
+	_, err := d.createFeature(context.Background(), domain.CardType{Kind: domain.KindFeature}, "a card in a repo that isn't there")
 	if err == nil {
 		t.Fatal("createFeature succeeded with an unconfigured repo")
 	}

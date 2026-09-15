@@ -45,8 +45,8 @@ func TestDialogDescSize(t *testing.T) {
 
 // door builds a new-card dialog with no repositories and no seams: the
 // shape every unit test below starts from.
-func door(kind domain.Kind, onSubmit func(formResult) tea.Cmd) *cardForm {
-	return newCardForm(kind, []string{"thrifty", "premium"}, nil, false, "", nil, 2400, onSubmit)
+func door(ct domain.CardType, onSubmit func(formResult) tea.Cmd) *cardForm {
+	return newCardForm(ct, []string{"thrifty", "premium"}, nil, false, "", nil, 2400, onSubmit)
 }
 
 func doorKey(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code, Text: string(code)} }
@@ -65,7 +65,7 @@ var (
 func TestCardFormSizing(t *testing.T) {
 	styles := theme.New(theme.GummiDark())
 	for _, area := range []struct{ w, h int }{{60, 20}, {100, 30}, {200, 60}} {
-		form := door(domain.KindFeature, nil)
+		form := door(domain.CardType{Kind: domain.KindFeature}, nil)
 		view := form.View(styles, area.w, area.h)
 		lines := strings.Split(form.text.View(), "\n")
 		wantW, _ := dialogDescSize(area.w, area.h, 0)
@@ -85,7 +85,7 @@ func TestCardFormSizing(t *testing.T) {
 
 // TestCardFormCharLimit: the text accepts up to 4096 characters.
 func TestCardFormCharLimit(t *testing.T) {
-	form := door(domain.KindFeature, nil)
+	form := door(domain.CardType{Kind: domain.KindFeature}, nil)
 	long := strings.Repeat("a", 4096)
 	form.SetText(long)
 	if got := len(form.Text()); got != 4096 {
@@ -96,24 +96,30 @@ func TestCardFormCharLimit(t *testing.T) {
 // TestCardFormOpensInTextWithKindPreset: with nothing to choose, focus
 // starts in the text, and the preset kind is the row's choice.
 func TestCardFormOpensInTextWithKindPreset(t *testing.T) {
-	for _, kind := range cardKinds {
-		form := door(kind, nil)
+	for _, ct := range domain.CardTypes {
+		form := door(ct, nil)
 		if form.focus != cardStopText || !form.text.Focused() {
-			t.Errorf("%s: focus = %d, want the text", kind, form.focus)
+			t.Errorf("%s: focus = %d, want the text", ct.Name(), form.focus)
 		}
-		if form.Kind() != kind {
-			t.Errorf("kind = %q, want %q", form.Kind(), kind)
+		if form.CardType() != ct {
+			t.Errorf("card type = %q, want %q", form.CardType().Name(), ct.Name())
 		}
 	}
-	if form := door("bogus", nil); form.Kind() != domain.KindFeature {
+	bogus := domain.CardType{Kind: "bogus"}
+	if form := door(bogus, nil); form.Kind() != domain.KindFeature {
 		t.Errorf("an invalid preset should read as feature, got %q", form.Kind())
+	}
+	// A mode on a kind that has none is just as invalid as an unknown
+	// kind: it names no entry on the row, so there is nothing to select.
+	if form := door(domain.CardType{Kind: domain.KindBug, Mode: domain.ModeDiagnosis}, nil); form.Kind() != domain.KindFeature {
+		t.Errorf("a mode on a bug should read as feature, got %q", form.CardType().Name())
 	}
 }
 
 // TestCardFormKindRowCycles: ←/→ on the kind row move it; a printable
 // key there falls through to the text instead of doing nothing.
 func TestCardFormKindRowCycles(t *testing.T) {
-	form := door(domain.KindFeature, nil)
+	form := door(domain.CardType{Kind: domain.KindFeature}, nil)
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // buttons
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // after (expands)
 	form.setFocus(cardStopKind)
@@ -121,10 +127,19 @@ func TestCardFormKindRowCycles(t *testing.T) {
 	if form.Kind() != domain.KindBug {
 		t.Fatalf("→ on kind = %q, want bug", form.Kind())
 	}
+	// research and diagnosis are two stops on the row and one kind, so
+	// stepping past research lands on a card that is still RS.
 	form.HandleKey(keyRight)
+	if ct := form.CardType(); ct != (domain.CardType{Kind: domain.KindResearch}) {
+		t.Fatalf("→ past bug = %q, want research", ct.Name())
+	}
+	form.HandleKey(keyRight)
+	if ct := form.CardType(); ct.Kind != domain.KindResearch || ct.Mode != domain.ModeDiagnosis {
+		t.Fatalf("→ past research = %q, want diagnosis", ct.Name())
+	}
 	form.HandleKey(keyRight)
 	if form.Kind() != domain.KindGoal {
-		t.Fatalf("→ past research = %q, want goal", form.Kind())
+		t.Fatalf("→ past diagnosis = %q, want goal", form.Kind())
 	}
 	form.HandleKey(keyRight)
 	if form.Kind() != domain.KindFeature {
@@ -140,7 +155,7 @@ func TestCardFormKindRowCycles(t *testing.T) {
 // envelope, profile, (severity for a bug), after — then the buttons, and
 // wraps. The repo stop is absent when there is nothing to choose.
 func TestCardFormTabOrder(t *testing.T) {
-	form := door(domain.KindFeature, nil)
+	form := door(domain.CardType{Kind: domain.KindFeature}, nil)
 	if form.expanded {
 		t.Fatal("options should open collapsed")
 	}
@@ -153,7 +168,7 @@ func TestCardFormTabOrder(t *testing.T) {
 	if !form.expanded {
 		t.Error("tabbing onto the runs line should have expanded the options")
 	}
-	bug := door(domain.KindBug, nil)
+	bug := door(domain.CardType{Kind: domain.KindBug}, nil)
 	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopSeverity, cardStopAfter} {
 		if bug.focus != want {
 			t.Fatalf("bug focus = %d, want %d", bug.focus, want)
@@ -162,7 +177,7 @@ func TestCardFormTabOrder(t *testing.T) {
 	}
 	// a severity stop that stops existing hands focus on
 	bug.setFocus(cardStopSeverity)
-	bug.setKind(domain.KindFeature)
+	bug.setKind(domain.CardType{Kind: domain.KindFeature})
 	if bug.focus != cardStopAfter {
 		t.Errorf("focus after the severity row vanished = %d, want after", bug.focus)
 	}
@@ -172,7 +187,7 @@ func TestCardFormTabOrder(t *testing.T) {
 // collapsing from an option row returns focus to the text.
 func TestCardFormAltOTogglesOptions(t *testing.T) {
 	s := theme.New(theme.GummiDark())
-	form := door(domain.KindBug, nil)
+	form := door(domain.CardType{Kind: domain.KindBug}, nil)
 	form.HandleKey(altO)
 	if !form.expanded || form.focus != cardStopText {
 		t.Fatalf("alt+o from the text: expanded=%v focus=%d", form.expanded, form.focus)
@@ -203,7 +218,7 @@ func TestCardFormEnvelope(t *testing.T) {
 	var submitted bool
 	mk := func() *cardForm {
 		submitted = false
-		form := door(domain.KindFeature, func(res formResult) tea.Cmd { got, submitted = res, true; return nil })
+		form := door(domain.CardType{Kind: domain.KindFeature}, func(res formResult) tea.Cmd { got, submitted = res, true; return nil })
 		form.SetText("dark mode")
 		return form
 	}
@@ -244,7 +259,7 @@ func TestCardFormEnvelope(t *testing.T) {
 // button pressed.
 func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 	var got formResult
-	form := door(domain.KindBug, func(res formResult) tea.Cmd { got = res; return nil })
+	form := door(domain.CardType{Kind: domain.KindBug}, func(res formResult) tea.Cmd { got = res; return nil })
 	form.SetText("Login loops\n\nSSO users bounce back")
 	form.HandleKey(altO)
 	form.setFocus(cardStopSeverity)
@@ -264,7 +279,7 @@ func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 		t.Errorf("desc/source = %q %q", got.Desc, got.Source)
 	}
 	// Cancel is the first button
-	form = door(domain.KindFeature, func(formResult) tea.Cmd { t.Fatal("cancel submitted"); return nil })
+	form = door(domain.CardType{Kind: domain.KindFeature}, func(formResult) tea.Cmd { t.Fatal("cancel submitted"); return nil })
 	form.setFocus(cardStopButtons)
 	form.buttons.SetCursor(0)
 	if done, _ := form.HandleKey(keyEnter); !done {
@@ -286,7 +301,7 @@ func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 // visible on this line now.
 func TestCardFormBecomesLine(t *testing.T) {
 	s := theme.New(theme.GummiDark())
-	form := door(domain.KindBug, nil)
+	form := door(domain.CardType{Kind: domain.KindBug}, nil)
 	form.SetText("Login loops")
 	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "becomes  BG (bug) · Login loops") {
 		t.Errorf("becomes line missing:\n%s", v)
@@ -307,14 +322,14 @@ func TestCardFormBecomesLine(t *testing.T) {
 // TestCardFormTextEditing: alt+enter and ctrl+j insert newlines, a
 // multiline paste keeps them, and down moves the cursor rather than focus.
 func TestCardFormTextEditing(t *testing.T) {
-	form := door(domain.KindBug, nil)
+	form := door(domain.CardType{Kind: domain.KindBug}, nil)
 	form.SetText("Crash on empty diff")
 	form.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	form.HandleKey(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	if got := form.Text(); got != "Crash on empty diff\n\n" {
 		t.Fatalf("text after alt+enter, ctrl+j = %q", got)
 	}
-	form = door(domain.KindBug, nil)
+	form = door(domain.CardType{Kind: domain.KindBug}, nil)
 	form.HandlePaste(tea.PasteMsg{Content: "Crash on empty diff\n\nRepro: stage nothing, hit c."})
 	if got := form.Text(); got != "Crash on empty diff\n\nRepro: stage nothing, hit c." {
 		t.Fatalf("text after paste = %q", got)
@@ -334,7 +349,7 @@ func TestCardFormTextEditing(t *testing.T) {
 func TestCardFormReferenceIsAnOffer(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	fetched := false
-	form := newCardForm(domain.KindBug, nil, []string{"lxd", "incus"}, false, "", nil, 2400, nil)
+	form := newCardForm(domain.CardType{Kind: domain.KindBug}, nil, []string{"lxd", "incus"}, false, "", nil, 2400, nil)
 	form.onImport = func(domain.IssueRef, string) tea.Cmd { fetched = true; return nil }
 	form.setFocus(cardStopText)
 	form.SetText("#18409")
@@ -371,7 +386,7 @@ func TestCardFormImportReplacesOnlyTheReference(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	var asked domain.IssueRef
 	var got formResult
-	form := newCardForm(domain.KindFeature, nil, []string{"lxd", "incus"}, false, "lxd", nil, 2400, func(res formResult) tea.Cmd { got = res; return nil })
+	form := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"lxd", "incus"}, false, "lxd", nil, 2400, func(res formResult) tea.Cmd { got = res; return nil })
 	form.originFor = func(string) repoOrigin { return repoOrigin{host: "github.com", ownerRepo: "canonical/lxd"} }
 	form.onImport = func(ref domain.IssueRef, _ string) tea.Cmd { asked = ref; return nil }
 	form.SetText("#18409\n\nmy own note under it")
@@ -412,7 +427,7 @@ func TestCardFormImportReplacesOnlyTheReference(t *testing.T) {
 		t.Errorf("result did not carry the import: %+v", got)
 	}
 	// the severity was read for a bug: flip the kind and check
-	form.setKind(domain.KindBug)
+	form.setKind(domain.CardType{Kind: domain.KindBug})
 	form.HandleKey(keyEnter)
 	if got.Severity != domain.SeverityHigh {
 		t.Errorf("severity = %q, want high from the label", got.Severity)
@@ -432,7 +447,7 @@ func TestCardFormImportReplacesOnlyTheReference(t *testing.T) {
 // origin is unknown.
 func TestCardFormFullReferenceNeedsNoRepoOrigin(t *testing.T) {
 	var asked domain.IssueRef
-	form := door(domain.KindBug, nil)
+	form := door(domain.CardType{Kind: domain.KindBug}, nil)
 	form.onImport = func(ref domain.IssueRef, _ string) tea.Cmd { asked = ref; return nil }
 	form.SetText("https://github.com/canonical/lxd/issues/7")
 	form.HandleKey(altG)
@@ -450,7 +465,7 @@ func TestCardFormFullReferenceNeedsNoRepoOrigin(t *testing.T) {
 // the picker, popping the form; with no repo chosen it asks for one.
 func TestCardFormAltGBrowsesWithoutAReference(t *testing.T) {
 	browsed := ""
-	form := newCardForm(domain.KindBug, nil, []string{"lxd", "incus"}, false, "", nil, 2400, nil)
+	form := newCardForm(domain.CardType{Kind: domain.KindBug}, nil, []string{"lxd", "incus"}, false, "", nil, 2400, nil)
 	form.onBrowse = func(repo string) tea.Cmd { browsed = repo; return nil }
 	form.setFocus(cardStopText)
 	form.HandleKey(altG)
@@ -479,7 +494,7 @@ func sampleCands() []afterCand {
 func TestCardFormAfterRow(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	var got formResult
-	form := newCardForm(domain.KindFeature, nil, []string{"lxd", "incus"}, false, "lxd", sampleCands(), 2400, func(res formResult) tea.Cmd { got = res; return nil })
+	form := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"lxd", "incus"}, false, "lxd", sampleCands(), 2400, func(res formResult) tea.Cmd { got = res; return nil })
 	form.SetText("storage quotas")
 	form.HandleKey(altO)
 	form.setFocus(cardStopAfter)

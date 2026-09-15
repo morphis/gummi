@@ -67,19 +67,32 @@ func DoneWhenIDForCheck(name string) (string, bool) {
 type GoalCardRow struct {
 	Title     string    `yaml:"title"`
 	OneLiner  string    `yaml:"one_liner,omitempty"`
-	Kind      Kind      `yaml:"kind,omitempty"`       // feature (default), bug or research
+	Kind      string    `yaml:"kind,omitempty"`       // a CardType name: feature (default), bug, research or diagnosis
 	Serves    []string  `yaml:"serves,omitempty"`     // done-when ids this card is for
 	DependsOn []string  `yaml:"depends_on,omitempty"` // titles (or ids) of other rows
 	Envelope  int       `yaml:"envelope,omitempty"`   // credits; 0 = the conductor splits
 	ID        FeatureID `yaml:"id,omitempty"`         // set once minted or when attaching
 }
 
-// EffectiveKind returns the row's kind with the feature default resolved.
-func (r GoalCardRow) EffectiveKind() Kind {
-	if r.Kind == "" {
-		return KindFeature
+// EffectiveType resolves the row's `kind:` to a card type, defaulting the
+// blank to a feature. It is a CardType rather than a Kind because
+// "diagnosis" is a name a row may write and is not a Kind — the row spells
+// what the person would say, and the pair it resolves to is what the mint
+// needs. ok is false for a name that is not offered at all.
+func (r GoalCardRow) EffectiveType() (CardType, bool) {
+	if strings.TrimSpace(r.Kind) == "" {
+		return CardType{Kind: KindFeature}, true
 	}
-	return r.Kind
+	return ParseCardType(r.Kind)
+}
+
+// EffectiveKind returns the kind the row mints, with the feature default
+// resolved and an unrecognized name left as-is so Validate can name it.
+func (r GoalCardRow) EffectiveKind() Kind {
+	if ct, ok := r.EffectiveType(); ok {
+		return ct.Kind
+	}
+	return Kind(r.Kind)
 }
 
 // Validate checks a row can become (or name) a goal card. Goals do not
@@ -93,9 +106,9 @@ func (r GoalCardRow) Validate(items map[string]bool) error {
 	if strings.TrimSpace(r.Title) == "" && r.ID == "" {
 		return fmt.Errorf("a card row has neither a title nor an id")
 	}
-	k := r.EffectiveKind()
-	if !k.Valid() || k == KindGoal {
-		return fmt.Errorf("card %q: kind %q cannot run inside a goal (feature, bug or research)", name, r.Kind)
+	ct, ok := r.EffectiveType()
+	if !ok || ct.Kind == KindGoal {
+		return fmt.Errorf("card %q: kind %q cannot run inside a goal (feature, bug, research or diagnosis)", name, r.Kind)
 	}
 	if r.ID != "" {
 		if _, err := ParseFeatureID(string(r.ID)); err != nil {

@@ -29,7 +29,7 @@ func TestCreationFormsLabelTheEnvelopeField(t *testing.T) {
 		{domain.KindResearch, envelopeHintRequired},
 	} {
 		t.Run(string(c.kind), func(t *testing.T) {
-			form := newCardForm(c.kind, profiles, nil, true, "", nil, 2400, nil)
+			form := newCardForm(domain.CardType{Kind: c.kind}, profiles, nil, true, "", nil, 2400, nil)
 			collapsed := ansi.Strip(form.View(s, 100, 30))
 			if !strings.Contains(collapsed, "2400 credits") {
 				t.Errorf("the collapsed readout does not carry the envelope with its unit:\n%s", collapsed)

@@ -253,7 +253,7 @@ func (m *Shell) performReentry(r featureRow, out reentry.Outcome) tea.Cmd {
 		// the sentence becomes the seed of a new one — the honest answer
 		// the fixed rule had no way to give, since every route it knew
 		// moved THIS card.
-		form := m.openCardForm(domain.KindFeature)
+		form := m.openCardForm(domain.CardType{Kind: domain.KindFeature})
 		form.SetText(out.Note)
 		// Backing out of the form is backing out of the whole route, so
 		// it lands the reader where the route started: the line back in

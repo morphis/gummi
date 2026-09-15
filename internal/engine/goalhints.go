@@ -38,7 +38,7 @@ asking:
    then run the binary.
 3. Limits — out of scope, constraints, things not to touch.
 4. Cards — the work, one gummi-cards row each: title, one_liner, kind
-   (feature, bug or research), serves (the DW ids it is for — every card
+   (feature, bug, research or diagnosis), serves (the DW ids it is for — every card
    serves at least one and every item is served), depends_on (titles of
    rows that must land first), and envelope (credits; leave it out to let
    the goal split its budget). A card is PR-sized: one coherent change

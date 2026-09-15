@@ -609,7 +609,7 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 		leadTool("goal_diff", "Read the goal branch's combined diff against main (summary and the start of the patch) — what a review of the goal reads.", map[string]any{}),
 		leadTool("card_create", "Create a card inside the goal. It must serve at least one done-when item; its envelope comes out of what the goal has left to give.",
 			map[string]any{
-				"kind":       str("feature (default), bug or research"),
+				"kind":       str("feature (default), bug, research, or diagnosis — a read-only investigation into why something already behaves wrong, which proposes fix cards rather than writing a fix"),
 				"title":      str("Short title."),
 				"one_liner":  str("What the card must do, in a sentence or two."),
 				"serves":     strs("Done-when ids this card is for."),
@@ -780,11 +780,7 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		if goal.Goal.WrappingUp() {
 			return "", errors.New("the goal is wrapping up; nothing new starts")
 		}
-		kind := domain.Kind(strings.TrimSpace(a.Kind))
-		if kind == "" {
-			kind = domain.KindFeature
-		}
-		row := domain.GoalCardRow{Title: strings.TrimSpace(a.Title), OneLiner: a.OneLiner, Kind: kind, Serves: a.Serves, Envelope: a.Envelope}
+		row := domain.GoalCardRow{Title: strings.TrimSpace(a.Title), OneLiner: a.OneLiner, Kind: strings.TrimSpace(a.Kind), Serves: a.Serves, Envelope: a.Envelope}
 		items := map[string]bool{}
 		itemText := map[string]string{}
 		for _, d := range view.DoneWhen {
@@ -810,8 +806,10 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		if float64(env) > avail {
 			return "", fmt.Errorf("a %d-credit card needs more than the %.0f credits the goal has left to give", env, max(0, avail))
 		}
+		// row.Validate above has already refused an unresolvable kind.
+		ct, _ := row.EffectiveType()
 		f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
-			Kind: kind, Description: goalCardDescription(goal, row, itemText), Profile: goal.Profile,
+			Kind: ct.Kind, Mode: ct.Mode, Description: goalCardDescription(goal, row, itemText), Profile: goal.Profile,
 			Envelope: env, Repo: goal.Repo, GateApproval: domain.GateAutopilot, Goal: goal.ID,
 		})
 		if err != nil {

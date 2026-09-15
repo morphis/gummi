@@ -189,6 +189,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if sev := r.F.Severity; sev != "" {
 		badge += " " + s.SeverityBadgeStyle(sev).Render(severityAbbrev(sev))
 	}
+	// the two research modes share the RS prefix and the RS tint, so the
+	// id alone cannot tell a diagnosis from a survey. The survey badges
+	// nothing — it is the default the prefix already means — and the
+	// diagnosis says so, the same way severity badges only the bugs that
+	// carry one.
+	if r.F.IsDiagnosis() {
+		badge += " " + s.CardIDResearch.Render("dx")
+	}
 	if g := goalRowTag(s, r, m.goalOpen[r.F.ID]); g != "" {
 		badge += " " + g
 	}

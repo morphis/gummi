@@ -22,6 +22,7 @@ import (
 // YAML, or a row with a blank title each return a non-nil error and an
 // empty result, never a partial one.
 func (e *Engine) IngestResearch(ctx context.Context, rsCard domain.Feature) (domain.IngestResult, error) {
+	layout := spec.LayoutOf(&rsCard)
 	path := e.artifactFile(&rsCard)
 	if path == "" {
 		return domain.IngestResult{}, fmt.Errorf("%s: no artifact found", rsCard.ID)
@@ -54,10 +55,15 @@ func (e *Engine) IngestResearch(ctx context.Context, rsCard domain.Feature) (dom
 		if title == "" {
 			return domain.IngestResult{}, fmt.Errorf("%s: a `## Slices` row has a blank title", rsCard.ID)
 		}
+		kind, err := r.mintKind(layout)
+		if err != nil {
+			return domain.IngestResult{}, fmt.Errorf("%s: `## Slices`: %w", rsCard.ID, err)
+		}
 		proposals = append(proposals, domain.FeatureProposal{
 			Title:     title,
 			OneLiner:  strings.TrimSpace(r.OneLiner),
 			DependsOn: r.DependsOn,
+			Kind:      kind,
 		})
 	}
 	if len(proposals) == 0 {
@@ -119,6 +125,26 @@ type sliceRow struct {
 	DependsOn    []string `yaml:"depends-on"`
 	Requirements []string `yaml:"requirements"`
 	ID           string   `yaml:"id"`
+	// Kind is what the row mints. Blank takes the document's default —
+	// features for a survey, fixes for a diagnosis (spec.Layout) — so
+	// neither document's rows have to spell out the usual answer, and
+	// either can name the other when a slice genuinely is the other
+	// thing: a diagnosis that finds a missing guard rather than a broken
+	// one proposes a feature.
+	Kind string `yaml:"kind"`
+}
+
+// mintKind resolves the row's kind against the document's default.
+func (r sliceRow) mintKind(l spec.Layout) (domain.Kind, error) {
+	raw := strings.TrimSpace(r.Kind)
+	if raw == "" {
+		return l.DefaultSliceKind, nil
+	}
+	k := domain.Kind(strings.ToLower(raw))
+	if k != domain.KindFeature && k != domain.KindBug {
+		return "", fmt.Errorf("row %q: kind %q is not one a slice can mint (feature, bug)", r.Title, raw)
+	}
+	return k, nil
 }
 
 var sliceYAMLFenceRe = regexp.MustCompile("(?s)```ya?ml\\s*\\n(.*?)```")
@@ -139,10 +165,15 @@ func parseSliceRows(yamlBody string) ([]sliceRow, error) {
 // it is never populated at this stage. A row the user renamed but left
 // otherwise blank is a real proposal, not scaffold.
 func isScaffoldRow(r sliceRow) bool {
-	return r.Title == "example slice" &&
-		r.OneLiner == "what it mints" &&
-		len(r.DependsOn) == 0 &&
-		len(r.Requirements) == 0
+	if len(r.DependsOn) != 0 || len(r.Requirements) != 0 {
+		return false
+	}
+	// One shape per template. The diagnosis scaffold is matched on its
+	// own two strings rather than by loosening the survey's, so a row
+	// genuinely titled "example fix" in a survey document is still a
+	// proposal — the pair has to match, as it always has.
+	return (r.Title == "example slice" && r.OneLiner == "what it mints") ||
+		(r.Title == "example fix" && r.OneLiner == "what it changes")
 }
 
 // coverageFromSlices synthesizes the Mapped half of coverage deterministically

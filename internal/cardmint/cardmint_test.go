@@ -448,3 +448,54 @@ func TestMintGoalAlwaysSeedsItsDoc(t *testing.T) {
 		t.Fatalf("a goal cannot be minted into a goal")
 	}
 }
+
+// TestMintDiagnosisSeedsTheDiagnosisDocument: the mode reaches the store
+// and picks the template, so a diagnosis card opens on its own contract
+// rather than on the survey's.
+func TestMintDiagnosisSeedsTheDiagnosisDocument(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	ctx := context.Background()
+	f, err := Mint(ctx, store, ws, Input{
+		Kind: domain.KindResearch, Mode: domain.ModeDiagnosis,
+		Description: "The picker drops answers\n\nSeen twice today, both on a tall window.",
+		Envelope:    300,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Mode != domain.ModeDiagnosis || !f.IsDiagnosis() {
+		t.Fatalf("minted card mode = %q", f.Mode)
+	}
+	got, err := store.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != domain.ModeDiagnosis {
+		t.Errorf("the mode did not survive the store: %q", got.Mode)
+	}
+	raw, err := os.ReadFile(filepath.Join(ws.Root, f.ArtifactPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	if _, ok := spec.ViewSection(body, "Symptom"); !ok {
+		t.Errorf("the diagnosis card got the survey template:\n%s", body)
+	}
+	sym, _ := spec.ViewSection(body, "Symptom")
+	if !strings.Contains(sym, "Seen twice today") {
+		t.Errorf("the description did not seed the symptom: %q", sym)
+	}
+}
+
+// TestMintDropsAModeOnANonResearchKind: a surface that presets the type
+// row and then moves it must not mint a bug carrying a research mode.
+func TestMintDropsAModeOnANonResearchKind(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindBug, Mode: domain.ModeDiagnosis, Description: "Login loops", Envelope: 300})
+	if err != nil {
+		t.Fatalf("the mint should drop the mode, not fail: %v", err)
+	}
+	if f.Mode != domain.ModeSurvey {
+		t.Errorf("a bug card kept mode %q", f.Mode)
+	}
+}

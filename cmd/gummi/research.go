@@ -19,10 +19,27 @@ import (
 // --full and --acceptance are not on its flag surface; --until only ever
 // accepts "shape", the sole pre-decompose stop on RS's route.
 func runResearch(args []string) error {
-	fs := flag.NewFlagSet("research", flag.ContinueOnError)
+	return runResearchCard(args, domain.CardType{Kind: domain.KindResearch}, "brief")
+}
+
+// runDiagnose implements `gummi diagnose [flags] "<symptom>"`: the same RS
+// card and the same drive, in the diagnosis mode (domain.ModeDiagnosis).
+// It is its own verb rather than a `research --diagnose` flag because the
+// argument is a different thing — behaviour somebody saw, not a question
+// somebody asked — and the usage line is the only place that says so
+// before the card exists.
+func runDiagnose(args []string) error {
+	return runResearchCard(args, domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}, "symptom")
+}
+
+// runResearchCard is both verbs' body: they differ only in the card type
+// they mint and the word their usage line calls the argument.
+func runResearchCard(args []string, ct domain.CardType, noun string) error {
+	verb := ct.Name()
+	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
 	rv := registerResearchFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `usage: gummi research [flags] "<brief>"`)
+		fmt.Fprintf(os.Stderr, "usage: gummi %s [flags] \"<%s>\"\n", verb, noun)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -30,7 +47,7 @@ func runResearch(args []string) error {
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return fmt.Errorf("research needs exactly one brief argument")
+		return fmt.Errorf("%s needs exactly one %s argument", verb, noun)
 	}
 	brief := fs.Arg(0)
 
@@ -49,7 +66,7 @@ func runResearch(args []string) error {
 		// mint the card first, then take its per-card lock for the drive so
 		// this run is the sole governor of the card it just created (two
 		// runs mint disjoint cards and so never contend on each other's lock).
-		f, err := d.Create(ctx, domain.KindResearch, brief)
+		f, err := d.Create(ctx, ct, brief)
 		if err != nil {
 			return driver.Outcome{}, err
 		}

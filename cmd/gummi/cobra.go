@@ -30,6 +30,15 @@ var researchCmd = &cobra.Command{
 	},
 }
 
+// diagnoseCmd implements `gummi diagnose [flags] "<symptom>"`.
+var diagnoseCmd = &cobra.Command{
+	Use:   "diagnose [flags] \"<symptom>\"",
+	Short: "Headlessly drive one diagnosis card through decompose",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runDiagnose(buildFlagArgs(cmd, args))
+	},
+}
+
 // resumeCmd implements `gummi resume <id|ref> [decision]`.
 var resumeCmd = &cobra.Command{
 	Use:   "resume <id|ref> [decision]",
@@ -304,6 +313,9 @@ var skillListCmd = &cobra.Command{
 func init() {
 	bindRunFlags(runCmd)
 	bindResearchFlags(researchCmd)
+	// diagnose is the same card in the other mode, so it is the same flag
+	// surface — bound from the one definition rather than restated.
+	bindResearchFlags(diagnoseCmd)
 	bindResumeFlags(resumeCmd)
 	bindGoalFlags(goalCmd)
 	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")

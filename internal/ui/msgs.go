@@ -291,7 +291,8 @@ func (m *Shell) canHaveLanded(ctx context.Context, f *domain.Feature) bool {
 // Start opens the autopilot dialog on it; FromPicker sends the person
 // back to the browse picker instead of the board.
 type formResult struct {
-	Kind        domain.Kind // "" reads as feature
+	Kind        domain.Kind         // "" reads as feature
+	Mode        domain.ResearchMode // research only: "" is the survey, "diagnosis" the other contract
 	Desc        string
 	Profile     string
 	Envelope    *int // nil = the shell's default envelope
@@ -332,7 +333,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			env = *res.Envelope
 		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
-			Kind: kind, Description: res.Desc, Profile: res.Profile, Envelope: env,
+			Kind: kind, Mode: res.Mode, Description: res.Desc, Profile: res.Profile, Envelope: env,
 			Repo: res.Repo, RequireRepo: m.requireRepo,
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion: res.Discussion,
@@ -889,7 +890,7 @@ func (m *Shell) undraftedGate(f domain.Feature) []string {
 	if err != nil {
 		return nil
 	}
-	return engine.UndraftedGateSections(f.Kind, f.Stage, forwardEdge(f), string(raw))
+	return engine.UndraftedGateSections(domain.CardTypeOf(&f), f.Stage, forwardEdge(f), string(raw))
 }
 
 // bounceStage sends a feature back for rework. Implement and Verify

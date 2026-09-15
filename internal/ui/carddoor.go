@@ -16,12 +16,12 @@ import (
 // dialog from board state, the GitHub round trips it asks for, and what
 // happens once a card exists.
 
-// openCardForm builds the door for kind with everything the board knows:
+// openCardForm builds the door for a card type with everything the board knows:
 // profiles, repositories, the repo chosen last time, the cards the after
 // row may name, and the seams for GitHub. It does not push it — presets
 // decide whether the form opens or goes straight to browse.
-func (m *Shell) openCardForm(kind domain.Kind) *cardForm {
-	d := newCardForm(kind, m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.afterCands(), m.envelopePrefill(), m.createCard)
+func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
+	d := newCardForm(ct, m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.afterCands(), m.envelopePrefill(), m.createCard)
 	if m.wt != nil {
 		d.originFor = m.repoOriginFor
 	}

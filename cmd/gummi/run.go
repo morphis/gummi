@@ -68,7 +68,7 @@ func runRun(args []string) error {
 		// mint the card first, then take its per-card lock for the drive so
 		// this run is the sole governor of the card it just created (two
 		// runs mint disjoint cards and so never contend on each other's lock).
-		f, err := d.Create(ctx, domain.KindFeature, desc)
+		f, err := d.Create(ctx, domain.CardType{Kind: domain.KindFeature}, desc)
 		if err != nil {
 			return driver.Outcome{}, err
 		}

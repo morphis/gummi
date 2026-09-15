@@ -705,6 +705,9 @@ func blankTemplate(f *domain.Feature) string {
 		return BugTemplate(f)
 	}
 	if f.Kind == domain.KindResearch {
+		if f.Mode == domain.ModeDiagnosis {
+			return DiagnosisTemplate(f)
+		}
 		return ResearchTemplate(f)
 	}
 	if f.Kind == domain.KindGoal {

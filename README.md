@@ -44,14 +44,23 @@ when it runs dry.
 ```
 todo → plan → implement → verify → done
 
-feature   FD-NNN   design the change, build it, prove it
-bug       BG-NNN   reproduce and diagnose, fix, prove
-research  RS-NNN   shape the question, gather evidence, check the citations
-goal      GL-NNN   agree what done means, run the cards that get there, prove the whole
+feature    FD-NNN   design the change, build it, prove it
+bug        BG-NNN   reproduce and diagnose, fix, prove
+research   RS-NNN   shape the question, gather evidence, check the citations
+diagnosis  RS-NNN   scope the fault, find every cause, propose the fixes
+goal       GL-NNN   agree what done means, run the cards that get there, prove the whole
 ```
 
-All four kinds walk the same stages. The kind changes what each stage
+All of them walk the same stages. The kind changes what each stage
 writes and what its gate demands, not the route.
+
+**Diagnosis is research in a second mode**, not a fifth kind: the same RS
+card, branchless and read-only, with a document that starts from a
+symptom instead of a question. Use it when something already behaves
+wrong and you do not yet know what — or how many things — it is. A bug
+card presumes one defect and commits to fixing it in the same card; a
+diagnosis may find two, records what it **ruled out**, writes no code,
+and decomposes into fix cards rather than features.
 
 - **Plan is a conversation.** The architect works the problem through
   with you in the card's thread and writes the plan as a markdown spec.
@@ -130,7 +139,7 @@ The keys you need first:
 
 | key | does |
 |---|---|
-| `n` | new card — feature, bug, research or goal; paste a GitHub issue link and `alt+g` imports it (`B` / `R` / `G` preset bug / research / browse issues) |
+| `n` | new card — feature, bug, research, diagnosis or goal; paste a GitHub issue link and `alt+g` imports it (`B` / `R` / `G` preset bug / research / browse issues) |
 | `f` | fold or unfold a goal's cards on the board |
 | `enter` | open the selected card; in the card, send what you typed |
 | `↑` | the card's actions, when nothing is typed |
@@ -256,6 +265,7 @@ It changes who approves a gate, never whether review and verify run.
 gummi run --envelope 500 "Add a --format=json flag to the export command"
 gummi run --envelope 500 --gate-approval autopilot "..."    # cross its own gates
 gummi research --envelope 300 "Where does the exporter buffer, and why?"
+gummi diagnose --envelope 300 "Exports truncate at 64KB, but only over HTTP/2"
 ```
 
 An envelope is required headlessly. `--until plan` stops before
@@ -264,7 +274,7 @@ agent's recommended answer instead of stopping on a question.
 
 | verb | |
 |---|---|
-| `run`, `research` | create and drive a feature or research card |
+| `run`, `research`, `diagnose` | create and drive a feature, research or diagnosis card |
 | `goal` | agree a goal, then drive it until it is ready for you |
 | `resume <id> --approve` / `--request-changes …` / `--answer …` / `--bounce` | apply a decision and drive on |
 | `resume <id> --say "<line>"` | report how the card page would read a line, without acting |

@@ -162,7 +162,7 @@ func (d *Driver) setGate(mode string) {
 // for callers that need no lock between the two; the CLI drives via the
 // split so it can hold the card's per-card lock for the whole drive.
 func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
-	f, err := d.Create(ctx, domain.KindFeature, desc)
+	f, err := d.Create(ctx, domain.CardType{Kind: domain.KindFeature}, desc)
 	if err != nil {
 		return d.fail(ctx, "", err)
 	}
@@ -175,13 +175,13 @@ func (d *Driver) Run(ctx context.Context, desc string) (Outcome, error) {
 // brainstorm+plan route (D3). kind selects the route: KindFeature/KindBug
 // use the existing draft-seeded shape; KindResearch mints an RS card and
 // seeds its `## Brief` directly (research has no draft step).
-func (d *Driver) Create(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
+func (d *Driver) Create(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
 	// validate --until against the route this run will take before minting a
 	// feature, so a bad stop target never leaves a stray FD in the backlog.
 	if err := ValidateUntil(d.opts.Until); err != nil {
 		return domain.Feature{}, err
 	}
-	f, err := d.createFeature(ctx, kind, desc)
+	f, err := d.createFeature(ctx, ct, desc)
 	if err != nil {
 		return domain.Feature{}, err
 	}
@@ -191,7 +191,7 @@ func (d *Driver) Create(ctx context.Context, kind domain.Kind, desc string) (dom
 	// a branch only where one will exist: a research card is
 	// worktree-less at every stage and never gets one.
 	branch := ""
-	if kind != domain.KindResearch {
+	if ct.Kind != domain.KindResearch {
 		branch = f.BranchName()
 	}
 	d.out.emit(createdEvent{
@@ -1964,9 +1964,9 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 // The actual recipe lives in internal/cardmint, shared with the workspace
 // MCP endpoint's card_new tool — this is now just the translation from a
 // Driver's own Options to a cardmint.Input.
-func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc string) (domain.Feature, error) {
+func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
-		Kind: kind, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
+		Kind: ct.Kind, Mode: ct.Mode, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 		GoalDoc: d.opts.GoalDoc,

@@ -33,24 +33,41 @@ var ErrDecomposeExhausted = errors.New("decompose: RS card's credit budget is ex
 var ErrDecomposeProposalCountMismatch = errors.New("decompose: proposal count does not match the doc's unsettled slice rows")
 
 const decomposeSourceHint = "You are decomposing an approved research card's `## Slices` rows into full " +
-	"feature proposals (gummi decomposition). The source document is at %s (relative to your working " +
-	"directory); read it first for full context (Findings, Direction, Constraints)."
+	"card proposals (gummi decomposition). The source document is at %s (relative to your working " +
+	"directory); read it first for full context — a survey's Findings, Direction and Constraints, " +
+	"a diagnosis's Evidence, Causes and Ruled out."
 
 const decomposeNoteHint = "Re-decomposing after operator feedback: %s. Address it in the new proposal."
 
 // decomposeRowPrompt is the go-ahead: it enumerates the unsettled rows by
 // index and demands exactly one proposal per row, in the same order, so
 // MintProposals can bind proposals[i] to the i-th unsettled row.
-func decomposeRowPrompt(rows []sliceRow) string {
+func decomposeRowPrompt(rows []sliceRow, l spec.Layout) string {
 	var b strings.Builder
-	b.WriteString("Expand each of the following unsettled `## Slices` rows into a full feature " +
+	b.WriteString("Expand each of the following unsettled `## Slices` rows into a full card " +
 		"proposal — a PR-sized vertical slice with a title, one-line summary, problem, constraints, " +
 		"acceptance criteria, and any open questions. Preserve each row's dependencies (depends-on) " +
 		"and cover its listed requirements. Submit exactly one proposal per row below, in the same " +
 		"order, via a single propose_features call:\n\n")
 	for i, r := range rows {
-		fmt.Fprintf(&b, "row %d: %s · %s · depends-on: %v · requirements: %v\n",
-			i+1, r.Title, r.OneLiner, r.DependsOn, r.Requirements)
+		kind, err := r.mintKind(l)
+		if err != nil {
+			// Unreachable from the callers, which resolve every row's kind
+			// before spending a session; named rather than hidden so a
+			// future caller that skips that pre-flight sees why.
+			kind = l.DefaultSliceKind
+		}
+		fmt.Fprintf(&b, "row %d [%s]: %s · %s · depends-on: %v · requirements: %v\n",
+			i+1, kind, r.Title, r.OneLiner, r.DependsOn, r.Requirements)
+	}
+	// A fix card's problem is a defect report, not a feature brief, and
+	// the two want different prose in the same field. Said once, after
+	// the rows, rather than per row.
+	if l.DefaultSliceKind == domain.KindBug {
+		b.WriteString("\nRows marked [bug] mint fix cards. Write each one's problem as a defect " +
+			"report — what goes wrong, how to see it, what should happen instead — grounded in " +
+			"the cause the source document's `## Causes` records for it. Do not propose the fix " +
+			"itself: the fix card's own design stage establishes that against the code.\n")
 	}
 	return b.String()
 }
@@ -145,7 +162,7 @@ func (e *Engine) DecomposeForCard(ctx context.Context, cardID domain.FeatureID, 
 	}
 	defer func() { _ = sess.Close() }()
 
-	if err := sess.Send(ctx, decomposeRowPrompt(rows)); err != nil {
+	if err := sess.Send(ctx, decomposeRowPrompt(rows, spec.LayoutOf(&rsCard))); err != nil {
 		return domain.IngestResult{}, err
 	}
 	res, err := e.collectDecomposeProposal(ctx, cardID, sess)
@@ -248,6 +265,20 @@ func (e *Engine) MintProposals(ctx context.Context, cardID domain.FeatureID, res
 	if len(res.Proposals) != len(unsettled) {
 		return nil, fmt.Errorf("%s: %w (%d proposals, %d unsettled rows)",
 			cardID, ErrDecomposeProposalCountMismatch, len(res.Proposals), len(unsettled))
+	}
+
+	// The ROW decides what each proposal mints, not the architect pass:
+	// the rows are the approved document, and the pass's job is to expand
+	// one into a full proposal, not to reclassify it. Bound positionally,
+	// which is the same binding the count assertion above exists to
+	// protect.
+	layout := spec.LayoutOf(&rsCard)
+	for i, row := range unsettled {
+		kind, err := row.mintKind(layout)
+		if err != nil {
+			return nil, fmt.Errorf("%s: `## Slices`: %w", cardID, err)
+		}
+		res.Proposals[i].Kind = kind
 	}
 
 	env := rsCard.Budget.Envelope

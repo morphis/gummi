@@ -58,6 +58,11 @@ type Input struct {
 	// draft-seeded shape, and KindResearch mints an RS card and seeds its
 	// `## Brief` directly (research has no draft step).
 	Kind domain.Kind
+	// Mode refines KindResearch into the survey (empty) or the diagnosis
+	// contract, choosing which document template seeds the card. Ignored
+	// for every other kind, and refused by Feature.Validate if it reaches
+	// one.
+	Mode domain.ResearchMode
 	// Description is the free-form input text: its first line is the
 	// title (domain.SplitFreeform). For KindResearch the whole text is the
 	// Brief; for everything else the overflow past the first line seeds
@@ -163,9 +168,17 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if gate == "" {
 		gate = domain.GateAttended
 	}
+	// Only a research card carries a mode; dropping it here rather than
+	// refusing keeps a caller that presets the dialog's type row (where
+	// diagnosis sits beside research) from failing when the person then
+	// moves the row to bug.
+	mode := in.Mode
+	if in.Kind != domain.KindResearch {
+		mode = domain.ModeSurvey
+	}
 	now := time.Now()
 	f := domain.Feature{
-		ID: id, Num: num, Kind: in.Kind, Title: title, OneLiner: oneLiner,
+		ID: id, Num: num, Kind: in.Kind, Mode: mode, Title: title, OneLiner: oneLiner,
 		Slug: slug, Stage: workflow.Initial(),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		GateApproval: gate,
@@ -201,7 +214,12 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		}
 	} else if in.Kind == domain.KindResearch {
 		artifact := filepath.Join(ws.Root, f.ArtifactPath())
-		content := spec.SeededResearchTemplate(&f, domain.ResearchSeed{Brief: in.Description}, domain.DraftProvenance{Source: in.Source})
+		seed := domain.ResearchSeed{Brief: in.Description}
+		prov := domain.DraftProvenance{Source: in.Source}
+		content := spec.SeededResearchTemplate(&f, seed, prov)
+		if mode == domain.ModeDiagnosis {
+			content = spec.SeededDiagnosisTemplate(&f, seed, prov)
+		}
 		if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
 			return domain.Feature{}, err
 		}

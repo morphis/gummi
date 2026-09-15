@@ -241,9 +241,14 @@ func (s Spend) Zero() bool {
 // Feature is one unit of work: the kanban card, its workflow position,
 // and everything needed to derive its branch, worktree, and spec paths.
 type Feature struct {
-	ID       FeatureID
-	Num      int    // numeric part of ID, unique
-	Kind     Kind   // feature (default), bug, or research; selects workflow + template
+	ID   FeatureID
+	Num  int  // numeric part of ID, unique
+	Kind Kind // feature (default), bug, research, or goal; selects the stage contracts + template
+	// Mode refines KindResearch into the survey (empty) or the diagnosis
+	// contract — see ResearchMode. Always empty for every other kind:
+	// nothing else has a second contract to choose between, and a mode
+	// stored on a feature would be a value readers have to ignore.
+	Mode     ResearchMode
 	Title    string // human title, free text
 	OneLiner string // short description from the creation form
 	Slug     string // allowlist-sanitized, used in branch and file names
@@ -580,6 +585,15 @@ func (f *Feature) Validate() error {
 	}
 	if !ValidGateApproval(f.GateApproval) {
 		return fmt.Errorf("feature %s: unknown gate-approval mode %q", f.ID, f.GateApproval)
+	}
+	if !f.Mode.Valid() {
+		return fmt.Errorf("feature %s: unknown research mode %q", f.ID, f.Mode)
+	}
+	// A mode on anything but a research card is a mint that lost track of
+	// what it was making. Refuse it here rather than storing a field the
+	// reader of a feature or a bug has to know to ignore.
+	if f.Mode != ModeSurvey && f.kind() != KindResearch {
+		return fmt.Errorf("feature %s: research mode %q on a %s card", f.ID, f.Mode, f.kind())
 	}
 	// Repo, when set, must be a plain configured name: no whitespace and no
 	// path separators, so it can never be mistaken for a path and can never

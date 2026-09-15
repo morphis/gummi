@@ -34,7 +34,7 @@ func TestBG096CreatedEventDescribesTheKindItCreated(t *testing.T) {
 		h := newHarness(t, false, nil)
 		h.fake.Caps.ReadOnlyEnforce = true
 		d := h.driver(Options{})
-		f, err := d.Create(context.Background(), c.kind, "some piece of work")
+		f, err := d.Create(context.Background(), domain.CardType{Kind: c.kind}, "some piece of work")
 		if err != nil {
 			t.Fatalf("%s: Create: %v", c.kind, err)
 		}

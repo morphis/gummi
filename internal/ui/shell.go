@@ -2772,11 +2772,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.syncActionFocus()
 		}
 	case "n":
-		m.Overlay.Push(m.openCardForm(domain.KindFeature))
+		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFeature}))
 	case "B":
-		m.Overlay.Push(m.openCardForm(domain.KindBug))
+		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindBug}))
 	case "R":
-		m.Overlay.Push(m.openCardForm(domain.KindResearch))
+		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindResearch}))
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
@@ -2814,7 +2814,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 		// the door with bug preset, then straight into browse: the form
 		// parks while the picker is up and comes back filled.
-		d := m.openCardForm(domain.KindBug)
+		d := m.openCardForm(domain.CardType{Kind: domain.KindBug})
 		if d.repo.needsChoice() {
 			d.errText = "choose a repository to browse its issues"
 			d.setFocus(cardStopRepo)

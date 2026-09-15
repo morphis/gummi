@@ -49,6 +49,7 @@ func init() {
 	rootCmd.AddCommand(prCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(researchCmd)
+	rootCmd.AddCommand(diagnoseCmd)
 	rootCmd.AddCommand(goalCmd)
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(verifyCmd)

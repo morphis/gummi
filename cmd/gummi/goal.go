@@ -49,7 +49,7 @@ func runGoal(args []string) error {
 	opts.GoalDoc = doc
 
 	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store, ws state.Workspace) (driver.Outcome, error) {
-		f, err := d.Create(ctx, domain.KindGoal, objective)
+		f, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, objective)
 		if err != nil {
 			return driver.Outcome{}, err
 		}

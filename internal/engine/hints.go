@@ -330,6 +330,9 @@ func critiqueHint(f domain.Feature) string {
 	if f.Kind == domain.KindResearch {
 		// a research critique judges a document at either stage, and is
 		// read-only at both
+		if f.IsDiagnosis() {
+			return diagnosisCritiqueHint()
+		}
 		return researchCritiqueHint()
 	}
 	if f.Kind == domain.KindGoal {
@@ -510,6 +513,77 @@ the one durable surface, reached through gummi's spec tools rather than
 the filesystem. Ask one decision at a time with a recommended answer
 attached, and stop when the question, its constraints, and the
 direction are set.`)
+}
+
+// diagnoseShapeHint is the diagnosis design pass contract — the survey's
+// shapeHint transposed onto a symptom. The two stages differ in what
+// their raw material is: a survey starts from a question somebody asked,
+// a diagnosis starts from behaviour somebody saw, and the first thing
+// worth settling is how the investigation will recognise that behaviour
+// when it meets it. Like every research stage it runs in the card's
+// scratch checkout and writes only through gummi's document tools.
+func diagnoseShapeHint() string {
+	return strings.TrimSpace(`
+Stage: Plan (interactive; the user is in gummi's chat pane). Scope the
+investigation with the user. Nothing has been investigated yet —
+gathering evidence is the build stage's job — so your raw material is
+the reported symptom, not findings. Settle three things and write each
+into the diagnosis document as it settles: how the fault is recognised
+(Reproduction — exact steps when it reproduces on demand; when it does
+not, say so and name the evidence that stands in for a repro, such as a
+log, a trace or a failing CI run), what the investigation is bound by
+(Constraints — time, scope, what must not be touched), and anything the
+investigation deliberately will not explain (Out of scope).
+Do not diagnose here and do not propose a fix: a cause named before any
+evidence is gathered is a guess the build stage will then try to
+confirm rather than test.
+The investigation that follows is READ-ONLY by construction — it runs
+with every writing tool stripped — so it cannot add instrumentation,
+run an experiment that edits code, or try a fix. Do not offer any of
+those as an option: scope the investigation to what reading the repo,
+its history and its existing tests can establish, and if the fault
+genuinely cannot be explained without new instrumentation, record that
+under Constraints as the limit it is. You run in the card's scratch checkout, a
+throwaway: nothing you write to disk there is kept, and the diagnosis
+document is the one durable surface, reached through gummi's spec tools
+rather than the filesystem. Ask one decision at a time with a
+recommended answer attached, and stop when the reproduction and the
+constraints are set.`)
+}
+
+// diagnoseInvestigateHint is the diagnosis build pass contract. It is
+// investigateHint's read-only, cited survey pointed at a fault instead of
+// a question, and it carries the two instructions that are the whole
+// reason this mode exists: record what you eliminated, and do not
+// converge on one cause because one is the usual number.
+func diagnoseInvestigateHint() string {
+	return strings.TrimSpace(`
+Stage: Implement — investigate (autonomous, read-only). Find out WHY the
+reported symptom happens. You run in the card's scratch checkout of
+main — a throwaway, with no worktree — and every tool that can write or
+commit is unavailable, so the investigation is read-only by
+construction: you cannot add instrumentation, run an experiment that
+edits code, or test a fix. Work from reading, from the reproduction the
+design stage recorded, and from whatever the repo's own history and
+tests already tell you.
+Write into the diagnosis document as you go:
+- Evidence — what you observed, every claim carrying a path:line
+  citation so the fix cards can navigate straight to it.
+- Ruled out — each candidate cause you eliminated and what eliminated
+  it. A dead end you do not record is one the fix cards pay to walk
+  again.
+- Causes — one bullet per cause, each saying why it produces the
+  symptom. Do not assume there is exactly one: a symptom with two
+  independent causes is common and is the case a bug card cannot
+  express. Equally, do not pad the list — a candidate you cannot tie to
+  the symptom belongs in Ruled out or Open risks, not here.
+- Slices — one row per cause, the fix it needs, with that cause's
+  bullet text in the row's requirements so the coverage check can
+  reconcile them. A cause you are deliberately not fixing goes under
+  Out of scope instead, with the reason.
+Propose the fixes; do not write them. Stop when every cause you can
+establish is recorded with its evidence, or when you can name precisely
+what blocks establishing the rest.`)
 }
 
 // researchCritiqueHint is the research critique pass contract, served
@@ -851,6 +925,10 @@ The user approves the diagnosis to advance — do not start fixing.`),
 		// The design stage shapes the question and the direction; the
 		// evidence is gathered at implement, which is read-only for a
 		// research card (researchReadOnly) exactly as investigate was.
+		// A diagnosis shapes a reproduction instead of a question.
+		if f.IsDiagnosis() {
+			return []string{diagnoseShapeHint()}
+		}
 		return []string{
 			shapeHint(),
 		}
@@ -943,6 +1021,9 @@ Stop when the plan is written; the user approves it.`),
 // was whether the card is a feature or a bug.
 func buildHints(f domain.Feature) []string {
 	if f.Kind == domain.KindResearch {
+		if f.IsDiagnosis() {
+			return []string{diagnoseInvestigateHint()}
+		}
 		return []string{investigateHint()}
 	}
 	if f.Kind == domain.KindGoal {
@@ -1010,4 +1091,35 @@ stage runs exactly those commands. If you are addressing review findings, resolv
 the Review section with how you fixed it. If you need a decision or
 hit a blocker, stop and say so clearly rather than guessing.`),
 	}
+}
+
+// diagnosisCritiqueHint is the diagnosis critique pass contract. A
+// diagnosis fails in ways a survey does not — a cause asserted from a
+// plausible reading rather than evidence, a second cause missed because
+// the first one explained enough of the symptom to stop looking, a dead
+// end explored and then not written down — so the critique names those
+// rather than inheriting the survey's "is the question answered".
+func diagnosisCritiqueHint() string {
+	return strings.TrimSpace(`
+Diagnosis critique (autonomous, fresh context, read-only).
+Adversarially critique the diagnosis document as the stage that just ran
+left it — the reproduction and the bounds after the design pass, the
+evidence and the causes after the build pass. Judge the document the
+stage produced, not the one a later stage will write.
+After the build pass, press on four things in particular:
+- Is each cause actually supported by the cited evidence, or is it a
+  plausible reading of the code that nothing observed confirms? A cause
+  that would survive being wrong is not established.
+- Would each cause, on its own, produce the reported symptom? If it
+  explains only part of it, say which part is unaccounted for.
+- Is there a second cause? Check whether the evidence is fully explained
+  by the causes listed, and say so if the document stopped at the first
+  one that fit.
+- Does Ruled out record what was eliminated and why, or does the
+  document only show the path that worked?
+A "changes" verdict sends the stage back for another round rather than
+blocking a finished document. You run with no worktree and cannot modify
+the artifact: record your findings in your final message and submit a
+verdict via the submit_verdict tool (pass or changes), exactly once,
+instead of writing to the document.`)
 }

@@ -132,3 +132,83 @@ func TestResearchSeedShape(t *testing.T) {
 		t.Errorf("ResearchSeed field round-trip failed: %+v", got)
 	}
 }
+
+// TestParseCardType: the one name that is not a Kind resolves, every
+// kind's own word resolves, and nothing else does.
+func TestParseCardType(t *testing.T) {
+	for name, want := range map[string]CardType{
+		"feature":   {Kind: KindFeature},
+		"bug":       {Kind: KindBug},
+		"research":  {Kind: KindResearch},
+		"diagnosis": {Kind: KindResearch, Mode: ModeDiagnosis},
+		"goal":      {Kind: KindGoal},
+		"  BUG  ":   {Kind: KindBug},
+	} {
+		got, ok := ParseCardType(name)
+		if !ok || got != want {
+			t.Errorf("ParseCardType(%q) = %+v, %v; want %+v", name, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "chore", "survey", "dx", "RS"} {
+		if _, ok := ParseCardType(bad); ok {
+			t.Errorf("ParseCardType(%q) should not resolve", bad)
+		}
+	}
+}
+
+// TestCardTypeValidIsMembership: a mode on a kind that has none is
+// invalid even though both halves are — the combination is what a
+// creation surface can produce by presetting one row and moving another.
+func TestCardTypeValidIsMembership(t *testing.T) {
+	if !(CardType{Kind: KindResearch, Mode: ModeDiagnosis}).Valid() {
+		t.Error("diagnosis should be an offered type")
+	}
+	if (CardType{Kind: KindBug, Mode: ModeDiagnosis}).Valid() {
+		t.Error("a mode on a bug names no offered type")
+	}
+	if (CardType{Kind: "chore"}).Valid() {
+		t.Error("an unknown kind names no offered type")
+	}
+}
+
+// TestCardTypeNamingAndPrefix: the two research modes are two names and
+// one prefix, which is the whole shape of the decision.
+func TestCardTypeNamingAndPrefix(t *testing.T) {
+	survey := CardType{Kind: KindResearch}
+	diag := CardType{Kind: KindResearch, Mode: ModeDiagnosis}
+	if survey.Name() != "research" || diag.Name() != "diagnosis" {
+		t.Errorf("names = %q / %q", survey.Name(), diag.Name())
+	}
+	if survey.Prefix() != "RS" || diag.Prefix() != "RS" {
+		t.Errorf("prefixes = %q / %q, want RS for both", survey.Prefix(), diag.Prefix())
+	}
+}
+
+// TestModeOnlyOnResearch: Validate refuses a mode stored on a kind that
+// has no second contract, so no reader has to know to ignore one.
+func TestModeOnlyOnResearch(t *testing.T) {
+	diag := &Feature{
+		ID: "RS-004", Num: 4, Kind: KindResearch, Mode: ModeDiagnosis,
+		Title: "why", Slug: "why", Stage: StageTodo,
+	}
+	if err := diag.Validate(); err != nil {
+		t.Fatalf("a diagnosis card should validate: %v", err)
+	}
+	if !diag.IsDiagnosis() {
+		t.Error("IsDiagnosis should be true for a research card in diagnosis mode")
+	}
+	bug := &Feature{
+		ID: "BG-004", Num: 4, Kind: KindBug, Mode: ModeDiagnosis,
+		Title: "broken", Slug: "broken", Stage: StageTodo,
+	}
+	if err := bug.Validate(); err == nil {
+		t.Error("a mode on a bug card should be refused")
+	}
+	bogus := &Feature{
+		ID: "RS-005", Num: 5, Kind: KindResearch, Mode: "survey",
+		Title: "why", Slug: "why", Stage: StageTodo,
+	}
+	if err := bogus.Validate(); err == nil {
+		t.Error("an unknown research mode should be refused")
+	}
+}

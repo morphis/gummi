@@ -90,6 +90,16 @@ gummi research [flags] "<brief>"
     --stage-timeout duration  per-stage inactivity timeout (0 disables)
     --until string            stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
     --verbose                 add per-tool-call activity lines to the stream
+gummi diagnose [flags] "<symptom>"
+    --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --envelope int            credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)
+    --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)
+    --profile string          profile mapping roles to models (default: first configured)
+    --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
+    --repo string             managed repository to create the card in (a configured repos: name; required when repos: is configured)
+    --stage-timeout duration  per-stage inactivity timeout (0 disables)
+    --until string            stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
+    --verbose                 add per-tool-call activity lines to the stream
 
 gummi goal [flags] "<objective>"
     --autonomous              let the architect take its recommended answer instead of asking during the plan conversation
