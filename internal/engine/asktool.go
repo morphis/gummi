@@ -1039,7 +1039,15 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// blocked call and its resolver died with the process, so the answer
 	// rides a fresh turn. The transcript above already recorded it; the
 	// turn must deliver it without appending it a second time.
-	if err := e.deliverTurn(ctx, s, answer); err != nil {
+	//
+	// What rides the wire is not the bare answer. A restored ask reaches a
+	// backend session that never asked the question — the process that did
+	// is gone — so "A. Subcommand-scoped flag" arrives with nothing to
+	// attach to, and the session's only way forward is to re-read the
+	// artifact and re-derive the repo from scratch. reentryTurn restates
+	// the exchange the answer belongs to; the transcript still shows the
+	// person's own words.
+	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer)); err != nil {
 		// Restore the question, exactly as every other failing branch
 		// above does. This is the branch a restored ask always takes, and
 		// deliverTurn refuses a session with no agent behind it — which a
@@ -1053,6 +1061,60 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		return err
 	}
 	return nil
+}
+
+// reentryTurn renders the turn that carries a restored ask's answer into a
+// session that did not ask the question.
+//
+// The live path never needs this: the answer resolves the agent's own
+// blocked tool call, so the question is right there in its context. A
+// restored ask has no such call — the headless loop exits at every
+// question and `gummi resume --answer` starts a new backend session — and
+// the bare answer string was all that session received. It could not tell
+// which question it answered, what the alternatives had been, or what the
+// session before it had already established, so it re-read the artifact
+// and re-explored the repository before it could act. Restating the
+// exchange costs a few dozen tokens once; rediscovering a repository costs
+// several tool calls every round trip.
+//
+// An ask with no question text (a malformed or legacy record) degrades to
+// the bare answer rather than framing an exchange that cannot be quoted.
+func reentryTurn(ask *Ask, answer string) string {
+	if ask == nil || strings.TrimSpace(ask.Question) == "" {
+		return answer
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "You asked: %s\n", strings.TrimSpace(ask.Question))
+	if opts := askOptionLabels(ask); len(opts) > 0 {
+		fmt.Fprintf(&b, "You offered: %s\n", strings.Join(opts, " · "))
+	}
+	fmt.Fprintf(&b, "The answer is: %s\n\n", answer)
+	b.WriteString(reentryGuidance)
+	return b.String()
+}
+
+// reentryGuidance is the standing half of a re-entry turn: what this
+// session is, and what it should not spend turns on. Fixed text — it does
+// not vary by stage or kind, because the situation does not.
+const reentryGuidance = `This is a fresh session. The one that asked has ended, along with
+everything it had read, so nothing you did earlier is in your context —
+but its work is not lost: it is written down in the artifact, which is
+the record both sessions share. Read the artifact for what has already
+been settled, resolve the thread this answer closes, and continue from
+there. Do not re-ask a question the artifact already answers, and do not
+re-derive decisions it already records.`
+
+// askOptionLabels lists an ask's option labels for the re-entry turn,
+// skipping empties so a partially-filled option list cannot produce a
+// line of separators.
+func askOptionLabels(ask *Ask) []string {
+	out := make([]string, 0, len(ask.Options))
+	for _, o := range ask.Options {
+		if l := strings.TrimSpace(o.Label); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // resumeAfterAnswer marks the session working again once the answer has

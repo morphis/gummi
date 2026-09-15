@@ -347,6 +347,14 @@ type Engine struct {
 	envNotices []string
 	envWarn    func(string)
 
+	// repoCards caches the repository orientation card per repository
+	// root, computed at most once per root per Engine lifetime. A
+	// workspace with several managed repos gets one card each; the map is
+	// keyed by root rather than by card so a repo whose card comes out
+	// empty is not recomputed on every session.
+	repoCardMu sync.Mutex
+	repoCards  map[string]string
+
 	// goalLocks serializes the conductor per goal (goal.go's goalLock).
 	goalLocksMu sync.Mutex
 	goalLocks   map[domain.FeatureID]*sync.Mutex
@@ -1554,6 +1562,16 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 			"autonomous research cannot run on that backend", ag.Name(), f.ID, f.Stage)
 	}
 	hints := stageHints(f, specPath, flavor)
+	// The repository orientation card sits directly under the operator's
+	// environment card: the operator's own words lead, because they are a
+	// deliberate instruction, and the file tree is reference material the
+	// session reads rather than obeys. Prepended in that order — repo
+	// first, environment second — so the environment card ends up first.
+	if mgr, err := e.mgr(ctx, &f); err == nil && mgr != nil {
+		if card := e.repoCard(mgr.RepoRoot()); card != "" {
+			hints = append([]string{card}, hints...)
+		}
+	}
 	if card := e.environmentCard(); card != "" {
 		hints = append([]string{card}, hints...)
 	}
