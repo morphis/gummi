@@ -183,6 +183,12 @@ type Snapshot struct {
 	VerdictFloorReason string        // human-readable reason for the floor, if any
 	Err                error
 	EnvProbes          []envprobe.Result
+	// StartedAt is the session's construction time, carried here as its
+	// identity. A stage hosts several sessions in turn — the writer, its
+	// critique, each replan round — and a reader that tracks a position
+	// in Activity needs to know when the feed it is reading was replaced
+	// by a different session's, rather than assuming one feed per stage.
+	StartedAt time.Time
 }
 
 // Session is one live agent conversation bound to a feature + stage.
@@ -386,6 +392,7 @@ func (s *Session) Snapshot() Snapshot {
 		VerdictFloorReason: s.verdictFloorReason,
 		Err:                s.err,
 		EnvProbes:          append([]envprobe.Result(nil), s.envProbes...),
+		StartedAt:          s.startedAt,
 	}
 }
 

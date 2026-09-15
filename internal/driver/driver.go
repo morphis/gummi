@@ -84,7 +84,19 @@ type Driver struct {
 	bounceNote      string       // one-shot addendum to the next plan/implement kickoff after a --bounce resume
 	curStage        domain.Stage // stage currently being driven (for verbose activity lines)
 	activityCur     int          // cursor into the live session's activity feed
-	sentTurn        bool         // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
+	// resumePrimed is the one-shot "skip what is already there" flag a
+	// resume sets before it streams anything. See emitActivity.
+	resumePrimed bool
+	// activitySession identifies the session activityCur points into. A
+	// STAGE is not one session: the writer, its critique and every
+	// replan round are separate sessions, each with its own Activity
+	// feed starting at zero. Keying the cursor to the stage alone left
+	// it parked at the previous session's high-water mark, so every
+	// shorter session that followed streamed nothing — which on a
+	// three-round plan meant the critique and both replans, two thirds
+	// of the run's spend, ran silent under --verbose.
+	activitySession time.Time
+	sentTurn        bool // a turn was dispatched to the agent this stage (drives the timeout diagnosis)
 
 	// events is the stream this driver reads when it is not the engine's
 	// own (a goal's cards share one process, split by hub); nil reads
@@ -234,6 +246,11 @@ type ResumeInput struct {
 // decision, and drives on. gummi's restartability (SQLite state, spec on
 // branch, session resume) makes this free (DESIGN §4).
 func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput) (Outcome, error) {
+	// Whatever activity this card already carries belongs to the run that
+	// parked it and has been streamed once already; emitActivity skips to
+	// the end of it the first time it looks. Run does not set this — a run
+	// creates the card, so there is nothing before it.
+	d.resumePrimed = true
 	if err := d.eng.Restore(ctx); err != nil {
 		return d.fail(ctx, string(id), fmt.Errorf("restoring sessions: %w", err))
 	}
@@ -1956,11 +1973,13 @@ func (d *Driver) createFeature(ctx context.Context, kind domain.Kind, desc strin
 	})
 }
 
-// enterStage resets per-stage state (the verbose activity cursor points
-// into a session's own feed, which is fresh each stage).
+// enterStage resets per-stage state. The activity cursor is reset here
+// for the stage boundary and again by emitActivity whenever the session
+// behind the feed changes, which is the finer of the two grains.
 func (d *Driver) enterStage(stage domain.Stage) {
 	d.curStage = stage
 	d.activityCur = 0
+	d.activitySession = time.Time{}
 	d.sentTurn = false
 }
 
@@ -2184,11 +2203,39 @@ func (d *Driver) awaitStage(ctx context.Context, id domain.FeatureID) (stageEnd,
 
 // emitActivity streams any new lines from the live session's activity
 // feed (verbose only).
+//
+// The cursor is rebased whenever the feed belongs to a different session
+// than the one it was last advanced against. Activity is per session, not
+// per stage, and a stage runs several in sequence, so a cursor that only
+// reset at the stage boundary sat past the end of every subsequent
+// session's feed and emitted nothing for it.
 func (d *Driver) emitActivity(id domain.FeatureID) {
 	if !d.out.verbose {
 		return
 	}
-	act := d.snapshot(id).Activity
+	snap := d.snapshot(id)
+	act := snap.Activity
+	if snap.StartedAt != d.activitySession {
+		d.activitySession = snap.StartedAt
+		d.activityCur = 0
+		// The first feed a resume looks at is the card's history: the
+		// stage it is picking up carries the activity of the run that
+		// parked it, seeded back onto the session from the store. Those
+		// lines were streamed once already, by the process that produced
+		// them. Start at the end of them and emit only what happens from
+		// here.
+		//
+		// Replaying them meant every `resume` re-emitted the card's whole
+		// activity history before adding anything new: an agent driving
+		// gummi through several stops re-read what it had already consumed
+		// on each one, and could tell old from new only by remembering how
+		// many lines it saw last time.
+		if d.resumePrimed {
+			d.resumePrimed = false
+			d.activityCur = len(act)
+			return
+		}
+	}
 	for i := d.activityCur; i < len(act); i++ {
 		d.out.activity(string(id), string(d.curStage), act[i])
 	}
