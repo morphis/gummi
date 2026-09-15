@@ -69,6 +69,40 @@ const fileManifestRubric = "a " + "```gummi-files" + " fenced block: the files t
 	"bar: it is read as a starting point, and the implementation is told to\n" +
 	"go beyond it when the work needs to."
 
+// planPhasePreamble states how the design stage's phases relate to each
+// other. It rides ahead of them for every kind that has more than one.
+//
+// The phases are sections of one static system prompt, delivered to one
+// session all at once. Nothing in them said so, and each ended with a
+// sentence that reads like a stopping point ("the user approves the spec to
+// advance"), so a session had two plausible readings of its own
+// instructions and picked the wrong one in both directions we observed. An
+// attended card spent a whole round trip — a process exit, a new session, a
+// re-read of the repository — asking permission to begin the phase it had
+// already been told to do. An unattended one, with nobody to ask, simply
+// stopped after the middle phase and left Implementation notes empty, which
+// the critique then correctly called a blocking defect and sent back for a
+// full replan round. Both cost more than the whole phase would have.
+//
+// So the relationship is stated once, plainly, before the phases are.
+const planPhasePreamble = `The phases below are ONE session's order of work, not separate sessions
+with approvals between them. You move from each phase to the next
+yourself, as soon as that phase is satisfied. No one reviews the phases
+and there is no gate between them, so asking whether you may go on to the
+next one is not a decision the user has been given: it costs a round trip
+and settles nothing. The only approval in this stage is the one at its
+very end, on the finished artifact.
+
+The stage is finished when the LAST phase's output is written, not when
+the first or the middle one is. Stopping early leaves the artifact
+incomplete, and the critique that reads it next has to send the whole
+stage back to write what this session was already asked to write.
+
+When it IS finished, end your turn. Do not ask whether you may move on:
+gummi raises the stage's gate itself, with the same question, in the
+place the user is already looking. Asking first does not bring the gate
+any closer — it just spends a round trip to arrive at it.`
+
 // researchWorkingDirGuard tells a research stage what its working
 // directory is. Every other kind now runs in the card's own branch
 // worktree for its whole life, so there is nothing to warn them about —
@@ -198,7 +232,17 @@ an agent. Tag any step that needs environment the agent may lack with
 can never run locally — untagged steps are promises the verify agent
 will hold you to. Tags belong on prose live-check lines only — never
 inside the gummi-checks block, which must contain only runnable
-commands. gummi runs the block once on the fresh branch at approval to
+commands. An entry in that block passes when its command exits ZERO
+and fails otherwise — that is all gummi reads, and an expect: line
+describes the intent to a human without changing the verdict. So a
+check whose success IS a non-zero exit — an error path, a rejected
+argument, a command that should refuse — must never go in the block
+as written: it records a failure, which floors the stage's verdict
+and sends a correct branch back. Invert it into a command that exits
+zero when the behavior is right (prefix it with ! , or run it in a
+shell line that captures the status and tests it), or leave it out of
+the block and write it as a prose live check for the verify agent to
+run and judge. gummi runs the block once on the fresh branch at approval to
 learn what was already broken, and a check failing there is written off
 as pre-existing at Verify — it gates nothing. So for any check whose
 target does not exist yet on the branch as it stands — a file this
@@ -237,8 +281,9 @@ resolve each thread once the user decides. Write the sections that
 outlive implementation (Problem, Out of scope, Chosen approach) as
 behavior and contracts — types, signatures, invariants — never file
 paths or line numbers, which go stale; file-level detail belongs in
-Implementation notes. The user approves the spec to advance — do not
-start implementing.`)
+Implementation notes. Do not start implementing — code comes after the
+plan, and after the user approves it. When the sections this phase owns
+are written, go straight on to phase 3.`)
 }
 
 // gateAskHint tells an attended stage to close by ASKING whether to move
@@ -611,6 +656,12 @@ yourself, and it must prove the feature's behavior — the symptom the
 spec promises, not merely "runs without erroring" — deterministically.
 Record all results in the spec (the Verification plan section, with
 a summary line in Progress).
+Check as well that the feature's behavior is covered by a test the
+repo's own test command runs. A branch whose only evidence is a live
+check you performed by hand proves the feature works today and nothing
+about tomorrow; if there is no such test and Progress does not name a
+missing seam that explains it, that is a fail with the gap named, not
+a pass with a note.
 When the plan lists no live check beyond the commands gummi already
 ran — the section is empty, or every line restates the gummi-checks —
 the question is already answered: record the kickoff's results and
@@ -754,6 +805,7 @@ func designHints(f domain.Feature) []string {
 	switch f.Kind {
 	case domain.KindBug:
 		return []string{
+			planPhasePreamble,
 			strings.TrimSpace(`
 Stage: Plan — phase 1 of 2: triage (interactive; the user is in
 gummi's chat pane). Your job:
@@ -806,6 +858,7 @@ The user approves the diagnosis to advance — do not start fixing.`),
 		return []string{goalPlanHint()}
 	default:
 		return []string{
+			planPhasePreamble,
 			strings.TrimSpace(`
 Stage: Plan — phase 1 of 3: explore (interactive; the user is in
 gummi's chat pane). Your job: interview the user, and write what you learn into the spec —
@@ -817,7 +870,14 @@ one shape. Lead the interview: ask exactly one question per turn, with
 your recommended answer attached so the user can accept it in a word,
 and walk decisions in dependency order (upstream decisions first). If
 a fact can be found by exploring the repo, look it up instead of
-asking; the decisions are the user's — put each one to them. Keep
+asking; the decisions are the user's — put each one to them.
+Spend questions on forks that change the shape of the work: a seam, a
+contract, a boundary, a tradeoff you cannot call from the brief. Decide
+the rest yourself and write it down where they can see and change it.
+Confirmations are not decisions — asking whether a list you just wrote
+is complete, or whether you may proceed, costs a full round trip and
+returns what you already recommended. Every question you ask a person
+stops the work and waits, so ask the ones worth waiting for. Keep
 turns short (no monologues), update the spec incrementally as answers
 arrive, and flag every unresolved decision as its own marker thread.
 Do not converge on one approach — convergence is phase 2's job.`),
@@ -929,7 +989,14 @@ round inherits the correction rather than the guess. If the kickoff
 carries no manifest, find your own way in as before.
 The spec's Out of scope section is
 binding — build nothing past it. Make focused edits, run the
-relevant checks as you go, and keep changes reviewable. Commit your
+relevant checks as you go, and keep changes reviewable.
+Add automated tests for the behavior you add, at a seam the repo
+already tests through, and run them — the Verify stage requires them.
+A feature whose only proof is someone running a command by hand once
+has no proof at all: the next change to this code has nothing to catch
+it. If the behavior genuinely cannot be tested at any existing seam,
+say so in Progress and name what is missing — the absent seam is a
+finding in its own right, and it stands in for the test. Commit your
 work to this branch with focused git commits as you complete each
 coherent piece — describe what and why in the commit body (bodies
 survive the squash as the merge commit's description) — the branch
