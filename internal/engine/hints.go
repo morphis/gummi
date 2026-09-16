@@ -29,13 +29,26 @@ const (
 const planClaimsRubric = "a `Plan claims` subsection: a table (one " +
 	"claim per bulleted line) of every load-bearing self-assertion " +
 	"the plan is making. Required claim shapes:\n" +
+	"  - `invariant: <what must still be true when this ships>` — one per\n" +
+	"    must-keep clause in the card's own description (X must keep\n" +
+	"    working, never changes Y, stays compatible with Z), copied\n" +
+	"    as a statement about behaviour, plus any the design itself adds.\n" +
+	"    These are numbered INV-1, INV-2 … in the order you write them,\n" +
+	"    and verify must answer every one by id before the card can\n" +
+	"    finish, so state each as something a reader could test — not as\n" +
+	"    an intention\n" +
 	"  - `helper <name>: keyed by <field>, returns <type>` — one per\n" +
 	"    helper, table, or map the plan introduces by name\n" +
-	"  - `golden <name> = <value> because <one-line trace through the plan>`\n" +
-	"    — one per test with a fixed expected value\n" +
-	"  - any other load-bearing invariant, ordering rule, or error-path\n" +
-	"    contract the reader would otherwise have to re-derive from prose,\n" +
-	"    one bullet per claim"
+	"  - `golden <name>[\"<input>\"] = <value> because <one-line trace\n" +
+	"    through the plan>` — one per test with a fixed expected value.\n" +
+	"    QUOTE THE INPUT: gummi checks that each golden's quoted input\n" +
+	"    appears somewhere on the branch, so a golden the implementation\n" +
+	"    silently dropped blocks the card instead of passing unnoticed.\n" +
+	"    A golden you later decide was wrong is struck from this table,\n" +
+	"    not left standing unpinned\n" +
+	"  - any other load-bearing ordering rule or error-path contract the\n" +
+	"    reader would otherwise have to re-derive from prose, one bullet\n" +
+	"    per claim"
 
 // fileManifestRubric is the required shape of the plan's file manifest —
 // the fenced block the implement kickoff carries verbatim, so the stage
@@ -762,7 +775,11 @@ confirm the regression test asserts the reproduction's exact symptom
 at a call site that exercises the bug pattern (inspection — the fix
 is already applied here; do not attempt to run the test against a
 reverted state, and do not modify git history to try). Record all
-results in the report's Verification section.` + verdict)
+results in the report's Verification section.
+Answer the plan's own promises there too: one INV-n: pass|fail line
+per invariant in the Plan claims table (an unanswered invariant blocks
+the card), and one UNPROVEN: <path> — <why> line per changed file no
+check exercised.` + verdict)
 	}
 	return strings.TrimSpace(`
 Stage: Verify (autonomous). The kickoff includes the gummi-check
@@ -776,6 +793,19 @@ yourself, and it must prove the feature's behavior — the symptom the
 spec promises, not merely "runs without erroring" — deterministically.
 Record all results in the spec (the Verification plan section, with
 a summary line in Progress).
+Answer the plan's own promises, in the Verification plan section:
+  - one line per invariant in the Plan claims table, by id, exactly
+    INV-1: pass / INV-1: fail, with the evidence after it. Every
+    invariant must have a line: an unanswered one blocks the card, and
+    "the critique said it was non-blocking" is not an answer — an
+    invariant the card's description asked for is either still true of
+    this branch or it is a fail.
+  - one line per changed file that NO check exercised, exactly
+    UNPROVEN: <path> — <why> (a toolchain this container lacks, a
+    CI-only suite, a generated file). The kickoff lists the files this
+    branch changed. This is not an excuse mechanism and does not block
+    the card: it is how the branch tells the person merging it which
+    parts nothing ran. A file you did prove needs no line.
 Check as well that the feature's behavior is covered by a test the
 repo's own test command runs. A branch whose only evidence is a live
 check you performed by hand proves the feature works today and nothing

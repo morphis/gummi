@@ -1544,6 +1544,36 @@ Decided in the design interview (2026-07-03):
     the combined branch), the budget is a ceiling no agent raises, and a
     sandbox refusal is a refusal — the lead plans around it, never widens
     a card's reach.
+21. **A plan's promises are part of the quality floor**, decided after
+    the lxd drives (2026-09-15). Until then the floor asked whether the
+    stages *ran* — a plan exists, a critique read the diff, the checks
+    exited zero — and never whether what the plan *promised* is in the
+    branch. Two drives of one feature showed both halves of the gap: a
+    plan pinned a golden the implementation silently dropped, and a card
+    shipped a branch contradicting its own description's must-keep
+    clause because a critique called the contradiction "non-blocking".
+    Three critique rounds and a verify passed each time. So a plan now
+    writes two checkable commitments, and the verify→done gate holds the
+    card to them:
+    - an **invariant** (`invariant: …` in `Plan claims`, numbered INV-n)
+      is a must-keep clause, usually lifted from the card's own
+      description. Verify answers each by id; an unanswered or failed
+      invariant blocks the gate. A critique may argue about how to keep
+      an invariant; it may not reclassify breaking one as documented.
+    - a **golden** quotes its input, and that input must appear
+      somewhere on the branch. A golden the work outgrew is struck from
+      the plan, not left standing.
+
+    Two rules bound it, both so the floor can never become the reason a
+    card cannot finish: it holds a card only to promises it can *read*
+    (a golden quoting nothing is prose), and a check that cannot run —
+    an unreadable artifact, a search that timed out — is no opinion
+    rather than a block. Coverage is recorded, not gated: verify
+    declares each changed file no check exercised (`UNPROVEN: <path> —
+    <why>`), and gummi carries those onto `status --json` and the `done`
+    event, because a pass that never compiled three of the branch's
+    files is a pass about the other files and the caller cannot
+    otherwise tell.
 
 Still open:
 

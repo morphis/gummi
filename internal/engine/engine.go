@@ -1443,6 +1443,14 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			s.setVerdictFloor("fail", "branch ships "+strings.Join(names, ", "))
 		}
 	}
+	// The inventory of what this branch changed, so the coverage question
+	// is answerable rather than assumed. A verify that cannot see the file
+	// list reports on the files it happened to look at, which is how a
+	// branch with three files no check could compile reached
+	// verified: true with the gap recorded only in prose.
+	paths := e.changedPaths(s.Feature)
+	b.WriteString(changedFileInventory(paths))
+	b.WriteString(grammarSweepHint(string(raw), paths))
 	b.WriteString("\nNow execute the spec's Verification plan (the feature-specific live " +
 		"checks), record all results in the spec's Verification plan and a summary " +
 		"line in Progress, and report pass or fail with the evidence.")
@@ -2468,6 +2476,11 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			}
 			e.stageReceipt(s)
 			e.gateVerifyVerdict(s)
+			// and the promises floor: a verify that passed while one of
+			// the plan's own invariants is unanswered, or while a golden
+			// it pinned is on the branch nowhere, is a pass about the
+			// process rather than about the work.
+			e.gatePromiseVerdict(s)
 		}
 	case agent.EventError:
 		// a terminal error ends the turn with no trailing idle (the

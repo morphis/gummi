@@ -243,6 +243,18 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 			return res, nil
 		}
 
+		// The promises floor: an invariant the plan carried that verify
+		// never answered, or answered fail, and a golden the plan pinned
+		// that nothing on the branch contains. It rides StatusBlockedOmission
+		// because it is the same kind of stop — the work is short of what
+		// the card said it would be — and every consumer already routes
+		// that status to a person with its reason.
+		if reason, blocked := e.promiseGateBlocksAdvance(ctx, f); blocked {
+			res.Status = StatusBlockedOmission
+			res.Reason = reason
+			return res, nil
+		}
+
 		if !f.HandedOff() {
 			wt, err := e.mgr(ctx, &f)
 			if err != nil {
