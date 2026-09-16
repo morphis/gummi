@@ -402,6 +402,25 @@ func NewCommitDraftGuardError(reason string) *CommitDraftGuardError {
 // caller can tell a broken scribe config from a slow draft or a guard
 // rejection instead of seeing a blank box forever. Deliberate rejections
 // (diff dump / attribution) are returned as a *CommitDraftGuardError.
+// commitScribeRepoHints carries the repository's own instructions into the
+// commit-message scribe, or nothing when the repo states none.
+//
+// Of every pass gummi runs, this is the one whose output is judged against
+// a written convention most often: repositories put their commit-prefix
+// table, their sign-off rule and their subject-line limits in exactly the
+// files this card quotes. A scribe that cannot see them writes a message
+// the project's reviewers bounce, which is a human round trip bought for a
+// prompt the engine already had.
+func commitScribeRepoHints(card string) []string {
+	if card == "" {
+		return nil
+	}
+	return []string{card, "Follow this repository's commit conventions exactly — its prefix " +
+		"table, subject style and body wrapping. Do NOT add a Signed-off-by, Co-authored-by, " +
+		"or any other attribution trailer: gummi never signs for a human, and a repo that " +
+		"requires a sign-off requires the person merging to add it."}
+}
+
 func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (string, error) {
 	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
@@ -433,9 +452,9 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		Provider:   rc.Provider,
 		Think:      rc.Think,
 		Permission: e.cfg.Permission,
-		SystemHints: []string{
+		SystemHints: append([]string{
 			"You are composing a commit message read-only; do not modify any files.",
-		},
+		}, commitScribeRepoHints(e.repoInstructionsCard(wt.RepoRoot()))...),
 	})
 	if err != nil {
 		return "", fmt.Errorf("scribe session could not open: %w", err)
@@ -466,6 +485,7 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		}
 		return draft, nil
 	}
+	stage := f.Stage
 	for {
 		select {
 		case ev, ok := <-sess.Events():
@@ -477,6 +497,8 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 				text.delta(ev.Text)
 			case agent.EventMessage:
 				text.message(ev.Text)
+			case agent.EventUsage:
+				e.recordOneShotUsage(f.ID, stage, ev.Usage)
 			case agent.EventIdle:
 				return drain()
 			case agent.EventError:

@@ -100,6 +100,33 @@ scribe survey that writes the repo's commands into the spec's
 were already failing. They are model-and-shell work that can take minutes
 on a large repository, which is why they are on the stream: between the
 plan's verdict and the gate crossing, they are the only thing happening.
+They carry the stage the card is crossing **from**, because that is the
+gate they belong to — the card's own stage field has already advanced by
+the time they start.
+
+The survey is remembered per repository, not per card: a second card in
+the same repo reuses the first card's answer and skips the session
+entirely, until one of the files that decides the answer changes (the
+Makefile or task file, the CI workflows, the dependency manifest, the
+lint config, or the repo's AGENTS.md/CLAUDE.md). Delete
+`.gummi/checks-cache.json` to force a fresh survey.
+
+A finished card's receipt carries three numbers worth reading together:
+
+```
+{"event":"done","spent_credits":661.4,
+ "review_rounds":3,            the critiques THIS invocation ran
+ "corrective_rounds":1,        the CARD's cumulative rework, across processes
+ "unproven_files":["lxd/images.go"]}
+```
+
+`unproven_files` is verify's own declaration of the files this branch
+changed that no check that ran exercised — a tree the local toolchain
+cannot build, a suite only CI runs. It does not block the card; it is how
+a caller tells a branch every check covered from one where a whole
+subtree was never compiled. `gummi status --json` carries the same list
+(with each file's reason) beside `excused_checks`, and both qualify
+`verified` in the same way.
 
 To measure where a run's spend went rather than watch it, `gummi status
 <id> --json` carries `stage_spend`: one row per (stage, role) with the

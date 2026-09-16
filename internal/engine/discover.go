@@ -103,6 +103,18 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		return e.recordChecks(specPath, spec.RenderDiscoveredChecks(cfg.Checks.Default))
 	}
 
+	// What builds this repository is a property of the repository, not of
+	// the card. A survey whose build-defining files have not moved since
+	// the last one is the same survey, so the workspace remembers it: the
+	// second card in a repo starts from the first card's answer instead of
+	// paying minutes of scribe time to re-derive it — and, more to the
+	// point, gets the SAME answer, rather than a second defensible command
+	// set that quietly means a different quality floor.
+	repoRoot := e.repoRootFor(ctx, f)
+	if cached, ok := e.cachedChecks(repoRoot); ok {
+		return e.recordChecks(specPath, spec.RenderDiscoveredChecks(cached))
+	}
+
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:         workDir,
 		ArtifactPath:    specPath,
@@ -118,23 +130,39 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		return nil, err
 	}
 	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, discoverPromptWith(e.environmentCard())); err != nil {
+	// The repo's own instructions go in ahead of the survey: a
+	// repository that documents its build ("make client builds the
+	// CGO-free half"; "these four files are generated, never edit them")
+	// answers in one line what the scribe otherwise spends a dozen tool
+	// calls and several minutes proving from the outside.
+	prompt := discoverPromptWith(e.environmentCard())
+	if card := e.repoInstructionsCardFor(ctx, f); card != "" {
+		prompt = card + "\n\n" + prompt
+	}
+	if err := sess.Send(ctx, prompt); err != nil {
 		return nil, err
 	}
+	// Booked against the stage the pass started in, like oneShot: a
+	// discovery that outlives the gate it was fired at is still that
+	// stage's spend, and a pass nobody books is spend the envelope
+	// cannot bound.
+	stage := f.Stage
 	var text assistantText
 	for {
 		select {
 		case ev, ok := <-sess.Events():
 			if !ok {
-				return e.recordChecks(specPath, text.String())
+				return e.finishDiscovery(repoRoot, specPath, text.String())
 			}
 			switch ev.Kind {
 			case agent.EventTextDelta:
 				text.delta(ev.Text)
 			case agent.EventMessage:
 				text.message(ev.Text)
+			case agent.EventUsage:
+				e.recordOneShotUsage(f.ID, stage, ev.Usage)
 			case agent.EventIdle:
-				return e.recordChecks(specPath, text.String())
+				return e.finishDiscovery(repoRoot, specPath, text.String())
 			case agent.EventError:
 				return nil, ev.Err
 			case agent.EventBudgetExhausted:
@@ -142,12 +170,45 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 				// in-flight response is done and no more turns will run, so
 				// stop waiting rather than block forever for an idle that
 				// isn't coming.
-				return e.recordChecks(specPath, text.String())
+				return e.finishDiscovery(repoRoot, specPath, text.String())
 			}
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// repoInstructionsCardFor resolves f's repository root and returns its
+// instruction card, or "" when the repo cannot be resolved or states
+// none. It exists so the one-shot passes, which hold a feature rather
+// than a session, can reach the same card stage sessions get.
+func (e *Engine) repoInstructionsCardFor(ctx context.Context, f domain.Feature) string {
+	return e.repoInstructionsCard(e.repoRootFor(ctx, f))
+}
+
+// finishDiscovery records a completed survey on the card and remembers it
+// for the repository.
+//
+// What is cached is what the scribe FOUND, not what the card ends up
+// carrying: recordChecks merges the survey into whatever the artifact
+// already held, and those hand-authored entries are the card's own
+// feature-specific checks. Caching the merge would leak one card's checks
+// into every later card in the repo.
+func (e *Engine) finishDiscovery(repoRoot, specPath, reply string) ([]domain.Check, error) {
+	if discovered, _, _ := spec.ParseChecks(reply); len(discovered) > 0 {
+		e.rememberChecks(repoRoot, discovered)
+	}
+	return e.recordChecks(specPath, reply)
+}
+
+// repoRootFor resolves f's repository root, or "" when it cannot be
+// resolved.
+func (e *Engine) repoRootFor(ctx context.Context, f domain.Feature) string {
+	mgr, err := e.mgr(ctx, &f)
+	if err != nil || mgr == nil {
+		return ""
+	}
+	return mgr.RepoRoot()
 }
 
 // recordChecks parses the scribe's reply and upserts the block into the

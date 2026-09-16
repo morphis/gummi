@@ -85,6 +85,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 	if err := sess.Send(ctx, estimatePrompt); err != nil {
 		return 0, err
 	}
+	stage := f.Stage
 	var text assistantText
 	for {
 		select {
@@ -98,6 +99,8 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 				text.delta(ev.Text)
 			case agent.EventMessage:
 				text.message(ev.Text)
+			case agent.EventUsage:
+				e.recordOneShotUsage(f.ID, stage, ev.Usage)
 			case agent.EventIdle:
 				v, _ := parseScribeEstimate(text.String())
 				return v * e.costFactor(backend), nil

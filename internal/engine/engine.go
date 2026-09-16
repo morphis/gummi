@@ -354,6 +354,10 @@ type Engine struct {
 	// empty is not recomputed on every session.
 	repoCardMu sync.Mutex
 	repoCards  map[string]string
+	// repoInstructions caches the managed repository's own instruction
+	// card (AGENTS.md/CLAUDE.md, quoted) per repository root, under the
+	// same mutex and with the same lifetime as repoCards.
+	repoInstructions map[string]string
 
 	// goalLocks serializes the conductor per goal (goal.go's goalLock).
 	goalLocksMu sync.Mutex
@@ -1607,6 +1611,15 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// first, environment second — so the environment card ends up first.
 	if mgr, err := e.mgr(ctx, &f); err == nil && mgr != nil {
 		if card := e.repoCard(mgr.RepoRoot()); card != "" {
+			hints = append([]string{card}, hints...)
+		}
+		// The repo's own instructions sit above its file tree: they are
+		// rules to follow, not reference material, and the precedence
+		// hint every session already carries asserts they are in force.
+		// Quoting them is what makes that assertion true — a session on a
+		// backend that auto-loads only its own convention never saw an
+		// AGENTS.md otherwise.
+		if card := e.repoInstructionsCard(mgr.RepoRoot()); card != "" {
 			hints = append([]string{card}, hints...)
 		}
 	}
