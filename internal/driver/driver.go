@@ -983,8 +983,6 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 			return d.timeout(f), nil
 		case endError:
 			return Outcome{}, firstErr(end.err, errors.New("agent session failed"))
-		case endTripwire:
-			return d.tripwire(f, end.dirtyPaths), nil
 		case endQuestion:
 			ask := d.pendingAsk(f.ID)
 			if ask == nil {
@@ -1119,8 +1117,6 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 		return d.timeout(f), nil
 	case endError:
 		return Outcome{}, firstErr(end.err, errors.New("agent session failed"))
-	case endTripwire:
-		return d.tripwire(f, end.dirtyPaths), nil
 	case endQuestion:
 		// autonomous stages register no ask_user tool, so this is anomalous;
 		// don't guess an answer — escalate.
@@ -1233,8 +1229,6 @@ func (d *Driver) awaitCritique(ctx context.Context, f domain.Feature) (Outcome, 
 		return d.timeout(f), nil
 	case endError:
 		return Outcome{}, firstErr(end.err, errors.New("critique session failed"))
-	case endTripwire:
-		return d.tripwire(f, end.dirtyPaths), nil
 	default:
 		return d.judgeCritique(ctx, f, d.snapshot(f.ID))
 	}
@@ -1338,8 +1332,6 @@ func (d *Driver) awaitRework(ctx context.Context, f domain.Feature) (Outcome, er
 		return d.timeout(f), nil
 	case endError:
 		return Outcome{}, firstErr(end.err, errors.New("rework session failed"))
-	case endTripwire:
-		return d.tripwire(f, end.dirtyPaths), nil
 	default:
 		// re-critique the revised output (mirrors ReCritiqueNote intent).
 		if err := d.dispatchCritique(f, verdict.ReCritiqueNote); err != nil {
@@ -1945,17 +1937,6 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
 }
 
-// tripwire reports a main-checkout tripwire hit as a typed escalation: the
-// agent dirtied paths on main that were clean before its turn, so the run
-// is hard-stopped (the engine leaves the dirt in place for the operator to
-// resolve) and the stage is re-run from a clean checkout. It maps to the
-// escalation exit — never a timeout — and names the dirty paths so the
-// stream carries the actionable cause instead of blaming the backend.
-func (d *Driver) tripwire(f domain.Feature, paths []string) Outcome {
-	reason := "the agent dirtied the main checkout; resolve these new paths, then re-run: " + strings.Join(paths, ", ")
-	return d.escalation(f, reason)
-}
-
 // bounceEscalation is the escalation flavor used when the human's follow-up
 // is to rewind review/verify back to implement/fix — a review cap-hit or a
 // verify-fail. The `next` field names `--bounce` so a caller driving the
@@ -2157,14 +2138,12 @@ const (
 	endExhausted
 	endError
 	endTimeout
-	endTripwire
 )
 
 type stageEnd struct {
-	kind       endKind
-	err        error
-	committed  bool     // endExhausted: the stage's work was committed, not stranded
-	dirtyPaths []string // endTripwire: paths the agent dirtied on the main checkout
+	kind      endKind
+	err       error
+	committed bool // endExhausted: the stage's work was committed, not stranded
 }
 
 // awaitStage reads the engine stream for feature id until the stage
@@ -2216,14 +2195,6 @@ func (d *Driver) awaitStage(ctx context.Context, id domain.FeatureID) (stageEnd,
 				return stageEnd{kind: endError, err: ev.Err}, nil
 			case engine.EventIdle:
 				return stageEnd{kind: endIdle}, nil
-			case engine.EventTripwire:
-				// a clean->dirty transition on the main checkout: the run is
-				// hard-stopped (engine.trip emits this then kills the session),
-				// so treat it as an end and carry the dirtied paths for the
-				// escalation. The trip's own EventStopped follows, but we return
-				// here before reading it. Nothing further can arrive for this
-				// feature.
-				return stageEnd{kind: endTripwire, dirtyPaths: ev.DirtyPaths}, nil
 			case engine.EventUpdated, engine.EventMessage, engine.EventAnnotations:
 				d.emitActivity(id)
 			case engine.EventCheckpointFailed:

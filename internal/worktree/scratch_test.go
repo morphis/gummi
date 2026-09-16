@@ -82,12 +82,6 @@ func TestScratchTreeIsolatesWritesFromMain(t *testing.T) {
 	if out := mustGit(t, root, "status", "--porcelain", "--untracked-files=all"); out != before {
 		t.Fatalf("main checkout dirtied by writes in the scratch tree:\n%s", out)
 	}
-	// the tripwire's own input, which is what actually parks a card
-	if paths, err := m.MainDirtyPaths(ctx); err != nil {
-		t.Fatal(err)
-	} else if len(paths) != 0 {
-		t.Fatalf("MainDirtyPaths = %v, want none", paths)
-	}
 	// and main's copy of the clobbered file is untouched
 	if body, err := os.ReadFile(filepath.Join(root, "README.md")); err != nil {
 		t.Fatal(err)

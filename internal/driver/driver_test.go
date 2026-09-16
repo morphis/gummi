@@ -1180,58 +1180,6 @@ func TestErrorEventResumable(t *testing.T) {
 	}
 }
 
-// A main-checkout tripwire hit must end the run promptly as a typed
-// escalation naming the dirtied paths — not block until --stage-timeout and
-// misreport a backend stall. The engine aborts the session and emits
-// EventTripwire with nothing further on the stream; the driver must treat
-// it as a decision boundary.
-func TestTripwireNotTimeout(t *testing.T) {
-	h := newHarness(t, true, map[domain.Stage]stageFn{
-		domain.StagePlan: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return msgIdle(o.Model, "Spec.")
-		},
-		domain.StageImplement: func(h *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			if o.Role == agent.RoleScribe {
-				return msgIdle(o.Model, "Implemented.")
-			}
-			// the agent dirties the MAIN checkout (h.root), not the worktree —
-			// a clean->dirty transition that trips the engine's tripwire.
-			if err := os.WriteFile(filepath.Join(h.root, "tripwire.txt"), []byte("dirty\n"), 0o600); err != nil {
-				t.Fatalf("writing main checkout: %v", err)
-			}
-			return msgIdle(o.Model, "Implemented.")
-		},
-
-		// the merged design stage ends with a critique; a drive that is
-		// not about the critique still needs it to pass.
-		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
-			return toolVerdict(o.Model, "pass")
-		},
-	})
-	start := time.Now()
-	out, err := h.driver(Options{StageTimeout: 3 * time.Second}).Run(context.Background(), "feature")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if out.Status != StatusEscalation {
-		t.Fatalf("status = %q, want escalation; stream=%v", out.Status, h.eventKinds())
-	}
-	if elapsed := time.Since(start); elapsed >= 3*time.Second {
-		t.Fatalf("tripwire run took %v — it blocked for the whole stage-timeout instead of failing promptly", elapsed)
-	}
-	if h.has("timeout") {
-		t.Fatalf("tripwire reported a timeout; stream=%v", h.eventKinds())
-	}
-	e := lastEvent(h, "escalation")
-	if e == nil {
-		t.Fatalf("no escalation event; stream=%v", h.eventKinds())
-	}
-	reason, _ := e["reason"].(string)
-	if !strings.Contains(reason, "tripwire.txt") {
-		t.Fatalf("escalation reason = %q, want the dirtied path named", reason)
-	}
-}
-
 // A silent backend death — the agent's event stream ends mid-turn with no
 // Idle and no Error — must surface as a prompt, non-zero failure, not hang
 // until --stage-timeout and misreport a backend stall. The engine turns the

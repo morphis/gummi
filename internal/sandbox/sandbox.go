@@ -5,13 +5,12 @@
 // (mode, coverage gaps), so the engine's session-start refusal and the
 // doctor's per-profile report cannot drift apart.
 //
-// The mode governs TOOL COVERAGE and DETECTION, not containment: enforce
-// refuses a backend that cannot reach gummi's tools and arms the
-// main-checkout tripwire, warn arms the tripwire alone, off disarms it.
-// No mode confines a write. What keeps a role's file writes inside its
-// worktree is the backend's own policy (agent.WriteCage), which doctor
-// reports per role; nothing at all confines shell commands. DESIGN §4.4
-// carries the full shape.
+// The mode governs TOOL COVERAGE, not containment: enforce refuses a
+// backend that cannot reach gummi's tools; warn and off let the run
+// start. No mode confines a write. What keeps a role's file writes inside
+// its worktree is the backend's own policy (agent.WriteCage), which
+// doctor reports per role; nothing at all confines shell commands.
+// DESIGN §4.4 carries the full shape.
 //
 // The resolver is a pure function of its inputs: it reads no filesystem,
 // constructs no adapter, and mutates nothing. Callers (the engine from
@@ -30,20 +29,22 @@ import (
 	"github.com/morphis/gummi/internal/config"
 )
 
-// Mode is one of the three confinement levels. The zero value ("") means
+// Mode is one of the three coverage levels. The zero value ("") means
 // "unset" — the resolver treats it as no declaration for that layer, so
 // precedence can fall through to the next one and finally to the built-in
 // default.
 type Mode string
 
 const (
-	// ModeEnforce arms the R1 tripwire and refuses to start any run whose
-	// profile names a backend without tool coverage.
+	// ModeEnforce refuses to start any run whose profile names a backend
+	// without tool coverage.
 	ModeEnforce Mode = "enforce"
-	// ModeWarn arms the R1 tripwire but never refuses on coverage gaps.
+	// ModeWarn reports coverage gaps without refusing on them.
 	ModeWarn Mode = "warn"
-	// ModeOff disarms the R1 tripwire entirely — the escape hatch for
-	// bootstrap and test sessions that legitimately touch main.
+	// ModeOff is ModeWarn's silent twin: it refuses nothing either. Both
+	// survive as config values that predate the removal of the
+	// main-checkout tripwire, which was the only thing they used to
+	// differ on.
 	ModeOff Mode = "off"
 )
 

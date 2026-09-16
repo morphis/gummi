@@ -57,13 +57,12 @@ func TestDesignStageRunsInTheCardsWorktree(t *testing.T) {
 	}
 }
 
-// TestDesignStageWritesDoNotTripMain is the observed regression this fix
-// exists for: an agent exploring at spec ran ordinary Go commands, the
-// toolchain rewrote go.sum in its working directory, and the tripwire
-// escalated ("the agent dirtied the main checkout ... go.sum") — parking
-// the card having produced nothing, and killing a benchmark run. Writing
-// in its own working directory must now be unremarkable.
-func TestDesignStageWritesDoNotTripMain(t *testing.T) {
+// TestDesignStageWritesStayOutOfMain is the observed regression this fix
+// exists for: an agent exploring at spec ran ordinary Go commands and the
+// toolchain rewrote go.sum in its working directory. That used to land in
+// the main checkout. The stage's writes must stay in its own working
+// directory, leaving main clean.
+func TestDesignStageWritesStayOutOfMain(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ag := agent.NewFake("ack")
 	ag.Responder = func(opts agent.SessionOpts, _ string) []agent.Event {
@@ -82,15 +81,10 @@ func TestDesignStageWritesDoNotTripMain(t *testing.T) {
 	if _, err := e.Attach(context.Background(), f); err != nil {
 		t.Fatal(err)
 	}
-	// a trip would emit EventTripwire instead and hang this wait
 	waitFor(t, e, EventIdle)
 
-	paths, err := wt.MainDirtyPaths(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(paths) != 0 {
-		t.Fatalf("main checkout dirty after a design stage: %v", paths)
+	if out := gitOut(t, wt.RepoRoot(), "status", "--porcelain", "--", ":(exclude).gummi"); out != "" {
+		t.Fatalf("main checkout dirty after a design stage:\n%s", out)
 	}
 	body, err := os.ReadFile(filepath.Join(wt.RepoRoot(), "README.md"))
 	if err != nil {

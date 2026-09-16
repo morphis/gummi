@@ -2,7 +2,6 @@ package engine
 
 import (
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +11,9 @@ import (
 )
 
 // newSandboxEng returns an engine whose `bad` fake is scripted to write the
-// given path into the main checkout on its turn, so the tripwire (warn /
-// enforce) or its absence (off) is observable through a real Run.
+// given path into the main checkout on its turn, so a mode's session-start
+// decision is observable through a real Run — and so is the fact that the
+// write itself no longer ends anything.
 func newSandboxEng(t *testing.T, mode, write string) *Engine {
 	t.Helper()
 	ws, store, wt := newRepo(t)
@@ -36,8 +36,10 @@ func newSandboxEng(t *testing.T, mode, write string) *Engine {
 	return e
 }
 
-// TestSandboxE2E drives the full session-start + tripwire behavior through
-// the autonomous Run path for each mode.
+// TestSandboxE2E drives the session-start decision through the autonomous
+// Run path for each mode. Only enforce refuses; warn and off are the same
+// permissive decision under two names, and neither watches the main
+// checkout — a turn that dirties it still finishes as a normal turn.
 func TestSandboxE2E(t *testing.T) {
 	t.Run("enforce with gap refuses and emits no start", func(t *testing.T) {
 		e := newSandboxEng(t, "enforce", "never-written.go")
@@ -69,26 +71,18 @@ func TestSandboxE2E(t *testing.T) {
 		waitFor(t, e, EventStarted)
 	})
 
-	t.Run("warn with gap starts and arms the tripwire", func(t *testing.T) {
-		e := newSandboxEng(t, "warn", "cmd/gummi/main.go")
-		f := implFeature(3)
-		withWorktree(t, e.cfg.Worktrees, f)
-		if err := e.Run(f); err != nil {
-			t.Fatalf("warn must not refuse, got error: %v", err)
-		}
-		ev := waitFor(t, e, EventTripwire)
-		if want := []string{"cmd/gummi/main.go"}; !reflect.DeepEqual(ev.DirtyPaths, want) {
-			t.Errorf("DirtyPaths = %v, want %v", ev.DirtyPaths, want)
-		}
-	})
-
-	t.Run("off starts and disarms the tripwire", func(t *testing.T) {
-		e := newSandboxEng(t, "off", "cmd/gummi/main.go")
-		f := implFeature(4)
-		withWorktree(t, e.cfg.Worktrees, f)
-		if err := e.Run(f); err != nil {
-			t.Fatalf("off must not refuse, got error: %v", err)
-		}
-		waitFor(t, e, EventIdle) // a trip would replace this with EventTripwire and hang the wait
-	})
+	// A turn that dirties main used to be a hard stop. It is now nothing at
+	// all: the checkout is watched by no one, under any mode. Both of these
+	// run the identical scenario to pin that warn and off no longer differ.
+	for _, mode := range []string{"warn", "off"} {
+		t.Run(mode+" with gap starts and lets a main-checkout write through", func(t *testing.T) {
+			e := newSandboxEng(t, mode, "cmd/gummi/main.go")
+			f := implFeature(3)
+			withWorktree(t, e.cfg.Worktrees, f)
+			if err := e.Run(f); err != nil {
+				t.Fatalf("%s must not refuse, got error: %v", mode, err)
+			}
+			waitFor(t, e, EventIdle)
+		})
+	}
 }

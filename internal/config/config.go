@@ -21,13 +21,14 @@ import (
 type Config struct {
 	// Permissions is "allow-all" (default) or "guarded" (DESIGN §4.4).
 	Permissions string `yaml:"permissions"`
-	// Sandbox is the workspace-wide default for the tool-coverage refusal
-	// and the main-checkout tripwire: "enforce", "warn", or "off". Empty
-	// means unset — profiles that omit their own value fall back to the
-	// built-in "warn". It does NOT confine writes: what keeps a role's
-	// writes inside its worktree is the backend's own file-tool policy
-	// (agent.WriteCage), and no backend confines the shell at all. See
-	// DESIGN §4.4 for what each layer actually guarantees.
+	// Sandbox is the workspace-wide default for the tool-coverage
+	// refusal: "enforce", "warn", or "off". Empty means unset — profiles
+	// that omit their own value fall back to the built-in "warn". Only
+	// "enforce" does anything; warn and off both let a run start. It does
+	// NOT confine writes: what keeps a role's writes inside its worktree
+	// is the backend's own file-tool policy (agent.WriteCage), and no
+	// backend confines the shell at all. See DESIGN §4.4 for what each
+	// layer actually guarantees.
 	Sandbox string `yaml:"sandbox"`
 	// AutopilotLanes caps how many autopilot-pool cards — a card whose
 	// gate-approval mode is domain.GateAutopilot, and ONLY that mode — can
@@ -426,12 +427,11 @@ const Template = `# gummi configuration. See docs/DESIGN.md.
 # permissions: allow-all (default) or guarded.
 permissions: allow-all
 
-# sandbox: enforce|warn|off — the confinement guarantee a run is held to
-# (default warn). enforce refuses to start any run whose profile routes a
-# role at a backend without tool coverage; warn arms the same tripwire but
-# never refuses on coverage gaps; off disarms the tripwire entirely (only
-# for bootstrap/test sessions that legitimately touch main). Profiles may
-# override this per-profile in .gummi/profiles.yaml.
+# sandbox: enforce|warn|off — the tool-coverage guarantee a run is held
+# to (default warn). enforce refuses to start any run whose profile routes
+# a role at a backend without tool coverage; warn and off let such a run
+# start anyway. Profiles may override this per-profile in
+# .gummi/profiles.yaml.
 # sandbox: warn
 
 # autopilot_lanes: how many autopilot cards (gate-approval mode autopilot,

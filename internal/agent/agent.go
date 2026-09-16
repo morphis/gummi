@@ -263,8 +263,8 @@ type Capabilities struct {
 // bash policy is command-string based, not path based, so a real shell
 // cage needs process-level confinement, which gummi does not do (the
 // decision is recorded at internal/agent/opencode_config.go and in
-// DESIGN §4.4). The main-checkout tripwire is the backstop for what slips
-// through, and it detects and kills — it does not prevent.
+// DESIGN §4.4). Nothing backstops what slips through: a role whose cage
+// is weaker than WriteCagePaths is trusted, not contained.
 type WriteCage string
 
 const (
@@ -273,7 +273,7 @@ const (
 	// backend itself rather than by the model's cooperation.
 	WriteCagePaths WriteCage = "paths"
 	// WriteCageCwd: gummi starts the backend in WorkDir and nothing more.
-	// Its tools may name any path they like; only the tripwire notices.
+	// Its tools may name any path they like, and nothing notices.
 	WriteCageCwd WriteCage = "cwd"
 )
 

@@ -10,7 +10,6 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/livelog"
-	"github.com/morphis/gummi/internal/sandbox"
 )
 
 // EventKind classifies an engine Event.
@@ -41,10 +40,6 @@ const (
 	// via the resolve_annotation client tool — an open diff surface should
 	// re-read its annotations so the open-count burns down live.
 	EventAnnotations EventKind = "annotations"
-	// EventTripwire fires when the agent made a clean→dirty transition on
-	// the main checkout — new paths appear that weren't dirty before the
-	// turn. The run aborts (DirtyPaths names the new paths).
-	EventTripwire EventKind = "tripwire"
 	// EventCheckpointFailed fires when checkpoint's CommitAll fails for any
 	// reason other than ErrNoWorktree (Err populated). It is non-terminal:
 	// the session and stage keep running.
@@ -74,13 +69,12 @@ type Event struct {
 	// that looks a Feature up — Engine.Get, a row lookup, the attention
 	// queue — must therefore establish it has one first. The empty case
 	// is a normal value on this channel, not a bug upstream.
-	Feature    domain.FeatureID
-	Stage      domain.Stage
-	Kind       EventKind
-	Err        error
-	Threshold  int      // budget % for EventBudget
-	Committed  bool     // EventExhausted: the stage's work was committed (not stranded)
-	DirtyPaths []string // EventTripwire: paths newly dirty on main after the turn (sorted)
+	Feature   domain.FeatureID
+	Stage     domain.Stage
+	Kind      EventKind
+	Err       error
+	Threshold int  // budget % for EventBudget
+	Committed bool // EventExhausted: the stage's work was committed (not stranded)
 }
 
 // SessionState is a session's scheduling status.
@@ -235,8 +229,8 @@ type Session struct {
 	done     chan struct{}
 	stopOnce sync.Once
 	// ctx is the session's lifecycle context: canceled by stop(), so any
-	// in-flight git subprocess (the tripwire's dirty snapshots) is killed
-	// the instant the session finalizes rather than racing teardown.
+	// in-flight subprocess it carries is killed the instant the session
+	// finalizes rather than racing teardown.
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -295,12 +289,10 @@ type Session struct {
 	// the row without moving this, so the figure can sit that much low
 	// until the next reload; it is never high.
 	cardSpent    float64
-	threshold    int          // highest budget threshold crossed (%)
-	pendingNudge string       // budget nudge awaiting the next sent turn
-	exhausted    bool         // hit the credit cap
-	tripped      bool         // main-checkout tripwire fired; the run is dead
-	clientTools  bool         // resolved backend's ClientTools capability (spawn-time cache)
-	sandboxMode  sandbox.Mode // resolved confinement mode (stamped at spawn)
+	threshold    int    // highest budget threshold crossed (%)
+	pendingNudge string // budget nudge awaiting the next sent turn
+	exhausted    bool   // hit the credit cap
+	clientTools  bool   // resolved backend's ClientTools capability (spawn-time cache)
 
 	// cardUnlock retires this session's hold on the workspace's per-card
 	// lock (state.CardLocks), taken before the session was created so a
@@ -316,12 +308,6 @@ type Session struct {
 	// no call site branches on it. Emits are non-blocking channel sends,
 	// so holding s.mu across one costs nothing the UI can feel.
 	live *livelog.Writer
-
-	// preTurnDirt is the set of paths dirty on the main checkout
-	// immediately before the pending Send. The tripwire compares it
-	// against the post-turn set at EventIdle; nil means no pre-turn
-	// snapshot was taken this turn (see takePreTurn).
-	preTurnDirt map[string]struct{}
 
 	// envProbes holds the most recent env prerequisite probe results for
 	// this session, produced at Verify kickoff and surfaced on Snapshot.
@@ -918,23 +904,6 @@ func (s *Session) ClientTools() bool {
 	return s.clientTools
 }
 
-// setSandboxMode records the session's resolved confinement mode (warn /
-// enforce / off), stamped once at spawn. The tripwire reads it to decide
-// whether this run's arming state is on or off.
-func (s *Session) setSandboxMode(m sandbox.Mode) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sandboxMode = m
-}
-
-// SandboxMode returns the session's resolved confinement mode. The zero
-// value (unset) is treated as armed — only an explicit off disarms.
-func (s *Session) SandboxMode() sandbox.Mode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sandboxMode
-}
-
 // registerResolver stashes a waiter for an in-flight MCP tool-call and
 // returns its channel. DispatchClientTool owns the call id; Resolve paths
 // that answer the call take the channel via takeResolver.
@@ -1082,44 +1051,6 @@ func (s *Session) markExhausted() bool {
 		return false
 	}
 	s.exhausted = true
-	s.busy = false
-	return true
-}
-
-// beginTurn records the set of paths dirty on main immediately before a
-// Send, arming the tripwire's post-turn comparison.
-func (s *Session) beginTurn(paths []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	set := make(map[string]struct{}, len(paths))
-	for _, p := range paths {
-		set[p] = struct{}{}
-	}
-	s.preTurnDirt = set
-}
-
-// takePreTurn reads-and-clears the pre-turn dirt set, returning nil when
-// no snapshot was taken this turn (a resumed session, a race, or a
-// pre-turn snapshot error that skipped beginTurn) — the fault-open arm
-// the tripwire must not mis-fire on.
-func (s *Session) takePreTurn() map[string]struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	pre := s.preTurnDirt
-	s.preTurnDirt = nil
-	return pre
-}
-
-// markTripped latches that the main-checkout tripwire fired, returning
-// true only the first time so the abort (activity, state, event) happens
-// exactly once. Mirrors markExhausted.
-func (s *Session) markTripped() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.tripped {
-		return false
-	}
-	s.tripped = true
 	s.busy = false
 	return true
 }

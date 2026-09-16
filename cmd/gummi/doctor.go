@@ -888,21 +888,21 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 // routing a role, not after a run goes wrong.
 //
 // It exists because "sandbox: enforce" reads like a promise it does not
-// make. That mode refuses backends without tool coverage and arms the
-// main-checkout tripwire; it confines nothing. What actually keeps a
-// role's writes in its worktree is the backend's own file-tool policy,
+// make. That mode refuses backends without tool coverage; it confines
+// nothing. What actually keeps a role's writes in its worktree is the
+// backend's own file-tool policy,
 // and that varies: claude, opencode and zz pin their file tools to the
 // session's working directory, while copilot, codex and headless are
 // merely started there. A weaker model routed at the second tier is held
 // by the prompt alone — which is how a reviewer once wrote a feature's
 // files into the operator's main checkout.
 //
-// Warn, never fail: the cwd tier is a legitimate configuration under the
-// tripwire, and this check's job is to make the choice visible, not to
-// make it for the operator. And the caveat rides on every profile,
-// including a fully caged one: NO backend confines shell commands.
+// Warn, never fail: the cwd tier is a legitimate configuration, and this
+// check's job is to make the choice visible, not to make it for the
+// operator. And the caveat rides on every profile, including a fully
+// caged one: NO backend confines shell commands.
 func writeCageCheck(name string, resolved config.Profile, caps map[string]agent.Capabilities) doctorCheck {
-	const shellNote = "no backend cages shell commands on any tier — the main-checkout tripwire is the only backstop there, and it kills a run rather than preventing the write"
+	const shellNote = "no backend cages shell commands on any tier — nothing at all backstops a shell write outside the worktree"
 
 	roles := make([]string, 0, len(resolved))
 	for role := range resolved {

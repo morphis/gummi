@@ -21,7 +21,7 @@ func singleAgent(a agent.Agent) map[string]agent.Agent {
 // research stage on a backend that cannot structurally strip its write
 // tools (ReadOnlyEnforce=false) is refused before any session is created
 // — the engine fails closed, so the "documented no-op" can never
-// silently downgrade the read-only guarantee to the tripwire alone. The
+// silently downgrade the read-only guarantee to nothing at all. The
 // refusal names the backend and no session is spawned.
 func TestResearchReadOnlyRefusedOnNonEnforcingBackend(t *testing.T) {
 	rec := &recorder{Fake: agent.NewFake("ok")} // Caps omit ReadOnlyEnforce

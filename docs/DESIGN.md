@@ -375,9 +375,7 @@ envelope that is gummi's real spend limiter.
   when the real worktree is cut. Every backend already cages its file
   tools to the session's working directory, so this is what makes "the
   design chat does not write to your repo" a boundary rather than a
-  sentence in a prompt — and it keeps the §4.4 tripwire's meaning sharp:
-  dirt on main is now unambiguously a violation, not a build command's
-  side effect.
+  sentence in a prompt.
 - Handles: creation at spec-approval (drafts live in `.gummi/state/drafts/`
   until then), rebase-on-main helper, dirty-state detection, landed-branch
   detection with worktree cleanup + spec archival.
@@ -409,24 +407,24 @@ Escape hatches, because the assumption won't always hold:
 Instead of probing for a container or warning once, gummi ships the
 sandbox assumption as layered, always-on guards. The `permissions:
 allow-all | guarded` mode (above) is the first layer; per-profile
-`sandbox: enforce | warn | off` is the second; the main-checkout
-tripwire is the third. Running gummi on a bare host with allow-all is
-possible and surfaced, not silently degraded — the escape hatches below
-stay the honest path.
+`sandbox: enforce | warn | off` is the second. Running gummi on a bare
+host with allow-all is possible and surfaced, not silently degraded — the
+escape hatches below stay the honest path.
 
 **What each layer actually guarantees**, because the names promise more
 than they keep and an operator routing a role deserves the real shape:
 
 - `sandbox: enforce` refuses to start a run whose profile names a backend
-  that cannot reach gummi's tools, and arms the tripwire. `warn` (the
-  default) arms the tripwire without the refusal; `off` disarms it. **None
-  of the three confines a write.** The mode is about tool coverage and
-  detection, not containment.
+  that cannot reach gummi's tools. `warn` (the default) and `off` both let
+  such a run start; they are two names for the same permissive decision,
+  kept apart only because they used to differ on the tripwire. **None of
+  the three confines a write.** The mode is about tool coverage, not
+  containment.
 - **File-tool confinement is the backend's**, and it comes in two tiers.
   claude, opencode and zz pin their file-writing tools to the session's
   working directory, so a write naming somewhere else is refused by the
   backend. copilot, codex and headless are merely *started* there — their
-  tools may name any path, and only the tripwire notices. `gummi doctor`
+  tools may name any path, and nothing notices. `gummi doctor`
   reports the tier per role per profile as `write-cage:<profile>`, so the
   choice is visible before a role is routed rather than after a run goes
   wrong.
@@ -435,10 +433,14 @@ than they keep and an operator routing a role deserves the real shape:
   process-level confinement, which gummi does not do (scoped out of
   FD-014, and still out). This is the gap that let a weak model on the
   reviewer role write a feature's files into the operator's main checkout.
-- **The tripwire is the backstop, and it detects — it does not prevent.**
-  It snapshots main's dirty set around every turn and kills the run on a
-  clean→dirty transition, leaving the tree exactly as the agent left it.
-  The write has already happened by then.
+- **Nothing backstops what gets past those two.** A main-checkout
+  tripwire used to: it snapshotted main's dirty set around every turn and
+  killed the run on a clean→dirty transition. It was removed because that
+  snapshot cannot tell the agent's writes from the operator's own — a
+  human editing their own checkout while a card ran was enough to park
+  the card — and because it only ever detected, never prevented: the
+  write had already happened by the time it fired. A role routed at the
+  weaker write-cage tier is trusted, not contained.
 
 Since §4.3, no stage runs in the main checkout at all — the pre-worktree
 stages have their own scratch tree — so worktree discipline no longer
@@ -1940,10 +1942,10 @@ all deterministic:
   than silently dropped.
 
 A safety note: research's autonomous work stage runs branchless, in the
-card's scratch tree (§4.3) rather than the main checkout, under the sandbox
-`warn` tripwire and the reviewer's per-role read-only deny policy — both
-defined in §4.4. The read-only tool stripping is the research guarantee; the
-scratch tree is what keeps it from resting on tool coverage alone.
+card's scratch tree (§4.3) rather than the main checkout, under the
+reviewer's per-role read-only deny policy (§4.4). The read-only tool
+stripping is the research guarantee; the scratch tree is what keeps it from
+resting on tool coverage alone.
 
 ### 13.5 The decompose gate
 

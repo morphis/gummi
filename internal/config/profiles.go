@@ -216,8 +216,8 @@ profiles:
     implementer: { backend: copilot, model: claude-sonnet-5 }
     reviewer: { backend: claude, model: claude-sonnet-5 }
     scribe: { backend: copilot, model: gpt-5-mini }
-    # sandbox: warn  # enforce holds premium runs to full confinement; off
-    #                # disarms the tripwire for a trusted escape hatch.
+    # sandbox: warn  # enforce refuses a backend without tool coverage;
+    #                # warn and off let such a run start anyway.
 
   thrifty: # everyday features — backend omitted → engine default
     architect: { model: claude-sonnet-5 }

@@ -1320,12 +1320,6 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			return m.reloadDiff()
 		}
 		return m.refreshBlockers(ev.Feature)
-	case engine.EventTripwire:
-		// the agent wrote into the main checkout — a hard stop with no
-		// top-up path, so it shares the failure attention lane.
-		text := "wrote to main checkout — " + strings.Join(ev.DirtyPaths, ", ") + " (resolve then re-run)"
-		m.raiseAttention(ev.Feature, attnFailure, text)
-		m.notice = noticeMsg{text: text, isErr: true, id: ev.Feature}
 	case engine.EventIdle:
 		s := m.engine.Get(ev.Feature)
 		if s == nil || s.Interactive || s.State() != engine.StateDone {

@@ -95,7 +95,7 @@ Scaffolded on first run. Every key is optional.
 | key | meaning |
 |---|---|
 | `permissions` | `allow-all` (default; gummi assumes it runs in a sandbox) or `guarded` (agent tool calls need approval through the inbox) |
-| `sandbox` | workspace default for the tool-coverage refusal and the main-checkout tripwire: `enforce`, `warn` (built-in default) or `off`. It does not confine writes; the backend's own file-tool policy does that, and no backend confines the shell. See DESIGN §4.4 |
+| `sandbox` | workspace default for the tool-coverage refusal: `enforce`, `warn` (built-in default) or `off`. Only `enforce` refuses anything — `warn` and `off` both let a run start. It does not confine writes; the backend's own file-tool policy does that, and no backend confines the shell. See DESIGN §4.4 |
 | `autopilot_lanes` | how many autopilot cards drive at once (default 2). The attended pool is sized by `GUMMI_MAX_ACTIVE`, not this key, so an attended card never queues behind autopilot work |
 | `repo` | the git repository gummi manages when `.gummi` sits above it, named relative to the workspace root (e.g. `git/lxd`). Empty means the workspace root is the repo |
 | `repos` | a map of selectable names to repository paths under the workspace. Every card names one; `--repo` on the headless verbs and `o` on the board pick it |

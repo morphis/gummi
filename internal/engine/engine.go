@@ -327,13 +327,6 @@ type Engine struct {
 	// pool resolves each card to its repository's manager (see mgr).
 	pool *worktree.Pool
 
-	// dirtyPathsFn returns the sorted set of paths dirty on the card's own
-	// main checkout. Bound at construction to the pool's ManagerFor(...)
-	// MainDirtyPaths; it is the tripwire's sole injection point, so tests
-	// can substitute a call-counter or fault-injecting closure without
-	// reaching into the worktree package or swapping the concrete pool.
-	dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
-
 	// envOnce reads and caches the workspace environment card once per
 	// Engine lifetime; envCard holds the (possibly truncated) card text.
 	// Editing the file requires an Engine restart.
@@ -379,49 +372,20 @@ func New(cfg Config) *Engine {
 	if pool == nil && cfg.Worktrees != nil {
 		pool = worktree.WrapSingle(cfg.Worktrees)
 	}
-	var dirtyPathsFn func(context.Context, *domain.Feature) ([]string, error)
-	if pool != nil {
-		if cfg.Store != nil {
-			// a goal card resolves through its goal's worktree; the pool
-			// asks the store whether a goal whose worktree is gone has ended
-			pool.SetGoalLookup(cfg.Store.GetFeature)
-		}
-		dirtyPathsFn = func(ctx context.Context, f *domain.Feature) ([]string, error) {
-			wt, err := pool.ManagerFor(ctx, f)
-			if err != nil {
-				return nil, err
-			}
-			paths, err := wt.MainDirtyPaths(ctx)
-			if err != nil || f.GoalID == "" {
-				return paths, err
-			}
-			// a goal card's "main" is its goal's worktree; the real main
-			// checkout is still off limits, so watch both
-			repo, rerr := pool.ManagerForName(ctx, f.Repo)
-			if rerr != nil {
-				return paths, nil
-			}
-			more, merr := repo.MainDirtyPaths(ctx)
-			if merr != nil {
-				return paths, nil
-			}
-			return append(paths, more...), nil
-		}
-	} else {
-		dirtyPathsFn = func(_ context.Context, _ *domain.Feature) ([]string, error) {
-			return nil, nil
-		}
+	if pool != nil && cfg.Store != nil {
+		// a goal card resolves through its goal's worktree; the pool
+		// asks the store whether a goal whose worktree is gone has ended
+		pool.SetGoalLookup(cfg.Store.GetFeature)
 	}
 	e := &Engine{
-		cfg:          cfg,
-		now:          time.Now,
-		raw:          make(chan Event, 256),
-		events:       make(chan Event),
-		stopped:      make(chan struct{}),
-		live:         map[domain.FeatureID]*Session{},
-		consult:      map[domain.FeatureID]*ConsultSession{},
-		pool:         pool,
-		dirtyPathsFn: dirtyPathsFn,
+		cfg:     cfg,
+		now:     time.Now,
+		raw:     make(chan Event, 256),
+		events:  make(chan Event),
+		stopped: make(chan struct{}),
+		live:    map[domain.FeatureID]*Session{},
+		consult: map[domain.FeatureID]*ConsultSession{},
+		pool:    pool,
 	}
 	e.consultIdleTimeout = consultIdleTimeout
 	e.lanes[poolAttended].max = attendedMax
@@ -662,7 +626,7 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	// The session's lifecycle context is bound to nothing: it is canceled by
 	// Session.stop, not by the caller's ctx going away. Keep it distinct from
 	// the caller's ctx so the initial kickoff Send stays on the caller's
-	// cancellation semantics (only the tripwire snapshots switch to s.ctx).
+	// cancellation semantics.
 	sctx, cancel := context.WithCancel(context.Background())
 	s := &Session{Feature: f, Role: role, Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, cardUnlock: unlock, startedAt: time.Now()}
 	var priorAgentSession string
@@ -754,7 +718,6 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	e.persist(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
 	if fresh {
-		e.beforeTurn(s)
 		if err := sess.Send(ctx, ko); err != nil {
 			s.setError(err)
 			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventError, Err: err})
@@ -996,12 +959,11 @@ func (e *Engine) startAutonomous(s *Session) {
 		e.exhaust(s)
 		return
 	}
-	// No pre-start dirty check on main: a research pass used to run in the
-	// main checkout, which made the operator's uncommitted work a hard stop
+	// No dirty check on main: a research pass used to run in the main
+	// checkout, which made the operator's uncommitted work a hard stop
 	// before any session. It runs in the card's scratch tree now, so that
 	// dirt is out of reach and refusing here would park a card over a state
-	// it cannot touch. checkTrip is still the armed layer — it compares
-	// pre-turn against post-turn, so genuine new dirt on main still trips.
+	// it cannot touch.
 	// run() always builds a brand-new in-process Session with no carried
 	// transcript (kickoff, bounce, and restart-then-resume all dispatch
 	// through the same path), so every startAutonomous spawn is fresh: any
@@ -1106,7 +1068,6 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			}
 		}
 	}
-	e.beforeTurn(s)
 	if err := sess.Send(context.Background(), msg); err != nil {
 		e.failRun(s, err)
 	}
@@ -1491,7 +1452,6 @@ func (e *Engine) stampSpawnInfo(s *Session) {
 	}
 	s.setSpawnInfo(name, rc.Model, clientTools)
 	s.setByokRate(rate)
-	s.setSandboxMode(e.resolveSandbox(s.Feature).Mode)
 }
 
 // UseCardLocks makes this engine take the workspace's per-card lock for
@@ -1598,7 +1558,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// could mutate the operator's repo. Fail closed: a backend that cannot
 	// structurally strip its write tools (copilot, headless, codex) is
 	// refused here, before any session, so "documented no-op" can never
-	// silently downgrade the read-only guarantee to the tripwire alone.
+	// silently downgrade the read-only guarantee to nothing at all.
 	readOnly := researchReadOnly(f)
 	if readOnly && !ag.Capabilities().ReadOnlyEnforce {
 		// ag.Name(), not the resolved backend name: an empty name is
@@ -1890,7 +1850,6 @@ func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string) error 
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
-	e.beforeTurn(s)
 	if err := s.agent().Send(ctx, msg); err != nil {
 		// ErrBusy is the backend saying "not now", not "this session is
 		// broken". Failing the run over it is how a second thought typed
@@ -2121,74 +2080,6 @@ func (e *Engine) ChangeProfile(ctx context.Context, id domain.FeatureID, profile
 	return e.run(f, note, flavor)
 }
 
-// beforeTurn snapshots main's dirty set immediately before a Send hands
-// work to the agent, arming the tripwire's post-turn comparison. On a
-// MainDirtyPaths error it records a diagnostic activity line and skips
-// the snapshot (s.beginTurn is not called), so takePreTurn reports "unset"
-// at post-turn and checkTrip returns nil — fail-open: a broken git skips
-// the trip decision for that turn rather than misattributing the
-// operator's pre-existing dirt to the agent.
-func (e *Engine) beforeTurn(s *Session) {
-	// An off-mode run arms nothing: skip the pre-turn snapshot entirely, so
-	// the tripwire is genuinely disarmed (checkTrip short-circuits too).
-	if s.SandboxMode() == sandbox.ModeOff {
-		return
-	}
-	paths, err := e.dirtyPathsFn(s.ctx, &s.Feature)
-	if err != nil {
-		s.appendActivity("main-checkout tripwire: pre-turn snapshot failed — skipping trip check for this turn: " + err.Error())
-		return
-	}
-	s.beginTurn(paths)
-}
-
-// checkTrip compares the post-turn dirty set against the pre-turn
-// snapshot, returning the newly-dirty paths (sorted) when the agent made
-// a clean→dirty transition. It returns nil — no trip — when no pre-turn
-// snapshot was taken this turn (takePreTurn "unset": a resumed session, a
-// race, or a pre-turn snapshot error), or when the post-turn call itself
-// errors (a diagnostic activity line records the git flake). A missing
-// pair thus fails safe rather than tripping on a spurious empty pre-set.
-func (e *Engine) checkTrip(s *Session) []string {
-	if s.SandboxMode() == sandbox.ModeOff {
-		return nil
-	}
-	pre := s.takePreTurn()
-	if pre == nil {
-		return nil
-	}
-	post, err := e.dirtyPathsFn(s.ctx, &s.Feature)
-	if err != nil {
-		s.appendActivity("main-checkout tripwire: post-turn snapshot failed — checking skipped: " + err.Error())
-		return nil
-	}
-	var delta []string
-	for _, p := range post {
-		if _, ok := pre[p]; !ok {
-			delta = append(delta, p)
-		}
-	}
-	return delta
-}
-
-// trip aborts a session on a main-checkout tripwire hit: the agent
-// dirtied paths that were clean before its turn. It is a hard stop — the
-// run is dead, no top-up, no resume. The working tree is left exactly as
-// the agent left it (no settle, no revert, no checkpoint commit): only
-// engine-internal state changes (activity line, session state, slot
-// release). The operator resolves the main dirt and re-runs the stage.
-func (e *Engine) trip(s *Session, paths []string) {
-	if !s.markTripped() {
-		return // already tripped; a stale event must not duplicate the abort
-	}
-	s.appendActivity("main-checkout tripwire: new dirty paths — " + strings.Join(paths, ", "))
-	s.setState(StateDone)
-	e.persist(s)
-	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventTripwire, DirtyPaths: paths})
-	s.stop() // finalizes the session, closing the underlying agent: a follow-up Send fails at a.Send
-	e.freeSlot(s)
-}
-
 // exhaust checkpoints and stops a session that hit its credit budget —
 // whether the CLI reported it or gummi-side enforcement tripped first —
 // moving it to the needs-attention queue (never a silent death). When the
@@ -2328,7 +2219,17 @@ var errSessionDied = errors.New("agent session died without finishing")
 // accumulates its transcript/activity/spend. It exits when the session
 // stops or its agent channel closes.
 func (e *Engine) pump(s *Session) {
-	events := s.agent().Events()
+	// The caller binds the agent before launching this goroutine, but a
+	// clearAgent (a drop, a pause, an Attach that replaces the session) can
+	// land before this line runs. Read it once under the lock and leave
+	// quietly if it is already gone: there is no stream left to relay, and
+	// dereferencing nil would take the process down with it.
+	a := s.agent()
+	if a == nil {
+		e.emitStopped(s)
+		return
+	}
+	events := a.Events()
 	for {
 		select {
 		case <-s.done:
@@ -2433,12 +2334,6 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		return
 	case agent.EventIdle:
 		s.setBusy(false)
-		// the turn made a clean→dirty transition on main: abort the run
-		// before any "finished" gate can read it as healthy.
-		if paths := e.checkTrip(s); len(paths) > 0 {
-			e.trip(s, paths)
-			return
-		}
 		// a turn that already exhausted its budget has raised the
 		// budget gate and freed its slot; the trailing idle must not
 		// downgrade that gate to a generic "finished" one.

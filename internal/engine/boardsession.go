@@ -308,7 +308,7 @@ func (e *Engine) replaceBoard(b *BoardSession) bool {
 // Send delivers a user turn to the board session. It mirrors
 // Engine.Send's card-chat path minus everything that doesn't apply here:
 // no pending budget nudge (no budget), no persist (no store row backs a
-// board session), no pre-turn tripwire snapshot (no worktree to dirty).
+// board session), and no worktree to touch.
 func (b *BoardSession) Send(ctx context.Context, msg string) error {
 	a := b.sess.agent()
 	if a == nil {
@@ -393,10 +393,9 @@ func (e *Engine) pumpBoard(b *BoardSession) {
 // transcript/spend/context and emits EventBoard so a UI surface knows to
 // re-render from Snapshot. It answers to a fraction of Engine.handle's
 // arms: a board session has no budget to enforce, no worktree to
-// checkpoint or tripwire, no stage to advance, and no attention slot to
-// free, so every card-scoped tail of Engine.handle (persist, exhaust,
-// tripwire, stageReceipt, gate verdicts) simply has nothing to fold into
-// here.
+// checkpoint, no stage to advance, and no attention slot to free, so
+// every card-scoped tail of Engine.handle (persist, exhaust,
+// stageReceipt, gate verdicts) simply has nothing to fold into here.
 func (e *Engine) handleBoard(b *BoardSession, ev agent.Event) {
 	switch ev.Kind {
 	case agent.EventTextDelta:

@@ -26,7 +26,7 @@ import (
 // A scratch tree is that boundary. It is a detached checkout of main's
 // HEAD at .gummi/scratch/<ID>: a real filesystem cage every backend
 // already knows how to enforce (each adapter cages its file tools to
-// opts.WorkDir), sitting outside the main checkout the tripwire watches.
+// opts.WorkDir), sitting outside the operator's main checkout.
 // It is deliberately NOT a branch worktree — nothing committed in it can
 // become the card's work, and it never collides with the card's own
 // gummi/<ID>-slug branch. Its edits are discarded when the card's real

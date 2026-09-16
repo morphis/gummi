@@ -194,7 +194,7 @@ func (m *Shell) goalStartCmd(st engine.GoalStart) tea.Cmd {
 // the card finished a turn, stopped, failed or ran dry.
 func (m *Shell) goalCardEvent(ev engine.Event) {
 	switch ev.Kind {
-	case engine.EventIdle, engine.EventExhausted, engine.EventError, engine.EventStopped, engine.EventTripwire:
+	case engine.EventIdle, engine.EventExhausted, engine.EventError, engine.EventStopped:
 		if g := m.goalOf(ev.Feature); g != "" {
 			m.queueGoalTick(g)
 		}
