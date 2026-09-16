@@ -33,8 +33,9 @@ type Ask struct {
 	SpecAnchor string      `json:"spec_anchor"`
 	// ChangesSection names the artifact section whose CONTENT differs
 	// depending on the answer. It is the design stage's proof that the
-	// question is a decision rather than a confirmation — see
-	// askChangesSomething.
+	// question is a decision rather than a confirmation, and it must name
+	// a section that stage decides rather than one a later stage rewrites
+	// regardless — see askChangesSomething.
 	ChangesSection string `json:"changes_section"`
 	// Gate marks this question AS the stage's gate: answering it is the
 	// crossing, rather than a decision the stage then acts on itself.
@@ -231,8 +232,12 @@ func askUserTool() agent.ToolDef {
 					"type": "string",
 					"description": "At the design stage, required: the name of the spec section whose " +
 						"CONTENT would be different depending on which option is chosen (e.g. " +
-						"\"Chosen approach\", \"Out of scope\"). If you cannot name one, this is not a " +
-						"decision for the user — record your recommendation in the spec and carry on.",
+						"\"Chosen approach\", \"Out of scope\", \"Implementation notes\"). It must be a " +
+						"section this stage decides — the Verification plan, Progress and Review are " +
+						"rewritten by later stages, so an answer that only changes one of those changes " +
+						"nothing about the work and is your call, not the user's. If you cannot name a " +
+						"deciding section, this is not a decision for the user — record your " +
+						"recommendation in the spec and carry on.",
 				},
 			},
 			"required": []any{"question", "options"},
@@ -561,10 +566,17 @@ func (e *Engine) bounceAsk(s *Session, callID, reason string) {
 // the recommendation is acceptable. Prose cannot hold that line, because
 // the model is not disobeying: asking feels cooperative. The check makes
 // the claim checkable instead. A question whose answer changes the Chosen
-// approach, or Out of scope, or the Verification plan, names that section
+// approach, or Out of scope, or Implementation notes, names that section
 // and goes through. A question whose answer changes nothing names nothing,
 // and the model is told to write its recommendation down and continue —
 // which is what it would have done with the answer anyway.
+//
+// The section must be one the design stage DECIDES, not one a later stage
+// rewrites regardless (spec.SectionDecidesWork). Naming any section at all
+// turned out to be too low a bar: "which interfaces should the tests
+// exercise?" truthfully changes the Verification plan and changes nothing
+// about what gets built, so it passed a toll meant to stop exactly that
+// question. A testing question is the stage's own call.
 //
 // It binds only where the cost is a full process restart and only to the
 // stage that owns the artifact's sections: the design stage, and never a
@@ -579,7 +591,7 @@ func askChangesSomething(s *Session, ask *Ask) (string, bool) {
 		// best it can do
 		return "", true
 	}
-	headings := spec.Headings(string(raw))
+	headings := spec.DecidingHeadings(string(raw))
 	if len(headings) == 0 {
 		return "", true
 	}
@@ -595,6 +607,13 @@ func askChangesSomething(s *Session, ask *Ask) (string, bool) {
 		return fmt.Sprintf("changes_section %q is not a section of this spec. Use one of: %s — "+
 			"or, if the answer would change none of them, record your recommendation in the spec "+
 			"and carry on without asking", named, strings.Join(headings, ", ")), false
+	}
+	if !spec.SectionDecidesWork(named) {
+		return fmt.Sprintf("%q is not a section this question can justify itself with: it is "+
+			"rewritten by the stage that does the work, so an answer that only changes it "+
+			"changes nothing about what gets built. Decide it yourself, write the decision "+
+			"there, and carry on. Ask only if the answer changes one of: %s",
+			named, strings.Join(headings, ", ")), false
 	}
 	return "", true
 }

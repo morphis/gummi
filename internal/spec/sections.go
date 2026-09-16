@@ -439,3 +439,45 @@ func UndraftedSections(content string, want []string) []string {
 
 	return undrafted
 }
+
+// processOwnedSections names the artifact sections a later stage rewrites
+// as a matter of course — the Verification plan is re-authored by check
+// discovery and then by the stage that proves the work, Progress is the
+// implementer's own log, and Review is where critique findings land.
+//
+// Lower-cased for case-insensitive lookup; the spelling on disk is the
+// heading's, and a caller compares against this set, not against it.
+var processOwnedSections = map[string]bool{
+	"verification plan": true,
+	"progress":          true,
+	"review":            true,
+}
+
+// SectionDecidesWork reports whether a section's content is one the design
+// stage decides — the sections that say what gets built (Problem, Out of
+// scope, Considered/Chosen approach, Implementation notes and its file
+// manifest) rather than how the result is checked or logged.
+//
+// It exists for the design stage's ask toll: a question must name the
+// section whose content differs depending on the answer, and a question
+// that can only point at a section a later stage rewrites anyway has not
+// shown that anything about the work differs. "Which interfaces should the
+// tests exercise?" truthfully changes the Verification plan's prose and
+// changes nothing about what is built — which is why naming a section had
+// to stop being sufficient on its own.
+func SectionDecidesWork(name string) bool {
+	return !processOwnedSections[strings.ToLower(strings.TrimSpace(name))]
+}
+
+// DecidingHeadings returns the subset of a document's headings that
+// SectionDecidesWork accepts, in document order — the list an ask toll
+// offers the model when it bounces a question.
+func DecidingHeadings(content string) []string {
+	var out []string
+	for _, h := range Headings(content) {
+		if SectionDecidesWork(h) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
