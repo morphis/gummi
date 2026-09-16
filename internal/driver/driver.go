@@ -19,6 +19,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/gatepolicy"
 	"github.com/morphis/gummi/internal/rounds"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/workflow"
@@ -1476,7 +1477,7 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		return d.done(ctx, res.Feature)
 	case engine.StatusAdvanced:
 		if res.EnteredWorktree {
-			d.discoverAndBaselineChecks(ctx, res.Feature)
+			d.discoverAndBaselineChecks(ctx, res.Feature, res.From)
 		}
 		if res.To == domain.StageDone {
 			if res.Feature.Kind == domain.KindResearch {
@@ -1535,7 +1536,7 @@ const discoverStageTimeout = 2 * time.Minute
 // Verify's own fallback still applies. Bounded by the driver's
 // --stage-timeout (or discoverStageTimeout when unset) so a stalling
 // scribe session returns promptly instead of hanging the gate crossing.
-func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature) {
+func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature, from domain.Stage) {
 	timeout := d.opts.StageTimeout
 	if timeout <= 0 {
 		timeout = discoverStageTimeout
@@ -1548,11 +1549,22 @@ func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature
 	// which reads as a hang and was investigated as one. The stage feed
 	// covers sessions the engine owns; these two are the engine's
 	// one-shots, so the driver narrates them itself.
-	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "discovering checks"})
+	//
+	// Both run AT a gate, not in a stage: the card's own stage field has
+	// already advanced by the time they start, so reading it labelled the
+	// work with the stage that had not begun — and a caller watching for
+	// "the plan stage is still going" saw implement instead. The stage
+	// crossed FROM is the one whose gate this is, which is what
+	// HEADLESS.md documents.
+	stage := string(from)
+	if stage == "" {
+		stage = string(f.Stage)
+	}
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: stage, Result: "discovering checks"})
 	if _, err := d.eng.DiscoverChecks(ctx, f); err != nil {
 		return
 	}
-	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "baselining checks"})
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: stage, Result: "baselining checks"})
 	_, _ = d.eng.BaselineChecks(ctx, f)
 }
 
@@ -1571,17 +1583,40 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 		return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
 	}
 	d.logPark(f, state.ParkReasonNeedsYou, "reached the landing gate — the branch is ready to merge.")
+	// The card's own rework total, not this process's: a card driven over
+	// four `resume` calls reports each call's critique count in
+	// review_rounds, and a caller cannot add those up to anything true.
+	corrective, err := rounds.Load(ctx, d.roundStore, f.ID, domain.RoundKindCorrective)
+	if err != nil {
+		corrective = 0
+	}
 	ev := doneEvent{
 		Event: "done", ID: string(f.ID), Branch: f.BranchName(),
 		Spec: f.ArtifactPath(), Spent: f.Spend.Credits, ReviewRounds: d.reviewsRun,
-		Message:     f.PullRequest.NextStepsHint(true),
-		PullRequest: f.PullRequest.StatusPayload(),
+		CorrectiveRounds: corrective,
+		UnprovenFiles:    unprovenPaths(f),
+		Message:          f.PullRequest.NextStepsHint(true),
+		PullRequest:      f.PullRequest.StatusPayload(),
 	}
 	if f.IsGoal() {
 		ev.Goal = d.goalDone(ctx, f)
 	}
 	d.out.emit(ev)
 	return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
+}
+
+// unprovenPaths reads verify's UNPROVEN declarations off the card's
+// artifact, for the done receipt. An unreadable artifact reports none.
+func unprovenPaths(f domain.Feature) []string {
+	raw, err := os.ReadFile(f.ArtifactPath())
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, u := range spec.UnprovenFiles(string(raw)) {
+		out = append(out, u.Path)
+	}
+	return out
 }
 
 // decomposeGate runs the FD-081 decompose side-effect off an RS card's

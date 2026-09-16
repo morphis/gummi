@@ -13,6 +13,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -137,6 +138,15 @@ type statusView struct {
 	// above is a pass that did not cover it. Absent when the branch was
 	// born clean, which is the ordinary case.
 	ExcusedChecks []string `json:"excused_checks,omitempty"`
+	// UnprovenFiles names the files this branch changed that no check
+	// that ran exercised — verify's own declaration, read back off the
+	// artifact. A cgo tree this container cannot build, a suite only CI
+	// runs, a generated file: all legitimate, and all invisible until
+	// now, because the admission lived in the artifact's prose while the
+	// verdict said only "verified". It qualifies `verified` the same way
+	// excused_checks does, and for the same reason: the pass did not
+	// cover these. Absent when verify declared none.
+	UnprovenFiles []statusUnprovenFile `json:"unproven_files,omitempty"`
 	// StageSpend is where the money went, per stage/role/model, largest
 	// first. It is what makes a reviewer's bounces answerable: a run total
 	// hides a stage that doubled. Note it is per stage, NOT per round —
@@ -169,9 +179,13 @@ type statusEscalation struct {
 	At    string `json:"at"`
 }
 
-// statusRounds carries each round kind's persisted counter. Plan and
-// review are the two loops with their own caps; corrective is the unified
-// budget across everything that bounces work back.
+// statusRounds carries each round kind's persisted counter.
+//
+// Plan and review are LIVE budgets: each is cleared when its loop crosses
+// its gate, so on a card past that gate they read 0 no matter how many
+// times the loop ran. Corrective is the card's cumulative rework — every
+// pass it was sent back to do again — and it is never reset mid-card, so
+// it is the only one of the three that answers "how much was redone".
 type statusRounds struct {
 	Plan       int `json:"plan"`
 	Review     int `json:"review"`
@@ -240,6 +254,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		Escalation:      openEscalation(ctx, store, f),
 		Rounds:          roundCounts(ctx, store, f),
 		ExcusedChecks:   excusedChecks(ctx, store, f),
+		UnprovenFiles:   unprovenFiles(f),
 		StageSpend:      stageSpendRows(ctx, store, f),
 		GoalID:          string(f.GoalID),
 		FoundBy:         string(f.FoundBy),
@@ -305,6 +320,28 @@ func roundCounts(ctx context.Context, store *state.Store, f *domain.Feature) sta
 		Review:     n(domain.RoundKindReview),
 		Corrective: n(domain.RoundKindCorrective),
 	}
+}
+
+// statusUnprovenFile is one file verify declared no check exercised.
+type statusUnprovenFile struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// unprovenFiles reads verify's UNPROVEN declarations off the card's
+// artifact. An unreadable artifact reports none: status must still answer
+// for a card whose spec cannot be read, and the honest fallback is to
+// claim no gap rather than to invent one.
+func unprovenFiles(f *domain.Feature) []statusUnprovenFile {
+	raw, err := os.ReadFile(f.ArtifactPath())
+	if err != nil {
+		return nil
+	}
+	var out []statusUnprovenFile
+	for _, u := range spec.UnprovenFiles(string(raw)) {
+		out = append(out, statusUnprovenFile{Path: u.Path, Reason: u.Reason})
+	}
+	return out
 }
 
 // excusedChecks names the repo checks verify will write off as
@@ -415,6 +452,17 @@ func renderStatus(w io.Writer, v statusView) {
 		fmt.Fprintf(w, "  Excused:  %s (already failing on the fresh branch; not gated at verify)\n",
 			strings.Join(v.ExcusedChecks, ", "))
 	}
+	// Same place, same reason: a pass that never compiled three of the
+	// branch's files is a pass about the other files, and the person
+	// merging it should read that here rather than find it in the spec.
+	if len(v.UnprovenFiles) > 0 {
+		paths := make([]string, 0, len(v.UnprovenFiles))
+		for _, u := range v.UnprovenFiles {
+			paths = append(paths, u.Path)
+		}
+		fmt.Fprintf(w, "  Unproven: %s (changed, but no check that ran exercised them)\n",
+			strings.Join(paths, ", "))
+	}
 	if v.HandedOff {
 		// Under Verified for the same reason Excused is: it qualifies what
 		// happened after the pass. Only on a handed-off card — every other
@@ -432,7 +480,16 @@ func renderStatus(w io.Writer, v statusView) {
 	fmt.Fprintf(w, "  Blockers: %d open comment%s · %d open diff comment%s\n",
 		v.Blockers.OpenQuestions, cardPlural(v.Blockers.OpenQuestions), v.Blockers.OpenDiff, cardPlural(v.Blockers.OpenDiff))
 	if r := v.Rounds; r.Plan > 0 || r.Review > 0 || r.Corrective > 0 {
-		fmt.Fprintf(w, "  Rounds:   plan %d · review %d · corrective %d\n", r.Plan, r.Review, r.Corrective)
+		// Corrective first, and named for what it is: it is the only one
+		// of the three that outlives its loop. Plan and review are live
+		// budgets, cleared the moment their loop passes, so on a finished
+		// card they read 0 while the card was in fact sent back four
+		// times — printing them first made a reworked card look untouched.
+		fmt.Fprintf(w, "  Rework:   %d round%s redone in total", r.Corrective, cardPlural(r.Corrective))
+		if r.Plan > 0 || r.Review > 0 {
+			fmt.Fprintf(w, " (open now: plan %d, review %d of their caps)", r.Plan, r.Review)
+		}
+		fmt.Fprintln(w)
 	}
 	if e := v.Escalation; e != nil {
 		fmt.Fprintf(w, "  Waiting:  [%s at %s] %s\n", e.Kind, e.Stage, firstLine(e.Reason))

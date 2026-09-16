@@ -145,7 +145,7 @@ branches on:
 | `0` | `stopped` | `--until` reached its stop. `resume --approve` to continue |
 | `0` | `said` | `--say` reported a reading and acted on nothing |
 | `2` | `question` | a delegated question or a design gate. `resume --answer`, `--approve` or `--request-changes` |
-| `3` | `blocked` | open `%%` or diff threads block a gate (resolve them, or `resume --request-changes`), or an unmet dependency blocks the coding stage (`blocking_deps` on the event: wait for it to land, or `gummi deps rm`) |
+| `3` | `blocked` | open `%%` or diff threads block a gate (resolve them, or `resume --request-changes`), an unmet dependency blocks the coding stage (`blocking_deps` on the event: wait for it to land, or `gummi deps rm`), or the plan's own promises are unmet at the verify→done gate (`reason` names them: an invariant verify never answered or answered fail, or a golden whose quoted input appears nowhere on the branch) |
 | `4` | `escalation` | a rerun or critique cap, or an unclear verdict. Report to a human; resumable |
 | `5` | `exhausted` | envelope dry. `resume --envelope N` with a higher number |
 | `6` | `timeout` | a stage went quiet. Report; resumable |

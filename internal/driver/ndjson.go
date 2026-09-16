@@ -320,12 +320,29 @@ type stoppedEvent struct {
 }
 
 type doneEvent struct {
-	Event        string  `json:"event"`
-	ID           string  `json:"id"`
-	Branch       string  `json:"branch"`
-	Spec         string  `json:"spec,omitempty"`
-	Spent        float64 `json:"spent_credits"`
-	ReviewRounds int     `json:"review_rounds"`
+	Event  string  `json:"event"`
+	ID     string  `json:"id"`
+	Branch string  `json:"branch"`
+	Spec   string  `json:"spec,omitempty"`
+	Spent  float64 `json:"spent_credits"`
+	// ReviewRounds is how many times a work stage's diff was judged BY
+	// THIS INVOCATION — the critiques this process dispatched. A card
+	// driven across several `resume` calls reports a share of its total
+	// on each one, which is why the card's own running total is a
+	// separate field rather than this one.
+	ReviewRounds int `json:"review_rounds"`
+	// UnprovenFiles names the files this branch changed that no check
+	// that ran exercised, as verify itself declared them. It qualifies
+	// `verified`: a caller that reads only the verdict cannot otherwise
+	// tell a branch every check covered from one where a whole tree was
+	// never compiled. Absent when verify declared none.
+	UnprovenFiles []string `json:"unproven_files,omitempty"`
+	// CorrectiveRounds is the CARD's cumulative rework: every pass it was
+	// sent back to do again — review→fix rounds, verify bounces, conflict
+	// handoffs — persisted across processes and never reset mid-card. It
+	// is the number to read when asking "how much did this card have to
+	// be redone", and the one `gummi status` prints.
+	CorrectiveRounds int `json:"corrective_rounds"`
 	// Message reiterates the linked PR (e.g. "PR #42 — merge on GitHub, then
 	// pull main") when the card is linked; absent otherwise.
 	Message string `json:"message,omitempty"`
