@@ -730,18 +730,39 @@ func (m *Shell) reconstructInbox() {
 			continue
 		case exhaustedActivity(snap.Activity):
 			m.inbox.seed(attnItem{Feature: id, Kind: attnBudget, Text: budgetAttentionText(snap.Feature.Stage, false)})
+		case unsettledCritique(snap):
+			// A critique that did not clear its gate is not a gate
+			// anyone should be invited to approve. Live, a changes
+			// verdict never raises one at all — the loop bounces
+			// straight into a rework round — so a card is only ever
+			// found in this state because the process stopped between
+			// the verdict and the round it was going to feed.
+			// Reconstructing it as a plain gate said "review & advance"
+			// over a verdict that had just said the opposite, and left
+			// the card unbounceable on top (bounceStage's plan arm is
+			// legal only on an escalated gate — msgs.go).
+			//
+			// Escalated, because that is what this stop is: the loop did
+			// not settle it, and it is waiting on a person's judgement
+			// rather than on their approval.
+			m.inbox.seed(attnItem{
+				Feature: id, Kind: attnGate, Escalated: true,
+				Text: unsettledGateReason(snap.Feature.Stage, sessionVerdict(snap)),
+			})
 		default:
 			// gateReason, not a hardcoded "review & advance": a card that
 			// reached its verify gate while the TUI was closed is reconstructed
 			// here, and telling that reader to "advance" it hides that the next
 			// keypress lands the branch on main (reviewloop.go).
 			//
-			// The outcome word comes from VerifiedAt, not from the session:
-			// a verdict does not survive a restart, but the verified stamp
-			// does, so it is the only thing here that can honestly say
-			// whether verify passed. An unstamped card gets "verify
+			// The outcome word comes from VerifiedAt, not from the
+			// session's own verdict: the stamp is the store's record that
+			// the gate was crossed clean, where the verdict is only what
+			// the session concluded. An unstamped card gets "verify
 			// finished" — still told that the next press lands it, without
-			// claiming a result nothing recorded.
+			// claiming a result nothing recorded. (A verdict that did not
+			// settle is read one case up, where it decides whether this is
+			// a gate at all.)
 			m.inbox.seed(attnItem{
 				Feature: id, Kind: attnGate,
 				Text: gateReason(snap.Feature.Stage, id.Kind(), !snap.Feature.VerifiedAt.IsZero(), m.baseBranch(snap.Feature)),

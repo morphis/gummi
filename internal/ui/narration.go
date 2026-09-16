@@ -305,11 +305,49 @@ func whyItStopped(in nextInput) string {
 	}
 	switch in.stage {
 	case domain.StagePlan:
+		// A gate the critique did not clear says what the critique said.
+		// Both sentences below describe a stop the reader is meeting
+		// because the loop was interrupted before its rework round, or
+		// because it ran out of them — and in both, the last thing that
+		// happened to the artifact is that it was judged and found
+		// wanting. Saying "the gate is waiting on you" over the top of a
+		// verdict still on screen three lines above is what sent a reader
+		// to approve a plan its own reviewer had just blocked.
+		if s := critiqueStopped(in, art); s != "" {
+			return s
+		}
 		return "The plan stage finished and wrote the " + art + " — the gate is waiting on you."
 	case domain.StageImplement:
+		if s := critiqueStopped(in, art); s != "" {
+			return s
+		}
 		return "Implement finished and its critique passed — the diff has not been read yet."
 	}
 	return ""
+}
+
+// critiqueStopped is the first sentence at a design or work gate whose
+// critique did not end on a clean pass, and "" at one that did — the
+// caller's own wording stands for a pass. It names the stage's output
+// (the artifact at plan, the diff at implement) so the second half says
+// what has not happened to it since the verdict landed.
+//
+// verifyStopped is this sentence's counterpart one gate later, and the
+// unclear case is worded to match it: the verdicts a critique can
+// submit are pass and changes, so fail and blocked have no case here.
+func critiqueStopped(in nextInput, art string) string {
+	if !critiqueUnsettled(in) {
+		return ""
+	}
+	produced := "the " + art
+	if in.stage == domain.StageImplement {
+		produced = "the diff"
+	}
+	lead := "The " + string(in.stage) + " " + critiqueVerdict(in)
+	if in.verdict == verdictChanges {
+		return lead + ", and " + produced + " has not been revised since — crossing this gate overrules it."
+	}
+	return lead + ", and the loop gave up rather than passing it."
 }
 
 // verifyStopped is the first sentence at a finished verify, where the

@@ -172,6 +172,41 @@ func (in nextInput) finished() bool {
 	return in.attn == attnGate || in.sess == engine.StateDone || in.exited
 }
 
+// critiqueUnsettled reports whether the critique standing behind a
+// design or work gate ended on anything other than a clean pass: it
+// asked for changes, or it gave no clear verdict and the loop escalated
+// rather than passing it.
+//
+// Live, such a verdict never raises a gate at all — it bounces into a
+// rework round (reviewloop's BounceToWork arm). A reader meets one here
+// because the loop was interrupted before that round ran (the process
+// stopped, and startup reconstructs the stop as a gate) or because the
+// round cap was hit and the loop handed the card over. Either way the
+// stage's own judge did NOT clear it, so the gate must not be presented
+// as a clean one: the verify gate has read its verdict this way all
+// along, and the design and work gates were the two that still led with
+// "approve" underneath a critique that had just said no.
+//
+// The predicate is the verify arm's, minus the verify-only verdicts: a
+// critique submits pass or changes, never fail/blocked.
+func critiqueUnsettled(in nextInput) bool {
+	return in.verdict == verdictChanges || (in.verdict == verdictUnclear && in.escalated)
+}
+
+// critiqueVerdict names what the critique behind an unsettled gate
+// concluded, as a clause that can follow the stage's own name
+// ("plan critique asked for changes"). Only meaningful where
+// critiqueUnsettled holds. The gate's question and the narration above
+// it are both built from this one pair of cases, so the two can never
+// name different verdicts — and the advance row underneath, which says
+// only that crossing overrules the critique, never has to.
+func critiqueVerdict(in nextInput) string {
+	if in.verdict == verdictChanges {
+		return "critique asked for changes"
+	}
+	return "critique gave no clear verdict"
+}
+
 // stageExited reads a stage's finished run out of the log: the newest
 // stage_exit event for stage, provided it is not older than the newest
 // transition INTO stage in the card's history. The second clause is the
@@ -679,6 +714,36 @@ func stageActions(in nextInput) []nextAction {
 			approve = nextStep("advance", "g", "approve",
 				"moves the goal into implement — its lead starts the cards and keeps within the budget")
 		}
+		// The critique said no, and crossing here overrules it rather
+		// than agreeing with it — so the row says so, and the architect
+		// leads instead, because acting on the findings is what moves
+		// this card. Nothing is dropped: approve is still here, still g,
+		// for a reader who reads the findings and disagrees. The verify
+		// gate has drawn its failed arm this way since FD-004; this is
+		// the same shape one gate earlier.
+		if finished && critiqueUnsettled(in) {
+			sendBack := talkAction(in, designPartner(in.kind),
+				"the findings are in the "+artifactNoun(in.kind)+" — your line goes with them")
+			if in.live {
+				// the same row the clean gate offers while the architect
+				// is attached: with a conversation on screen the send-back
+				// is a turn in it, and talkAction withholds its own row
+				// there rather than offering to start what is running.
+				sendBack = append(sendBack, sendBackStep("changes", "",
+					"say what is wrong — your line goes to the architect as the turn asking for it"))
+			}
+			crossed := "the card"
+			if in.kind == domain.KindGoal {
+				crossed = "the goal"
+			}
+			// which verdict is being overruled is the question one line
+			// above this picker (decisionQuestion's own unsettled arm), so
+			// the row spends its width on what crossing DOES instead of
+			// repeating it.
+			overrule := nextStep("advance", "g", "approve anyway",
+				"overrules the critique — moves "+crossed+" into implement")
+			return append(append(sendBack, overrule), stopHere(in)...)
+		}
 		var acts []nextAction
 		if finished {
 			// §3.3: this stop's own narration reads "plan is ready for
@@ -739,14 +804,25 @@ func stageActions(in nextInput) []nextAction {
 			// "enter" row underneath its own.
 			return append([]nextAction{*b}, stopHere(in)...)
 		}
+		// re-runs the stage in place rather than rewinding to it: the
+		// work stage's critique iterates the stage, so there is no edge
+		// to take. The bigger hammer — the whole plan, not this pass — is
+		// /bounce.
+		rework := sendBackStep("run", "",
+			"re-runs "+string(in.stage)+" with what is wrong — your line goes with it")
+		if critiqueUnsettled(in) {
+			// "the critique passed" is the one thing this stop is not, so
+			// the rework leads and the advance says what crossing here
+			// would be overruling (the plan gate above does the same).
+			return append([]nextAction{
+				rework,
+				nextStep("advance", "g", "start verify",
+					"overrules the critique — runs the checks anyway"),
+			}, stopOrResume(in)...)
+		}
 		acts := []nextAction{
 			nextStep("advance", "g", "start verify", "the critique passed — run the checks"),
-			// re-runs the stage in place rather than rewinding to it: the
-			// work stage's critique iterates the stage, so there is no edge
-			// to take. The bigger hammer — the whole plan, not this pass —
-			// is /bounce.
-			sendBackStep("run", "",
-				"re-runs "+string(in.stage)+" with what is wrong — your line goes with it"),
+			rework,
 		}
 		return append(acts, stopOrResume(in)...)
 

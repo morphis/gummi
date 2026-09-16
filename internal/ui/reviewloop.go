@@ -507,6 +507,44 @@ func gateReason(stage domain.Stage, k domain.Kind, verifyPassed bool, base strin
 	return string(stage) + " finished — review & advance"
 }
 
+// unsettledCritique reports whether a restored session is a critique
+// pass that ended without clearing its stage's gate: it asked for
+// changes, or it reached the end with no verdict anyone could read.
+//
+// It is the startup reconstruction's question, not a live one. Live, the
+// loop judges the same session through gatepolicy the moment it
+// finishes — changes bounces into a rework round, an unreadable verdict
+// escalates — so a card only ever reaches the next process in this
+// state because the one before it was stopped in between, or because
+// the escalation's own record did not outlive it. Verify is excluded:
+// it has no critique pass, and its gate reads its verdict where it is
+// raised.
+//
+// nextInput.critiqueUnsettled is the card page's half of this same
+// question, asked of the row rather than the session.
+func unsettledCritique(snap engine.Snapshot) bool {
+	if _, ok := engine.CritiqueRoundKind(snap.Feature.Stage); !ok {
+		return false
+	}
+	if !snap.Critique {
+		return false
+	}
+	v := sessionVerdict(snap)
+	return v == verdictChanges || v == verdictUnclear
+}
+
+// unsettledGateReason is gateReason's wording for such a stop: what the
+// critique said, and the fact that nothing has acted on it. It is kept
+// beside gateReason so the gate vocabulary stays written in one place,
+// and it keeps the stage first for the same reason every line there
+// does — inboxRowText trims that word off, the row having printed it.
+func unsettledGateReason(stage domain.Stage, v reviewVerdict) string {
+	if v == verdictChanges {
+		return string(stage) + " critique asked for changes — nothing has acted on them"
+	}
+	return string(stage) + " critique gave no clear verdict — review it manually"
+}
+
 // verifyGateReason is what a clean verify asks the reader to do, in the
 // words of the act itself. gateReason routes the verify stage here rather
 // than restating it, so the branch-vs-research split below is made once.

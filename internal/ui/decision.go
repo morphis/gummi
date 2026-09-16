@@ -403,6 +403,18 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		}
 		return "verification stopped here — choose what happens next."
 	case decisionGate:
+		// "ready for your decision" is true of a gate the critique
+		// cleared. At one it did not — a stop the loop was interrupted
+		// before reworking, or ran out of rounds to rework — the same
+		// sentence reads as an invitation to approve, which is how a plan
+		// its reviewer had just blocked came back after a restart under
+		// the word "approve". The verify gate already asks the unsettled
+		// question in its own words; this is the same distinction one
+		// gate earlier, over the answer set stageActions reorders to
+		// match.
+		if critiqueUnsettled(in) {
+			return string(r.F.Stage) + " " + critiqueVerdict(in) + " — choose what happens next."
+		}
 		return string(r.F.Stage) + " is ready for your decision."
 	case decisionFailure:
 		// names what happened rather than reusing the idle sentence

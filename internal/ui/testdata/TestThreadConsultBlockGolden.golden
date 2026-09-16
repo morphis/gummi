@@ -38,13 +38,13 @@
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m   [38;2;247;246;251mImplement finished and its critique passed — the diff has not been read yet.[39m                     [m
+[48;2;32;31;38m   [38;2;247;246;251mThe implement critique gave no clear verdict, and the loop gave up rather than passing it.[39m       [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mimplement is ready for your decision.[39m                                                      [m
-[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. start verify[38;2;96;95;107m — the critique passed — run the checks[39m                                          [m
-[48;2;32;31;38m  [38;2;247;246;251m  2. send it back[38;2;96;95;107m — re-runs implement with what is wrong — your line goes with it[39m                 [m
+[48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mimplement critique gave no clear verdict — choose what happens next.[39m                       [m
+[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. send it back[38;2;96;95;107m — re-runs implement with what is wrong — your line goes with it[39m                 [m
+[48;2;32;31;38m  [38;2;247;246;251m  2. start verify[38;2;96;95;107m — overrules the critique — runs the checks anyway[39m                               [m
 [48;2;32;31;38m  [38;2;247;246;251m  3. stop here[38;2;96;95;107m — park it — nothing runs until you come back[39m                                       [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;191;188;200m┃ [38;2;107;80;255;7mm[38;2;96;95;107;27message the agent, /approve /verify /diff…, or ↑ for actions[39m                                    [m
 [48;2;32;31;38m                                                                                                    [m
-[38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [48;2;32;31;38m [48;2;77;76;87m [38;2;191;188;200mFD-001: diff written → critiquing[39m [48;2;32;31;38m               [38;2;191;188;200m↑↓[39m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[39m [38;2;133;131;146mstart verify[38;2;96;95;107m · [38;2;191;188;200mesc[39m [38;2;133;131;146mboard[m
+[38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [48;2;32;31;38m [48;2;77;76;87m [38;2;191;188;200mFD-001: diff written → critiquing[39m [48;2;32;31;38m               [38;2;191;188;200m↑↓[39m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[39m [38;2;133;131;146msend it back[38;2;96;95;107m · [38;2;191;188;200mesc[39m [38;2;133;131;146mboard[m
