@@ -209,9 +209,12 @@ func roleForStage(f domain.Feature) (agent.Role, bool) {
 // autonomous pass that must never mutate the main checkout (it runs in
 // the repo root with no worktree).
 //
-// Keyed on the stage past design: the design stage writes the research
-// document through gummi's mediated spec tools and must not be stripped
-// of them, while everything after it only reads.
+// It governs the REPOSITORY, and only that: the backend's own file and
+// shell tools, which Engine.run refuses to start such a session without
+// being able to strip (Capabilities().ReadOnlyEnforce). It once also
+// stripped gummi's mediated document tools, which left the survey stage
+// unable to write the one artifact it exists to produce; those are served
+// on every stage now (asktool.go).
 func researchReadOnly(f domain.Feature) bool {
 	return f.Kind == domain.KindResearch && f.Stage != domain.StagePlan
 }
@@ -538,15 +541,20 @@ your final message explaining which conflict and why.`)
 // wiring.
 func investigateHint() string {
 	return strings.TrimSpace(`
-Stage: Implement — investigate (autonomous, read-only). Survey the research
+Stage: Implement — investigate (autonomous). Survey the research
 question against this repo. You run in the card's scratch checkout of
-main — a throwaway, with no worktree — and every tool that can write or
-commit is unavailable, so the survey is read-only by construction — do
-not expect to modify anything.
+main — a throwaway, with no worktree — and the repository is read-only to
+you: no tool of yours can edit or commit a file in it, so do not expect to
+modify the code, add instrumentation or run an experiment that changes it.
+The research document is the exception and the point: it is written
+through gummi's own document tools (spec_view, spec_replace_section,
+spec_annotate), which reach the document at its workspace home and nothing
+else.
 Ground every finding with a path:line citation so later stages can
-navigate to it. Record your findings and open questions in the research
-document as you go, and stop when the survey answers the research
-question or names what blocks it.`)
+navigate to it. Write your findings into the document as you go — the
+Findings section is this stage's deliverable, and a survey that ends with
+it empty has produced nothing — and stop when the survey answers the
+research question or names what blocks it.`)
 }
 
 // shapeHint is the research design pass contract: an interactive session
@@ -617,14 +625,15 @@ constraints are set.`)
 // converge on one cause because one is the usual number.
 func diagnoseInvestigateHint() string {
 	return strings.TrimSpace(`
-Stage: Implement — investigate (autonomous, read-only). Find out WHY the
+Stage: Implement — investigate (autonomous). Find out WHY the
 reported symptom happens. You run in the card's scratch checkout of
-main — a throwaway, with no worktree — and every tool that can write or
-commit is unavailable, so the investigation is read-only by
-construction: you cannot add instrumentation, run an experiment that
-edits code, or test a fix. Work from reading, from the reproduction the
-design stage recorded, and from whatever the repo's own history and
-tests already tell you.
+main — a throwaway, with no worktree — and the repository is read-only to
+you: no tool of yours can edit or commit a file in it, so you cannot add
+instrumentation, run an experiment that edits code, or test a fix. Work
+from reading, from the reproduction the design stage recorded, and from
+whatever the repo's own history and tests already tell you. The diagnosis
+document is the exception: it is written through gummi's own document
+tools, which reach it at its workspace home and nothing else.
 Write into the diagnosis document as you go:
 - Evidence — what you observed, every claim carrying a path:line
   citation so the fix cards can navigate straight to it.
@@ -823,41 +832,31 @@ verdict attached.` + verdict)
 // mediatedTools names the gummi tools this card's sessions can actually
 // reach, for the contract hint's sentence about them.
 //
-// It is not a fixed list. A read-only research session is served a
-// STRIPPED tool set (filterReadOnlyTools, asktool.go): spec_replace_section
-// and spec_annotate are structurally absent from opts.Tools, from MCP
-// list_tools, and from the per-stage tool hint. Naming them anyway in the
-// contract — the first thing every session reads — told a research
-// reviewer to record its findings with a tool it does not have, which is
-// the same class of wrong instruction this paragraph was rewritten to
-// remove (it used to tell three of six backends they could edit the
-// artifact in place, which their write cage refuses).
+// It is not a fixed list, because what a stage is served differs by
+// stage: a critique judges and does not rewrite, a rebase pass touches no
+// artifact at all. The sentence hedges with "on any stage that offers
+// them" for the same reason — which writeable tools a given stage carries
+// is the per-stage hint's business, not this one's.
 //
-// The rest of the sentence still hedges with "on any stage that offers
-// them", because which of the writeable tools a given stage carries is
-// the per-stage hint's business, not this one's.
+// A research session is not a special case here any more. It used to be:
+// spec_replace_section and spec_annotate were stripped from every research
+// stage past plan, so this paragraph told a research survey it had
+// "`spec_view` — and only that", which was true and fatal (see asktool.go
+// for what it cost). gummi's document tools write the artifact at its
+// workspace home and cannot reach the repository, so the read-only
+// contract never had a reason to take them, and they are served.
 func mediatedTools(f domain.Feature, flavor runFlavor) string {
 	switch flavor {
 	case flavorCritique:
 		// A critique judges; it does not rewrite. stageTools serves it
-		// submit_verdict and spec_annotate and nothing else — and on a
-		// read-only research card filterReadOnlyTools takes the annotate
-		// away too, leaving it with no way to touch the artifact at all.
-		if researchReadOnly(f) || f.Kind == domain.KindResearch {
-			return "none — this pass reads the document and returns a verdict; " +
-				"it is not served any tool that writes to the artifact"
-		}
+		// submit_verdict and spec_annotate and nothing else.
 		return "`spec_annotate` to attach a finding as a `%%` marker — and only that"
 	case flavorRebase:
 		return "none — this pass resolves a rebase in the working directory " +
 			"and is served no artifact tools"
 	}
-	view := "`spec_view` to read a section (or the whole document)"
-	if researchReadOnly(f) {
-		return view + " — and only that: this session is read-only, so the " +
-			"artifact-writing tools are not served to it at all"
-	}
-	return view + ", `spec_replace_section` to rewrite one, `spec_annotate` " +
+	return "`spec_view` to read a section (or the whole document), " +
+		"`spec_replace_section` to rewrite one, `spec_annotate` " +
 		"to attach an open question or note as a `%%` marker"
 }
 

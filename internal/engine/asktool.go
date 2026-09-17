@@ -166,28 +166,34 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 	}
 }
 
-// filterReadOnlyTools strips the artifact-rewriting tools from a stage's
-// gummi-mediated surface for a read-only research session. The read-only
-// contract is all-or-nothing at the adapter boundary, so only the tools
-// that never mutate the main checkout remain: spec_view (a read) and the
-// gummi-state tools (submit_verdict / resolve_annotation / verify_verdict,
-// which write to the store, never the artifact). spec_replace_section and
-// spec_annotate rewrite the artifact and are structurally absent, so the
-// engine serves — over opts.Tools, MCP list_tools, and the prompt's
-// toolHint — exactly the stripped set.
-func filterReadOnlyTools(defs []agent.ToolDef, readOnly bool) []agent.ToolDef {
-	if !readOnly {
-		return defs
-	}
-	out := make([]agent.ToolDef, 0, len(defs))
-	for _, d := range defs {
-		if d.Name == specReplaceSectionToolName || d.Name == annotateToolName {
-			continue
-		}
-		out = append(out, d)
-	}
-	return out
-}
+// A read-only research session used to be served a STRIPPED gummi surface:
+// spec_replace_section and spec_annotate were removed from opts.Tools, from
+// MCP tools/list and from the prompt's tool hint, on the reasoning that a
+// read-only pass "must never mutate the main checkout".
+//
+// They never could. Both are gummi-mediated: they write the card's artifact
+// at its workspace home (.gummi/research/<id>.md), through the engine, and
+// have no path to the repository at all. What protects the operator's
+// checkout is the ADAPTER's read-only mode — the backend's own file and
+// shell tools, which Engine.run refuses to start a research session without
+// (Capabilities().ReadOnlyEnforce). Stripping gummi's own document tools
+// added nothing to that guarantee and took away the only way the stage
+// could do its job.
+//
+// The cost was total. A research card's build stage is the survey: its
+// entire deliverable is the Findings section, its own contract tells it to
+// "record your findings and open questions in the research document as you
+// go", and researchReadOnly covers every stage except plan — so the stage
+// was instructed to write and served nothing that writes. On the lxd
+// autopilot drive case C ran three times, spent 428.8 credits across 84
+// greps and reads, wrote nothing, and was failed by its own verify for the
+// section it had no tool to fill; the recommended recovery (--bounce, and
+// the card page's "draft the missing section") returned it to the same
+// stage each time. Its critique could not file a finding either, for the
+// same reason.
+//
+// So there is no filter. A stage's gummi surface is stageTools, read-only
+// or not, and the read-only contract means what it says: the repository.
 
 func askUserTool() agent.ToolDef {
 	return agent.ToolDef{
@@ -476,15 +482,6 @@ const unattendedAskHint = "This card is running unattended: no one will read you
 // agent's turn never hangs on a call gummi won't answer.
 func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 	if tc == nil {
-		return
-	}
-	// Defense in depth: a read-only research session refuses the stripped
-	// mutating tools outright, so a hand-crafted MCP call that names them
-	// cannot rewrite the artifact even though filterReadOnlyTools kept
-	// them out of the advertised surface (and no prompt told the model
-	// they exist).
-	if s.ReadOnly && (tc.Name == specReplaceSectionToolName || tc.Name == annotateToolName) {
-		e.resolveNow(s, tc.ID, "read-only research session: "+tc.Name+" is not available")
 		return
 	}
 	switch tc.Name {

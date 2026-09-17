@@ -362,11 +362,13 @@ func mcpE2EReadonlySetup(t *testing.T) (*Engine, string, *Session) {
 	return e, socket, s
 }
 
-// TestMCPEndToEndReadonlySurface: a read-only research session's MCP
-// tool surface is the stripped set — spec_replace_section and
-// spec_annotate are absent (tools/list), and a hand-crafted
-// call_tool spec_replace_section is refused without touching the
-// artifact, so the MCP shim cannot rewrite the main checkout.
+// TestMCPEndToEndReadonlySurface: a read-only research session reaches its
+// document over MCP. The surface used to be stripped of
+// spec_replace_section and spec_annotate, and a call naming one was
+// refused, "so the MCP shim cannot rewrite the main checkout" — which it
+// never could: the tool writes the artifact at its workspace home, through
+// the engine. The strip is what left a research survey unable to write its
+// Findings at all (see TestReadOnlyResearchWritesItsDocument).
 func TestMCPEndToEndReadonlySurface(t *testing.T) {
 	_, socket, s := mcpE2EReadonlySetup(t)
 	child := startChildFor(t, socket, "RS-001")
@@ -383,30 +385,22 @@ func TestMCPEndToEndReadonlySurface(t *testing.T) {
 	for _, tl := range tools {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	for _, gone := range []string{"spec_replace_section", "spec_annotate"} {
-		for _, n := range names {
-			if n == gone {
-				t.Fatalf("read-only tools/list contains %s: %v", gone, names)
-			}
+	for _, want := range []string{"spec_view", "spec_replace_section"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("read-only tools/list lost %s: %v — a research survey cannot "+
+				"write the document it exists to produce", want, names)
 		}
 	}
-	if !slices.Contains(names, "spec_view") {
-		t.Fatalf("read-only tools/list lost spec_view: %v", names)
-	}
 
-	before, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	text, _ := child.call("spec_replace_section", `{"section":"Problem","body":"pwned"}`)
-	if !strings.Contains(text, "not available") {
-		t.Fatalf("spec_replace_section on a read-only session resolved to %q, want a not-available refusal", text)
+	text, _ := child.call("spec_replace_section", `{"section":"Problem","body":"the survey found this"}`)
+	if strings.Contains(text, "not available") {
+		t.Fatalf("spec_replace_section over MCP was refused on a research session: %q", text)
 	}
 	after, err := os.ReadFile(s.SpecPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(after, before) {
-		t.Fatal("read-only session's spec_replace_section mutated the artifact")
+	if !strings.Contains(string(after), "the survey found this") {
+		t.Fatalf("the survey's write never reached the document:\n%s", after)
 	}
 }

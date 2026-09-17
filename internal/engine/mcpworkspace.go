@@ -82,11 +82,10 @@ func workspaceMCPNonce() string {
 // (cfg.Store, the worktree pool, Run/RunWith) rather than bridging into a
 // single live *Session's handleClientTool path the way mcpEndpoint does —
 // there is no one session to bridge into here, only the engine itself.
-// This is also why it carries no readOnly flag: filterReadOnlyTools exists
-// to strip artifact-mutating stage tools from a research session's
-// surface, and none of the board-level tools below touch the artifact
-// that way (card_run/card_resume kick off a session; they don't write to
-// it directly).
+// This is also why it carries no read-only flag: the read-only contract
+// governs a research session's access to the REPOSITORY, which none of the
+// board-level tools below touch (card_run/card_resume kick off a session;
+// they don't write code or artifacts directly).
 //
 // Its hello handshake is {"mode":"workspace"}, not {"feature":"<id>"}:
 // there is no feature id to validate a connection against, so overloading

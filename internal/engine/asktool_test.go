@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -901,43 +900,46 @@ func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
 	}
 }
 
-// TestFilterReadOnlyTools: a read-only research session's gummi-mediated
-// surface strips the artifact-rewriting tools (spec_replace_section,
-// spec_annotate) while keeping the read/nav and gummi-state tools. A
-// non-read-only session is unchanged. Every stage keeps spec_view;
-// implement keeps resolve_annotation and verify keeps submit_verdict.
-func TestFilterReadOnlyTools(t *testing.T) {
+// TestReadOnlyResearchKeepsItsDocumentTools locks the surface a research
+// session past its design stage is served. It used to be stripped:
+// spec_replace_section and spec_annotate were removed for any session
+// where researchReadOnly held, on the reasoning that a read-only pass
+// must not mutate the main checkout — which those tools cannot do. They
+// are gummi-mediated writes to the artifact at its workspace home.
+//
+// The strip made the survey stage structurally unable to do its job. On
+// the lxd autopilot drive case C ran three times, spent 428.8 credits on
+// 84 greps and reads, wrote nothing, and was failed by its own verify for
+// the Findings section it had no tool to fill — and its critique could
+// not file that finding as a marker either.
+func TestReadOnlyResearchKeepsItsDocumentTools(t *testing.T) {
 	for _, tc := range []struct {
-		stage    domain.Stage
-		kept     []string
-		stripped []string
+		stage domain.Stage
+		want  []string
 	}{
-		{domain.StageImplement, []string{"resolve_annotation", "spec_view"}, []string{"spec_replace_section"}},
-		{domain.StagePlan, []string{"ask_user", "spec_view"}, []string{"spec_replace_section", "spec_annotate"}},
-		{domain.StageVerify, []string{"submit_verdict", "spec_view"}, []string{"spec_replace_section"}},
+		{domain.StageImplement, []string{"resolve_annotation", "spec_view", "spec_replace_section"}},
+		{domain.StagePlan, []string{"ask_user", "spec_view", "spec_replace_section", "spec_annotate"}},
+		{domain.StageVerify, []string{"submit_verdict", "spec_view", "spec_replace_section"}},
 	} {
 		names := map[string]bool{}
-		for _, td := range filterReadOnlyTools(stageTools(tc.stage, flavorStage), true) {
+		for _, td := range stageTools(tc.stage, flavorStage) {
 			names[td.Name] = true
 		}
-		for _, k := range tc.kept {
-			if !names[k] {
-				t.Errorf("stage %s read-only lost %s: %v", tc.stage, k, names)
-			}
-		}
-		for _, st := range tc.stripped {
-			if names[st] {
-				t.Errorf("stage %s read-only kept mutating tool %s: %v", tc.stage, st, names)
+		for _, w := range tc.want {
+			if !names[w] {
+				t.Errorf("stage %s is not served %s: %v", tc.stage, w, names)
 			}
 		}
 	}
-	// a non-read-only session is unchanged: the filter is a no-op.
+	// A critique judges and files findings: it needs the annotate.
 	names := map[string]bool{}
-	for _, td := range filterReadOnlyTools(stageTools(domain.StagePlan, flavorStage), false) {
+	for _, td := range stageTools(domain.StageImplement, flavorCritique) {
 		names[td.Name] = true
 	}
-	if !names[specReplaceSectionToolName] {
-		t.Errorf("non-read-only investigate lost spec_replace_section: %v", names)
+	for _, w := range []string{"submit_verdict", "spec_annotate"} {
+		if !names[w] {
+			t.Errorf("a critique is not served %s: %v", w, names)
+		}
 	}
 }
 
@@ -964,29 +966,33 @@ func researchReadonlySession(t *testing.T) (*Engine, *Session) {
 	return e, s
 }
 
-// TestReadonlyDispatchRefusesSpecReplace: a hand-crafted spec_replace_section
-// through DispatchClientTool on a read-only session is refused (and the
-// artifact untouched), so the MCP bridge cannot rewrite the main checkout.
-func TestReadonlyDispatchRefusesSpecReplace(t *testing.T) {
+// TestReadOnlyResearchWritesItsDocument is the regression for the worst
+// finding of the lxd autopilot drive: a research card's survey stage was
+// served no tool that could write the document it exists to produce.
+//
+// spec_replace_section used to be refused outright on any read-only
+// research session, "so the MCP bridge cannot rewrite the main checkout".
+// It cannot: the tool is gummi-mediated and writes the card's artifact at
+// its workspace home. What guards the checkout is the adapter's own
+// read-only mode, which Engine.run refuses to start such a session
+// without (Capabilities().ReadOnlyEnforce, covered by
+// TestResearchReadOnlyRefusedOnNonEnforcingBackend).
+func TestReadOnlyResearchWritesItsDocument(t *testing.T) {
 	e, s := researchReadonlySession(t)
-	before, err := os.ReadFile(s.SpecPath())
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := e.DispatchClientTool(context.Background(), s, "spec_replace_section",
-		json.RawMessage(`{"section":"Problem","body":"pwned"}`))
+		json.RawMessage(`{"section":"Problem","body":"the survey found this"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "not available") {
-		t.Errorf("refusal result = %q, want a not-available refusal", result)
+	if strings.Contains(result, "not available") {
+		t.Fatalf("a research survey is still refused its own document tool: %q", result)
 	}
 	after, err := os.ReadFile(s.SpecPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(after, before) {
-		t.Fatal("read-only session's spec_replace_section mutated the artifact")
+	if !strings.Contains(string(after), "the survey found this") {
+		t.Errorf("the survey's write never reached the document:\n%s", after)
 	}
 }
 

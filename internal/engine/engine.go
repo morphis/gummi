@@ -1627,11 +1627,14 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// same way, so its stage sessions still receive the toolHint.
 	var tools []agent.ToolDef
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
-		tools = filterReadOnlyTools(stageTools(f.Stage, flavor), readOnly)
-		// A read-only session's standard toolHint would describe the
-		// stripped spec_replace_section; the research stage hints carry
-		// the read-only surface instead.
-		if h := toolHint(f.Stage, flavor); h != "" && !readOnly {
+		tools = stageTools(f.Stage, flavor)
+		// Every session that has the tools is told how to use them,
+		// research included. This used to skip a read-only session,
+		// because its surface had spec_replace_section stripped out from
+		// under it and the hint would have described a tool it did not
+		// have. Nothing is stripped now (see asktool.go), so the hint is
+		// true for every session that gets one.
+		if h := toolHint(f.Stage, flavor); h != "" {
 			hints = append(hints, h)
 		}
 	} else {
@@ -1654,7 +1657,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// on start never races the bind. The teardown is returned for the caller
 	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
-	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor, readOnly)
+	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor)
 	if err != nil {
 		return nil, "", nil, err
 	}
