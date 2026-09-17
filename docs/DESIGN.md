@@ -268,6 +268,15 @@ Stage semantics:
   there are always several (you land seven cards and clean none until
   Friday) and a live list holding all of them never empties.
 
+- **The close-out pass** (`C`) is the end of a session as one ritual: it
+  walks the cards whose branches are ready, **one confirm each** — the
+  drafted commit message is still the review, and `skip` is bound as
+  cheaply as `land` — then ends on the cleanup **sweep**, which collects
+  every refusal cleanup already made (not landed, uncommitted rework, a
+  branch kept on purpose) into a plan that can be read instead of one
+  error at a time on a card someone had to go find. The masthead names
+  what a pass would find, so hygiene is noticed rather than remembered.
+
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.
 

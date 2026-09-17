@@ -144,6 +144,9 @@ the board. Then:
    it. A card its goal dropped keeps a group of its own for a day, with
    the reason it was dropped and the one answer that matters: `adopt`
    takes it back with its work kept.
+8. At the end of a session, `C` closes out: it walks the cards whose
+   branches are ready, one confirm each, then sweeps the worktrees that
+   landing left behind — naming what it is holding back and why.
 
 The keys you need first:
 
@@ -157,6 +160,7 @@ The keys you need first:
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
 | `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
+| `C` | close out the session — land what is ready, then sweep the worktrees landing left behind |
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
 | `i` | the needs-attention inbox |
 | `tab`, `alt+1/2/3` | the board, inbox and agent tabs |

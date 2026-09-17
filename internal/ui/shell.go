@@ -227,6 +227,10 @@ type Shell struct {
 	goalTickQueue map[domain.FeatureID]bool
 	goalTicking   map[domain.FeatureID]bool
 	goalTickAgain map[domain.FeatureID]bool
+	// sizedFor is how many landed rows worktreeSizeText was measured
+	// against, so a reload that did not change the set does not re-walk
+	// every worktree on disk. -1 until the first measurement.
+	sizedFor int
 	// worktreeSizeText is the disk the un-cleaned landed worktrees hold,
 	// formatted, as the archive header and the close-out sweep print it.
 	// Measured on demand (a filesystem walk per frame is the wrong price
@@ -472,6 +476,9 @@ func NewShell(t theme.Theme, version string) *Shell {
 		threadDrafts:   map[domain.FeatureID]string{},
 		copilotHint:    true,
 		motionEnabled:  true,
+		// -1, so the first row load always measures: a zero would read as
+		// "already measured, and the answer was nothing landed".
+		sizedFor: -1,
 		// the composer is themed from the same styles as everything else
 		// on the page; left on the widget's own defaults it renders in raw
 		// ANSI and reads as a foreign box (threadinput.go).
@@ -1548,10 +1555,20 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and those are half the narration's cache key, so the pass is
 		// re-checked here too. The other half, and the moment a card
 		// page first has a log to key on at all, is cardEventsMsg.
-		if r, ok := m.selected(); ok {
-			return m, m.ensureNarration(r)
+		// The archive header's disk figure is measured only when the set
+		// it describes has actually changed — a walk of every landed
+		// worktree is far too expensive to repeat on every reload, and a
+		// figure that is one landing stale is still the right order of
+		// magnitude for the decision it informs.
+		var cmds []tea.Cmd
+		if n := landedRows(m.rows); n != m.sizedFor {
+			m.sizedFor = n
+			cmds = append(cmds, m.refreshWorktreeSize())
 		}
-		return m, nil
+		if r, ok := m.selected(); ok {
+			cmds = append(cmds, m.ensureNarration(r))
+		}
+		return m, tea.Batch(cmds...)
 
 	case openDecisionsMsg:
 		// The record is the primary source: seed from it first, then let
@@ -2088,6 +2105,27 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spec, m.diff, m.ingest = nil, nil, nil
 		m.bugIngest = newBugIngestView(msg.res, msg.params)
 		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " issue(s) — enter fills the form"}
+		return m, nil
+
+	case sweepPlannedMsg:
+		// the measurement landed: hand it to the pass if it is still open.
+		// A pass the reader has already left simply drops it — nothing was
+		// changed by measuring.
+		if d, ok := m.Overlay.Top().(*closeOutDialog); ok {
+			plan := msg.plan
+			d.sweep = &plan
+		}
+		return m, nil
+
+	case sweptMsg:
+		m.notice = noticeMsg{
+			text:   sweptText(msg),
+			reload: true,
+		}
+		return m, m.refreshWorktreeSize()
+
+	case worktreeSizeMsg:
+		m.worktreeSizeText = msg.text
 		return m, nil
 
 	case cardIssueMsg:
@@ -2810,6 +2848,12 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.sortMode = SortSeverity
 			m.notice = noticeMsg{text: "todo: by severity"}
 		}
+	case "C":
+		// The board-wide counterpart of c: c tidies one landed card, C
+		// closes out the session — walk what is ready to land, then sweep
+		// what landing left behind. Uppercase for the bigger act, and the
+		// pair is the mnemonic.
+		return m.openCloseOut()
 	case "I":
 		if m.engine == nil {
 			m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}

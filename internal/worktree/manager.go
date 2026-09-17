@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -361,6 +362,51 @@ func (m *Manager) Remove(ctx context.Context, f *domain.Feature, force bool) err
 	// a recreate re-anchors to main's then-current head instead of keeping a
 	// stale SHA that would trip the drift guard forever.
 	return m.forkStore.ClearForkPoint(ctx, f.ID)
+}
+
+// DiskSize is how many bytes the feature's worktree occupies, walking
+// the checkout on disk.
+//
+// It exists for the close-out sweep and for the board's archive line, and
+// both are deliberately the only callers: a checkout is thousands of
+// files and this walks all of them, so it belongs on a surface someone
+// opened on purpose and never on a render path. A missing worktree is
+// zero, not an error — "nothing there" is the answer, not a failure.
+//
+// Unreadable entries are skipped rather than failing the walk. A figure
+// that is short by one directory is still the right order of magnitude,
+// and the number's whole job is to tell someone whether tidying up is
+// worth doing.
+func (m *Manager) DiskSize(ctx context.Context, f *domain.Feature) (int64, error) {
+	p, _, err := m.featurePaths(f)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	err = filepath.WalkDir(p, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fs.SkipDir
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		total += info.Size()
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
 }
 
 // CommitAll stages everything in the feature's worktree — tracked edits

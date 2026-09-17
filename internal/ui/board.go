@@ -413,6 +413,9 @@ func (m *Shell) boardCounts() string {
 			parts = append(parts, lanes)
 		}
 	}
+	if out := m.closeOutText(); out != "" {
+		parts = append(parts, out)
+	}
 	return strings.Join(parts, " · ")
 }
 
@@ -469,4 +472,39 @@ func formatCount(super domain.SuperState, n int) string {
 		return c + " done"
 	}
 	return ""
+}
+
+// closeOutText is the masthead's nudge: what a close-out pass would find.
+// It is how the cleanup ask becomes something noticed rather than
+// remembered — the failure it replaces is a worktree that went on holding
+// disk because the only prompt for it was a transient notice on a card
+// nobody reopened.
+//
+// It counts and never measures: the byte figure comes from the last
+// sweep or load (worktreeSizeText), so drawing the bar stays free.
+func (m *Shell) closeOutText() string {
+	var ready, holding int
+	for _, r := range m.rows {
+		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() && !r.F.InGoal() {
+			ready++
+		}
+		if r.Landed {
+			holding++
+		}
+	}
+	var parts []string
+	if ready > 0 {
+		parts = append(parts, strconv.Itoa(ready)+" ready to land")
+	}
+	if holding > 0 {
+		s := strconv.Itoa(holding) + " to sweep"
+		if m.worktreeSizeText != "" {
+			s += " (" + m.worktreeSizeText + ")"
+		}
+		parts = append(parts, s)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ") + " — C"
 }

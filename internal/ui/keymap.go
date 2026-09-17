@@ -368,6 +368,9 @@ func (m *Shell) boardBindings() []binding {
 		{key: "m", label: "merge", help: "squash-merge branch into " + base + " (review & approve the drafted message)"},
 		{key: "z", label: "squash", help: "collapse the branch to one commit in place (review & approve the drafted message)"},
 		{key: "c", label: "clean up", help: "clean up a landed branch"},
+		// C beside c on purpose: c tidies THIS card, C closes out the
+		// session — land what is ready, then sweep what landing left.
+		{key: "C", label: "close out", help: "land what is ready, then sweep the worktrees landing left behind"},
 		{key: "n", label: "new", help: "new card — feature, bug, research or goal, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold goal", help: "fold or unfold a goal's cards under it"},
 		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},

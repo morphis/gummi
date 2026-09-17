@@ -145,6 +145,9 @@ func (m *Shell) archiveLine() string {
 		// The cleanup ask, at the altitude it is acted on. Without this
 		// the fold would be the second way a worktree gets forgotten.
 		line += " · " + strconv.Itoa(holding) + " hold worktrees"
+		if sz := m.archivedWorktreeSize(); sz != "" {
+			line += ", " + sz
+		}
 	}
 	if m.archiveOpen {
 		return line + " · f folds"
@@ -178,3 +181,10 @@ func upper(s string) string {
 	}
 	return string(out)
 }
+
+// archivedWorktreeSize is the disk the archive's un-cleaned worktrees
+// hold, as the header prints it. Empty when nothing has been measured —
+// the figure is computed on demand by the close-out sweep rather than on
+// the render path, where a filesystem walk per frame would be the wrong
+// price for a line of text.
+func (m *Shell) archivedWorktreeSize() string { return m.worktreeSizeText }

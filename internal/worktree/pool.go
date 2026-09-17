@@ -429,6 +429,17 @@ func (p *Pool) Remove(ctx context.Context, f *domain.Feature, force bool) error 
 	return wt.Remove(ctx, f, force)
 }
 
+// DiskSize reports the bytes f's worktree holds. See Manager.DiskSize —
+// it walks the checkout, so it belongs on a surface someone opened on
+// purpose, never on a render path.
+func (p *Pool) DiskSize(ctx context.Context, f *domain.Feature) (int64, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return 0, err
+	}
+	return wt.DiskSize(ctx, f)
+}
+
 func (p *Pool) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]string, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
