@@ -707,6 +707,29 @@ func UndraftedGateSections(ct domain.CardType, from, to domain.Stage, artifact s
 	return spec.UndraftedSections(artifact, want)
 }
 
+// UndraftedBlocking is undraftedBlockingGate for the two driving loops:
+// the section(s) this card's current stage owes its forward edge and left
+// holding nothing but the template's `%%` prompt. Nil when the edge owes
+// nothing, when the artifact cannot be read, or when the stage drafted
+// what it owed.
+//
+// It is exported because the floor has two ways past it. A design gate
+// crosses through Advance, which checks it — but a WORK stage's critique
+// verdict of `pass` does not go through Advance at all: gatepolicy returns
+// Advance, and both loops act on it with a bare store.Transition (the
+// driver's stepTo, the TUI's autoStep). So the one edge where a stage's
+// own output is the thing being judged was the one edge the floor did not
+// cover, in both loops at once.
+//
+// That is how the lxd autopilot drive's research card crossed
+// implement→verify with its Findings section still the seeded placeholder:
+// the critique passed it — citing a resolution the architect had written
+// at the PLAN stage, which nothing marks as spent — and the crossing never
+// asked. Verify then failed the card for the section, 428.8 credits later.
+func (e *Engine) UndraftedBlocking(f domain.Feature) []string {
+	return e.undraftedBlockingGate(f)
+}
+
 // undraftedBlockingGate returns the required section(s) the departing
 // stage left undrafted, or nil when the gate has nothing to check or the
 // artifact can't be read. Mirrors openQuestionsBlockingGate's zero-on-error

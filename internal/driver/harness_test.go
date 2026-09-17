@@ -79,7 +79,11 @@ func newHarnessRoots(t *testing.T, clientTools bool, script map[domain.Stage]sta
 
 	h := &harness{t: t, store: store, ws: ws, wt: wt, buf: &bytes.Buffer{}, root: repoRoot, calls: map[domain.Stage]int{}}
 	fake := agent.NewFake("")
-	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: clientTools}
+	// ReadOnlyEnforce so the harness can drive a research card's autonomous
+	// stages, which Engine.run refuses on a backend that cannot strip its
+	// own write tools.
+	fake.Caps = agent.Capabilities{Resume: true, UsageEvents: true, Interrupt: true,
+		ClientTools: clientTools, ReadOnlyEnforce: true}
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
 		stage := h.scriptStage(opts)
 		if f, err := h.store.GetFeature(context.Background(), h.only()); err == nil {

@@ -304,6 +304,16 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		// gate's row state — the undrafted sections among them — is fresh
 		return m.loadRows
 	case gatepolicy.Advance:
+		// The same floor a design gate is held to. A work stage's critique
+		// passing is still a crossing, and a stage that wrote nothing into
+		// the section its forward edge owes has not finished, whatever its
+		// critique thought — the driver checks this on its own copy of
+		// this branch, and the two loops must not drift.
+		if names := m.engine.UndraftedBlocking(snap.Feature); len(names) > 0 {
+			m.raiseAttention(id, attnGate,
+				noun+" critiqued clean, but "+strings.Join(names, ", ")+" is still blank — review it")
+			return m.loadRows
+		}
 		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
 			return m.writeHalt(id, err)
 		}

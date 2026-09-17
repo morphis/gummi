@@ -1268,6 +1268,18 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		d.setRound(f.ID, kind, 0)
 		return d.crossGate(ctx, f)
 	case gatepolicy.Advance:
+		// A work stage's critique passing is still a crossing, so it is
+		// held to the same floor a design gate is: a stage that wrote
+		// nothing into the section its forward edge owes has not finished,
+		// whatever its critique thought. Checked here rather than inside
+		// stepTo because this is the only caller and the blocked outcome
+		// is a terminal the caller reports.
+		if names := d.eng.UndraftedBlocking(f); len(names) > 0 {
+			d.recordBlocked(f, fmt.Sprintf("undrafted %s blocks %s.", strings.Join(names, ", "), f.Stage))
+			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage),
+				Undrafted: names, Resume: string(f.ID)})
+			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
+		}
 		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}
