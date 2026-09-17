@@ -93,6 +93,14 @@ type statusView struct {
 	// off, or ended through its PR; this is the one of the three the store
 	// records directly.
 	HandedOff bool `json:"handed_off"`
+	// Dropped is true when this card's goal dropped it: it was minted for
+	// the goal, never finished, and closed when the goal wrapped up. The
+	// store closes such a card the way a hand-off closes one — branch
+	// kept, nothing landed — so HandedOff is true for it too, and a caller
+	// counting hand-offs used to count a card that never ran as completed
+	// work. On the lxd autopilot drive BG-003 reported `done: true,
+	// handed_off: true` with 0 credits spent and no branch at all.
+	Dropped bool `json:"dropped,omitempty"`
 	// Running reports whether something is currently driving this card:
 	// either the pid recorded at this card's pid file
 	// (.gummi/state/locks/<id>.pid) is still alive — a headless run/resume
@@ -248,6 +256,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		Verified:        !f.VerifiedAt.IsZero(),
 		Done:            f.Stage == domain.StageDone,
 		HandedOff:       f.HandedOff(),
+		Dropped:         f.GoalDropped(),
 		Running:         cardRunning(ws, f.ID),
 		PullRequest:     f.PullRequest.StatusPayload(),
 		PullRequestLine: f.PullRequest.PlainLine(),
@@ -463,7 +472,18 @@ func renderStatus(w io.Writer, v statusView) {
 		fmt.Fprintf(w, "  Unproven: %s (changed, but no check that ran exercised them)\n",
 			strings.Join(paths, ", "))
 	}
-	if v.HandedOff {
+	switch {
+	case v.Dropped:
+		// A card its goal dropped is closed through the same store path a
+		// hand-off uses, so it used to print "handed off — <branch> kept",
+		// two lines under a Branch line reading "(none)" — a branch that
+		// was never created, described as kept. Say what happened instead.
+		if v.BranchState == "none" || v.Branch == "" {
+			fmt.Fprintf(w, "  Ending:   dropped by %s — it never started, nothing was kept\n", goalOrItsGoal(v))
+		} else {
+			fmt.Fprintf(w, "  Ending:   dropped by %s — %s kept, nothing landed\n", goalOrItsGoal(v), v.Branch)
+		}
+	case v.HandedOff:
 		// Under Verified for the same reason Excused is: it qualifies what
 		// happened after the pass. Only on a handed-off card — every other
 		// card's ending is already legible from Stage and the branch state.
@@ -471,6 +491,18 @@ func renderStatus(w io.Writer, v statusView) {
 	}
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)
+	// An envelope bounds what a card may START, not what it may finish:
+	// the check fires between sessions, so the session in flight when the
+	// cap is reached runs to its end. Every stop on the lxd autopilot
+	// drive overran — 70.66 of 60 at one plan gate, a whole critique's
+	// worth — and nothing anywhere said the cap was advisory, so a person
+	// who set a small envelope to bound a spend had no way to learn by how
+	// much it could be missed. Printed only when it actually happened.
+	if v.Spend.Envelope > 0 && v.Spend.Credits > float64(v.Spend.Envelope) {
+		fmt.Fprintf(w, "            over by %s — the envelope is checked between sessions, "+
+			"so the one in flight finishes\n",
+			trimCredits(v.Spend.Credits-float64(v.Spend.Envelope)))
+	}
 	// continuation lines under Spend: the breakdown is the same figure
 	// taken apart, not a second one.
 	for _, sp := range v.StageSpend {
@@ -549,4 +581,13 @@ func trimCredits(c float64) string {
 		return fmt.Sprintf("%d", int64(c))
 	}
 	return fmt.Sprintf("%.2f", c)
+}
+
+// goalOrItsGoal names the goal that dropped a card, falling back to the
+// generic when the row no longer carries the id.
+func goalOrItsGoal(v statusView) string {
+	if v.GoalID != "" {
+		return v.GoalID
+	}
+	return "its goal"
 }

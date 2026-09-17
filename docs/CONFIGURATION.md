@@ -147,7 +147,7 @@ to commit.
 | `GUMMI_ZZ_MAX_TURNS` | zz's runaway-turn backstop (default 200) |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_MAX_ACTIVE` | the attended lane pool (default 1) |
-| `GUMMI_ENVELOPE` | default credit envelope for new cards, and a floor under the estimated one. Unset, the board prefills 2000 and headless runs refuse to start |
+| `GUMMI_ENVELOPE` | default credit envelope for new cards, and a floor under the estimated one. Unset, the board prefills 2000 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_TURN_RESERVE` | one turn's credits, the floor under envelope-derived stage budgets |
 | `GUMMI_REVIEW_DIFF_MAX` | bytes of diff the reviewer is handed inline (default 48 KiB); above it the reviewer gets a stat and fetches what it reads, and 0 forces that shape |

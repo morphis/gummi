@@ -272,6 +272,12 @@ An envelope is required headlessly. `--until plan` stops before
 implementation for a human design review. `--autonomous` takes the
 agent's recommended answer instead of stopping on a question.
 
+An envelope bounds what a card may **start**, not what it may finish: the
+check fires between sessions, so the session already running when the cap
+is reached runs to its end. Expect a card to stop a little over its
+envelope — one session's worth, which on a small envelope can be most of
+it. `gummi status` says by how much when it happens.
+
 | verb | |
 |---|---|
 | `run`, `research`, `diagnose` | create and drive a feature, research or diagnosis card |
