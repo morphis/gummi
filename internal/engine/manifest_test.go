@@ -132,7 +132,7 @@ func TestPlanningStagesRequireTheFileManifest(t *testing.T) {
 	} {
 		f := feature(1, "x", tc.stage)
 		f.Kind = tc.kind
-		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		h := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorStage), "\n"))
 		if !strings.Contains(h, unwrap("```gummi-files")) {
 			t.Errorf("%s/%s hint does not ask for a file manifest", tc.stage, tc.kind)
 		}
@@ -140,7 +140,7 @@ func TestPlanningStagesRequireTheFileManifest(t *testing.T) {
 	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug} {
 		f := feature(1, "x", domain.StageImplement)
 		f.Kind = kind
-		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		h := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorStage), "\n"))
 		if !strings.Contains(h, "file manifest") {
 			t.Errorf("implement/%s hint never mentions the manifest it may be handed", kind)
 		}

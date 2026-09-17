@@ -12,7 +12,7 @@ import (
 func planText(t *testing.T, kind domain.Kind) string {
 	t.Helper()
 	f := domain.Feature{ID: "FD-001", Kind: kind, Stage: domain.StagePlan}
-	return strings.Join(stageHints(f, "/tmp/spec.md", flavorStage), "\n\n")
+	return strings.Join(stageHints(f, "/tmp/spec.md", "", flavorStage), "\n\n")
 }
 
 // TestPlanPhasesAreOneSession: the phases are sections of a single static

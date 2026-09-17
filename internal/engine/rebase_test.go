@@ -15,14 +15,14 @@ import (
 func TestRebaseHintsAndTools(t *testing.T) {
 	f := feature(1, "Dark mode", domain.StageVerify)
 
-	joined := strings.Join(stageHints(f, "spec.md", flavorRebase), "\n")
+	joined := strings.Join(stageHints(f, "spec.md", "", flavorRebase), "\n")
 	if !strings.Contains(joined, "Task: Rebase onto main") {
 		t.Error("rebase hints missing the rebase contract")
 	}
 	if !strings.Contains(joined, "You are the implementer") {
 		t.Error("rebase contract not issued for the implementer role")
 	}
-	if plain := strings.Join(stageHints(f, "spec.md", flavorStage), "\n"); strings.Contains(plain, "Task: Rebase") {
+	if plain := strings.Join(stageHints(f, "spec.md", "", flavorStage), "\n"); strings.Contains(plain, "Task: Rebase") {
 		t.Error("stage hints leaked the rebase contract")
 	}
 

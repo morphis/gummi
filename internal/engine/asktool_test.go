@@ -1715,11 +1715,11 @@ func TestGateAskHintOnlyWhereAGateStops(t *testing.T) {
 	}
 
 	// and it rides the critique's hints, not the stage's own
-	joined := strings.Join(stageHints(attendedPlan, "spec.md", flavorCritique), "\n")
+	joined := strings.Join(stageHints(attendedPlan, "spec.md", "", flavorCritique), "\n")
 	if !strings.Contains(joined, `"gate": true`) {
 		t.Error("the critique's hints do not carry the gate-ask instruction")
 	}
-	if plain := strings.Join(stageHints(attendedPlan, "spec.md", flavorStage), "\n"); strings.Contains(plain, `"gate": true`) {
+	if plain := strings.Join(stageHints(attendedPlan, "spec.md", "", flavorStage), "\n"); strings.Contains(plain, `"gate": true`) {
 		t.Error("the plan WRITER was told to ask the gate question; only its critique should be")
 	}
 }

@@ -1629,7 +1629,16 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 			"(feature %s stage %s); point this role at `claude` or `opencode`, or accept that "+
 			"autonomous research cannot run on that backend", ag.Name(), f.ID, f.Stage)
 	}
-	hints := stageHints(f, specPath, flavor)
+	// A real, per-card place for throwaway files, named in the boundary
+	// hint. Best-effort: a directory that cannot be created leaves the
+	// hint saying `mktemp -d`, as it always did.
+	scratch := ""
+	if dir := e.cfg.Workspace.ScratchFilesDir(f.ID); dir != "" && e.cfg.Workspace.Root != "" {
+		if err := os.MkdirAll(dir, 0o700); err == nil {
+			scratch = dir
+		}
+	}
+	hints := stageHints(f, specPath, scratch, flavor)
 	// The repository orientation card sits directly under the operator's
 	// environment card: the operator's own words lead, because they are a
 	// deliberate instruction, and the file tree is reference material the

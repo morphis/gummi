@@ -149,15 +149,21 @@ it in the document and let an implementation card make it.`
 // Scratch stays OUT of the worktree for the opposite reason: the stage's
 // checkpoint commits what the stage leaves behind, so a prototype left in
 // the tree ships with the work.
-const worktreeBoundaryHint = `Your working directory is this card's own worktree — a full checkout of
+func worktreeBoundaryHint(scratch string) string {
+	where := "a temporary directory of your own (mktemp -d)"
+	if scratch != "" {
+		where = "this card's own scratch directory, " + scratch
+	}
+	return `Your working directory is this card's own worktree — a full checkout of
 its branch — and it is the boundary of your work. Run every command from
 inside it. Never cd into the repository's main checkout, and never write
-outside the worktree except into a temporary directory of your own
-(mktemp -d): whatever the worktree holds when your turn ends is committed
-as the stage's work, and whatever the main checkout holds is someone
-else's. A throwaway program to check a value or confirm an assumption is
-fine, in that temporary directory; building the feature there is not —
-that is the implement stage's job, in this worktree.`
+outside the worktree except into ` + where + `:
+whatever the worktree holds when your turn ends is committed as the
+stage's work, and whatever the main checkout holds is someone else's. A
+throwaway program to check a value or confirm an assumption is fine,
+there; building the feature there is not — that is the implement stage's
+job, in this worktree.`
+}
 
 // repoInstructionsPrecedenceHint states the precedence between the managed
 // repo's own instructions (AGENTS.md, CLAUDE.md, or equivalent) and gummi's
@@ -228,26 +234,26 @@ func researchReadOnly(f domain.Feature) bool {
 // rediscovering them from the repo's docs. The flavor selects the
 // borrowed-stage passes: the plan critique (reviewer's contract and
 // job) and the rebase resolve (implementer's contract, rebase job).
-func stageHints(f domain.Feature, specPath string, flavor runFlavor) []string {
+func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []string {
 	switch flavor {
 	case flavorCritique:
 		h := []string{contractHint(f, specPath, agent.RoleReviewer, flavorCritique), critiqueHint(f)}
 		if f.Kind != domain.KindResearch {
-			h = append(h, worktreeBoundaryHint)
+			h = append(h, worktreeBoundaryHint(scratch))
 		}
 		if gate := gateAskHint(f); gate != "" {
 			h = append(h, gate)
 		}
 		return h
 	case flavorRebase:
-		return []string{contractHint(f, specPath, agent.RoleImplementer, flavorRebase), rebaseHint(), worktreeBoundaryHint}
+		return []string{contractHint(f, specPath, agent.RoleImplementer, flavorRebase), rebaseHint(), worktreeBoundaryHint(scratch)}
 	}
 	role, _ := roleForStage(f)
 	hints := []string{contractHint(f, specPath, role, flavor)}
 	if f.Kind == domain.KindResearch {
 		hints = append(hints, researchWorkingDirGuard)
 	} else {
-		hints = append(hints, worktreeBoundaryHint)
+		hints = append(hints, worktreeBoundaryHint(scratch))
 	}
 
 	switch f.Stage {

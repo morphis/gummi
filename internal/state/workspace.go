@@ -51,6 +51,26 @@ func (w Workspace) IngestDir() string { return filepath.Join(w.GummiDir(), "inge
 // SeqFile is the FD-NNN monotonic counter.
 func (w Workspace) SeqFile() string { return filepath.Join(w.GummiDir(), "seq") }
 
+// ScratchFilesDir is where a card's sessions put throwaway files — the
+// prototype program a plan session writes to check an assumption, the
+// probe a critique compiles to confirm a value.
+//
+// It exists because the instruction alone did not hold. The boundary hint
+// has always said to keep scratch out of the worktree (a prototype left
+// in the tree ships with the stage's work) and to use "a temporary
+// directory of your own (mktemp -d)" — and sessions wrote /tmp/t.go,
+// /tmp/t2.go, /tmp/t3.go, /tmp/roundtest.go instead, which is fine until
+// two cards on one machine pick the same name and read each other's
+// program. Naming a real per-card directory in the hint replaces advice
+// with an address.
+//
+// Under .gummi (gitignored, never committed, cleaned with the card) and
+// distinct from ScratchDir, which is a research card's whole detached
+// checkout rather than a place to drop a file.
+func (w Workspace) ScratchFilesDir(id domain.FeatureID) string {
+	return filepath.Join(w.StateDir(), "scratch", string(id))
+}
+
 // ConfigFile is the repo-controlled config (verify checks, permissions).
 func (w Workspace) ConfigFile() string { return filepath.Join(w.GummiDir(), "config.yaml") }
 

@@ -136,7 +136,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	} {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
-		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorCritique), "\n"))
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorCritique), "\n"))
 		for _, want := range tc.want {
 			if !strings.Contains(joined, unwrap(want)) {
 				t.Errorf("%s/%s critique hint missing %q", tc.stage, tc.kind, want)
@@ -147,7 +147,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	for _, tc := range cases {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
-		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorStage), "\n"))
 		// the stage-independent contract rides along on every stage
 		wants := append([]string{"%% @user:", "not tampering to remove"}, tc.want...)
 		for _, want := range wants {
@@ -181,7 +181,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	} {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
-		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorCritique), "\n"))
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorCritique), "\n"))
 		for _, want := range tc.want {
 			if !strings.Contains(joined, unwrap(want)) {
 				t.Errorf("%s/%s critique hint missing %q", tc.stage, tc.kind, want)
@@ -192,7 +192,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	for _, tc := range cases {
 		f := feature(1, "Dark mode", tc.stage)
 		f.Kind = tc.kind
-		joined := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		joined := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorStage), "\n"))
 		if tc.stage != domain.StagePlan {
 			if strings.Contains(joined, "environment gummi described") {
 				t.Errorf("%s/%s hint leaked Triage/Diagnose environment-contract language", tc.stage, tc.kind)
@@ -208,14 +208,14 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// F9: contractHint's `%% @gummi:` line reads differently by role.
 	// Reviewers (Review/Verify/Critique) shouldn't be told to fill in
 	// sections — they read and add findings.
-	reviewHints := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageVerify), "spec.md", flavorStage), "\n"))
+	reviewHints := unwrap(strings.Join(stageHints(feature(1, "x", domain.StageVerify), "spec.md", "", flavorStage), "\n"))
 	if !strings.Contains(reviewHints, "leave them where they are") {
 		t.Error("review contractHint missing the softened seeded-line phrasing")
 	}
 	if strings.Contains(reviewHints, "overwrite or resolve them") {
 		t.Error("review contractHint carried the writer-role instruction")
 	}
-	specStd := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorStage), "\n"))
+	specStd := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", "", flavorStage), "\n"))
 	if !strings.Contains(specStd, "overwrite or resolve them") {
 		t.Error("spec contractHint lost the writer-role instruction")
 	}
@@ -224,7 +224,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// last of them is what writes Implementation notes — the section its
 	// gate is judged on. The converge phase must hand that section on
 	// rather than claim it.
-	stdSpec := unwrap(strings.Join(stageHints(feature(1, "Dark mode", domain.StagePlan), "spec.md", flavorStage), "\n"))
+	stdSpec := unwrap(strings.Join(stageHints(feature(1, "Dark mode", domain.StagePlan), "spec.md", "", flavorStage), "\n"))
 	if !strings.Contains(stdSpec, "Leave Implementation notes for phase 3") {
 		t.Error("the converge phase no longer hands Implementation notes to the plan phase")
 	}
@@ -238,7 +238,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// be fenced off from committing. No stage carries it any more.
 	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
 		f := feature(1, "x", st)
-		h := unwrap(strings.Join(stageHints(f, "spec.md", flavorStage), "\n"))
+		h := unwrap(strings.Join(stageHints(f, "spec.md", "", flavorStage), "\n"))
 		if strings.Contains(h, "scratch checkout of main") {
 			t.Errorf("%s still carries the retired scratch-tree guard", st)
 		}
@@ -248,7 +248,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// rule for the gummi-checks block, and the cost-shaping rules the
 	// FD-001 blowout motivated (one-pass discipline, turn budget,
 	// blocking-only filtering, no ADR re-derivation).
-	critique := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorCritique), "\n"))
+	critique := unwrap(strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", "", flavorCritique), "\n"))
 	for _, want := range []string{
 		"%% @user:",
 		// a tag in the block no longer breaks the parse — ParseChecks
@@ -289,7 +289,7 @@ func TestStageHintsCarryMethodology(t *testing.T) {
 	// and the standard flavor's convergence contract must not leak in
 
 	// the contract's section list matches the template's new shape
-	joined := strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", flavorStage), "\n")
+	joined := strings.Join(stageHints(feature(1, "x", domain.StagePlan), "spec.md", "", flavorStage), "\n")
 	if !strings.Contains(joined, "Problem · Out of scope · Considered approaches") {
 		t.Error("contract hint section list missing Out of scope")
 	}
@@ -318,7 +318,7 @@ func TestResearchStageHints(t *testing.T) {
 	for _, tc := range cases {
 		f := feature(1, "RS topic", tc.stage)
 		f.Kind = domain.KindResearch
-		h := unwrap(strings.Join(stageHints(f, "research.md", flavorStage), "\n"))
+		h := unwrap(strings.Join(stageHints(f, "research.md", "", flavorStage), "\n"))
 		for _, want := range tc.want {
 			if !strings.Contains(h, unwrap(want)) {
 				t.Errorf("%s hint missing %q", tc.stage, want)
@@ -331,7 +331,7 @@ func TestResearchStageHints(t *testing.T) {
 	// spec_replace_section to record findings with.
 	rf := feature(1, "RS topic", domain.StagePlan)
 	rf.Kind = domain.KindResearch
-	critique := unwrap(strings.Join(stageHints(rf, "research.md", flavorCritique), "\n"))
+	critique := unwrap(strings.Join(stageHints(rf, "research.md", "", flavorCritique), "\n"))
 	for _, want := range []string{"read-only", "submit_verdict", "critique"} {
 		if !strings.Contains(critique, unwrap(want)) {
 			t.Errorf("research critique hint missing %q", want)
@@ -347,7 +347,7 @@ func TestResearchStageHints(t *testing.T) {
 	// records findings by editing the artifact.
 	nf := feature(1, "Dark mode", domain.StageImplement)
 	nf.Kind = domain.KindFeature
-	ncrit := unwrap(strings.Join(stageHints(nf, "spec.md", flavorCritique), "\n"))
+	ncrit := unwrap(strings.Join(stageHints(nf, "spec.md", "", flavorCritique), "\n"))
 	if !strings.Contains(ncrit, "Review the worktree diff") {
 		t.Error("feature critique hint lost the worktree-diff contract")
 	}
@@ -514,13 +514,13 @@ func TestSpecHintTeachesBaselineOptOut(t *testing.T) {
 func TestWorktreeBoundaryReachesEveryWorktreeStage(t *testing.T) {
 	for _, stage := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
 		f := feature(1, "boundary", stage)
-		joined := strings.Join(stageHints(f, "/w/spec.md", flavorStage), "\n")
+		joined := strings.Join(stageHints(f, "/w/spec.md", "", flavorStage), "\n")
 		if !strings.Contains(joined, "Never cd into the repository's main checkout") {
 			t.Errorf("%s session is not told where its boundary is", stage)
 		}
 	}
 	// the critique pass too — it reads and runs commands like any other
-	crit := strings.Join(stageHints(feature(1, "boundary", domain.StagePlan), "/w/spec.md", flavorCritique), "\n")
+	crit := strings.Join(stageHints(feature(1, "boundary", domain.StagePlan), "/w/spec.md", "", flavorCritique), "\n")
 	if !strings.Contains(crit, "Never cd into the repository's main checkout") {
 		t.Error("the critique pass is not told where its boundary is")
 	}
@@ -528,11 +528,32 @@ func TestWorktreeBoundaryReachesEveryWorktreeStage(t *testing.T) {
 	// handed a second, contradictory one
 	r := feature(2, "research", domain.StagePlan)
 	r.Kind = domain.KindResearch
-	rh := strings.Join(stageHints(r, "/w/doc.md", flavorStage), "\n")
+	rh := strings.Join(stageHints(r, "/w/doc.md", "", flavorStage), "\n")
 	if strings.Contains(rh, "Never cd into the repository's main checkout") {
 		t.Error("a research card got the worktree boundary hint; it has no worktree")
 	}
 	if !strings.Contains(rh, "scratch checkout of main") {
 		t.Error("a research card lost its own working-directory guard")
+	}
+}
+
+// TestBoundaryHintNamesARealScratchDirectory: "a temporary directory of
+// your own (mktemp -d)" is advice, and on the lxd autopilot drive
+// sessions ignored it — writing /tmp/t.go, /tmp/t2.go, /tmp/t3.go and
+// /tmp/roundtest.go, which is fine until two cards on one machine choose
+// the same name and read each other's program. A named per-card
+// directory is an address rather than advice.
+func TestBoundaryHintNamesARealScratchDirectory(t *testing.T) {
+	const dir = "/ws/.gummi/state/scratch/FD-001"
+	got := worktreeBoundaryHint(dir)
+	if !strings.Contains(got, dir) {
+		t.Errorf("the hint does not name the card's scratch directory:\n%s", got)
+	}
+	if strings.Contains(got, "mktemp") {
+		t.Errorf("the hint still sends the session off to invent its own path:\n%s", got)
+	}
+	// with no directory to name it falls back to what it always said
+	if fallback := worktreeBoundaryHint(""); !strings.Contains(fallback, "mktemp -d") {
+		t.Errorf("the fallback lost its instruction:\n%s", fallback)
 	}
 }

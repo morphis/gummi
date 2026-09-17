@@ -10,7 +10,7 @@ import (
 func stageText(t *testing.T, kind domain.Kind, stage domain.Stage) string {
 	t.Helper()
 	f := domain.Feature{ID: "FD-001", Kind: kind, Stage: stage}
-	return strings.Join(stageHints(f, "/tmp/spec.md", flavorStage), "\n\n")
+	return strings.Join(stageHints(f, "/tmp/spec.md", "", flavorStage), "\n\n")
 }
 
 // TestFeatureImplementRequiresATest: a bug card has always been told to
