@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -228,23 +229,31 @@ func (d *ingestForm) setFocus(f int) {
 }
 
 // View implements overlay.Dialog.
+//
+// Every row is folded to the dialog's content width first: the repo row
+// is as long as the workspace's `repos:` list, and on one line it set
+// the frame's width — a dialog wider than the terminal it is drawn in.
 func (d *ingestForm) View(s *theme.Styles, w, h int) string {
+	width, _ := dialogDescSize(w, h, 0)
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("ingest spec") + "\n\n")
 	if d.repo.shown() {
-		b.WriteString(choiceRow(s, d.focus == ingestFieldRepo, "repo", d.repo.options(), d.repo.idx, repoUnsetLabel) + "\n\n")
+		// this dialog has no text box to trade rows with, so the repo row
+		// takes the full fold budget whatever the terminal's height.
+		rows := choiceRowLines(s, d.focus == ingestFieldRepo, "repo", d.repo.options(), d.repo.idx, repoUnsetLabel, false, width, choiceMaxLines)
+		b.WriteString(strings.Join(rows, "\n") + "\n\n")
 	}
 	b.WriteString(d.path.View() + "\n\n")
 	b.WriteString(fieldRow(s, d.focus == ingestFieldProfile, "profile: "+d.profiles[d.profile]) + "\n")
-	b.WriteString("\n" + d.buttons.View(s, d.focus == ingestFieldButtons) + "\n")
+	b.WriteString("\n" + d.buttons.ViewWidth(s, d.focus == ingestFieldButtons, width) + "\n")
 
 	if d.errText != "" {
-		b.WriteString("\n" + s.Error.Render(d.errText))
+		b.WriteString("\n" + s.Error.Render(ansi.Wrap(d.errText, width, " -")))
 	}
 	hint := "tab next · ←/→ change · enter decompose · esc cancel"
 	if d.focus == ingestFieldButtons {
 		hint = "←/→ buttons · enter activate · tab next · esc cancel"
 	}
-	b.WriteString("\n" + s.Faint.Render(hint))
+	b.WriteString("\n" + s.Faint.Render(strings.Join(wrapHint(hint, width), "\n")))
 	return s.DialogFrame.Render(b.String())
 }

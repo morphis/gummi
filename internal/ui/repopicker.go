@@ -68,6 +68,7 @@ func (d *repoPickerDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 
 // View implements overlay.Dialog.
 func (d *repoPickerDialog) View(s *theme.Styles, w, h int) string {
+	width, _ := dialogDescSize(w, h, 0)
 	var b strings.Builder
 	b.WriteString(s.DialogTitle.Render("repo · "+string(d.feature.ID)) + "\n\n")
 	// an empty repo here is an unset one, not a default: this dialog only
@@ -77,19 +78,23 @@ func (d *repoPickerDialog) View(s *theme.Styles, w, h int) string {
 		now = "unset"
 	}
 	b.WriteString(s.Faint.Render("now "+now) + "\n\n")
-	b.WriteString(repoPickerOptions(s, d.candidates, d.idx) + "\n")
+	b.WriteString(strings.Join(repoPickerOptions(s, d.candidates, d.idx, width), "\n") + "\n")
 	b.WriteString("\n" + s.Faint.Render("←/→ · h/l · r cycle · enter set · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }
 
-func repoPickerOptions(s *theme.Styles, candidates []string, idx int) string {
-	parts := make([]string, len(candidates))
+// repoPickerOptions lays the candidates out over as many lines as they
+// need within width: a workspace can configure any number of them, and
+// on one line they set this popover's width — which is how a dialog
+// ends up wider than the terminal it is centred in.
+func repoPickerOptions(s *theme.Styles, candidates []string, idx, width int) []string {
+	cells := make([]string, len(candidates))
 	for i, c := range candidates {
 		if i == idx {
-			parts[i] = s.Selection.Render("▸ " + c)
+			cells[i] = s.Selection.Render("▸ " + c)
 		} else {
-			parts[i] = s.Faint.Render("  " + c)
+			cells[i] = s.Faint.Render("  " + c)
 		}
 	}
-	return strings.Join(parts, "   ")
+	return foldChoices(s, cells, idx, width, choiceMaxLines)
 }

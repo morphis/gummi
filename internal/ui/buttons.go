@@ -97,15 +97,41 @@ func (r *buttonRow) Selected() button {
 // every button unfilled (e.g. while a sibling text input has it), so a
 // filled, marked button always means "enter presses this".
 func (r *buttonRow) View(s *theme.Styles, focused bool) string {
+	return strings.Join(r.cells(s, focused, true), "  ")
+}
+
+// ViewWidth renders the row for a dialog whose content width is known.
+// The equal-width padding View applies is a nicety, not a requirement:
+// when the padded row would be wider than the dialog's own content
+// width it is dropped, and when even the unpadded row does not fit the
+// buttons stack one per line. A dialog frame is as wide as its widest
+// line, so a row that overflows here is not clipped — it widens the
+// whole dialog past the terminal's edge.
+func (r *buttonRow) ViewWidth(s *theme.Styles, focused bool, width int) string {
+	if row := r.View(s, focused); ansi.StringWidth(row) <= width {
+		return row
+	}
+	cells := r.cells(s, focused, false)
+	if row := strings.Join(cells, "  "); ansi.StringWidth(row) <= width {
+		return row
+	}
+	return strings.Join(cells, "\n")
+}
+
+// cells renders each button. pad squares every label off against the
+// widest one; ViewWidth drops that when the row has to get narrower.
+func (r *buttonRow) cells(s *theme.Styles, focused, pad bool) []string {
 	width := 0
-	for _, b := range r.buttons {
-		width = max(width, ansi.StringWidth(b.label))
+	if pad {
+		for _, b := range r.buttons {
+			width = max(width, ansi.StringWidth(b.label))
+		}
 	}
 	parts := make([]string, len(r.buttons))
 	for i, b := range r.buttons {
 		label := b.label
-		if pad := width - ansi.StringWidth(label); pad > 0 {
-			label += strings.Repeat(" ", pad)
+		if n := width - ansi.StringWidth(label); n > 0 {
+			label += strings.Repeat(" ", n)
 		}
 		on := focused && i == r.cursor
 		style := s.Button
@@ -123,5 +149,5 @@ func (r *buttonRow) View(s *theme.Styles, focused bool) string {
 		}
 		parts[i] = marker + style.Render("[ "+label+" ]")
 	}
-	return strings.Join(parts, "  ")
+	return parts
 }

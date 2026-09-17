@@ -746,21 +746,42 @@ func cardLabel(s *theme.Styles, label string) string {
 	return "  " + s.Faint.Render(fmt.Sprintf("%-*s", cardLabelW, label))
 }
 
-// choiceRow renders a side-by-side option row: the chosen option carries
-// the marker, and the focused row bands its chosen option.
-func choiceRow(s *theme.Styles, focused bool, label string, opts []string, idx int, unsetLabel string) string {
-	return cardLabel(s, label) + choices(s, focused, opts, idx, unsetLabel, false)
-}
+// A row of options is a horizontal list, and its length is the
+// workspace's to decide: `repos:` names, profiles.yaml presets. On one
+// line that list set the dialog's own width — a frame is as wide as its
+// widest line no matter how wide the terminal is — so a workspace with a
+// handful of repositories opened a new-card dialog wider than the
+// screen, and the overlay clipped whatever hung off the edge (including,
+// past a certain count, the options themselves and the box's right
+// border). Rows that can grow that way fold instead (choiceRowLines):
+// as many lines as they need, up to choiceMaxLines, then windowed
+// around the selection.
+const (
+	// choiceSep is the gap between two options laid out side by side.
+	choiceSep = "    "
+	// choiceMaxLines caps how tall one folded row may get before it
+	// windows instead of growing further. Three lines holds a dozen-odd
+	// names at a usual dialog width and still leaves the description box
+	// its own rows in a 24-row terminal; past that the row scrolls rather
+	// than pushing the box under the fold. A short terminal tightens the
+	// budget further — see cardForm.View.
+	choiceMaxLines = 3
+	// choiceMinWidth is the narrowest budget a folded row's options ever
+	// get. A dialog drawn into a terminal narrower than its own floor
+	// would otherwise hand the row a negative width and fold every option
+	// onto a line of its own.
+	choiceMinWidth = 16
+)
 
-// choices renders the options of a row. numbered prefixes each with its
-// digit — the repo row's hint that 1–9 choose there.
-func choices(s *theme.Styles, focused bool, opts []string, idx int, unsetLabel string, numbered bool) string {
-	parts := make([]string, 0, len(opts)+1)
+// choiceCells renders each option as its own cell, in cycle order, with
+// the unset chip ahead of them while nothing is chosen.
+func choiceCells(s *theme.Styles, focused bool, opts []string, idx int, unsetLabel string, numbered bool) []string {
+	cells := make([]string, 0, len(opts)+1)
 	if idx < 0 {
 		if focused {
-			parts = append(parts, s.Band(" "+unsetLabel+" ", 0, true))
+			cells = append(cells, s.Band(" "+unsetLabel+" ", 0, true))
 		} else {
-			parts = append(parts, s.Error.Render(unsetLabel))
+			cells = append(cells, s.Error.Render(unsetLabel))
 		}
 	}
 	for i, o := range opts {
@@ -770,15 +791,167 @@ func choices(s *theme.Styles, focused bool, opts []string, idx int, unsetLabel s
 		}
 		switch {
 		case i == idx && focused:
-			parts = append(parts, num+s.Band(s.BandMarker(true)+s.BandText.Render(o)+" ", 0, true))
+			cells = append(cells, num+s.Band(s.BandMarker(true)+s.BandText.Render(o)+" ", 0, true))
 		case i == idx:
-			parts = append(parts, num+s.KeyHint.Render("▸ ")+s.Base.Render(o))
+			cells = append(cells, num+s.KeyHint.Render("▸ ")+s.Base.Render(o))
 		default:
-			parts = append(parts, num+s.Faint.Render(o))
+			cells = append(cells, num+s.Faint.Render(o))
 		}
 	}
-	return strings.Join(parts, "    ")
+	return cells
 }
+
+// packChoices folds cells into lines at most width columns wide, and
+// reports the line each cell landed on. A cell wider than the whole
+// budget is truncated rather than allowed to set the width.
+func packChoices(cells []string, width int) (lines []string, lineOf []int) {
+	if width < 1 {
+		width = 1
+	}
+	lineOf = make([]int, len(cells))
+	cur, curW := "", 0
+	for i, c := range cells {
+		cw := ansi.StringWidth(c)
+		if cw > width {
+			c = ansi.Truncate(c, width, "…")
+			cw = ansi.StringWidth(c)
+		}
+		switch {
+		case cur == "":
+			cur, curW = c, cw
+		case curW+len(choiceSep)+cw <= width:
+			cur += choiceSep + c
+			curW += len(choiceSep) + cw
+		default:
+			lines = append(lines, cur)
+			cur, curW = c, cw
+		}
+		lineOf[i] = len(lines)
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines, lineOf
+}
+
+// foldChoices lays cells out over at most maxLines lines of width
+// columns. When they don't all fit it keeps the window around the cell
+// at sel — the selected option is the one that must always be on screen
+// — and tails the last line with how many the window leaves off, so a
+// short row never reads as the whole list.
+func foldChoices(s *theme.Styles, cells []string, sel, width, maxLines int) []string {
+	if len(cells) == 0 {
+		return nil
+	}
+	lines, lineOf := packChoices(cells, width)
+	if len(lines) <= maxLines {
+		return lines
+	}
+	// the tail's room has to come out of the cells' budget, so pack again
+	// against the narrower width before choosing the window.
+	lines, lineOf = packChoices(cells, width-ansi.StringWidth(choiceTail(s, len(cells))))
+	if len(lines) <= maxLines {
+		return lines
+	}
+	start := clamp(lineOf[clamp(sel, 0, len(cells)-1)]-maxLines/2, 0, len(lines)-maxLines)
+	hidden := 0
+	for _, l := range lineOf {
+		if l < start || l >= start+maxLines {
+			hidden++
+		}
+	}
+	out := append([]string(nil), lines[start:start+maxLines]...)
+	if hidden > 0 {
+		out[len(out)-1] += choiceTail(s, hidden)
+	}
+	return out
+}
+
+// choiceTail names what a windowed row is not showing.
+func choiceTail(s *theme.Styles, n int) string {
+	return s.Faint.Render(fmt.Sprintf("  +%d", n))
+}
+
+// choiceRowLines is choiceRow for a row whose options may not fit beside
+// each other in width columns: the row folds, continuation lines
+// indented under the first option so the label still reads as one row's.
+func choiceRowLines(s *theme.Styles, focused bool, label string, opts []string, idx int, unsetLabel string, numbered bool, width, maxLines int) []string {
+	return foldedRow(s, cardLabel(s, label), cardLabelW+2, choiceCells(s, focused, opts, idx, unsetLabel, numbered), idx, width, maxLines)
+}
+
+// foldedRow prefixes a folded option row with its already-rendered
+// label, indenting the continuation lines by the label cell's width
+// (indent, which differs between the top-level rows and the expanded
+// option rows under "runs as").
+func foldedRow(s *theme.Styles, prefix string, indent int, cells []string, sel, width, maxLines int) []string {
+	lines := foldChoices(s, cells, sel, max(width-indent, choiceMinWidth), maxLines)
+	if len(lines) == 0 {
+		return []string{prefix}
+	}
+	rows := make([]string, len(lines))
+	for i, ln := range lines {
+		if i == 0 {
+			rows[i] = prefix + ln
+			continue
+		}
+		rows[i] = strings.Repeat(" ", indent) + ln
+	}
+	return rows
+}
+
+// foldReadout folds an already-labelled readout row — `from`, `becomes`,
+// `runs as` — to width, indenting its continuation lines under the label
+// so the row still reads as one. It wraps rather than truncates: the
+// `becomes` line carries the derived title with DeriveTitle's own
+// ellipsis where a long first line was cut to maxTitleLen, and that cut
+// is the whole reason the title is shown there at all — a second,
+// width-driven ellipsis on top of it would hide exactly what the line
+// exists to say.
+func foldReadout(line string, indent, width int) []string {
+	if width < 1 || ansi.StringWidth(line) <= width {
+		return []string{line}
+	}
+	rows := strings.Split(ansi.Wrap(line, max(width-indent, choiceMinWidth), " -·"), "\n")
+	for i := 1; i < len(rows); i++ {
+		rows[i] = strings.Repeat(" ", indent) + rows[i]
+	}
+	return rows
+}
+
+// wrapHint folds a key line to width. The hints are " · "-separated
+// lists of "key does thing", and the text-row hint alone is over a
+// hundred columns — on an 80-column terminal it, not the form, was what
+// set the dialog's width, and the frame ran off both edges of the
+// screen whatever the repo row did. Breaks land only on a separator, so
+// a key never ends up on a different line from what it does.
+func wrapHint(hint string, width int) []string {
+	const sep = " · "
+	if width < 1 || ansi.StringWidth(hint) <= width {
+		return []string{hint}
+	}
+	var lines []string
+	cur := ""
+	for _, part := range strings.Split(hint, sep) {
+		switch {
+		case cur == "":
+			cur = part
+		case ansi.StringWidth(cur)+ansi.StringWidth(sep)+ansi.StringWidth(part) <= width:
+			cur += sep + part
+		default:
+			lines = append(lines, cur)
+			cur = part
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+// optionLabelW is optionLabel's rendered width: the four-column marker
+// margin plus the eleven-column label cell. It is what a folded option
+// row indents its continuation lines by.
+const optionLabelW = 4 + 11
 
 // optionLabel is an expanded option row's label cell: indented under
 // "runs as", banded when its row has focus — and, since the band alone
@@ -915,7 +1088,7 @@ func joinIDs(ids []domain.FeatureID) string {
 
 // optionRows are the expanded options: budget, profile, severity (bugs),
 // runs after — and the after list while that row has focus.
-func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
+func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 	hint := envelopeHintCapped
 	if d.ct.Kind == domain.KindResearch || d.ct.Kind == domain.KindGoal {
 		hint = envelopeHintRequired
@@ -923,8 +1096,12 @@ func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 	rows := []string{
 		cardLabel(s, "runs as"),
 		optionLabel(s, d.focus == cardStopEnvelope, "budget") + d.env.View() + " " + s.Faint.Render(hint),
-		optionLabel(s, d.focus == cardStopProfile, "profile") + choices(s, d.focus == cardStopProfile, d.profiles, d.profile, "", false),
 	}
+	// profiles.yaml sets how many presets there are, so the profile row
+	// folds the same way the repo row does rather than setting the
+	// dialog's width from the config file.
+	rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopProfile, "profile"), optionLabelW,
+		choiceCells(s, d.focus == cardStopProfile, d.profiles, d.profile, "", false), d.profile, width, maxLines)...)
 	if d.ct.Kind == domain.KindBug {
 		labels := make([]string, len(bugSeverityChoices))
 		for i, sev := range bugSeverityChoices {
@@ -933,7 +1110,8 @@ func (d *cardForm) optionRows(s *theme.Styles, width int) []string {
 				labels[i] = "unset"
 			}
 		}
-		rows = append(rows, optionLabel(s, d.focus == cardStopSeverity, "severity")+choices(s, d.focus == cardStopSeverity, labels, d.sev, "", false))
+		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopSeverity, "severity"), optionLabelW,
+			choiceCells(s, d.focus == cardStopSeverity, labels, d.sev, "", false), d.sev, width, maxLines)...)
 	}
 	chips := make([]string, len(d.after))
 	for i, id := range d.after {
@@ -996,8 +1174,88 @@ func (d *cardForm) afterListRows(s *theme.Styles, width int) []string {
 	return rows
 }
 
+// repoRows is the repo row: the configured names folded to the dialog's
+// width, with the chosen repository's origin read back at the end of the
+// last line — or on a line of its own when what is left there is too
+// narrow to hold it. The readout used to be appended to the row
+// regardless, which pushed the dialog past the width it had just been
+// padded to fit.
+func (d *cardForm) repoRows(s *theme.Styles, width, maxLines int) []string {
+	rows := choiceRowLines(s, d.focus == cardStopRepo, "repo", d.repo.options(), d.repo.idx, repoUnsetLabel, d.focus == cardStopRepo, width, maxLines)
+	if d.originFor == nil || !d.repo.chosen() {
+		return rows
+	}
+	origin := s.Faint.Render(ansi.Truncate(d.origin().label(), width, "…"))
+	last := len(rows) - 1
+	if pad := width - ansi.StringWidth(rows[last]) - ansi.StringWidth(origin); pad > 2 {
+		rows[last] += strings.Repeat(" ", pad) + origin
+		return rows
+	}
+	return append(rows, strings.Repeat(" ", max(width-ansi.StringWidth(origin), 0))+origin)
+}
+
 // View implements overlay.Dialog.
+//
+// Every row is built before any of it is written, because none of the
+// dialog's parts has a fixed height any more: a repo row folds to as
+// many lines as the workspace's `repos:` list needs, a readout wraps
+// rather than running off the edge, and the key hint is longer than an
+// 80-column terminal on its own. A frame is as wide and as tall as its
+// widest and tallest content, so a row that overflows doesn't get
+// clipped neatly — it drags the whole dialog off the screen, and the
+// overlay centres what's left. Everything is folded to textW first and
+// counted, so the box gets exactly the rows that are left.
 func (d *cardForm) View(s *theme.Styles, w, h int) string {
+	// dialogDescSize's width depends only on the terminal's, never on the
+	// row count, so textW is final before a single row is laid out.
+	textW, _ := dialogDescSize(w, h, 0)
+
+	// Folding trades width for height, and a short terminal has none to
+	// spare — so the layout is tried at a full budget first and gives
+	// things up, in the order a reader can most afford to lose them,
+	// until the box can still have its floor: first the option rows'
+	// extra lines (they window around the selection instead), then the
+	// key hint (the one row that only repeats what tab and the arrows
+	// already say), then the blank lines between the blocks.
+	var rows []string
+	var textAt, static int
+	for _, try := range []struct {
+		fold          int
+		hint, spacers bool
+	}{
+		{choiceMaxLines, true, true},
+		{2, true, true},
+		{1, true, true},
+		{1, false, true},
+		{1, false, false},
+	} {
+		rows, textAt, static = d.layout(s, textW, h, try.fold, try.hint, try.spacers)
+		if dialogFrameChromeH+static+descHeightMin <= h-dialogStatusBarMargin {
+			break
+		}
+	}
+
+	_, textH := dialogDescSize(w, h, static)
+	d.text.SetWidth(textW)
+	d.text.SetHeight(textH)
+	rows[textAt] = d.text.View()
+	return s.DialogFrame.Render(strings.Join(rows, "\n"))
+}
+
+// layout builds every row of the dialog for a content width of textW, a
+// draw height of h, at most fold lines per option row, and the hint and
+// the blank separators only when asked for. It returns the rows (with
+// the text box's own slot left empty), that slot's index, and the row
+// count everything but the box takes: title+blank(2), kind, repo?,
+// from?, blank, the box, blank, becomes, runs (one readout or the
+// expanded options), blank+buttons, blank+error?, blank+hint?.
+func (d *cardForm) layout(s *theme.Styles, textW, h, fold int, hint, spacers bool) (rows []string, textAt, static int) {
+	gap := func() []string {
+		if spacers {
+			return []string{""}
+		}
+		return nil
+	}
 	kinds := make([]string, len(domain.CardTypes))
 	kindIdx := 0
 	for i, c := range domain.CardTypes {
@@ -1006,72 +1264,45 @@ func (d *cardForm) View(s *theme.Styles, w, h int) string {
 			kindIdx = i
 		}
 	}
-	from := d.fromLine(s)
-	showHint := h >= 24
 
-	// static rows: title+blank(2), kind(1), repo(1)?, from(1)?, blank(1),
-	// blank-after-text(1), becomes(1), runs(1 or expanded), blank+buttons(2),
-	// error(1)?, blank+hint(2)?
-	static := 2 + 1 + 1 + 1 + 1
+	rows = append(rows, s.DialogTitle.Render("new card"), "")
+	rows = append(rows, choiceRowLines(s, d.focus == cardStopKind, "kind", kinds, kindIdx, "", false, textW, fold)...)
 	if d.repo.shown() {
-		static++
+		rows = append(rows, d.repoRows(s, textW, fold)...)
 	}
-	if from != "" {
-		static++
+	if from := d.fromLine(s); from != "" {
+		rows = append(rows, foldReadout(from, cardLabelW+2, textW)...)
 	}
-	var opts []string
-	textW, _ := dialogDescSize(w, h, static)
+
+	// the box always keeps its own blank line above: it is what separates
+	// the fields from the prose, and the two run together without it.
+	rows = append(rows, "", "")
+	textAt = len(rows) - 1
+	rows = append(rows, gap()...)
+
+	rows = append(rows, foldReadout(d.becomesLine(s), cardLabelW+2, textW)...)
 	if d.expanded {
-		opts = d.optionRows(s, textW)
-		static += len(opts)
+		rows = append(rows, d.optionRows(s, textW, fold)...)
 	} else {
-		static++
+		rows = append(rows, foldReadout(d.runsLine(s), cardLabelW+2, textW)...)
 	}
-	static += 2
+	rows = append(rows, gap()...)
+	rows = append(rows, strings.Split(d.buttons.ViewWidth(s, d.focus == cardStopButtons, textW), "\n")...)
 	if d.errText != "" {
-		static++
-	}
-	if showHint {
-		static += 2
-	}
-	textW, textH := dialogDescSize(w, h, static)
-	d.text.SetWidth(textW)
-	d.text.SetHeight(textH)
-
-	var b strings.Builder
-	b.WriteString(s.DialogTitle.Render("new card") + "\n\n")
-	b.WriteString(choiceRow(s, d.focus == cardStopKind, "kind", kinds, kindIdx, "") + "\n")
-	if d.repo.shown() {
-		row := cardLabel(s, "repo") + choices(s, d.focus == cardStopRepo, d.repo.options(), d.repo.idx, repoUnsetLabel, d.focus == cardStopRepo)
-		if d.originFor != nil && d.repo.chosen() {
-			origin := s.Faint.Render(d.origin().label())
-			if pad := textW - ansi.StringWidth(row) - ansi.StringWidth(origin); pad > 2 {
-				row += strings.Repeat(" ", pad)
-			} else {
-				row += "  "
-			}
-			row += origin
+		rows = append(rows, gap()...)
+		for _, row := range strings.Split(ansi.Wrap(d.errText, textW, " -"), "\n") {
+			rows = append(rows, s.Error.Render(row))
 		}
-		b.WriteString(row + "\n")
 	}
-	if from != "" {
-		b.WriteString(from + "\n")
+	// a terminal too short for the hint never had room for it: the rule
+	// predates the folding and is why h reaches this far down.
+	if hint && h >= 24 {
+		rows = append(rows, gap()...)
+		for _, row := range wrapHint(d.hint(), textW) {
+			rows = append(rows, s.Faint.Render(row))
+		}
 	}
-	b.WriteString("\n" + d.text.View() + "\n\n")
-	b.WriteString(d.becomesLine(s) + "\n")
-	if d.expanded {
-		b.WriteString(strings.Join(opts, "\n") + "\n")
-	} else {
-		b.WriteString(d.runsLine(s) + "\n")
-	}
-	b.WriteString("\n" + d.buttons.View(s, d.focus == cardStopButtons) + "\n")
-	if d.errText != "" {
-		b.WriteString("\n" + s.Error.Render(d.errText))
-	}
-	if showHint {
-		b.WriteString("\n" + s.Faint.Render(d.hint()))
-	}
-	return s.DialogFrame.Render(strings.TrimRight(b.String(), "\n"))
+	return rows, textAt, len(rows) - 1
 }
 
 // hint is the key line for the focused row.

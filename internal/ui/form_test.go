@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,110 @@ func TestCardFormSizing(t *testing.T) {
 		if h := lipgloss.Height(view); h > area.h-dialogStatusBarMargin {
 			t.Errorf("at %dx%d: dialog is %d rows tall, paints over the status bar", area.w, area.h, h)
 		}
+	}
+}
+
+// TestDialogsFitTheDrawArea: a dialog frame is as wide and as tall as
+// its widest and tallest content, and the overlay centres it in the
+// whole terminal — so a row that overflows is not clipped neatly, it
+// carries the frame off both edges of the screen. Two rows could do
+// that from configuration alone: the repo row (one line per `repos:`
+// name laid side by side) and the profile row, and the text row's key
+// hint did it from nothing at all, being 103 columns long. Every
+// creation dialog has to fit the area it is handed, whatever the
+// workspace names.
+func TestDialogsFitTheDrawArea(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	repos := []string{
+		"platform-core", "mobile-android", "mobile-ios", "web-console",
+		"infra-terraform", "docs-site", "sdk-python", "sdk-go",
+		"billing-service", "identity-service", "telemetry-pipeline",
+		"design-tokens", "edge-proxy", "batch-jobs",
+	}
+	// 60×20 is in the list for the width assertion only: an expanded form
+	// showing a refusal needs more rows than a 20-row terminal has,
+	// whatever the layout gives up (checkFits leaves the height alone
+	// below 24 rows — the same threshold the key hint already uses).
+	areas := []struct{ w, h int }{{60, 20}, {80, 24}, {100, 30}, {200, 60}}
+	for _, area := range areas {
+		form := newCardForm(domain.CardType{Kind: domain.KindBug}, []string{"thrifty", "premium", "local-heavy"}, repos, false, "", nil, 2400, nil)
+		form.errText = repoUnchosenErr
+		for _, stop := range []int{cardStopRepo, cardStopText, cardStopButtons} {
+			form.setFocus(stop)
+			for _, expanded := range []bool{false, true} {
+				form.expanded = expanded
+				checkFits(t, "new card", form.View(s, area.w, area.h), area.w, area.h)
+			}
+		}
+		ingest := newIngestForm(nil, repos, false, nil)
+		ingest.errText = repoUnchosenErr
+		checkFits(t, "ingest spec", ingest.View(s, area.w, area.h), area.w, area.h)
+
+		picker := newRepoPickerDialog(domain.Feature{ID: "FD-001"}, repos, nil)
+		checkFits(t, "repo picker", picker.View(s, area.w, area.h), area.w, area.h)
+	}
+}
+
+// checkFits asserts no line of a dialog is wider than the draw area and
+// that the whole frame leaves the status bar its row.
+func checkFits(t *testing.T, name, view string, w, h int) {
+	t.Helper()
+	for i, line := range strings.Split(view, "\n") {
+		if got := ansi.StringWidth(line); got > w {
+			t.Errorf("%s at %dx%d: line %d is %d columns wide, past the terminal's edge:\n%s", name, w, h, i, got, ansi.Strip(view))
+			break
+		}
+	}
+	if got := lipgloss.Height(view); h >= 24 && got > h-dialogStatusBarMargin {
+		t.Errorf("%s at %dx%d: dialog is %d rows tall:\n%s", name, w, h, got, ansi.Strip(view))
+	}
+}
+
+// TestCardFormRepoRowKeepsTheChoiceInView: folding the repo row is only
+// half the job — a workspace with more names than the fold's line
+// budget windows the row, and the window has to be the one holding the
+// selection, with the names it leaves out counted rather than silently
+// dropped.
+func TestCardFormRepoRowKeepsTheChoiceInView(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	repos := make([]string, 30)
+	for i := range repos {
+		repos[i] = fmt.Sprintf("service-%02d", i)
+	}
+	form := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, repos, false, "", nil, 2400, nil)
+	for _, pick := range []int{0, 14, 29} {
+		form.repo.idx = pick
+		view := ansi.Strip(form.View(s, 80, 24))
+		if !strings.Contains(view, repos[pick]) {
+			t.Errorf("repo %q is selected but not on screen:\n%s", repos[pick], view)
+		}
+		if !strings.Contains(view, "+") {
+			t.Errorf("the windowed repo row does not say how many names it leaves out:\n%s", view)
+		}
+	}
+}
+
+// TestWrapHintBreaksOnSeparators: a key and what it does stay on one
+// line — the hint folds at " · " or not at all.
+func TestWrapHintBreaksOnSeparators(t *testing.T) {
+	hint := "tab/shift+tab rows · alt+g browse issues · alt+o options · alt+enter newline · enter create · esc cancel"
+	rows := wrapHint(hint, 46)
+	if len(rows) < 2 {
+		t.Fatalf("a 103-column hint did not fold at 46 columns: %q", rows)
+	}
+	for _, row := range rows {
+		if ansi.StringWidth(row) > 46 {
+			t.Errorf("folded hint row is %d columns: %q", ansi.StringWidth(row), row)
+		}
+		if strings.HasPrefix(row, "·") || strings.HasSuffix(row, "·") {
+			t.Errorf("hint folded mid-separator: %q", row)
+		}
+	}
+	if got := strings.Join(rows, " · "); got != hint {
+		t.Errorf("folding changed the hint:\n got %q\nwant %q", got, hint)
+	}
+	if rows := wrapHint(hint, 200); len(rows) != 1 {
+		t.Errorf("a hint that fits should stay on one line, got %d", len(rows))
 	}
 }
 
@@ -287,6 +392,17 @@ func TestCardFormSubmitCarriesKindSeverityAndButtons(t *testing.T) {
 	}
 }
 
+// unwrapped reads a dialog back as running text: frame off, rows joined,
+// runs of spaces collapsed — so an assertion about one readout doesn't
+// depend on where that readout happened to wrap.
+func unwrapped(view string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(ansi.Strip(view), "\n") {
+		b.WriteString(strings.Trim(line, "│╭╮╰╯─ ") + " ")
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
 // TestCardFormBecomesLine reads back the id prefix (with the kind word
 // beside it — FD/BG/RS are never expanded anywhere else in the UI) and
 // the derived title live, and the slug refusal before enter. It used to
@@ -307,8 +423,13 @@ func TestCardFormBecomesLine(t *testing.T) {
 		t.Errorf("becomes line missing:\n%s", v)
 	}
 	form.SetText("tally count reports one character too many when a file has no trailing newline and the operator was hoping for a number they could actually reconcile against the ledger")
-	if v := ansi.Strip(form.View(s, 120, 30)); !strings.Contains(v, "becomes  BG (bug) · tally count reports one character too many when a file has no trailing newline and the operator was…") {
-		t.Errorf("becomes line does not show the truncated title with its ellipsis:\n%s", v)
+	// the readout wraps at the dialog's own width rather than running off
+	// the terminal's edge (foldReadout), so read it back the way a person
+	// does — rows joined, runs of spaces collapsed. What must survive is
+	// DeriveTitle's own ellipsis: the whole line still ends where the
+	// title was cut, not where the frame was.
+	if v := form.View(s, 120, 30); !strings.Contains(unwrapped(v), "becomes BG (bug) · tally count reports one character too many when a file has no trailing newline and the operator was…") {
+		t.Errorf("becomes line does not show the truncated title with its ellipsis:\n%s", ansi.Strip(v))
 	}
 	form.SetText("???")
 	if v := ansi.Strip(form.View(s, 100, 30)); !strings.Contains(v, "letter or digit") {
