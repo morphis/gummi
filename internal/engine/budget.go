@@ -178,14 +178,32 @@ func budgetHintReadMostly(budget float64) string {
 }
 
 // nudge builds the mid-session budget update injected at a threshold.
+//
+// Every one of them names the artifact, because writing to it is the only
+// thing that survives running dry. A stage whose whole output is one write
+// at the end — a research survey, a verify's evidence — can spend its
+// entire envelope doing real work and leave nothing behind: on the lxd
+// autopilot drive a survey read 73 files, took the 80% nudge's "wrap up or
+// checkpoint soon" as advice about pace, and ended with its Findings
+// section still the template's placeholder. "Wrap up" did not say what to
+// wrap up INTO.
 func nudge(pct int, spent, budget float64) string {
 	left := budget - spent
 	if left < 0 {
 		left = 0
 	}
-	if pct >= 95 {
+	switch {
+	case pct >= 95:
 		return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — checkpoint now: "+
-			"write what's done, what's left, and where to resume, then stop.", pct, left)
+			"write what's done, what's left, and where to resume into the artifact, "+
+			"then stop.", pct, left)
+	case pct >= 80:
+		return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — write what you "+
+			"have into the artifact NOW, while there is room to write it. A stage that "+
+			"runs dry having written nothing has produced nothing, whatever it read.",
+			pct, left)
 	}
-	return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — wrap up or checkpoint soon.", pct, left)
+	return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — keep the artifact "+
+		"current as you go, so what you have learned survives if this stage runs out.",
+		pct, left)
 }

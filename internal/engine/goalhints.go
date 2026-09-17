@@ -50,6 +50,18 @@ asking:
    warning never blocks; the user may approve anyway. Set lanes in the
    gummi-goal block: how many cards may run at once (default 2; fewer
    when the cards touch the same code).
+   Size those ranges against what a CARD costs, not against how small the
+   change looks. A card is a plan conversation, its critique, a build, its
+   critique, a check discovery pass and a verify — six model passes before
+   anything else, and on a large repository that is several hundred
+   credits for even a one-file change. Estimating a two-card goal at "30
+   to 60 credits" is not optimism, it is an error of two orders of
+   magnitude, and it is the only figure the person sizing this envelope
+   has to go on. If you have no basis for a number, say what it depends on
+   instead of inventing a total. Your estimate does not allocate anything:
+   the goal splits its actual envelope across the cards when they are
+   minted, so the number's whole job is to tell a person whether the
+   budget they are about to approve is the right order of magnitude.
 
 Keep the doc current as answers arrive through gummi's spec tools. Leave
 Notes, Try it, Review, Verification plan and Report alone — they are
