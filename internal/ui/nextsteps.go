@@ -1007,6 +1007,9 @@ func closedActions(in nextInput) []nextAction {
 		// happened to has never said so. Landing it retracts the stamp.
 		out = append(out, nextStep("merge", "m", "land it after all",
 			"changed your mind — squash-merge "+in.keptBranch()+" onto "+in.landBase()))
+	case domain.EndingDropped:
+		out = append(out, nextStep("adopt", "", "adopt it",
+			"take it back onto the board with its work kept — it is yours now"))
 	}
 	// The follow-up, on every ending. A landed card that breaks ten
 	// minutes later is the most ordinary thing that happens after done,

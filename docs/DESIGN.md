@@ -225,7 +225,8 @@ Stage semantics:
   / `handed off` / `dropped`), and `status --json` names it in one
   `ending` field beside `branch_state` — "how did it close" and "is the
   work on the trunk" being two different questions. gummi then offers
-  worktree cleanup on a landed card with `c`. The card's artifact stays at
+  worktree cleanup on a landed card — per card with `c`, or for the whole
+  board in the close-out sweep. The card's artifact stays where it is at
   its workspace home: "spec archival" was described here for a long time
   and never built, and the artifact of a finished card is the thing a
   follow-up reads, so there is nothing archival to do to it.
@@ -240,11 +241,32 @@ Stage semantics:
   became of its branch and worktree, what it cost and how much of that
   was rework — every one of those facts already stored, and none of them
   previously on any screen in the TUI. Beside it are the answers that
-  remain: clean up, land a handed-off card after all, and **open a bug
-  from this**, which mints a fresh BG card carrying
+  remain: clean up, land a handed-off card after all, adopt a dropped
+  one, and **open a bug from this**, which mints a fresh BG card carrying
   the parent's artifact, branch and thread (`FoundBy`) instead of making
   someone retype them. Done stays terminal — the follow-up is new work
   with its own spec, never a rewind.
+
+- **A drop is a proposal, not a verdict.** A card its goal gave up on
+  closes as `dropped` in its own right (it used to borrow the hand-off
+  stamp to clear the landing floor, and reported itself handed off ever
+  after). The reason the goal recorded is written to the card's own
+  thread as well as the goal's log, and `adopt` takes the card back onto
+  the open board at the stage the drop closed it from — read from the
+  closing transition, so the rewind target is a recorded fact. There is
+  deliberately no "acknowledge" verb: a recent drop sits in its own board
+  group for a day and then folds with everything else, because agreeing
+  with a drop is what doing nothing means.
+
+- **Settled, and the archive.** A card is **settled** when it has nothing
+  left to ask — it reached done, by any route. Settled cards older than a
+  day fold into one board line (`f` opens it), out of the jump numbers
+  and out of `alt+j`/`alt+k`. This is a DISPLAY grouping read from stored
+  facts, never a state: nothing here touches the graph. The one question
+  a finished card can still raise — a worktree still on disk — moves to
+  that header rather than keeping a row per card in the live list, since
+  there are always several (you land seven cards and clean none until
+  Friday) and a live list holding all of them never empties.
 
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.
@@ -393,7 +415,9 @@ envelope that is gummi's real spend limiter.
   sentence in a prompt.
 - Handles: creation at spec-approval (drafts live in `.gummi/state/drafts/`
   until then), rebase-on-main helper, dirty-state detection, landed-branch
-  detection with worktree cleanup.
+  detection with worktree cleanup, and the on-disk size behind the
+  close-out sweep's figures (`DiskSize` — a checkout walk, so it is called
+  from surfaces someone opened on purpose and never on a render path).
 - Merge-conflict triage is itself a good `scribe`-role autonomous task later.
 
 ### 4.4 Permissions & sandboxing

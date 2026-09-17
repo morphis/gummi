@@ -45,7 +45,7 @@ func TestClosedCardOffersAnswersForItsEnding(t *testing.T) {
 		{
 			"dropped by its goal",
 			nextInput{stage: domain.StageDone, ending: domain.EndingDropped, droppedBy: "GL-004"},
-			[]string{"newbug"},
+			[]string{"adopt", "newbug"},
 		},
 		{
 			// a goal's follow-up is not a bug card: its work is other cards.

@@ -297,6 +297,70 @@ func (s *Store) SetGoalWrapUp(ctx context.Context, goal domain.FeatureID, at tim
 	return err
 }
 
+// ReopenGoalDropped is the inverse of CloseGoalDropped: it moves a card
+// its goal closed back to the stage it stood at when the drop happened,
+// recording the reverse transition.
+//
+// The stage is read from the closing transition rather than guessed —
+// CloseGoalDropped wrote `from` when it closed the card, so the rewind
+// target is a recorded fact and not a policy. A card whose closing edge
+// is not in the table (a record older than it, or one closed some other
+// way) rewinds to verify: the stage where a card with a branch and no
+// landing belongs, and the one whose answer set offers every ending
+// again.
+//
+// Like CloseGoalDropped it writes the stage directly. That is the same
+// deliberate exception, for the same reason and in the same direction:
+// the drop did not walk the graph on the way in, so the way back is not
+// a graph walk either. `done` stays terminal in the workflow — nothing
+// here adds an edge to it (DESIGN §3).
+func (s *Store) ReopenGoalDropped(ctx context.Context, card domain.FeatureID, actor string, at time.Time) (domain.Stage, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after commit
+	f, err := scanFeature(tx.QueryRowContext(ctx, `SELECT `+featureCols+` FROM features WHERE id = ?`, string(card)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%s: %w", card, ErrNotFound)
+	}
+	if err != nil {
+		return "", err
+	}
+	if f.Stage != domain.StageDone {
+		// already open: adopting it is about the goal link, not the stage
+		return f.Stage, nil
+	}
+	back := domain.StageVerify
+	rows, err := tx.QueryContext(ctx,
+		`SELECT from_stage FROM transitions WHERE feature_id = ? AND to_stage = ? ORDER BY seq DESC LIMIT 1`,
+		string(card), string(domain.StageDone))
+	if err != nil {
+		return "", err
+	}
+	if rows.Next() {
+		var from string
+		if err := rows.Scan(&from); err == nil && domain.Stage(from).Valid() && domain.Stage(from) != domain.StageDone {
+			back = domain.Stage(from)
+		}
+	}
+	rows.Close()
+	now := at.UTC().Format(timeFmt)
+	if _, err := tx.ExecContext(ctx, `UPDATE features SET stage = ?, updated_at = ? WHERE id = ?`,
+		string(back), now, string(card)); err != nil {
+		return "", fmt.Errorf("reopening %s: %w", card, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO transitions (feature_id, from_stage, to_stage, actor, at) VALUES (?,?,?,?,?)`,
+		string(card), string(domain.StageDone), string(back), actor, now); err != nil {
+		return "", fmt.Errorf("recording transition for %s: %w", card, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return back, nil
+}
+
 // ClearGoalWrapUp lifts a wrap-up: the goal was sent back with more budget
 // or notes and may start work again.
 func (s *Store) ClearGoalWrapUp(ctx context.Context, goal domain.FeatureID) error {

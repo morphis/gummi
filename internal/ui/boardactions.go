@@ -172,6 +172,7 @@ var cardCommandNames = map[string]string{
 	"squash":  "squash",
 	"clean":   "clean",
 	"newbug":  "bug followup",
+	"adopt":   "adopt take back",
 	"gate":    "autopilot",
 	"spec":    "spec",
 	"diff":    "diff",
@@ -270,6 +271,11 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 			return m.openBugFromCard(r)
 		}
 		return nil
+	case "adopt":
+		if r, ok := m.selected(); ok {
+			return m.openAdopt(r)
+		}
+		return nil
 	case "gate":
 		if r, ok := m.selected(); ok {
 			return m.openAutopilot(r.F)
@@ -339,6 +345,10 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// above cannot catch it — the same shape topup has.
 		if r, ok := m.selected(); ok {
 			return m.openBugFromCard(r)
+		}
+	case "adopt":
+		if r, ok := m.selected(); ok {
+			return m.openAdopt(r)
 		}
 	case "goalstop":
 		if r, ok := m.selected(); ok {

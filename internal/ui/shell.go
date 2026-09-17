@@ -227,6 +227,16 @@ type Shell struct {
 	goalTickQueue map[domain.FeatureID]bool
 	goalTicking   map[domain.FeatureID]bool
 	goalTickAgain map[domain.FeatureID]bool
+	// worktreeSizeText is the disk the un-cleaned landed worktrees hold,
+	// formatted, as the archive header and the close-out sweep print it.
+	// Measured on demand (a filesystem walk per frame is the wrong price
+	// for a line of text) and empty until something has measured it.
+	worktreeSizeText string
+	// archiveOpen is whether the board's folded archive — every card that
+	// settled longer ago than archiveWindow — is showing its rows. It is
+	// ephemeral, like sortMode: the board opens with history folded away,
+	// which is the state that makes the list about today.
+	archiveOpen bool
 	// goalOpen names the goals whose cards are unfolded under them on the
 	// board. Folded is the default: a goal is one row until you look.
 	goalOpen map[domain.FeatureID]bool
@@ -3087,6 +3097,14 @@ func (m *Shell) displayOrder(mode SortMode) []int {
 		var idxs []int
 		for i, r := range m.rows {
 			if r.F.GoalID != "" && goals[r.F.GoalID] {
+				continue
+			}
+			// A folded archive row is not in the order at all, which is
+			// what keeps the jump numbers contiguous and stops alt+j/alt+k
+			// from walking through the graveyard — half of what made the
+			// unbounded DONE group cost something rather than merely look
+			// untidy.
+			if m.archived(m.rows[i]) {
 				continue
 			}
 			if r.F.Stage.SuperState() == super {

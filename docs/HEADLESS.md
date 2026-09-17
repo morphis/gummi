@@ -252,6 +252,10 @@ must not conflate them:
 After a headless run expect `verified:true` with no `ending` until you
 merge or hand off.
 
+The TUI names the same three words on the board badge and in a finished
+card's closing block, and `adopt` (TUI only) takes a `dropped` card back
+onto the open board at the stage the drop closed it from.
+
 `ending` replaced the `done` and `handed_off` booleans, which took two
 fields to name one fact and could not name a drop at all: a card its goal
 dropped was closed by borrowing the hand-off stamp, so it reported

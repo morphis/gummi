@@ -426,6 +426,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// Keyless for the same reason duplicate is — the board's lowercase
 		// letters are spent, and the closing block puts the row on screen
 		// at exactly the moment it is wanted.
+		// Only on a dropped card, which is the only card that has one.
+		{
+			"adopt", "", "adopt it",
+			"take it back onto the board with its work kept — it is yours now", false,
+			r.F.GoalDropped(),
+		},
 		{
 			"newbug", "", "open a bug from this",
 			"a fresh bug card carrying this card's spec, branch and thread", false,

@@ -139,6 +139,11 @@ the board. Then:
    cost — and offers what is left: clean up, land it after all, or open
    a bug from it, which carries the spec, the branch and the thread into
    a fresh card.
+7. Cards that settled more than a day ago fold into the board's archive,
+   whose header carries how many of them still hold a worktree. `f` opens
+   it. A card its goal dropped keeps a group of its own for a day, with
+   the reason it was dropped and the one answer that matters: `adopt`
+   takes it back with its work kept.
 
 The keys you need first:
 
@@ -152,6 +157,7 @@ The keys you need first:
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
 | `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
+| `f` | fold a goal's cards, or the board's archive of everything settled earlier |
 | `i` | the needs-attention inbox |
 | `tab`, `alt+1/2/3` | the board, inbox and agent tabs |
 | `?` or `alt+/` | the full key table |

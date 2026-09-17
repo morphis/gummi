@@ -70,7 +70,7 @@ var runnableIDs = map[string]bool{
 	expandID: true, "topup": true, "duplicate": true, "profile": true,
 	"ask": true, "changes": true, "gate": true, "run": true,
 	"prlink": true, "prunlink": true, "prpull": true,
-	"newbug": true,
+	"newbug": true, "adopt": true,
 }
 
 // TestInvariantCompleteness — invariant 1. Every id the answer set can

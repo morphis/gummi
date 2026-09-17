@@ -142,9 +142,15 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	if !m.cardOpen {
 		switch key {
 		case "f":
+			// One fold key, two things to fold, and no ambiguity between
+			// them: on a goal or one of its cards it folds that goal, and
+			// anywhere else the only other fold on the board is the
+			// archive.
 			if m.toggleGoalFold() {
 				return nil, true
 			}
+			m.toggleArchive()
+			return nil, true
 		case "enter", "right", "l":
 			return m.openCard(), true
 		case "g":
@@ -259,7 +265,8 @@ type backlogEntry struct {
 // cards.
 func (m *Shell) backlogEntries() []backlogEntry {
 	var out []backlogEntry
-	var last domain.SuperState
+	var last boardGroup
+	splitDone := m.archiveCount() > 0
 	for i, idx := range m.displayOrder(m.sortMode) {
 		if m.isFoldedChild(idx) {
 			// a goal's unfolded card rides under its goal, whatever group
@@ -267,12 +274,19 @@ func (m *Shell) backlogEntries() []backlogEntry {
 			out = append(out, backlogEntry{card: true, row: idx, shortcut: i + 1})
 			continue
 		}
-		if super := m.rows[idx].F.Stage.SuperState(); i == 0 || super != last {
+		if group := m.groupOf(m.rows[idx], splitDone); i == 0 || group != last {
 			if i > 0 {
 				out = append(out, backlogEntry{})
 			}
-			out = append(out, backlogEntry{header: strings.ToUpper(string(super))})
-			last = super
+			head := string(group)
+			if group == groupArchived {
+				// the archive's heading carries its own count and its own
+				// outstanding question (archive.go), so it is built rather
+				// than named
+				head = m.archiveLine()
+			}
+			out = append(out, backlogEntry{header: head})
+			last = group
 		}
 		out = append(out, backlogEntry{card: true, row: idx, shortcut: i + 1})
 		if note := m.boardNarrationLine(m.rows[idx]); note != "" {

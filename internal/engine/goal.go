@@ -543,6 +543,12 @@ func (e *Engine) goalDrop(ctx context.Context, goal, card domain.Feature, reason
 		return err
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDropped, Card: card.ID, Detail: reason, By: by})
+	// The card's own thread, as well as the goal's log. The goal knew
+	// exactly why it dropped the card — stuck and not recoverable, the
+	// goal is wrapping up, a dependency was dropped — and the card never
+	// learned it: its row wore one faint word and its page, which is
+	// where someone reading the card actually is, said nothing at all.
+	e.cardNote(ctx, card.ID, card.Stage, "dropped by "+goalName(goal.ID)+" — "+reason)
 	if !card.GoalAttached {
 		return e.goalCloseDropped(ctx, card)
 	}
@@ -582,6 +588,11 @@ func (e *Engine) goalDetach(ctx context.Context, goal, card domain.Feature) erro
 		}
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDetached, Card: card.ID, Detail: detail, By: ActorGoal})
+	// An attached card that is released reappears on the board mid-stage
+	// with no session and nothing saying where it has been — and if the
+	// rebase above failed, that too was recorded only in the goal's log,
+	// which the card's reader has no reason to open. Say it on the card.
+	e.cardNote(ctx, card.ID, card.Stage, "released by "+goalName(goal.ID)+" — "+detail)
 	return nil
 }
 
