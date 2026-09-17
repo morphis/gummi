@@ -14,7 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// The run tab: where a card's credits and hours went.
+// The stats tab: where a card's credits and hours went.
 //
 // The board already answers the card's other questions. The inbox says
 // what needs you; the thread says what happened; the week view says what
@@ -39,28 +39,28 @@ import (
 // so in the sentence where the number would have been, rather than
 // rendering an empty list as a quiet zero.
 
-// runView is the mounted run tab.
-type runView struct {
+// statsView is the mounted run tab.
+type statsView struct {
 	f      domain.Feature
 	report cardrun.Run
 	scroll int
 }
 
-type runLoadedMsg struct {
+type statsLoadedMsg struct {
 	f      domain.Feature
 	report cardrun.Run
 	err    error
 }
 
-// openRun reads the card's record and mounts its run tab. Every read
+// openStats reads the card's record and mounts its run tab. Every read
 // degrades to its zero value rather than failing the surface: a reader
 // asking how a card ran must still get the part of the answer that is
 // readable.
-func (m *Shell) openRun(f domain.Feature) tea.Cmd {
+func (m *Shell) openStats(f domain.Feature) tea.Cmd {
 	store := m.store
 	return func() tea.Msg {
 		if store == nil {
-			return runLoadedMsg{f: f, err: fmt.Errorf("no store to read the run from")}
+			return statsLoadedMsg{f: f, err: fmt.Errorf("no store to read the run from")}
 		}
 		ctx := context.Background()
 		// The card is re-read rather than taken from the board row: the
@@ -74,7 +74,7 @@ func (m *Shell) openRun(f domain.Feature) tea.Cmd {
 		}
 		evs, err := store.Events(ctx, f.ID)
 		if err != nil {
-			return runLoadedMsg{f: f, err: err}
+			return statsLoadedMsg{f: f, err: err}
 		}
 		spend, err := store.SessionBreakdown(ctx, f.ID)
 		if err != nil {
@@ -92,26 +92,26 @@ func (m *Shell) openRun(f domain.Feature) tea.Cmd {
 		if err != nil {
 			baseline = nil
 		}
-		return runLoadedMsg{f: f, report: cardrun.Report(cardrun.Input{
+		return statsLoadedMsg{f: f, report: cardrun.Report(cardrun.Input{
 			Feature: f, Events: evs, Spend: spend, Rounds: rnds, Baseline: baseline,
 		})}
 	}
 }
 
-func (m *Shell) runLoaded(msg runLoadedMsg) tea.Cmd {
+func (m *Shell) statsLoaded(msg statsLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 		return nil
 	}
 	scroll := 0
-	if m.run != nil && m.run.f.ID == msg.f.ID {
-		scroll = m.run.scroll
+	if m.stats != nil && m.stats.f.ID == msg.f.ID {
+		scroll = m.stats.scroll
 	}
-	m.run = &runView{f: msg.f, report: msg.report, scroll: scroll}
+	m.stats = &statsView{f: msg.f, report: msg.report, scroll: scroll}
 	return nil
 }
 
-func (rv *runView) bindings() []binding {
+func (rv *statsView) bindings() []binding {
 	return []binding{
 		{key: "j/k", label: "scroll", help: "scroll the run"},
 		{key: "r", label: "reload", help: "read the card's record again", bar: true},
@@ -120,11 +120,11 @@ func (rv *runView) bindings() []binding {
 	}
 }
 
-func (m *Shell) handleRunKey(key string) tea.Cmd {
-	rv := m.run
+func (m *Shell) handleStatsKey(key string) tea.Cmd {
+	rv := m.stats
 	switch key {
 	case "esc", "q":
-		m.run = nil
+		m.stats = nil
 	case "j", "down":
 		rv.scroll++
 	case "k", "up":
@@ -136,15 +136,15 @@ func (m *Shell) handleRunKey(key string) tea.Cmd {
 	case "pgup":
 		rv.scroll = max(0, rv.scroll-10)
 	case "r":
-		return m.openRun(rv.f)
+		return m.openStats(rv.f)
 	}
 	return nil
 }
 
-// runViewRender draws the run, scrolled.
-func (m *Shell) runViewRender(w, h int) string {
-	lines := runLines(m.styles, m.run.report, w)
-	rv := m.run
+// statsViewRender draws the run, scrolled.
+func (m *Shell) statsViewRender(w, h int) string {
+	lines := statsLines(m.styles, m.stats.report, w)
+	rv := m.stats
 	if rv.scroll > len(lines)-1 {
 		rv.scroll = max(0, len(lines)-1)
 	}
@@ -152,19 +152,19 @@ func (m *Shell) runViewRender(w, h int) string {
 	return strings.Join(lines[rv.scroll:end], "\n")
 }
 
-// runBarWidth is how wide the magnitude bars are drawn, in columns. Wide
+// statsBarWidth is how wide the magnitude bars are drawn, in columns. Wide
 // enough for a share to read at a glance, narrow enough that the figure
 // beside it still fits on a modest terminal.
-const runBarWidth = 24
+const statsBarWidth = 24
 
-// runHeading is a section rule: a blank row and the section's name, the
+// statsHeading is a section rule: a blank row and the section's name, the
 // same shape every other pane in the board uses for its headers.
-func runHeading(s *theme.Styles, title string) []string {
+func statsHeading(s *theme.Styles, title string) []string {
 	return []string{"", " " + s.PaneTitleActive.Render(strings.ToUpper(title))}
 }
 
-// runLines renders the whole surface, top to bottom.
-func runLines(s *theme.Styles, r cardrun.Run, w int) []string {
+// statsLines renders the whole surface, top to bottom.
+func statsLines(s *theme.Styles, r cardrun.Run, w int) []string {
 	var out []string
 	add := func(line string) { out = append(out, line) }
 	clip := func(text string) string { return ansi.Truncate(text, max(w-1, 10), "…") }
@@ -181,24 +181,24 @@ func runLines(s *theme.Styles, r cardrun.Run, w int) []string {
 		return out
 	}
 
-	out = append(out, runMoneyLines(s, r, clip)...)
-	out = append(out, runRedoLines(s, r, clip)...)
-	out = append(out, runClockLines(s, r)...)
-	out = append(out, runHandsLines(s, r, clip)...)
-	out = append(out, runEnvelopeLines(s, r)...)
+	out = append(out, statsMoneyLines(s, r, clip)...)
+	out = append(out, statsRedoLines(s, r, clip)...)
+	out = append(out, statsClockLines(s, r)...)
+	out = append(out, statsHandsLines(s, r, clip)...)
+	out = append(out, statsEnvelopeLines(s, r)...)
 	return out
 }
 
-func runMoneyLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []string {
-	out := runHeading(s, "where it went")
+func statsMoneyLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []string {
+	out := statsHeading(s, "where it went")
 	add := func(line string) { out = append(out, line) }
 	for _, b := range r.Money.ByStage {
 		add(clip(fmt.Sprintf("  %-11s %s %8.2f  %3.0f%%",
-			b.Name, s.Info.Render(runBar(b.Credits, r.Money.Credits)),
+			b.Name, s.Info.Render(statsBar(b.Credits, r.Money.Credits)),
 			b.Credits, share(b.Credits, r.Money.Credits)*100)))
 	}
 	add(clip(fmt.Sprintf("  %-11s %s %8.2f  %s",
-		"", strings.Repeat(" ", runBarWidth), r.Money.Credits, s.Muted.Render("credits"))))
+		"", strings.Repeat(" ", statsBarWidth), r.Money.Credits, s.Muted.Render("credits"))))
 	// An unsettled figure is marked where it stands rather than in a
 	// footnote: a number a provider may still correct has to read as one.
 	if r.Money.Estimated > 0 {
@@ -214,11 +214,11 @@ func runMoneyLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []s
 	return out
 }
 
-// runRedoLines is the headline, and it earns its own block: a run report
+// statsRedoLines is the headline, and it earns its own block: a run report
 // that makes you count rows to find the expensive mistake has buried its
 // own point. It is absent entirely on a card that never did anything
 // twice, which is most of them.
-func runRedoLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []string {
+func statsRedoLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []string {
 	var redone []cardrun.Session
 	for _, p := range r.Sessions {
 		if p.Redo {
@@ -228,7 +228,7 @@ func runRedoLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []st
 	if len(redone) == 0 {
 		return nil
 	}
-	out := runHeading(s, "the redo")
+	out := statsHeading(s, "the redo")
 	// The first pass of each redone piece of work, so the comparison the
 	// block exists to make is on the page rather than in the reader's head.
 	first := map[string]cardrun.Session{}
@@ -259,11 +259,11 @@ func runRedoLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []st
 	return out
 }
 
-func runClockLines(s *theme.Styles, r cardrun.Run) []string {
+func statsClockLines(s *theme.Styles, r cardrun.Run) []string {
 	if r.Clock.Elapsed <= 0 {
 		return nil
 	}
-	out := append(runHeading(s, "the clock"),
+	out := append(statsHeading(s, "the clock"),
 		fmt.Sprintf("  %-15s %10s", "agent working", shortDur(r.Clock.Agent)),
 		fmt.Sprintf("  %-15s %10s  %s", "waiting on you", shortDur(r.Clock.Waiting),
 			s.Muted.Render(fmt.Sprintf("(%.0f%%)", r.Clock.WaitingShare()*100))),
@@ -275,8 +275,8 @@ func runClockLines(s *theme.Styles, r cardrun.Run) []string {
 	return out
 }
 
-func runHandsLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []string {
-	out := runHeading(s, "its hands")
+func statsHandsLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []string {
+	out := statsHeading(s, "its hands")
 	add := func(line string) { out = append(out, clip(line)) }
 
 	add(fmt.Sprintf("  %-15s %d", "turns", r.Hands.Turns))
@@ -335,11 +335,11 @@ func runHandsLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []s
 	return out
 }
 
-func runEnvelopeLines(s *theme.Styles, r cardrun.Run) []string {
+func statsEnvelopeLines(s *theme.Styles, r cardrun.Run) []string {
 	if r.Envelope.Granted <= 0 {
 		return nil
 	}
-	out := runHeading(s, "the envelope")
+	out := statsHeading(s, "the envelope")
 	line := fmt.Sprintf("  granted %d · spent %.0f · %.0f%% used",
 		r.Envelope.Granted, r.Envelope.Spent, r.Envelope.Utilization()*100)
 	if r.Envelope.Utilization() < 0.25 {
@@ -350,21 +350,21 @@ func runEnvelopeLines(s *theme.Styles, r cardrun.Run) []string {
 	return out
 }
 
-// runBar draws a proportional magnitude bar. One hue for every stage:
+// statsBar draws a proportional magnitude bar. One hue for every stage:
 // these are shares of one total, not different kinds of thing, so the
 // form that fits is magnitude, and magnitude needs no palette.
-func runBar(v, total float64) string {
+func statsBar(v, total float64) string {
 	if total <= 0 || v <= 0 {
-		return strings.Repeat(" ", runBarWidth)
+		return strings.Repeat(" ", statsBarWidth)
 	}
-	n := int(v/total*float64(runBarWidth) + 0.5)
+	n := int(v/total*float64(statsBarWidth) + 0.5)
 	if n < 1 {
 		n = 1
 	}
-	if n > runBarWidth {
-		n = runBarWidth
+	if n > statsBarWidth {
+		n = statsBarWidth
 	}
-	return strings.Repeat("█", n) + strings.Repeat(" ", runBarWidth-n)
+	return strings.Repeat("█", n) + strings.Repeat(" ", statsBarWidth-n)
 }
 
 func share(v, total float64) float64 {
@@ -407,9 +407,9 @@ func shortDur(d time.Duration) string {
 	}
 }
 
-// runHasRecord reports whether a card has anything to show on the tab —
+// statsHasRecord reports whether a card has anything to show on the tab —
 // used by the tab bar, so it never offers a surface that would open on
 // an empty page.
-func runHasRecord(r featureRow) bool {
+func statsHasRecord(r featureRow) bool {
 	return r.F.Stage != domain.StageTodo || r.F.Spend.Credits > 0
 }

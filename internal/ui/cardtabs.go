@@ -38,11 +38,16 @@ const (
 	cardTabThread   cardTab = "thread"
 	cardTabArtifact cardTab = "artifact"
 	cardTabDiff     cardTab = "diff"
-	// cardTabRun is where the card's credits and hours went (runview.go).
-	// A fourth reading surface of exactly the same kind as the other
-	// three: something you look at before deciding, never one of the
-	// decisions.
-	cardTabRun cardTab = "run"
+	// cardTabStats is where the card's credits and hours went
+	// (statsview.go). A fourth reading surface of exactly the same kind as
+	// the other three: something you look at before deciding, never one of
+	// the decisions.
+	//
+	// It is "stats" and not "run" because run is already a verb here —
+	// `gummi run`, running a stage, what autopilot does — so a tab reading
+	// "run" next to "spec" and "diff" invited being read as an action on
+	// the card rather than a page about it.
+	cardTabStats cardTab = "stats"
 )
 
 // cardTabKeys maps each tab to the chord that selects it.
@@ -50,7 +55,7 @@ var cardTabKeys = map[cardTab]string{
 	cardTabThread:   "alt+t",
 	cardTabArtifact: "alt+s",
 	cardTabDiff:     "alt+d",
-	cardTabRun:      "alt+r",
+	cardTabStats:    "alt+r",
 }
 
 // activeCardTab reports which of the three is on screen, read from the
@@ -63,8 +68,8 @@ func (m *Shell) activeCardTab() cardTab {
 		return cardTabArtifact
 	case m.diff != nil:
 		return cardTabDiff
-	case m.run != nil:
-		return cardTabRun
+	case m.stats != nil:
+		return cardTabStats
 	}
 	return cardTabThread
 }
@@ -92,8 +97,8 @@ func (m *Shell) cardTabBar(active cardTab, w int) string {
 	if cardHasDiff(r) {
 		tabs = append(tabs, cardTabDiff)
 	}
-	if runHasRecord(r) {
-		tabs = append(tabs, cardTabRun)
+	if statsHasRecord(r) {
+		tabs = append(tabs, cardTabStats)
 	}
 	out := " "
 	for i, t := range tabs {
@@ -151,10 +156,10 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 	}
 	switch tab {
 	case cardTabThread:
-		m.spec, m.diff, m.run = nil, nil, nil
+		m.spec, m.diff, m.stats = nil, nil, nil
 		return nil, true
 	case cardTabArtifact:
-		m.diff, m.run = nil, nil
+		m.diff, m.stats = nil, nil
 		return m.openSpec(r.F), true
 	case cardTabDiff:
 		if !cardHasDiff(r) {
@@ -164,17 +169,17 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 			m.notice = noticeMsg{text: string(r.F.ID) + ": no diff — " + noDiffReason(r)}
 			return nil, true
 		}
-		m.spec, m.run = nil, nil
+		m.spec, m.stats = nil, nil
 		return m.openDiff(r.F), true
-	case cardTabRun:
-		if !runHasRecord(r) {
+	case cardTabStats:
+		if !statsHasRecord(r) {
 			// same contract as the diff tab: a chord the help table lists
 			// answers, even when the surface it names has nothing on it.
 			m.notice = noticeMsg{text: string(r.F.ID) + ": nothing has run on this card yet"}
 			return nil, true
 		}
 		m.spec, m.diff = nil, nil
-		return m.openRun(r.F), true
+		return m.openStats(r.F), true
 	}
 	return nil, false
 }
@@ -345,8 +350,8 @@ func (m *Shell) cardTabBindings() []binding {
 	if !haveCard || cardHasDiff(r) {
 		bs = append(bs, binding{key: "alt+d", label: "diff", help: "the card's diff — comment, resolve and approve in place"})
 	}
-	if !haveCard || runHasRecord(r) {
-		bs = append(bs, binding{key: "alt+r", label: "run", help: "where the card's credits and hours went — its passes, what each cost, and how much was work done twice"})
+	if !haveCard || statsHasRecord(r) {
+		bs = append(bs, binding{key: "alt+r", label: "stats", help: "where the card's credits and hours went — its passes, what each cost, and how much was work done twice"})
 	}
 	return bs
 }

@@ -12,22 +12,26 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// `gummi status <id> --run`: where a card's credits and hours went.
+// `gummi status <id> --stats`: where a card's credits and hours went.
+//
+// It is "stats" and not "run" because run is already a verb on this CLI —
+// `gummi run` drives a card — so `status --run` read as an instruction
+// rather than as a question about what a run cost.
 //
 // It is opt-in rather than always present because it reads the card's
 // whole event log, and status is a thing callers poll. The ordinary
 // status stays a cheap question about where a card stands; this is the
 // expensive question about how it got there.
 
-// statusRun is the run report on the wire — the same figures the board's
+// statusStats is the run report on the wire — the same figures the board's
 // run tab draws, for a caller who has no board.
-type statusRun struct {
-	Sessions int             `json:"sessions"`
-	Passes   []statusPass    `json:"passes,omitempty"`
-	Money    statusRunMoney  `json:"money"`
-	Clock    statusRunClock  `json:"clock"`
-	Hands    statusRunHands  `json:"hands"`
-	Judgment statusRunJudged `json:"judgment"`
+type statusStats struct {
+	Sessions int               `json:"sessions"`
+	Passes   []statusPass      `json:"passes,omitempty"`
+	Money    statusStatsMoney  `json:"money"`
+	Clock    statusStatsClock  `json:"clock"`
+	Hands    statusStatsHands  `json:"hands"`
+	Judgment statusStatsJudged `json:"judgment"`
 }
 
 // statusPass is one run of one stage — the grain at which "the redo cost
@@ -65,7 +69,7 @@ type statusPass struct {
 	Reconstructed bool `json:"reconstructed,omitempty"`
 }
 
-type statusRunMoney struct {
+type statusStatsMoney struct {
 	Credits   float64 `json:"credits"`
 	Metered   float64 `json:"metered"`
 	Estimated float64 `json:"estimated"`
@@ -84,10 +88,10 @@ type statusRunMoney struct {
 	Corrected   float64 `json:"corrected"`
 	Reproved    float64 `json:"reproved"`
 
-	ByStage []statusBucket  `json:"by_stage,omitempty"`
-	ByRole  []statusBucket  `json:"by_role,omitempty"`
-	ByModel []statusBucket  `json:"by_model,omitempty"`
-	Tokens  statusRunTokens `json:"tokens"`
+	ByStage []statusBucket    `json:"by_stage,omitempty"`
+	ByRole  []statusBucket    `json:"by_role,omitempty"`
+	ByModel []statusBucket    `json:"by_model,omitempty"`
+	Tokens  statusStatsTokens `json:"tokens"`
 }
 
 type statusBucket struct {
@@ -95,7 +99,7 @@ type statusBucket struct {
 	Credits float64 `json:"credits"`
 }
 
-type statusRunTokens struct {
+type statusStatsTokens struct {
 	Input  int64 `json:"input"`
 	Cached int64 `json:"cached"`
 	Output int64 `json:"output"`
@@ -105,7 +109,7 @@ type statusRunTokens struct {
 	CacheReadRatio float64 `json:"cache_read_ratio"`
 }
 
-type statusRunClock struct {
+type statusStatsClock struct {
 	AgentSeconds   float64 `json:"agent_seconds"`
 	ElapsedSeconds float64 `json:"elapsed_seconds"`
 	// WaitingSeconds is elapsed less agent time: the part of the card's
@@ -117,7 +121,7 @@ type statusRunClock struct {
 	ToVerifiedSeconds  float64 `json:"to_verified_seconds,omitempty"`
 }
 
-type statusRunHands struct {
+type statusStatsHands struct {
 	Turns int `json:"turns"`
 	// Tools is null — not an empty object — when this card's backend
 	// recorded no tool calls at all. A caller must be able to tell "this
@@ -146,7 +150,7 @@ type statusCheck struct {
 	Excused bool `json:"excused,omitempty"`
 }
 
-type statusRunJudged struct {
+type statusStatsJudged struct {
 	Gates    statusAnswered `json:"gates"`
 	Asks     statusAnswered `json:"asks"`
 	Verdicts map[string]int `json:"verdicts,omitempty"`
@@ -166,11 +170,11 @@ type statusPark struct {
 	At     string `json:"at"`
 }
 
-// buildRun reads the card's record and projects cardrun's report onto the
+// buildStats reads the card's record and projects cardrun's report onto the
 // wire. Every read degrades to its zero value, the same way the rest of
 // the status view does: a caller asking how a card ran must still get the
 // part of the answer that is readable.
-func buildRun(ctx context.Context, store *state.Store, f *domain.Feature) *statusRun {
+func buildStats(ctx context.Context, store *state.Store, f *domain.Feature) *statusStats {
 	evs, err := store.Events(ctx, f.ID)
 	if err != nil {
 		return nil
@@ -192,15 +196,15 @@ func buildRun(ctx context.Context, store *state.Store, f *domain.Feature) *statu
 	r := cardrun.Report(cardrun.Input{
 		Feature: *f, Events: evs, Spend: spend, Rounds: rnds, Baseline: baseline,
 	})
-	return runPayload(r)
+	return statsPayload(r)
 }
 
-// runPayload is the projection itself, kept apart from the reads so it
+// statsPayload is the projection itself, kept apart from the reads so it
 // can be exercised without a store.
-func runPayload(r cardrun.Run) *statusRun {
-	out := &statusRun{
+func statsPayload(r cardrun.Run) *statusStats {
+	out := &statusStats{
 		Sessions: len(r.Sessions),
-		Money: statusRunMoney{
+		Money: statusStatsMoney{
 			Credits:     round2(r.Money.Credits),
 			Metered:     round2(r.Money.Credits - r.Money.Estimated),
 			Estimated:   round2(r.Money.Estimated),
@@ -214,12 +218,12 @@ func runPayload(r cardrun.Run) *statusRun {
 			ByStage:     bucketPayload(r.Money.ByStage),
 			ByRole:      bucketPayload(r.Money.ByRole),
 			ByModel:     bucketPayload(r.Money.ByModel),
-			Tokens: statusRunTokens{
+			Tokens: statusStatsTokens{
 				Input: r.Money.InputTokens, Cached: r.Money.CachedTokens,
 				Output: r.Money.OutputTokens, CacheReadRatio: round4(r.Money.CacheReadRatio()),
 			},
 		},
-		Clock: statusRunClock{
+		Clock: statusStatsClock{
 			AgentSeconds:       r.Clock.Agent.Seconds(),
 			ElapsedSeconds:     r.Clock.Elapsed.Seconds(),
 			WaitingSeconds:     r.Clock.Waiting.Seconds(),
@@ -227,7 +231,7 @@ func runPayload(r cardrun.Run) *statusRun {
 			ToFirstGateSeconds: r.Clock.ToFirstGate.Seconds(),
 			ToVerifiedSeconds:  r.Clock.ToVerified.Seconds(),
 		},
-		Hands: statusRunHands{
+		Hands: statusStatsHands{
 			Turns:     r.Hands.Turns,
 			Tools:     toolPayload(r.Hands.Tools),
 			ToolCalls: r.Hands.ToolCalls,
@@ -235,7 +239,7 @@ func runPayload(r cardrun.Run) *statusRun {
 			Skills:    toolPayload(r.Hands.Skills),
 			Subagents: toolPayload(r.Hands.Subagents),
 		},
-		Judgment: statusRunJudged{
+		Judgment: statusStatsJudged{
 			Gates: statusAnswered{r.Judgment.Gates.Total, r.Judgment.Gates.ByYou, r.Judgment.Gates.ByMachine},
 			Asks:  statusAnswered{r.Judgment.Asks.Total, r.Judgment.Asks.ByYou, r.Judgment.Asks.ByMachine},
 			Rounds: statusRounds{
@@ -309,9 +313,9 @@ func sign(v float64) float64 {
 	return 1
 }
 
-// renderRun writes the run report as the text summary — the same shape
+// renderStats writes the run report as the text summary — the same shape
 // the board's run tab draws, in a terminal that has no board.
-func renderRun(w io.Writer, view statusView, r *statusRun) {
+func renderStats(w io.Writer, view statusView, r *statusStats) {
 	if r == nil {
 		return
 	}

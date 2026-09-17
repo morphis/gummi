@@ -246,9 +246,9 @@ type Shell struct {
 	goalOpen map[domain.FeatureID]bool
 	// goalPage is the mounted goal page (goalpage.go), nil when closed.
 	goalPage *goalPageView
-	// run is the mounted run tab (runview.go), nil when closed: where the
-	// selected card's credits and hours went.
-	run *runView
+	// stats is the mounted stats tab (statsview.go), nil when closed:
+	// where the selected card's credits and hours went.
+	stats *statsView
 	// foreignTicks counts live-drive probes, pacing the slower full row
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
@@ -2539,9 +2539,9 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.goalPage != nil {
 			return m.handleGoalPageKey(key)
 		}
-		if m.run != nil {
+		if m.stats != nil {
 			m.clearTransientNotice()
-			return m.handleRunKey(key)
+			return m.handleStatsKey(key)
 		}
 		if m.cardOpen && m.threadInput.Focused() {
 			return m.handleThreadInputKey(msg)
@@ -3896,11 +3896,11 @@ func (m *Shell) mainView(w, h int) string {
 			}
 			return m.diffViewRender(w, h)
 		}
-		if m.run != nil {
+		if m.stats != nil {
 			if m.cardOpen {
-				return m.cardSurface(cardTabRun, w, h, m.runViewRender)
+				return m.cardSurface(cardTabStats, w, h, m.statsViewRender)
 			}
-			return m.runViewRender(w, h)
+			return m.statsViewRender(w, h)
 		}
 		if m.ingest != nil {
 			return m.ingestViewRender(w, h)

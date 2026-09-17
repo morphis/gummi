@@ -12,10 +12,10 @@ import (
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
-// runRender renders the surface and strips styling, so the assertions
+// statsRender renders the surface and strips styling, so the assertions
 // below are about what the reader is told rather than about colour.
-func runRender(r cardrun.Run) string {
-	lines := runLines(theme.New(theme.GummiDark()), r, 100)
+func statsRender(r cardrun.Run) string {
+	lines := statsLines(theme.New(theme.GummiDark()), r, 100)
 	return ansi.Strip(strings.Join(lines, "\n"))
 }
 
@@ -50,7 +50,7 @@ func bounced() cardrun.Run {
 // is on the page: a report that leaves the reader to notice for themselves
 // that the second attempt cost more has buried its own headline.
 func TestRunViewNamesTheRedoAndItsCost(t *testing.T) {
-	out := runRender(bounced())
+	out := statsRender(bounced())
 
 	if !strings.Contains(out, "THE REDO") {
 		t.Fatalf("no redo block on a card that did the work twice:\n%s", out)
@@ -78,7 +78,7 @@ func TestRunViewOmitsTheRedoBlockWhenNothingWasRedone(t *testing.T) {
 	r.Money.Rework, r.Money.Corrected = 0, 0
 	r.Money.FirstPass = r.Money.Credits
 
-	out := runRender(r)
+	out := statsRender(r)
 	if strings.Contains(out, "THE REDO") {
 		t.Errorf("a clean card was given a redo block:\n%s", out)
 	}
@@ -92,7 +92,7 @@ func TestRunViewOmitsTheRedoBlockWhenNothingWasRedone(t *testing.T) {
 // report no tool outcomes; rendering that as "0 calls" would be a claim
 // about the card that only holds about the backend.
 func TestRunViewSaysWhenTheBackendRecordedNoTools(t *testing.T) {
-	out := runRender(bounced())
+	out := statsRender(bounced())
 	if !strings.Contains(out, "none recorded — this backend reports no tool calls") {
 		t.Errorf("an absent tool record was not named as absent:\n%s", out)
 	}
@@ -103,7 +103,7 @@ func TestRunViewSaysWhenTheBackendRecordedNoTools(t *testing.T) {
 	r := bounced()
 	r.Hands.Tools = []cardrun.ToolUse{{Name: "Bash", Calls: 3, Fails: 1, Total: 2 * time.Second}}
 	r.Hands.ToolCalls, r.Hands.ToolFails = 3, 1
-	out = runRender(r)
+	out = statsRender(r)
 	if !strings.Contains(out, "3 calls, 1 failed") {
 		t.Errorf("a present tool record was not counted:\n%s", out)
 	}
@@ -118,10 +118,10 @@ func TestRunViewSaysWhenTheBackendRecordedNoTools(t *testing.T) {
 func TestRunViewMarksReconstructedFigures(t *testing.T) {
 	r := bounced()
 	r.Sessions[2].Reconstructed = true
-	if out := runRender(r); !strings.Contains(out, "12.51 ~") {
+	if out := statsRender(r); !strings.Contains(out, "12.51 ~") {
 		t.Errorf("a reconstructed figure is presented as measured:\n%s", out)
 	}
-	if out := runRender(bounced()); strings.Contains(out, "12.51 ~") {
+	if out := statsRender(bounced()); strings.Contains(out, "12.51 ~") {
 		t.Errorf("a measured figure was marked as reconstructed:\n%s", out)
 	}
 }
@@ -131,10 +131,10 @@ func TestRunViewMarksReconstructedFigures(t *testing.T) {
 func TestRunViewMarksEstimatedSpend(t *testing.T) {
 	r := bounced()
 	r.Money.Estimated = 4.5
-	if out := runRender(r); !strings.Contains(out, "~4.50 estimated") {
+	if out := statsRender(r); !strings.Contains(out, "~4.50 estimated") {
 		t.Errorf("estimated spend was not marked:\n%s", out)
 	}
-	if out := runRender(bounced()); strings.Contains(out, "estimated") {
+	if out := statsRender(bounced()); strings.Contains(out, "estimated") {
 		t.Errorf("a fully metered card was told part of it was an estimate:\n%s", out)
 	}
 }
@@ -142,7 +142,7 @@ func TestRunViewMarksEstimatedSpend(t *testing.T) {
 // A card nothing has run on says so rather than rendering a page of
 // zeroes with bars of nothing.
 func TestRunViewEmptyCard(t *testing.T) {
-	out := runRender(cardrun.Run{ID: "FD-009", Title: "not started", Stage: domain.StageTodo})
+	out := statsRender(cardrun.Run{ID: "FD-009", Title: "not started", Stage: domain.StageTodo})
 	if !strings.Contains(out, "nothing has run on this card yet") {
 		t.Fatalf("an unrun card was not named as unrun:\n%s", out)
 	}
@@ -171,16 +171,16 @@ func TestRunViewSubSecondDurations(t *testing.T) {
 // bar and the chord agree about which is which.
 func TestRunTabOfferedOnlyWithARecord(t *testing.T) {
 	todo := featureRow{F: domain.Feature{ID: "FD-001", Stage: domain.StageTodo}}
-	if runHasRecord(todo) {
+	if statsHasRecord(todo) {
 		t.Error("a card still in todo with no spend was offered a run tab")
 	}
 	spent := todo
 	spent.F.Spend.Credits = 2
-	if !runHasRecord(spent) {
+	if !statsHasRecord(spent) {
 		t.Error("a todo card that has already spent credits was denied its run tab")
 	}
 	running := featureRow{F: domain.Feature{ID: "FD-001", Stage: domain.StageImplement}}
-	if !runHasRecord(running) {
+	if !statsHasRecord(running) {
 		t.Error("a running card was denied its run tab")
 	}
 }

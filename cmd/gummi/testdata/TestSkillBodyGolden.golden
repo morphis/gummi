@@ -147,8 +147,8 @@ gummi handoff <id|ref>
 gummi clean <id|ref>
 
 gummi status <id|ref>
-    --json  emit machine-readable JSON instead of the text summary
-    --run   report where the card's credits and hours went instead of where it stands
+    --json   emit machine-readable JSON instead of the text summary
+    --stats  report where the card's credits and hours went instead of where it stands
 
 gummi watch <id|ref>
     --json  emit the raw record stream as NDJSON instead of the rendered transcript

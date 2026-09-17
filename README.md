@@ -159,7 +159,7 @@ The keys you need first:
 | `enter` | open the selected card; in the card, send what you typed |
 | `↑` | the card's actions, when nothing is typed |
 | `s` / `d` | spec / diff, with comments in place |
-| `alt+r` | the card's run — where its credits and hours went, and how much was work done twice |
+| `alt+r` | the card's stats — where its credits and hours went, and how much was work done twice |
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
 | `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
@@ -303,7 +303,7 @@ it. `gummi status` says by how much when it happens.
 | `resume <id> --approve` / `--request-changes …` / `--answer …` / `--bounce` | apply a decision and drive on |
 | `resume <id> --say "<line>"` | report how the card page would read a line, without acting |
 | `status`, `watch`, `spec`, `diff` | read-only; they take no lock |
-| `status <id> --run` | where the card's credits and hours went, per pass — the rework split included |
+| `status <id> --stats` | where the card's credits and hours went, per pass — the rework split included |
 | `verify <id>` | re-run the checks on a verified branch |
 | `merge <id> -m <msg\|->` | land the branch as one squash commit |
 | `handoff <id>` | close a verified card and keep its branch — nothing lands |

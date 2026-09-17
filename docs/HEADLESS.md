@@ -54,7 +54,7 @@ Other `run` flags:
 | `gummi resume <id\|ref> [decision]` | apply a decision and drive on |
 | `gummi resume <id\|ref> --say "<line>"` | read a line the way the card page would and report what it would do, as a `say` event, without acting |
 | `gummi status <id\|ref> [--json]` | stage, blockers, spend, branch state |
-| `gummi status <id\|ref> --run [--json]` | how the card ran: each pass and what it cost, the share that was rework, the share of its life spent waiting on a person |
+| `gummi status <id\|ref> --stats [--json]` | how the card ran: each pass and what it cost, the share that was rework, the share of its life spent waiting on a person |
 | `gummi watch <id\|ref> [--json] [--wait] [--once]` | follow the live agent stream of a card another gummi is driving |
 | `gummi spec <id\|ref>` | the current spec or report markdown |
 | `gummi diff <id\|ref>` | the worktree diff against main |

@@ -11,9 +11,9 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// bouncedRun is a card that did the same work twice — the shape the run
+// bouncedStats is a card that did the same work twice — the shape the run
 // report exists to make legible.
-func bouncedRun() cardrun.Run {
+func bouncedStats() cardrun.Run {
 	start := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	pass := func(role string, mins int, credits float64, redo bool, reason string) cardrun.Session {
 		return cardrun.Session{
@@ -49,7 +49,7 @@ func bouncedRun() cardrun.Run {
 // produce: what share of this card's spend went on work it had already
 // done, and which passes those were.
 func TestStatusRunPayloadCarriesTheReworkSplit(t *testing.T) {
-	r := runPayload(bouncedRun())
+	r := statsPayload(bouncedStats())
 
 	if r.Sessions != 2 {
 		t.Fatalf("sessions = %d, want 2", r.Sessions)
@@ -78,7 +78,7 @@ func TestStatusRunPayloadCarriesTheReworkSplit(t *testing.T) {
 // tool calls" from "this card made none" — they are different facts and
 // only one of them is about the card.
 func TestStatusRunToolsNullWhenUnrecorded(t *testing.T) {
-	b, err := json.Marshal(runPayload(bouncedRun()))
+	b, err := json.Marshal(statsPayload(bouncedStats()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +86,10 @@ func TestStatusRunToolsNullWhenUnrecorded(t *testing.T) {
 		t.Fatalf("tools did not marshal as null:\n%s", b)
 	}
 
-	r := bouncedRun()
+	r := bouncedStats()
 	r.Hands.Tools = []cardrun.ToolUse{{Name: "Bash", Calls: 2, Fails: 1, Detail: "go vet ./..."}}
 	r.Hands.ToolCalls, r.Hands.ToolFails = 2, 1
-	out := runPayload(r)
+	out := statsPayload(r)
 	if out.Hands.Tools["Bash"].Calls != 2 || out.Hands.Tools["Bash"].Fails != 1 {
 		t.Errorf("tools = %+v, want Bash 2/1", out.Hands.Tools)
 	}
@@ -103,7 +103,7 @@ func TestStatusRunToolsNullWhenUnrecorded(t *testing.T) {
 func TestRenderRunNamesTheRedo(t *testing.T) {
 	var b bytes.Buffer
 	view := statusView{ID: "BG-004", Title: "the rerun edge is unreachable", Ending: domain.EndingLanded}
-	renderRun(&b, view, runPayload(bouncedRun()))
+	renderStats(&b, view, statsPayload(bouncedStats()))
 	out := b.String()
 
 	for _, want := range []string{
@@ -120,13 +120,13 @@ func TestRenderRunNamesTheRedo(t *testing.T) {
 // A card that never did anything twice gets no redo block: the block is
 // the exception, never a heading over an empty list.
 func TestRenderRunOmitsTheRedoWhenThereIsNone(t *testing.T) {
-	r := bouncedRun()
+	r := bouncedStats()
 	r.Sessions[1].Redo, r.Sessions[1].RedoReason = false, ""
 	r.Money.Rework, r.Money.Corrected = 0, 0
 	r.Money.FirstPass = r.Money.Credits
 
 	var b bytes.Buffer
-	renderRun(&b, statusView{ID: "BG-004", Stage: "done"}, runPayload(r))
+	renderStats(&b, statusView{ID: "BG-004", Stage: "done"}, statsPayload(r))
 	if strings.Contains(b.String(), "the redo") {
 		t.Errorf("a clean card was given a redo block:\n%s", b.String())
 	}
