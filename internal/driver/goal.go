@@ -465,7 +465,7 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 	if err != nil {
 		if errors.Is(err, engine.ErrGoalSentBack) {
 			d.out.emit(escalationEvent{Event: "escalation", ID: string(f.ID), Stage: string(domain.StageImplement), Reason: err.Error(),
-				Resume: string(f.ID), Next: resumeCmd(string(f.ID))})
+				Resume: string(f.ID), Next: d.resumeCmd(string(f.ID))})
 			return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
 		}
 		return d.fail(ctx, string(f.ID), err)

@@ -922,7 +922,7 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 				Event: "question", ID: string(f.ID), Q: open.Question,
 				Decision: open.ID, FreeForm: true,
 				Resume: string(f.ID),
-				Next:   resumeCmd(string(f.ID), "--answer", `"<answer>"`),
+				Next:   d.resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 			})
 			d.logPark(f, state.ParkReasonNeedsYou, open.Question)
 			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
@@ -1016,7 +1016,7 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 				Event: "question", ID: string(f.ID), Q: ask.Question,
 				Options: askLabels(ask), Recommended: engine.RecommendedOption(ask),
 				FreeForm: ask.FreeForm, Resume: string(f.ID),
-				Next:     resumeCmd(string(f.ID), "--answer", `"<answer>"`),
+				Next:     d.resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 				Decision: decisionID,
 			})
 			d.logPark(f, state.ParkReasonNeedsYou, ask.Question)
@@ -1437,7 +1437,7 @@ func (d *Driver) crossGate(ctx context.Context, f domain.Feature) (Outcome, erro
 		d.out.emit(gatePendingEvent{
 			Event: "gate", ID: string(f.ID), From: string(f.Stage), To: string(next), Resume: string(f.ID),
 			Decision: decisionID,
-			Next:     resumeCmd(string(f.ID), "--approve"),
+			Next:     d.resumeCmd(string(f.ID), "--approve"),
 		})
 		return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 	}
@@ -1680,7 +1680,7 @@ func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note strin
 	if err != nil {
 		d.out.emit(escalationEvent{
 			Event: "decompose_failed", ID: string(f.ID), Stage: string(f.Stage), Reason: err.Error(),
-			Resume: string(f.ID), Next: resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
+			Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
 		})
 		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
 	}
@@ -1692,7 +1692,7 @@ func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note strin
 	if err := d.eng.SavePendingDecompose(f.ID, res); err != nil {
 		d.out.emit(escalationEvent{
 			Event: "decompose_failed", ID: string(f.ID), Stage: string(f.Stage), Reason: err.Error(),
-			Resume: string(f.ID), Next: resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
+			Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
 		})
 		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
 	}
@@ -1701,7 +1701,7 @@ func (d *Driver) decomposeGate(ctx context.Context, f domain.Feature, note strin
 		Event: "question", ID: string(f.ID),
 		Decision:  d.openDecision(f, state.DecisionKindGate, "decompose — review the proposals and mint them, or send the pass back with a note."),
 		Proposals: wireDecomposeProposals(res), Coverage: wireDecomposeCoverage(res),
-		Resume: string(f.ID), Next: resumeCmd(string(f.ID), "--approve"),
+		Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--approve"),
 	})
 	return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
 }
@@ -1762,7 +1762,7 @@ func (d *Driver) approveDecompose(ctx context.Context, f domain.Feature) (Outcom
 	if mintErr != nil {
 		d.out.emit(escalationEvent{
 			Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: mintErr.Error(),
-			MintedIDs: ids, Resume: string(f.ID), Next: resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
+			MintedIDs: ids, Resume: string(f.ID), Next: d.resumeCmd(string(f.ID), "--request-changes", "'<note>'"),
 		})
 		return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
 	}
@@ -1788,7 +1788,7 @@ func (d *Driver) exhausted(ctx context.Context, f domain.Feature, committed bool
 	d.out.emit(exhaustedEvent{
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Spent: f.Spend.Credits, Envelope: f.Budget.Envelope, Committed: committed, Resume: string(f.ID),
-		Next:          resumeCmd(string(f.ID), "--envelope", fmt.Sprintf("%d", suggested)),
+		Next:          d.resumeCmd(string(f.ID), "--envelope", fmt.Sprintf("%d", suggested)),
 		Preconditions: d.resumePreconditions(f.ID),
 	})
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
@@ -1841,7 +1841,7 @@ func (d *Driver) timeout(f domain.Feature) Outcome {
 		Event: "timeout", ID: string(f.ID), Stage: string(f.Stage), Hint: hint,
 		StageTimeoutUsed: used,
 		Resume:           string(f.ID),
-		Next:             resumeCmd(string(f.ID)),
+		Next:             d.resumeCmd(string(f.ID)),
 		Preconditions:    d.resumePreconditions(f.ID),
 	})
 	return Outcome{Status: StatusTimeout, ID: string(f.ID)}
@@ -1898,6 +1898,27 @@ func resumeCmd(id string, args ...string) string {
 	return cmd
 }
 
+// resumeCmd is resumeCmd with this run's own driving mode carried into it.
+//
+// `--gate-approval` is persisted on the card, so a resume inherits it
+// whether or not the command says so. `--autonomous` is not: it is a
+// per-invocation flag the driver holds right here in d.opts, and leaving
+// it out of the suggested command hands the caller a resume that is
+// strictly less autonomous than the run it continues — one that crosses
+// its own gates but parks (exit 2) on the first question this run would
+// have answered itself. A CI loop that does what the stream tells it
+// would change its own card's driving mode halfway through, which is
+// exactly what the `next` field exists to stop happening.
+//
+// It goes directly after the id so a free-form placeholder an operator
+// has to edit (`--answer "<answer>"`, `--note "<why>"`) stays last.
+func (d *Driver) resumeCmd(id string, args ...string) string {
+	if d != nil && d.opts.Autonomous {
+		args = append([]string{"--autonomous"}, args...)
+	}
+	return resumeCmd(id, args...)
+}
+
 // stopped is the --until early-stop terminal: a clean, deliberate halt at a
 // design boundary (the feature stays parked at f.Stage, resumable). It exits
 // 0 — not an escalation — so a caller distinguishes it from `done` by the
@@ -1906,7 +1927,7 @@ func (d *Driver) stopped(f domain.Feature) Outcome {
 	d.logPark(f, state.ParkReasonNeedsYou, "stopped early at --until "+string(f.Stage)+", as requested.")
 	d.out.emit(stoppedEvent{
 		Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID),
-		Next: resumeCmd(string(f.ID), "--approve"),
+		Next: d.resumeCmd(string(f.ID), "--approve"),
 	})
 	return Outcome{Status: StatusStopped, ID: string(f.ID)}
 }
@@ -1983,7 +2004,7 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	d.openDecision(f, escalationDecisionKind(f), reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
-		Next: resumeCmd(string(f.ID)),
+		Next: d.resumeCmd(string(f.ID)),
 	})
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
 }
@@ -1998,7 +2019,7 @@ func (d *Driver) bounceEscalation(f domain.Feature, reason string) Outcome {
 	d.openDecision(f, escalationDecisionKind(f), reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
-		Next: resumeCmd(string(f.ID), "--bounce", "--note", `"<why>"`),
+		Next: d.resumeCmd(string(f.ID), "--bounce", "--note", `"<why>"`),
 	})
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
 }
@@ -2020,8 +2041,16 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 			ev.Resumable = !workflow.Terminal(f.Stage)
 			ev.Stage = string(f.Stage)
 			if ev.Resumable {
-				ev.Next = resumeCmd(id)
+				ev.Next = d.resumeCmd(id)
 			}
+			// Close the card's autopilot period with the reason, as every
+			// other terminal does (recordBlocked, escalation, exhausted,
+			// done). Without it the log has a period that was never closed,
+			// and the board reads that as a driving process that vanished:
+			// it drew "autopilot stopped without saying so" directly under
+			// the transcript line where the run had said, in as many words,
+			// "claude run failed: You've hit your session limit".
+			d.logPark(f, state.ParkReasonGaveUp, err.Error())
 		}
 	}
 	d.out.emit(ev)
