@@ -88,6 +88,10 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		}
 	}
 
+	// Visible while it runs: a pass that takes minutes must not read as a
+	// card with nothing running (see oneshotpresence.go).
+	defer e.beginOneShot(f, string(agent.RoleScribe))()
+
 	userPath, err := config.UserConfigPath()
 	if err != nil {
 		if e.envWarn != nil {

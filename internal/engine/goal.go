@@ -41,7 +41,18 @@ const ActorGoal = "goal"
 // no park and no progress before the conductor restarts it. It covers the
 // moment between one step of a driving loop and the next, so a card that
 // is merely between steps is never restarted under the loop's feet.
-const goalIdleGrace = 90 * time.Second
+//
+// It was 90 seconds, which is shorter than the gaps a real repository
+// produces: check discovery alone ran 4.6 minutes on canonical/lxd, and
+// the conductor duly declared a working card stuck and paid a lead turn
+// to restart it. That particular gap is now visible on its own
+// (OneShotRunning, oneshotpresence.go); the grace is widened as well
+// because it is the backstop for every OTHER between-steps pause on a
+// large tree — a worktree add, a rebase, a session spawning — and the
+// cost of waiting too long on a card that really is stuck is one more
+// tick, while the cost of restarting one that is not is a lead turn and a
+// duplicated pass.
+const goalIdleGrace = 5 * time.Minute
 
 // goalLock serializes everything the conductor does for one goal: two
 // ticks of the same goal must never land two cards on its branch at once
@@ -300,6 +311,15 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 		case StateRunning, StateQueued, StateInteractive:
 			return goalpolicy.Running, ""
 		}
+	}
+	// A card between sessions may still be working: check discovery and its
+	// baseline hold a feature, not a Session, so e.Get sees nothing for the
+	// minutes they run. That is how this conductor came to declare a
+	// perfectly healthy child card "stuck: stopped with nothing running"
+	// 90 seconds into a discovery pass that takes three times that on a
+	// repo of any size — and then spent a lead turn restarting it.
+	if e.OneShotRunning(c.ID) {
+		return goalpolicy.Running, ""
 	}
 	for _, d := range open {
 		if d.Kind == state.DecisionKindBudget {

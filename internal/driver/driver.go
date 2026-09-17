@@ -1568,11 +1568,35 @@ func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature
 		stage = string(f.Stage)
 	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: stage, Result: "discovering checks"})
-	if _, err := d.eng.DiscoverChecks(ctx, f); err != nil {
+	checks, err := d.eng.DiscoverChecks(ctx, f)
+	if err != nil {
+		// Best-effort, as it always was — the card crosses and verify's own
+		// fallback applies — but not silent. This is the one pass that can
+		// spend a fifth of a card and leave nothing behind, and a stream
+		// that says "discovering checks" and then nothing about it is the
+		// same silence the narration below exists to end.
+		d.out.activity(string(f.ID), stage, "check discovery failed: "+err.Error()+
+			" — crossing without a discovered checks block")
 		return
 	}
+	// What the survey decided, not just that it ran. This is the most
+	// expensive single pass a card makes — 95 to 148 credits on the lxd
+	// drive, 14–25% of each card — and the stream said nothing about it
+	// either way, so a caller could not tell a good check set from a bad
+	// one without opening the artifact afterwards. The checks ARE the
+	// definition of green this card is about to be held to.
+	for _, c := range checks {
+		d.out.activity(string(f.ID), stage, "check discovered: "+c.Name+" — "+c.Cmd)
+	}
 	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: stage, Result: "baselining checks"})
-	_, _ = d.eng.BaselineChecks(ctx, f)
+	results, _ := d.eng.BaselineChecks(ctx, f)
+	for _, r := range results {
+		outcome := "pass"
+		if !r.OK {
+			outcome = "FAIL"
+		}
+		d.out.activity(string(f.ID), stage, "baseline "+outcome+": "+r.Name)
+	}
 }
 
 // --- terminal outcomes -------------------------------------------------

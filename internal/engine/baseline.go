@@ -29,6 +29,10 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 	if e.cfg.Permission == agent.PermissionGuarded {
 		return nil, nil
 	}
+	// Visible while it runs, like discovery before it: the baseline can
+	// take as long as the repo's test suite does.
+	defer e.beginOneShot(f, string(agent.RoleScribe))()
+
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
 		return nil, err

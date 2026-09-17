@@ -259,9 +259,21 @@ type Engine struct {
 	events  chan Event
 	stopped chan struct{}
 
-	mu    sync.Mutex
-	live  map[domain.FeatureID]*Session
-	lanes [numLanePools]laneState // per-pool cap/running/queue — see laneState
+	mu   sync.Mutex
+	live map[domain.FeatureID]*Session
+	// oneShot counts the engine's session-less passes currently running
+	// per card — check discovery and its baseline. They are the only work
+	// a card does that e.live cannot see, and on a repository the size of
+	// lxd they run for minutes: 4.6 on one drive's card, 14–25% of what
+	// the card cost. Everything that asks "is this card still working?"
+	// asked e.live and was told no, so the board rendered a live card as
+	// "autopilot stopped without saying so" and offered to restart the
+	// stage, its footer counted 0 of 2 autopilot lanes in use, and a goal
+	// declared its own healthy child stuck and spent a lead turn
+	// restarting it. Refcounted, not a flag: baseline follows discovery
+	// and a card can be re-entered.
+	oneShots map[domain.FeatureID]int
+	lanes    [numLanePools]laneState // per-pool cap/running/queue — see laneState
 	// board is the engine's single workspace-scoped agent session (see
 	// boardsession.go), or nil until OpenBoard is first called. Unlike a
 	// card's session it takes no attention slot and needs no lane
@@ -378,14 +390,15 @@ func New(cfg Config) *Engine {
 		pool.SetGoalLookup(cfg.Store.GetFeature)
 	}
 	e := &Engine{
-		cfg:     cfg,
-		now:     time.Now,
-		raw:     make(chan Event, 256),
-		events:  make(chan Event),
-		stopped: make(chan struct{}),
-		live:    map[domain.FeatureID]*Session{},
-		consult: map[domain.FeatureID]*ConsultSession{},
-		pool:    pool,
+		cfg:      cfg,
+		now:      time.Now,
+		raw:      make(chan Event, 256),
+		events:   make(chan Event),
+		stopped:  make(chan struct{}),
+		live:     map[domain.FeatureID]*Session{},
+		oneShots: map[domain.FeatureID]int{},
+		consult:  map[domain.FeatureID]*ConsultSession{},
+		pool:     pool,
 	}
 	e.consultIdleTimeout = consultIdleTimeout
 	e.lanes[poolAttended].max = attendedMax
