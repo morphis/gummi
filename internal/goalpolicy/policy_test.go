@@ -225,3 +225,81 @@ func TestSplitEnvelopes(t *testing.T) {
 		t.Fatalf("no cards is fine: %v %v", got, err)
 	}
 }
+
+// TestShrinkBeforeDroppingACardTheGoalCanAfford is the drive's case E in
+// one table. The ledger counts what a card HOLDS, so a card that has not
+// started holds its whole allocation — and when that allocation is what
+// tips the ledger past the reserve, the card the goal drops is the one
+// whose unspent credits made the number negative. Case E dropped its
+// one-paragraph doc card with 330 of 1,400 credits never spent, then
+// spent 213 more failing its own review for that card's missing work.
+func TestShrinkBeforeDroppingACardTheGoalCanAfford(t *testing.T) {
+	in := Input{
+		Stage:    domain.StageImplement,
+		Envelope: 1400,
+		Reserve:  140,
+		OwnSpent: 470,
+		Cards: []Card{
+			{ID: "BG-002", State: Landed, Envelope: 484, Spent: 490},
+			{ID: "BG-003", State: Waiting, Envelope: 416},
+		},
+	}
+	if got := ComputeLedger(in).Available; got >= 0 {
+		t.Fatalf("fixture is not the failing one: Available = %.0f, want negative", got)
+	}
+
+	acts := Decide(in)
+	var shrink *Action
+	for i := range acts {
+		switch acts[i].Kind {
+		case Shrink:
+			shrink = &acts[i]
+		case Drop:
+			t.Errorf("dropped %s while the goal still had credits to give: %v", acts[i].Card, acts)
+		case WrapUp:
+			t.Errorf("wrapped up while the goal still had credits to give: %v", acts)
+		}
+	}
+	if shrink == nil {
+		t.Fatalf("no shrink: %v", acts)
+	}
+	if shrink.Card != "BG-003" {
+		t.Errorf("shrank %s, want the card that never started", shrink.Card)
+	}
+	if shrink.To >= 416 || shrink.To < MinCardEnvelope {
+		t.Errorf("shrank to %d, want between %d and 416", shrink.To, MinCardEnvelope)
+	}
+	// and the shrink has to actually balance the ledger
+	in.Cards[1].Envelope = shrink.To
+	if got := ComputeLedger(in).Available; got < 0 {
+		t.Errorf("after the shrink Available = %.0f, still negative", got)
+	}
+}
+
+// When even the floor cannot cover the shortfall, wrapping up is right:
+// a card funded below MinCardEnvelope cannot finish its design stage, so
+// funding it buys a guaranteed exhaustion rather than a chance at the work.
+func TestShrinkGivesUpWhenThereIsNoRoom(t *testing.T) {
+	in := Input{
+		Stage:    domain.StageImplement,
+		Envelope: 600,
+		Reserve:  100,
+		OwnSpent: 480,
+		Cards:    []Card{{ID: "BG-003", State: Waiting, Envelope: 150}},
+	}
+	acts := Decide(in)
+	var wrapped, dropped bool
+	for _, a := range acts {
+		switch a.Kind {
+		case WrapUp:
+			wrapped = true
+		case Drop:
+			dropped = true
+		case Shrink:
+			t.Errorf("shrank below the floor: %v", a)
+		}
+	}
+	if !wrapped || !dropped {
+		t.Errorf("a goal that genuinely cannot fund its card must wrap up and drop it: %v", acts)
+	}
+}

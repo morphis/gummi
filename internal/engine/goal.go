@@ -480,6 +480,18 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		}
 		res.Start = append(res.Start, GoalStart{ID: a.Card})
 		return nil
+	case goalpolicy.Shrink:
+		// The step between "the ledger went negative" and "drop a card":
+		// a card that has not started holds its whole allocation against
+		// the goal, so handing part of it back can be the difference
+		// between the work happening and the goal coming back partial
+		// with credits unspent. It does not start the card — the normal
+		// Start action does that on this or a later tick.
+		gc, _ := view.Card(a.Card)
+		if err := e.goalShrink(ctx, goal, gc, a.To, a.Reason, ActorGoal); err != nil {
+			return err
+		}
+		return nil
 	case goalpolicy.Lead:
 		starts, err := e.runLeadTurn(ctx, view, a.Reasons)
 		res.Start = append(res.Start, starts...)
@@ -591,6 +603,27 @@ func (e *Engine) goalRaise(ctx context.Context, goal domain.Feature, gc GoalCard
 		return err
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRaised, Card: gc.Feature.ID, From: gc.Feature.Budget.Envelope, To: to, Detail: reason, By: by})
+	return nil
+}
+
+// goalShrink lowers a card's envelope and returns the difference to the
+// goal's pool. Refused on a card that has spent anything: the ledger only
+// ever over-counts a card that has not started, and a running card's
+// envelope is a promise its session is already spending against.
+func (e *Engine) goalShrink(ctx context.Context, goal domain.Feature, gc GoalCard, to int, reason, by string) error {
+	from := gc.Feature.Budget.Envelope
+	if to >= from {
+		return fmt.Errorf("%s: %d credits is not a reduction from %d", gc.Feature.ID, to, from)
+	}
+	if gc.Feature.Spend.Credits > 0 {
+		return fmt.Errorf("%s has already spent %.0f credits; its envelope is not the goal's to reclaim",
+			gc.Feature.ID, gc.Feature.Spend.Credits)
+	}
+	if err := e.RaiseEnvelope(ctx, gc.Feature.ID, to); err != nil {
+		return err
+	}
+	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRaised, Card: gc.Feature.ID,
+		From: from, To: to, Detail: reason, By: by})
 	return nil
 }
 

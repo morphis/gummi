@@ -480,3 +480,22 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 	d.out.emit(mergedGoalEvent{Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha, Cards: landed})
 	return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
 }
+
+// goalReviewUnactionable ends a wrapped-up goal's review loop. The
+// critique asked for changes the goal cannot make — its cards are landed
+// or dropped and its conductor has finished — so the request is recorded
+// as what makes the result partial and the goal goes on to its verify and
+// its hand-over, rather than re-running the same critique until the cap.
+func (d *Driver) goalReviewUnactionable(ctx context.Context, f domain.Feature) (Outcome, error) {
+	why := "its review asked for changes after the goal had wrapped up, " +
+		"with no card left to make them"
+	if f.Goal.Partial == "" {
+		_ = d.store.SetGoalPartial(ctx, f.ID, why)
+	}
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage),
+		Result: "review not actionable — wrapped up"})
+	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
+		f = got
+	}
+	return d.autoAdvance(ctx, f)
+}

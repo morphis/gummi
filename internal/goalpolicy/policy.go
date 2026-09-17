@@ -129,11 +129,23 @@ const (
 	// Finish settles the goal's work and starts its review; Reason is why
 	// the result is partial, empty when whole.
 	Finish
+	// Shrink lowers Card's envelope to To, freeing the difference back to
+	// the goal. The opposite of Raise, and the step that was missing
+	// between "the ledger went negative" and "drop a card".
+	Shrink
 )
 
 func (k Kind) String() string {
-	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish"}[k]
+	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink"}[k]
 }
+
+// MinCardEnvelope is the smallest envelope worth giving a card. Below it a
+// card cannot finish its design stage and that stage's critique on any
+// repository measured — the lxd autopilot drive's cheapest plan cost 25
+// credits for the architect and 33 for its reviewer, and its dearest 112
+// and 66 — so funding a card under this is buying a guaranteed exhaustion
+// rather than a chance at the work.
+const MinCardEnvelope = 100
 
 // Action is one step for the engine to execute.
 type Action struct {
@@ -212,16 +224,45 @@ func Decide(in Input) []Action {
 		wrap, wrapReason = true, "the lead kept failing"
 		out = append(out, Action{Kind: WrapUp, Reason: wrapReason})
 	}
-	if !wrap && ledger.Available < 0 {
-		wrap, wrapReason = true, "the budget reached the reserve"
-		out = append(out, Action{Kind: WrapUp, Reason: wrapReason})
-	}
-
 	cards := append([]Card(nil), in.Cards...)
 	sort.Slice(cards, func(i, j int) bool { return cards[i].ID < cards[j].ID })
 	state := map[domain.FeatureID]CardState{}
 	for _, c := range cards {
 		state[c.ID] = c.State
+	}
+
+	if !wrap && ledger.Available < 0 {
+		// Before giving up on the work, try making room for it.
+		//
+		// The ledger counts what cards HOLD, not what they have spent
+		// (Card.Held), so a card that has not started yet holds its whole
+		// allocation — and when that allocation is what tipped the ledger
+		// negative, the card the goal then drops is the one whose unspent
+		// credits made the number negative in the first place. On the lxd
+		// autopilot drive that arithmetic dropped a one-paragraph doc card
+		// while 330 of the goal's 1,400 credits had never been spent:
+		//
+		//     Available = 1400 − Own 470 − Given (490 + 416) − Reserve 140 = −116
+		//
+		// Shrinking that card's envelope by 117 would have balanced the
+		// ledger and left it 299 credits to work with. So a waiting card is
+		// shrunk to what the goal can actually afford, and dropped only
+		// when that is less than a card can do anything with.
+		if shrinks, freed := reclaimFromWaiting(cards, -ledger.Available); freed {
+			out = append(out, shrinks...)
+			for _, sh := range shrinks {
+				for i := range cards {
+					if cards[i].ID == sh.Card {
+						ledger.Available += float64(cards[i].Envelope - sh.To)
+						cards[i].Envelope = sh.To
+					}
+				}
+			}
+		}
+		if ledger.Available < 0 {
+			wrap, wrapReason = true, "the budget reached the reserve"
+			out = append(out, Action{Kind: WrapUp, Reason: wrapReason})
+		}
 	}
 
 	var leadReasons []string
@@ -464,4 +505,56 @@ func SplitEnvelopes(want []int, pool float64) ([]int, error) {
 		}
 	}
 	return out, nil
+}
+
+// reclaimFromWaiting frees `need` credits by lowering the envelopes of
+// cards that have not started, largest allocation first, never below
+// MinCardEnvelope. It returns the shrinks to apply and whether they cover
+// the whole shortfall — a partial reclaim is no use, because the goal
+// wraps up either way, so nothing is emitted unless the ledger balances.
+//
+// Only Waiting cards are touched. A running card's envelope is a promise
+// its session is already spending against, and an exhausted one has
+// proved it needs more rather than less.
+func reclaimFromWaiting(cards []Card, need float64) ([]Action, bool) {
+	if need <= 0 {
+		return nil, false
+	}
+	type room struct {
+		id    domain.FeatureID
+		env   int
+		spare int
+	}
+	var rooms []room
+	for _, c := range cards {
+		if c.State != Waiting || c.Envelope <= MinCardEnvelope {
+			continue
+		}
+		rooms = append(rooms, room{c.ID, c.Envelope, c.Envelope - MinCardEnvelope})
+	}
+	sort.Slice(rooms, func(i, j int) bool {
+		if rooms[i].spare != rooms[j].spare {
+			return rooms[i].spare > rooms[j].spare
+		}
+		return rooms[i].id < rooms[j].id
+	})
+	var total int
+	for _, r := range rooms {
+		total += r.spare
+	}
+	if float64(total) < need {
+		return nil, false // even at the floor there is not enough room
+	}
+	var out []Action
+	left := int(math.Ceil(need))
+	for _, r := range rooms {
+		if left <= 0 {
+			break
+		}
+		take := min(r.spare, left)
+		out = append(out, Action{Kind: Shrink, Card: r.id, To: r.env - take,
+			Reason: "shrunk to what the goal can still fund"})
+		left -= take
+	}
+	return out, true
 }
