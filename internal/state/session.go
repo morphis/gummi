@@ -55,6 +55,11 @@ type SessionSnapshot struct {
 	// submit_verdict, persisted so a resumed process judges a finished
 	// session the way the live one did instead of re-deriving Unclear.
 	Verdict string
+	// Exhausted is true when this session stopped because the card's
+	// envelope ran out rather than because it was finished. A resume reads
+	// it to tell a stage that still owes work from one that is done — see
+	// the migration note in store.go.
+	Exhausted bool
 	// VerdictFloor is gummi's own deterministic ceiling on that verdict,
 	// stamped when a live gummi-check fails or an environment gate blocks
 	// (engine.setVerdictFloor), and VerdictFloorReason is the sentence
@@ -91,8 +96,8 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO sessions (feature_id, stage, role, flavor, state, agent_session,
 			spend_credits, spend_in, spend_out, spend_model, activity, error, verdict,
-			verdict_floor, verdict_floor_reason, updated_at, started_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			verdict_floor, verdict_floor_reason, exhausted, updated_at, started_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(feature_id) DO UPDATE SET
 			stage=excluded.stage, role=excluded.role, flavor=excluded.flavor,
 			state=excluded.state, agent_session=excluded.agent_session,
@@ -100,11 +105,13 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 			spend_out=excluded.spend_out, spend_model=excluded.spend_model,
 			activity=excluded.activity, error=excluded.error, verdict=excluded.verdict,
 			verdict_floor=excluded.verdict_floor, verdict_floor_reason=excluded.verdict_floor_reason,
+			exhausted=excluded.exhausted,
 			updated_at=excluded.updated_at, started_at=excluded.started_at`,
 		string(snap.Feature), string(snap.Stage), snap.Role, snap.Flavor, snap.State, snap.AgentSession,
 		snap.SpendCredits, snap.SpendIn, snap.SpendOut, snap.SpendModel,
 		strings.Join(snap.Activity, activitySep), snap.Error, snap.Verdict,
-		snap.VerdictFloor, snap.VerdictFloorReason, time.Now().UTC().Format(timeFmt), snap.StartedAt); err != nil {
+		snap.VerdictFloor, snap.VerdictFloorReason, snap.Exhausted,
+		time.Now().UTC().Format(timeFmt), snap.StartedAt); err != nil {
 		return fmt.Errorf("saving session %s: %w", snap.Feature, err)
 	}
 
@@ -135,7 +142,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.feature_id, s.stage, s.role, s.flavor, s.state, s.agent_session,
 			s.spend_credits, s.spend_in, s.spend_out, s.spend_model, s.activity, s.error, s.verdict,
-			s.verdict_floor, s.verdict_floor_reason, s.started_at
+			s.verdict_floor, s.verdict_floor_reason, s.exhausted, s.started_at
 		FROM sessions s JOIN features f ON f.id = s.feature_id
 		ORDER BY f.num`)
 	if err != nil {
@@ -149,7 +156,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 		var fid, stage, activity string
 		if err := rows.Scan(&fid, &stage, &snap.Role, &snap.Flavor, &snap.State, &snap.AgentSession,
 			&snap.SpendCredits, &snap.SpendIn, &snap.SpendOut, &snap.SpendModel, &activity, &snap.Error, &snap.Verdict,
-			&snap.VerdictFloor, &snap.VerdictFloorReason, &snap.StartedAt); err != nil {
+			&snap.VerdictFloor, &snap.VerdictFloorReason, &snap.Exhausted, &snap.StartedAt); err != nil {
 			return nil, err
 		}
 		snap.Feature = domain.FeatureID(fid)

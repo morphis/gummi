@@ -2287,6 +2287,27 @@ func (d *Driver) resumeCritiqueLoop(ctx context.Context, f domain.Feature) (Outc
 	}
 	{
 		if snap := d.snapshot(f.ID); snap.Feature.Stage == f.Stage {
+			// A resume that was bought to finish the work must not spend
+			// itself judging work that was never written.
+			//
+			// Two facts have to line up for that to be the case, and both
+			// are recorded: the stage stopped because the envelope ran out
+			// (snap.Exhausted — the budget stop and a clean completion both
+			// save as StateDone, so nothing else tells them apart), and the
+			// section its forward edge owes is still blank. That is exactly
+			// the lxd autopilot drive's research card: its survey ran out
+			// with Findings still the seeded placeholder, the loop moved on
+			// to critique it, and the 500 credits the top-up added went to
+			// critiquing and verifying a document nobody had written.
+			//
+			// Both conditions matter. A writer that ran out having already
+			// produced its output is finished work that merely stopped
+			// being paid for — it is critiqued, as before — and a stage
+			// that owes no section (a feature's implement edge) never
+			// takes this path at all.
+			if snap.Exhausted && !snap.Critique && len(d.eng.UndraftedBlocking(f)) > 0 {
+				return Outcome{}, false, nil // the caller restarts the writer
+			}
 			if snap.State == engine.StateDone && !snap.Critique {
 				// the revised plan is on disk: critique it, using the
 				// re-critique kickoff when a prior round was burned.

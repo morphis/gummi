@@ -57,7 +57,13 @@ func (e *Engine) persist(s *Session) {
 		// process, as the agent's unchallenged word.
 		VerdictFloor:       snap.VerdictFloor,
 		VerdictFloorReason: snap.VerdictFloorReason,
-		StartedAt:          s.startedAt.UTC().Format(time.RFC3339Nano),
+		// And so does the budget stop. A session that ran out is saved as
+		// StateDone like any other finished one, so without this a new
+		// process cannot tell a stage that finished from a stage that was
+		// cut off — and a resume spends the top-up critiquing work that
+		// was never written.
+		Exhausted: s.isExhausted(),
+		StartedAt: s.startedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if snap.Err != nil {
 		rec.Error = snap.Err.Error()
@@ -271,6 +277,9 @@ func (e *Engine) Restore(ctx context.Context) error {
 		// say which check made it say so.
 		s.verdictFloor = snap.VerdictFloor
 		s.verdictFloorReason = snap.VerdictFloorReason
+		// and the budget stop, so the restored session still knows it was
+		// cut off rather than finished
+		s.exhausted = snap.Exhausted
 		s.setAgentSessionID(snap.AgentSession)
 		e.stampSpawnInfo(s)
 		// An ask that was open when the process died is re-armed from its

@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	verdict       TEXT NOT NULL DEFAULT '',
 	verdict_floor        TEXT NOT NULL DEFAULT '',
 	verdict_floor_reason TEXT NOT NULL DEFAULT '',
+	exhausted     INTEGER NOT NULL DEFAULT 0,
 	updated_at    TEXT NOT NULL,
 	started_at    TEXT NOT NULL DEFAULT ''
 );
@@ -567,6 +568,17 @@ var migrations = []string{
 	// blocked verify could say only THAT it was blocked and never why.
 	`ALTER TABLE sessions ADD COLUMN verdict_floor TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE sessions ADD COLUMN verdict_floor_reason TEXT NOT NULL DEFAULT ''`,
+	// Whether the session stopped because the card's envelope ran out,
+	// rather than because it had finished. The engine has always known the
+	// difference — markExhausted/isExhausted, and the EventIdle path warns
+	// that "the trailing idle must not downgrade that gate to a generic
+	// finished one" — but the latch lived on the live session object and
+	// had no column, and a resume is always a new process. So a writer cut
+	// off mid-work was restored as StateDone, which resumeCritiqueLoop
+	// reads as "the revised output is on disk: critique it". The one thing
+	// a top-up is for — letting the stage that ran out finish — was the one
+	// thing it could not buy.
+	`ALTER TABLE sessions ADD COLUMN exhausted INTEGER NOT NULL DEFAULT 0`,
 	// gate_approval vocabulary collapse: three modes became two, so every
 	// spelling any older gummi could have stored is rewritten to its new
 	// canonical form. This mirrors domain.NormalizeGateApproval exactly —

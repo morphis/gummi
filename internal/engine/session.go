@@ -175,8 +175,12 @@ type Snapshot struct {
 	Verdict            string        // review verdict via submit_verdict, if submitted
 	VerdictFloor       string        // deterministic ceiling applied before returning the stage verdict
 	VerdictFloorReason string        // human-readable reason for the floor, if any
-	Err                error
-	EnvProbes          []envprobe.Result
+	// Exhausted is true when this session stopped because the card's
+	// envelope ran out, not because it finished. Both states persist as
+	// StateDone, and only this tells them apart.
+	Exhausted bool
+	Err       error
+	EnvProbes []envprobe.Result
 	// StartedAt is the session's construction time, carried here as its
 	// identity. A stage hosts several sessions in turn — the writer, its
 	// critique, each replan round — and a reader that tracks a position
@@ -376,6 +380,7 @@ func (s *Session) Snapshot() Snapshot {
 		Verdict:            s.verdict,
 		VerdictFloor:       s.verdictFloor,
 		VerdictFloorReason: s.verdictFloorReason,
+		Exhausted:          s.exhausted,
 		Err:                s.err,
 		EnvProbes:          append([]envprobe.Result(nil), s.envProbes...),
 		StartedAt:          s.startedAt,
