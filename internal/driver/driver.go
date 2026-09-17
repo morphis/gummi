@@ -1084,6 +1084,9 @@ func (d *Driver) driveAutonomous(ctx context.Context, f domain.Feature) (Outcome
 	// starts/restarts the writer below. The snapshot's feature stage is the
 	// guard, so a leftover done session from a prior stage is never mistaken
 	// for a resume of this one.
+	if out, handled, err := d.resumeFinishedVerify(ctx, f); handled || err != nil {
+		return out, err
+	}
 	if out, handled, err := d.resumeCritiqueLoop(ctx, f); handled || err != nil {
 		return out, err
 	}
@@ -2268,6 +2271,40 @@ func (d *Driver) emitActivity(id domain.FeatureID) {
 	if len(act) > d.activityCur {
 		d.activityCur = len(act)
 	}
+}
+
+// resumeFinishedVerify crosses the gate on a verify verdict this card has
+// already earned, instead of paying for it twice.
+//
+// resumeCritiqueLoop is the only path that consults a stored verdict on
+// resume, and it is keyed on CritiqueRoundKind, which knows plan and
+// implement — not verify. So a resume at verify fell straight through to
+// a fresh session. Verify is the last stage and among the most expensive
+// (117.7 credits on the lxd autopilot drive's case A, more than its plan
+// architect), which makes it exactly where a card is most likely to run
+// dry: that card's verify returned "pass — all gummi-checks pass, all 5
+// plan invariants confirmed, an independent 1853-input fuzz comparison
+// found 0 regressions", ran out four seconds later, and the 60-credit
+// top-up bought a second verify from scratch, which ran out too. 123.8 of
+// its 241.5 verify credits — 51% — went on a verdict already in the store.
+//
+// A recorded verdict IS the stage's output, so the budget stop that landed
+// after it does not invalidate it: exhausted with a verdict is finished
+// work that stopped being paid for. Exhausted WITHOUT one has nothing to
+// honour and re-runs, as before.
+func (d *Driver) resumeFinishedVerify(ctx context.Context, f domain.Feature) (Outcome, bool, error) {
+	if f.Stage != domain.StageVerify {
+		return Outcome{}, false, nil
+	}
+	snap := d.snapshot(f.ID)
+	if snap.Feature.Stage != domain.StageVerify || snap.State != engine.StateDone {
+		return Outcome{}, false, nil
+	}
+	if verdict.SessionVerdict(snap) == verdict.Unclear {
+		return Outcome{}, false, nil // nothing was decided: verify again
+	}
+	out, err := d.applyVerdict(ctx, f)
+	return out, true, err
 }
 
 // resumeCritiqueLoop puts a resume back where the stage's loop actually
