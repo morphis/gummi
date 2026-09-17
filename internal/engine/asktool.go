@@ -1063,7 +1063,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// whether the blocked tool call ultimately resolves.
 	e.appendAskEvent(s, ask, answer, by)
 	// best-effort spec capture; a bad anchor never blocks the answer
-	if note := e.captureAnswer(s, ask, answer); note != "" {
+	if note := e.captureAnswer(s, ask, answer, by); note != "" {
 		s.appendActivity(note)
 	}
 	e.persist(s)
@@ -1259,6 +1259,30 @@ func (e *Engine) appendAskEvent(s *Session, ask *Ask, answer, by string) {
 	})
 }
 
+// answerAuthor maps the declared answerer onto the `%%` marker author the
+// answer is filed under. It exists because the artifact is the one record
+// of a decision that outlives the run: a reviewer reads the spec on the
+// branch long after the stream and the card page are gone, and a later
+// stage re-reads it as settled. Filing an answer autopilot took by itself
+// as `@user` told both of them a person had weighed it, and on this
+// drive's case A the architect duly wrote "confirmed by the user" into
+// Chosen approach about a question no human ever saw.
+//
+// The answerer is already declared — AnswerAs carries it, appendAskEvent
+// records it, and the card page renders "autopilot answered …" from it.
+// Only this one write was hardcoded.
+//
+// It also lands the marker on the right side of spec.Parse's author rule:
+// a `@user` marker closes only under a `@user` resolution, so an
+// autopilot resolution can no longer silently close a human's own comment
+// sharing the anchor — which is the floor that rule was added for.
+func answerAuthor(by string) string {
+	if by == state.ActorAutopilot {
+		return state.ActorAutopilot
+	}
+	return state.ActorUser
+}
+
 // captureAnswer writes the answer into the spec under the ask's anchor,
 // returning an activity note describing what happened (empty when there
 // was no anchor to write). Failures degrade to a note, never an error:
@@ -1283,7 +1307,7 @@ func (e *Engine) appendAskEvent(s *Session, ask *Ask, answer, by string) {
 // a person (or the next stage) will find it on their next pass over
 // the artifact, tagged with the anchor text that missed so it can be
 // moved by hand.
-func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
+func (e *Engine) captureAnswer(s *Session, ask *Ask, answer, by string) string {
 	anchor := strings.TrimSpace(ask.SpecAnchor)
 	if anchor == "" {
 		return ""
@@ -1336,7 +1360,7 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer string) string {
 		// right and stays; only its wording was gating the card.
 		text = fmt.Sprintf("resolved — %s (recorded here: the line this answered, %q, is no longer in the document)", answer, anchor)
 	}
-	out, err := spec.AddComment(content, line, "user", date, text)
+	out, err := spec.AddComment(content, line, answerAuthor(by), date, text)
 	if err != nil {
 		return AnswerNotSavedPrefix + err.Error()
 	}

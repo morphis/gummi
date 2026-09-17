@@ -288,7 +288,7 @@ func TestBadAnchorWithNoSectionFallsBackToTheDocumentEnd(t *testing.T) {
 		Question:   "ready?",
 		SpecAnchor: "no such line anywhere",
 		Gate:       true,
-	}, "move on")
+	}, "move on", state.ActorUser)
 	if !strings.Contains(note, "end of the document") {
 		t.Errorf("note = %q, want the document-end backstop", note)
 	}
