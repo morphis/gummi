@@ -10,8 +10,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/rounds"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -44,6 +46,15 @@ type weekCard struct {
 	Spend      float64
 	Corrective int
 	At         time.Time
+
+	// Rework is what the card spent doing work it had already done, and
+	// Waiting/Elapsed how much of its life nothing was running. Both come
+	// from cardrun, which is the same derivation the card's own run tab
+	// reads — so a week cannot disagree with the cards it is made of.
+	Rework   float64
+	Waiting  time.Duration
+	Elapsed  time.Duration
+	Envelope int
 }
 
 // weekReport is the whole view's data, measured once when it opens.
@@ -60,6 +71,43 @@ type weekReport struct {
 	Open      int
 	Costliest weekCard
 	Cheapest  weekCard
+
+	// The three ratios the week could not produce until a card's run was
+	// derivable: what share of the week's spend went on work already done,
+	// what share of its cards' lives was spent waiting on a person, and how
+	// much of the envelopes granted was actually used.
+	//
+	// They belong here rather than on a card because each is only an
+	// answer at this scale: one card at 43% rework is an anecdote, and a
+	// week at 9% is a fact about how the board is running.
+	ReworkCredits float64
+	Waiting       time.Duration
+	Elapsed       time.Duration
+	Envelope      int
+}
+
+// ReworkShare, WaitingShare and EnvelopeShare are the week's three
+// ratios. Each is zero when its denominator is, so a quiet week renders
+// without a division.
+func (r weekReport) ReworkShare() float64 {
+	if r.Spend <= 0 {
+		return 0
+	}
+	return r.ReworkCredits / r.Spend
+}
+
+func (r weekReport) WaitingShare() float64 {
+	if r.Elapsed <= 0 {
+		return 0
+	}
+	return float64(r.Waiting) / float64(r.Elapsed)
+}
+
+func (r weekReport) EnvelopeShare() float64 {
+	if r.Envelope <= 0 {
+		return 0
+	}
+	return r.Spend / float64(r.Envelope)
 }
 
 // weekReportMsg carries a measured report to the open view.
@@ -92,7 +140,7 @@ func (d *weekDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // and belongs nowhere near a frame.
 func (m *Shell) measureWeek() tea.Cmd {
 	rows := append([]featureRow(nil), m.rows...)
-	rs, now := m.roundStore, m.now()
+	rs, now, store := m.roundStore, m.now(), m.store
 	return func() tea.Msg {
 		ctx := context.Background()
 		rep := weekReport{ByEnding: map[domain.Ending]int{}}
@@ -114,10 +162,20 @@ func (m *Shell) measureWeek() tea.Cmd {
 			if rs != nil {
 				c.Corrective, _ = rounds.Load(ctx, rs, r.F.ID, domain.RoundKindCorrective)
 			}
+			if store != nil {
+				if run, ok := weekRun(ctx, store, r.F); ok {
+					c.Rework, c.Waiting, c.Elapsed = run.Money.Rework, run.Clock.Waiting, run.Clock.Elapsed
+					c.Envelope = run.Envelope.Granted
+				}
+			}
 			rep.Cards = append(rep.Cards, c)
 			rep.ByEnding[c.Ending]++
 			rep.Spend += c.Spend
 			rep.Rework += c.Corrective
+			rep.ReworkCredits += c.Rework
+			rep.Waiting += c.Waiting
+			rep.Elapsed += c.Elapsed
+			rep.Envelope += c.Envelope
 			if c.Corrective > 0 {
 				rep.Redone++
 			}
@@ -171,9 +229,23 @@ func (d *weekDialog) View(s *theme.Styles, _, _ int) string {
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("cost")), s.Base.Render(money(rep.Spend)))
 	if rep.Rework > 0 {
-		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("redone")),
-			s.Base.Render(fmt.Sprintf("%d round%s across %d card%s",
-				rep.Rework, plural(rep.Rework), rep.Redone, plural(rep.Redone))))
+		redone := fmt.Sprintf("%d round%s across %d card%s",
+			rep.Rework, plural(rep.Rework), rep.Redone, plural(rep.Redone))
+		// A count of rounds says how often; the credits say what it cost,
+		// which is the number that decides whether anything should change.
+		if rep.ReworkCredits > 0 {
+			redone += fmt.Sprintf(" · %s (%.0f%%)", money(rep.ReworkCredits), rep.ReworkShare()*100)
+		}
+		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("redone")), s.Base.Render(redone))
+	}
+	if rep.Elapsed > 0 && rep.Waiting > 0 {
+		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("waiting")),
+			s.Base.Render(fmt.Sprintf("%s of %s — %.0f%% of the week's card time",
+				shortDur(rep.Waiting), shortDur(rep.Elapsed), rep.WaitingShare()*100)))
+	}
+	if rep.Envelope > 0 {
+		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("envelopes")),
+			s.Faint.Render(fmt.Sprintf("%d granted · %.0f%% used", rep.Envelope, rep.EnvelopeShare()*100)))
 	}
 	if rep.Costliest.ID != "" {
 		fmt.Fprintf(&b, "   %s  %s\n", s.CardTitle.Render(pad("costliest")),
@@ -226,4 +298,23 @@ func padLeft(s string, n int) string {
 		s = " " + s
 	}
 	return s
+}
+
+// weekRun derives one settled card's run the same way its own run tab
+// does, so the week's ratios and the card's page can never disagree.
+//
+// It reads the card's whole event log, which is why measureWeek runs off
+// the render loop. A card whose record cannot be read is skipped rather
+// than counted as zero: a week that quietly averages in an unreadable
+// card reports a number nothing produced.
+func weekRun(ctx context.Context, store *state.Store, f domain.Feature) (cardrun.Run, bool) {
+	evs, err := store.Events(ctx, f.ID)
+	if err != nil {
+		return cardrun.Run{}, false
+	}
+	spend, err := store.SessionBreakdown(ctx, f.ID)
+	if err != nil {
+		spend = nil
+	}
+	return cardrun.Report(cardrun.Input{Feature: f, Events: evs, Spend: spend}), true
 }

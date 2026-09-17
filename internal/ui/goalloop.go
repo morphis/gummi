@@ -147,6 +147,9 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 	case goalPageLoadedMsg:
 		return m.goalPageLoaded(msg), true
 
+	case runLoadedMsg:
+		return m.runLoaded(msg), true
+
 	case reverseDialogMsg:
 		m.Overlay.Push(&reverseDialog{f: msg.f, decisions: msg.decisions, eng: msg.eng})
 		return nil, true

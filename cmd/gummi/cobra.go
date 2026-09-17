@@ -127,9 +127,9 @@ var commitCmd = &cobra.Command{
 	},
 }
 
-// statusCmd implements `gummi status <id|ref> [--json]`.
+// statusCmd implements `gummi status <id|ref> [--json] [--run]`.
 var statusCmd = &cobra.Command{
-	Use:   "status <id|ref> [--json]",
+	Use:   "status <id|ref> [--json] [--run]",
 	Short: "Show a card's stage, spend, and branch state",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runStatus(buildFlagArgs(cmd, args))
@@ -323,6 +323,7 @@ func init() {
 	squashCmd.Flags().Bool("force", false, "proceed even if the linked PR has open review threads")
 	commitCmd.Flags().StringP("message", "m", "", "commit message for the card's uncommitted worktree changes (required; - reads from stdin)")
 	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
+	statusCmd.Flags().Bool("run", false, "report where the card's credits and hours went instead of where it stands")
 	watchCmd.Flags().Bool("json", false, "emit the raw record stream as NDJSON instead of the rendered transcript")
 	watchCmd.Flags().Bool("wait", false, "block until the card has a live stream instead of failing when none exists")
 	watchCmd.Flags().Bool("once", false, "exit when the current session ends instead of following the card's next one")

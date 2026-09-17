@@ -24,9 +24,9 @@ import (
 // nothing and holds no lock, so it is safe to poll a running feature.
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	jsonOut := registerStatusFlags(fs)
+	jsonOut, runOut := registerStatusFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi status <id|ref> [--json]")
+		fmt.Fprintln(os.Stderr, "usage: gummi status <id|ref> [--json] [--run]")
 		fs.PrintDefaults()
 	}
 	idArg, err := idFirstArg(fs, args)
@@ -39,6 +39,9 @@ func runStatus(args []string) error {
 			return err
 		}
 		view := buildStatus(ctx, store, wt, ws, &f)
+		if *runOut {
+			view.Run = buildRun(ctx, store, &f)
+		}
 		if *jsonOut {
 			b, err := json.MarshalIndent(view, "", "  ")
 			if err != nil {
@@ -47,16 +50,25 @@ func runStatus(args []string) error {
 			fmt.Println(string(b))
 			return nil
 		}
+		if *runOut {
+			renderRun(os.Stdout, view, view.Run)
+			return nil
+		}
 		renderStatus(os.Stdout, view)
 		return nil
 	})
 }
 
-// registerStatusFlags binds `gummi status`'s only flag onto fs and returns
-// its pointer, so the skill's grammar generator can enumerate it alongside
-// the run/resume flag sets (see runFlagValues).
-func registerStatusFlags(fs *flag.FlagSet) *bool {
-	return fs.Bool("json", false, "emit machine-readable JSON instead of the text summary")
+// registerStatusFlags binds `gummi status`'s flags onto fs and returns
+// their pointers, so the skill's grammar generator can enumerate them
+// alongside the run/resume flag sets (see runFlagValues).
+//
+// --run is opt-in rather than always on because it reads the card's whole
+// event log, and status is a thing callers poll. Where the card stands
+// stays a cheap question; how it got there is the expensive one.
+func registerStatusFlags(fs *flag.FlagSet) (jsonOut, runOut *bool) {
+	return fs.Bool("json", false, "emit machine-readable JSON instead of the text summary"),
+		fs.Bool("run", false, "report where the card's credits and hours went instead of where it stands")
 }
 
 // statusView is the status command's payload — the JSON schema the skill
@@ -151,15 +163,21 @@ type statusView struct {
 	UnprovenFiles []statusUnprovenFile `json:"unproven_files,omitempty"`
 	// StageSpend is where the money went, per stage/role/model, largest
 	// first. It is what makes a reviewer's bounces answerable: a run total
-	// hides a stage that doubled. Note it is per stage, NOT per round —
-	// stage_spend is keyed (feature, stage, model, role) and accumulates
-	// across rounds, so a bounced implement stage reports both passes as
-	// one figure. Rounds above is what tells you how many passes that is.
+	// hides a stage that doubled. Note it is per stage, NOT per pass: it
+	// sums every session of a stage, so a bounced implement reports both
+	// passes as one figure. Rounds above says how many passes that is, and
+	// `run` (under --run) says what each of them cost.
 	StageSpend []statusStageSpend `json:"stage_spend,omitempty"`
 	// GoalID is the goal this card belongs to; FoundBy the goal that filed
 	// it as found along the way. Both absent on an ordinary card.
 	GoalID  string `json:"goal_id,omitempty"`
 	FoundBy string `json:"found_by,omitempty"`
+	// Run is where this card's credits and hours went — its passes, what
+	// each cost, how much of the total was work done a second time, and
+	// how much of its life it spent waiting on a person. Present only
+	// under --run, since deriving it reads the card's whole event log and
+	// the rest of this view is cheap enough to poll.
+	Run *statusRun `json:"run,omitempty"`
 	// Goal is a goal's hand-over, as it stands now: its budget tree, its
 	// done-when items and their status, its cards, the decisions for
 	// review, declined findings and what it found along the way. `ready`

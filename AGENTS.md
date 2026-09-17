@@ -63,6 +63,7 @@ leaf services.
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
 | `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |
+| `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the run tab, `status --run` and the week view. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |
 | `notify` | Terminal bell / desktop notification on needs-attention. |
@@ -76,7 +77,8 @@ leaf services.
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
 (spec decomposition), `bugs` (GitHub issue import / manual add), and the
-headless driver surface — `run`, `resume`, `status`, `spec`, `diff`, `verify`,
+headless driver surface — `run`, `resume`, `status` (`--run` reports where a
+card's credits and hours went), `spec`, `diff`, `verify`,
 `merge`, `clean`, `deps`, `doctor`, `skill`. See README's "Running headlessly"
 for the driver's command grammar and exit-status table.
 
@@ -167,6 +169,10 @@ still work — the board just stays static. Key env vars are tabled in
 
 - Behavior of a stage/transition → `internal/workflow` then `internal/engine`.
 - A TUI bug → `internal/ui` (`board.go`, `chat.go`, `diffview.go`, `inbox.go`).
+- "what did this card cost / how did it run" → `internal/cardrun`, then its
+  three readers (`internal/ui/runview.go`, `cmd/gummi/statusrun.go`,
+  `internal/ui/week.go`). The derivation lives in one place on purpose: two
+  surfaces that disagree about what a card cost are worse than one.
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - Anything architectural or a "why is it this way" question →
   `docs/DESIGN.md` (its **Decisions** list in §10 is binding).
