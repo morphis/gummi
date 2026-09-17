@@ -110,7 +110,26 @@ func parseFlavor(s string) (critique, rebase bool) {
 // and shape each had their own because each was its own stage; they are
 // one stage now, and what differs between a feature, a bug and a research
 // topic is the KIND, which the opener names rather than the stage.
+//
+// The MODE decides the rest of it. The opener used to say "the user just
+// opened the design chat" and "put the most consequential open question to
+// the user first" to every card, autopilot included, where both halves are
+// false: nobody opened anything, and the question is answered by the card's
+// own recommendation without a person ever seeing it. It is the first thing
+// a session reads, so it won: on the lxd autopilot drive all four cards
+// opened by asking, and all four were bounced by the ask toll — a tool call
+// and a model turn each, spent to be told not to ask. Two other mechanisms
+// (unattendedAskHint, askChangesSomething) existed to undo what this
+// sentence had just instructed.
+//
+// So an unattended card is told what is true. It is not told to stop
+// asking — unattendedAskHint still invites a real decision to be recorded
+// as a question, which is what the receipt is built from — only to stop
+// opening with one addressed to a reader who is not there.
 func designKickoff(f domain.Feature) string {
+	if f.GateApproval == domain.GateAutopilot {
+		return unattendedDesignKickoff(f)
+	}
 	switch f.Kind {
 	case domain.KindBug:
 		return "The user just opened the design chat on a bug. Read the report, try to " +
@@ -128,6 +147,32 @@ func designKickoff(f domain.Feature) string {
 			"recommend one approach with your reasoning, and put the most consequential open " +
 			"question to the user first, with your recommended answer. Keep chat turns short; " +
 			"the detail belongs in the spec."
+	}
+}
+
+// unattendedDesignKickoff is designKickoff for a card running on
+// autopilot: same job, same artifact, no reader. Each one ends where its
+// attended twin ends — with the decision written down — because the
+// artifact is the only place an unattended decision can go.
+const unattendedPreamble = "This card is running unattended: no one is at the keyboard, and " +
+	"the design stage will be judged on what it writes, not on what it asks. "
+
+func unattendedDesignKickoff(f domain.Feature) string {
+	switch f.Kind {
+	case domain.KindBug:
+		return unattendedPreamble + "Read the report, try to reproduce it, and report what " +
+			"you found. Then drive toward root cause: state your leading hypothesis with the " +
+			"evidence for it, and write the diagnosis into the report. Keep it short."
+	case domain.KindResearch:
+		return unattendedPreamble + "Read the research artifact at its workspace home, then " +
+			"shape the question yourself: scope it, fix the constraints and success criteria " +
+			"it must meet, and pick the direction the survey will take, writing each decision " +
+			"into the document as it settles. Keep it short."
+	default:
+		return unattendedPreamble + "Read the spec draft and its open %% threads, then drive " +
+			"convergence: state the problem as you understand it, choose one approach with " +
+			"your reasoning, and write the decision into the spec where a reader will find it " +
+			"afterwards. Keep turns short; the detail belongs in the spec."
 	}
 }
 
