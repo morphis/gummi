@@ -133,7 +133,7 @@ func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 			{Kind: state.EventMessage}, {Kind: state.EventMessage}, {Kind: state.EventTool},
 		},
 	}
-	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 80))
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 0, 80))
 	if strings.Contains(line, "\n") {
 		t.Fatalf("folded receipt spans more than one line: %q", line)
 	}
@@ -157,7 +157,7 @@ func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
 			{Kind: state.EventMessage}, {Kind: state.EventMessage},
 		},
 	}
-	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 80))
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 0, 80))
 	if !strings.Contains(line, "from 20:35") {
 		t.Errorf("folded receipt %q missing the enterAt fallback timestamp", line)
 	}
@@ -337,7 +337,7 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 	metered := map[domain.Stage]float64{domain.StageImplement: 41}
 
 	// one segment: the payload wins over the rollup even though both exist.
-	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, metered, 1, 80))
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, metered, 1, 0, 80))
 	if !strings.Contains(line, "6 credits") {
 		t.Errorf("receipt %q did not use the segment's own payload", line)
 	}
@@ -348,7 +348,7 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 	// no payload (predates the credits field), one segment: the rollup is
 	// still better than nothing.
 	bare := stageSegment{stage: domain.StageImplement, role: "implementer", exited: true}
-	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 1, 80))
+	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 1, 0, 80))
 	if !strings.Contains(line, "41 credits") {
 		t.Errorf("receipt %q dropped the rollup fallback", line)
 	}
@@ -356,7 +356,7 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 	// no payload, more than one segment for the stage: the rollup cannot
 	// be attributed to this session, so nothing is shown rather than a
 	// number that may not even be this segment's.
-	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 2, 80))
+	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 2, 0, 80))
 	if strings.Contains(line, "credits") {
 		t.Errorf("receipt %q showed an unattributable rollup across multiple segments", line)
 	}
@@ -373,8 +373,8 @@ func TestFoldedReceiptPerSessionSpendDiffers(t *testing.T) {
 	first := stageSegment{stage: domain.StageImplement, exited: true, credits: 12}
 	second := stageSegment{stage: domain.StageImplement, exited: true, credits: 34}
 
-	l1 := ansi.Strip(foldedReceiptLine(m0Styles(), first, rollup, 2, 80))
-	l2 := ansi.Strip(foldedReceiptLine(m0Styles(), second, rollup, 2, 80))
+	l1 := ansi.Strip(foldedReceiptLine(m0Styles(), first, rollup, 2, 0, 80))
+	l2 := ansi.Strip(foldedReceiptLine(m0Styles(), second, rollup, 2, 0, 80))
 	if !strings.Contains(l1, "12 credits") {
 		t.Errorf("first fix receipt %q did not show its own 12 credits", l1)
 	}
@@ -421,7 +421,7 @@ func TestFoldedReceiptVerdictMarker(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			seg := stageSegment{stage: tt.stage, role: tt.role, exited: true, verdict: tt.verdict, credits: 18}
-			line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 80))
+			line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 0, 80))
 			hasCheck := strings.Contains(line, "✓")
 			hasCross := strings.Contains(line, "✗")
 			switch tt.want {
@@ -1595,5 +1595,80 @@ func TestAnsweredDecisions(t *testing.T) {
 	}
 	if got["d3"] {
 		t.Error("answeredDecisions() marked d3 answered, but nothing in the log ever answered it")
+	}
+}
+
+// TestReceiptClaimsTheStagesUnaccountedSpend: a session that ended
+// without a credits figure in its stage_exit payload printed a receipt
+// line with no cost at all, while the masthead counted the money. On the
+// lxd autopilot drive's case B that was the card's first plan session —
+// 35.1 of the stage's 60.1 credits — and the page's rows summed to 208.6
+// against a masthead of 339.4.
+func TestReceiptClaimsTheStagesUnaccountedSpend(t *testing.T) {
+	rollup := map[domain.Stage]float64{domain.StagePlan: 60.1}
+	unclaimed := map[domain.Stage]float64{domain.StagePlan: 60.1 - 25}
+	unknown := map[domain.Stage]int{domain.StagePlan: 1}
+
+	bare := stageSegment{stage: domain.StagePlan, role: "architect"} // no credits recorded
+	known := stageSegment{stage: domain.StagePlan, role: "architect", credits: 25}
+
+	line := ansi.Strip(foldedReceiptLine(m0Styles(), bare, rollup, 2,
+		remainderFor(bare, unclaimed, unknown), 90))
+	if !strings.Contains(line, "35.1 credits") {
+		t.Errorf("the unclaimed remainder is still missing from the receipt: %q", line)
+	}
+	// the segment that knows its own cost is untouched
+	line = ansi.Strip(foldedReceiptLine(m0Styles(), known, rollup, 2,
+		remainderFor(known, unclaimed, unknown), 90))
+	if !strings.Contains(line, "25 credits") {
+		t.Errorf("a segment with its own figure lost it: %q", line)
+	}
+
+	// two segments with no figure: neither claims the remainder, because
+	// there is no honest way to split it.
+	unknown[domain.StagePlan] = 2
+	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, rollup, 2,
+		remainderFor(bare, unclaimed, unknown), 90))
+	if strings.Contains(line, "credits") {
+		t.Errorf("a remainder was split across two segments that cannot be told apart: %q", line)
+	}
+}
+
+// TestSessionlessSpendGetsItsOwnLine: check discovery and its baseline
+// hold a feature rather than a Session, so they fold to no receipt and
+// used to appear nowhere on the card page — while being the single
+// largest thing most cards buy (95 to 148 credits on the lxd autopilot
+// drive, 14–25% of each card's total).
+func TestSessionlessSpendGetsItsOwnLine(t *testing.T) {
+	rows := []state.StageSpend{
+		{Stage: domain.StageImplement, Role: "scribe", Credits: 94.9},
+		{Stage: domain.StageImplement, Role: "implementer", Credits: 39.6},
+		{Stage: domain.StageImplement, Role: "helper", Credits: 0.4},
+		{Stage: domain.StageImplement, Role: "reviewer", Credits: 50.8},
+	}
+	segs := []stageSegment{
+		{stage: domain.StageImplement, role: "implementer", credits: 39.6},
+		{stage: domain.StageImplement, role: "reviewer", credits: 50.8},
+	}
+	got := sessionlessSpend(rows, segs)
+	if len(got[domain.StageImplement]) != 2 {
+		t.Fatalf("sessionless rows = %+v, want the scribe and the helper", got)
+	}
+	var names []string
+	for _, r := range got[domain.StageImplement] {
+		names = append(names, ansi.Strip(sessionlessReceiptLine(m0Styles(), r, 90)))
+	}
+	joined := strings.Join(names, "\n")
+	if !strings.Contains(joined, "checks · discovery and baseline") ||
+		!strings.Contains(joined, "94.9 credits") {
+		t.Errorf("check discovery is still unexplained on the page:\n%s", joined)
+	}
+	if !strings.Contains(joined, "backend's own side model") {
+		t.Errorf("the backend's side-model spend has no line:\n%s", joined)
+	}
+	// a role that did run as a session keeps its own receipt and gets no
+	// second line
+	if strings.Contains(joined, "implementer") {
+		t.Errorf("a role that ran as a session was given a duplicate line:\n%s", joined)
 	}
 }

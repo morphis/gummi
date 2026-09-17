@@ -331,7 +331,45 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		for _, seg := range folded {
 			counts[seg.stage]++
 		}
+		// What each stage spent that no segment claims. A segment's own
+		// figure comes from its stage_exit payload, and a session that
+		// ended without one leaves a receipt line with no credits at all —
+		// on the lxd autopilot drive's case B the card's first plan
+		// session, 35.1 credits of it, printed as "plan · architect · 5
+		// turns" and nothing else, while the masthead counted the money.
+		// stage_spend knows the stage's true total, so the remainder —
+		// the total less what the segments do account for — is exactly
+		// what is missing, and when one segment is missing its figure the
+		// remainder IS that figure.
+		unclaimed := map[domain.Stage]float64{}
+		unknown := map[domain.Stage]int{}
+		for st, total := range spend {
+			unclaimed[st] = total
+		}
+		for _, seg := range folded {
+			if seg.credits > 0 {
+				unclaimed[seg.stage] -= seg.credits
+				continue
+			}
+			unknown[seg.stage]++
+		}
+		// Roles that spent on a stage without ever being a session of it:
+		// the scribe's check discovery and its baseline, and the backend's
+		// own side-model. They hold a feature rather than a Session, so
+		// they fold to no segment and got no line — and discovery is the
+		// single largest thing most cards buy (95 to 148 credits on the
+		// lxd autopilot drive, 14–25% of each card). The page a person
+		// reads to ask "what did this cost me and on what" could not
+		// explain 39% of one card's bill, most of it this.
+		sessionless := sessionlessSpend(r.StageSpend, folded)
+		printed := map[domain.Stage]bool{}
 		for i, seg := range folded {
+			if !printed[seg.stage] {
+				printed[seg.stage] = true
+				for _, row := range sessionless[seg.stage] {
+					add(sessionlessReceiptLine(s, row, inner))
+				}
+			}
 			// A period already running when this stage began brackets the
 			// whole of it, so its rule is the one thing that belongs above
 			// the receipt. Everything else that fell in this segment
@@ -343,7 +381,8 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 					add(stretchOpenLine(s, st, inner))
 				}
 			}
-			add(foldedReceiptLine(s, seg, spend, counts[seg.stage], inner))
+			add(foldedReceiptLine(s, seg, spend, counts[seg.stage],
+				remainderFor(seg, unclaimed, unknown), inner))
 			// The rest of the segment, sorted by the event that produced
 			// it. Drawing all the openings first and all the closings last
 			// was what let a card handed to autopilot twice read as one
@@ -1321,7 +1360,7 @@ func stageSegments(events []state.CardEvent) []stageSegment {
 // foldedReceiptLine renders one finished stage session as the single
 // line folding really means: stage, role, turn count, spend, and the
 // outcome marker with the time it closed.
-func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage]float64, stageSegs int, w int) string {
+func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage]float64, stageSegs int, remainder float64, w int) string {
 	turns := 0
 	for _, ev := range seg.events {
 		if ev.Kind == state.EventMessage {
@@ -1361,6 +1400,11 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 	credits := seg.credits
 	if credits == 0 && stageSegs == 1 {
 		credits = spend[seg.stage]
+	}
+	if credits == 0 {
+		// the stage's unaccounted remainder, when this is the one segment
+		// of it that does not know what it cost
+		credits = remainder
 	}
 	if credits > 0 {
 		head += fmt.Sprintf(" · %g credits", roundSpend(credits))
@@ -2174,4 +2218,66 @@ type segItem struct {
 	lines  []string
 	open   autopilotStretch
 	isOpen bool
+}
+
+// remainderFor returns the spend a segment may claim as its own when its
+// own receipt carries none: the stage's total less what its other
+// segments accounted for, and only when this is the single segment of
+// that stage without a figure. With two such segments there is no honest
+// way to split the remainder between them, so neither takes it — a wrong
+// attribution is worse than a missing one on a page a person reads to
+// answer "what did this cost me, and on what".
+func remainderFor(seg stageSegment, unclaimed map[domain.Stage]float64, unknown map[domain.Stage]int) float64 {
+	if seg.credits > 0 || unknown[seg.stage] != 1 {
+		return 0
+	}
+	if r := unclaimed[seg.stage]; r > 0 {
+		return r
+	}
+	return 0
+}
+
+// sessionlessSpend groups the stage_spend rows whose role never ran as a
+// session of that stage — the one-shot passes (check discovery and its
+// baseline, on the scribe) and the backend's own side-model spend (the
+// helper role). Both are booked against the card and neither folds to a
+// receipt, so without this they are money the page cannot explain.
+func sessionlessSpend(rows []state.StageSpend, segs []stageSegment) map[domain.Stage][]state.StageSpend {
+	if len(rows) == 0 {
+		return nil
+	}
+	ran := map[domain.Stage]map[string]bool{}
+	for _, seg := range segs {
+		if ran[seg.stage] == nil {
+			ran[seg.stage] = map[string]bool{}
+		}
+		ran[seg.stage][seg.role] = true
+	}
+	out := map[domain.Stage][]state.StageSpend{}
+	for _, r := range rows {
+		if r.Credits <= 0 || ran[r.Stage][r.Role] {
+			continue
+		}
+		out[r.Stage] = append(out[r.Stage], r)
+	}
+	return out
+}
+
+// sessionlessReceiptLine draws one of those rows the way a folded session
+// receipt is drawn, named by what it is rather than by its role: "checks"
+// for the scribe's discovery and baseline, "backend" for a backend's own
+// side model. The role alone would tell a reader nothing — nobody asked
+// for a scribe.
+func sessionlessReceiptLine(s *theme.Styles, row state.StageSpend, w int) string {
+	what := row.Role
+	switch row.Role {
+	case string(agent.RoleScribe):
+		what = "checks · discovery and baseline"
+	case string(agent.RoleHelper):
+		what = "backend's own side model"
+	}
+	head := string(row.Stage) + " · " + what +
+		fmt.Sprintf(" · %g credits", roundSpend(row.Credits))
+	fill := max(w-ansi.StringWidth(head)-2, 1)
+	return s.Faint.Render(head+" ") + s.Separator.Render(strings.Repeat("─", fill))
 }
