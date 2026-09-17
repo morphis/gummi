@@ -771,6 +771,47 @@ func (e *Engine) openQuestionsBlockingGate(f domain.Feature) int {
 	return len(spec.Parse(string(raw)).UserOpenThreads())
 }
 
+// openSpecComments compiles an item's open user annotations into the turn
+// its stage writer addresses them from (CompileSpecComments). Empty for a
+// missing or unreadable artifact, or when nothing is open.
+func (e *Engine) openSpecComments(f domain.Feature) string {
+	path := e.artifactFile(&f)
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return CompileSpecComments(spec.Parse(string(raw)))
+}
+
+// CompileSpecComments builds the instruction listing a spec's open user
+// annotations (DESIGN §6.1) — the spec half of CompileDiffComments. The UI
+// sends it as a live turn to a running stage writer, and every fresh
+// writer run carries it in its kickoff, so a comment left while a critique
+// held the card still reaches the writer. Empty when the human has no open
+// comments.
+func CompileSpecComments(doc spec.Doc) string {
+	threads := doc.UserOpenThreads()
+	if len(threads) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Please address these review comments in the spec. ")
+	b.WriteString("For each, edit the relevant section and mark it resolved with a line like ")
+	b.WriteString("`%% @architect: resolved — <how>`:\n\n")
+	for _, t := range threads {
+		mk := spec.UnresolvedUserMarker(t)
+		q := mk.Text
+		if q == "" {
+			q = "(see the marker)"
+		}
+		fmt.Fprintf(&b, "- L%d: %s\n", mk.Line, q)
+	}
+	return b.String()
+}
+
 // omissionGateBlocksAdvance is the Advance-side counterpart of
 // gateVerifyVerdict. It re-runs env probes fresh against the feature's
 // worktree and, if the artifact can be read, asks omissionGateReason whether

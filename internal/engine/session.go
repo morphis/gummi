@@ -223,6 +223,12 @@ type Session struct {
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
 	kickoffNote string
+	// specComments is the artifact's open user comments, compiled when a
+	// stage writer's run starts (Engine.openSpecComments) and appended to
+	// its kickoff. Kept apart from kickoffNote so a restart re-reads the
+	// artifact instead of replaying a stale list. Set before the kickoff
+	// is sent, never after.
+	specComments string
 	// startedAt is when this session generation began. It is the
 	// discriminator that keeps mirrored events unique per generation:
 	// a stage that re-runs (a review bounce, a resumed card) gets a
@@ -388,7 +394,8 @@ func (s *Session) Snapshot() Snapshot {
 }
 
 // kickoffMessage returns the autonomous stage kickoff, with the user's
-// review comments appended when this run carries them (RunWith). A
+// review comments appended when this run carries them (RunWith, or the
+// artifact's open comments on a stage writer's run). A
 // rebase session opens with its own go-ahead; its note carries the
 // rebase target and expected conflicts (RunRebase).
 func (s *Session) kickoffMessage() string {
@@ -396,10 +403,14 @@ func (s *Session) kickoffMessage() string {
 	if s.Rebase {
 		base = rebaseKickoff
 	}
-	if s.kickoffNote == "" {
-		return base
+	for _, extra := range []string{s.kickoffNote, s.specComments} {
+		// RunWith from the spec view carries the same compiled list the
+		// artifact yields: say it once.
+		if extra != "" && !strings.Contains(base, extra) {
+			base += "\n\n" + extra
+		}
 	}
-	return base + "\n\n" + s.kickoffNote
+	return base
 }
 
 // flavor recovers which autonomous pass this session runs (see runFlavor).

@@ -235,6 +235,11 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 			if s := m.engine.Get(f.ID); s != nil {
 				switch s.State() {
 				case engine.StateRunning:
+					// implement runs carry the open diff comments in their
+					// hints, so a held one reaches the next writer run
+					if held := heldForWriter(s.Snapshot(), f, n, "diff comment"); held != "" {
+						return noticeMsg{text: held}
+					}
 					if err := m.engine.Send(ctx, f.ID, turn); err != nil {
 						return noticeMsg{text: sanitize(err.Error()), isErr: true}
 					}

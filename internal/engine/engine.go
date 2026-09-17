@@ -1053,6 +1053,14 @@ func (e *Engine) startAutonomous(s *Session) {
 	e.flushEnvNotices(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventStarted})
 
+	// Only a stage's writer answers the human's spec comments: a critique
+	// judges what was written, a rebase resolves conflicts, and verify
+	// checks the result — any of them taking the comments would act on
+	// them in the wrong pass.
+	if !s.Critique && !s.Rebase && (s.Feature.Stage == domain.StagePlan || s.Feature.Stage == domain.StageImplement) {
+		s.specComments = e.openSpecComments(s.Feature)
+	}
+
 	// The kickoff is gummi's own turn, not the user's, on this loop the
 	// same as the interactive one (see startInteractive's appendSystem):
 	// it's boilerplate gummi composed, with any review note the user

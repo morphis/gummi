@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -235,5 +236,49 @@ func TestRequestChangesSendsToAgent(t *testing.T) {
 			t.Fatalf("the comments never reached the live session as a user turn: %+v", eng.Get("FD-001").Snapshot().Transcript)
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+func TestRequestChangesHoldsCommentsFromCritique(t *testing.T) {
+	// a critique running on the card is not the plan's writer: R must not
+	// hand the architect's comments to the reviewer mid-pass. They stay
+	// open in the spec for the next writer run to pick up.
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role != agent.RoleReviewer {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		// no idle event: the critique stays running
+		return []agent.Event{{Kind: agent.EventMessage, Text: "Reading the plan."}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	if err := eng.RunCritique(m.rows[0].F, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitLive(t, eng, "FD-001")
+
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'c', Text: "c"})
+	m = typeString(t, m, "take the version from the env script")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	if !strings.Contains(m.notice.text, "plan critique is running") || !strings.Contains(m.notice.text, "held for the next plan run") {
+		t.Errorf("notice = %q, want it to say the comment is held from the critique", m.notice.text)
+	}
+	snap := eng.Get("FD-001").Snapshot()
+	if !snap.Critique {
+		t.Fatalf("R replaced the critique session: %+v", snap)
+	}
+	for _, msg := range snap.Transcript {
+		if strings.Contains(msg.Content, "env script") {
+			t.Fatalf("the comment reached the reviewer: %+v", snap.Transcript)
+		}
+	}
+	raw, err := os.ReadFile(m.spec.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(userOpenThreads(spec.Parse(string(raw)))); n != 1 {
+		t.Errorf("open comments = %d, want the held one still open", n)
 	}
 }

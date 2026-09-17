@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -25,26 +24,9 @@ func userMarker(t spec.Thread) *spec.Marker { return spec.UnresolvedUserMarker(t
 
 // compileOpenQuestions builds a structured turn from a spec's open
 // user annotations for the responsible role (DESIGN §6.1). Returns ""
-// when the human has no open comments.
-func compileOpenQuestions(doc spec.Doc) string {
-	threads := userOpenThreads(doc)
-	if len(threads) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Please address these review comments in the spec. ")
-	b.WriteString("For each, edit the relevant section and mark it resolved with a line like ")
-	b.WriteString("`%% @architect: resolved — <how>`:\n\n")
-	for _, t := range threads {
-		mk := userMarker(t)
-		q := mk.Text
-		if q == "" {
-			q = "(see the marker)"
-		}
-		fmt.Fprintf(&b, "- L%d: %s\n", mk.Line, q)
-	}
-	return b.String()
-}
+// when the human has no open comments. The engine owns the wording, so a
+// live turn and a writer's kickoff say the same thing.
+func compileOpenQuestions(doc spec.Doc) string { return engine.CompileSpecComments(doc) }
 
 // requestSpecChanges compiles the artifact's open questions into a turn
 // and sends it to the responsible agent (DESIGN §6.1). Interactive
@@ -71,9 +53,11 @@ func (m *Shell) requestSpecChanges(sv *specView) tea.Cmd {
 }
 
 // sendChangesToAutonomous delivers review comments to an autonomous
-// stage: a running session gets them as a live turn (in-context, no
-// restart); a finished or paused one is re-run with them appended to
-// its kickoff, so the stage re-gates when it completes. A queued run
+// stage: a running stage writer gets them as a live turn (in-context, no
+// restart); a critique or rebase pass does not take them at all — they
+// stay open in the spec, holding the gate, and the writer's next run
+// reads them in its kickoff (see heldForWriter); a finished or paused
+// one is re-run with them appended to its kickoff, so the stage re-gates when it completes. A queued run
 // hasn't started yet and reads the artifact — with the comments already
 // in it — when it does.
 func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) tea.Cmd {
@@ -82,6 +66,9 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 		if s := m.engine.Get(f.ID); s != nil {
 			switch s.State() {
 			case engine.StateRunning, engine.StateInteractive:
+				if held := heldForWriter(s.Snapshot(), f, n, "comment"); held != "" {
+					return noticeMsg{text: held}
+				}
 				// a session the user attached takes the turn in-context too:
 				// Send accepts both states, and re-running a stage the user
 				// is sitting in front of would throw its context away.
@@ -98,6 +85,26 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d review comment(s)", f.ID, f.Stage, n), reload: true}
 	}
+}
+
+// heldForWriter returns the notice for comments that must not go to the
+// running session because it is not the stage's writer — a critique
+// judging what the writer produced, or a rebase resolving conflicts — or
+// "" when it is the writer and the comments can go to it live. A comment
+// delivered to a critique mid-pass is acted on in the wrong phase: the
+// reviewer reads an instruction meant for the architect and judges a
+// plan nobody has revised yet.
+func heldForWriter(snap engine.Snapshot, f domain.Feature, n int, what string) string {
+	var pass string
+	switch {
+	case snap.Critique:
+		pass = "the " + string(f.Stage) + " critique"
+	case snap.Rebase:
+		pass = "a rebase"
+	default:
+		return ""
+	}
+	return fmt.Sprintf("%s: %s is running — %d %s%s held for the next %s run", f.ID, pass, n, what, plural(n), f.Stage)
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored
