@@ -419,6 +419,18 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"duplicate", "", "duplicate", "duplicate as a fresh card in todo (this card stays)", false,
 			true,
 		},
+		// Offered only once the card has ended, which is the whole point
+		// of it: before then, work that is not this card's opens a new
+		// card through the composer, and rework on this one is a bounce.
+		// Afterwards neither is reachable, and this is the only door left.
+		// Keyless for the same reason duplicate is — the board's lowercase
+		// letters are spent, and the closing block puts the row on screen
+		// at exactly the moment it is wanted.
+		{
+			"newbug", "", "open a bug from this",
+			"a fresh bug card carrying this card's spec, branch and thread", false,
+			(doneStage || r.Landed) && in.kind != domain.KindGoal,
+		},
 		{
 			"delete", "D", "delete", "remove the worktree, branch, and record — irrecoverable", true,
 			true,

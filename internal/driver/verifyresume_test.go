@@ -56,8 +56,8 @@ func TestResumeHonoursAVerifyAlreadyPassed(t *testing.T) {
 		t.Errorf("verify ran %d more time(s) — the resume paid again for a verdict "+
 			"already in the store", verifyRuns)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Errorf("status = %q, want %q — the card had already passed verify",
-			out.Status, StatusDone)
+			out.Status, StatusVerified)
 	}
 }

@@ -196,7 +196,7 @@ func TestBuildStatusVerified(t *testing.T) {
 	feat := f.mkVerifyFeature(t)
 
 	// mid-verify: the branch is already ahead, but the verify gate has not
-	// been crossed → not verified, not done.
+	// been crossed → not verified, and no ending.
 	v := buildStatus(f.ctx, f.store, f.wt, f.ws, &feat)
 	if v.BranchState != "ahead" {
 		t.Fatalf("branch_state = %q, want ahead (setup)", v.BranchState)
@@ -204,8 +204,8 @@ func TestBuildStatusVerified(t *testing.T) {
 	if v.Verified {
 		t.Fatal("verified=true mid-verify: false positive on an ahead branch")
 	}
-	if v.Done {
-		t.Fatal("done=true before any merge")
+	if v.Ending != domain.EndingNone {
+		t.Fatalf("ending=%q before any merge", v.Ending)
 	}
 
 	// the engine stamps this marker when it reaches the stop-at-verified gate.
@@ -220,8 +220,8 @@ func TestBuildStatusVerified(t *testing.T) {
 	if !v.Verified {
 		t.Fatal("verified=false at the terminal verified-branch state")
 	}
-	if v.Done {
-		t.Fatal("done=true without a merge — verified is not done")
+	if v.Ending != domain.EndingNone {
+		t.Fatalf("ending=%q without a merge — verified is not an ending", v.Ending)
 	}
 }
 

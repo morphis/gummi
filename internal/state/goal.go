@@ -219,8 +219,8 @@ func (s *Store) SetGoalDropped(ctx context.Context, card domain.FeatureID, at ti
 }
 
 // CloseGoalDropped ends a card its goal dropped: it moves straight to
-// done, stamped handed off (its branch is kept, nothing lands), with one
-// transition and gate crossing from wherever it stood. It deliberately
+// done — its branch kept, nothing landed — with one transition and gate
+// crossing from wherever it stood. It deliberately
 // skips the workflow's one-step-at-a-time rule — a dropped card did not
 // pass the stages between, and walking it through them would record
 // crossings that never happened. Moving off its stage abandons whatever
@@ -242,8 +242,13 @@ func (s *Store) CloseGoalDropped(ctx context.Context, card domain.FeatureID, act
 		return nil
 	}
 	now := at.UTC().Format(timeFmt)
-	if _, err := tx.ExecContext(ctx, `UPDATE features SET stage = ?, handed_off_at = ?, updated_at = ? WHERE id = ?`,
-		string(domain.StageDone), now, now, string(card)); err != nil {
+	// The stage alone. This used to stamp handed_off_at too, purely to get
+	// the card past Advance's landing floor — so every surface afterwards
+	// reported a card nobody had handed off as handed off (`done: true,
+	// handed_off: true`, no branch, zero credits). The floor reads
+	// goal_dropped_at directly now, and the drop keeps its own name.
+	if _, err := tx.ExecContext(ctx, `UPDATE features SET stage = ?, updated_at = ? WHERE id = ?`,
+		string(domain.StageDone), now, string(card)); err != nil {
 		return fmt.Errorf("closing %s: %w", card, err)
 	}
 	if _, err := tx.ExecContext(ctx,

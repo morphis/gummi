@@ -441,7 +441,7 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 // the same floor Advance does (a verified branch with no open blockers) plus
 // message validation, and performs zero git mutations on any precondition or
 // validation failure. On success it emits a `merged` event carrying the
-// landed commit's sha and returns StatusDone.
+// landed commit's sha and returns StatusVerified.
 func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
@@ -543,14 +543,14 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 		}
 	}
 	d.out.emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha})
-	return Outcome{Status: StatusDone, ID: string(id)}, nil
+	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
 // Clean removes a landed card's worktree and branch — the headless
 // counterpart of the TUI's c key. It keeps the card record (it stays as a
 // done entry) and never removes anything that has not actually landed or
 // that carries tracked-dirty rework. On success it emits a `cleaned` event
-// and returns StatusDone.
+// and returns StatusVerified.
 func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error) {
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
@@ -602,7 +602,7 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 		}
 	}
 	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName()})
-	return Outcome{Status: StatusDone, ID: string(id)}, nil
+	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
 // HandOff ends a card without landing it — the headless counterpart of the
@@ -639,7 +639,7 @@ func (d *Driver) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, err
 			return d.fail(ctx, string(id), handOffRefusal(id, res))
 		}
 		d.out.emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
-		return Outcome{Status: StatusDone, ID: string(id)}, nil
+		return Outcome{Status: StatusVerified, ID: string(id)}, nil
 	}
 	// the verified-branch precondition, the same one Merge applies: this
 	// verb ends a card that finished, not one abandoned mid-flight.
@@ -656,7 +656,7 @@ func (d *Driver) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, err
 		return d.fail(ctx, string(id), handOffRefusal(id, res))
 	}
 	d.out.emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
-	return Outcome{Status: StatusDone, ID: string(id)}, nil
+	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
 // handOffRefusal turns a non-advancing gate result into the sentence a
@@ -726,14 +726,14 @@ func (d *Driver) Squash(ctx context.Context, id domain.FeatureID, message string
 		return d.fail(ctx, string(id), err)
 	}
 	if sha == "" {
-		return Outcome{Status: StatusDone, ID: string(id)}, nil
+		return Outcome{Status: StatusVerified, ID: string(id)}, nil
 	}
 	d.out.emit(squashedEvent{
 		Event: "squashed", ID: string(id), Branch: f.BranchName(),
 		BeforeSHA: beforeSHA, AfterSHA: sha, BaseSHA: base,
 		MessageSubject: commitSubject(message),
 	})
-	return Outcome{Status: StatusDone, ID: string(id)}, nil
+	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
 // Commit commits exactly the target card's own uncommitted worktree changes
@@ -745,7 +745,7 @@ func (d *Driver) Squash(ctx context.Context, id domain.FeatureID, message string
 // stray changes. It composes with Squash to replace the raw-git "commit the
 // stray changes, then collapse" workaround a PR-linked card with a dirty
 // worktree otherwise needs. A clean worktree is a no-op, reported as
-// StatusDone with no `committed` event, not an error.
+// StatusVerified with no `committed` event, not an error.
 func (d *Driver) Commit(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
@@ -765,7 +765,7 @@ func (d *Driver) Commit(ctx context.Context, id domain.FeatureID, message string
 		return d.fail(ctx, string(id), err)
 	}
 	if !committed {
-		return Outcome{Status: StatusDone, ID: string(id)}, nil
+		return Outcome{Status: StatusVerified, ID: string(id)}, nil
 	}
 
 	sha, err := wt.Head(ctx, &f)
@@ -773,7 +773,7 @@ func (d *Driver) Commit(ctx context.Context, id domain.FeatureID, message string
 		return d.fail(ctx, string(id), err)
 	}
 	d.out.emit(committedEvent{Event: "committed", ID: string(id), Branch: f.BranchName(), Commit: sha})
-	return Outcome{Status: StatusDone, ID: string(id)}, nil
+	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
 // commitSubject returns msg's first line — the subject a squashed/merged
@@ -1620,10 +1620,10 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 	}
 	if f.InGoal() && f.Stage != domain.StageDone {
 		// a goal card's verified branch is its goal's to land, not a stop
-		// for a person: no park, and no `done` a caller could mistake for
-		// the goal's own
-		d.out.emit(verifiedEvent{Event: "verified", ID: string(f.ID), Goal: string(f.GoalID), Branch: f.BranchName(), Spent: f.Spend.Credits})
-		return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
+		// for a person: no park, and no terminal event a caller could
+		// mistake for the goal's own
+		d.out.emit(cardVerifiedEvent{Event: "card_verified", ID: string(f.ID), Goal: string(f.GoalID), Branch: f.BranchName(), Spent: f.Spend.Credits})
+		return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
 	}
 	d.logPark(f, state.ParkReasonNeedsYou, "reached the landing gate — the branch is ready to merge.")
 	// The card's own rework total, not this process's: a card driven over
@@ -1633,8 +1633,8 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 	if err != nil {
 		corrective = 0
 	}
-	ev := doneEvent{
-		Event: "done", ID: string(f.ID), Branch: f.BranchName(),
+	ev := verifiedEvent{
+		Event: "verified", ID: string(f.ID), Branch: f.BranchName(),
 		Spec: f.ArtifactPath(), Spent: f.Spend.Credits, ReviewRounds: d.reviewsRun,
 		CorrectiveRounds: corrective,
 		UnprovenFiles:    unprovenPaths(f),
@@ -1645,7 +1645,7 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 		ev.Goal = d.goalDone(ctx, f)
 	}
 	d.out.emit(ev)
-	return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
+	return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
 }
 
 // unprovenPaths reads verify's UNPROVEN declarations off the card's

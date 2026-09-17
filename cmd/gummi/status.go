@@ -77,30 +77,24 @@ type statusView struct {
 	BranchState string         `json:"branch_state"`
 	// Verified is true once the verify gate has passed and the branch is
 	// ready to land — the headless driver's stop-at-verified terminal state.
-	// Distinct from Done (== merged): a CI caller polls `verified` to know a
-	// run reached its verified branch, since the headless driver never merges.
+	// Distinct from an ending: a CI caller polls `verified` to know a run
+	// reached its verified branch, since the headless driver never merges.
 	Verified bool `json:"verified"`
-	// Done means the card is CLOSED, not that anything merged. It used to
-	// mean both, because the only way out of verify was a squash merge;
-	// two of the three endings a verified card now has reach done without
-	// gummi merging anything (a landing on GitHub, and a hand-off). A
-	// caller that wants "is this on the base branch" reads branch_state
-	// ("landed"), not this.
-	Done bool `json:"done"`
-	// HandedOff is true when the card was closed with its branch
-	// deliberately left unlanded — the third ending, where the caller owns
-	// whatever happens to the branch next. A done card is landed, handed
-	// off, or ended through its PR; this is the one of the three the store
-	// records directly.
-	HandedOff bool `json:"handed_off"`
-	// Dropped is true when this card's goal dropped it: it was minted for
-	// the goal, never finished, and closed when the goal wrapped up. The
-	// store closes such a card the way a hand-off closes one — branch
-	// kept, nothing landed — so HandedOff is true for it too, and a caller
-	// counting hand-offs used to count a card that never ran as completed
-	// work. On the lxd autopilot drive BG-003 reported `done: true,
-	// handed_off: true` with 0 credits spent and no branch at all.
-	Dropped bool `json:"dropped,omitempty"`
+	// Ending is how the card left gummi: "landed", "handed_off",
+	// "dropped", or empty while it is still open. One field, because the
+	// question it answers is one question.
+	//
+	// It replaces `done` and `handed_off`. Those were two booleans naming
+	// one fact, and naming it badly: `done` meant "closed", not "merged",
+	// while the headless run's own `done` meant "a verified branch is
+	// ready" — and a card its goal dropped reported `handed_off: true`
+	// because the drop borrowed that stamp to cross the landing floor. On
+	// the lxd autopilot drive BG-003 reported `done: true, handed_off:
+	// true` with 0 credits spent and no branch at all.
+	//
+	// "is the card closed" is `stage == "done"`. "is the work on the base
+	// branch" is `branch_state == "landed"`, which it always was.
+	Ending domain.Ending `json:"ending,omitempty"`
 	// Running reports whether something is currently driving this card:
 	// either the pid recorded at this card's pid file
 	// (.gummi/state/locks/<id>.pid) is still alive — a headless run/resume
@@ -242,6 +236,11 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		route = "full"
 	}
 	sq, dq := gateBlockers(ctx, store, wt, ws, f)
+	// One branch query, read twice: branch_state is the field, and its
+	// "landed" answer is also the one fact domain.Ending cannot derive
+	// from the record — a branch that reached the base branch through a
+	// merged PR or a hand merge leaves no LandedSHA behind.
+	bs := branchState(ctx, wt, f)
 	return statusView{
 		ID:              string(f.ID),
 		Ref:             f.ExternalRef,
@@ -252,11 +251,9 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		Blockers:        statusBlockers{OpenQuestions: sq, OpenDiff: dq},
 		Spend:           statusSpend{Credits: f.Spend.Credits, Envelope: f.Budget.Envelope},
 		Branch:          f.BranchName(),
-		BranchState:     branchState(ctx, wt, f),
+		BranchState:     bs,
 		Verified:        !f.VerifiedAt.IsZero(),
-		Done:            f.Stage == domain.StageDone,
-		HandedOff:       f.HandedOff(),
-		Dropped:         f.GoalDropped(),
+		Ending:          f.Ending(bs == "landed"),
 		Running:         cardRunning(ws, f.ID),
 		PullRequest:     f.PullRequest.StatusPayload(),
 		PullRequestLine: f.PullRequest.PlainLine(),
@@ -472,22 +469,26 @@ func renderStatus(w io.Writer, v statusView) {
 		fmt.Fprintf(w, "  Unproven: %s (changed, but no check that ran exercised them)\n",
 			strings.Join(paths, ", "))
 	}
-	switch {
-	case v.Dropped:
-		// A card its goal dropped is closed through the same store path a
-		// hand-off uses, so it used to print "handed off — <branch> kept",
-		// two lines under a Branch line reading "(none)" — a branch that
-		// was never created, described as kept. Say what happened instead.
+	// Under Verified for the same reason Excused is: it qualifies what
+	// happened after the pass.
+	switch v.Ending {
+	case domain.EndingDropped:
+		// A dropped card may never have had a branch at all, and saying
+		// "<branch> kept" two lines under a Branch line reading "(none)"
+		// describes a branch that was never created as kept.
 		if v.BranchState == "none" || v.Branch == "" {
 			fmt.Fprintf(w, "  Ending:   dropped by %s — it never started, nothing was kept\n", goalOrItsGoal(v))
 		} else {
 			fmt.Fprintf(w, "  Ending:   dropped by %s — %s kept, nothing landed\n", goalOrItsGoal(v), v.Branch)
 		}
-	case v.HandedOff:
-		// Under Verified for the same reason Excused is: it qualifies what
-		// happened after the pass. Only on a handed-off card — every other
-		// card's ending is already legible from Stage and the branch state.
+	case domain.EndingHandedOff:
 		fmt.Fprintf(w, "  Ending:   handed off — %s kept, nothing landed\n", v.Branch)
+	case domain.EndingLanded:
+		// Landing used to be the one ending that said nothing here, on the
+		// grounds that Stage and branch_state already implied it. They
+		// imply it; they do not name it, and a reader scanning for the
+		// Ending line on a landed card found no line at all.
+		fmt.Fprintf(w, "  Ending:   landed — %s is merged\n", v.Branch)
 	}
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
 	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)

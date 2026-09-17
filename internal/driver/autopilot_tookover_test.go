@@ -79,7 +79,7 @@ func TestUnattendedRunLogsTookOver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v; stream=%v", err, h.eventKinds())
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 

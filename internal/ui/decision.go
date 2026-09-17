@@ -23,6 +23,11 @@ const (
 	decisionBudget  decisionKind = "budget"
 	decisionFailure decisionKind = "failure"
 	decisionIdle    decisionKind = "idle"
+	// decisionClosed is a card that has ended. It is a decision in the
+	// same sense the others are — it names what is true and offers the
+	// answers that remain — but the thing it reports has already
+	// happened, so its head is a statement rather than a question.
+	decisionClosed decisionKind = "closed"
 )
 
 // threadDecision is a render-time projection, not a second stored model.
@@ -79,11 +84,17 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	// Rendering those here is what made the control a flat list of
 	// equal-weight options in the first place (nextsteps.go's own doc).
 	actions := stageActions(in)
-	if len(actions) == 0 || in.landed || in.stage == domain.StageDone {
+	if len(actions) == 0 {
 		return nil
 	}
 	kind := decisionIdle
 	switch {
+	// First, because a closed card is not any of the states below and
+	// used to be excluded here rather than classified: this arm and
+	// stageActions' own closed arm are what put a finished card's ending
+	// and its remaining answers on the page at all.
+	case in.closed():
+		kind = decisionClosed
 	case in.attn == attnFailure:
 		kind = decisionFailure
 	case in.attn == attnBudget:
@@ -176,7 +187,11 @@ func (d *threadDecision) wordConsumer() int {
 		return -1
 	}
 	for i, action := range d.actions {
-		if action.id == "run" || action.id == "bounce" || action.id == "changes" {
+		// newbug joins the three for the same reason they are here: its
+		// row IS the composer's words. On a closed card the line someone
+		// types is what is wrong with the work, and the follow-up card is
+		// where that sentence belongs.
+		if action.id == "run" || action.id == "bounce" || action.id == "changes" || action.id == "newbug" {
 			return i
 		}
 	}
@@ -379,8 +394,30 @@ func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, pi
 	return out
 }
 
+// endingWord is the ending as the head of a closed decision says it —
+// the same word the board badges, so the row and the page a reader opens
+// from it agree. Spelled out rather than taken from the domain constant
+// because handed_off is a wire value and this is a sentence.
+func endingWord(e domain.Ending) string {
+	switch e {
+	case domain.EndingLanded:
+		return "landed"
+	case domain.EndingHandedOff:
+		return "handed off"
+	case domain.EndingDropped:
+		return "dropped"
+	}
+	return "nothing landed"
+}
+
 func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	switch kind {
+	case decisionClosed:
+		// A statement, not a question. Every other head here asks a
+		// person for something; this one tells them what happened and
+		// then offers whatever is still open. Phrasing it as a question
+		// ("what now?") would invite a decision the card no longer has.
+		return string(r.F.ID) + " is closed — " + endingWord(in.ending) + "."
 	case decisionBudget:
 		return string(r.F.Stage) + " ran out of budget."
 	case decisionVerify:

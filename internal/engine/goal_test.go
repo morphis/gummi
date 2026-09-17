@@ -311,9 +311,18 @@ func TestStopGoalDropsUnfinishedWorkAndFinishesPartial(t *testing.T) {
 		if !c.GoalDropped() {
 			t.Fatalf("%s should be dropped", c.ID)
 		}
-		// a card the goal made and dropped is closed, not left in flight
-		if c.Stage != domain.StageDone || !c.HandedOff() {
-			t.Fatalf("%s is closed with its branch kept: stage %s handed off %v", c.ID, c.Stage, c.HandedOff())
+		// a card the goal made and dropped is closed, not left in flight —
+		// and closed as DROPPED. It used to borrow the hand-off stamp to
+		// clear Advance's landing floor, so every surface afterwards
+		// reported a card nobody handed off as handed off.
+		if c.Stage != domain.StageDone {
+			t.Fatalf("%s is closed: stage %s", c.ID, c.Stage)
+		}
+		if c.HandedOff() {
+			t.Fatalf("%s is dropped, not handed off: handed_off_at is stamped", c.ID)
+		}
+		if got := c.Ending(false); got != domain.EndingDropped {
+			t.Fatalf("%s ending = %q, want dropped", c.ID, got)
 		}
 	}
 	open, _ := store.OpenDecisions(ctx)

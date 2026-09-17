@@ -68,7 +68,7 @@ func TestNestedLayoutEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	id := domain.FeatureID(out.ID)
@@ -86,12 +86,12 @@ func TestNestedLayoutEndToEnd(t *testing.T) {
 	d := h.driver(Options{})
 	if out, err := d.Merge(context.Background(), id, "feat(nested): land the nested end-to-end card"); err != nil {
 		t.Fatalf("Merge: %v", err)
-	} else if out.Status != StatusDone {
+	} else if out.Status != StatusVerified {
 		t.Fatalf("merge status = %q, want done", out.Status)
 	}
 	if out, err := d.Clean(context.Background(), id); err != nil {
 		t.Fatalf("Clean: %v", err)
-	} else if out.Status != StatusDone {
+	} else if out.Status != StatusVerified {
 		t.Fatalf("clean status = %q, want done", out.Status)
 	}
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {

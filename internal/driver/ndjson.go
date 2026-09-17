@@ -319,7 +319,7 @@ type stoppedEvent struct {
 	Next   string `json:"next,omitempty"`
 }
 
-type doneEvent struct {
+type verifiedEvent struct {
 	Event  string  `json:"event"`
 	ID     string  `json:"id"`
 	Branch string  `json:"branch"`
@@ -355,10 +355,11 @@ type doneEvent struct {
 	Goal *goalDoneEvent `json:"goal,omitempty"`
 }
 
-// verifiedEvent reports a goal card reaching its verified branch: its goal
-// lands it on the goal branch next. It stands in for `done`, which is the
-// goal's own terminal event.
-type verifiedEvent struct {
+// cardVerifiedEvent reports a goal card reaching its verified branch: its
+// goal lands it on the goal branch next. It is a notification mid-run, not
+// a terminal event — the run continues afterwards — which is why it does
+// not share a name with the `verified` the run itself ends on.
+type cardVerifiedEvent struct {
 	Event  string  `json:"event"`
 	ID     string  `json:"id"`
 	Goal   string  `json:"goal"`

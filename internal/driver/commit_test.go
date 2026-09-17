@@ -42,7 +42,7 @@ func TestDriverCommitCommitsDirtyWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 
@@ -66,7 +66,7 @@ func TestDriverCommitCommitsDirtyWorktree(t *testing.T) {
 }
 
 // TestDriverCommitNoopOnCleanWorktree proves a clean worktree is a no-op:
-// StatusDone, no `committed` event, and the branch tip unchanged.
+// StatusVerified, no `committed` event, and the branch tip unchanged.
 func TestDriverCommitNoopOnCleanWorktree(t *testing.T) {
 	h, d, id := driveVerified(t)
 	f, err := h.store.GetFeature(context.Background(), id)
@@ -83,7 +83,7 @@ func TestDriverCommitNoopOnCleanWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if lastEvent(h, "committed") != nil {

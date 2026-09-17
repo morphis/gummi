@@ -314,13 +314,18 @@ func TestBacklogBindingsMatchTheLevel(t *testing.T) {
 	assertLabel(t, bs, "esc", "board")
 	assertLabel(t, bs, "J/K", "prev/next")
 
-	// with no decision open (a done card), enter is back to send: a bare
-	// composer means exactly one thing — nothing is waiting on a person
+	// a DONE card carries a decision of its own now — the closing block —
+	// so enter names that block's first row rather than "send". The rule
+	// is unchanged and this is the rule applying: the bar says where enter
+	// actually goes, and on a finished card it goes to the follow-up,
+	// which is the row the composer's line feeds (decision.go's
+	// wordConsumer). A finished card is not a card with nothing waiting on
+	// a person; it is a card whose last question is "and now?".
 	m.threadInput.Focus()
 	m.sel = 5 // FD-039, done
 	_, bs = m.activeSurface()
-	assertLabel(t, bs, "enter", "send")
-	assertLabel(t, bs, "↑", "actions")
+	assertLabel(t, bs, "enter", "open a bug from this")
+	assertLabel(t, bs, "↑↓", "choose")
 }
 
 func assertNoKey(t *testing.T, bs []binding, key string) {

@@ -265,7 +265,7 @@ func TestResumeApproveMintsPendingDecompose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume --approve: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	feats, _ := h.store.ListFeatures(context.Background())
@@ -434,7 +434,7 @@ func TestZeroSliceRSExitsDoneCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("autoAdvance: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	if h.has("question") {
@@ -471,7 +471,7 @@ func TestAutoTriggerFiresExactlyOncePerCrossing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("drive: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if len(prompts) != 1 {

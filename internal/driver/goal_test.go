@@ -80,7 +80,7 @@ func TestDriveGoalEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("drive: %v\n%s", err, h.buf.String())
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %s\n%s", out.Status, h.buf.String())
 	}
 
@@ -106,26 +106,27 @@ func TestDriveGoalEndToEnd(t *testing.T) {
 		}
 	}
 
-	// the stream: the cards verified (not `done`), the goal ticked, and
-	// the single `done` is the goal's, carrying its hand-over
+	// the stream: the cards emit `card_verified` (a notification, not a
+	// terminal event), the goal ticked, and the single terminal `verified`
+	// is the goal's own, carrying its hand-over
 	var dones, verifieds, ticks int
 	var goalDone map[string]any
 	for _, ev := range h.events() {
 		switch ev["event"] {
-		case "done":
+		case "verified":
 			dones++
 			goalDone = ev
-		case "verified":
+		case "card_verified":
 			verifieds++
 		case "goal":
 			ticks++
 		}
 	}
 	if dones != 1 || verifieds != 2 || ticks == 0 {
-		t.Fatalf("done %d verified %d goal ticks %d\n%s", dones, verifieds, ticks, h.buf.String())
+		t.Fatalf("verified %d card_verified %d goal ticks %d\n%s", dones, verifieds, ticks, h.buf.String())
 	}
 	if goalDone["id"] != string(g.ID) {
-		t.Fatalf("the done event is the goal's: %v", goalDone)
+		t.Fatalf("the terminal verified event is the goal's: %v", goalDone)
 	}
 	gd, _ := goalDone["goal"].(map[string]any)
 	if gd == nil || gd["done_when_met"].(float64) != 2 || gd["done_when_total"].(float64) != 2 {
@@ -135,7 +136,7 @@ func TestDriveGoalEndToEnd(t *testing.T) {
 	// landing: one merge commit on main over both card commits
 	h.buf.Reset()
 	mout, err := h.driver(Options{}).Merge(ctx, g.ID, "")
-	if err != nil || mout.Status != StatusDone {
+	if err != nil || mout.Status != StatusVerified {
 		t.Fatalf("merge: %v %v\n%s", mout.Status, err, h.buf.String())
 	}
 	for _, name := range []string{"cache.txt", "flag.txt"} {
@@ -198,7 +199,7 @@ func TestDriveGoalThatCannotMeetAnItemEndsPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := d.Drive(ctx, g)
-	if err != nil || out.Status != StatusDone {
+	if err != nil || out.Status != StatusVerified {
 		t.Fatalf("status %s err %v\n%s", out.Status, err, h.buf.String())
 	}
 	got, _ := h.store.GetFeature(ctx, g.ID)
@@ -207,7 +208,7 @@ func TestDriveGoalThatCannotMeetAnItemEndsPartial(t *testing.T) {
 	}
 	var goalDone map[string]any
 	for _, ev := range h.events() {
-		if ev["event"] == "done" {
+		if ev["event"] == "verified" {
 			goalDone = ev
 		}
 	}

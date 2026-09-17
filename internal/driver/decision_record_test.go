@@ -62,7 +62,7 @@ func TestCallerGateRecordsItsDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume --approve: %v; stream=%v", err, h.eventKinds())
 	}
-	if out2.Status != StatusDone {
+	if out2.Status != StatusVerified {
 		t.Fatalf("approve status = %q, want done; stream=%v", out2.Status, h.eventKinds())
 	}
 

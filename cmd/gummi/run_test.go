@@ -130,7 +130,7 @@ func TestRunUntilValidation(t *testing.T) {
 // driverExit maps each terminal status to its process exit code, and done
 // to a clean (nil) return.
 func TestDriverExitMapping(t *testing.T) {
-	if err := driverExit(driver.Outcome{Status: driver.StatusDone}, nil); err != nil {
+	if err := driverExit(driver.Outcome{Status: driver.StatusVerified}, nil); err != nil {
 		t.Fatalf("done → %v, want nil", err)
 	}
 	// --until's clean stop also exits 0 (nil return).

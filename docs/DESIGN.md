@@ -222,14 +222,29 @@ Stage semantics:
 
   Because of the last two, **Done means the card is closed, not that
   anything merged.** The board badges which ending a card took (`landed`
-  / `handed off`), and `status --json` carries `branch_state`,
-  `handed_off`, and `done` as three separate facts. gummi then offers
-  worktree cleanup + spec archival on a landed card.
+  / `handed off` / `dropped`), and `status --json` names it in one
+  `ending` field beside `branch_state` — "how did it close" and "is the
+  work on the trunk" being two different questions. gummi then offers
+  worktree cleanup on a landed card with `c`. The card's artifact stays at
+  its workspace home: "spec archival" was described here for a long time
+  and never built, and the artifact of a finished card is the thing a
+  follow-up reads, so there is nothing archival to do to it.
 
   One consequence is named at the hand-off confirm rather than blocked:
   a dependency is met at `Stage == done`, so handing a card off frees its
   dependents to start from a base branch that does not carry its work.
   The confirm names them; the choice is the user's.
+
+- **After done.** A finished card is not a silent one. Its page carries a
+  **closing block**: the ending and its date, the commit it became, what
+  became of its branch and worktree, what it cost and how much of that
+  was rework — every one of those facts already stored, and none of them
+  previously on any screen in the TUI. Beside it are the answers that
+  remain: clean up, land a handed-off card after all, and **open a bug
+  from this**, which mints a fresh BG card carrying
+  the parent's artifact, branch and thread (`FoundBy`) instead of making
+  someone retype them. Done stays terminal — the follow-up is new work
+  with its own spec, never a rewind.
 
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.
@@ -378,7 +393,7 @@ envelope that is gummi's real spend limiter.
   sentence in a prompt.
 - Handles: creation at spec-approval (drafts live in `.gummi/state/drafts/`
   until then), rebase-on-main helper, dirty-state detection, landed-branch
-  detection with worktree cleanup + spec archival.
+  detection with worktree cleanup.
 - Merge-conflict triage is itself a good `scribe`-role autonomous task later.
 
 ### 4.4 Permissions & sandboxing
@@ -2171,7 +2186,7 @@ caller branches on the result without parsing stdout:
 
 | exit | status | meaning |
 |---|---|---|
-| `0` | `done` | verified branch ready — report it, stop |
+| `0` | `verified` | verified branch ready — report it, stop |
 | `0` | `stopped` | `--until` reached its clean stop — `resume --approve` to continue |
 | `1` | `error` | setup/agent failure — nothing partial landed |
 | `2` | `question` | delegated `ask_user`, or a caller design gate awaiting a decision |
@@ -2180,10 +2195,14 @@ caller branches on the result without parsing stdout:
 | `5` | `exhausted` | the credit envelope ran dry |
 | `6` | `timeout` | a stage went quiet past the inactivity budget |
 
-The exit/event `done` above names the run outcome — *a verified branch is
-ready* — not a merge; it is deliberately distinct from `status --json`'s `done`
-field, which is true only once the branch is **merged**. A caller keying off a
-completed run should poll `status`'s `verified`, not its `done` (§14.1).
+The exit/event `verified` above names the run outcome — *a verified branch
+is ready* — not a merge, and not the card's own `done`. It used to be
+spelled `done` too, which left one word meaning "a branch is ready" in the
+exit table and "the card is closed" in the card model; the collision was
+documented rather than removed, and documenting a trap is not removing it.
+A run reaches `verified`; only a card is ever `done`. Inside a goal, a
+child card reaching its verified branch emits `card_verified` — a
+notification, not a terminal event.
 
 Long autonomous stretches (implement → critique → verify) carry no caller
 decisions under `auto`, so one `resume` streams that whole tail and returns

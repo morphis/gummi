@@ -195,7 +195,7 @@ and exits with a **typed status**. Branch on the exit code:
 
 | Exit | Status | What it means / your action |
 |------|--------|-----------------------------|
-| 0 | `done` | verified branch ready — report it upward, stop |
+| 0 | `verified` | verified branch ready — report it upward, stop |
 | 0 | `stopped` | clean `--until` stop — `resume <id> --approve` crosses the gate and continues |
 | 1 | `error` | setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event) |
 | 2 | `question` | a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>` |
@@ -214,7 +214,7 @@ gummi run --envelope N "<description>" > run.log; ec=$?
 ```
 
 (or `set -o pipefail` if you must pipe). Equivalently, the exit code is fully
-redundant with the stream: the **last NDJSON line's `event`** (`done`,
+redundant with the stream: the **last NDJSON line's `event`** (`verified`,
 `question`, `blocked`, `escalation`, `exhausted`, `timeout`, `stopped`,
 `error`) is the terminal status — parse that if you'd rather not depend on the
 shell.
@@ -224,7 +224,7 @@ Every resumable terminal event also carries a **`next`** field: the literal
 (free-form values you must supply appear as a `<placeholder>`, e.g. `--answer
 "<answer>"`, and `exhausted` pre-fills a doubled `--envelope`). Prefer running
 `next` verbatim over assembling the command yourself — it can't pick the wrong
-verb. `done` carries no `next` (nothing to resume); `blocked` carries none
+verb. `verified` carries no `next` (nothing to resume); `blocked` carries none
 because its next step is to resolve the threads, not a fixed command.
 
 The loop you run:
@@ -232,7 +232,7 @@ The loop you run:
 1. `gummi run --envelope N "<description>"` (add `--ref <id>` to correlate with
    your own tracker, `--acceptance <file|->` to seed the verification plan).
 2. Read the exit code:
-   - **done (0)** — parse the final `done` line for the branch; report it to your
+   - **verified (0)** — parse the final `verified` line for the branch; report it to your
      caller/human and stop. The branch is verified, not merged.
    - **question (2)** — a design decision was delegated to you. Answer from your
      **task context first**; if unsure, read the spec (`gummi spec <id>`) or diff
@@ -262,7 +262,7 @@ The loop you run:
      pre-id setup failure landed nothing (report it), but a mid-run failure
      can leave a durable, non-terminal card that a `gummi resume <id>` may
      finish — the error event's `resumable`/`stage` fields say which.
-3. After a `resume`, read the new exit code and repeat until `done`.
+3. After a `resume`, read the new exit code and repeat until `verified`.
 
 ### Before you retry: check `preconditions.check_running`
 
@@ -355,9 +355,9 @@ questions, reads their plans, and re-plans when a card gets stuck. Then it
 reviews and verifies the combined branch. The envelope is the goal's whole
 budget and a hard ceiling. While it runs, the stream carries `goal` events
 (what each step did) and `verified` events for its cards. A card's `verified`
-is not the goal's `done`.
+is not the goal's own `verified`.
 
-The run exits `done` (0) when the goal is ready for you. The `done` event's
+The run exits `verified` (0) when the goal is ready for you. The event's
 `goal` object says how many done-when items were met, whether the goal is
 `partial`, which cards landed and which were dropped, and carries the full
 report. `gummi status GL-NNN --json` has the same report under `goal`,
@@ -388,7 +388,7 @@ all its commits and passes the acceptance checks, but the card is still
 `stage: verify` with `verified: false` (e.g. `status <id>` shows it) — you don't
 have to re-run the whole verify stage. `gummi verify <id>` re-runs the spec's
 `gummi-checks` on the existing branch and, if they pass, finalizes the card
-(stamps `verified`, emits `done`, exit 0) with no fresh agent pass. If the
+(stamps `verified`, emits the `verified` event, exit 0) with no fresh agent pass. If the
 checks still fail it escalates (exit 4); if a cheap re-attach can't be trusted
 (not parked at verify, no checks) it exits 1 and points you back to `resume`.
 

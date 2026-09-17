@@ -134,6 +134,11 @@ the board. Then:
    hand it off instead: the card closes and the branch stays yours, to
    push, PR by hand or cherry-pick. Or merge outside gummi: it notices
    either way and offers cleanup with `c`.
+6. A finished card keeps its receipt. Open it and the page says how it
+   ended, which commit it became, where its branch is now and what it
+   cost — and offers what is left: clean up, land it after all, or open
+   a bug from it, which carries the spec, the branch and the thread into
+   a fresh card.
 
 The keys you need first:
 
@@ -296,7 +301,7 @@ it. `gummi status` says by how much when it happens.
 
 | exit | status | meaning |
 |---|---|---|
-| `0` | `done` / `stopped` / `said` | verified branch, `--until` stop, or `--say` reading |
+| `0` | `verified` / `stopped` / `said` | verified branch, `--until` stop, or `--say` reading |
 | `2` | `question` | a question or gate waits: `resume` with the matching flag |
 | `3` | `blocked` | open threads or an unmet dependency block a gate |
 | `4` | `escalation` | a retry cap or unclear verdict; a human should look |
@@ -304,8 +309,9 @@ it. `gummi status` says by how much when it happens.
 | `6` | `timeout` | a stage went quiet; resumable |
 | `1` | `error` | setup or agent failure; nothing partial landed |
 
-`status --json` says `verified:true` when the branch is ready to land and
-`done:true` once it is merged. A headless run stops at the first.
+`status --json` says `verified:true` when the branch is ready to land, and
+names how the card closed in one `ending` field — `landed`, `handed_off`
+or `dropped`. A headless run stops at the first.
 
 **Let your agent drive gummi.** `gummi skill install` writes a `SKILL.md`
 for Claude Code, Copilot CLI, Codex and opencode, generated from the

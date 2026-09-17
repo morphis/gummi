@@ -140,6 +140,40 @@ type nextInput struct {
 	// a reader about to go push something is not left to derive it. Empty
 	// only in a test scaffold, where keptBranch() says "the branch".
 	branch string
+
+	// --- what a finished card says about itself -------------------------
+	//
+	// A done card used to say nothing at all: both the answer set and the
+	// narration returned early for it, so the surface that holds every
+	// one of these facts showed none of them at the moment a reader came
+	// looking for exactly this.
+
+	// ending is how the card left gummi, resolved through the card's own
+	// predicate so the block, the board badge and `status` cannot
+	// disagree.
+	ending domain.Ending
+	// endedAt is when the card reached done, read from the transition
+	// record rather than from any one ending's stamp — a landing has no
+	// stamp of its own, and the transition is the fact all three share.
+	endedAt time.Time
+	// commit is the squash commit a landing created (LandedSHA). It has
+	// been recorded since the first merge and shown nowhere.
+	commit string
+	// spend is what the card cost, and corrective how many rounds of it
+	// were work done again.
+	spend      float64
+	corrective int
+	// droppedBy names the goal that dropped the card, empty otherwise.
+	droppedBy domain.FeatureID
+}
+
+// closed reports whether the card has ended — landed, or at done by any
+// route. It is the one predicate the three surfaces that used to test
+// this inline now share (the answer set, the narration, the decision), so
+// none of them can decide a finished card is finished and another decide
+// it is not.
+func (in nextInput) closed() bool {
+	return in.landed || in.stage == domain.StageDone
 }
 
 // keptBranch names the branch a hand-off keeps, falling back to the
@@ -241,6 +275,27 @@ func stageExited(events []state.CardEvent, hist []state.TransitionRecord, stage 
 	return verdictUnclear, false
 }
 
+// doneAt is when the card reached done, from the transitions table — the
+// LAST such edge, because a card can be closed, adopted back and closed
+// again, and the ending on screen is the current one.
+//
+// It is read from history rather than from an ending's own stamp because
+// only two of the three endings have one: a hand-off stamps HandedOffAt
+// and a drop stamps GoalDroppedAt, while a landing stamps only the
+// commit. The transition is the fact all three share. Zero when the
+// history does not reach done — a landed card still sitting at verify,
+// or a scaffold with no history at all — and every caller prints the
+// date only when it is non-zero.
+func doneAt(hist []state.TransitionRecord) time.Time {
+	var at time.Time
+	for _, t := range hist {
+		if t.To == domain.StageDone {
+			at = t.At
+		}
+	}
+	return at
+}
+
 // verifyBounces counts verify→work bounce edges in a feature's history:
 // each one is a verify failure someone sent back for rework. Derived
 // from the transitions table, so the count survives restarts. Verify
@@ -275,6 +330,12 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		excusedChecks:    m.excusedChecks[r.F.ID],
 		base:             m.baseBranch(r.F),
 		branch:           r.F.BranchName(),
+		ending:           r.F.Ending(r.Landed),
+		commit:           r.F.LandedSHA,
+		spend:            r.F.Spend.Credits,
+		corrective:       m.round(r.F.ID, domain.RoundKindCorrective),
+		droppedBy:        r.F.GoalID,
+		endedAt:          doneAt(r.History),
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
@@ -587,13 +648,10 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 // anywhere near it (DESIGN §6.3: the options are deterministic even
 // though the narration above them is not).
 func stageActions(in nextInput) []nextAction {
-	if in.landed {
-		a := nextStep("clean", "c", "clean up", "branch landed on "+in.landBase()+" — remove the worktree and branch")
-		a.danger = true
-		return []nextAction{a}
-	}
-	if in.stage == domain.StageDone {
-		return nil
+	// A card that has ended answers for its ending, not for its stage.
+	// Both halves of this used to be a bare return — see closedActions.
+	if in.closed() {
+		return closedActions(in)
 	}
 
 	// a scheduled or running agent owns the screen; only a blocking
@@ -925,6 +983,55 @@ func stageActions(in nextInput) []nextAction {
 		}, stopOrResume(in)...)
 	}
 	return nil
+}
+
+// closedActions is the answer set for a card that has ended.
+//
+// Both halves of this used to be a bare return: a landed card was offered
+// clean-up and nothing else, and a card at done was offered nothing at
+// all — so the page that holds the spec, the branch, the commit and the
+// whole history went silent at the one moment a reader opens it to ask
+// what happened. The rows differ by ending because the answers do: a
+// landed branch can be tidied away, a kept one can still be landed, and a
+// dropped card can be taken back.
+//
+// Deleting stays out of it: that verb is in the inventory under D, where
+// the destructive ones live, and a closing block offering "delete" as a
+// peer of "open a bug from this" invites the keypress it should be making
+// someone think about. Clean-up keeps the danger paint it has always had.
+func closedActions(in nextInput) []nextAction {
+	var out []nextAction
+	switch in.ending {
+	case domain.EndingHandedOff:
+		// m has always worked on a handed-off card, and the card it
+		// happened to has never said so. Landing it retracts the stamp.
+		out = append(out, nextStep("merge", "m", "land it after all",
+			"changed your mind — squash-merge "+in.keptBranch()+" onto "+in.landBase()))
+	}
+	// The follow-up, on every ending. A landed card that breaks ten
+	// minutes later is the most ordinary thing that happens after done,
+	// and the answer — a fresh bug card — was reachable only by pressing
+	// n and retyping context this card is already holding.
+	if in.kind != domain.KindGoal {
+		out = append(out, nextStep("newbug", "", "open a bug from this",
+			"a fresh bug card carrying this card's spec, branch and thread"))
+	}
+	// Clean-up last, because it is the destructive one and a destructive
+	// action never gets to be what enter runs by default.
+	//
+	// Gated on landed rather than on the worktree: Landed is only
+	// computed where a worktree exists (msgs.go's canHaveLanded), so it
+	// drops to false the moment clean-up removes one — which is exactly
+	// the moment there is nothing left to clean. A card whose ending is
+	// landed only because LandedSHA survives that removal is already
+	// tidy, and offering it the row would be offering a refusal.
+	if in.landed {
+		a := nextStep("clean", "c", "clean up",
+			"branch landed on "+in.landBase()+" — remove the worktree and branch")
+		a.danger = true
+		out = append(out, a)
+	}
+	return out
 }
 
 // answerIt is the row a pending ask_user gets in the workflow answer set.

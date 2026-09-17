@@ -82,7 +82,7 @@ func TestResumeOverridesPersistedGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done (override to autopilot crosses the gate); stream=%v", out.Status, h.eventKinds())
 	}
 	got, err := h.store.GetFeature(context.Background(), f.ID)
@@ -138,7 +138,7 @@ func TestHeadlessAdvanceBaselinesChecksAtWorktreeEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done (verify reattach on the baselined block); stream=%v", out.Status, h.eventKinds())
 	}
 }
@@ -182,7 +182,7 @@ func TestHeadlessAdvanceSurvivesDiscoveryBudgetExhaustion(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done (quick route stops at verified); stream=%v", out.Status, h.eventKinds())
 	}
 
@@ -240,7 +240,7 @@ func TestHeadlessAdvanceSurvivesDiscoveryStall(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done (quick route stops at verified); stream=%v", out.Status, h.eventKinds())
 	}
 
@@ -267,11 +267,11 @@ func TestVerifyReattachFinalizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
-	if !h.has("verify") || !h.has("done") {
-		t.Fatalf("missing verify/done milestones; stream=%v", h.eventKinds())
+	if !h.has("verify") || !h.has("verified") {
+		t.Fatalf("missing verify/verified milestones; stream=%v", h.eventKinds())
 	}
 	got := h.storeFeature(t)
 	if got.VerifiedAt.IsZero() {

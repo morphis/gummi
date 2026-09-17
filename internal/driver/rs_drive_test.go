@@ -108,14 +108,14 @@ func TestCreateResearchDrivesToDecomposeQuestion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume --approve: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	if lastEvent(h, "decompose_minted") == nil {
 		t.Fatalf("no decompose_minted event; stream=%v", h.eventKinds())
 	}
-	if lastEvent(h, "done") == nil {
-		t.Fatalf("no done event; stream=%v", h.eventKinds())
+	if lastEvent(h, "verified") == nil {
+		t.Fatalf("no verified event; stream=%v", h.eventKinds())
 	}
 	feats, err := h.store.ListFeatures(ctx)
 	if err != nil {

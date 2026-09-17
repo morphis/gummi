@@ -37,7 +37,7 @@ func driveVerified(t *testing.T) (*harness, *Driver, domain.FeatureID) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	return h, h.driver(Options{}), domain.FeatureID(out.ID)
@@ -55,7 +55,7 @@ func gitHead(t *testing.T, root string) string {
 
 // Merge lands a verified card: the stream carries a `merged` event whose
 // commit is the actual sha now on main, the card moves to done, and the
-// outcome is StatusDone (exit 0).
+// outcome is StatusVerified (exit 0).
 func TestMergeLandsVerifiedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	before := gitHead(t, h.root)
@@ -64,7 +64,7 @@ func TestMergeLandsVerifiedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if st := h.stageOf(id); st != domain.StageDone {
@@ -185,7 +185,7 @@ func TestMergeSucceedsAfterUnlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge after unlink: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 }
@@ -209,7 +209,7 @@ func TestCleanRemovesLandedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if ex, _ := h.wt.Exists(context.Background(), &f); ex {
@@ -303,7 +303,7 @@ func driveVerifiedNamed(t *testing.T) (*harness, *Driver, domain.FeatureID) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	return h, h.driver(Options{}), domain.FeatureID(out.ID)
@@ -324,7 +324,7 @@ func TestMergeLandsOnNamedRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if st := h.stageOf(id); st != domain.StageDone {
@@ -363,7 +363,7 @@ func TestCleanNamedRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if ex, _ := h.pool.Exists(context.Background(), &f); ex {

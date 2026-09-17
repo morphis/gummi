@@ -449,15 +449,15 @@ type cardStatusItem struct {
 	SpendCredits float64 `json:"spend_credits"`
 	Envelope     int     `json:"envelope"`
 	Verified     bool    `json:"verified"`
-	// Done means the card is CLOSED. A done card reached that state by
-	// landing, through its PR, or by hand-off — branch_state and
-	// handed_off say which; "done" alone has not meant "merged" since
-	// hand-off existed.
-	Done             bool `json:"done"`
-	HandedOff        bool `json:"handed_off"`
-	Running          bool `json:"running"`
-	OpenQuestions    int  `json:"open_questions"`
-	OpenDiffComments int  `json:"open_diff_comments"`
+	// Ending is how the card left gummi: "landed", "handed_off",
+	// "dropped", or empty while it is still open — the same word every
+	// other surface uses. It replaces the `done`/`handed_off` pair, which
+	// took two booleans to name one fact and still could not name a drop.
+	// "is the card closed" is stage == "done".
+	Ending           domain.Ending `json:"ending,omitempty"`
+	Running          bool          `json:"running"`
+	OpenQuestions    int           `json:"open_questions"`
+	OpenDiffComments int           `json:"open_diff_comments"`
 }
 
 // cardStatus answers card_status: the same snapshot `gummi status`
@@ -480,12 +480,13 @@ func (e *Engine) cardStatus(ctx context.Context, args json.RawMessage) (string, 
 	if kind == "" {
 		kind = domain.KindFeature
 	}
+	bs := workspaceBranchState(ctx, e.pool, &f)
 	item := cardStatusItem{
 		ID: string(f.ID), Kind: string(kind), Title: f.Title, Stage: string(f.Stage),
-		Branch: f.BranchName(), BranchState: workspaceBranchState(ctx, e.pool, &f),
+		Branch: f.BranchName(), BranchState: bs,
 		SpendCredits: f.Spend.Credits, Envelope: f.Budget.Envelope,
-		Verified: !f.VerifiedAt.IsZero(), Done: f.Stage == domain.StageDone,
-		HandedOff:        f.HandedOff(),
+		Verified:         !f.VerifiedAt.IsZero(),
+		Ending:           f.Ending(bs == "landed"),
 		Running:          state.ProcessAlive(state.ReadPIDFile(e.cfg.Workspace.PIDFile(f.ID))),
 		OpenQuestions:    specOpen,
 		OpenDiffComments: diffOpen,

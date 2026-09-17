@@ -337,9 +337,14 @@ type Feature struct {
 	// it stopped, spends nothing more, and no longer counts toward the
 	// goal. Zero on every card a goal has not dropped.
 	GoalDroppedAt time.Time
-	// FoundBy names the goal that filed this card as something real but
-	// outside its objective ("found along the way"). It is an open-board
-	// card, never worked by that goal.
+	// FoundBy names the CARD this one was filed from — provenance, not
+	// dependency: nothing about it blocks, schedules or orders work.
+	//
+	// It was written only by a goal at first ("found along the way": a
+	// goal filing something real but outside its objective, as an
+	// open-board card it never works), because a goal was the only thing
+	// that ever filed a card. A finished card's follow-up is the second,
+	// and it means exactly the same thing — this came out of that.
 	FoundBy FeatureID
 	// Goal holds the settings only a goal card carries. Zero on every
 	// other kind.
@@ -519,6 +524,55 @@ func (f *Feature) GateMode() string {
 // surface asks (the board badge, the clean-up refusal, Advance's fourth
 // skip), phrased once so none of them tests the timestamp by hand.
 func (f *Feature) HandedOff() bool { return !f.HandedOffAt.IsZero() }
+
+// Ending names how a card left gummi. It is the one word every surface
+// uses for that — the board badge, `gummi status`, `status --json`, the
+// card's own closing block — so that a reader never has to combine flags
+// to name one fact.
+//
+// It is derived, never stored: each ending already has its own record
+// (LandedSHA, GoalDroppedAt, HandedOffAt), and a second field naming what
+// those three already say is a field that can disagree with them.
+type Ending string
+
+const (
+	// EndingLanded: the branch reached the base branch — gummi's own
+	// squash merge, or any other route that put the work there.
+	EndingLanded Ending = "landed"
+	// EndingHandedOff: closed with the branch deliberately kept.
+	EndingHandedOff Ending = "handed_off"
+	// EndingDropped: a goal gave up on the card. Nobody chose this one,
+	// which is exactly why it needs a name of its own — it used to borrow
+	// the hand-off stamp to get through the landing floor, and reported
+	// itself as handed off ever after.
+	EndingDropped Ending = "dropped"
+	// EndingNone: the card has not ended. Every open card, and a done card
+	// whose ending predates the records above.
+	EndingNone Ending = ""
+)
+
+// Ending reports how the card ended.
+//
+// landedOnBase is the one fact the record cannot hold on its own: a
+// branch that reached the base branch by a route gummi did not perform —
+// a merged PR, a hand merge, a cherry-pick — leaves no LandedSHA, because
+// nothing here did the merging. Callers holding that answer (the board
+// row, `status`) pass it; callers that only have the record pass false
+// and get the ending the card can prove.
+//
+// The order is the board's own badge order, so no two surfaces resolve a
+// card carrying more than one stamp differently.
+func (f *Feature) Ending(landedOnBase bool) Ending {
+	switch {
+	case landedOnBase || f.LandedSHA != "":
+		return EndingLanded
+	case f.GoalDropped():
+		return EndingDropped
+	case f.HandedOff():
+		return EndingHandedOff
+	}
+	return EndingNone
+}
 
 // BranchName is the feature's git branch: gummi/FD-042-slug.
 func (f *Feature) BranchName() string {

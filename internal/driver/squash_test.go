@@ -34,7 +34,7 @@ func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Squash: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if got := gitHead(t, h.root); got != before {

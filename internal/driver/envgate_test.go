@@ -81,7 +81,7 @@ func TestDriverOmissionGateBlocksBugPass(t *testing.T) {
 	if verifyResult != "blocked" {
 		t.Fatalf("verify result = %q, want blocked; events=%v", verifyResult, h.events())
 	}
-	if out.Status == StatusDone {
+	if out.Status == StatusVerified {
 		t.Fatalf("status = done, want non-terminal/blocked; omission gate must not let a bug pass")
 	}
 }

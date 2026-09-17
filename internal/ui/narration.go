@@ -131,8 +131,15 @@ func cite(text, kind, ref string) claim {
 // built for such a card, and citations.go refuses to spend a model turn
 // on one, since ensureNarration asks this first.
 func narrationStop(in nextInput) bool {
-	if in.landed || in.stage == domain.StageDone {
-		return false
+	// A card that has ended is parked for a person in the most complete
+	// sense there is, and it has exactly one thing to say: how it ended.
+	// This used to return false here, which is why a finished card's page
+	// was blank — the half of invariant 4 that says a running card has
+	// nothing to narrate was being applied to a card that had stopped for
+	// good. Nothing below it is reachable for such a card anyway: it has
+	// no session, and no gate.
+	if in.closed() {
+		return true
 	}
 	switch in.sess {
 	case engine.StateQueued:
@@ -151,6 +158,15 @@ func narrationStop(in nextInput) bool {
 func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 	if !narrationStop(in) {
 		return nil
+	}
+	// A finished card's paragraph is its receipt, and it is a different
+	// paragraph from a stop's: nothing is pending, nothing ran
+	// unattended since, and there is no plan left to weigh the code
+	// against. It returns here rather than falling through the three
+	// questions below, all of which are about a card that is going to
+	// carry on.
+	if in.closed() {
+		return closingClaims(in)
 	}
 	// The log is read from m.cardEvents rather than from r.Events, and
 	// the difference matters: featureRow.Events is filled at RENDER time
@@ -190,6 +206,96 @@ func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 	return out
 }
 
+// closingClaims is a finished card's receipt: how it ended, what it
+// became, and what it cost.
+//
+// Every fact here was already stored and none of it was on screen. The
+// landed commit in particular has been recorded at every merge since
+// SquashMerge first stamped it and was shown by no surface in the TUI —
+// the notice that named it lived one keypress.
+//
+// The sentences carry no citations. Each one is the card's own record
+// rather than evidence somewhere else, so there is nothing for a mark to
+// open — and citations.go refuses to spend a turn on a closed card
+// anyway (approveShaped).
+func closingClaims(in nextInput) []claim {
+	var out []claim
+	if s := endingSentence(in); s != "" {
+		out = append(out, sentence(s))
+	}
+	if s := costSentence(in); s != "" {
+		out = append(out, sentence(s))
+	}
+	return out
+}
+
+// endingSentence names the ending and what happened to the branch. The
+// branch's fate is the half a reader cannot see from anywhere else: a
+// landed card may or may not still have its worktree, and the two read
+// identically on the board once the badge is the only difference.
+func endingSentence(in nextInput) string {
+	when := ""
+	if !in.endedAt.IsZero() {
+		when = " on " + in.endedAt.Local().Format("2 Jan")
+	}
+	switch in.ending {
+	case domain.EndingLanded:
+		s := "Landed on " + in.landBase() + when
+		if in.commit != "" {
+			s += " as " + shortSHA(in.commit)
+		}
+		if in.hasWorktree {
+			return s + ". Its branch and worktree are still here — clean up removes both."
+		}
+		return s + ". Its branch and worktree are gone."
+	case domain.EndingHandedOff:
+		return "Handed off" + when + " — nothing landed, and " + in.keptBranch() +
+			" is yours. Landing it after all is still available while the branch exists."
+	case domain.EndingDropped:
+		by := "its goal"
+		if in.droppedBy != "" {
+			by = string(in.droppedBy)
+		}
+		return "Dropped by " + by + when + " — nothing landed, and whatever it had written is kept on " +
+			in.keptBranch() + "."
+	}
+	// Done, with no ending any record can name: a card closed before the
+	// stamps existed, or a research card, which never had a branch to end
+	// one way or the other.
+	if in.kind == domain.KindResearch {
+		return "Closed" + when + ". A research card delivers its document, not a branch."
+	}
+	return "Closed" + when + "."
+}
+
+// costSentence is the second half of the receipt: what the card cost and
+// how much of that was work done twice. Rework is the number worth
+// reading beside the total — it is the one that says whether the card was
+// hard or the harness was.
+func costSentence(in nextInput) string {
+	if in.spend <= 0 {
+		return ""
+	}
+	s := "It cost " + money(in.spend)
+	switch {
+	case in.corrective == 1:
+		s += ", with one round redone"
+	case in.corrective > 1:
+		s += ", with " + strconv.Itoa(in.corrective) + " rounds redone"
+	}
+	return s + "."
+}
+
+// shortSHA is the commit as a reader would quote it. Twelve characters,
+// matching what the merge notice and the goal report print, so the same
+// commit is not spelled two lengths on two screens.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 // approveShaped reports whether this stop is one where "what does the
 // code do against what the plan promised" is a question worth paying
 // for: implement finished, the verify gate, the landing gate.
@@ -204,6 +310,13 @@ func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 // model.
 func approveShaped(in nextInput) bool {
 	if !narrationStop(in) || in.kind == domain.KindResearch {
+		return false
+	}
+	// A finished card is never worth a model turn: the decision the
+	// sentence exists to inform has already been taken. narrationStop now
+	// says yes to such a card (its ending is worth a sentence), so the
+	// guard that used to come free from that predicate has to be stated.
+	if in.closed() {
 		return false
 	}
 	if in.hasAsk || in.attn == attnQuestion || in.attn == attnFailure || in.attn == attnBudget {

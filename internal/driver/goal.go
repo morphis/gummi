@@ -478,7 +478,7 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 		}
 	}
 	d.out.emit(mergedGoalEvent{Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha, Cards: landed})
-	return Outcome{Status: StatusDone, ID: string(f.ID)}, nil
+	return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
 }
 
 // goalReviewUnactionable ends a wrapped-up goal's review loop. The

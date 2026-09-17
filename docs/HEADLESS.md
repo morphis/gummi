@@ -114,7 +114,7 @@ lint config, or the repo's AGENTS.md/CLAUDE.md). Delete
 A finished card's receipt carries three numbers worth reading together:
 
 ```
-{"event":"done","spent_credits":661.4,
+{"event":"verified","spent_credits":661.4,
  "review_rounds":3,            the critiques THIS invocation ran
  "corrective_rounds":1,        the CARD's cumulative rework, across processes
  "unproven_files":["lxd/images.go"]}
@@ -141,7 +141,7 @@ branches on:
 
 | exit | status | caller action |
 |---|---|---|
-| `0` | `done` | verified branch ready. Report it and stop |
+| `0` | `verified` | verified branch ready. Report it and stop |
 | `0` | `stopped` | `--until` reached its stop. `resume --approve` to continue |
 | `0` | `said` | `--say` reported a reading and acted on nothing |
 | `2` | `question` | a delegated question or a design gate. `resume --answer`, `--approve` or `--request-changes` |
@@ -245,17 +245,22 @@ must not conflate them:
 | field | means |
 |---|---|
 | `verified: true` | the verify gate passed and the branch is ready to land — where a headless run stops, and what a CI caller polls for |
-| `done: true` | the card is **closed**: landed, ended through its PR, or handed off. It does not mean anything merged |
+| `stage: "done"` | the card is **closed**. It does not mean anything merged |
+| `ending` | how it closed: `landed`, `handed_off` or `dropped`; absent while the card is open |
 | `branch_state: "landed"` | the branch is on the trunk — the field to read for "did this merge" |
-| `handed_off: true` | the card was closed with its branch deliberately kept |
 
-After a headless run expect `verified:true` with `done:false` until you
+After a headless run expect `verified:true` with no `ending` until you
 merge or hand off.
+
+`ending` replaced the `done` and `handed_off` booleans, which took two
+fields to name one fact and could not name a drop at all: a card its goal
+dropped was closed by borrowing the hand-off stamp, so it reported
+`handed_off: true` with no branch and nothing spent.
 
 `rounds` on the same payload is a **live counter, not a history**. Each
 loop resets its own count when it completes, so a finished card that took
 three plan rounds still reads `{"plan": 0, "review": 0, "corrective": 0}`.
-The tally of critique passes is `review_rounds` on the terminal `done`
+The tally of critique passes is `review_rounds` on the terminal `verified`
 event. A poller reading `rounds` as "how much rework did this take" will
 read zero every time.
 
@@ -290,8 +295,8 @@ the cards' questions, reads their plans before they implement, re-plans
 stuck and exhausted cards, records **decisions for review** for every call
 a user of the result would notice, declines reviewer findings with a
 reason, and files what it finds outside the goal as open-board cards. The
-stream carries a `goal` event for each step and a `verified` event for each
-card; a card's `verified` is not the goal's `done`.
+stream carries a `goal` event for each step and a `card_verified` event for
+each card; a card's `card_verified` is not the goal's own `verified`.
 
 **Budget.** The envelope is the goal's whole budget and a hard ceiling. Each
 card gets an envelope out of it; a landed or dropped card returns what it
@@ -301,7 +306,7 @@ the budget runs down to it, the goal wraps up: verified cards land, the rest
 are dropped, and it comes back partial.
 
 **Hand-over.** When its cards have settled, the goal reviews and verifies
-the combined branch. The run exits `done` with the hand-over on the event's
+the combined branch. The run exits `verified` with the hand-over on the event's
 `goal` object — done-when items met, partial or whole, cards landed and
 dropped, decisions for review, and the full report — and `status --json`
 carries the same report under `goal`. From there:

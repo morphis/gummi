@@ -42,7 +42,7 @@ func TestQuickRouteToVerified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	id := domain.FeatureID(out.ID)
@@ -56,7 +56,7 @@ func TestQuickRouteToVerified(t *testing.T) {
 	} else if f.VerifiedAt.IsZero() {
 		t.Fatal("reached a verified branch but verified_at was not stamped")
 	}
-	if !h.has("created") || !h.has("gate") || !h.has("done") {
+	if !h.has("created") || !h.has("gate") || !h.has("verified") {
 		t.Fatalf("missing created/gate/done; stream=%v", h.eventKinds())
 	}
 	if h.eventKinds()[0] != "created" {
@@ -79,7 +79,7 @@ func TestQuickRouteEmptyBranchToDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done", out.Status)
 	}
 	if st := h.stageOf(domain.FeatureID(out.ID)); st != domain.StageDone {
@@ -140,7 +140,7 @@ func TestSpecQuestionThenResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out2.Status != StatusDone {
+	if out2.Status != StatusVerified {
 		t.Fatalf("resume status = %q, want done; stream=%v", out2.Status, h.eventKinds())
 	}
 }
@@ -165,7 +165,7 @@ func TestAutonomousAutoAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done (auto-answered); stream=%v", out.Status, h.eventKinds())
 	}
 	if h.has("question") {
@@ -204,7 +204,7 @@ func TestAutonomousAnswerRecordsItsOwnActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done (auto-answered); stream=%v", out.Status, h.eventKinds())
 	}
 
@@ -256,7 +256,7 @@ func TestReviewChangesThenPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	// three critiques: the design stage's, then implement's two (the
@@ -265,7 +265,7 @@ func TestReviewChangesThenPass(t *testing.T) {
 	if h.calls[stageCritique] != 3 {
 		t.Fatalf("critique entered %d times, want 3", h.calls[stageCritique])
 	}
-	if d := lastEvent(h, "done"); d == nil || d["review_rounds"].(float64) != 3 {
+	if d := lastEvent(h, "verified"); d == nil || d["review_rounds"].(float64) != 3 {
 		t.Fatalf("done review_rounds = %v, want 3 (the design critique plus implement's two)", d)
 	}
 }
@@ -293,10 +293,10 @@ func TestDoneEventCarriesLinkedPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
-	d := lastEvent(h, "done")
+	d := lastEvent(h, "verified")
 	if d == nil {
 		t.Fatalf("no done event; stream=%v", h.eventKinds())
 	}
@@ -326,10 +326,10 @@ func TestDoneEventOmitsPRWhenUnlinked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
-	d := lastEvent(h, "done")
+	d := lastEvent(h, "verified")
 	if d == nil {
 		t.Fatalf("no done event; stream=%v", h.eventKinds())
 	}
@@ -456,7 +456,7 @@ func TestResumeBounceRewindsAndCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume(bounce): %v", err)
 	}
-	if out2.Status != StatusDone {
+	if out2.Status != StatusVerified {
 		t.Fatalf("resume status = %q, want done (bounce → implement → review → verify pass); stream=%v",
 			out2.Status, h.eventKinds())
 	}
@@ -529,7 +529,7 @@ func TestResumeBounceFromImplementRewindsToPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume(bounce) at implement: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("resume status = %q, want done (bounce → plan → implement → verify pass); stream=%v",
 			out.Status, h.eventKinds())
 	}
@@ -646,7 +646,7 @@ func TestResumeEnvelopeRaisesBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	got, err := h.store.GetFeature(context.Background(), f.ID)
@@ -829,7 +829,7 @@ func TestCallerGateApproveResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out2.Status != StatusDone {
+	if out2.Status != StatusVerified {
 		t.Fatalf("resume status = %q, want done; stream=%v", out2.Status, h.eventKinds())
 	}
 	// BG-005: an explicit caller approval must not be indistinguishable
@@ -908,7 +908,7 @@ func TestResumeCompletedAutoGateAdvances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out2.Status != StatusDone {
+	if out2.Status != StatusVerified {
 		t.Fatalf("resume status = %q, want done (auto-advanced past the gate); stream=%v", out2.Status, h.eventKinds())
 	}
 	if h.has("timeout") {
@@ -1120,10 +1120,10 @@ func TestNextCommandSelfDocumentsResume(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if out.Status != StatusDone {
+		if out.Status != StatusVerified {
 			t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 		}
-		if d := lastEvent(h, "done"); d == nil {
+		if d := lastEvent(h, "verified"); d == nil {
 			t.Fatal("no done event")
 		} else if _, ok := d["next"]; ok {
 			t.Fatalf("done event carried a next command: %v", d)

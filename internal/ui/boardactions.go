@@ -171,6 +171,7 @@ var cardCommandNames = map[string]string{
 	"merge":   "land merge",
 	"squash":  "squash",
 	"clean":   "clean",
+	"newbug":  "bug followup",
 	"gate":    "autopilot",
 	"spec":    "spec",
 	"diff":    "diff",
@@ -264,6 +265,11 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "newbug":
+		if r, ok := m.selected(); ok {
+			return m.openBugFromCard(r)
+		}
+		return nil
 	case "gate":
 		if r, ok := m.selected(); ok {
 			return m.openAutopilot(r.F)
@@ -328,6 +334,12 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "newbug":
+		// keyless by construction (closedActions), so the a.key shortcut
+		// above cannot catch it — the same shape topup has.
+		if r, ok := m.selected(); ok {
+			return m.openBugFromCard(r)
+		}
 	case "goalstop":
 		if r, ok := m.selected(); ok {
 			return m.confirmStopGoal(r.F)

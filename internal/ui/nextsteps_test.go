@@ -31,7 +31,11 @@ func TestNextActionsByState(t *testing.T) {
 		in   nextInput
 		want string // expected key sequence, "" for no suggestions
 	}{
-		{"landed wins over everything", nextInput{stage: domain.StageVerify, kind: feat, landed: true, attn: attnGate}, "c"},
+		// A landed card answers for its ending, not its stage or its inbox
+		// item. The keyless first row is the follow-up ("open a bug from
+		// this"); clean-up keeps c and stays last, because it is the
+		// destructive one.
+		{"landed wins over everything", nextInput{stage: domain.StageVerify, kind: feat, landed: true, attn: attnGate}, " c"},
 		{"done and cleaned up is quiet", nextInput{stage: domain.StageDone, kind: feat}, ""},
 		{"queued run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateQueued}, ""},
 		{"busy run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, busy: true}, ""},
@@ -250,6 +254,12 @@ func TestNextInputForAssembly(t *testing.T) {
 		// hand-off row names the branch it keeps, and a sentence about a
 		// branch has to carry its name.
 		branch: row.F.BranchName(),
+		// the ending is resolved at assembly too, through the card's own
+		// predicate, so the closing block and the board badge cannot
+		// disagree about how a card finished. This row is Landed, so it
+		// ends landed even with no LandedSHA — the branch reached the base
+		// branch by some route gummi did not perform.
+		ending: domain.EndingLanded,
 	}
 	// undrafted is a slice (one blocker per blank section), so the struct
 	// no longer compares with ==; DeepEqual keeps the assembly pinned.

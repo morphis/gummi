@@ -128,7 +128,7 @@ func TestReviewRoundsClearedOnPassGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Status != StatusDone {
+	if out.Status != StatusVerified {
 		t.Fatalf("status = %q, want done; stream=%v", out.Status, h.eventKinds())
 	}
 	if got, err := h.store.Rounds(context.Background(), h.only(), domain.RoundKindReview); err != nil || got != 0 {

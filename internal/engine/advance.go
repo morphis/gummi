@@ -255,7 +255,14 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 			return res, nil
 		}
 
-		if !f.HandedOff() {
+		// The fifth skip, beside the hand-off one: a card its goal dropped.
+		// The drop closes the card where it stood and keeps whatever the
+		// branch had written, so no landing is owed — nobody is going to
+		// merge work the goal gave up on. It used to reach this floor by
+		// stamping HandedOffAt, which crossed the gate at the cost of every
+		// later surface reporting the card as handed off; the stamp it
+		// really needed was its own.
+		if !f.HandedOff() && !f.GoalDropped() {
 			wt, err := e.mgr(ctx, &f)
 			if err != nil {
 				return res, err

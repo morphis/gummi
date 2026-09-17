@@ -52,7 +52,7 @@ func TestSkillDocumentsEveryFlag(t *testing.T) {
 func TestSkillDocumentsExitCodes(t *testing.T) {
 	doc := skillBody()
 	for _, want := range []string{
-		"| 0 | `done` |", "| 2 | `question` |", "| 3 | `blocked` |",
+		"| 0 | `verified` |", "| 2 | `question` |", "| 3 | `blocked` |",
 		"| 4 | `escalation` |", "| 5 | `exhausted` |", "| 6 | `timeout` |",
 	} {
 		if !strings.Contains(doc, want) {

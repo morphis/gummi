@@ -70,6 +70,7 @@ var runnableIDs = map[string]bool{
 	expandID: true, "topup": true, "duplicate": true, "profile": true,
 	"ask": true, "changes": true, "gate": true, "run": true,
 	"prlink": true, "prunlink": true, "prpull": true,
+	"newbug": true,
 }
 
 // TestInvariantCompleteness — invariant 1. Every id the answer set can
@@ -178,8 +179,17 @@ func TestInvariantLockstepStopHere(t *testing.T) {
 	}
 }
 
-// TestInvariantFreeAtRest — invariant 4. Nothing is narrated for a
-// running, queued, done or landed card.
+// TestInvariantFreeAtRest — invariant 4. Nothing is narrated for a card
+// that is working, and nothing a card narrates ever costs a model turn.
+//
+// A CLOSED card is deliberately not quiet any more: its ending is the one
+// thing it has to say, and saying nothing left the page that holds the
+// commit, the branch's fate and the cost blank at exactly the moment
+// someone opened it to ask. What the invariant is actually about is
+// COST — "free at rest" — and that half is unchanged and asserted below:
+// a closed card's paragraph is a pure function of its own record, so it
+// is free, and approveShaped (the one sentence that is paid for) must
+// refuse it.
 //
 // The caching half of the invariant ("nothing regenerates while the
 // newest event id and the blocking counts are unchanged") is vacuous
@@ -189,14 +199,14 @@ func TestInvariantLockstepStopHere(t *testing.T) {
 // cache key is named in narration.go's own doc for when it does.
 func TestInvariantFreeAtRest(t *testing.T) {
 	for _, in := range surfaceInputs() {
-		quiet := in.landed || in.stage == domain.StageDone ||
-			in.sess == engine.StateQueued ||
+		working := in.sess == engine.StateQueued ||
 			(in.sess == engine.StateRunning && !in.hasAsk)
-		if !quiet {
-			continue
+		if working && !in.closed() && narrationStop(in) {
+			t.Errorf("%+v: narrated a card that is working", in)
 		}
-		if narrationStop(in) {
-			t.Errorf("%+v: narrated a card nobody is waiting on", in)
+		// the cost half, over every closed card the sweep produces
+		if in.closed() && approveShaped(in) {
+			t.Errorf("%+v: a closed card must never be worth a model turn", in)
 		}
 	}
 
@@ -208,11 +218,9 @@ func TestInvariantFreeAtRest(t *testing.T) {
 	for _, in := range []nextInput{
 		{stage: domain.StageVerify, kind: domain.KindFeature, sess: engine.StateRunning, verdict: verdictFail, failedCheck: "go vet"},
 		{stage: domain.StageVerify, kind: domain.KindFeature, sess: engine.StateQueued, attn: attnFailure},
-		{stage: domain.StageDone, kind: domain.KindFeature, attn: attnGate},
-		{stage: domain.StageVerify, kind: domain.KindFeature, landed: true, attn: attnGate, verdict: verdictFail},
 	} {
 		if got := m.cardNarration(in, row); len(got) != 0 {
-			t.Errorf("%+v: narrated a quiet card: %+v", in, got)
+			t.Errorf("%+v: narrated a working card: %+v", in, got)
 		}
 	}
 }

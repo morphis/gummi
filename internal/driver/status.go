@@ -17,8 +17,14 @@ package driver
 type Status string
 
 const (
-	// StatusDone: a verified branch is ready. gummi never merges it.
-	StatusDone Status = "done"
+	// StatusVerified: a verified branch is ready. gummi never merges it.
+	//
+	// It used to be spelled "done", which collided with the card's own
+	// done — the stage a card reaches when it is CLOSED. Both were
+	// correct and they meant different things, so a caller reading one
+	// table and not the other learned the difference from a pipeline that
+	// shipped nothing. The run reaches verified; only a card is ever done.
+	StatusVerified Status = "verified"
 	// StatusError: a setup or agent failure. Often nothing partial landed
 	// (a pre-id validation/setup failure), but a mid-run agent-turn failure
 	// can occur after earlier stages committed durable progress — that case
@@ -49,12 +55,12 @@ const (
 	StatusSaid Status = "said"
 )
 
-// ExitCode is the process exit status for a terminal Status. done is 0;
+// ExitCode is the process exit status for a terminal Status. verified is 0;
 // error keeps the conventional 1; the decision boundaries take distinct
 // codes so a caller can branch on them.
 func (s Status) ExitCode() int {
 	switch s {
-	case StatusDone, StatusStopped, StatusSaid:
+	case StatusVerified, StatusStopped, StatusSaid:
 		return 0
 	case StatusError:
 		return 1

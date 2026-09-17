@@ -73,7 +73,7 @@ func TestPausedInteractiveResumeReDispatches(t *testing.T) {
 	st.mu.Lock()
 	calls = st.specCalls
 	st.mu.Unlock()
-	if out2.Status == StatusDone && calls == 1 {
+	if out2.Status == StatusVerified && calls == 1 {
 		t.Fatalf("resume reported done without ever re-dispatching the dead interview: "+
 			"specCalls=%d; stream=%v", calls, h.eventKinds())
 	}

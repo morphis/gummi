@@ -95,7 +95,7 @@ func TestUntilSpecThenResumeToVerified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if out2.Status != StatusDone {
+	if out2.Status != StatusVerified {
 		t.Fatalf("resume status = %q, want done; stream=%v", out2.Status, h.eventKinds())
 	}
 }
