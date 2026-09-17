@@ -2107,6 +2107,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = noticeMsg{text: "fetched " + strconv.Itoa(len(msg.res.Proposals)) + " issue(s) — enter fills the form"}
 		return m, nil
 
+	case weekReportMsg:
+		if d, ok := m.Overlay.Top().(*weekDialog); ok {
+			rep := msg.report
+			d.report = &rep
+		}
+		return m, nil
+
 	case sweepPlannedMsg:
 		// the measurement landed: hand it to the pass if it is still open.
 		// A pass the reader has already left simply drops it — nothing was
@@ -2848,6 +2855,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			m.sortMode = SortSeverity
 			m.notice = noticeMsg{text: "todo: by severity"}
 		}
+	case "W":
+		// The one screen that answers "was running this worth it". It
+		// reports and never acts: every key that would change something
+		// belongs on the card it would change.
+		return m.openWeek()
 	case "C":
 		// The board-wide counterpart of c: c tidies one landed card, C
 		// closes out the session — walk what is ready to land, then sweep

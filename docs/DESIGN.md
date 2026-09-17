@@ -276,6 +276,8 @@ Stage semantics:
   branch kept on purpose) into a plan that can be read instead of one
   error at a time on a card someone had to go find. The masthead names
   what a pass would find, so hygiene is noticed rather than remembered.
+  `W` reports what the last seven days produced, grouped by ending —
+  the goal hand-over's shape at the scale of a week.
 
 Every stage transition is recorded (who/what/when) in the feature's history —
 the audit trail is part of the quality story.

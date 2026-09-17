@@ -146,7 +146,8 @@ the board. Then:
    takes it back with its work kept.
 8. At the end of a session, `C` closes out: it walks the cards whose
    branches are ready, one confirm each, then sweeps the worktrees that
-   landing left behind — naming what it is holding back and why.
+   landing left behind — naming what it is holding back and why. `W` says
+   what the last seven days produced, grouped by how each card ended.
 
 The keys you need first:
 
@@ -160,7 +161,7 @@ The keys you need first:
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
 | `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
-| `C` | close out the session — land what is ready, then sweep the worktrees landing left behind |
+| `C` / `W` | close out the session — land what is ready, then sweep the worktrees / what the last seven days produced |
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
 | `i` | the needs-attention inbox |
 | `tab`, `alt+1/2/3` | the board, inbox and agent tabs |
