@@ -2375,7 +2375,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		s.finishAssistant(ev.Text)
 		kind = EventMessage
 	case agent.EventToolCall:
-		s.appendToolCall(ev.CallID, toolLine(ev))
+		s.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
 	case agent.EventToolResult:
 		if ev.Result != nil {
 			s.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)
@@ -2530,17 +2530,22 @@ func (e *Engine) recordUsage(s *Session, id domain.FeatureID, stage domain.Stage
 	// so a render can read the store's figure off the session instead of
 	// the board snapshot it last reloaded.
 	s.addCardSpent(credits)
-	// the same sample attributed to (stage, model, role) for the
+	// the same sample attributed to (stage, session, model, role) for the
 	// breakdown; same credit-equivalent, so stage_spend sums to
-	// spend_credits. A backend's internal side-model call is booked to
+	// spend_credits. The session key is this generation's, so a stage that
+	// bounced through review→fix keeps its first attempt and its redo in
+	// separate rows instead of adding them together. A backend's internal side-model call is booked to
 	// the helper role, not the working role it ran under — else a
 	// token-less title/summary call inflates and mis-attributes the
 	// working role's row.
 	if u.Helper {
 		role = agent.RoleHelper
 	}
-	_ = e.cfg.Store.RecordStageSpend(context.Background(), id, stage, string(role), u.Model,
-		credits, estimated, u.InputTokens, u.CachedTokens, u.OutputTokens)
+	_ = e.cfg.Store.RecordStageSpend(context.Background(), id, state.SpendSample{
+		Stage: stage, Session: s.generation(), Role: string(role), Model: u.Model,
+		Credits: credits, Estimated: estimated,
+		InputTokens: u.InputTokens, CachedTokens: u.CachedTokens, OutputTokens: u.OutputTokens,
+	})
 }
 
 // checkpointTimeout bounds the checkpoint's git work; a commit is local

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -129,7 +130,34 @@ type Message struct {
 	// reports it, and the captured output (bounded at the adapter).
 	ToolStatus ToolStatus
 	ToolOutput string
-	callID     string // backend call id awaiting its result; cleared on resolve
+
+	// Tool and Detail are the call taken apart — the backend's name for
+	// the tool, and the salient argument the activity line shows after
+	// it. Content still holds the two joined for display; these exist so
+	// the durable log can record a tool call as a record rather than as a
+	// string a reader has to take back apart.
+	//
+	// Both are empty on gummi's own activity notes (budget nudges, check
+	// results), which are lines rather than calls.
+	Tool   string
+	Detail string
+	// CallID is the backend's tool-call id. Unlike pending below it
+	// survives the outcome arriving, because the durable log correlates a
+	// result to its call by exactly this value long after the call
+	// settled.
+	CallID string
+	// pending marks an agent tool call still awaiting its outcome;
+	// cleared on resolve. It is separate from CallID because "which call
+	// is this" and "is it still open" are different questions, and
+	// answering the second by erasing the first is what made the id
+	// unavailable to everything downstream.
+	pending bool
+	// At and DoneAt are when the entry was appended and, for a tool call,
+	// when its outcome arrived. They are the real times, as against the
+	// time a mirror happened to run — the difference between a duration
+	// that is measured and one that is invented.
+	At     time.Time
+	DoneAt time.Time
 
 	// Role names the role that produced this message when it is NOT the
 	// role of the session now holding it. Empty — the normal case — means
@@ -150,6 +178,15 @@ type Message struct {
 	// matter how many restarts the transcript survives. Empty on legacy
 	// rows and every message that is not an ask echo.
 	AnsweredBy string
+}
+
+// generation is this session generation's key: the discriminator that
+// keeps its mirrored events unique (persist.go's dedupe prefix) and the
+// session column of its realized spend (state.SpendSample.Session). Both
+// have to agree on what "this run of this stage" is named, so there is
+// one derivation and both read it.
+func (s *Session) generation() string {
+	return strconv.FormatInt(s.startedAt.UnixNano(), 10)
 }
 
 // Snapshot is an immutable view of a session's state, safe to render.
@@ -279,6 +316,11 @@ type Session struct {
 	activity   []string
 	spend      agent.Usage
 	context    agent.Context
+	// ctxPeak is the highest context occupancy this session ever
+	// reported, kept because the live figure is gone the moment the
+	// session ends and how close a stage came to its window is often the
+	// whole explanation for how that stage went.
+	ctxPeak    agent.Context
 	busy       bool
 	pendingAsk *Ask
 	verdict    string // review verdict from submit_verdict ("pass"/"changes")
@@ -568,7 +610,7 @@ func (s *Session) releaseSlot() (held bool, pool lanePool) {
 func (s *Session) appendUser(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text})
+	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, At: time.Now()})
 	s.err = nil
 	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
 }
@@ -582,7 +624,7 @@ func (s *Session) appendUser(text string) {
 func (s *Session) appendUserAs(text, by string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, AnsweredBy: by})
+	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, AnsweredBy: by, At: time.Now()})
 	s.err = nil
 	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
 }
@@ -590,7 +632,7 @@ func (s *Session) appendUserAs(text, by string) {
 func (s *Session) appendSystem(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.transcript = append(s.transcript, Message{Author: AuthorSystem, Content: text})
+	s.transcript = append(s.transcript, Message{Author: AuthorSystem, Content: text, At: time.Now()})
 	s.err = nil
 	s.live.Emit(livelog.Record{Kind: livelog.KindSystem, Text: text})
 }
@@ -611,7 +653,7 @@ func (s *Session) appendDelta(text string) {
 		s.transcript[s.streamIdx].Content += text
 		return
 	}
-	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text, Streaming: true})
+	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text, Streaming: true, At: time.Now()})
 	s.streamOpen = true
 	s.streamIdx = len(s.transcript) - 1
 }
@@ -648,7 +690,7 @@ func (s *Session) finishAssistant(text string) {
 		s.streamOpen = false
 		return
 	}
-	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text})
+	s.transcript = append(s.transcript, Message{Author: AuthorAssistant, Content: text, At: time.Now()})
 }
 
 // lastAssistant returns the most recent assistant message's content and
@@ -682,9 +724,14 @@ func (s *Session) appendActivity(tool string) {
 }
 
 // appendToolCall records an agent tool invocation, keeping the backend
-// call id so a later resolveToolResult can attach the outcome.
-func (s *Session) appendToolCall(callID, line string) {
-	s.appendTool(Message{Author: AuthorTool, Content: line, callID: callID})
+// call id so a later resolveToolResult can attach the outcome — and the
+// tool's name and argument apart from the rendered line, so the durable
+// log can record what was called rather than only how it was shown.
+func (s *Session) appendToolCall(callID, line, tool, detail string) {
+	s.appendTool(Message{
+		Author: AuthorTool, Content: line,
+		Tool: tool, Detail: detail, CallID: callID, pending: callID != "",
+	})
 }
 
 // appendToolDone records a tool line whose outcome is already known —
@@ -705,6 +752,9 @@ func (s *Session) appendTool(m Message) {
 	// activity is stored newline-joined; keep labels single-line so they
 	// round-trip through persistence intact.
 	m.Content = strings.ReplaceAll(strings.ReplaceAll(m.Content, "\n", " "), "\r", " ")
+	if m.At.IsZero() {
+		m.At = time.Now()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activity = append(s.activity, m.Content)
@@ -715,7 +765,7 @@ func (s *Session) appendTool(m Message) {
 	}
 	s.transcript = append(s.transcript, m)
 	s.live.Emit(livelog.Record{
-		Kind: livelog.KindTool, Text: m.Content, Call: m.callID,
+		Kind: livelog.KindTool, Text: m.Content, Call: m.CallID,
 		OK: m.ToolStatus == ToolOK, Output: m.ToolOutput,
 	})
 }
@@ -731,10 +781,11 @@ func (s *Session) resolveToolResult(callID string, ok bool, output string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := len(s.transcript) - 1; i >= 0; i-- {
-		if s.transcript[i].callID != callID {
+		if !s.transcript[i].pending || s.transcript[i].CallID != callID {
 			continue
 		}
-		s.transcript[i].callID = ""
+		s.transcript[i].pending = false
+		s.transcript[i].DoneAt = time.Now()
 		s.transcript[i].ToolStatus = ToolOK
 		if !ok {
 			s.transcript[i].ToolStatus = ToolFail
@@ -770,6 +821,19 @@ func (s *Session) setContext(c agent.Context) {
 	if c.Limit > 0 {
 		s.context.Limit = c.Limit
 	}
+	if c.Tokens > s.ctxPeak.Tokens {
+		s.ctxPeak.Tokens = c.Tokens
+	}
+	if c.Limit > 0 {
+		s.ctxPeak.Limit = c.Limit
+	}
+}
+
+// contextPeak reports the session's high-water context occupancy.
+func (s *Session) contextPeak() agent.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ctxPeak
 }
 
 // crossedThreshold returns the highest new budget threshold this

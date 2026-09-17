@@ -24,9 +24,28 @@ const (
 	// EventMessage is a chat turn (user, assistant, or system) in a stage
 	// session.
 	EventMessage = "message"
-	// EventTool is one tool call and its outcome, including raw output
-	// (subject to PruneStageOutput once the stage is no longer live).
+	// EventTool is one tool call: its name, the salient argument, and —
+	// for a call gummi itself ran, whose outcome is known the moment it
+	// is recorded — its status and raw output (subject to
+	// PruneStageOutput once the stage is no longer live).
+	//
+	// A call made by an agent is written the moment it is CALLED, before
+	// anything knows how it went, because waiting for an outcome means
+	// losing the call entirely on the backends that never report one.
+	// Its outcome arrives separately, as EventToolResult.
 	EventTool = "tool"
+	// EventToolResult is the outcome of an EventTool, correlated to it by
+	// the call id both payloads carry. It exists because card_events is
+	// append-only: a row written when a call was still in flight cannot
+	// later be amended with how it ended, so the ending is its own row.
+	//
+	// A reader wants FoldToolResults, which merges each result back onto
+	// the call it belongs to and hands back a log in which a tool event
+	// once again carries its own outcome. An unmerged result — a call
+	// whose backend never reported one — is not an error but the truth
+	// about that backend, and is reported as such rather than as a
+	// success or a silence.
+	EventToolResult = "tool_result"
 	// EventStageEnter marks a card entering a stage.
 	EventStageEnter = "stage_enter"
 	// EventStageExit marks a card leaving a stage.
@@ -206,6 +225,106 @@ type AutopilotPayload struct {
 	Mode   string `json:"mode,omitempty"`
 }
 
+// ToolPayload is the JSON shape of an EventTool and EventToolResult
+// event's Payload.
+//
+// Label is the rendered activity line ("Bash  make test") and is what
+// every display has read since tool events existed; it stays because a
+// reader that only wants to print the line should not have to reassemble
+// one. Tool, Detail and Call are the same fact taken apart, so that
+// "which tools did this card use, how often, and how often did they
+// fail" stops being a question you answer by splitting a human-readable
+// string on a double space.
+//
+// Every field is additive: rows written before them decode to zero
+// values, and a reader that finds Tool empty falls back to Label.
+type ToolPayload struct {
+	Label string `json:"label"`
+	// Tool is the backend's own name for the tool ("Bash", "Read",
+	// "Skill"). Empty on gummi's own activity notes, which are lines
+	// rather than calls.
+	Tool string `json:"tool,omitempty"`
+	// Detail is the call's salient argument (the command, the path, the
+	// skill). It is the one field the retention sweep removes, since it
+	// is the only one that can be large and the only one that stops
+	// mattering once a call has gone by without failing.
+	Detail string `json:"detail,omitempty"`
+	// Call is the backend's tool-call id, correlating an EventToolResult
+	// to the EventTool it settles. Empty on a call gummi ran itself,
+	// whose outcome was known when it was recorded and needs no second row.
+	Call string `json:"call,omitempty"`
+	// MS is how long the call took, in milliseconds, set on the result
+	// row. Zero means not measured, which is every row written before
+	// durations were, and every call whose backend reports no outcome.
+	MS int64 `json:"ms,omitempty"`
+}
+
+// FoldToolResults merges every EventToolResult back onto the EventTool it
+// settles and returns the log without the result rows — the shape every
+// reader wants, in which a tool event carries its own status, output and
+// duration again.
+//
+// The split exists only because the log is append-only and an outcome
+// arrives after the call (see EventToolResult); nothing above the store
+// should have to know that. A result whose call cannot be found is
+// dropped rather than kept as a headless row: it describes a call this
+// card's log does not contain, so there is nothing for a reader to say
+// about it.
+//
+// The input is never modified; events with no tool rows at all come back
+// as the same slice.
+func FoldToolResults(evs []CardEvent) []CardEvent {
+	results := 0
+	for _, ev := range evs {
+		if ev.Kind == EventToolResult {
+			results++
+		}
+	}
+	if results == 0 {
+		return evs
+	}
+	// where each in-flight call's row landed in the output, by call id
+	at := map[string]int{}
+	out := make([]CardEvent, 0, len(evs)-results)
+	for _, ev := range evs {
+		if ev.Kind == EventTool {
+			var p ToolPayload
+			if json.Unmarshal([]byte(ev.Payload), &p) == nil && p.Call != "" {
+				at[p.Call] = len(out)
+			}
+			out = append(out, ev)
+			continue
+		}
+		if ev.Kind != EventToolResult {
+			out = append(out, ev)
+			continue
+		}
+		var p ToolPayload
+		if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.Call == "" {
+			continue
+		}
+		i, ok := at[p.Call]
+		if !ok {
+			continue
+		}
+		// the call keeps its identity (name, detail, position in the log)
+		// and gains how it ended; only the duration comes off the result's
+		// own payload, since the call could not have known it.
+		call := out[i]
+		var cp ToolPayload
+		_ = json.Unmarshal([]byte(call.Payload), &cp)
+		cp.MS = p.MS
+		if merged, err := json.Marshal(cp); err == nil {
+			call.Payload = string(merged)
+		}
+		call.Status = ev.Status
+		call.Output = ev.Output
+		out[i] = call
+		delete(at, p.Call)
+	}
+	return out
+}
+
 // CardEvent is one row of a card's event log.
 type CardEvent struct {
 	Seq     int64
@@ -373,19 +492,121 @@ func (s *Store) appendAutopilotEvent(ctx context.Context, id domain.FeatureID, m
 	})
 }
 
-// PruneStageOutput blanks the raw output of a stage's successful tool
-// events, once that stage is no longer live. Retention rule: every event
-// is kept forever; raw output is kept only for the live stage and for
-// anything that failed, so a long-lived card's log doesn't accumulate
-// unbounded tool output for stages it has already moved past.
+// PruneStageOutput applies the log's retention rule to a stage that is
+// no longer live: every event is kept forever, but the two fields that
+// can grow without bound are kept only where they still earn their place.
+//
+//   - Raw output is blanked on everything that did not fail. Output is
+//     the forensic field, and a call that passed has nothing to be
+//     forensic about.
+//   - A tool call's detail — the command, the path, the skill — is
+//     dropped for the same reason and under the same test, which for an
+//     agent's call means the outcome its EventToolResult reported. The
+//     tool's name, its outcome and its duration are never pruned, so no
+//     count, failure rate or timing decays; only the arguments thin out.
+//
+// This is the bargain the log already struck with raw output, applied
+// one field further: what a long-lived card accumulates is bounded by
+// how much of it went wrong rather than by how much of it happened.
 func (s *Store) PruneStageOutput(ctx context.Context, id domain.FeatureID, stage domain.Stage) error {
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE card_events SET output = ''
-		WHERE feature_id = ? AND stage = ? AND kind = ? AND status <> ?`,
-		string(id), string(stage), EventTool, StatusFail); err != nil {
+		WHERE feature_id = ? AND stage = ? AND kind IN (?, ?) AND status <> ?`,
+		string(id), string(stage), EventTool, EventToolResult, StatusFail); err != nil {
 		return fmt.Errorf("pruning stage output for %s/%s: %w", id, stage, err)
 	}
-	return nil
+	return s.pruneStageDetail(ctx, id, stage)
+}
+
+// pruneStageDetail removes the detail field from the stage's tool calls
+// that did not fail. A call's outcome may live on its own result row
+// (EventToolResult), so the failed set is collected first by call id and
+// the calls are then rewritten in one transaction.
+//
+// The rewrite is done in Go rather than with SQLite's json_remove so the
+// store depends on nothing beyond the SQL it already uses; the sweep runs
+// once per stage, over one stage's rows, so the cost is paid where it is
+// least visible.
+func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage domain.Stage) error {
+	failed := map[string]bool{}
+	fails, err := s.db.QueryContext(ctx, `
+		SELECT payload FROM card_events
+		WHERE feature_id = ? AND stage = ? AND kind IN (?, ?) AND status = ?`,
+		string(id), string(stage), EventTool, EventToolResult, StatusFail)
+	if err != nil {
+		return fmt.Errorf("pruning stage detail for %s/%s: %w", id, stage, err)
+	}
+	for fails.Next() {
+		var payload string
+		if err := fails.Scan(&payload); err != nil {
+			fails.Close()
+			return err
+		}
+		var p ToolPayload
+		if json.Unmarshal([]byte(payload), &p) == nil && p.Call != "" {
+			failed[p.Call] = true
+		}
+	}
+	if err := fails.Err(); err != nil {
+		fails.Close()
+		return err
+	}
+	fails.Close()
+
+	type rewrite struct {
+		seq     int64
+		payload string
+	}
+	var todo []rewrite
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT seq, status, payload FROM card_events
+		WHERE feature_id = ? AND stage = ? AND kind = ?`,
+		string(id), string(stage), EventTool)
+	if err != nil {
+		return fmt.Errorf("pruning stage detail for %s/%s: %w", id, stage, err)
+	}
+	for rows.Next() {
+		var seq int64
+		var status, payload string
+		if err := rows.Scan(&seq, &status, &payload); err != nil {
+			rows.Close()
+			return err
+		}
+		var p ToolPayload
+		if json.Unmarshal([]byte(payload), &p) != nil || p.Detail == "" {
+			continue
+		}
+		if status == StatusFail || failed[p.Call] {
+			continue
+		}
+		p.Detail = ""
+		next, err := json.Marshal(p)
+		if err != nil {
+			continue
+		}
+		todo = append(todo, rewrite{seq, string(next)})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(todo) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	for _, r := range todo {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE card_events SET payload = ? WHERE seq = ?`, r.payload, r.seq); err != nil {
+			return fmt.Errorf("pruning stage detail for %s/%s: %w", id, stage, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // appendGateEventTx records a stage crossing inside the caller's own

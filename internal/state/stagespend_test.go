@@ -35,7 +35,10 @@ func TestRecordStageSpendAccumulates(t *testing.T) {
 	}
 	var wantTotal float64
 	for _, x := range samples {
-		if err := s.RecordStageSpend(ctx, f.ID, x.stage, x.role, x.model, x.credits, 0, x.in, x.cd, x.out); err != nil {
+		if err := s.RecordStageSpend(ctx, f.ID, SpendSample{
+			Stage: x.stage, Role: x.role, Model: x.model, Credits: x.credits,
+			InputTokens: x.in, CachedTokens: x.cd, OutputTokens: x.out,
+		}); err != nil {
 			t.Fatal(err)
 		}
 		wantTotal += x.credits
@@ -93,10 +96,16 @@ func TestRecordStageSpendRoleRows(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StagePlan, "architect", "claude-haiku", 20, 0, 1000, 0, 500); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{
+		Stage: domain.StagePlan, Role: "architect", Model: "claude-haiku",
+		Credits: 20, InputTokens: 1000, OutputTokens: 500,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StagePlan, "reviewer", "claude-haiku", 5, 0, 200, 0, 100); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{
+		Stage: domain.StagePlan, Role: "reviewer", Model: "claude-haiku",
+		Credits: 5, InputTokens: 200, OutputTokens: 100,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	bd, err := s.StageBreakdown(ctx, f.ID)
@@ -119,7 +128,7 @@ func TestRecordStageSpendRoleRows(t *testing.T) {
 		t.Errorf("breakdown sum = %v, want 25 (feature total invariant)", total)
 	}
 	// accumulation still merges within one role's row
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StagePlan, "reviewer", "claude-haiku", 3, 0, 0, 0, 50); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{Stage: domain.StagePlan, Role: "reviewer", Model: "claude-haiku", Credits: 3, OutputTokens: 50}); err != nil {
 		t.Fatal(err)
 	}
 	bd, err = s.StageBreakdown(ctx, f.ID)
@@ -142,10 +151,10 @@ func TestRecordStageSpendEstimated(t *testing.T) {
 		t.Fatal(err)
 	}
 	// token-derived (estimated == credits), then provider-metered (0)
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageVerify, "reviewer", "gpt-5-codex", 6, 6, 0, 0, 12000); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{Stage: domain.StageVerify, Role: "reviewer", Model: "gpt-5-codex", Credits: 6, Estimated: 6, OutputTokens: 12000}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageVerify, "reviewer", "gpt-5-codex", 30, 0, 1200, 300, 400); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{Stage: domain.StageVerify, Role: "reviewer", Model: "gpt-5-codex", Credits: 30, InputTokens: 1200, CachedTokens: 300, OutputTokens: 400}); err != nil {
 		t.Fatal(err)
 	}
 	bd, err := s.StageBreakdown(ctx, f.ID)
@@ -166,7 +175,7 @@ func TestRecordStageSpendEmptyModel(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageImplement, "implementer", "", 5, 0, 10, 0, 20); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{Stage: domain.StageImplement, Role: "implementer", Model: "", Credits: 5, InputTokens: 10, OutputTokens: 20}); err != nil {
 		t.Fatal(err)
 	}
 	bd, err := s.StageBreakdown(ctx, f.ID)
@@ -245,7 +254,7 @@ func TestStageSpendPKRebuild(t *testing.T) {
 		t.Fatalf("row lost in rebuild: %+v", bd)
 	}
 	// a second role on the same (stage, model) now coexists
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StagePlan, "reviewer", "claude-haiku", 5, 0, 0, 0, 100); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{Stage: domain.StagePlan, Role: "reviewer", Model: "claude-haiku", Credits: 5, OutputTokens: 100}); err != nil {
 		t.Fatal(err)
 	}
 	if bd, _ = s.StageBreakdown(ctx, f.ID); len(bd) != 2 {
@@ -293,7 +302,7 @@ func TestRecordStageSpendCascades(t *testing.T) {
 	if err := s.CreateFeature(ctx, f); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordStageSpend(ctx, f.ID, domain.StageVerify, "reviewer", "gpt-5", 1, 0, 1, 0, 1); err != nil {
+	if err := s.RecordStageSpend(ctx, f.ID, SpendSample{Stage: domain.StageVerify, Role: "reviewer", Model: "gpt-5", Credits: 1, InputTokens: 1, OutputTokens: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteFeature(ctx, f.ID); err != nil {

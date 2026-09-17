@@ -92,8 +92,10 @@ func (e *Engine) persist(s *Session) {
 func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 	// prefix discriminates this session generation's events from any
 	// other generation's on the same stage (a review bounce, a resumed
-	// card) so their dedupe keys never collide.
-	prefix := strconv.FormatInt(s.startedAt.UnixNano(), 10)
+	// card) so their dedupe keys never collide. It is the same key this
+	// generation's realized spend is filed under (Session.generation),
+	// so the log and the meter agree on what one run of a stage is.
+	prefix := s.generation()
 
 	var evs []state.CardEvent
 
@@ -116,16 +118,7 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 		// settled — a later save picks up anything skipped here, once
 		// it has.
 		if m.Author == AuthorTool {
-			if m.ToolStatus == "" {
-				continue
-			}
-			payload, _ := json.Marshal(map[string]string{"label": m.Content})
-			evs = append(evs, state.CardEvent{
-				Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-				Kind: state.EventTool, Status: string(m.ToolStatus),
-				At: time.Now(), Payload: string(payload), Output: m.ToolOutput,
-				Dedupe: prefix + ":tool:" + strconv.Itoa(i),
-			})
+			evs = append(evs, toolEvents(snap, m, prefix, i)...)
 			continue
 		}
 		if m.Streaming {
@@ -153,15 +146,24 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 		})
 		evs = append(evs, state.CardEvent{
 			Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
-			Kind: state.EventMessage, At: time.Now(), Payload: string(payload),
+			Kind: state.EventMessage, At: eventTime(m.At), Payload: string(payload),
 			Dedupe: prefix + ":message:" + strconv.Itoa(i),
 		})
 	}
 
 	done := snap.State == StateDone
 	if done {
+		// ctx_peak/ctx_limit are the only facts written here that are not
+		// derivable from the log: the session row holding them is deleted
+		// as the stage completes, and nothing else ever saw them. Everything
+		// else a reader wants about this session — its turns, its tools, how
+		// long it ran — stays derived from the events above, so this payload
+		// never becomes a second source of truth for a fact that already has
+		// one (DESIGN §6.3).
+		peak := s.contextPeak()
 		payload, _ := json.Marshal(map[string]any{
 			"verdict": snap.Verdict, "credits": snap.Spend.Credits,
+			"ctx_peak": peak.Tokens, "ctx_limit": peak.Limit,
 		})
 		evs = append(evs, state.CardEvent{
 			Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
@@ -177,6 +179,69 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 		return e.cfg.Store.PruneStageOutput(context.Background(), snap.Feature.ID, snap.Feature.Stage)
 	}
 	return nil
+}
+
+// toolEvents mirrors one AuthorTool transcript entry as the one or two
+// rows the durable log wants for it.
+//
+// A call gummi ran itself — a check, a budget nudge — knew its outcome
+// before it was ever recorded, so it is one row and that row carries
+// everything. A call an agent made is two: the call, written the moment
+// it happened, and its outcome, written when it arrives.
+//
+// The split is what makes the tool record exist at all. Waiting for an
+// outcome before recording anything means recording nothing on every
+// backend that does not report one — and three of gummi's six do not
+// (agent.EventToolResult's own doc says so). A call whose result never
+// comes now leaves a row saying it was called, which is the truth, in
+// place of the silence that used to read as "this card used no tools".
+//
+// Both dedupe keys are derived from the entry's index within this
+// generation, so a save that re-walks a transcript it has already
+// mirrored is a no-op, and a call that settles between two saves adds its
+// outcome without disturbing the call.
+func toolEvents(snap Snapshot, m Message, prefix string, i int) []state.CardEvent {
+	payload, _ := json.Marshal(state.ToolPayload{
+		Label: m.Content, Tool: m.Tool, Detail: m.Detail, Call: m.CallID,
+	})
+	call := state.CardEvent{
+		Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
+		Kind: state.EventTool, At: eventTime(m.At), Payload: string(payload),
+		Dedupe: prefix + ":tool:" + strconv.Itoa(i),
+	}
+	// gummi's own line: no call id to correlate on, and the outcome (if
+	// it has one) was known when it was appended. One row, as before.
+	if m.CallID == "" {
+		call.Status = string(m.ToolStatus)
+		call.Output = m.ToolOutput
+		return []state.CardEvent{call}
+	}
+	if m.ToolStatus == "" {
+		return []state.CardEvent{call}
+	}
+	var ms int64
+	if !m.DoneAt.IsZero() && !m.At.IsZero() {
+		ms = m.DoneAt.Sub(m.At).Milliseconds()
+	}
+	result, _ := json.Marshal(state.ToolPayload{Label: m.Content, Call: m.CallID, MS: ms})
+	return []state.CardEvent{call, {
+		Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
+		Kind: state.EventToolResult, Status: string(m.ToolStatus),
+		At: eventTime(m.DoneAt), Payload: string(result), Output: m.ToolOutput,
+		Dedupe: prefix + ":tool_result:" + strconv.Itoa(i),
+	}}
+}
+
+// eventTime prefers when the thing actually happened over when the
+// mirror got around to writing it down. A zero time means the entry
+// predates the stamp — a transcript restored from a previous process,
+// which carries its messages but not their clocks — and the write time
+// is then the closest honest answer available.
+func eventTime(at time.Time) time.Time {
+	if at.IsZero() {
+		return time.Now()
+	}
+	return at
 }
 
 // persistDelete removes a feature's persisted session.

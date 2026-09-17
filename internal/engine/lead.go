@@ -356,8 +356,13 @@ func (e *Engine) recordLeadUsage(goal domain.FeatureID, u agent.Usage) {
 	}
 	ctx := context.Background()
 	_ = e.cfg.Store.AddSpend(ctx, goal, credits, estimated, u.InputTokens, u.OutputTokens)
-	_ = e.cfg.Store.RecordStageSpend(ctx, goal, domain.StageImplement, string(agent.RoleLead), u.Model,
-		credits, estimated, u.InputTokens, u.CachedTokens, u.OutputTokens)
+	// No session key: the lead conducts the goal across every card's
+	// stages, so its spend is the goal's, not one pass of one stage's.
+	_ = e.cfg.Store.RecordStageSpend(ctx, goal, state.SpendSample{
+		Stage: domain.StageImplement, Role: string(agent.RoleLead), Model: u.Model,
+		Credits: credits, Estimated: estimated,
+		InputTokens: u.InputTokens, CachedTokens: u.CachedTokens, OutputTokens: u.OutputTokens,
+	})
 }
 
 // --- prompts ---------------------------------------------------------------

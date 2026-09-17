@@ -431,10 +431,16 @@ func TestBuildStatusExplainsAParkedCard(t *testing.T) {
 	if err := f.store.IncrementRounds(f.ctx, feat.ID, domain.RoundKindReview); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageImplement, "implementer", "m1", 431, 0, 10, 20, 30); err != nil {
+	if err := f.store.RecordStageSpend(f.ctx, feat.ID, state.SpendSample{
+		Stage: domain.StageImplement, Role: "implementer", Model: "m1",
+		Credits: 431, InputTokens: 10, CachedTokens: 20, OutputTokens: 30,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.RecordStageSpend(f.ctx, feat.ID, domain.StageVerify, "reviewer", "m2", 97, 0, 1, 2, 3); err != nil {
+	if err := f.store.RecordStageSpend(f.ctx, feat.ID, state.SpendSample{
+		Stage: domain.StageVerify, Role: "reviewer", Model: "m2",
+		Credits: 97, InputTokens: 1, CachedTokens: 2, OutputTokens: 3,
+	}); err != nil {
 		t.Fatal(err)
 	}
 

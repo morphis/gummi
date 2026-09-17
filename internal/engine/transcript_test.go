@@ -115,7 +115,7 @@ func TestFinishAssistantFinalizesAcrossInterleavedActivity(t *testing.T) {
 	const text = "Baseline is clean. Two contract decisions remain. First:"
 	s.appendDelta("Baseline is clean. ")
 	s.appendDelta("Two contract decisions remain. First:")
-	s.appendToolCall("call-1", "gummi_ask_user  Presenter unit tests?")
+	s.appendToolCall("call-1", "gummi_ask_user  Presenter unit tests?", "tool", "")
 	s.finishAssistant(text)
 
 	tr := s.Snapshot().Transcript
@@ -157,9 +157,9 @@ func TestFinishAssistantFinalizesAcrossAskAnswer(t *testing.T) {
 
 func TestResolveToolResultMarksMatchingCall(t *testing.T) {
 	s := &Session{}
-	s.appendToolCall("c1", "bash  rockcraft pack")
+	s.appendToolCall("c1", "bash  rockcraft pack", "tool", "")
 	s.appendActivity("budget nudge") // no call id: outcome stays unknown
-	s.appendToolCall("c2", "bash  tox -e static")
+	s.appendToolCall("c2", "bash  tox -e static", "tool", "")
 	s.resolveToolResult("c1", false, "error: device already exists\nfull log")
 	s.resolveToolResult("c2", true, "all green")
 	s.resolveToolResult("missing", true, "dropped") // unknown ids are ignored

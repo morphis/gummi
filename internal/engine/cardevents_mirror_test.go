@@ -54,13 +54,12 @@ func TestMirrorEventsIdempotentAcrossRepeatedPersist(t *testing.T) {
 	}
 }
 
-// TestMirrorSkipsUnsettledUntilSettled: a streaming assistant message and
-// an unresolved tool call have a stable ord while their content is still
-// changing, so mirroring them early would freeze the truncated first
-// version under a dedupe key that can never be overwritten. They must be
-// skipped until they settle, then mirrored exactly once with their final
-// content.
-func TestMirrorSkipsUnsettledUntilSettled(t *testing.T) {
+// TestMirrorSkipsStreamingAssistantUntilSettled: a streaming assistant
+// message has a stable ord while its content is still changing, so
+// mirroring it early would freeze the truncated first version under a
+// dedupe key that can never be overwritten. It must be skipped until it
+// settles, then mirrored exactly once with its final content.
+func TestMirrorSkipsStreamingAssistantUntilSettled(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
 	f := feature(1, "impl", domain.StageImplement)
@@ -71,7 +70,6 @@ func TestMirrorSkipsUnsettledUntilSettled(t *testing.T) {
 	s := &Session{Feature: f, Role: agent.RoleImplementer, state: StateRunning, startedAt: time.Now()}
 	s.transcript = []Message{
 		{Author: AuthorAssistant, Content: "partial thought...", Streaming: true},
-		{Author: AuthorTool, Content: "go test ./...", ToolStatus: ToolPending},
 	}
 	e.persist(s)
 
@@ -80,37 +78,162 @@ func TestMirrorSkipsUnsettledUntilSettled(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ev := range evs {
-		if ev.Kind == state.EventMessage || ev.Kind == state.EventTool {
-			t.Fatalf("unsettled entry mirrored early: %+v", ev)
+		if ev.Kind == state.EventMessage {
+			t.Fatalf("streaming message mirrored early: %+v", ev)
 		}
 	}
 
-	// both entries settle
 	s.transcript[0].Streaming = false
 	s.transcript[0].Content = "final thought"
-	s.transcript[1].ToolStatus = ToolOK
-	s.transcript[1].ToolOutput = "PASS"
 	e.persist(s)
 
-	msgEvs, toolEvs := splitByKind(t, store, f.ID)
+	msgEvs, _ := splitByKind(t, store, f.ID)
 	if len(msgEvs) != 1 {
 		t.Fatalf("message events = %d, want 1: %+v", len(msgEvs), msgEvs)
 	}
 	if !strings.Contains(msgEvs[0].Payload, "final thought") {
 		t.Errorf("message payload = %q, want the final content", msgEvs[0].Payload)
 	}
-	if len(toolEvs) != 1 {
-		t.Fatalf("tool events = %d, want 1: %+v", len(toolEvs), toolEvs)
+
+	// a further persist with nothing new must not duplicate it
+	e.persist(s)
+	if msgEvs, _ = splitByKind(t, store, f.ID); len(msgEvs) != 1 {
+		t.Fatalf("after re-persist: messages = %d, want 1", len(msgEvs))
 	}
-	if toolEvs[0].Status != string(ToolOK) || toolEvs[0].Output != "PASS" {
-		t.Errorf("tool event = %+v, want ok/PASS", toolEvs[0])
+}
+
+// TestMirrorRecordsToolCallWhenCalled is W2's contract, and the reason
+// the tool record exists at all: an agent's call is written the moment it
+// is made, before anything knows how it went. Waiting for an outcome
+// meant recording nothing on the backends that never report one, which is
+// half of them — so a card could run for hours and its history show no
+// tool calls whatsoever.
+//
+// The outcome, when it does arrive, lands as its own row (the log is
+// append-only, so the call's row cannot be amended), and FoldToolResults
+// puts the two back together for every reader above the store.
+func TestMirrorRecordsToolCallWhenCalled(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	e := persistEngine(t, agent.NewFake("hi"), ws, store, wt)
+
+	started := time.Now()
+	s := &Session{Feature: f, Role: agent.RoleImplementer, state: StateRunning, startedAt: started}
+	s.transcript = []Message{{
+		Author: AuthorTool, Content: "Bash  go test ./...",
+		Tool: "Bash", Detail: "go test ./...",
+		CallID: "call-1", pending: true, At: started,
+	}}
+	e.persist(s)
+
+	_, tools := splitByKind(t, store, f.ID)
+	if len(tools) != 1 {
+		t.Fatalf("tool events = %d, want the call recorded before its outcome: %+v", len(tools), tools)
+	}
+	var p state.ToolPayload
+	if err := json.Unmarshal([]byte(tools[0].Payload), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Tool != "Bash" || p.Detail != "go test ./..." || p.Call != "call-1" {
+		t.Errorf("payload = %+v, want the call taken apart, not only its rendered label", p)
+	}
+	if p.Label != "Bash  go test ./..." {
+		t.Errorf("label = %q, want the rendered line kept for readers that only print it", p.Label)
+	}
+	if tools[0].Status != "" {
+		t.Errorf("status = %q, want empty: nothing knew the outcome yet", tools[0].Status)
 	}
 
-	// a further persist with nothing new must not duplicate the now-settled entries
+	// the outcome arrives
+	s.transcript[0].pending = false
+	s.transcript[0].ToolStatus = ToolFail
+	s.transcript[0].ToolOutput = "FAIL"
+	s.transcript[0].DoneAt = started.Add(1500 * time.Millisecond)
 	e.persist(s)
-	msgEvs, toolEvs = splitByKind(t, store, f.ID)
-	if len(msgEvs) != 1 || len(toolEvs) != 1 {
-		t.Fatalf("after re-persist: messages=%d tools=%d, want 1/1", len(msgEvs), len(toolEvs))
+
+	evs, err := store.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folded := state.FoldToolResults(evs)
+	var got []state.CardEvent
+	for _, ev := range folded {
+		if ev.Kind == state.EventTool {
+			got = append(got, ev)
+		}
+		if ev.Kind == state.EventToolResult {
+			t.Errorf("folded log still carries a result row: %+v", ev)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("folded tool events = %d, want the call and its outcome as one: %+v", len(got), got)
+	}
+	if got[0].Status != string(ToolFail) || got[0].Output != "FAIL" {
+		t.Errorf("folded event = %+v, want the failure merged onto the call", got[0])
+	}
+	var fp state.ToolPayload
+	if err := json.Unmarshal([]byte(got[0].Payload), &fp); err != nil {
+		t.Fatal(err)
+	}
+	if fp.Tool != "Bash" || fp.Detail != "go test ./..." {
+		t.Errorf("folded payload = %+v, want the call's own identity kept", fp)
+	}
+	if fp.MS != 1500 {
+		t.Errorf("duration = %dms, want 1500 measured from the call to its outcome", fp.MS)
+	}
+
+	// re-persisting settles nothing new and must not duplicate either row
+	e.persist(s)
+	evs, err = store.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls, results int
+	for _, ev := range evs {
+		switch ev.Kind {
+		case state.EventTool:
+			calls++
+		case state.EventToolResult:
+			results++
+		}
+	}
+	if calls != 1 || results != 1 {
+		t.Fatalf("after re-persist: calls=%d results=%d, want 1/1", calls, results)
+	}
+}
+
+// TestMirrorGummiRunLineIsOneRow: a check gummi ran itself knew its
+// outcome before it was ever recorded, so it needs no second row and
+// carries its status where it always did.
+func TestMirrorGummiRunLineIsOneRow(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := feature(1, "impl", domain.StageImplement)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	e := persistEngine(t, agent.NewFake("hi"), ws, store, wt)
+
+	s := &Session{Feature: f, Role: agent.RoleImplementer, state: StateRunning, startedAt: time.Now()}
+	s.transcript = []Message{
+		{Author: AuthorTool, Content: "check test: pass", ToolStatus: ToolOK, ToolOutput: "PASS"},
+	}
+	e.persist(s)
+
+	evs, err := store.Events(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if ev.Kind == state.EventToolResult {
+			t.Fatalf("gummi's own line got a result row it never needed: %+v", ev)
+		}
+	}
+	_, tools := splitByKind(t, store, f.ID)
+	if len(tools) != 1 || tools[0].Status != string(ToolOK) || tools[0].Output != "PASS" {
+		t.Fatalf("tool events = %+v, want one ok/PASS row", tools)
 	}
 }
 

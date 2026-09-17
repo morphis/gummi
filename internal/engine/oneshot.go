@@ -7,6 +7,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // A one-shot card pass is a single scribe-role turn asked about one
@@ -147,6 +148,11 @@ func (e *Engine) recordOneShotUsage(id domain.FeatureID, stage domain.Stage, u a
 	}
 	ctx := context.Background()
 	_ = e.cfg.Store.AddSpend(ctx, id, credits, estimated, u.InputTokens, u.OutputTokens)
-	_ = e.cfg.Store.RecordStageSpend(ctx, id, stage, string(agent.RoleScribe), u.Model,
-		credits, estimated, u.InputTokens, u.CachedTokens, u.OutputTokens)
+	// No session key: a one-shot is not a stage session, so its spend
+	// belongs to the stage as a whole rather than to any pass of it.
+	_ = e.cfg.Store.RecordStageSpend(ctx, id, state.SpendSample{
+		Stage: stage, Role: string(agent.RoleScribe), Model: u.Model,
+		Credits: credits, Estimated: estimated,
+		InputTokens: u.InputTokens, CachedTokens: u.CachedTokens, OutputTokens: u.OutputTokens,
+	})
 }

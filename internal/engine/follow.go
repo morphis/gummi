@@ -182,7 +182,7 @@ func (fl *Follower) editLastAssistant(content string) {
 }
 
 func (fl *Follower) appendTool(r livelog.Record) {
-	m := Message{Author: AuthorTool, Content: r.Text, callID: r.Call, ToolOutput: r.Output}
+	m := Message{Author: AuthorTool, Content: r.Text, CallID: r.Call, pending: r.Call != "", ToolOutput: r.Output}
 	if r.OK {
 		m.ToolStatus = ToolOK
 	}
@@ -200,10 +200,10 @@ func (fl *Follower) resolveTool(r livelog.Record) {
 		return
 	}
 	for i := len(fl.transcript) - 1; i >= 0; i-- {
-		if fl.transcript[i].callID != r.Call {
+		if !fl.transcript[i].pending || fl.transcript[i].CallID != r.Call {
 			continue
 		}
-		fl.transcript[i].callID = ""
+		fl.transcript[i].pending = false
 		fl.transcript[i].ToolStatus = ToolOK
 		if !r.OK {
 			fl.transcript[i].ToolStatus = ToolFail

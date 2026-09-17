@@ -403,7 +403,7 @@ func (e *Engine) handleBoard(b *BoardSession, ev agent.Event) {
 	case agent.EventMessage:
 		b.sess.finishAssistant(ev.Text)
 	case agent.EventToolCall:
-		b.sess.appendToolCall(ev.CallID, toolLine(ev))
+		b.sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
 	case agent.EventToolResult:
 		if ev.Result != nil {
 			b.sess.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)
@@ -466,7 +466,7 @@ func (e *Engine) dispatchBoardClientTool(b *BoardSession, tc *agent.ToolCall) {
 	if tc == nil {
 		return
 	}
-	b.sess.appendToolCall(tc.ID, tc.Name)
+	b.sess.appendToolCall(tc.ID, tc.Name, tc.Name, "")
 	e.send(Event{Kind: EventBoard})
 	e.wg.Add(1)
 	go func() {

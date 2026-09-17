@@ -170,9 +170,18 @@ CREATE INDEX IF NOT EXISTS diff_annotations_feature ON diff_annotations(feature_
 -- routing (which model served which role at which stage) survives only
 -- here. The helper role captures a backend's internal side-model calls
 -- so they don't mis-attribute to the stage's working role.
+--
+-- session is the stage session that spent it — the generation key the
+-- event mirror already derives from the session's start (persist.go's
+-- dedupe prefix). It is in the key because a stage that bounced through
+-- review→fix ran several times, and without it every pass of a stage
+-- collapses into one row: the first attempt and the redo add together
+-- and neither can be told from the other. Rows written before it existed
+-- carry '' and still sum correctly, since StageBreakdown groups over it.
 CREATE TABLE IF NOT EXISTS stage_spend (
 	feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
 	stage      TEXT    NOT NULL,
+	session    TEXT    NOT NULL DEFAULT '',
 	model      TEXT    NOT NULL,
 	role       TEXT    NOT NULL,
 	credits     REAL    NOT NULL DEFAULT 0,
@@ -181,7 +190,7 @@ CREATE TABLE IF NOT EXISTS stage_spend (
 	cached_tok  INTEGER NOT NULL DEFAULT 0,
 	output_tok  INTEGER NOT NULL DEFAULT 0,
 	updated_at  TEXT    NOT NULL,
-	PRIMARY KEY (feature_id, stage, model, role)
+	PRIMARY KEY (feature_id, stage, session, model, role)
 );
 
 -- Baseline outcome of the artifact's gummi-checks, captured once on
@@ -284,6 +293,12 @@ func OpenStore(dbPath string) (*Store, error) {
 	// After the column migrations: the rebuild copies every current
 	// column, so est_credits must already exist on an old DB.
 	if err := rebuildStageSpendPK(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrating state db: %w", err)
+	}
+	// And after that one: the session rebuild copies the role column the
+	// rebuild above guarantees, so it must not run first.
+	if err := rebuildStageSpendSession(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrating state db: %w", err)
 	}
@@ -496,6 +511,78 @@ func rebuildStageSpendPK(db *sql.DB) error {
 			(feature_id, stage, model, role, credits, est_credits,
 			 input_tok, cached_tok, output_tok, updated_at)
 		 SELECT feature_id, stage, model, role, credits, est_credits,
+			 input_tok, cached_tok, output_tok, updated_at
+		 FROM stage_spend`,
+		`DROP TABLE stage_spend`,
+		`ALTER TABLE stage_spend_new RENAME TO stage_spend`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// rebuildStageSpendSession migrates stage_spend rows keyed (feature_id,
+// stage, model, role) to the five-column key that also includes the
+// session that spent the credits. Without session in the key every pass
+// of a stage upserts onto the same row, so a card that bounced through
+// review→fix reports one number for what were several attempts and the
+// redo cannot be told from the first try.
+//
+// Same transactional rebuild as rebuildStageSpendPK, and the same
+// reasoning: SQLite cannot alter a primary key in place, and the old key
+// is a strict subset of the new one, so every existing row is admitted
+// unchanged under session ”. Idempotent — a table whose key already
+// includes session is left alone, which is every fresh database.
+func rebuildStageSpendSession(db *sql.DB) error {
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx,
+		`SELECT name FROM pragma_table_info('stage_spend') WHERE pk > 0`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	sessionKeyed := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == "session" {
+			sessionKeyed = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if sessionKeyed {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	for _, stmt := range []string{
+		`CREATE TABLE stage_spend_new (
+			feature_id TEXT    NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+			stage      TEXT    NOT NULL,
+			session    TEXT    NOT NULL DEFAULT '',
+			model      TEXT    NOT NULL,
+			role       TEXT    NOT NULL,
+			credits     REAL    NOT NULL DEFAULT 0,
+			est_credits REAL    NOT NULL DEFAULT 0,
+			input_tok   INTEGER NOT NULL DEFAULT 0,
+			cached_tok  INTEGER NOT NULL DEFAULT 0,
+			output_tok  INTEGER NOT NULL DEFAULT 0,
+			updated_at  TEXT    NOT NULL,
+			PRIMARY KEY (feature_id, stage, session, model, role)
+		)`,
+		`INSERT INTO stage_spend_new
+			(feature_id, stage, session, model, role, credits, est_credits,
+			 input_tok, cached_tok, output_tok, updated_at)
+		 SELECT feature_id, stage, '', model, role, credits, est_credits,
 			 input_tok, cached_tok, output_tok, updated_at
 		 FROM stage_spend`,
 		`DROP TABLE stage_spend`,
@@ -1110,10 +1197,13 @@ func (s *Store) setRounds(ctx context.Context, id domain.FeatureID, kind domain.
 	return nil
 }
 
-// StageSpend is one (stage, model) rollup row from stage_spend: the
-// realized cost a stage incurred on a given model, in credits and tokens.
+// StageSpend is one rollup row from stage_spend: the realized cost a
+// stage incurred on a given model, in credits and tokens. Session names
+// the stage session that spent it, and is empty on a row rolled up
+// across sessions (StageBreakdown) or written before the column existed.
 type StageSpend struct {
 	Stage            domain.Stage
+	Session          string
 	Model            string
 	Role             string
 	Credits          float64
@@ -1124,45 +1214,99 @@ type StageSpend struct {
 	UpdatedAt        time.Time
 }
 
+// SpendSample is one metering sample to accumulate onto the rollup. It
+// is a struct rather than ten positional arguments because five of them
+// are strings and two more are floats: a transposed pair would be
+// silently wrong, and the one thing a spend meter must never be is
+// quietly wrong.
+type SpendSample struct {
+	Stage domain.Stage
+	// Session is the stage session that spent it — the generation key
+	// persist.go derives from the session's start time. Empty attributes
+	// the sample to the stage as a whole, which is what every row written
+	// before the column existed reads as.
+	Session      string
+	Role         string
+	Model        string
+	Credits      float64
+	Estimated    float64 // the token-derived subset of Credits
+	InputTokens  int64
+	CachedTokens int64
+	OutputTokens int64
+}
+
 // RecordStageSpend accumulates one usage sample onto the (feature, stage,
-// model, role) rollup behind features.spend_* — the per-stage breakdown.
-// credits is the same credit-equivalent AddSpend receives, so the
-// breakdown sums back to the feature total. Like AddSpend it is a cheap
-// metering side-channel (an UPSERT, no validation). An empty model is
-// stored as "unknown" so the row is never keyed on ” and the breakdown
-// still accounts for the spend. Role is part of the key: one model can
-// serve two roles on the same stage (e.g. a critique pass reusing the
-// plan stage), and each keeps its own attribution.
-func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, stage domain.Stage, role, model string, credits, estimated float64, in, cached, out int64) error {
+// session, model, role) rollup behind features.spend_* — the per-stage
+// breakdown. sample.Credits is the same credit-equivalent AddSpend
+// receives, so the breakdown sums back to the feature total. Like AddSpend
+// it is a cheap metering side-channel (an UPSERT, no validation). An empty
+// model is stored as "unknown" so the row is never keyed on ” and the
+// breakdown still accounts for the spend. Role is part of the key: one
+// model can serve two roles on the same stage (e.g. a critique pass
+// reusing the plan stage), and each keeps its own attribution.
+func (s *Store) RecordStageSpend(ctx context.Context, id domain.FeatureID, sample SpendSample) error {
+	model := sample.Model
 	if model == "" {
 		model = "unknown"
 	}
 	now := time.Now().UTC().Format(timeFmt)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO stage_spend
-			(feature_id, stage, model, role, credits, est_credits, input_tok, cached_tok, output_tok, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(feature_id, stage, model, role) DO UPDATE SET
+			(feature_id, stage, session, model, role, credits, est_credits, input_tok, cached_tok, output_tok, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(feature_id, stage, session, model, role) DO UPDATE SET
 			credits     = credits     + excluded.credits,
 			est_credits = est_credits + excluded.est_credits,
 			input_tok   = input_tok   + excluded.input_tok,
 			cached_tok  = cached_tok  + excluded.cached_tok,
 			output_tok  = output_tok  + excluded.output_tok,
 			updated_at  = excluded.updated_at`,
-		string(id), string(stage), model, role, credits, estimated, in, cached, out, now)
+		string(id), string(sample.Stage), sample.Session, model, sample.Role,
+		sample.Credits, sample.Estimated, sample.InputTokens, sample.CachedTokens, sample.OutputTokens, now)
 	if err != nil {
-		return fmt.Errorf("metering stage %s/%s for %s: %w", stage, model, id, err)
+		return fmt.Errorf("metering stage %s/%s for %s: %w", sample.Stage, model, id, err)
 	}
 	return nil
 }
 
-// StageBreakdown returns a feature's per-stage/model spend rollup, ordered
-// by workflow stage position then descending credits (so each stage's
-// dominant model leads). It is the read behind the dashboard breakdown.
+// StageBreakdown returns a feature's per-stage/model spend rollup summed
+// across sessions, ordered by workflow stage position then descending
+// credits (so each stage's dominant model leads). It is the read behind
+// the dashboard breakdown, and its rows carry no Session — a stage that
+// ran four times reports one row per (stage, model, role), exactly as it
+// did before sessions entered the key. Callers that need to tell one pass
+// from another want SessionBreakdown.
 func (s *Store) StageBreakdown(ctx context.Context, id domain.FeatureID) ([]StageSpend, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT stage, model, role, credits, est_credits, input_tok, cached_tok, output_tok, updated_at
-		FROM stage_spend WHERE feature_id = ?`, string(id))
+	return s.spendRows(ctx, `
+		SELECT stage, '', model, role, SUM(credits), SUM(est_credits),
+			SUM(input_tok), SUM(cached_tok), SUM(output_tok), MAX(updated_at)
+		FROM stage_spend WHERE feature_id = ?
+		GROUP BY stage, model, role`, id)
+}
+
+// SessionBreakdown returns the same rollup at its finest grain: one row
+// per (stage, session, model, role). This is what tells a stage's first
+// attempt from the redo that followed it — the question StageBreakdown
+// cannot answer, because it sums exactly the dimension that distinguishes
+// them.
+//
+// Unlike a stage_exit event's payload, which carries a session's credits
+// only if the session actually exited, these rows are written per usage
+// sample. A stage that was interrupted, exhausted or is still running is
+// therefore accounted for here and nowhere else.
+func (s *Store) SessionBreakdown(ctx context.Context, id domain.FeatureID) ([]StageSpend, error) {
+	return s.spendRows(ctx, `
+		SELECT stage, session, model, role, credits, est_credits,
+			input_tok, cached_tok, output_tok, updated_at
+		FROM stage_spend WHERE feature_id = ?`, id)
+}
+
+// spendRows runs a stage_spend query whose columns are, in order: stage,
+// session, model, role, credits, est_credits, input, cached, output,
+// updated_at — and sorts the result into workflow order, dominant model
+// first within a stage.
+func (s *Store) spendRows(ctx context.Context, query string, id domain.FeatureID) ([]StageSpend, error) {
+	rows, err := s.db.QueryContext(ctx, query, string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -1171,7 +1315,7 @@ func (s *Store) StageBreakdown(ctx context.Context, id domain.FeatureID) ([]Stag
 	for rows.Next() {
 		var r StageSpend
 		var stage, updated string
-		if err := rows.Scan(&stage, &r.Model, &r.Role, &r.Credits, &r.EstimatedCredits,
+		if err := rows.Scan(&stage, &r.Session, &r.Model, &r.Role, &r.Credits, &r.EstimatedCredits,
 			&r.InputTokens, &r.CachedTokens, &r.OutputTokens, &updated); err != nil {
 			return nil, err
 		}
@@ -1189,7 +1333,10 @@ func (s *Store) StageBreakdown(ctx context.Context, id domain.FeatureID) ([]Stag
 		if si != sj {
 			return si < sj
 		}
-		return out[i].Credits > out[j].Credits
+		if out[i].Credits != out[j].Credits {
+			return out[i].Credits > out[j].Credits
+		}
+		return out[i].Session < out[j].Session
 	})
 	return out, nil
 }
