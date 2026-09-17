@@ -124,3 +124,84 @@ func TestChecksCacheSurvivesCorruption(t *testing.T) {
 		t.Error("a corrupt cache could not be rewritten")
 	}
 }
+
+// A second card in the same repository is a second PATH — gummi's model
+// is a worktree per card — so a cache that can only hit on the path it was
+// written at can never help the card it exists for. A goal makes it
+// certain: its children resolve their repo root through the goal's own
+// worktree while the goal's gate resolves the workspace root. On the lxd
+// autopilot drive the cache ended the run holding two entries with
+// identical fingerprints and different keys, the second survey having
+// re-derived a byte-identical answer for 79.3 credits.
+func TestChecksCacheFollowsTheFingerprintAcrossWorktrees(t *testing.T) {
+	e := newEngine(t, agent.NewFake("ack"))
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "go.mod"), "module x\n")
+	write(t, filepath.Join(repo, "Makefile"), "test:\n\tgo test ./...\n")
+
+	// the same repository content checked out again, as a card's worktree is
+	worktree := filepath.Join(t.TempDir(), ".gummi", "worktrees", "FD-002")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(worktree, "go.mod"), "module x\n")
+	write(t, filepath.Join(worktree, "Makefile"), "test:\n\tgo test ./...\n")
+
+	want := []domain.Check{{Name: "test", Cmd: "go test ./..."}}
+	e.rememberChecks(repo, want)
+
+	got, ok := e.cachedChecks(worktree)
+	if !ok {
+		t.Fatal("the second card in one repo surveyed again from scratch")
+	}
+	if got[0].Cmd != want[0].Cmd {
+		t.Errorf("cachedChecks = %q, want the first card's %q — the point of the "+
+			"cache is that the second card gets the SAME floor", got[0].Cmd, want[0].Cmd)
+	}
+
+	// A repo that really does build differently is still surveyed again.
+	other := t.TempDir()
+	write(t, filepath.Join(other, "go.mod"), "module x\n")
+	write(t, filepath.Join(other, "Makefile"), "test:\n\tgo test -race ./...\n")
+	if _, ok := e.cachedChecks(other); ok {
+		t.Error("a repo with different build files was served another's survey")
+	}
+}
+
+// Two entries sharing a fingerprint are two independent surveys that need
+// not have agreed — exactly what the drive's cache held. Reuse has to pick
+// the same one every time, or the floor a card is held to depends on map
+// order.
+func TestChecksCachePicksTheSameEntryEveryTime(t *testing.T) {
+	e := newEngine(t, agent.NewFake("ack"))
+	base := t.TempDir()
+	seed := func(dir string) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, "go.mod"), "module x\n")
+	}
+	shortRoot := filepath.Join(base, "r")
+	longRoot := filepath.Join(base, "r", ".gummi", "worktrees", "GL-001")
+	seed(shortRoot)
+	seed(longRoot)
+	e.rememberChecks(longRoot, []domain.Check{{Name: "a", Cmd: "go test ./x/..."}})
+	e.rememberChecks(shortRoot, []domain.Check{{Name: "b", Cmd: "go test ./..."}})
+
+	fresh := filepath.Join(base, "other")
+	seed(fresh)
+	first, ok := e.cachedChecks(fresh)
+	if !ok {
+		t.Fatal("no entry reused")
+	}
+	for i := 0; i < 20; i++ {
+		got, ok := e.cachedChecks(fresh)
+		if !ok || got[0].Cmd != first[0].Cmd {
+			t.Fatalf("reuse is not deterministic: %q then %q", first[0].Cmd, got[0].Cmd)
+		}
+	}
+	if first[0].Cmd != "go test ./..." {
+		t.Errorf("reused %q, want the root nearest the workspace (%q)",
+			first[0].Cmd, "go test ./...")
+	}
+}

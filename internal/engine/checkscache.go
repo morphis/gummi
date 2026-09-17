@@ -141,17 +141,49 @@ func (e *Engine) loadChecksCache() map[string]checksCacheEntry {
 }
 
 // cachedChecks returns the remembered survey for root when its fingerprint
-// still matches what is on disk.
+// still matches what is on disk — and, failing that, any other root in the
+// cache whose fingerprint is identical.
+//
+// The fallback is the whole point. gummi's model is a worktree per card, so
+// two cards in one repository are two different absolute paths, and a cache
+// keyed on the path alone can only ever hit for a card that runs where an
+// earlier one ran. A goal makes this certain rather than likely: its
+// children resolve their repo root through the goal's own worktree
+// (PLAN-goal.md decision 1) while the goal's own gate resolves the
+// workspace root, so on the lxd autopilot drive the cache ended the run
+// holding two entries with IDENTICAL fingerprints and different keys, and
+// the second survey — 79.3 credits — re-derived a byte-identical answer.
+//
+// The fingerprint is what decides whether a survey is still valid, so it is
+// what decides reuse; the path is only where it was learned. Selection is
+// deterministic (shortest key, then lexicographic) because two entries
+// sharing a fingerprint are two independent surveys that need not have
+// agreed, and "the second card gets the SAME floor as the first" is the
+// property this cache exists for — a map-order pick would hand out
+// whichever of them came up first. Shortest wins because the root nearest
+// the workspace is the one a per-card worktree is a copy of.
 func (e *Engine) cachedChecks(root string) ([]domain.Check, bool) {
 	fp := checksFingerprint(root)
 	if fp == "" {
 		return nil, false
 	}
-	entry, ok := e.loadChecksCache()[root]
-	if !ok || entry.Fingerprint != fp || len(entry.Checks) == 0 {
+	cache := e.loadChecksCache()
+	if entry, ok := cache[root]; ok && entry.Fingerprint == fp && len(entry.Checks) > 0 {
+		return entry.Checks, true
+	}
+	best, found := "", false
+	for key, entry := range cache {
+		if key == root || entry.Fingerprint != fp || len(entry.Checks) == 0 {
+			continue
+		}
+		if !found || len(key) < len(best) || (len(key) == len(best) && key < best) {
+			best, found = key, true
+		}
+	}
+	if !found {
 		return nil, false
 	}
-	return entry.Checks, true
+	return cache[best].Checks, true
 }
 
 // rememberChecks records a fresh survey for root. Best-effort: a cache
