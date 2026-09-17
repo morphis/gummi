@@ -199,6 +199,20 @@ Stage semantics:
     advancing out of Verify squash-merges the branch into main as a
     single commit whose message gummi drafts from the spec and the
     branch; you review, edit, and approve it before anything lands.
+    **The draft is composed at the verify gate, not at the keypress.**
+    The pass is the same zero-tool scribe turn it always was, but the
+    moment it costs nobody anything is the one where the branch has just
+    become final and the card has parked: the reader is elsewhere, and a
+    measured ~60s of it used to be spent with them watching an empty box
+    — once per card, serially, in the close-out ritual. Drafting there
+    also hands the scribe the one input the merge dialog could never
+    have: what verify just reported. The stored draft is stamped with
+    the branch tip it describes, so a branch that moved since (a rebase,
+    a post-verify fix, the merge flow's own final checkpoint) is drafted
+    live exactly as before — staleness is a question about the tree, and
+    the tree answers it. Redraft (`ctrl+r`) always composes anew. What
+    does not change: it is a draft, the human still reviews and approves
+    it, and untouched text still takes a second `ctrl+s` to land.
   - **Land through a PR** — a PR merge is a first-class landing route
     alongside gummi's own squash merge, and works under any of GitHub's
     three merge methods — squash merge, merge commit, or rebase merge.

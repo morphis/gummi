@@ -231,7 +231,7 @@ func TestDraftCommitMsgScrubsAttribution(t *testing.T) {
 
 func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 	feed := &worktree.DraftFeed{}
-	p := commitmsgPrompt(feed, "")
+	p := commitmsgPrompt(feed, "", "")
 	for _, want := range []string{
 		// every body line, including each "- " bullet, stays at or under 72.
 		"stays at or under 72",
@@ -253,7 +253,7 @@ func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 	// the inlined digest travels as the authoritative context; no surviving
 	// instruction may send the scribe to read a file.
 	digest := commitmsgDigest("# FD-009: land me\n\n## Problem\n\nThe draft times out.\n\n## Chosen approach\n\nOne zero-tool turn.\n")
-	pd := commitmsgPrompt(&worktree.DraftFeed{}, digest)
+	pd := commitmsgPrompt(&worktree.DraftFeed{}, digest, "")
 	if !strings.Contains(pd, "## Spec digest") || !strings.Contains(pd, "One zero-tool turn.") {
 		t.Errorf("commitmsgPrompt does not embed the digest:\n%.400s", pd)
 	}
@@ -263,7 +263,7 @@ func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 		}
 	}
 	// an empty digest omits the section instead of shipping a hole.
-	if strings.Contains(commitmsgPrompt(&worktree.DraftFeed{}, ""), "## Spec digest") {
+	if strings.Contains(commitmsgPrompt(&worktree.DraftFeed{}, "", ""), "## Spec digest") {
 		t.Errorf("empty digest still emits a Spec digest section")
 	}
 
@@ -273,7 +273,7 @@ func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 		"feat(engine,ui): one graph, five stages",
 		"fix(ui): stop the cursor blink",
 	}}
-	pst := commitmsgPrompt(styled, "")
+	pst := commitmsgPrompt(styled, "", "")
 	if !strings.Contains(pst, "established landing style") {
 		t.Errorf("commitmsgPrompt lacks the style-match instruction")
 	}
@@ -286,7 +286,7 @@ func TestCommitmsgPromptGuardsFormat(t *testing.T) {
 		t.Errorf("commitmsgPrompt lost the Conventional Commits floor instruction")
 	}
 	// a sparse history omits the style section entirely; the floor alone.
-	bare := commitmsgPrompt(&worktree.DraftFeed{}, "")
+	bare := commitmsgPrompt(&worktree.DraftFeed{}, "", "")
 	if strings.Contains(bare, "established landing style") {
 		t.Errorf("sparse-history prompt still carries the style section")
 	}
@@ -639,7 +639,7 @@ func TestDraftCommitMsgSurfacesDistinctReasons(t *testing.T) {
 func TestCommitmsgPromptStatesWhatTheValidatorEnforces(t *testing.T) {
 	p := commitmsgPrompt(&worktree.DraftFeed{
 		StyleSubjects: []string{"feat(lxc/list): add a column"},
-	}, "")
+	}, "", "")
 
 	// Every type the validator accepts is offered, so the scribe never has
 	// to guess one that will be rejected.

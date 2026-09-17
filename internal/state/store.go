@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS features (
 	fork_point      TEXT NOT NULL DEFAULT '',
 	landed_sha      TEXT NOT NULL DEFAULT '',
 	commit_draft_fail TEXT NOT NULL DEFAULT '',
+	commit_draft    TEXT NOT NULL DEFAULT '',
+	commit_draft_sha TEXT NOT NULL DEFAULT '',
 	repo            TEXT NOT NULL DEFAULT '',
 	pr_repo         TEXT NOT NULL DEFAULT '',
 	pr_number       INTEGER NOT NULL DEFAULT 0,
@@ -543,6 +545,8 @@ var migrations = []string{
 	`ALTER TABLE sessions ADD COLUMN flavor TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE sessions ADD COLUMN verdict TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN commit_draft_fail TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN commit_draft TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN commit_draft_sha TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN repo TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN spend_decompose_credits REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE features ADD COLUMN spend_decompose_in INTEGER NOT NULL DEFAULT 0`,
@@ -644,11 +648,11 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		INSERT INTO features (id, num, title, one_liner, slug, stage,
 			skip_brainstorm, skip_plan, profile,
 			budget_envelope, created_at, updated_at,
-			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
+			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 			pr_repo, pr_number, pr_url, pr_head_sha,
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -656,7 +660,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.CreatedAt.UTC().Format(timeFmt), f.UpdatedAt.UTC().Format(timeFmt),
 		// the three false values are skip_triage/skip_diagnose/quick: vestigial
 		string(kind), f.ExternalRef, false, false, false, f.GateApproval,
-		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.Repo,
+		string(f.Severity), f.ForkPoint, f.LandedSHA, f.CommitDraftFail, f.CommitDraft, f.CommitDraftSHA, f.Repo,
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
 		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
@@ -672,7 +676,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	budget_envelope, spend_credits, spend_est, spend_in, spend_out,
 	spend_decompose_credits, spend_decompose_in, spend_decompose_out,
 	created_at, updated_at,
-	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, repo,
+	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode`
@@ -710,7 +714,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.Spend.Credits, &f.Spend.EstimatedCredits, &f.Spend.InputTokens, &f.Spend.OutputTokens,
 		&f.Spend.DecomposeCredits, &f.Spend.DecomposeInputTokens, &f.Spend.DecomposeOutputTokens,
 		&created, &updated,
-		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.Repo,
+		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode)
@@ -873,6 +877,32 @@ func (s *Store) SetCommitDraftFail(ctx context.Context, id domain.FeatureID, rea
 		`UPDATE features SET commit_draft_fail = ? WHERE id = ?`, reason, string(id))
 	if err != nil {
 		return fmt.Errorf("setting commit-draft failure for %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetCommitDraft stores a landing commit message composed ahead of the
+// landing, stamped with the branch tip it was composed against. Like
+// SetCommitDraftFail it is a side-channel write (it neither touches
+// updated_at nor moves the stage): a draft is something gummi noticed
+// about the card, not a step the card took, and it must not show up in
+// the audit trail as one.
+//
+// The two values are written together, always. They are one fact — "this
+// message describes that tree" — and a draft whose SHA did not come from
+// the same pass is worse than no draft at all: it would read as fresh
+// against a branch it never saw. Passing an empty draft clears both,
+// which is how a stale draft is dropped rather than left to be re-checked
+// on every dialog.
+func (s *Store) SetCommitDraft(ctx context.Context, id domain.FeatureID, draft, sha string) error {
+	if draft == "" {
+		sha = ""
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE features SET commit_draft = ?, commit_draft_sha = ? WHERE id = ?`,
+		draft, sha, string(id))
+	if err != nil {
+		return fmt.Errorf("setting commit draft for %s: %w", id, err)
 	}
 	return nil
 }

@@ -129,8 +129,9 @@ the board. Then:
 4. Watch it work. `d` shows the diff. `b` bounces the work back with
    your notes.
 5. Done means a verified branch, and the card asks how it leaves gummi.
-   Press `g` (or `m`) to squash-merge it into main — gummi drafts the
-   landing message from the spec; you edit and approve it. Press `h` to
+   Press `g` (or `m`) to squash-merge it into main — gummi drafted the
+   landing message when verify passed, so the dialog opens on it; you
+   edit and approve it (`ctrl+r` composes another). Press `h` to
    hand it off instead: the card closes and the branch stays yours, to
    push, PR by hand or cherry-pick. Or merge outside gummi: it notices
    either way and offers cleanup with `c`.

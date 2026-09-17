@@ -703,11 +703,11 @@ func (m *Shell) probeOpenReviewThreads(ctx context.Context, f domain.Feature) (i
 func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 	d := newCommitMsgDialog(f, func(message string) tea.Cmd {
 		return m.collapseFeature(f, message)
-	}, func(dctx context.Context, feature domain.Feature) (string, error) {
+	}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 		if m.engine == nil {
 			return "", nil
 		}
-		return m.engine.DraftCommitMessage(dctx, feature)
+		return m.engine.LandingMessage(dctx, feature, fresh)
 	})
 	// The dialog names the branch this lands on. It is a field rather than
 	// a constructor argument (commitMsgDialog.baseBranch has the why), and
@@ -715,7 +715,7 @@ func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 	// at a repo whose trunk is master.
 	d.baseBranch = m.baseBranch(f)
 	m.Overlay.Push(d)
-	return d.startDraft()
+	return d.startDraft(false)
 }
 
 // reconstructInbox is the needs-attention queue's fallback source at
@@ -1643,7 +1643,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.landGoal(f, message)
 			}
 			return m.squashMergeFeature(f, message, thenDone)
-		}, func(dctx context.Context, feature domain.Feature) (string, error) {
+		}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 			// best-effort: a nil engine or any drafting failure yields an
 			// empty draft, never a hard error or a delayed dialog; dctx
 			// lets esc cancel an in-flight pass.
@@ -1654,13 +1654,16 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// a goal lands as a merge commit gummi writes from its cards
 				return m.engine.GoalMergeMessage(dctx, feature), nil
 			}
-			return m.engine.DraftCommitMessage(dctx, feature)
+			// fresh=false takes the message the verify gate pre-drafted for
+			// this branch, so the common landing opens on a filled box
+			// instead of on a ~60s pass; Redraft passes true.
+			return m.engine.LandingMessage(dctx, feature, fresh)
 		})
 		d.baseBranch = m.baseBranch(f) // see openSquashDialog's own wiring
 		m.Overlay.Push(d)
 		// start the draft pass off the render loop; the dialog is already
 		// open and editable, and the draft fills only while unmodified.
-		return m, d.startDraft()
+		return m, d.startDraft(false)
 
 	case squashReadyMsg:
 		m.squashPrep = false

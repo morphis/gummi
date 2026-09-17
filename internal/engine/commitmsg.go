@@ -23,7 +23,7 @@ import (
 // pass is a single zero-tool turn: nothing asks the scribe to read a
 // file. Everything beyond the inlined inputs is a hard contract on the
 // reply's shape.
-func commitmsgPrompt(feed *worktree.DraftFeed, digest string) string {
+func commitmsgPrompt(feed *worktree.DraftFeed, digest, verifyNote string) string {
 	var b strings.Builder
 	b.WriteString(`Compose the squash-merge landing commit for a feature about to land on
 main. This is the only message that stays in main's history, so it must
@@ -100,6 +100,19 @@ write fix(list).
 			fmt.Fprintf(&b, "- %s\n", s)
 		}
 	}
+	if verifyNote != "" {
+		b.WriteString(`
+## What verify found
+
+The verify pass's closing report on this branch. It is the one thing the
+spec could not tell you: what the work turned out to be once it was done,
+and what was actually checked. Use it for the body's rationale — never
+quote its verdict line, its markers, or its formatting.
+
+`)
+		b.WriteString(verifyNote)
+		b.WriteString("\n")
+	}
 	b.WriteString("\n## Branch commits\n")
 	for _, c := range feed.Commits {
 		fmt.Fprintf(&b, "%s\t%s\n", c.Hash, c.Body)
@@ -114,6 +127,14 @@ write fix(list).
 // draft prompt in the same few-KB envelope, so a long feature can never
 // push a backend against its output_token_max.
 const commitmsgDigestCap = 4000
+
+// commitmsgVerifyNoteCap bounds the verify pass's closing report where it
+// rides into the prompt. It is smaller than the digest's cap on purpose:
+// the report is evidence for a message, not the message's subject, and a
+// long one is mostly command output the landing message must never
+// quote. The tail is kept rather than the head — a verify report ends on
+// its conclusion.
+const commitmsgVerifyNoteCap = 2000
 
 // commitmsgDigestTruncMarker is appended, visibly, when the digest cap
 // bites — a clipped digest must never pass as whole.
@@ -171,6 +192,31 @@ func commitmsgDigest(specText string) string {
 		digest = digest[:cut] + commitmsgDigestTruncMarker
 	}
 	return digest
+}
+
+// commitmsgVerifyNote trims the verify pass's closing report down to what
+// a landing message can use: marker lines dropped (they are collaboration
+// scaffolding, not context) and the tail kept to commitmsgVerifyNoteCap
+// bytes, on a rune boundary. An empty or whitespace-only report yields "",
+// which keeps the section out of the prompt entirely rather than heading
+// nothing.
+func commitmsgVerifyNote(text string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "%%") {
+			continue
+		}
+		b.WriteString(line + "\n")
+	}
+	note := strings.TrimSpace(b.String())
+	if len(note) > commitmsgVerifyNoteCap {
+		cut := len(note) - commitmsgVerifyNoteCap
+		for cut < len(note) && !utf8.RuneStart(note[cut]) {
+			cut++
+		}
+		note = "[report truncated]\n\n" + strings.TrimSpace(note[cut:])
+	}
+	return note
 }
 
 // parseGummiCommit extracts the landing-message draft from the scribe's
@@ -422,6 +468,15 @@ func commitScribeRepoHints(card string) []string {
 }
 
 func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (string, error) {
+	return e.draftCommitMessage(ctx, f, "")
+}
+
+// draftCommitMessage is DraftCommitMessage with the verify pass's closing
+// report threaded in. It is separate only because that report exists at
+// exactly one moment — the pre-draft, fired as verify passes — and is
+// gone by the time anyone opens the merge dialog; every other caller
+// passes "" and gets the pass as it always was.
+func (e *Engine) draftCommitMessage(ctx context.Context, f domain.Feature, verifyNote string) (string, error) {
 	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
@@ -460,7 +515,7 @@ func (e *Engine) DraftCommitMessage(ctx context.Context, f domain.Feature) (stri
 		return "", fmt.Errorf("scribe session could not open: %w", err)
 	}
 	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, commitmsgPrompt(feed, commitmsgDigest(string(raw)))); err != nil {
+	if err := sess.Send(ctx, commitmsgPrompt(feed, commitmsgDigest(string(raw)), commitmsgVerifyNote(verifyNote))); err != nil {
 		return "", fmt.Errorf("scribe failed to start the draft: %w", err)
 	}
 	var text assistantText

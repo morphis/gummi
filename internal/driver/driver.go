@@ -1491,6 +1491,7 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Undrafted: res.Undrafted, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusNeedsMerge:
+		d.predraftLanding(ctx, res.Feature)
 		return d.done(ctx, res.Feature)
 	case engine.StatusNoop:
 		return d.done(ctx, res.Feature)
@@ -1609,6 +1610,42 @@ func (d *Driver) discoverAndBaselineChecks(ctx context.Context, f domain.Feature
 		}
 		d.out.activity(string(f.ID), stage, "baseline "+outcome+": "+r.Name)
 	}
+}
+
+// predraftLanding composes the card's landing commit message at the
+// moment the drive stops on a verified branch, so the person who comes
+// back to land it opens a merge dialog that already holds one
+// (engine.PredraftCommitMessage).
+//
+// It is the headless half of a fact the TUI learns at its own verify gate
+// (internal/ui/reviewloop.go): a card driven by `gummi run` never passes
+// through that gate, so without this the entire autonomous fleet — the
+// way most cards reach a verified branch — would be exactly the set of
+// cards that still pay the ~60s pass at the keypress, one after another,
+// in the close-out ritual where they all come due at once.
+//
+// It runs where discoverAndBaselineChecks runs, for the same reasons and
+// with the same manners: at a gate rather than in a stage, best-effort
+// (the drive stops on its verified branch either way), and narrated —
+// this is a model pass of a couple of minutes at the very end of a run,
+// and a stream that goes silent there reads as a hang.
+func (d *Driver) predraftLanding(ctx context.Context, f domain.Feature) {
+	// asked before the stream is told anything: a card whose message is
+	// written by something else (a goal's, a linked card's) must not be
+	// announced as drafting one.
+	if !engine.PredraftEligible(f) {
+		return
+	}
+	stage := string(domain.StageVerify)
+	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: stage, Result: "drafting the landing message"})
+	// the verify pass's closing report, while it is still in hand: the one
+	// input the merge dialog could never have had.
+	if _, err := d.eng.PredraftCommitMessage(ctx, f, verdict.LastAssistant(d.snapshot(f.ID))); err != nil {
+		d.out.activity(string(f.ID), stage, "landing-message draft failed: "+err.Error()+
+			" — the message is drafted when someone lands the card")
+		return
+	}
+	d.out.activity(string(f.ID), stage, "landing message drafted — the merge dialog opens on it")
 }
 
 // --- terminal outcomes -------------------------------------------------

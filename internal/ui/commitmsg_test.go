@@ -132,9 +132,9 @@ func TestCommitMsgDialogSurfacesDraftFailureReason(t *testing.T) {
 			d := newCommitMsgDialog(
 				domain.Feature{ID: "FD-001", Slug: "dark-mode"},
 				func(string) tea.Cmd { return nil },
-				func(ctx context.Context, f domain.Feature) (string, error) { return "", tc.err },
+				func(ctx context.Context, f domain.Feature, fresh bool) (string, error) { return "", tc.err },
 			)
-			msg, ok := d.startDraft()().(commitDraftMsg)
+			msg, ok := d.startDraft(false)().(commitDraftMsg)
 			if !ok {
 				t.Fatal("startDraft did not emit commitDraftMsg")
 			}
@@ -159,15 +159,15 @@ func TestCommitMsgDialogClearsReasonOnRedraft(t *testing.T) {
 	d := newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "dark-mode"},
 		func(string) tea.Cmd { return nil },
-		func(ctx context.Context, f domain.Feature) (string, error) { return "", errors.New("boom") },
+		func(ctx context.Context, f domain.Feature, fresh bool) (string, error) { return "", errors.New("boom") },
 	)
-	d.apply(d.startDraft()().(commitDraftMsg))
+	d.apply(d.startDraft(false)().(commitDraftMsg))
 	if d.reason == "" {
 		t.Fatal("expected a reason from the failing pass")
 	}
 	// a fresh pass starts drafting with the reason cleared, so the
 	// "drafting…" affordance replaces the stale explanation.
-	d.startDraft()
+	d.startDraft(false)
 	if d.reason != "" {
 		t.Fatalf("redraft left reason %q, want cleared", d.reason)
 	}
@@ -280,7 +280,7 @@ func TestCommitMsgDialogRedraftClearsArm(t *testing.T) {
 		t.Fatal("merge did not arm")
 	}
 
-	d.startDraft()
+	d.startDraft(false)
 	if d.armed {
 		t.Fatal("a fresh draft pass left a stale arm from the previous draft")
 	}
@@ -313,7 +313,7 @@ func TestCommitMsgDialogTypingAfterArmingSubmitsWithoutFurtherConfirm(t *testing
 // about has already been overwritten by hand.
 func TestCommitMsgDialogHidesDraftingHintOnceModified(t *testing.T) {
 	d := newTestCommitMsgDialog(t)
-	d.startDraft()
+	d.startDraft(false)
 	if v := d.View(theme.New(theme.GummiDark()), 80, 24); !strings.Contains(v, "drafting a suggested message") {
 		t.Fatalf("drafting affordance missing while drafting:\n%s", v)
 	}

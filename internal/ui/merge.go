@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -160,6 +161,42 @@ func (m *Shell) recordCommitDraftFail(id domain.FeatureID, reason string) tea.Cm
 			return noticeMsg{text: sanitize("recording commit-draft outcome: " + err.Error()), isErr: true}
 		}
 		return commitDraftPersistedMsg{id: id, reason: reason}
+	}
+}
+
+// predraftLandingMessage composes the card's landing commit message at
+// the verify gate, before anyone asks for it, and stores it against the
+// branch tip it describes (engine.PredraftCommitMessage). The merge
+// dialog opens on it later instead of on a live pass.
+//
+// It is a command because it runs a model pass — the longest-running one
+// on this path, bounded at two minutes — and nothing on screen waits for
+// it: the gate is already raised, the inbox already says the card is
+// ready to land, and the reader is free to go do something else. A card
+// whose pre-draft fails is exactly a card that drafts at the keypress,
+// which is where every landing started before this existed, so the
+// failure is recorded durably (the engine writes CommitDraftFail) and
+// reflected on the row rather than raised as a notice about nothing.
+func (m *Shell) predraftLandingMessage(id domain.FeatureID, verifyNote string) tea.Cmd {
+	if m.engine == nil || m.store == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return nil
+		}
+		// an excluded card (a goal's own, a goal's card, a linked one)
+		// leaves even the durable draft-failure note alone: nothing was
+		// attempted, so there is nothing to report about it.
+		if !engine.PredraftEligible(f) {
+			return nil
+		}
+		if _, err := m.engine.PredraftCommitMessage(ctx, f, verifyNote); err != nil {
+			return commitDraftPersistedMsg{id: id, reason: err.Error()}
+		}
+		return commitDraftPersistedMsg{id: id, reason: ""}
 	}
 }
 

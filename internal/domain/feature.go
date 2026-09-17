@@ -317,6 +317,21 @@ type Feature struct {
 	// or a timeout), persisted so the failure survives the dialog and later
 	// inspection still sees it. Empty when the last pass drafted cleanly.
 	CommitDraftFail string
+	// CommitDraft is a landing commit message composed ahead of the
+	// landing itself — at the moment verify passed and the card parked at
+	// its landing gate, where nobody is waiting on the answer. The merge
+	// dialog opens on it instead of on an empty box behind a ~60s pass.
+	// It is a DRAFT in the same sense as the one the dialog used to make
+	// at the keypress: the human still reviews, edits and approves it, and
+	// nothing lands except on an explicit ctrl+s.
+	CommitDraft string
+	// CommitDraftSHA is the branch tip CommitDraft was composed against.
+	// It is the staleness guard, and the reason the draft can be trusted
+	// at all: a branch that moved after the draft was written (a rebase, a
+	// post-verify fix, the merge flow's own final checkpoint) describes
+	// work the draft never saw, so the dialog ignores the stored draft and
+	// runs the live pass exactly as it did before. Empty with CommitDraft.
+	CommitDraftSHA string
 	// PullRequest is the outbound PR this card is linked to — the mirror of
 	// ExternalRef (which ties a bug back to its inbound source). Set by
 	// `gummi pr link`, cleared by `gummi pr unlink`. A linked card refuses a

@@ -40,10 +40,13 @@ type commitMsgDialog struct {
 	baseBranch string
 	input      textarea.Model
 	onSubmit   func(message string) tea.Cmd
-	// draft runs a read-only, best-effort scribe pass for the landing
-	// message under a caller-provided context (so esc cancels it); a nil
-	// backend or any failure returns an empty draft.
-	draft func(ctx context.Context, f domain.Feature) (string, error)
+	// draft yields the landing message under a caller-provided context (so
+	// esc cancels it); a nil backend or any failure returns an empty draft.
+	// fresh asks for a newly composed one: false accepts the pre-drafted
+	// message the verify gate already stored for this branch (which is why
+	// the box is usually filled before the first frame), true is the reader
+	// pressing Redraft and always pays for a live pass.
+	draft func(ctx context.Context, f domain.Feature, fresh bool) (string, error)
 	// gen tags each draft pass so a stale reply can't clobber a re-draft
 	// or a closed dialog.
 	gen      int
@@ -76,7 +79,7 @@ type commitMsgDialog struct {
 	buttons *buttonRow
 }
 
-func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft func(ctx context.Context, f domain.Feature) (string, error)) *commitMsgDialog {
+func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft func(ctx context.Context, f domain.Feature, fresh bool) (string, error)) *commitMsgDialog {
 	in := textarea.New()
 	in.Placeholder = "commit message"
 	in.CharLimit = 4000
@@ -122,11 +125,15 @@ func (d *commitMsgDialog) spinnerGlyph() string {
 	return spinnerFrames[n%len(spinnerFrames)]
 }
 
-// startDraft launches a fresh best-effort draft pass for this dialog and
+// startDraft launches a best-effort draft pass for this dialog and
 // returns the command to run it. A stale in-flight pass is cancelled
 // first. The arriving commitDraftMsg carries the generation, so apply
 // only honors the latest.
-func (d *commitMsgDialog) startDraft() tea.Cmd {
+//
+// fresh is passed straight to the seam: the dialog's own opening asks for
+// false (take the pre-draft if the branch still matches it, which usually
+// returns within a frame), and Redraft asks for true.
+func (d *commitMsgDialog) startDraft(fresh bool) tea.Cmd {
 	d.gen++
 	gen := d.gen
 	if d.cancel != nil {
@@ -142,7 +149,7 @@ func (d *commitMsgDialog) startDraft() tea.Cmd {
 	d.armed = false // a fresh pass invalidates any earlier arm
 	f := d.f
 	return func() tea.Msg {
-		draft, err := d.draft(ctx, f)
+		draft, err := d.draft(ctx, f, fresh)
 		cancel() // release the bound even on the fast path
 		msg := commitDraftMsg{f: d.feature, gen: gen, draft: draft}
 		if err != nil {
@@ -224,7 +231,7 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		return d.merge()
 	case "ctrl+r":
 		// regenerate the draft; applies only while the user hasn't typed.
-		return false, d.startDraft()
+		return false, d.startDraft(true)
 	case "tab", "shift+tab":
 		d.focus = (d.focus + 1) % 2
 		if d.focus == commitFieldText {
@@ -248,7 +255,7 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 				}
 				return true, nil
 			case 1: // Redraft
-				return false, d.startDraft()
+				return false, d.startDraft(true)
 			default: // Merge
 				return d.merge()
 			}

@@ -92,6 +92,7 @@ knowing is `stage`, whose `result` names what the card is doing:
 {"event":"stage","stage":"plan","result":"discovering checks"}
 {"event":"stage","stage":"plan","result":"baselining checks"}
 {"event":"gate","from":"plan","to":"implement",...}
+{"event":"stage","stage":"verify","result":"drafting the landing message"}
 ```
 
 The last two are the one-shot passes that run at the approval gate — the
@@ -103,6 +104,18 @@ plan's verdict and the gate crossing, they are the only thing happening.
 They carry the stage the card is crossing **from**, because that is the
 gate they belong to — the card's own stage field has already advanced by
 the time they start.
+
+The last line is the same kind of pass at the other end of the drive.
+When a run stops on a verified branch it composes the card's squash-merge
+landing message and stores it, so the person who comes back to land the
+card opens a merge dialog that already holds one instead of waiting
+~60s for it — the draft is stamped with the branch tip it describes, and
+a branch that moves afterwards is drafted live at the landing as before.
+It is skipped, silently, for a card whose message is written by something
+else: a goal's own, a goal's card (its goal lands it), a card linked to a
+PR, a research card, and one already handed off or dropped. The run stops
+at its verified branch either way — a failed draft costs the landing
+nothing but the wait it was meant to save.
 
 The survey is remembered per repository, not per card: a second card in
 the same repo reuses the first card's answer and skips the session

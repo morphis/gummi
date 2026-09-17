@@ -119,7 +119,15 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		// to be read, because it is the one that just changed — was the
 		// only frame missing the clause naming what the pass did not
 		// cover. It arrived a navigation later, which is exactly too late.
-		stamp = tea.Batch(m.markVerified(id), m.loadExcusedChecks(id))
+		//
+		// The landing message is drafted here too, for the same reason the
+		// stamp is: this is the moment the branch became final, and the
+		// reader who will land it is not here yet. Doing it now is the
+		// difference between a merge dialog that opens on a message and one
+		// that opens on a ~60s wait — and this pass is the only caller that
+		// can hand the scribe what verify just reported (engine/predraft.go).
+		stamp = tea.Batch(m.markVerified(id), m.loadExcusedChecks(id),
+			m.predraftLandingMessage(id, verdict.LastAssistant(s.Snapshot())))
 	case out.Reason == "verify-blocked":
 		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
