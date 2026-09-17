@@ -116,3 +116,34 @@ func TestNoClaimsTableMeansNoPromises(t *testing.T) {
 		t.Errorf("a card with no claims table made promises: %+v", got)
 	}
 }
+
+// TestUnprovenNoneIsNotAFile locks the shape verify actually writes when
+// every changed file was exercised. The instruction asks for one
+// `UNPROVEN: <path> — <why>` line per unproven file; a stage with none
+// answers it rather than skipping it, and "UNPROVEN: none" reached the
+// `done` event as unproven_files:["none"] — one unproven file, named
+// "none", on a card that had none. Observed on the lxd autopilot drive.
+func TestUnprovenNoneIsNotAFile(t *testing.T) {
+	for _, in := range []string{
+		"UNPROVEN: none",
+		"UNPROVEN: none — every changed file is covered by the units tests",
+		"- **UNPROVEN**: N/A",
+		"UNPROVEN: nothing",
+	} {
+		if got := UnprovenFiles(in); len(got) != 0 {
+			t.Errorf("UnprovenFiles(%q) = %+v, want none — the word is the stage "+
+				"saying there are no unproven files", in, got)
+		}
+	}
+	// A real path still lands, and so does a file that merely looks like one.
+	for _, c := range []struct{ in, want string }{
+		{"UNPROVEN: doc/reference/instance_units.md — prose, no check reads it",
+			"doc/reference/instance_units.md"},
+		{"UNPROVEN: none.go — no test builds it", "none.go"},
+	} {
+		got := UnprovenFiles(c.in)
+		if len(got) != 1 || got[0].Path != c.want {
+			t.Errorf("UnprovenFiles(%q) = %+v, want one file %q", c.in, got, c.want)
+		}
+	}
+}

@@ -208,12 +208,19 @@ func InvariantVerdicts(content string) map[string]string {
 // UnprovenFiles returns the files verify declared unproven, in document
 // order, de-duplicated by path (the last reason wins — a later line is a
 // revision of an earlier one).
+//
+// A stage with nothing to declare answers the instruction rather than
+// skipping it: "UNPROVEN: none" was the commonest shape on the lxd
+// autopilot drive, and it reached `done`'s unproven_files as a
+// one-element list whose element was the word "none" — a caller counting
+// the list saw one unproven file on a card that had none. The words that
+// mean "nothing here" are not paths and are dropped.
 func UnprovenFiles(content string) []UnprovenFile {
 	seen := map[string]int{}
 	var out []UnprovenFile
 	for _, m := range unprovenRe.FindAllStringSubmatch(content, -1) {
 		path := strings.Trim(strings.TrimSpace(m[1]), "`\"'")
-		if path == "" {
+		if path == "" || isNothingWord(path) {
 			continue
 		}
 		reason := strings.TrimSpace(m[2])
@@ -225,4 +232,15 @@ func UnprovenFiles(content string) []UnprovenFile {
 		out = append(out, UnprovenFile{Path: path, Reason: reason})
 	}
 	return out
+}
+
+// isNothingWord reports whether a declared UNPROVEN path is really the
+// stage saying there were none. Matched on the WHOLE word, so a real file
+// called none.go, or a path with "none" in it, is still a path.
+func isNothingWord(path string) bool {
+	switch strings.ToLower(strings.Trim(path, ".,;:()[]")) {
+	case "none", "n/a", "na", "nil", "nothing", "-", "—":
+		return true
+	}
+	return false
 }
