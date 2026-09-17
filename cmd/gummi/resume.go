@@ -74,6 +74,17 @@ func runResume(args []string) error {
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		// --say reads a line and reports what the card page would do with
+		// it. It advances nothing, writes nothing and spawns no stage, so
+		// it takes no card lock: taking one made the surface for
+		// rehearsing an intervention unavailable on exactly the cards it
+		// is for — an autopilot card mid-run answered "another gummi
+		// process is already driving this card" for the hour it worked.
+		// It also skips the pid/orphan bookkeeping, which belongs to a
+		// process that is driving.
+		if in.Say != nil {
+			return d.Resume(ctx, f.ID, in)
+		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
 			return driver.Outcome{}, err

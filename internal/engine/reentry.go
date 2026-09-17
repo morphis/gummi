@@ -131,6 +131,16 @@ func (e *Engine) ClassifyReentry(ctx context.Context, f domain.Feature, sentence
 	if strings.TrimSpace(sentence) == "" {
 		return "", nil
 	}
+	// A line that is nothing but an assent is answered without a model
+	// pass. The reading primes the card's artifact to classify one
+	// sentence — ~23 credits on the lxd autopilot drive, half that card's
+	// whole verify pass, charged to its envelope — and "go on" is both the
+	// commonest line typed at a stop and the one whose answer gummi
+	// already knows. reentry.Decide still decides what proceeding MEANS
+	// here; this only skips asking a model what the words were.
+	if reentry.BareProceed(sentence) {
+		return reentry.Proceed, nil
+	}
 	text, err := e.oneShot(ctx, f, classifyPrompt(f, sentence, forward))
 	if err != nil {
 		return "", err

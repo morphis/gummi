@@ -386,3 +386,33 @@ func TestParseIntent(t *testing.T) {
 		}
 	}
 }
+
+// TestBareProceedIsNarrow: the reader is a model pass over the card's
+// artifact — ~23 credits a line on the lxd autopilot drive, charged to
+// the card's own envelope — and "go on" is both the commonest line typed
+// at a stop and the one whose answer is already known. Answering those
+// without the pass is only safe if the match is exact: a sentence that
+// carries anything beyond assent must still be read.
+func TestBareProceedIsNarrow(t *testing.T) {
+	for _, in := range []string{
+		"go on", "  Go On. ", "yes", "LGTM", "approve", "ship it", "looks good",
+	} {
+		if !BareProceed(in) {
+			t.Errorf("BareProceed(%q) = false — a bare assent still costs a model pass", in)
+		}
+	}
+	for _, in := range []string{
+		"go on, but rename the flag first",
+		"yes if the fuzz test passes",
+		"approve the plan but not the checks",
+		"ok — one thing: this needs a test for the IEC path",
+		"land it on main yourself",
+		"looks good, though Findings is still empty",
+		"", "  ",
+	} {
+		if BareProceed(in) {
+			t.Errorf("BareProceed(%q) = true — a sentence that carries something "+
+				"was answered without being read", in)
+		}
+	}
+}

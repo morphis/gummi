@@ -453,3 +453,35 @@ func rewindPath(from, to domain.Stage) ([]domain.Stage, bool) {
 	}
 	return nil, false
 }
+
+// bareProceed is the set of sentences that mean "go on" and cannot mean
+// anything else — matched on the WHOLE line, so "go on, but fix the
+// naming first" is not one of them and still gets read properly.
+var bareProceed = map[string]bool{
+	"go on": true, "go ahead": true, "carry on": true, "continue": true,
+	"proceed": true, "yes": true, "y": true, "yep": true, "yes please": true,
+	"ok": true, "okay": true, "sure": true, "approve": true, "approved": true,
+	"lgtm": true, "ship it": true, "land it": true, "do it": true,
+	"sounds good": true, "looks good": true, "fine": true, "agreed": true,
+}
+
+// BareProceed reports whether a typed line is nothing but an assent —
+// the case where reading it costs more than it can possibly tell you.
+//
+// The reader is a model pass that primes the card's artifact to classify
+// one sentence: measured on the lxd autopilot drive, ~23 credits a line,
+// about half what that card's entire verify pass cost, and charged to the
+// card's own envelope. Most lines typed at a stop are "go on", whose
+// answer is already known, so gummi answers those itself and keeps the
+// model pass for sentences that carry something.
+//
+// Deliberately narrow, and matched whole: punctuation and case are
+// stripped, nothing else. A line this does not recognise is read, as
+// before — a false negative costs one ordinary reading, while a false
+// positive would advance a card on a sentence that meant something else.
+func BareProceed(line string) bool {
+	s := strings.ToLower(strings.TrimSpace(line))
+	s = strings.Trim(s, ".!,;: \t\n\"'")
+	s = strings.Join(strings.Fields(s), " ")
+	return bareProceed[s]
+}
