@@ -299,3 +299,22 @@ func commitInTree(t *testing.T, dir, file, msg string) {
 	gitIn(t, dir, "add", "-A")
 	gitIn(t, dir, "commit", "-q", "-m", msg)
 }
+
+// TestThePlanIsToldWhereAChecksCommandRuns: a done-when check runs at the
+// root of its repository's own checkout. An architect that read the
+// workspace from its root writes `cd <repo> && …` and every item then
+// fails for a reason that has nothing to do with the work — the whole
+// goal comes back not met while its cards have landed and are correct.
+func TestThePlanIsToldWhereAChecksCommandRuns(t *testing.T) {
+	e, _, _, _, goal := twoRepoGoalEngine(t, twoRepoGoalDoc)
+	card := e.goalReposCard(context.Background(), goal)
+	if card == "" {
+		t.Fatal("a multi-repo workspace says nothing about its repositories")
+	}
+	if !strings.Contains(card, "ROOT of that repository's own checkout") {
+		t.Errorf("the plan is not told where a check's command runs:\n%s", card)
+	}
+	if !strings.Contains(card, "never `cd` into it by name") {
+		t.Errorf("the plan is not warned off the one mistake this costs a whole goal:\n%s", card)
+	}
+}

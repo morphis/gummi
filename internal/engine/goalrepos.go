@@ -221,6 +221,12 @@ func (e *Engine) goalReposCard(ctx context.Context, goal domain.Feature) string 
 	b.WriteString("A goal is not in one of them — each card row in the goal doc names its own `repo:`, ")
 	b.WriteString("and the goal has a branch of its own in every repository its cards are in. ")
 	b.WriteString("A done-when item whose `check:` must run somewhere other than " + repoName(goal.Repo) + " names that repository too.\n")
+	// The one thing about a check that a plan written from the workspace
+	// root gets wrong, every time: its command runs INSIDE the repository
+	// it names, so a `cd <repo>` at the top of it cannot find anything and
+	// the item fails for a reason that has nothing to do with the work.
+	b.WriteString("A check runs at the ROOT of that repository's own checkout of this goal's branch — not at the workspace root — ")
+	b.WriteString("so write it as if you were already standing in the repository, and never `cd` into it by name.\n")
 	trees, err := e.goalTrees(ctx, goal)
 	if err != nil || len(trees) < 2 {
 		return strings.TrimSpace(b.String())
