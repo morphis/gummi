@@ -134,3 +134,54 @@ func TestGoalLogNumbersDecisions(t *testing.T) {
 		t.Fatalf("an entry for a missing goal must fail")
 	}
 }
+
+// A goal arriving at implement is being put back to work. SendBackGoal
+// said so itself, which covered its own verb and nothing else: the
+// composer's rewind walks the same edge with a plain transition, and left
+// a wrapped-up goal with its wrap-up stamp and its partial reason intact,
+// so the conductor finished it again on its first tick and handed back
+// the identical result.
+func TestAGoalBackAtImplementIsNoLongerWrappingUp(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t)
+	g := domain.Feature{
+		ID: "GL-001", Num: 1, Kind: domain.KindGoal, Title: "a goal", Slug: "a-goal",
+		Stage: domain.StageImplement, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := s.CreateFeature(ctx, &g); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGoalWrapUp(ctx, g.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetGoalPartial(ctx, g.ID, "the lead kept failing"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(ctx, g.ID, domain.StageVerify, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetVerifiedAt(ctx, g.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	back, err := s.Transition(ctx, g.ID, domain.StageImplement, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Goal.WrappingUp() {
+		t.Error("the returned feature still says it is wrapping up")
+	}
+	got, err := s.GetFeature(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Goal.WrappingUp() {
+		t.Error("a goal sent back to implement is still wrapping up")
+	}
+	if got.Goal.Partial != "" {
+		t.Errorf("partial reason survived the send-back: %q", got.Goal.Partial)
+	}
+	if !got.VerifiedAt.IsZero() {
+		t.Error("a goal back at implement is still stamped verified")
+	}
+}

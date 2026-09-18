@@ -1659,6 +1659,24 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	if err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, s.newestOpenGateDecisionTx(ctx, tx, id)); err != nil {
 		return f, err
 	}
+	// A goal arriving at implement is being put back to work, so it is no
+	// longer finishing now and no longer partial. Engine.SendBackGoal
+	// said this itself, which covered its own verb and nothing else: the
+	// composer's rewind walks the same edge with a plain transition, and
+	// left a goal that had wrapped up with its wrap-up stamp and its
+	// "partial: the lead kept failing" standing. The conductor read those
+	// on its first tick, finished the goal again, and handed back the
+	// identical partial result — twice on the measured drive, at a full
+	// critique and verify round each time. Every caller reaches a
+	// crossing through here, which is what makes this the place to say it
+	// once.
+	if f.Kind == domain.KindGoal && to == domain.StageImplement {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE features SET goal_wrapup_at='', goal_partial='', verified_at='' WHERE id=?`, string(id)); err != nil {
+			return f, fmt.Errorf("lifting %s's wrap-up: %w", id, err)
+		}
+		f.Goal.WrapUpAt, f.Goal.Partial, f.VerifiedAt = time.Time{}, "", time.Time{}
+	}
 	if err := tx.Commit(); err != nil {
 		return f, err
 	}
