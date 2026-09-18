@@ -1660,7 +1660,7 @@ func TestParseAskAcceptsBareStringOptions(t *testing.T) {
 func TestGateAskOptionsAreGummisNotTheModels(t *testing.T) {
 	body := `{"changes_section":"Problem","question":"ship it?","gate":true,"spec_anchor":"the plan",
 		"options":[{"label":"ok"},{"label":"lgtm"},{"label":"YOLO"}],
-		"multi_select":true,"allow_free_form":false}`
+		"multi_select":true}`
 	a, err := parseAsk("c1", json.RawMessage(body))
 	if err != nil {
 		t.Fatalf("parseAsk: %v", err)
@@ -1675,9 +1675,6 @@ func TestGateAskOptionsAreGummisNotTheModels(t *testing.T) {
 	// and the shape gummi depends on is forced
 	if a.MultiPick {
 		t.Error("a gate must not be multi-select — it is one crossing")
-	}
-	if !a.FreeForm {
-		t.Error("a gate must keep the free-form channel: saying what is wrong is an answer")
 	}
 
 	// an ordinary ask is untouched

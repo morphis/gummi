@@ -74,7 +74,9 @@ and decomposes into fix cards rather than features.
   holding its template prompt keeps the gate shut.
 - **Implement runs alone** in the card's worktree. The agent can ask you a
   bounded question mid-turn through the built-in `ask_user` tool, and the
-  turn spends nothing while it waits.
+  turn spends nothing while it waits. Every question it asks also offers
+  to talk it over — pick one of its options, or press `o` and answer in
+  your own words.
 - **Verify proves it.** The repo's checks and the spec's own verification
   plan run. A failure sends the work back to implement — unless the check
   was already red on the fresh branch, which is excused and gates nothing.

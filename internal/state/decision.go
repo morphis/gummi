@@ -38,10 +38,12 @@ type DecisionPayload struct {
 	// Question is what the card is waiting on, in the words it was shown.
 	// Options are never stored, only regenerated.
 	Question string `json:"question"`
-	// FreeForm and Multi mirror an ask's own flags, so a restored ask can
-	// be re-armed honestly (prose-only once the options are gone).
-	FreeForm bool `json:"freeform,omitempty"`
-	Multi    bool `json:"multi,omitempty"`
+	// Multi mirrors an ask's own flag, so a restored ask can be re-armed
+	// honestly. There is no free-form counterpart: every ask takes the
+	// person's own words, so there is nothing about that channel a row
+	// could disagree with. (Rows written before that became an invariant
+	// carry a "freeform" key; it decodes to nothing, which is correct.)
+	Multi bool `json:"multi,omitempty"`
 	// Anchor is an ask's spec anchor, so a re-armed answer lands where the
 	// agent asked for it to land.
 	Anchor string `json:"anchor,omitempty"`

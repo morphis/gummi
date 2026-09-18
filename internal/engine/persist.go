@@ -398,9 +398,12 @@ func (e *Engine) openAskFor(ctx context.Context, id domain.FeatureID, stage doma
 		if d.Kind != state.DecisionKindAsk || d.Stage != stage {
 			continue
 		}
+		// No options: they died with the process and are never stored. The
+		// question is still answerable because every ask takes the
+		// person's own words (see Ask) — here that channel is the only one
+		// left.
 		return &Ask{
 			Question:   d.Question,
-			FreeForm:   true, // the options died with the process and are never stored
 			SpecAnchor: d.Anchor,
 			DecisionID: d.ID,
 		}

@@ -61,7 +61,7 @@ func TestSeedInboxFromOpenAskDecision(t *testing.T) {
 	ctx := context.Background()
 	f := mkFeature(t, store, 1, "dark mode", domain.StagePlan)
 	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
-		ID: "ask:1", Kind: state.DecisionKindAsk, Question: "persist where?", FreeForm: true,
+		ID: "ask:1", Kind: state.DecisionKindAsk, Question: "persist where?",
 	}, time.Now()); err != nil {
 		t.Fatal(err)
 	}

@@ -551,7 +551,9 @@ tools**: tool declarations passed on `SessionOpts.Tools`, whose handlers
 run inside gummi, not the model's sandbox.
 
 The one tool today is **`ask_user`** (`{question, options[], multi_select,
-allow_free_form, spec_anchor}`). When the model calls it, the adapter
+spec_anchor}`). There is no flag for whether the person may answer in
+their own words — see §6.3's "an agent's question always offers to talk
+it over". When the model calls it, the adapter
 surfaces an `EventClientToolCall` and *blocks that call* until the
 orchestrator answers — a blocked call spends no tokens, so waiting on a
 human is free. gummi renders the question as the card's open decision
@@ -1166,6 +1168,21 @@ Rules that make the control safe:
   chip's own "no — send it as a message" hands the line back untouched
   rather than to the highlighted option. One classification, made the
   same way whether or not anything is open.
+- **An agent's question always offers to talk it over.** Every
+  `ask_user` picker carries a "Chat about this" row after the model's own
+  options, and `o` arms the composer as the answer from any question at
+  all. The tool used to take an `allow_free_form` flag, and the row
+  appeared only when the model set it — but the answer path never
+  honoured that flag: a prose line at an open question has always been
+  delivered as its answer, because the ask blocks the agent's turn from
+  inside a client tool and a second turn is refused. So the flag withheld
+  nothing but the *knowledge* that talking was allowed, from exactly the
+  questions whose options were too narrow to say what the reader meant.
+  It is gone. The model owns the question and the options; whether a
+  person may answer in a sentence is gummi's, and the answer is always
+  yes. This is the free-form channel *of the offered decision*, not the
+  "other option" the rule below refuses: the words become the ask's own
+  answer, never an action nobody offered.
 - **More than one can be open, and each surface names one.** A card can
   genuinely be waiting on two things at once — a verify gate raised
   beside an exhausted envelope — so `Store.OpenDecisions` reports a list
@@ -1282,9 +1299,9 @@ Rules that make the control safe:
   marked exit, and it gets both. **Re-armed on restore:** when the engine
   rehydrates a card's session for the stage an open ask decision was
   raised in, the question is re-armed as that session's pending ask from
-  the durable record — free-form only, because the recorded options died
+  the durable record — with no options, because the recorded ones died
   with the process and are never stored (§ above), so the answer is
-  prose, which the control always allows. The answer rides a fresh turn
+  prose, which every question always allows. The answer rides a fresh turn
   (the convention path), not a tool resolution — the blocked call is
   gone — and still carries the same decision id, so the record closes on
   the answer event like any other. **Abandoned when the stage moves on:**

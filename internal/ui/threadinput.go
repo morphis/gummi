@@ -365,10 +365,11 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
 			if d := m.visibleDecision(r); d != nil && d.ask != nil && d.ask.MultiPick && len(d.ask.Options) > 0 {
 				m.syncDecision(d)
-				// the synthetic "Chat about this" row (index len(d.ask.Options),
-				// present iff FreeForm) has no tick box — decisionAnswerText
-				// never reads it — so toggling here would record picked state
-				// the render doesn't show and the answer ignores.
+				// the synthetic "Chat about this" row (index
+				// len(d.ask.Options), on every ask) has no tick box —
+				// decisionAnswerText never reads it — so toggling here would
+				// record picked state the render doesn't show and the answer
+				// ignores.
 				if m.decisionCursor < len(d.ask.Options) {
 					m.decisionPicked[m.decisionCursor] = !m.decisionPicked[m.decisionCursor]
 				}
@@ -376,12 +377,13 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 	case "o":
-		// the free-form channel: with a question that allows it, 'o' arms
-		// the composer as the answer — the picker keys stand down so the
+		// the free-form channel: at any open question, 'o' arms the
+		// composer as the answer — the picker keys stand down so the
 		// words type unmolested, digit-leading included (the pane's own
-		// 'o', inherited when the pane retired).
+		// 'o', inherited when the pane retired). Any question, because
+		// every one of them takes the reader's own words.
 		if strings.TrimSpace(m.threadInput.Value()) == "" {
-			if d := m.visibleDecision(r); d != nil && d.ask != nil && d.ask.FreeForm {
+			if d := m.visibleDecision(r); d != nil && d.ask != nil {
 				m.syncDecision(d)
 				// syncDecision alone won't move the cursor here: wordAim's
 				// ask branch only aims once the composer holds prose, and
@@ -489,19 +491,18 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	}
 	if d := m.visibleDecision(r); d != nil {
 		m.syncDecision(d)
-		if m.threadFreeForm && d.ask != nil && d.ask.FreeForm {
+		if m.threadFreeForm && d.ask != nil {
 			return m.answerAskWith(r, text)
 		}
 		if parseInput(text).Kind == verbNone {
 			if d.ask != nil {
-				// EVERY PROSE LINE AT AN OPEN ASK IS THE ANSWER, whether
-				// or not the ask declared free_form. A structured ask used
-				// to "keep its terms" and route prose as a turn instead —
-				// which is the one thing that cannot work here: the ask is
-				// blocking the agent's turn from inside a client tool, so
-				// the backend refuses the second turn, and the line was
-				// lost after being echoed into the transcript as if it had
-				// been delivered. Engine.Answer takes arbitrary text and
+				// EVERY PROSE LINE AT AN OPEN ASK IS THE ANSWER. A
+				// structured ask used to "keep its terms" and route prose
+				// as a turn instead — which is the one thing that cannot
+				// work here: the ask is blocking the agent's turn from
+				// inside a client tool, so the backend refuses the second
+				// turn, and the line was lost after being echoed into the
+				// transcript as if it had been delivered. Engine.Answer takes arbitrary text and
 				// hands it back as the tool's result, so the model reads
 				// the sentence the person actually wrote.
 				return m.answerAskWith(r, text)
@@ -1016,8 +1017,7 @@ func (m *Shell) threadInputBindings() []binding {
 			aim := m.wordAim(d)
 			text := strings.TrimSpace(m.threadInput.Value())
 			typed := text != ""
-			freeForm := d.ask != nil && d.ask.FreeForm
-			if m.threadFreeForm && freeForm {
+			if m.threadFreeForm && d.ask != nil {
 				// armed: the composer owns the keyboard the way a plain
 				// input does; enter delivers the line as the answer
 				return m.withCardTabs([]binding{
@@ -1036,8 +1036,8 @@ func (m *Shell) threadInputBindings() []binding {
 			label, help := "answer", "answer the highlighted option"
 			switch {
 			case d.ask != nil && typed && parseInput(text).Kind == verbNone:
-				// Prose in front of an open question is the answer,
-				// whether or not the ask declared allow_free_form. It used
+				// Prose in front of an open question is the answer — and
+				// the picker's own "Chat about this" row says so. It used
 				// to be the answer only for a free-form ask; a structured
 				// one "kept its terms" and the line went out as an
 				// ordinary turn, which is the one thing that cannot work
@@ -1090,7 +1090,9 @@ func (m *Shell) threadInputBindings() []binding {
 				{key: "verb", label: "command", help: "type a verb (approve, verify, diff…) instead of choosing — the same vocabulary the empty composer takes"},
 				{key: "pgup/pgdn", label: "scroll", help: "scroll the history above the pinned decision", bar: true},
 			}
-			if freeForm {
+			if d.ask != nil {
+				// every question offers it, so the key is named whenever
+				// one is open
 				bs = append(bs, binding{key: "o", label: "own answer", help: "type your own answer — the digits stop picking while it's armed", bar: true})
 			}
 			bs = append(bs, m.threadOutputsBinding(),

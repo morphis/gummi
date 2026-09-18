@@ -84,7 +84,7 @@ func TestOpenAskSurvivesItsStageRunningAgain(t *testing.T) {
 	enterStage(t, store, f.ID, domain.StagePlan, "gen-1")
 	if err := store.OpenDecision(ctx, f.ID, domain.StagePlan, state.DecisionPayload{
 		ID: "call-1", Kind: state.DecisionKindAsk,
-		Question: "Persist where?", FreeForm: true,
+		Question: "Persist where?",
 	}, time.Now()); err != nil {
 		t.Fatal(err)
 	}

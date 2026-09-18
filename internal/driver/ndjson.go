@@ -115,8 +115,14 @@ type questionEvent struct {
 	Q           string   `json:"q"`
 	Options     []string `json:"options,omitempty"`
 	Recommended string   `json:"recommended,omitempty"`
-	FreeForm    bool     `json:"free_form"`
-	Resume      string   `json:"resume"`
+	// FreeForm is always true: every question gummi asks takes the
+	// answerer's own words as well as its options (engine.Ask), so
+	// `--answer "<anything>"` is always a legal reply to this stop. It
+	// stays on the wire — a stream consumer reading the field learns the
+	// same thing it always did, and learns it without having to know that
+	// gummi settled the question.
+	FreeForm bool   `json:"free_form"`
+	Resume   string `json:"resume"`
 	// Next is the copy-pasteable command that advances this stop — the exact
 	// `gummi resume <id> …` verb for this event, so a caller driving the
 	// stream never has to recall which flag a given stop takes. Free-form

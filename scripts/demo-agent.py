@@ -478,7 +478,6 @@ def fd001_implement(ctx, turn):
                         "detail": "one rule for both columns",
                     },
                 ],
-                "allow_free_form": True,
                 "spec_anchor": "Out of scope",
             },
         })

@@ -24,12 +24,19 @@ import (
 const askToolName = "ask_user"
 
 // Ask is a parsed ask_user invocation awaiting the user's answer.
+//
+// There is no free-form flag. Every question gummi puts to a person
+// accepts their own words as well as its options — Engine.Answer takes
+// arbitrary text and hands it back as the tool's result either way, so a
+// flag that could turn the channel off would only ever hide an
+// affordance that still worked. The model owns the question and the
+// options; whether the person may answer in a sentence is gummi's, and
+// the answer is always yes.
 type Ask struct {
 	CallID     string      // the agent-side tool-call id, for Resolve
 	Question   string      `json:"question"`
 	Options    []AskOption `json:"options"`
 	MultiPick  bool        `json:"multi_select"`
-	FreeForm   bool        `json:"allow_free_form"`
 	SpecAnchor string      `json:"spec_anchor"`
 	// ChangesSection names the artifact section whose CONTENT differs
 	// depending on the answer. It is the design stage's proof that the
@@ -200,7 +207,9 @@ func askUserTool() agent.ToolDef {
 		Name: askToolName,
 		Description: "Ask the user a question with a small set of options and wait for their " +
 			"answer. Use this whenever you need a decision from the user: it is cheaper and " +
-			"clearer than asking in prose. Returns the chosen option(s).",
+			"clearer than asking in prose. Returns the chosen option(s) — or, since every " +
+			"question also offers to talk it over, whatever the user wrote instead. Read the " +
+			"result as an answer in their own words when it matches none of your options.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -220,8 +229,7 @@ func askUserTool() agent.ToolDef {
 						"required": []any{"label"},
 					},
 				},
-				"multi_select":    map[string]any{"type": "boolean", "description": "Allow choosing more than one option."},
-				"allow_free_form": map[string]any{"type": "boolean", "description": "Let the user type their own answer instead (default true)."},
+				"multi_select": map[string]any{"type": "boolean", "description": "Allow choosing more than one option."},
 				"gate": map[string]any{
 					"type": "boolean",
 					"description": "Set true ONLY for the question that closes an attended stage — " +
@@ -455,8 +463,10 @@ on it.`
 const askConventionHint = "When you need a decision from the user, end your message with a fenced " +
 	"block tagged `gummi-ask` containing JSON: " +
 	"{\"question\":\"…\",\"options\":[{\"label\":\"…\",\"detail\":\"…\"}]," +
-	"\"multi_select\":false,\"allow_free_form\":true,\"spec_anchor\":\"…\"}. " +
-	"gummi shows the user a picker and delivers their answer as the next message. " +
+	"\"multi_select\":false,\"spec_anchor\":\"…\"}. " +
+	"gummi shows the user a picker — which always also offers to talk it over — and " +
+	"delivers their answer as the next message, in their own words if that is how they " +
+	"gave it. " +
 	"Ask about one decision at a time."
 
 // unattendedAskHint is appended for a card running on GateAutopilot, whichever
@@ -680,7 +690,7 @@ func (e *Engine) openAskDecision(s *Session, ask *Ask) {
 	_ = e.cfg.Store.OpenDecision(context.Background(), s.Feature.ID, s.Feature.Stage,
 		state.DecisionPayload{
 			ID: ask.DecisionID, Kind: state.DecisionKindAsk,
-			Question: ask.Question, FreeForm: ask.FreeForm, Multi: ask.MultiPick,
+			Question: ask.Question, Multi: ask.MultiPick,
 			Anchor: ask.SpecAnchor,
 		}, e.now())
 }
@@ -944,12 +954,12 @@ func parseAsk(callID string, args json.RawMessage) (*Ask, error) {
 	}
 	a.CallID = callID
 	if a.Gate {
-		// gummi owns a gate's options and its free-form channel; whatever
-		// the model sent is replaced, so a gate can never offer a choice
-		// gummi does not know how to honour.
+		// gummi owns a gate's options; whatever the model sent is
+		// replaced, so a gate can never offer a choice gummi does not
+		// know how to honour. (The free-form channel needs no replacing:
+		// every ask carries it — see Ask.)
 		a.Options = GateAskOptions()
 		a.MultiPick = false
-		a.FreeForm = true
 	}
 	if strings.TrimSpace(a.Question) == "" || len(a.Options) == 0 {
 		return nil, fmt.Errorf("ask_user needs a question and at least one option")

@@ -603,8 +603,8 @@ func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
 	waitAsk(t, eng)
 
 	ask := eng.Get("FD-001").Snapshot().PendingAsk
-	if ask == nil || ask.FreeForm {
-		t.Fatalf("precondition: a structured (non-free-form) ask is pending, got %+v", ask)
+	if ask == nil {
+		t.Fatalf("precondition: a structured ask is pending, got %+v", ask)
 	}
 
 	m = typeString(t, m, "please point me at the rig")
@@ -778,35 +778,26 @@ func TestThreadDecisionProseNothingConsumesSends(t *testing.T) {
 	}
 }
 
-// TestAskPickerOptionsAddsChatAboutThisRow is FD-063: a free-form ask's
-// picker gains a synthetic "Chat about this" row after its real options,
-// visible before the user ever types anything. A structured ask — nothing
-// to route free text to — gets no such row.
+// TestAskPickerOptionsAddsChatAboutThisRow is FD-063: an ask's picker
+// gains a synthetic "Chat about this" row after its real options, visible
+// before the user ever types anything.
+//
+// EVERY ask, including one whose call never declared allow_free_form: the
+// answer path has always delivered a prose line at an open question as
+// its answer, so the row that says so is the only part that was ever
+// conditional — and the questions it was withheld from are exactly the
+// ones whose options were too narrow to say what the reader meant.
 func TestAskPickerOptionsAddsChatAboutThisRow(t *testing.T) {
-	freeForm := &engine.Ask{
-		Question: "Persist where?",
-		Options:  []engine.AskOption{{Label: "per-device"}, {Label: "synced"}},
-		FreeForm: true,
-	}
-	got := askPickerOptions(freeForm)
-	if len(got) != 3 {
-		t.Fatalf("free-form ask got %d options, want 3 (2 real + synthetic): %+v", len(got), got)
-	}
-	if got[2].label != "Chat about this" {
-		t.Errorf("last row = %q, want \"Chat about this\"", got[2].label)
-	}
-
-	structured := &engine.Ask{
-		Question: "Which rig?",
-		Options:  []engine.AskOption{{Label: "rig-a"}, {Label: "rig-b"}},
-	}
-	got = askPickerOptions(structured)
-	if len(got) != 2 {
-		t.Fatalf("structured ask got %d options, want 2 (no synthetic row): %+v", len(got), got)
-	}
-	for _, o := range got {
-		if o.label == "Chat about this" {
-			t.Errorf("structured ask grew a \"Chat about this\" row: %+v", got)
+	for _, ask := range []*engine.Ask{
+		{Question: "Persist where?", Options: []engine.AskOption{{Label: "per-device"}, {Label: "synced"}}},
+		{Question: "Which rig?", Options: []engine.AskOption{{Label: "rig-a"}, {Label: "rig-b"}}},
+	} {
+		got := askPickerOptions(ask)
+		if len(got) != 3 {
+			t.Fatalf("%q got %d options, want 3 (2 real + synthetic): %+v", ask.Question, len(got), got)
+		}
+		if got[2].label != "Chat about this" {
+			t.Errorf("%q last row = %q, want \"Chat about this\"", ask.Question, got[2].label)
 		}
 	}
 }
@@ -833,8 +824,8 @@ func TestThreadDecisionDigitAndArrowsReachChatAboutThisRow(t *testing.T) {
 }
 
 // TestThreadDecisionTypedProseAimsAtChatAboutThis: wordAim's ask branch
-// aims at the synthetic row's index once the composer holds prose, and
-// never for a structured ask (nothing to route free text to there).
+// aims at the synthetic row's index once the composer holds prose — for
+// any ask, since every one of them carries that row and takes the line.
 func TestThreadDecisionTypedProseAimsAtChatAboutThis(t *testing.T) {
 	m, eng := chatWorkspace(t, askingFake())
 	m = openAndAttach(t, m)
@@ -857,8 +848,8 @@ func TestThreadDecisionTypedProseAimsAtChatAboutThis(t *testing.T) {
 		t.Fatalf("no live ask decision open: %+v", d2)
 	}
 	m2 = typeString(t, m2, "please point me at the rig")
-	if got := m2.wordAim(d2); got != -1 {
-		t.Errorf("wordAim = %d for a structured ask, want -1", got)
+	if got, want := m2.wordAim(d2), len(d2.ask.Options); got != want {
+		t.Errorf("wordAim = %d for a structured ask, want %d (the synthetic row)", got, want)
 	}
 }
 
@@ -921,30 +912,43 @@ func TestThreadDecisionEnterOnChatAboutThisArmsFreeForm(t *testing.T) {
 	}
 }
 
-// TestThreadDecisionStructuredAskNeverShowsChatAboutThis: the out-of-scope
-// boundary — a structured ask never grows or aims at the synthetic row,
-// even once the user starts typing.
-func TestThreadDecisionStructuredAskNeverShowsChatAboutThis(t *testing.T) {
+// TestThreadDecisionStructuredAskShowsChatAboutThis: a question whose call
+// declared no free-form channel still offers to talk it over, before the
+// reader types anything — and the row is armable by 'o' the same as any
+// other ask's. Whether the person may answer in a sentence is gummi's
+// call, not the asking model's, and the answer path already worked this
+// way; only the affordance was missing.
+func TestThreadDecisionStructuredAskShowsChatAboutThis(t *testing.T) {
 	m, eng := chatWorkspace(t, structuredAskFake())
 	m = openAndAttach(t, m)
 	waitAsk(t, eng)
 
-	m = typeString(t, m, "please point me at the rig")
 	out := ansi.Strip(m.threadView(100, 30))
-	if strings.Contains(out, "Chat about this") {
-		t.Errorf("structured ask shows a \"Chat about this\" row:\n%s", out)
+	if !strings.Contains(out, "Chat about this") {
+		t.Errorf("structured ask offers no \"Chat about this\" row:\n%s", out)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'o', Text: "o"})
+	if !m.threadFreeForm {
+		t.Fatal("'o' did not arm free-form on a structured ask")
+	}
+	d := m.openDecision(m.rows[m.sel])
+	if d == nil || d.ask == nil {
+		t.Fatalf("no live ask decision open: %+v", d)
+	}
+	if m.decisionCursor != len(d.ask.Options) {
+		t.Errorf("'o' landed on cursor %d, want %d (the synthetic row)", m.decisionCursor, len(d.ask.Options))
 	}
 }
 
 // TestDecisionAnswerTextIgnoresSyntheticIndex is a defensive test for the
-// untested MultiPick && FreeForm combination: decisionAnswerText only
-// ever reads ask.Options, so a stray pick landing on the synthetic row's
-// index (reachable now that optionCount includes it) is inert.
+// untested multi-pick combination: decisionAnswerText only ever reads
+// ask.Options, so a stray pick landing on the synthetic row's index
+// (reachable now that optionCount includes it) is inert.
 func TestDecisionAnswerTextIgnoresSyntheticIndex(t *testing.T) {
 	ask := &engine.Ask{
 		Options:   []engine.AskOption{{Label: "per-device"}, {Label: "synced"}},
 		MultiPick: true,
-		FreeForm:  true,
 	}
 	base := map[int]bool{0: true}
 	withSynthetic := map[int]bool{0: true, len(ask.Options): true}
@@ -957,7 +961,7 @@ func TestDecisionAnswerTextIgnoresSyntheticIndex(t *testing.T) {
 }
 
 // TestThreadDecisionMultiPickNeverTogglesChatAboutThis is the review fix:
-// a MultiPick && FreeForm ask's synthetic "Chat about this" row must never
+// a multi-pick ask's synthetic "Chat about this" row must never
 // render a tick box or accept space, since decisionAnswerText never reads
 // that index — a togglable-looking row that space silently no-ops on is
 // the same class of "picker shows a state enter/space won't honour" bug

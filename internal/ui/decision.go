@@ -229,11 +229,21 @@ type pickerOption struct {
 	noToggle bool
 }
 
-// askPickerOptions shapes a live ask_user question for the picker. A
-// free-form ask gains a synthetic, always-present "Chat about this" row
-// after the real options, so the free-form channel is visible before the
-// user ever types anything — closing the gap where the picker offered no
-// legible way to see that prose would be routed there (Chosen approach).
+// askPickerOptions shapes a live ask_user question for the picker. Every
+// ask gains a synthetic "Chat about this" row after the real options, so
+// the free-form channel is visible before the user ever types anything —
+// closing the gap where the picker offered no legible way to see that
+// prose would be routed there (Chosen approach).
+//
+// EVERY ask, not only one that declared allow_free_form: the answer path
+// has never honoured that flag — a prose line at any open question is
+// delivered as its answer (submitThreadLine), because the ask is
+// blocking the agent's turn from inside a client tool and a second turn
+// is refused. So withholding the row withheld nothing but the knowledge
+// that talking was allowed, from exactly the questions whose options
+// were too narrow to say what the reader meant. The flag is gone from
+// Ask for the same reason.
+//
 // The row's index is always len(ask.Options): appended last and never
 // reordered, so wordAim, the digit/arrow bound checks, the o-key handler,
 // and answerDecision's enter guard all agree on it without a shared
@@ -243,14 +253,11 @@ func askPickerOptions(ask *engine.Ask) []pickerOption {
 	for _, option := range ask.Options {
 		options = append(options, pickerOption{label: option.Label, detail: option.Detail})
 	}
-	if ask.FreeForm {
-		options = append(options, pickerOption{
-			label:    "Chat about this",
-			detail:   "reply with your own words instead of picking an option",
-			noToggle: true,
-		})
-	}
-	return options
+	return append(options, pickerOption{
+		label:    "Chat about this",
+		detail:   "reply with your own words instead of picking an option",
+		noToggle: true,
+	})
 }
 
 // pickerView is the shared inline decision picker. The card thread feeds
@@ -505,10 +512,8 @@ func (m *Shell) wordAim(d *threadDecision) int {
 		return -1
 	}
 	if d.ask != nil {
-		if d.ask.FreeForm {
-			return len(d.ask.Options)
-		}
-		return -1
+		// the synthetic "Chat about this" row, which every ask carries
+		return len(d.ask.Options)
 	}
 	return d.wordConsumer()
 }
@@ -524,7 +529,7 @@ func (m *Shell) wordAim(d *threadDecision) int {
 // time, and while a verb is pending that control is the composer, not
 // the picker's highlighted row.
 func (m *Shell) decisionArmed(d *threadDecision) bool {
-	if d.ask != nil && d.ask.FreeForm && m.threadFreeForm {
+	if d.ask != nil && m.threadFreeForm {
 		return false
 	}
 	text := strings.TrimSpace(m.threadInput.Value())
@@ -891,11 +896,10 @@ func (m *Shell) proseAnswersAsk() bool {
 }
 
 // answerAskWith delivers free-form prose as the answer to the open ask —
-// the chat pane's 'o' channel, which the composer makes always-on: the
-// question declared allow_free_form, so the line is the answer the ask
-// invited (DESIGN §6.3; a structured ask keeps its terms and prose
-// routes as a turn instead). Same live-session guard as the picker path,
-// and the same F8 shape as sendThreadMessage: the nil check that used to
+// the chat pane's 'o' channel, which the composer makes always-on. Every
+// question invites it (DESIGN §6.3): the line is the answer, whatever
+// options were offered beside it. Same live-session guard as the picker
+// path, and the same F8 shape as sendThreadMessage: the nil check that used to
 // run only once the returned command executed is done up front instead,
 // so the composer (and the free-form arming) clears only once a session
 // is confirmed live — a line typed with nothing to answer stays put
@@ -925,7 +929,7 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 
 func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 	if d.ask != nil {
-		if d.ask.FreeForm && m.decisionCursor == len(d.ask.Options) {
+		if m.decisionCursor == len(d.ask.Options) {
 			// the synthetic "Chat about this" row is selected: there is no
 			// entry in ask.Options at this index for decisionAnswerText to
 			// resolve, so enter arms the free-form channel instead of

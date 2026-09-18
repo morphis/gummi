@@ -1027,7 +1027,7 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 			d.out.emit(questionEvent{
 				Event: "question", ID: string(f.ID), Q: ask.Question,
 				Options: askLabels(ask), Recommended: engine.RecommendedOption(ask),
-				FreeForm: ask.FreeForm, Resume: string(f.ID),
+				FreeForm: true, Resume: string(f.ID),
 				Next:     d.resumeCmd(string(f.ID), "--answer", `"<answer>"`),
 				Decision: decisionID,
 			})

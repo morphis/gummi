@@ -35,11 +35,11 @@ func TestAnswerRestoredAskWithNoAgentMustNotSwallowIt(t *testing.T) {
 	}
 
 	// the shape openAskFor produces for a restored ask: no CallID (the
-	// blocked call died with the process), free-form (options are never
-	// stored), and no live agent behind it.
+	// blocked call died with the process), no options (they are never
+	// stored, so prose is the only answer left), and no live agent behind
+	// it.
 	s.setPendingAsk(&Ask{
 		Question:   "How should the greeting prefix be configured?",
-		FreeForm:   true,
 		DecisionID: "call:1:mcp-5",
 	})
 	s.agent().Close()
