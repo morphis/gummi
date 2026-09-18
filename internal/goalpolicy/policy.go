@@ -133,10 +133,22 @@ const (
 	// the goal. The opposite of Raise, and the step that was missing
 	// between "the ledger went negative" and "drop a card".
 	Shrink
+	// NeedBudget stops the goal and asks for more. Card cannot go on
+	// without credits the envelope cannot give, and To is what it asks
+	// for — only a person raises a goal's envelope.
+	//
+	// It replaces dropping a card for want of money. Which work to
+	// abandon when the budget runs out is not a decision the goal is
+	// entitled to make on its own: it had been deciding it by accident,
+	// dropping whichever card happened to exhaust first — reliably the
+	// most ambitious one — and then reviewing itself against the work it
+	// had just defunded. Verified cards still land; the waiting card
+	// keeps its branch and its spend, and a top-up continues it.
+	NeedBudget
 )
 
 func (k Kind) String() string {
-	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink"}[k]
+	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "need-budget"}[k]
 }
 
 // MinCardEnvelope is the smallest envelope worth giving a card. Below it a
@@ -146,6 +158,11 @@ func (k Kind) String() string {
 // and 66 — so funding a card under this is buying a guaranteed exhaustion
 // rather than a chance at the work.
 const MinCardEnvelope = 100
+
+// MinRaise is the smallest top-up worth giving an exhausted card: less
+// than one turn's worth buys another immediate exhaustion rather than any
+// work, so below it the goal stops and asks instead.
+const MinRaise = float64(domain.TurnReserveCredits)
 
 // Action is one step for the engine to execute.
 type Action struct {
@@ -296,6 +313,10 @@ func Decide(in Input) []Action {
 	}
 
 	available := ledger.Available
+	// needBudget: the envelope is spent and a person has been asked to
+	// raise it. Nothing new starts meanwhile — another card started now
+	// would exhaust on its first session and ask the same question twice.
+	needBudget := false
 	if !wrap {
 		for _, c := range cards {
 			if c.TakenOver {
@@ -307,17 +328,28 @@ func Decide(in Input) []Action {
 					addLead(fmt.Sprintf("%s ran out of budget (spent %.0f of %d)", c.ID, c.Spent, c.Envelope))
 					continue
 				}
-				to := int(domain.Budget{Envelope: c.Envelope}.RaisedEnvelope(c.Spent))
-				delta := float64(to - c.Envelope)
-				if to > c.Envelope && delta <= available {
+				ask := int(domain.Budget{Envelope: c.Envelope}.RaisedEnvelope(c.Spent))
+				if ask <= c.Envelope {
+					break
+				}
+				// Raise to what is there, not all or nothing. The full ask
+				// is itself an estimate; a card refused it entirely stops
+				// the goal, while the same card given what the pool holds
+				// keeps working and comes back for the rest once its
+				// siblings have landed and returned what they did not
+				// spend.
+				to := min(ask, c.Envelope+int(available))
+				if float64(to-c.Envelope) >= MinRaise {
 					out = append(out, Action{Kind: Raise, Card: c.ID, To: to, Reason: "raised from the goal budget"})
-					available -= delta
+					available -= float64(to - c.Envelope)
 					continue
 				}
-				wrap, wrapReason = true, fmt.Sprintf("%s needs more budget than the goal has left", c.ID)
-				out = append(out, Action{Kind: WrapUp, Reason: wrapReason})
-				out = append(out, Action{Kind: Drop, Card: c.ID, Reason: "the goal is wrapping up: " + wrapReason})
-				state[c.ID] = Dropped
+				// Nothing left worth giving: the envelope is spent, and
+				// only a person raises it. The goal stops and says what it
+				// needs — it does not choose work to abandon.
+				out = append(out, Action{Kind: NeedBudget, Card: c.ID, To: ask,
+					Reason: fmt.Sprintf("%s has spent %.0f of %d and needs about %d to go on", c.ID, c.Spent, c.Envelope, ask)})
+				needBudget = true
 			case Stuck:
 				if in.LeadAvailable && c.LeadTries < MaxLeadTriesStuck {
 					addLead(fmt.Sprintf("%s is stuck: %s", c.ID, c.Reason))
@@ -329,8 +361,10 @@ func Decide(in Input) []Action {
 		}
 	}
 	if wrap {
-		// a wrap-up triggered by an exhausted card above still has to drop
-		// the rest of the unfinished work
+		// a wrap-up — yours, or the lead having failed too often — drops
+		// the rest of the unfinished work. Running out of budget is NOT
+		// one of its causes: that stops and asks (NeedBudget) instead of
+		// choosing work to abandon.
 		for _, c := range cards {
 			if st := state[c.ID]; st == Waiting || st == Running || st == Exhausted || st == Stuck {
 				if !hasDrop(out, c.ID) {
@@ -368,7 +402,7 @@ func Decide(in Input) []Action {
 		out = append(out, Action{Kind: Lead, Reasons: leadReasons})
 	}
 
-	if !wrap {
+	if !wrap && !needBudget {
 		running := 0
 		for _, c := range cards {
 			if state[c.ID] == Running && !c.TakenOver {

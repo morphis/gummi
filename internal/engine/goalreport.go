@@ -27,6 +27,12 @@ const (
 	DoneWhenMet     = "met"
 	DoneWhenNotMet  = "not met"
 	DoneWhenUnknown = "not checked"
+	// DoneWhenWaiting: not met YET. Every card serving it is waiting on
+	// budget, so the item is unfinished and resumable — a different claim
+	// from "not met", which says the goal gave up on it. Conflating the
+	// two would report a result as final while a top-up would still
+	// finish it.
+	DoneWhenWaiting = "waiting on budget"
 )
 
 // DoneWhenStatus is one done-when item at the hand-over.
@@ -82,21 +88,26 @@ type GoalLogLine struct {
 
 // GoalReport is the hand-over of one goal.
 type GoalReport struct {
-	ID         domain.FeatureID `json:"id"`
-	Title      string           `json:"title"`
-	Stage      domain.Stage     `json:"stage"`
-	Ready      bool             `json:"ready"` // verified: waiting for you
-	Partial    string           `json:"partial,omitempty"`
-	WrappingUp bool             `json:"wrapping_up,omitempty"`
-	Budget     GoalReportBudget `json:"budget"`
-	Lanes      int              `json:"lanes"`
-	DoneWhen   []DoneWhenStatus `json:"done_when"`
-	Repos      []GoalReportRepo `json:"repos,omitempty"`
-	Cards      []GoalReportCard `json:"cards"`
-	Decisions  []GoalLogLine    `json:"decisions,omitempty"`
-	Declined   []GoalLogLine    `json:"declined_findings,omitempty"`
-	Found      []GoalLogLine    `json:"found_along_the_way,omitempty"`
-	TryIt      string           `json:"try_it,omitempty"`
+	ID      domain.FeatureID `json:"id"`
+	Title   string           `json:"title"`
+	Stage   domain.Stage     `json:"stage"`
+	Ready   bool             `json:"ready"` // verified: waiting for you
+	Partial string           `json:"partial,omitempty"`
+	// NeedsBudget is set when the goal stopped on a card it cannot fund.
+	// Unlike Partial, which says the result is incomplete and final, this
+	// says it is unfinished and resumable: raise the envelope and send it
+	// back and the card carries on from where it stopped.
+	NeedsBudget GoalNeedsBudget  `json:"needs_budget,omitempty"`
+	WrappingUp  bool             `json:"wrapping_up,omitempty"`
+	Budget      GoalReportBudget `json:"budget"`
+	Lanes       int              `json:"lanes"`
+	DoneWhen    []DoneWhenStatus `json:"done_when"`
+	Repos       []GoalReportRepo `json:"repos,omitempty"`
+	Cards       []GoalReportCard `json:"cards"`
+	Decisions   []GoalLogLine    `json:"decisions,omitempty"`
+	Declined    []GoalLogLine    `json:"declined_findings,omitempty"`
+	Found       []GoalLogLine    `json:"found_along_the_way,omitempty"`
+	TryIt       string           `json:"try_it,omitempty"`
 }
 
 // GoalReportBudget is the budget tree at the hand-over.
@@ -165,6 +176,7 @@ func buildGoalReport(v GoalView) GoalReport {
 		ID: g.ID, Title: g.Title, Stage: g.Stage, Partial: g.Goal.Partial,
 		Ready:      g.Stage == domain.StageVerify && !g.VerifiedAt.IsZero(),
 		WrappingUp: g.Goal.WrappingUp(), Lanes: g.Goal.LaneCount(),
+		NeedsBudget: v.NeedsBudget,
 	}
 	r.Budget = GoalReportBudget{
 		Envelope: v.Ledger.Envelope, Own: v.Ledger.Own, Given: v.Ledger.Given,
@@ -272,6 +284,17 @@ func buildGoalReport(v GoalView) GoalReport {
 			if allDropped {
 				st.Status, st.Evidence = DoneWhenNotMet, "every card serving it was dropped"
 			}
+			// An item whose card is waiting on money is not one the goal
+			// gave up on: say so, so a reader tops up rather than reading
+			// the result as finished.
+			if !allDropped && r.NeedsBudget.Waiting() {
+				for _, c := range cards {
+					if c.Feature.ID == r.NeedsBudget.Card {
+						st.Status = DoneWhenWaiting
+						st.Evidence = r.NeedsBudget.Reason
+					}
+				}
+			}
 		}
 		if why, ok := notMet[d.ID]; ok {
 			st.Status, st.Evidence = DoneWhenNotMet, why
@@ -298,10 +321,19 @@ func RenderGoalReport(r GoalReport) string {
 	var b strings.Builder
 	met, total := r.Met()
 	state := "ready for you"
-	if r.Partial != "" {
+	switch {
+	case r.NeedsBudget.Waiting():
+		// Not "ready": work remains and a top-up continues it. Saying
+		// ready here would report an unfinished result as a finished one.
+		state = "waiting for you — " + r.NeedsBudget.Reason
+	case r.Partial != "":
 		state = "ready for you — partial: " + r.Partial
 	}
 	fmt.Fprintf(&b, "%s. %d of %d done-when items met.\n\n", capitalize(state), met, total)
+	if r.NeedsBudget.Waiting() {
+		fmt.Fprintf(&b, "Raise the goal's envelope and send it back, and %s carries on from where it stopped:\n\n```sh\ngummi resume %s --envelope <more than %d>\n```\n\n",
+			r.NeedsBudget.Card, r.ID, r.Budget.Envelope)
+	}
 
 	b.WriteString("### Done when\n\n")
 	for _, d := range r.DoneWhen {

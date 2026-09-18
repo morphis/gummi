@@ -10,6 +10,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -300,6 +301,39 @@ func (m *Shell) goalReady(id domain.FeatureID) tea.Cmd {
 		}
 		return nil
 	}, m.loadRows)
+}
+
+// topUpGoalAndContinue answers a goal that stopped on a card it cannot
+// fund: raise the envelope by what the card asked for, then send the goal
+// back to its cards so the waiting one carries on from where it stopped.
+//
+// One gesture, because it is one decision. The two halves already existed
+// — RaiseGoalBudget and SendBackGoal — but reaching them separately meant
+// answering "it needs 600 more credits" with arithmetic, a dialog and a
+// second verb, on a card page that had not said what the number was.
+func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudget) tea.Cmd {
+	eng, store := m.engine, m.store
+	m.inbox.remove(f.ID)
+	return func() tea.Msg {
+		ctx := context.Background()
+		if eng == nil {
+			return noticeMsg{text: "no engine to raise the budget with", isErr: true}
+		}
+		cur, err := store.GetFeature(ctx, need.Card)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		// what the card asked for, over and above what it already holds
+		to := f.Budget.Envelope + max(need.Needs-cur.Budget.Envelope, domain.TurnReserveCredits)
+		if err := eng.RaiseGoalBudget(ctx, f.ID, to); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		if err := eng.SendBackGoal(ctx, f.ID, "", "user"); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: fmt.Sprintf("%s topped up to %d credits — %s carries on", f.ID, to, need.Card),
+			reload: true, clearInbox: f.ID}
+	}
 }
 
 // goalReviewUnactionable ends a goal's own review loop on this board, the

@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -836,6 +837,22 @@ func stageActions(in nextInput) []nextAction {
 			// including to a goal whose conductor had already given up.
 			// The row was then the recommendation, and taking it stamped a
 			// wrap-up nothing would carry out.
+			// Stopped on a budget question: the answer is a number only
+			// you can give, so it leads. The goal did not choose work to
+			// abandon — nothing is dropped and the waiting card keeps its
+			// branch and its spend — so "take it to verify" is the answer
+			// for someone who would rather ship what landed.
+			if in.goal != nil && in.goal.NeedsBudget.Waiting() {
+				need := in.goal.NeedsBudget
+				return []nextAction{
+					nextStep("goaltopup", "", "top up and continue",
+						fmt.Sprintf("%s needs about %d credits — raise the goal's envelope and it carries on from where it stopped", need.Card, need.Needs)),
+					nextStep("advance", "g", "finish without it",
+						"take what landed to verify — the waiting card's items come back not met"),
+					nextStep("goalpage", "P", "open the goal page",
+						"the done-when list, the cards (enter watches one), the budget and the lead's log"),
+				}
+			}
 			if goalStopped(in) {
 				return []nextAction{
 					nextStep("advance", "g", "take it to verify",

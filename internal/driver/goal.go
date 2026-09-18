@@ -244,6 +244,15 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 			wg.Wait()
 			return d.awaitCritique(ctx, f)
 		}
+		if res.NeedsBudget.Waiting() {
+			// The envelope is spent and only a person raises it. Exit 5
+			// with the report, the same status and the same answer a card
+			// that runs dry already gets — `resume --envelope N` — rather
+			// than dropping the card and reporting a diminished result as
+			// though it were the one that was asked for.
+			wg.Wait()
+			return d.goalNeedsBudget(ctx, f, res.NeedsBudget), nil
+		}
 		if res.Again {
 			continue
 		}
@@ -479,6 +488,37 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 	}
 	d.out.emit(mergedGoalEvent{Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha, Cards: landed})
 	return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
+}
+
+// goalNeedsBudget reports a goal stopped on a card it cannot fund. It is
+// an exhaustion like any other — the envelope ran dry, a person raises it
+// and resumes — so it wears the status the exit table already documents
+// for one, and carries the hand-over so the reader can see what has
+// landed, what is waiting, and what it asks for.
+func (d *Driver) goalNeedsBudget(ctx context.Context, f domain.Feature, need engine.GoalNeedsBudget) Outcome {
+	ev := goalStopEvent{
+		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
+		Reason: need.Reason, Card: string(need.Card), Needs: need.Needs,
+		Resume: fmt.Sprintf("gummi resume %s --envelope <more than %d>", f.ID, f.Budget.Envelope),
+	}
+	if r, err := d.eng.GoalReport(ctx, f.ID); err == nil {
+		ev.Goal = &r
+	}
+	d.out.emit(ev)
+	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
+}
+
+// goalStopEvent is the stream's record of a goal that stopped on a
+// question only a person can answer.
+type goalStopEvent struct {
+	Event  string             `json:"event"`
+	ID     string             `json:"id"`
+	Stage  string             `json:"stage,omitempty"`
+	Reason string             `json:"reason,omitempty"`
+	Card   string             `json:"card,omitempty"`
+	Needs  int                `json:"needs,omitempty"`
+	Resume string             `json:"resume,omitempty"`
+	Goal   *engine.GoalReport `json:"goal,omitempty"`
 }
 
 // goalReviewUnactionable ends a goal's own review loop. The critique

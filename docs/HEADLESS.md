@@ -330,9 +330,21 @@ card starts on the lesser of its planned estimate and an even share, and what
 is left over is not handed out until a card proves it needs it: a card that
 runs out is raised from what is available. A landed or dropped card returns
 what it did not spend; the lead's turns count; nothing is ever raised past
-the ceiling. A reserve is held back for the goal's own review and verify. When
-the budget runs down to it, the goal wraps up: verified cards land, the rest
-are dropped, and it comes back partial.
+the ceiling. A reserve is held back for the goal's own review and verify.
+
+When there is nothing left to give, the goal stops rather than choosing work
+to abandon: it exits `exhausted` (5) naming the card that is waiting and
+roughly what it needs, with the hand-over on the event's `goal` object and
+the waiting card's done-when items marked `waiting on budget` — unfinished
+and resumable, not given up on. Nothing is dropped and the card keeps its
+branch and its spend, so raising the envelope continues it:
+
+```sh
+gummi resume GL-004 --envelope 6000     # more budget, and it carries on
+```
+
+A wrap-up you ask for (`--wrap-up`) still drops what is unfinished: that is
+what finishing now means.
 
 **Hand-over.** When its cards have settled, the goal reviews and verifies
 the combined branch. The run exits `verified` with the hand-over on the event's

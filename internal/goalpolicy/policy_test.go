@@ -99,15 +99,30 @@ func TestExhaustedCardRaiseOrWrapUp(t *testing.T) {
 	if got := acts(in); !strings.Contains(got, "lead [FD-002 ran out of budget") {
 		t.Fatalf("got %q", got)
 	}
-	// not affordable: wrap up and drop what is unfinished
+	// the full ask is not affordable, but something is: raise to what is
+	// there rather than all-or-nothing. 1700 − 500 − 500 − 600 reserve =
+	// 100 available, and the ask of 630 needs 130.
 	in.LeadAvailable = false
-	in.Envelope = 1700 // 1700 − 500 − 500 − 600 = 100 available, raise needs 130
+	in.Envelope = 1700
+	if got := acts(in); !strings.HasPrefix(got, "raise FD-002 → 600") {
+		t.Fatalf("a partial raise beats stopping the goal: %q", got)
+	}
+
+	// nothing left worth giving: the goal asks a person, and does not
+	// choose work to abandon on its own
+	in.Envelope = 1620 // 20 available, under one turn's worth
 	got := acts(in)
-	if !strings.HasPrefix(got, "wrap-up: FD-002 needs more budget") || !strings.Contains(got, "drop FD-002") || !strings.Contains(got, "drop FD-003") {
+	if !strings.Contains(got, "need-budget FD-002 → 630") {
 		t.Fatalf("got %q", got)
 	}
+	if !strings.Contains(got, "has spent 500 of 500 and needs about 630") {
+		t.Fatalf("it says what it needs and why: %q", got)
+	}
+	if strings.Contains(got, "drop") || strings.Contains(got, "wrap-up") {
+		t.Fatalf("running out of budget drops nothing: %q", got)
+	}
 	if strings.Contains(got, "start") {
-		t.Fatalf("nothing starts once wrapping up: %q", got)
+		t.Fatalf("nothing new starts while it waits on you: %q", got)
 	}
 }
 

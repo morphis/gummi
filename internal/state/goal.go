@@ -45,14 +45,15 @@ const (
 	GoalLeadFailed   = "lead-failed"   // a lead turn failed
 	GoalCaughtUp     = "caught-up"     // the goal branch caught up with main
 	GoalCatchUpFail  = "catch-up-failed"
-	GoalReserve      = "reserve"  // the lead re-estimated the reserve
-	GoalWrapUp       = "wrap-up"  // the goal was told to finish now
-	GoalFinished     = "finished" // the goal's work settled; its review started
-	GoalReversed     = "reversed" // you reversed a decision for review
-	GoalRefused      = "refused"  // a card's out-of-sandbox request was refused
-	GoalLeadNote     = "lead"     // a free line from the lead for the log
-	GoalRework       = "rework"   // work the goal owes: a review's changes, a failed verify, your send-back
-	GoalChecks       = "checks"   // the goal's verify-stage check results (Detail is JSON)
+	GoalReserve      = "reserve"     // the lead re-estimated the reserve
+	GoalWrapUp       = "wrap-up"     // the goal was told to finish now
+	GoalFinished     = "finished"    // the goal's work settled; its review started
+	GoalReversed     = "reversed"    // you reversed a decision for review
+	GoalRefused      = "refused"     // a card's out-of-sandbox request was refused
+	GoalLeadNote     = "lead"        // a free line from the lead for the log
+	GoalRework       = "rework"      // work the goal owes: a review's changes, a failed verify, your send-back
+	GoalChecks       = "checks"      // the goal's verify-stage check results (Detail is JSON)
+	GoalNeedBudget   = "need-budget" // the goal stopped on a card it cannot fund; To is what that card needs
 )
 
 // GoalPayload is the JSON shape of an EventGoal event. Only the fields an

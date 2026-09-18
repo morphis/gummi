@@ -253,13 +253,14 @@ todo → plan ─────────────▶ implement ────�
   re-plans stuck and exhausted cards, and records a **decision for review**
   for every call a user of the result would notice. None of it reaches
   your inbox.
-- **The budget is a hard ceiling.** Each card starts on what its plan
-  estimated, capped at an even share, and the rest stays unspoken for: the
-  lead raises a card from what is left when it proves it needs more, never
-  past the ceiling. A reserve is
-  held back so the goal always finishes cleanly: when the budget runs down
-  to it, verified work lands, the rest is dropped, and the goal comes back
-  **partial**.
+- **The budget is a hard ceiling, and only you raise it.** Each card starts
+  on what its plan estimated, capped at an even share, and the rest stays
+  unspoken for: the lead raises a card from what is left when it proves it
+  needs more, never past the ceiling. When there is nothing left to give,
+  the goal does not choose work to abandon — it stops and tells you which
+  card is waiting and roughly what it needs. Nothing is dropped, the card
+  keeps its branch and its spend, and **top up and continue** carries it on
+  from where it stopped.
 - **A goal is not in a repository.** You are never asked which one it is
   in: the cards its plan agrees name their own `repo:`, and the goal keeps
   a branch of its name in every repository they are in. It lands once in
@@ -276,7 +277,8 @@ todo → plan ─────────────▶ implement ────�
 - **You can still reach in — through the goal.** Type into a running goal
   and the lead reads it as a note. Stop it, and verified work lands and
   the rest is dropped.
-- **Ready for you** is the one stop that reaches you. The goal page shows
+- **Two stops reach you, and only two**: it is ready, or it needs more
+  budget. Everything else its lead settles. The goal page shows
   each done-when item met or not met with its evidence, a try-it guide, the
   decisions for review, the declined reviewer findings, what was found
   along the way, the diff by card, and the spend. Land it (`g`: one merge

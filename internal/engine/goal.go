@@ -99,6 +99,9 @@ type GoalView struct {
 	Input    goalpolicy.Input
 	// DocPath is where the goal doc lives right now ("" when missing).
 	DocPath string
+	// NeedsBudget is the goal's standing request for more budget, derived
+	// from the log: which card is waiting and what it asked for.
+	NeedsBudget GoalNeedsBudget
 }
 
 // Card returns the goal card with id, and whether it belongs to the goal.
@@ -132,6 +135,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	if v.Log, err = e.cfg.Store.GoalLog(ctx, goal.ID); err != nil {
 		return v, err
 	}
+	v.NeedsBudget = needsBudgetFrom(v.Log)
 	v.DocPath = e.artifactFile(&goal)
 	if v.DocPath != "" {
 		if raw, rerr := os.ReadFile(v.DocPath); rerr == nil {
@@ -418,7 +422,22 @@ type GoalTickResult struct {
 	Again bool
 	// Finished reports that the goal's work settled and its review started.
 	Finished bool
+	// NeedsBudget is set when the tick stopped the goal on a card it
+	// cannot fund: the driving loop reports it to whoever is listening
+	// rather than carrying on.
+	NeedsBudget GoalNeedsBudget
 }
+
+// GoalNeedsBudget is a goal's standing request for more budget: which
+// card is waiting, what it asks for, and the sentence saying why.
+type GoalNeedsBudget struct {
+	Card   domain.FeatureID `json:"card,omitempty"`
+	Needs  int              `json:"needs,omitempty"`
+	Reason string           `json:"reason,omitempty"`
+}
+
+// Waiting reports whether the goal is stopped on a budget question.
+func (n GoalNeedsBudget) Waiting() bool { return n.Card != "" }
 
 // GoalTick conducts a goal one step: it reads the goal, decides, and
 // executes. It is safe to call often and from any event; a goal that is
@@ -512,8 +531,63 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 	case goalpolicy.Finish:
 		res.Finished = true
 		return e.goalFinish(ctx, goal, a.Reason)
+	case goalpolicy.NeedBudget:
+		res.NeedsBudget = GoalNeedsBudget{Card: a.Card, Needs: a.To, Reason: a.Reason}
+		return e.goalNeedBudget(ctx, goal, a.Card, a.To, a.Reason)
 	}
 	return nil
+}
+
+// goalNeedBudget stops the goal on a card it cannot fund and records what
+// it needs, so the one thing left is a person's answer.
+//
+// It is the ending that used to be a drop. A goal that hit its ceiling
+// dropped whichever card had exhausted — reliably the most ambitious one,
+// since that is the card that runs out first — and carried on to review
+// itself against work it had just defunded. Which work to abandon when
+// the money runs out is not the goal's call: the envelope is a hard
+// ceiling only a person raises, so the goal says what it has spent, what
+// the card needs, and stops. Nothing is dropped, the card keeps its
+// branch and its spend, and a top-up continues it.
+func (e *Engine) goalNeedBudget(ctx context.Context, goal domain.Feature, card domain.FeatureID, needs int, reason string) error {
+	if last := e.goalNeedsBudget(ctx, goal.ID); last.Card == card && last.Needs == needs {
+		return nil // already asked, and nothing has changed since
+	}
+	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalNeedBudget, Card: card, To: needs, Detail: reason, By: ActorGoal})
+	e.send(Event{Feature: goal.ID, Stage: domain.StageImplement, Kind: EventGoal})
+	return nil
+}
+
+// goalNeedsBudget reads the goal's standing request for more budget: the
+// newest one not answered by a raise of the goal's envelope since. Zero
+// when the goal is not waiting on money.
+//
+// Derived from the log rather than stored on the card, because it is a
+// fact about a moment the log already records, and a raise answers it
+// without anything having to remember to clear a flag.
+func (e *Engine) goalNeedsBudget(ctx context.Context, goalID domain.FeatureID) GoalNeedsBudget {
+	log, err := e.cfg.Store.GoalLog(ctx, goalID)
+	if err != nil {
+		return GoalNeedsBudget{}
+	}
+	return needsBudgetFrom(log)
+}
+
+// needsBudgetFrom is the derivation itself, over a log already read.
+func needsBudgetFrom(log []state.GoalEntry) GoalNeedsBudget {
+	var out GoalNeedsBudget
+	for _, en := range log {
+		switch en.Action {
+		case state.GoalNeedBudget:
+			out = GoalNeedsBudget{Card: en.Card, Needs: en.To, Reason: en.Detail}
+		case state.GoalRaised:
+			if en.Card == "" {
+				// the goal's own envelope went up: the question is answered
+				out = GoalNeedsBudget{}
+			}
+		}
+	}
+	return out
 }
 
 // goalLog appends to a goal's log, best-effort: the action it records has

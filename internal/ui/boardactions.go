@@ -350,6 +350,11 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.openAdopt(r)
 		}
+	case "goaltopup":
+		if r, ok := m.selected(); ok && r.Goal != nil {
+			return m.topUpGoalAndContinue(r.F, r.Goal.NeedsBudget)
+		}
+		return nil
 	case "goalstop":
 		if r, ok := m.selected(); ok {
 			return m.confirmStopGoal(r.F)
