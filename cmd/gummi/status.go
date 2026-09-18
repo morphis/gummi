@@ -570,8 +570,14 @@ func renderStatus(w io.Writer, v statusView) {
 			state += " — partial: " + g.Partial
 		}
 		fmt.Fprintf(w, "  Goal:     %s · %d of %d done-when met · %d lanes\n", state, met, total, g.Lanes)
-		fmt.Fprintf(w, "  Budget:   %d · goal %s · cards %s · reserve %d · left to give %s\n",
-			g.Budget.Envelope, trimCredits(g.Budget.Own), trimCredits(g.Budget.CardSpent), g.Budget.Reserve, trimCredits(g.Budget.Available))
+		// The cards' figure is what they HOLD — a live card holds its
+		// envelope, an ended one what it spent — because that is the term
+		// "left to give" is computed from. Printing their spend here beside
+		// it made four numbers that look like a decomposition of the
+		// envelope and do not add up to it.
+		fmt.Fprintf(w, "  Budget:   %d · goal %s · cards %s held (%s spent) · reserve %d · left to give %s\n",
+			g.Budget.Envelope, trimCredits(g.Budget.Own), trimCredits(g.Budget.Given),
+			trimCredits(g.Budget.CardSpent), g.Budget.Reserve, trimCredits(g.Budget.Available))
 		for _, d := range g.DoneWhen {
 			fmt.Fprintf(w, "            %s %s — %s\n", d.ID, d.Status, d.Says)
 		}
