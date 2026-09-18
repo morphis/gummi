@@ -99,6 +99,31 @@ func (r featureRow) baseBranch() string {
 	return worktree.DefaultBaseBranchName
 }
 
+// watchOnly reports whether this board may watch the card but not steer
+// it, because something else is already driving it: another gummi process
+// (DrivenAbroad) or, one level in, the lead of the goal the card belongs
+// to (domain.Feature.Conducted). The two are the same relationship seen
+// from the same side — a card has one driver, and this board is not it —
+// so every place that withholds a verb, a key, a decision or the composer
+// asks this rather than either half, and the two never drift apart.
+//
+// What differs is only who to name when saying so, which is why the
+// notices and the labels branch on watchDriver rather than on this.
+func (r featureRow) watchOnly() bool { return r.DrivenAbroad || r.F.Conducted() }
+
+// watchDriver names the driver watchOnly is deferring to, for the one
+// sentence each refusal owes the reader. Empty when the row is this
+// board's to drive.
+func (r featureRow) watchDriver() string {
+	switch {
+	case r.DrivenAbroad:
+		return fmt.Sprintf("pid %d", r.Foreign.PID)
+	case r.F.Conducted():
+		return goalDriver(r.F.GoalID)
+	}
+	return ""
+}
+
 // rowsMsg delivers a fresh load of the board content.
 type rowsMsg struct {
 	rows []featureRow

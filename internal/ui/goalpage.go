@@ -27,6 +27,18 @@ type goalPageView struct {
 	report engine.GoalReport
 	log    []state.GoalEntry
 	scroll int
+	// cursor is the card in the cards section enter opens, an index into
+	// report.Cards. The page is a document with exactly one actionable
+	// region, so the cursor lives only there: j/k walk the cards and,
+	// past either end, go back to scrolling the document. That is what
+	// keeps the board's grammar (j/k select, enter opens, esc goes back)
+	// true on a page that also has to be read top to bottom.
+	cursor int
+	// reveal asks the next render to scroll the selected card into view.
+	// The cursor moves in the key handler, which does not know the
+	// height; the render does, and is the only place that can honestly
+	// say whether the card is on screen.
+	reveal bool
 }
 
 type goalPageLoadedMsg struct {
@@ -61,31 +73,59 @@ func (m *Shell) goalPageLoaded(msg goalPageLoadedMsg) tea.Cmd {
 		m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 		return nil
 	}
-	scroll := 0
+	scroll, cursor := 0, 0
 	if m.goalPage != nil && m.goalPage.goal.ID == msg.goal.ID {
-		scroll = m.goalPage.scroll
+		scroll, cursor = m.goalPage.scroll, m.goalPage.cursor
 	}
-	m.goalPage = &goalPageView{goal: msg.goal, report: msg.report, log: msg.log, scroll: scroll}
+	// a reload can shorten the card list (a drop leaves it listed, but an
+	// attach that failed does not), so the kept cursor is clamped rather
+	// than trusted
+	if cursor >= len(msg.report.Cards) {
+		cursor = max(0, len(msg.report.Cards)-1)
+	}
+	m.goalPage = &goalPageView{goal: msg.goal, report: msg.report, log: msg.log, scroll: scroll, cursor: cursor}
 	return nil
 }
 
 func (gp *goalPageView) bindings() []binding {
-	return []binding{
+	bs := []binding{
 		{key: "j/k", label: "scroll", help: "scroll the goal page"},
 		{key: "r", label: "reload", help: "read the goal again", bar: true},
 		{key: "?", label: "help", bar: true},
 		{key: "esc", label: "back", help: "close the goal page (also q)", bar: true},
 	}
+	if len(gp.report.Cards) > 0 {
+		bs[0] = binding{key: "j/k", label: "select", help: "walk the goal's cards; past either end, scroll the page"}
+		bs = append([]binding{{key: "enter", label: "watch", help: "open the selected card and watch it run — read-only, the goal's lead drives it", bar: true}}, bs...)
+	}
+	return bs
 }
 
 func (m *Shell) handleGoalPageKey(key string) tea.Cmd {
 	gp := m.goalPage
+	cards := len(gp.report.Cards)
 	switch key {
 	case "esc", "q":
 		m.goalPage = nil
+	case "enter", "right", "l":
+		return m.watchGoalCard()
 	case "j", "down":
+		// the cursor first, the document second: walking off the last
+		// card resumes plain scrolling, so everything below the cards —
+		// the budget, the decisions, the log — is still reachable a line
+		// at a time.
+		if gp.cursor < cards-1 {
+			gp.cursor++
+			gp.reveal = true
+			return nil
+		}
 		gp.scroll++
 	case "k", "up":
+		if gp.cursor > 0 {
+			gp.cursor--
+			gp.reveal = true
+			return nil
+		}
 		if gp.scroll > 0 {
 			gp.scroll--
 		}
@@ -99,10 +139,82 @@ func (m *Shell) handleGoalPageKey(key string) tea.Cmd {
 	return nil
 }
 
-// goalPageRender draws the page, scrolled.
-func (m *Shell) goalPageRender(w, h int) string {
-	lines := goalPageLines(m.styles, m.goalPage, w)
+// watchGoalCard opens the card under the page's cursor, to watch it run.
+// The board's selection moves to it and its goal is unfolded behind, so
+// the board the card page sits on agrees with the card in front of the
+// reader; goalReturn is what brings esc back here rather than dropping
+// them on that board. openThread, not openCard, because a goal whose
+// cards a headless driver is running needs the foreign tail — the same
+// routing t already does, for the same reason.
+func (m *Shell) watchGoalCard() tea.Cmd {
 	gp := m.goalPage
+	if gp == nil || gp.cursor >= len(gp.report.Cards) {
+		return nil
+	}
+	card := gp.report.Cards[gp.cursor]
+	i := m.rowIndex(card.ID)
+	if i < 0 {
+		// the board filters cards out (the archive fold, a load that has
+		// not caught up with a card the lead minted a moment ago), and
+		// the page lists them from the goal's own report either way
+		m.notice = noticeMsg{text: string(card.ID) + " is not on the board yet — reload with r", isErr: true}
+		return nil
+	}
+	goal := gp.goal
+	m.goalPage = nil
+	m.goalReturn = goal.ID
+	m.sel = i
+	m.syncActionFocus()
+	if m.goalOpen == nil {
+		m.goalOpen = map[domain.FeatureID]bool{}
+	}
+	m.goalOpen[goal.ID] = true
+	return m.openThread(m.rows[i].F)
+}
+
+// backToGoalPage reopens the goal page a watched card was entered from.
+// esc on that card means "back where I came from", and where they came
+// from was the goal, not the board it is a row on — landing them on the
+// board would make watching a second card a fresh hunt through the fold
+// every time. Returns nil when the card was not entered that way, which
+// is every other esc.
+func (m *Shell) backToGoalPage() tea.Cmd {
+	id := m.goalReturn
+	m.goalReturn = ""
+	if id == "" {
+		return nil
+	}
+	// the card that was entered from the page can be left behind without
+	// this esc — a jump from the inbox, a notice that moved the
+	// selection — and returning to the goal from a card that is no longer
+	// one of its own would be answering a question nobody asked
+	if r, ok := m.selected(); !ok || r.F.GoalID != id {
+		return nil
+	}
+	i := m.rowIndex(id)
+	if i < 0 {
+		return nil
+	}
+	m.sel = i
+	m.syncActionFocus()
+	return m.openGoalPage(m.rows[i].F)
+}
+
+// goalPageRender draws the page, scrolled. A cursor move asks to be
+// revealed (goalPageView.reveal): the selected card is scrolled to the
+// nearer edge of the window, so walking the list never leaves the reader
+// looking at a highlight that is off screen.
+func (m *Shell) goalPageRender(w, h int) string {
+	gp := m.goalPage
+	lines, cardAt := goalPageLines(m.styles, gp, w)
+	if gp.reveal && gp.cursor < len(cardAt) {
+		gp.reveal = false
+		if at := cardAt[gp.cursor]; at < gp.scroll {
+			gp.scroll = at
+		} else if at >= gp.scroll+h {
+			gp.scroll = at - h + 1
+		}
+	}
 	if gp.scroll > len(lines)-1 {
 		gp.scroll = max(0, len(lines)-1)
 	}
@@ -110,10 +222,15 @@ func (m *Shell) goalPageRender(w, h int) string {
 	return strings.Join(lines[gp.scroll:end], "\n")
 }
 
-// goalPageLines renders the goal page as lines, top to bottom.
-func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
+// goalPageLines renders the goal page as lines, top to bottom. cardAt
+// tags each card in report.Cards with the line its row landed on — the
+// cards are the one region with a cursor, and the render is the only
+// place that knows where they ended up, since everything above them
+// wraps to the width.
+func goalPageLines(s *theme.Styles, gp *goalPageView, w int) ([]string, []int) {
 	r := gp.report
 	var out []string
+	cardAt := make([]int, 0, len(r.Cards))
 	add := func(line string) { out = append(out, line) }
 	section := func(title string) {
 		add("")
@@ -209,8 +326,11 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 	section("cards")
 	if len(r.Cards) == 0 {
 		add("   " + s.Faint.Render("none yet"))
+	} else {
+		add("   " + s.Faint.Render("enter watches the selected card — read-only, its lead drives it"))
 	}
-	for _, c := range r.Cards {
+	for ci, c := range r.Cards {
+		cardAt = append(cardAt, len(out))
 		glyph := s.Faint.Render("○")
 		switch c.State {
 		case "landed":
@@ -229,7 +349,11 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 		if len(c.Serves) > 0 {
 			tail += " · " + strings.Join(c.Serves, ",")
 		}
-		add("   " + glyph + " " + string(c.ID) + " " + clip(c.Title+s.Faint.Render(tail), 12))
+		cursor := "  "
+		if ci == gp.cursor {
+			cursor = s.SelMarker.Render("▸ ")
+		}
+		add(" " + cursor + glyph + " " + string(c.ID) + " " + clip(c.Title+s.Faint.Render(tail), 12))
 		switch {
 		case c.Commit != "":
 			add("       " + s.Faint.Render(clip("landed as "+shortHash(c.Commit)+" "+c.Subject, 8)))
@@ -293,7 +417,7 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 			add("   " + clip(line, 3))
 		}
 	}
-	return out
+	return out, cardAt
 }
 
 // --- reversing a decision ------------------------------------------------------

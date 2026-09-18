@@ -591,6 +591,21 @@ func (f *Feature) InGoal() bool { return f.GoalID != "" }
 // GoalDropped reports whether the card's goal dropped it.
 func (f *Feature) GoalDropped() bool { return !f.GoalDroppedAt.IsZero() }
 
+// Conducted reports whether this card's goal is driving it. Inside a
+// running goal the lead is the driver (§17): it starts the card, answers
+// its questions, raises its envelope and lands it on the goal branch, and
+// the card's stops wake the goal rather than a person (§17.5). So a
+// person watches such a card; they do not steer it, for the same reason
+// two gummi processes never drive one card at once.
+//
+// Two cards wear a GoalID and are nobody's to conduct: one the goal
+// dropped (it is closed where it stands and the person may adopt it back)
+// and one already done. A card the goal only attached is conducted while
+// it is held — releasing it clears the GoalID entirely.
+func (f *Feature) Conducted() bool {
+	return f.InGoal() && !f.GoalDropped() && f.Stage != StageDone
+}
+
 // GateMode returns the feature's gate-approval mode with the empty
 // default resolved, the same job kind() does for Kind. Every read of
 // GateApproval that branches on the mode must go through this: the field

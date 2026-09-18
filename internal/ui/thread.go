@@ -1795,6 +1795,12 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	if r.DrivenAbroad {
 		lines = append(lines, "  "+s.Faint.Render("driven elsewhere — "+foreignSummary(r.Foreign)))
 		pad(-1)
+	} else if r.F.Conducted() {
+		// the same sentence a foreign drive gets, for the driver one
+		// level in: without it a conducted card reads as a chat whose
+		// composer has stopped working for no stated reason.
+		lines = append(lines, "  "+s.Faint.Render("run by "+goalDriver(r.F.GoalID)+" — read-only here · "+string(r.F.GoalID)+" takes your notes"))
+		pad(-1)
 	}
 	return lines, anchorAt, evAt
 }

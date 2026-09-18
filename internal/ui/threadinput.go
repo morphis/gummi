@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -107,6 +108,13 @@ func composerPlaceholder(k domain.Kind) string {
 // rather than advertising verbs and an inventory that would silently
 // do nothing here.
 const drivenAbroadPlaceholderText = "ask a question — read-only while another process drives this card"
+
+// conductedPlaceholderText is the composer's placeholder on a card its
+// goal's lead drives. Unlike a foreign card there is no consult session
+// to ask — the card is right here and the lead is mid-turn on it — so
+// the line has one honest destination, and the placeholder names it
+// rather than inviting a line this surface would have to refuse.
+const conductedPlaceholderText = "read-only — %s conducts this card; type into %s to reach its lead"
 
 // threadInputMaxHeight caps how many rows the composer (newThreadInput's
 // DynamicHeight) can grow to before it scrolls internally instead of
@@ -482,6 +490,21 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	if r.DrivenAbroad {
 		return m.sendConsultMessage(r.F, text)
+	}
+	// A card its goal's lead conducts takes no line here. Not a turn (the
+	// lead is mid-turn on this very card and the backend would refuse the
+	// second one), not an answer (goalAnswerAsk is already answering),
+	// and not a consult session either — that would spend the goal's
+	// budget on a conversation the conductor never sees. The line is
+	// kept, not discarded: it stays in the composer so it can be retyped
+	// where it lands, which is the goal's own thread.
+	if r.F.Conducted() {
+		m.notice = noticeMsg{
+			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID),
+			isErr: true,
+			id:    r.F.ID,
+		}
+		return nil
 	}
 	// a line typed into a running goal is a note for its lead: the goal
 	// has no stage agent to talk to, and the lead reads notes next turn
@@ -966,6 +989,8 @@ type consultSentMsg struct {
 func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 	if r.DrivenAbroad {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
+	} else if r.F.Conducted() {
+		m.threadInput.Placeholder = fmt.Sprintf(conductedPlaceholderText, goalDriver(r.F.GoalID), r.F.GoalID)
 	} else {
 		// up reaches the inventory whether or not a decision is pinned
 		// above the line (F11), so the placeholder no longer has to pick

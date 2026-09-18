@@ -833,7 +833,7 @@ func stageActions(in nextInput) []nextAction {
 			// hand, and typing into the composer is a note to its lead
 			return []nextAction{
 				nextStep("goalstop", "", "stop the goal", "finish now — verified work lands, the rest is dropped, and it comes back partial"),
-				nextStep("goalpage", "", "open the goal page", "the done-when list, the cards, the budget and the lead's log"),
+				nextStep("goalpage", "P", "open the goal page", "the done-when list, the cards (enter watches one), the budget and the lead's log"),
 			}
 		}
 		if !finished {
@@ -940,7 +940,7 @@ func stageActions(in nextInput) []nextAction {
 				sendBackStep("bounce", "b", "send it back to its cards — your line goes to its lead"),
 				nextStep("goalreverse", "", "reverse a decision", "pick a decision for review and have the lead take the other way"),
 				nextStep("handoff", "h", "hand off", "close the goal and keep its branch — nothing lands"),
-				nextStep("goalpage", "", "open the goal page", "the report: done-when, cards, decisions, declined findings, spend"),
+				nextStep("goalpage", "P", "open the goal page", "the report: done-when, cards (enter watches one), decisions, declined findings, spend"),
 			}
 		}
 		if in.kind == domain.KindResearch {

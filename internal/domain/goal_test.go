@@ -151,3 +151,33 @@ func TestGoalMintPoolKeepsRoomForTheLead(t *testing.T) {
 		t.Fatalf("many cards cap the headroom: %v", got)
 	}
 }
+
+// TestAGoalConductsItsOwnCards: a card a goal is working is driven by
+// that goal's lead, so no one else drives it. A card the goal dropped is
+// closed where it stands and a done card has nothing left to drive —
+// both wear the goal id and neither is conducted — and a card in no goal
+// never was.
+func TestAGoalConductsItsOwnCards(t *testing.T) {
+	held := Feature{ID: "FD-011", Kind: KindFeature, Stage: StageImplement, GoalID: "GL-010"}
+	if !held.Conducted() {
+		t.Fatal("a card its goal is working is conducted by the goal's lead")
+	}
+	dropped := held
+	dropped.GoalDroppedAt = time.Now()
+	if dropped.Conducted() {
+		t.Fatal("a dropped card left the goal's hands — adopting it back is the reader's move")
+	}
+	done := held
+	done.Stage = StageDone
+	if done.Conducted() {
+		t.Fatal("a done card has nothing left to conduct")
+	}
+	own := Feature{ID: "FD-012", Kind: KindFeature, Stage: StageImplement}
+	if own.Conducted() {
+		t.Fatal("a card outside every goal is the board's own")
+	}
+	goal := Feature{ID: "GL-010", Kind: KindGoal, Stage: StageImplement}
+	if goal.Conducted() {
+		t.Fatal("goals do not nest: a goal is never conducted by one")
+	}
+}

@@ -206,7 +206,7 @@ var boardHelpKeyGroup = map[string]int{
 	// moves the card through its workflow, or spends credits on it now
 	"enter": 0, "p": 0, "g": 0, "h": 0, "b": 0, "v": 0, "u": 0, "A": 0,
 	// reads the card without changing anything
-	"s": 1, "d": 1, "t": 1, "i": 1,
+	"s": 1, "d": 1, "t": 1, "i": 1, "P": 1,
 	// branch/worktree plumbing
 	"r": 2, "m": 2, "z": 2, "c": 2, "o": 2,
 }
@@ -374,6 +374,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "W", label: "this week", help: "what the last seven days produced: endings, cost, rework"},
 		{key: "n", label: "new", help: "new card — feature, bug, research or goal, or paste an issue link to import one", bar: true},
 		{key: "f", label: "fold goal", help: "fold or unfold a goal's cards under it"},
+		{key: "P", label: "goal page", help: "a goal's page — done-when, cards, budget, lead's log"},
 		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
 		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
 		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
@@ -384,12 +385,13 @@ func (m *Shell) boardBindings() []binding {
 		{key: "?", label: "help", bar: true},
 		{key: "q", label: "quit"},
 	}
-	if r, ok := m.selected(); ok && r.DrivenAbroad {
-		// another gummi process is driving this card: every verb that
-		// would write to it is refused (shell.go's boardVerb), so the bar
-		// and the ? help overlay must stop offering them — the same
-		// reasoning as the research-card filter below. enter still works,
-		// as the way to watch the other process's stream.
+	if r, ok := m.selected(); ok && r.watchOnly() {
+		// something else is driving this card — another gummi process, or
+		// the lead of its goal: every verb that would write to it is
+		// refused (shell.go's boardVerb), so the bar and the ? help
+		// overlay must stop offering them — the same reasoning as the
+		// research-card filter below. enter still works, as the way to
+		// watch the run.
 		filtered := bs[:0:0]
 		for _, b := range bs {
 			if foreignBlockedKeys[b.key] {
@@ -397,7 +399,7 @@ func (m *Shell) boardBindings() []binding {
 			}
 			if b.key == "enter" {
 				b.label = "watch"
-				b.help = "follow the live agent stream of the process driving this card"
+				b.help = "follow the live agent stream of " + r.watchDriver() + ", which drives this card"
 			}
 			filtered = append(filtered, b)
 		}

@@ -55,6 +55,18 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		// routes a foreign card's line to its consult session instead.
 		return nil
 	}
+	if r.F.Conducted() {
+		// A card inside a goal has an answerer already: its goal's lead
+		// (goalloop.go's goalAnswerAsk takes every ask such a card
+		// raises, and goalPlanCheck its plan gate). Offering the same
+		// question to a person here would be a race with a turn that is
+		// probably already in flight — and the person answering it would
+		// be steering a card the conductor is accounting for. The stop is
+		// not swallowed: the thread renders the ask in the live stage
+		// block like any other, and the goal's own page is where a
+		// reader acts.
+		return nil
+	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {
 		snap := sess.Snapshot()
 		if ask := snap.PendingAsk; ask != nil {

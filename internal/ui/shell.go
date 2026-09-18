@@ -257,6 +257,12 @@ type Shell struct {
 	goalOpen map[domain.FeatureID]bool
 	// goalPage is the mounted goal page (goalpage.go), nil when closed.
 	goalPage *goalPageView
+	// goalReturn is the goal whose page sent the reader into the card
+	// they are watching, so esc goes back to it (goalpage.go's
+	// backToGoalPage). Empty whenever the open card was reached any other
+	// way — the board, the inbox, a notice — since esc there has always
+	// meant the board.
+	goalReturn domain.FeatureID
 	// stats is the mounted stats tab (statsview.go), nil when closed:
 	// where the selected card's credits and hours went.
 	stats *statsView
@@ -2798,14 +2804,15 @@ func (m *Shell) scrollThread(up bool) {
 // command menu) reaches the same guarded case body as its key without
 // passing back through the focus interception.
 func (m *Shell) boardVerb(key string) tea.Cmd {
-	// a card another gummi process is driving is read-only here: refuse
-	// the verbs that would write to it and name the owner, rather than
-	// racing the other process or failing deeper in with a confusing
-	// error. The action list withholds exactly this set, so what the
-	// board offers and what it answers stay in lockstep.
-	if r, ok := m.selected(); ok && r.DrivenAbroad && foreignBlockedKeys[key] {
+	// a card something else is already driving is read-only here: refuse
+	// the verbs that would write to it and name the driver, rather than
+	// racing it or failing deeper in with a confusing error. The action
+	// list withholds exactly this set, so what the board offers and what
+	// it answers stay in lockstep. Two drivers: another gummi process,
+	// and the lead of the goal a card belongs to (featureRow.watchOnly).
+	if r, ok := m.selected(); ok && r.watchOnly() && foreignBlockedKeys[key] {
 		m.notice = noticeMsg{
-			text:  fmt.Sprintf("%s is being driven by pid %d — read-only here (enter watches it)", r.F.ID, r.Foreign.PID),
+			text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.ID, r.watchDriver()),
 			isErr: true,
 			id:    r.F.ID,
 		}
@@ -2834,6 +2841,25 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "v":
 		if r, ok := m.selected(); ok {
 			return m.runChecks(r.F)
+		}
+	case "P":
+		// the goal's page, from the goal row or from any of its cards —
+		// a reader watching one card wants the next one, and the page is
+		// where the cards are. It was reachable only through the action
+		// inventory, which is a poor place for the one surface a person
+		// opens to look in on a running goal.
+		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
+			goal := r.F
+			if !goal.IsGoal() {
+				i := m.rowIndex(r.F.GoalID)
+				if i < 0 {
+					m.notice = noticeMsg{text: string(r.F.ID) + " is not in a goal — nothing to open", isErr: true, id: r.F.ID}
+					return nil
+				}
+				goal = m.rows[i].F
+			}
+			return m.openGoalPage(goal)
 		}
 	case "t":
 		if r, ok := m.selected(); ok {
@@ -2867,9 +2893,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "A":
 		if r, ok := m.selected(); ok {
-			if r.DrivenAbroad {
+			// A is not in foreignBlockedKeys (it is not a card verb the
+			// action inventory lists), so it carries the top guard's rule
+			// itself: how far a card runs on its own is the driver's
+			// setting, and a conducted card's driver is its goal's lead —
+			// changing it here would have the conductor and the reader
+			// disagreeing about when that card stops.
+			if r.watchOnly() {
 				m.notice = noticeMsg{
-					text:  fmt.Sprintf("%s is being driven by pid %d — read-only here (enter watches it)", r.F.ID, r.Foreign.PID),
+					text:  fmt.Sprintf("%s is driven by %s — read-only here (enter watches it)", r.F.ID, r.watchDriver()),
 					isErr: true,
 				}
 				return nil
@@ -3474,6 +3506,13 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	// honestly do with enter is watch it.
 	if _, ok := m.foreignFor(f.ID); ok {
 		return m.watchForeign(f)
+	}
+	// its goal's lead owns this one: the conductor starts it, answers it
+	// and lands it (§17), so running the stage by hand here would put a
+	// second driver on a card that already has one. enter opens it to
+	// watch, which is the same answer, one level in.
+	if f.Conducted() {
+		return m.watchConducted(f)
 	}
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}

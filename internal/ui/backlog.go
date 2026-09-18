@@ -163,7 +163,9 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 	switch key {
 	case "esc", "left":
 		m.closeCard()
-		return nil, true
+		// a card entered from a goal's page goes back to that page, not
+		// to the board underneath it (goalpage.go's backToGoalPage)
+		return m.backToGoalPage(), true
 	case "j", "down":
 		m.moveAction(1)
 		return nil, true
@@ -171,8 +173,12 @@ func (m *Shell) backlogKey(key string) (tea.Cmd, bool) {
 		m.moveAction(-1)
 		return nil, true
 	case "J":
+		// stepping to the next card leaves the goal's page behind: the
+		// reader is walking the board now, and esc means the board again
+		m.goalReturn = ""
 		return m.stepCard(1), true
 	case "K":
+		m.goalReturn = ""
 		return m.stepCard(-1), true
 	case "right":
 		return nil, true

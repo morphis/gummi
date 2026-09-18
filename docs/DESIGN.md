@@ -2611,6 +2611,33 @@ met with its evidence, the cards with their landed commits and diff stats,
 the decisions for review, declined findings, what was found along the way,
 the try-it guide, and the budget tree.
 
+### 17.6 Watching a goal's cards
+
+Silence is not opacity. A goal's cards are ordinary cards with ordinary
+threads, and the page a person opens to look in on a running goal is a
+way into them: the goal page's card list carries a cursor, `enter` opens
+the selected card's page with its live stage block streaming, and `esc`
+comes back to the page rather than to the board underneath it. `P` opens
+that page from the goal row or from any of its cards. On the board the
+cards are still there, folded under their goal behind `f`.
+
+What that page opens is a **watch, not a chat**
+(`domain.Feature.Conducted`, `ui.featureRow.watchOnly`). A card inside a
+running goal already has a driver: the lead starts it, answers its
+questions, raises its envelope and lands it. So the board withholds from
+such a card exactly what it withholds from one another gummi process is
+driving (`ui.foreignSafeActions`, §14's one-driver rule seen from the
+board) — every verb that would write to it, the autopilot key, the
+decision block, and the composer — and says which lead owns the run.
+Only the driver differs: a pid there, a lead here, and in both cases not
+this board. A line typed into a conducted card is refused rather than
+delivered, because the one thing it could honestly be — a note for the
+conductor — has a home already: the goal's own thread.
+
+A card the goal dropped and a card already done wear a goal id and are
+nobody's to conduct; both keep the full inventory, which is what makes
+`adopt` reachable on the first of them.
+
 
 ## 18. Stacks — slicing one piece of work into several landings
 

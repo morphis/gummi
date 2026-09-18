@@ -161,11 +161,13 @@ type actionSpec struct {
 // folding leaves them in the list, on their key, one row away.
 var promotedActions = map[string]bool{}
 
-// foreignSafeActions are the actions that survive on a card another
-// gummi process is driving: reading it, and watching its live stream.
-// Everything else would write to a card this board does not own — the
-// other process would either fight the change or never see it — so it is
-// withheld while the drive lasts, not disabled forever.
+// foreignSafeActions are the actions that survive on a card this board
+// may watch but not steer (featureRow.watchOnly): reading it, and
+// watching its live stream. Everything else would write to a card this
+// board does not own — another gummi process would either fight the
+// change or never see it, and a goal's lead, which starts, answers and
+// lands its own cards, would fight it from inside this very process — so
+// they are withheld while the drive lasts, not disabled forever.
 //
 // handOffHelp is the one sentence the hand-off verb wears everywhere —
 // the action inventory, the board's key table, the ? overlay. It names
@@ -228,12 +230,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 
 	runLabel, runWhy := runLabelWhy(in)
 	pauseLabel, pauseWhy := pauseLabelWhy(in)
-	// on a card another process drives, enter can only watch — and can do
-	// so at any stage, since what it opens is that run's live stream
-	// rather than this board's session.
-	if r.DrivenAbroad {
+	// on a card something else drives, enter can only watch — and can do
+	// so at any stage, since what it opens is that driver's run rather
+	// than one this board would start.
+	if r.watchOnly() {
 		runLabel = "watch"
-		runWhy = fmt.Sprintf("follow the live agent stream — pid %d owns this run", r.Foreign.PID)
+		runWhy = "follow the live agent stream — " + r.watchDriver() + " owns this run"
 	}
 
 	advanceLabel, advanceWhy := "next stage", "move the card to its next stage"
@@ -258,7 +260,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	specs := []actionSpec{
 		{
 			"run", "enter", runLabel, runWhy, false,
-			r.DrivenAbroad || autonomousStage(in.stage),
+			r.watchOnly() || autonomousStage(in.stage),
 		},
 		// the gate must stay in lockstep with boardVerb's `p`, which pauses
 		// whenever a non-interactive session exists — including a finished
@@ -446,11 +448,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	// seed ordering and why text from the ranked suggestions: first
 	// occurrence of a key wins, so the recommendation (steps[0]) always
 	// out-ranks a same-keyed entry appended later in the same call.
-	// a card another process drives has no local recommendation to make:
-	// every step nextActions ranks is about driving it here. Watching is
-	// the only move, and the run action already says so.
+	// a card someone else drives has no recommendation to make here:
+	// every step nextActions ranks is about driving it from this board.
+	// Watching is the only move, and the run action already says so.
 	var steps []nextAction
-	if !r.DrivenAbroad {
+	if !r.watchOnly() {
 		steps = nextActions(in)
 	}
 	rank := make(map[string]int, len(steps))
@@ -471,7 +473,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		if !sp.valid {
 			continue
 		}
-		if r.DrivenAbroad && !foreignSafeActions[sp.id] {
+		if r.watchOnly() && !foreignSafeActions[sp.id] {
 			continue
 		}
 		w := sp.why

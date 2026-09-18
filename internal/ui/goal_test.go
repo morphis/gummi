@@ -152,7 +152,16 @@ func TestGoalPageRendersTheHandOver(t *testing.T) {
 		},
 		log: []state.GoalEntry{{At: fixedTime, GoalPayload: state.GoalPayload{Action: state.GoalLanded, Card: "FD-011", Detail: "abcdef1 feat: local cache"}}},
 	}
-	out := ansi.Strip(strings.Join(goalPageLines(theme.New(theme.GummiDark()), gp, 100), "\n"))
+	lines, cardAt := goalPageLines(theme.New(theme.GummiDark()), gp, 100)
+	out := ansi.Strip(strings.Join(lines, "\n"))
+	if len(cardAt) != len(gp.report.Cards) {
+		t.Fatalf("every card is tagged with the line it landed on: %v", cardAt)
+	}
+	for i, at := range cardAt {
+		if !strings.Contains(ansi.Strip(lines[at]), string(gp.report.Cards[i].ID)) {
+			t.Fatalf("cardAt[%d]=%d points at %q", i, at, ansi.Strip(lines[at]))
+		}
+	}
 	for _, want := range []string{
 		"ready for you", "partial: 1 card(s) dropped", "1 of 2 done-when met",
 		"DW-1 cache exists", "every card serving it was dropped",
@@ -338,5 +347,121 @@ func TestGoalCardVerifiedStampIsInPlace(t *testing.T) {
 	c, _ := store.GetFeature(ctx, cards[0].ID)
 	if c.VerifiedAt.IsZero() {
 		t.Fatal("stampVerified writes the stamp in place")
+	}
+}
+
+// offersAction reports whether the card inventory offers id.
+func offersAction(acts []cardAction, id string) bool {
+	for _, a := range acts {
+		if a.id == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestAGoalsCardIsWatchedNotSteered: a card inside a running goal already
+// has a driver — its goal's lead, which starts it, answers it and lands
+// it (§17) — so the board watches it and withholds everything that would
+// steer it, exactly as it does for a card another gummi process drives.
+// The two cards that wear a goal id and are nobody's to conduct, one the
+// goal dropped and one already done, keep every verb.
+func TestAGoalsCardIsWatchedNotSteered(t *testing.T) {
+	m := goalBoard()
+	m.sel = 3 // FD-012: implement, inside GL-010, not dropped
+	r, ok := m.selected()
+	if !ok || !r.watchOnly() || r.watchDriver() != "GL-010's lead" {
+		t.Fatalf("a conducted card names its driver: watchOnly=%v driver=%q", r.watchOnly(), r.watchDriver())
+	}
+
+	acts := cardActionsFor(nextInput{stage: domain.StageImplement, kind: domain.KindFeature}, r)
+	for _, id := range []string{"advance", "bounce", "verify", "merge", "handoff", "envelope", "attach", "delete"} {
+		if offersAction(acts, id) {
+			t.Errorf("a conducted card still offers %q: %s", id, idsOf(acts))
+		}
+	}
+	for _, id := range []string{"run", "spec", "diff", "ask"} {
+		if !offersAction(acts, id) {
+			t.Errorf("a conducted card should still offer %q: %s", id, idsOf(acts))
+		}
+	}
+	for _, a := range acts {
+		if a.id == "run" && a.label != "watch" {
+			t.Errorf("enter on a conducted card watches, it does not run: %q — %q", a.label, a.why)
+		}
+	}
+
+	// the key answers what the list offers: the two must stay in lockstep
+	if cmd := m.boardVerb("m"); cmd != nil {
+		t.Error("m on a conducted card must refuse rather than merge")
+	}
+	if !strings.Contains(m.notice.text, "GL-010's lead") || !m.notice.isErr {
+		t.Errorf("the refusal names the driver: %q", m.notice.text)
+	}
+
+	// nothing typed into it reaches an agent: the lead is mid-turn on this
+	// very card, and the goal's own thread is where a note lands
+	if cmd := m.submitThreadLine(r, "try the other library"); cmd != nil {
+		t.Error("a line typed into a conducted card must not be delivered")
+	}
+	if !strings.Contains(m.notice.text, "GL-010") {
+		t.Errorf("the composer's refusal points at the goal: %q", m.notice.text)
+	}
+	if d := m.openDecision(r); d != nil {
+		t.Errorf("a conducted card raises no decision here — its lead answers: %+v", d)
+	}
+
+	// a card the goal dropped is out of its hands, and a landed one is
+	// nobody's to drive: both keep the full inventory
+	for _, sel := range []int{2, 4} {
+		m.sel = sel
+		r, _ := m.selected()
+		if r.watchOnly() {
+			t.Errorf("%s is not conducted (dropped or done) yet reads as watch-only", r.F.ID)
+		}
+	}
+}
+
+// TestTheGoalPageOpensItsCards: the goal page's cards are a list with a
+// cursor, enter opens the selected one to watch, and esc comes back to
+// the page rather than dropping the reader on the board underneath it.
+func TestTheGoalPageOpensItsCards(t *testing.T) {
+	m := goalBoard()
+	goal := m.rows[1]
+	m.goalPage = &goalPageView{goal: goal.F, report: *goal.Goal}
+
+	// j/k walk the cards; past the last one they go back to scrolling
+	m.handleGoalPageKey("j")
+	if m.goalPage.cursor != 1 || !m.goalPage.reveal {
+		t.Fatalf("j selects the next card and asks to be revealed: cursor=%d reveal=%v", m.goalPage.cursor, m.goalPage.reveal)
+	}
+	m.handleGoalPageKey("j")
+	m.handleGoalPageKey("j")
+	if m.goalPage.cursor != 2 || m.goalPage.scroll != 1 {
+		t.Fatalf("past the last card j scrolls the page: cursor=%d scroll=%d", m.goalPage.cursor, m.goalPage.scroll)
+	}
+
+	m.goalPage.cursor = 1 // FD-012, the one that is running
+	m.handleGoalPageKey("enter")
+	if !m.cardOpen || m.sel != 3 {
+		t.Fatalf("enter opens the selected card's page: open=%v sel=%d", m.cardOpen, m.sel)
+	}
+	if m.goalPage != nil {
+		t.Error("the card page replaces the goal page rather than hiding under it")
+	}
+	if m.goalReturn != goal.F.ID {
+		t.Errorf("the card remembers the page it was entered from: %q", m.goalReturn)
+	}
+	if !m.goalOpen[goal.F.ID] {
+		t.Error("the goal is unfolded behind, so the board agrees with the card in front of the reader")
+	}
+
+	// esc goes back to the goal page, not to the board
+	cmd, handled := m.backlogKey("esc")
+	if !handled || cmd == nil {
+		t.Fatalf("esc on a watched card reopens its goal page: handled=%v cmd=%v", handled, cmd)
+	}
+	if m.cardOpen || m.goalReturn != "" || m.sel != 1 {
+		t.Fatalf("esc leaves the card and selects the goal: open=%v return=%q sel=%d", m.cardOpen, m.goalReturn, m.sel)
 	}
 }

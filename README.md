@@ -169,6 +169,7 @@ The keys you need first:
 | `T` | new card stacked on this one — its branch forks from this card's, and gummi replays it whenever this card changes |
 | `C` / `W` | close out the session — land what is ready, then sweep the worktrees / what the last seven days produced |
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
+| `P` | a goal's page — done-when, its cards (`enter` watches one run), budget, the lead's log |
 | `i` | the needs-attention inbox |
 | `tab`, `alt+1/2/3` | the board, inbox and agent tabs |
 | `?` or `alt+/` | the full key table |
@@ -262,8 +263,17 @@ todo → plan ─────────────▶ implement ────�
   a branch of its name in every repository they are in. It lands once in
   each — git has no merge across repositories — and the hand-over says
   which of them have it.
-- **You can still reach in.** Type into a running goal and the lead reads
-  it as a note. Take over one of its cards with `A`. Stop it.
+- **You can watch every card it runs.** `P` opens the goal's page from the
+  goal or any of its cards; its card list has a cursor and `enter` opens
+  the selected card's thread, live, with `esc` coming back to the page.
+  (They are on the board too, folded under the goal behind `f`.) What you
+  get is a watch, not a chat: while the goal's lead is driving a card it
+  starts, answers and lands it, so the board withholds the verbs and the
+  composer that would put a second driver on it — the same rule as a card
+  another gummi process is running.
+- **You can still reach in — through the goal.** Type into a running goal
+  and the lead reads it as a note. Stop it, and verified work lands and
+  the rest is dropped.
 - **Ready for you** is the one stop that reaches you. The goal page shows
   each done-when item met or not met with its evidence, a try-it guide, the
   decisions for review, the declined reviewer findings, what was found
