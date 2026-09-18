@@ -811,6 +811,14 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return scribeEstimateDoneMsg{id: id}
 		}
+		if f.GoalID != "" {
+			// A goal's card is funded by its goal's ledger, which has
+			// already divided the envelope between the cards and holds
+			// the rest against raises. Re-sizing one card behind the
+			// conductor's back moves credits the goal believes it still
+			// has to give.
+			return scribeEstimateDoneMsg{id: id}
+		}
 		scribe, err := m.engine.Estimate(ctx, f)
 		if err != nil || scribe <= 0 {
 			return scribeEstimateDoneMsg{id: id}
@@ -820,6 +828,19 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 		// for an expensive-looking feature, never silently undercut it
 		if m.envelope > 0 && blended < m.envelope {
 			blended = m.envelope
+		}
+		// and so is the number on the card. The budget field of the
+		// creation dialog is required and prefilled, so every card
+		// arrives here with a figure a person either typed or accepted,
+		// and averaging it with a scribe's guess quietly moved it: a goal
+		// created at 3000 was stored at 2940, which is the ceiling its
+		// reserve, its mint pool and every card envelope are derived
+		// from. The engine's own estimator has always had this rule —
+		// estimateEnvelope fills an UNSET envelope and never replaces a
+		// chosen one — and this surface did not. An estimate may still
+		// raise a budget that looks too small; it may not shave one.
+		if blended < f.Budget.Envelope {
+			return scribeEstimateDoneMsg{id: id}
 		}
 		if blended == f.Budget.Envelope {
 			return scribeEstimateDoneMsg{id: id}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
 
@@ -36,7 +37,7 @@ func TestScribeEstimateBlendsAndPersists(t *testing.T) {
 	if got.Budget.Envelope != 150 {
 		t.Errorf("envelope = %d, want 150 (blend of historical 100 + scribe 200)", got.Budget.Envelope)
 	}
-	if !strings.Contains(m.notice.text, "scribe sized") {
+	if !strings.Contains(m.notice.text, "scribe raised") {
 		t.Errorf("notice = %q, want a scribe refinement", m.notice.text)
 	}
 	if len(m.scribing) != 0 {
@@ -145,5 +146,58 @@ func TestScribeEstimateSettlesOnUnchangedBlend(t *testing.T) {
 	m = pump(t, m, m.scribeEstimate("FD-001"))
 	if len(m.scribing) != 0 {
 		t.Errorf("scribing still marked in flight after an unchanged blend: %+v", m.scribing)
+	}
+}
+
+// The number in the creation dialog's budget field is the one a person
+// chose, and it was being averaged with a scribe's guess: a goal created
+// at 3000 was stored at 2940 — the ceiling its reserve, its mint pool and
+// every card envelope are derived from. The engine's own estimator has
+// always refused to replace a chosen envelope; this surface now agrees.
+func TestScribeEstimateNeverShavesTheBudgetOnTheCard(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	f.Budget.Envelope = 3000 // typed into the dialog; GUMMI_ENVELOPE unset
+	if err := m.store.UpdateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	scribeEngine(t, m, "Cheap.\nESTIMATE: 2880") // blend(3000,2880) = 2940
+
+	m = pump(t, m, m.scribeEstimate("FD-001"))
+	got, _ := m.store.GetFeature(ctx, "FD-001")
+	if got.Budget.Envelope != 3000 {
+		t.Errorf("envelope = %d, want the 3000 that was chosen", got.Budget.Envelope)
+	}
+	if m.notice.text != "" {
+		t.Errorf("a blend that changed nothing announced itself: %q", m.notice.text)
+	}
+}
+
+// A goal card's envelope is the goal ledger's arithmetic — what it gave
+// this card out of what it holds. A scribe pass that re-sizes it moves
+// credits the conductor still believes it has.
+func TestScribeEstimateLeavesAGoalsCardsAlone(t *testing.T) {
+	m, _ := diffWorkspace(t)
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	f.Budget.Envelope = 1048
+	if err := m.store.UpdateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	goal := f
+	goal.ID, goal.Num, goal.Kind, goal.Slug = "GL-009", 9, domain.KindGoal, "a-goal"
+	if err := m.store.CreateFeature(ctx, &goal); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.store.SetGoal(ctx, "FD-001", "GL-009", false); err != nil {
+		t.Fatal(err)
+	}
+	scribeEngine(t, m, "Looks big.\nESTIMATE: 4000")
+
+	m = pump(t, m, m.scribeEstimate("FD-001"))
+	got, _ := m.store.GetFeature(ctx, "FD-001")
+	if got.Budget.Envelope != 1048 {
+		t.Errorf("envelope = %d, want the 1048 its goal gave it", got.Budget.Envelope)
 	}
 }

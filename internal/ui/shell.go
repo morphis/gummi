@@ -1997,7 +1997,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.blended == 0 {
 			return m, nil
 		}
-		m.notice = noticeMsg{text: fmt.Sprintf("%s: scribe sized the budget at %d credits", msg.id, msg.blended), reload: true}
+		m.notice = noticeMsg{text: fmt.Sprintf("%s: scribe raised the budget to %d credits", msg.id, msg.blended), reload: true}
 		return m, m.loadRows
 
 	case baselineDoneMsg:
