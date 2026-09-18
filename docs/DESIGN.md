@@ -2715,6 +2715,18 @@ tree, so afterwards its branch is measured against a trunk that never took
 its commits and reads as unlanded for good. A card carrying work no merge
 has — dropped, handed off — is left standing, branch and all.
 
+**Delete** (`D`) is the same fact with nothing kept back. Cleanup is
+offered work that landed and refuses the rest; delete was asked to destroy
+the goal, so it takes every card with it — checkout, branch and record,
+landed or not — and then the goal's own tree and branch in *every*
+repository it spans, not only its home (`ui.Shell.deleteFeature`,
+`worktree.Pool.DeleteGoalTrees`). Cards kept back would be rows pointing
+at a goal that no longer exists, holding branches no surface would ever
+offer to remove again, in checkouts already deleted underneath them. The
+one thing that stops it is an edge it does not own: a card **outside** the
+goal depending on one inside refuses the whole delete, before anything is
+touched, and names the pair to break.
+
 Every sentence the board writes about such a card names the **goal
 branch** it forks from and lands on, never the repository's trunk
 (`ui.Shell.baseBranch`): the trunk is where the goal lands, later, once,
@@ -2813,8 +2825,13 @@ tested.
   is really using it: a runner that dies lets go (and its run reads
   inconclusive, never failed), and a gummi that dies does not take a running
   experiment's exclusivity down with it. On Linux a phase's command is
-  killed with its runner (a parent-death signal), so a deploy cannot outlive
-  the lease that covered it and go on working a substrate the next holder
+  asked to die with its runner (a parent-death signal), but that signal
+  reaches the shell and nothing it started, so the run record also names the
+  phase's **process group** — and the moment a run is read back and found to
+  have lost its runner, that group is killed. Reading the run and killing
+  what it left behind are one act because the process that would otherwise
+  do the killing is the one that died. A deploy therefore cannot outlive the
+  lease that covered it and go on working a substrate the next holder
   believes it has to itself.
 - **The judge is not the work's to edit.** Experiments are operator config
   from outside every worktree, as env probes are. A goal may well change the

@@ -148,6 +148,14 @@ type Result struct {
 	Assertions []Assertion `json:"assertions,omitempty"`
 	// Ops lists what was done to the substrate to make it ready.
 	Ops []string `json:"substrate_ops,omitempty"`
+	// PhaseGroup is the process group of the phase command running right
+	// now, and PhaseGroupStart identifies its leader against pid reuse.
+	// They are what lets a reader of this record kill a phase whose runner
+	// died under it: the parent-death signal reaches the shell and nothing
+	// below it, and a deploy still working the substrate after its lease
+	// has gone is the one thing exclusivity is for.
+	PhaseGroup      int    `json:"phase_group,omitempty"`
+	PhaseGroupStart uint64 `json:"phase_group_start,omitempty"`
 
 	PID       int       `json:"pid"`
 	Started   time.Time `json:"started"`
@@ -265,8 +273,18 @@ func Load(dir string) (Result, error) {
 	}
 	r.Dir = dir
 	if r.State == StateRunning && !alive(r.PID) {
+		// The run is over and what it left behind is still working the
+		// substrate: the parent-death signal took the phase's shell and
+		// nothing under it. Reading the run and killing its remains are
+		// one fact, so they happen in one place — and the next holder of
+		// the substrate reads runs before it takes one.
+		if substrate.KillGroup(r.PhaseGroup, r.PhaseGroupStart) {
+			r.Reason = "its runner stopped before the run finished, and the phase it left running was killed"
+		} else {
+			r.Reason = "its runner stopped before the run finished"
+		}
 		r.State, r.Outcome = StateDone, Inconclusive
-		r.Reason = "its runner stopped before the run finished"
+		r.PhaseGroup, r.PhaseGroupStart = 0, 0
 		if r.Ended.IsZero() {
 			r.Ended = r.Heartbeat
 		}
@@ -472,12 +490,17 @@ func (r *runner) phase(ctx context.Context, attempt int, name, cmd string) Phase
 	ph := Phase{Name: name, Attempt: attempt, Log: filepath.Join("log", fmt.Sprintf("%d-%s.log", attempt, name))}
 	var out string
 	var err error
+	note := func(pgid int, gstart uint64) {
+		r.res.PhaseGroup, r.res.PhaseGroupStart = pgid, gstart
+		r.save()
+	}
 	if f := r.logFile(attempt, name); f != nil {
-		out, ph.Exit, err = substrate.RunShell(ctx, r.job.Root, cmd, r.job.Def.PhaseTimeout(), r.env(attempt), f)
+		out, ph.Exit, err = substrate.RunShell(ctx, r.job.Root, cmd, r.job.Def.PhaseTimeout(), r.env(attempt), f, note)
 		_ = f.Close()
 	} else {
-		out, ph.Exit, err = substrate.RunShell(ctx, r.job.Root, cmd, r.job.Def.PhaseTimeout(), r.env(attempt), nil)
+		out, ph.Exit, err = substrate.RunShell(ctx, r.job.Root, cmd, r.job.Def.PhaseTimeout(), r.env(attempt), nil, note)
 	}
+	r.res.PhaseGroup, r.res.PhaseGroupStart = 0, 0
 	ph.OK = err == nil && ph.Exit == 0
 	ph.Seconds = r.now().Sub(start).Seconds()
 	ph.Tail = tailLines(out, 12)

@@ -375,7 +375,12 @@ const maxOutput = 16 << 10
 // timeout takes the whole tree with it. It returns the (bounded) combined
 // output, the exit code (-1 when the command never produced one) and an
 // error only for the ways a command fails to give an answer at all.
-func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env []string, log io.Writer) (string, int, error) {
+//
+// started, when given, is called once with the command's process group and
+// the group leader's start time, as soon as it has both. A caller that
+// holds something the command is working — a substrate — records them, so
+// that whoever finds the caller dead can kill what it left running.
+func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env []string, log io.Writer, started ...func(pgid int, start uint64)) (string, int, error) {
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(rctx, "sh", "-c", cmd) //nolint:gosec // operator config from outside the worktree
@@ -400,7 +405,20 @@ func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env [
 	// command's life: otherwise the runtime retiring an idle thread would
 	// kill a healthy command.
 	runtime.LockOSThread()
-	err := c.Run()
+	err := c.Start()
+	if err == nil {
+		// The command's own process group, named while it is alive: the
+		// parent-death signal reaches only this shell, so whoever finds
+		// the run afterwards needs the group to kill what it left behind.
+		for _, fn := range started {
+			if fn == nil {
+				continue
+			}
+			st, _ := ProcessStart(c.Process.Pid)
+			fn(c.Process.Pid, st)
+		}
+		err = c.Wait()
+	}
 	runtime.UnlockOSThread()
 	out := buf.String()
 	if rctx.Err() != nil {
