@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -69,5 +70,34 @@ func TestCardFormOptionLabelMarksFocusWithoutColor(t *testing.T) {
 	}
 	if ansi.StringWidth(focused) != ansi.StringWidth(unfocused) {
 		t.Errorf("marker changed the row's width: focused=%d unfocused=%d", ansi.StringWidth(focused), ansi.StringWidth(unfocused))
+	}
+}
+
+// "alt+o edit" opens a panel whose first field is a text input, and a
+// text input draws its "> " prompt focused or not. Leaving focus in the
+// description made that prompt a lie — the next keystrokes edited the
+// card's text, below the panel that had just opened.
+func TestOptionsOpenWhereTheTypingGoes(t *testing.T) {
+	d := newCardForm(domain.CardType{Kind: domain.KindGoal}, nil, nil, true, "", nil, 2000, nil)
+	d.setFocus(cardStopText)
+	d.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt})
+	if !d.expanded {
+		t.Fatal("alt+o did not open the options")
+	}
+	if d.focus != cardStopEnvelope {
+		t.Fatalf("focus = %d after alt+o, want the budget field (%d)", d.focus, cardStopEnvelope)
+	}
+	before := d.text.Value()
+	d.HandleKey(tea.KeyPressMsg{Code: '5', Text: "5"})
+	if d.text.Value() != before {
+		t.Errorf("typing after alt+o edited the description: %q", d.text.Value())
+	}
+	if !strings.Contains(d.env.Value(), "5") {
+		t.Errorf("budget field = %q, want the keystroke", d.env.Value())
+	}
+	// collapsing puts the person back where they were writing
+	d.HandleKey(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt})
+	if d.focus != cardStopText {
+		t.Errorf("focus = %d after collapsing, want the description", d.focus)
 	}
 }

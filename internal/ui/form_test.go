@@ -290,13 +290,15 @@ func TestCardFormTabOrder(t *testing.T) {
 	}
 }
 
-// TestCardFormAltOTogglesOptions: alt+o expands and collapses in place;
-// collapsing from an option row returns focus to the text.
+// TestCardFormAltOTogglesOptions: alt+o expands onto the first option and
+// collapses back to the text. Expanding used to leave focus in the
+// description, which made the panel's "> " prompt a lie — the keystrokes
+// that followed edited the card's text (see TestOptionsOpenWhereTheTypingGoes).
 func TestCardFormAltOTogglesOptions(t *testing.T) {
 	s := theme.New(theme.GummiDark())
 	form := door(domain.CardType{Kind: domain.KindBug}, nil)
 	form.HandleKey(altO)
-	if !form.expanded || form.focus != cardStopText {
+	if !form.expanded || form.focus != cardStopEnvelope {
 		t.Fatalf("alt+o from the text: expanded=%v focus=%d", form.expanded, form.focus)
 	}
 	// "envelope" was renamed to "budget" (the spend-cap word settled on

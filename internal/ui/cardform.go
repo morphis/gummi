@@ -332,6 +332,18 @@ func (d *cardForm) advanceFocus(dir int) {
 	d.setFocus(next)
 }
 
+// firstOptionStop is the option row alt+o lands on: the budget when the
+// card has one, and otherwise whatever this kind's first option is.
+func (d *cardForm) firstOptionStop() int {
+	stops := d.stops()
+	for i, stop := range stops {
+		if stop == cardStopText && i+1 < len(stops) {
+			return stops[i+1]
+		}
+	}
+	return cardStopText
+}
+
 func (d *cardForm) setFocus(f int) {
 	d.focus = f
 	d.text.Blur()
@@ -420,7 +432,15 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.expanded = !d.expanded
 		switch {
 		case d.expanded && d.focus == cardStopText:
-			// expanding from the text keeps the person where they were
+			// The row this opens is labelled "alt+o edit" and its first
+			// field is a text input, which draws its "> " prompt whether
+			// or not it has focus. Leaving focus in the description made
+			// that prompt a lie: the next keystrokes edited the card's
+			// text, out of sight below the panel that had just opened,
+			// and a person correcting the budget deleted four characters
+			// of their own brief before noticing. Opening the options
+			// means editing them.
+			d.setFocus(d.firstOptionStop())
 		case !d.expanded && (d.focus == cardStopEnvelope || d.focus == cardStopProfile || d.focus == cardStopSeverity || d.focus == cardStopAfter):
 			d.setFocus(cardStopText)
 		}
