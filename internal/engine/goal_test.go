@@ -1017,3 +1017,67 @@ func TestANoteThatArrivedTooLateIsOnTheHandOver(t *testing.T) {
 		t.Errorf("a note the lead has read is still listed as unread: %+v", rep.Unread)
 	}
 }
+
+// A goal that wrapped up because its lead kept failing must be
+// recoverable: the failures that caused it are the newest lead entries in
+// its log, and only a successful lead turn ever cleared them — which the
+// conductor will not run while it is wrapping up. Lifting the wrap-up
+// therefore lasted exactly one tick, which re-wrapped it in the same
+// second and sent the same partial hand-over back.
+func TestASendBackLiftsAWrapUpForGood(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("goal plan gate: %v %v", res.Status, err)
+	}
+	for i := 0; i < goalpolicy.MaxLeadFailures; i++ {
+		if _, err := store.AppendGoalEvent(ctx, g.ID, state.GoalPayload{
+			Action: state.GoalLeadFailed, Detail: "claude run failed: exit status 1", By: ActorGoal,
+		}, time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err := e.GoalView(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Input.LeadFailures < goalpolicy.MaxLeadFailures {
+		t.Fatalf("failures = %d, want the wrap-up threshold", view.Input.LeadFailures)
+	}
+
+	// The composer's own route to the same place: a line read as "this
+	// does not match the plan" moves the goal verify → implement without
+	// writing a rework row, which is how the measured drive's second
+	// send-back slipped past the reset and re-wrapped in the same second.
+	if _, err := store.Transition(ctx, g.ID, domain.StageVerify, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition(ctx, g.ID, domain.StageImplement, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if v, verr := e.GoalView(ctx, g.ID); verr != nil {
+		t.Fatal(verr)
+	} else if v.Input.LeadFailures != 0 {
+		t.Errorf("a goal put back to work carries %d old lead failures", v.Input.LeadFailures)
+	}
+
+	if err := e.SendBackGoal(ctx, g.ID, "the backend was out of quota; do the work", "user"); err != nil {
+		t.Fatal(err)
+	}
+	view, err = e.GoalView(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Input.LeadFailures != 0 {
+		t.Errorf("a send-back left %d failures standing — the goal re-wraps on its next tick", view.Input.LeadFailures)
+	}
+	if view.Input.WrapUp {
+		t.Error("the goal is still wrapping up after a send-back")
+	}
+	for _, a := range goalpolicy.Decide(view.Input) {
+		if a.Kind == goalpolicy.WrapUp {
+			t.Fatalf("the tick after a send-back wrapped the goal up again: %v", a)
+		}
+	}
+}

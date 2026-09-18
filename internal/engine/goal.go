@@ -167,6 +167,24 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		members[c.ID] = true
 	}
 
+	// Lead failures older than the goal's latest arrival at implement are
+	// history. Every way a person puts a goal back to work ends in that
+	// transition — a send-back through its verify arm, a line the
+	// composer routes there, a reversed decision, a verify that failed —
+	// and each of them used to leave the failures that had wrapped the
+	// goal up standing as the newest lead entries in its log. The goal
+	// then re-wrapped on its first tick, bounced straight back to its
+	// hand-over, and said "the lead kept failing" about turns that had
+	// happened before the person intervened. Twice on the measured drive,
+	// at the cost of a full critique and verify round each time.
+	var leadSince int64
+	if marks, merr := e.cfg.Store.LatestCardMarks(ctx, goal.ID); merr == nil {
+		// the newest of the two, because a stage the goal was moved into
+		// leaves a gate mark and one it started a session in leaves a
+		// stage-enter; a send-back is the first without the second
+		leadSince = max(marks.Gate.Seq, marks.StageEnter.Seq)
+	}
+
 	// the last log entry that touched each card, and the pre-goal spend of
 	// attached cards (it does not count against the goal)
 	lastTouch := map[domain.FeatureID]int64{}
@@ -200,7 +218,24 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 					leadSeen[domain.FeatureID(id)] = append(leadSeen[domain.FeatureID(id)], en.Seq)
 				}
 			}
+		case state.GoalRework:
+			// Work is owed again — a send-back, or a verify that failed —
+			// so the lead's tolerance starts over. Without this a goal
+			// that once wrapped up for lead failures could never be
+			// recovered: ClearGoalWrapUp lifted the wrap-up, the failures
+			// that caused it were still the newest lead entries in the
+			// log, and the next tick re-wrapped it in the same second.
+			// Only a successful lead turn cleared them, and the conductor
+			// will not run one while it is wrapping up.
+			//
+			// Resetting is self-limiting: a lead that really is broken
+			// fails MaxLeadFailures times again and the goal wraps up
+			// again, having cost one more round of turns.
+			failures, outage, stalled = 0, "", ""
 		case state.GoalLeadFailed:
+			if en.Seq < leadSince {
+				continue // before this stage began; not this run's evidence
+			}
 			lastLeadAny = en.Seq
 			if en.Outage {
 				// not the lead's failure: the backend could not serve the
