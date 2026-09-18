@@ -2161,9 +2161,59 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		}
 		line := "autopilot set to " + sanitize(autopilotLabel(mode))
 		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+	case state.EventGoal:
+		// A goal's log — every landing, drop, raise, decision and lead
+		// turn — is written as card_events rows on the goal card itself
+		// (state.AppendGoalEvent), stamped with whatever stage the goal
+		// stood at when it happened, which for a conducted goal is
+		// implement. Without an arm here every one of them fell through to
+		// the default below and rendered as the bare word "goal", one row
+		// each: a column of nothing where the goal's own history belongs.
+		var p state.GoalPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || p.Action == "" {
+			return s.Faint.Render(ev.Kind)
+		}
+		return eventMarker(s, ev.Status) + s.Subtle.Render(ansi.Truncate(goalEventSentence(p), max(w-2, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)
 	}
+}
+
+// goalEventSentence says one goal log entry in a line, in the vocabulary
+// the goal page's own log already prints (goalpage.go): the action, the
+// card it is about, the decision number when it has one, and the detail
+// that explains it. Two surfaces naming the same entry two ways would be
+// two things to learn, so the wording is shared rather than re-invented
+// for the thread.
+//
+// The checks entry is the one exception it makes: its Detail is the
+// verify stage's check results as JSON, which is for the goal page to
+// unpack, not for a line of prose.
+func goalEventSentence(p state.GoalPayload) string {
+	line := p.Action
+	if p.Card != "" {
+		line += " " + string(p.Card)
+	}
+	if p.Item != "" {
+		line += " " + p.Item
+	}
+	if p.N > 0 {
+		line += " " + (state.GoalEntry{GoalPayload: p}).DecisionRef()
+	}
+	// An amount pair is the whole fact of a raise or a re-estimated
+	// reserve, and the Detail beside it carries the reason rather than
+	// the numbers. Both ends have to be there to say "from x to y": an
+	// entry with only To (a goal stopped on a card it cannot fund) is
+	// naming what is needed, not a move, and "0 → 1500" would read as a
+	// card that had been given nothing.
+	if p.From > 0 && p.To > 0 {
+		line += " " + itoa(p.From) + " → " + itoa(p.To)
+	}
+	if p.Detail != "" && p.Action != state.GoalChecks {
+		first, _, _ := strings.Cut(p.Detail, "\n")
+		line += " — " + first
+	}
+	return sanitize(line)
 }
 
 // eventMarker is toolMarker's (transcript.go) counterpart for a logged
