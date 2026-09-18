@@ -453,6 +453,7 @@ func bindGoalFlags(cmd *cobra.Command) {
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
 	f.String("base", "", "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)")
 	f.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
+	f.String("after", "", "the goal this one continues (GL-NNN): what it came to know — reference, decided constants, findings, its hand-over — comes with it, and this goal's plan cannot be approved until that one has landed")
 	f.String("reference", "", "documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff")
 	f.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)")
 }

@@ -2976,6 +2976,42 @@ from snapshots of the *goal's* heads (`GUMMI_TREE_<REPO>`). A goal's changes
 to the harness are product like any other, reach the substrate as something
 deployed, and only become the judge once a person has landed them.
 
+### 17.12 Programmes — a sequence of goals
+
+Goals do not nest, and a programme does not need them to. The plan gate is
+the only place a person agrees what done means, and for work that begins
+with discovery that cannot be known once, up front — so the honest structure
+puts a gate wherever knowledge changes hands. One goal makes the rig
+trustworthy; the next finds out what is true; the next builds on it. Each
+has its own budget, so a failure costs a phase rather than the programme,
+and its own hand-over, which takes a person minutes. A test rig in
+particular should be trusted before it judges anything, and it is trusted
+when a person has landed it (§17.11).
+
+What that needs is small, and additive:
+
+- **`after: GL-NNN`** in the `gummi-goal` block (or `gummi goal --after`).
+  The goal may be *planned* while the one before it runs — that is most of
+  the point — and its gate refuses to cross until that one has ended, and
+  refuses a predecessor that was handed off rather than landed, because its
+  work is not on the trunk this goal's cards would fork from.
+- **What was known comes with it** (`Engine.ContinueGoal`): the
+  predecessor's reference, its registry, the findings of it that still hold
+  (each saying which goal it came from), and its hand-over as a reference
+  document — the plan conversation reads what was handed over, not a summary
+  of it. What the new goal already decided wins. Substrates and their leases
+  are workspace-wide already, so nothing about them needs carrying.
+- **`land_order:`** lists a goal's repositories in the order they land. Git
+  has no merge that spans repositories, so a landing can stop part way; with
+  an agreed order it stops with the dependency in and the dependent out
+  rather than the other way round. The hand-over numbers the repositories in
+  that order and lists each one's **series** — what the goal branch brings to
+  its trunk, oldest first, one commit per landed card, read off the branch —
+  because for a repository whose trunk is someone else's the deliverable is
+  not a merge here but a series a person upstreams, in that order. gummi
+  still never pushes. Turning a goal branch into a §18 stack of per-card
+  branches for that purpose is deferred.
+
 ## 18. Stacks — slicing one piece of work into several landings
 
 A **stack** is an ordered chain of cards in one repository whose branches

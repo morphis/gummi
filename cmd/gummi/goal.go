@@ -57,6 +57,14 @@ func runGoal(args []string) error {
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		// A goal that continues another starts from what that one came to
+		// know — its reference, its registry, the findings that still hold,
+		// and its hand-over — so the plan is agreed against it.
+		if prev := strings.ToUpper(strings.TrimSpace(*gv.after)); prev != "" {
+			if err := d.ContinueGoal(ctx, f.ID, domain.FeatureID(prev)); err != nil {
+				return driver.Outcome{}, fmt.Errorf("--after %s: %w", prev, err)
+			}
+		}
 		// The owner's reference documents go into the goal's notebook before
 		// the plan conversation starts: the architect plans against them,
 		// and the plan gate pins them.
@@ -90,6 +98,7 @@ type goalFlagValues struct {
 	profile, gate, ref  *string
 	until, base         *string
 	planFile, reference *string
+	after               *string
 	autonomous, verbose *bool
 	timeout             *time.Duration
 }
@@ -108,6 +117,7 @@ func registerGoalFlags(fs *flag.FlagSet) *goalFlagValues {
 		base:       fs.String("base", "", "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)"),
 		planFile:   fs.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)"),
+		after:      fs.String("after", "", "the goal this one continues (GL-NNN): what it came to know — reference, decided constants, findings, its hand-over — comes with it, and this goal's plan cannot be approved until that one has landed"),
 		reference:  fs.String("reference", "", "documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff"),
 	}
 }

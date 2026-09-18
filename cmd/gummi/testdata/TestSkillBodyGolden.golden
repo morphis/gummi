@@ -105,6 +105,7 @@ gummi diagnose [flags] "<symptom>"
     --verbose                 add per-tool-call activity lines to the stream
 
 gummi goal [flags] "<objective>"
+    --after string            the goal this one continues (GL-NNN): what it came to know — reference, decided constants, findings, its hand-over — comes with it, and this goal's plan cannot be approved until that one has landed
     --autonomous              let the architect take its recommended answer instead of asking during the plan conversation
     --base string             branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)
     --envelope int            the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)

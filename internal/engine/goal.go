@@ -1793,6 +1793,9 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 	if problem := e.goalExperimentProblem(items); problem != "" {
 		return problem
 	}
+	if problem := e.goalProgrammeProblem(ctx, goal, doc); problem != "" {
+		return problem
+	}
 	budget, _, err := spec.ParseGoalSubstrate(doc)
 	if err != nil {
 		return err.Error()
@@ -1914,6 +1917,15 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	}
 	if lanes > 0 {
 		if err := e.cfg.Store.SetGoalLanes(ctx, goal.ID, lanes); err != nil {
+			return err
+		}
+	}
+	// A goal that continues another starts from what that one came to know.
+	// Usually this happened when the goal was created (`--after`), so that
+	// its plan was agreed against it; a plan that only names the goal in its
+	// doc gets it here, before the reference is pinned.
+	if after := e.goalAfter(ctx, *goal, doc); after != "" {
+		if err := e.ContinueGoal(ctx, goal.ID, after); err != nil {
 			return err
 		}
 	}
@@ -2359,6 +2371,11 @@ func (e *Engine) LandGoal(ctx context.Context, goalID domain.FeatureID, message,
 	if err != nil {
 		return "", err
 	}
+	// The order the plan agreed, where it agreed one: a change that means
+	// nothing until another repository's is in lands after it, and a
+	// landing that stops part way stops with the dependency in and the
+	// dependent out rather than the other way round.
+	trees = orderGoalTrees(trees, e.goalLandOrder(goal))
 	// no final checkpoint: nothing in a goal worktree that is not
 	// committed belongs on the goal branch (see Engine.checkpoint)
 	anyMerged := false

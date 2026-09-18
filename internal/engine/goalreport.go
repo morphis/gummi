@@ -59,6 +59,20 @@ type GoalReportRepo struct {
 	Home   bool   `json:"home,omitempty"` // the goal card's own repository
 	Branch string `json:"branch"`
 	Landed bool   `json:"landed"` // the goal branch is in this repo's main
+	// Order is this repository's place in the order the goal lands, from 1.
+	// It matters when the plan agreed one: a change that means nothing until
+	// another repository's is in, and a series someone has to upstream in
+	// the same order.
+	Order int `json:"order"`
+	// Series is what the goal branch brings to this repository's trunk,
+	// oldest first — one commit per landed card.
+	Series []GoalReportCommit `json:"series,omitempty"`
+}
+
+// GoalReportCommit is one commit of a repository's series.
+type GoalReportCommit struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
 }
 
 // GoalReportCard is one card at the hand-over.
@@ -169,6 +183,11 @@ type GoalReport struct {
 	// NeedsSubstrate is NeedsBudget for the goal's other ceiling: it cannot
 	// afford the run it has to make in order to be judged.
 	NeedsSubstrate GoalNeedsSubstrate `json:"needs_substrate,omitempty"`
+	// After names the goal this one continues, when it continues one.
+	After domain.FeatureID `json:"after,omitempty"`
+	// LandOrderAgreed reports that the plan agreed the order its
+	// repositories land in, rather than it being gummi's default.
+	LandOrderAgreed bool `json:"land_order_agreed,omitempty"`
 	// NeedsOwner is a question only the goal's owner can answer: something
 	// found means an agreed item cannot hold as written.
 	NeedsOwner GoalNeedsOwner `json:"needs_owner,omitempty"`
@@ -259,11 +278,20 @@ func (e *Engine) GoalReport(ctx context.Context, goalID domain.FeatureID) (GoalR
 	trees, terr := e.goalTrees(ctx, view.Goal)
 	if terr == nil {
 		byRepo := map[string]*worktree.Manager{}
-		for _, t := range trees {
+		order := e.goalLandOrder(view.Goal)
+		r.LandOrderAgreed = len(order) > 0
+		for i, t := range orderGoalTrees(trees, order) {
 			landed, _ := t.Landed(ctx)
-			r.Repos = append(r.Repos, GoalReportRepo{Name: t.Repo, Home: t.Home, Branch: t.Branch(), Landed: landed})
+			repo := GoalReportRepo{Name: t.Repo, Home: t.Home, Branch: t.Branch(), Landed: landed, Order: i + 1}
+			if series, serr := t.Series(ctx); serr == nil && !landed {
+				for _, c := range series {
+					repo.Series = append(repo.Series, GoalReportCommit{SHA: c.SHA, Subject: c.Subject})
+				}
+			}
+			r.Repos = append(r.Repos, repo)
 			byRepo[t.Repo] = t.Manager()
 		}
+		r.After = e.goalAfter(ctx, view.Goal, "")
 		// the diff by card: each landed card's commit, summarized, read in
 		// the repository the card is in
 		for i, c := range r.Cards {
@@ -597,16 +625,22 @@ func RenderGoalReport(r GoalReport) string {
 	// goal then lands once in each and can be in some and not others.
 	if len(r.Repos) > 1 {
 		b.WriteString("\n### Repositories\n\n")
+		if r.LandOrderAgreed {
+			b.WriteString("The plan agreed the order these land in, and a series that is upstreamed rather than merged here goes up in the same order — a later one may mean nothing until an earlier one is in.\n\n")
+		}
 		for _, rp := range r.Repos {
 			where := "not landed yet"
 			if rp.Landed {
 				where = "landed"
 			}
-			fmt.Fprintf(&b, "- %s — `%s`, %s", repoName(rp.Name), rp.Branch, where)
+			fmt.Fprintf(&b, "%d. %s — `%s`, %s", rp.Order, repoName(rp.Name), rp.Branch, where)
 			if rp.Home {
 				b.WriteString(" (the goal's own)")
 			}
 			b.WriteString("\n")
+			for _, c := range rp.Series {
+				fmt.Fprintf(&b, "   - `%s` %s\n", shortSHA(c.SHA), c.Subject)
+			}
 		}
 	}
 

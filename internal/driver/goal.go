@@ -384,6 +384,12 @@ func (d *Driver) goalVerifyNotPassed(ctx context.Context, f domain.Feature, reas
 	return Outcome{}, nil
 }
 
+// ContinueGoal makes a goal start from what another came to know, before
+// its plan conversation begins (`gummi goal --after`).
+func (d *Driver) ContinueGoal(ctx context.Context, goal, prev domain.FeatureID) error {
+	return d.eng.ContinueGoal(ctx, goal, prev)
+}
+
 // goalVerifyBlocked stops a goal whose own verify said the environment
 // cannot run its checks. Nothing was judged, so nothing is sent back, no
 // rework round is spent and the goal is not partial: it stays at verify,

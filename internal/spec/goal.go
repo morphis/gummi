@@ -177,6 +177,40 @@ type goalBlock struct {
 	// IntegrateEvery is how many landings may pile up on the goal branch
 	// before the goal stops waiting for a quiet substrate and proves them.
 	IntegrateEvery int `yaml:"integrate_every"`
+	// After names the goal this one continues: a programme is a sequence
+	// of goals, each one's hand-over the next one's gate.
+	After string `yaml:"after"`
+	// LandOrder is the order the goal's repositories land in, where that
+	// matters — a change that is meaningless until another repository's is
+	// in. Names are configured repositories; "home" is the unnamed default.
+	LandOrder []string `yaml:"land_order"`
+}
+
+// ParseGoalProgramme reads what places a goal among others and its
+// repositories among each other: the goal it continues, and the order its
+// repositories land in.
+func ParseGoalProgramme(content string) (after string, landOrder []string, err error) {
+	body, ok := fenceBody(content, GoalSectionBudget, goalFenceRe)
+	if !ok {
+		return "", nil, nil
+	}
+	var g goalBlock
+	if err := yaml.Unmarshal([]byte(body), &g); err != nil {
+		return "", nil, fmt.Errorf("the gummi-goal block does not parse: %w", err)
+	}
+	seen := map[string]bool{}
+	for i, name := range g.LandOrder {
+		name = strings.TrimSpace(name)
+		if strings.EqualFold(name, "home") {
+			name = ""
+		}
+		if seen[name] {
+			return "", nil, fmt.Errorf("the gummi-goal block's land_order names %q twice", g.LandOrder[i])
+		}
+		seen[name] = true
+		g.LandOrder[i] = name
+	}
+	return strings.TrimSpace(g.After), g.LandOrder, nil
 }
 
 // GoalSubstrateBudget is the substrate budget a goal doc agrees.

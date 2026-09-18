@@ -44,6 +44,7 @@ const (
 	GoalLeadTurn      = "lead-turn"      // the lead took a turn
 	GoalLeadFailed    = "lead-failed"    // a lead turn failed
 	GoalStalled       = "stalled"        // the goal stopped on something it can only wait for — the agent backend, or (Card set) a card's environment; nothing was dropped
+	GoalContinued     = "continues"      // this goal continues another; Ref is that goal, and what it knew came with it
 	GoalTranche       = "tranche"        // part of the budget held for cards the plan could not name yet; Ref is the tbd row's title, To the credits
 	GoalTrancheClosed = "tranche-closed" // a tranche was closed; Ref is its title, To what returned to the goal
 	GoalNeedOwner     = "need-owner"     // a question only the owner can answer; Item is what it is about, Alternative the amendment proposed

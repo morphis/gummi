@@ -154,3 +154,24 @@ func TestAppendGoalNote(t *testing.T) {
 		t.Fatalf("a note must never open a thread")
 	}
 }
+
+func TestParseGoalProgramme(t *testing.T) {
+	doc := "## Budget\n\n```gummi-goal\nlanes: 2\nafter: gl-003\nland_order: [ovn, microovn, home]\n```\n"
+	after, order, err := ParseGoalProgramme(doc)
+	if err != nil || after != "gl-003" || len(order) != 3 || order[0] != "ovn" || order[2] != "" {
+		t.Fatalf("%q %v %v", after, order, err)
+	}
+	if _, _, err := ParseGoalProgramme("## Budget\n\n```gummi-goal\nland_order: [ovn, ovn]\n```\n"); err == nil {
+		t.Fatal("a repository lands once")
+	}
+	if after, order, err := ParseGoalProgramme("no block at all"); err != nil || after != "" || order != nil {
+		t.Fatal("a goal that says nothing of the kind stands alone")
+	}
+	b, every, err := ParseGoalSubstrate("## Budget\n\n```gummi-goal\nruns: 12\nminutes: 600\nintegrate_every: 3\n```\n")
+	if err != nil || !b.Agreed() || b.Runs != 12 || b.Minutes != 600 || every != 3 {
+		t.Fatalf("%+v %d %v", b, every, err)
+	}
+	if _, _, err := ParseGoalSubstrate("## Budget\n\n```gummi-goal\nruns: -1\n```\n"); err == nil {
+		t.Fatal("negative budgets are refused")
+	}
+}

@@ -526,6 +526,36 @@ func (e *CatchUpConflictError) Error() string {
 	return "catching the goal branch up with main conflicts in " + strings.Join(e.Files, ", ") + " — " + state
 }
 
+// SeriesCommit is one commit of a goal branch that its trunk does not have.
+type SeriesCommit struct {
+	SHA     string
+	Subject string
+}
+
+// Series lists what the goal branch would bring to its repository's trunk,
+// oldest first, following first parents: one commit per landed card, with
+// the merges that kept the branch caught up in between. It is the series a
+// person reviews — and, for a repository whose trunk is someone else's,
+// upstreams — and reading it off the branch is what keeps the hand-over
+// from describing a history the branch does not have.
+func (t GoalTree) Series(ctx context.Context) ([]SeriesCommit, error) {
+	branch := t.Branch()
+	if ok, err := gitOK(ctx, t.mgr.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil || !ok {
+		return nil, err
+	}
+	out, err := runGit(ctx, t.mgr.repo, "log", "--first-parent", "--reverse", "--no-merges", "--format=%H%x09%s", "HEAD.."+branch)
+	if err != nil {
+		return nil, err
+	}
+	var series []SeriesCommit
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if sha, subject, ok := strings.Cut(line, "\t"); ok && sha != "" {
+			series = append(series, SeriesCommit{SHA: sha, Subject: subject})
+		}
+	}
+	return series, nil
+}
+
 // Behind reports whether this repository's main HEAD is missing from its
 // goal branch — whether a catch-up has anything to bring in.
 func (t GoalTree) Behind(ctx context.Context) (bool, error) {

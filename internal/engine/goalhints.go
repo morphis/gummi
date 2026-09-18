@@ -115,6 +115,18 @@ this kickoff: plan against them, and quote them by name where a done-when
 item or a card stands on one. They are the user's, and are pinned when the
 plan is approved.
 
+Two more lines of the gummi-goal block place a goal among others. When
+this goal builds on another goal's result, ` + "`after: GL-NNN`" + ` says so: it
+may be planned now and cannot start until that goal has landed, and what
+that goal came to know is already in this one's notebook. If what the user
+describes is really several phases with a decision between them — make
+the test rig trustworthy, then find out what is true, then build on it —
+say so and propose a sequence of goals rather than one: a plan gate is
+the only place anyone agrees what done means, and work that begins with
+discovery needs one wherever what is known changes. And when the goal
+spans repositories whose changes depend on each other, ` + "`land_order:`" + `
+lists them in the order they must land (home for the unnamed default).
+
 Keep the doc current as answers arrive through gummi's spec tools. Leave
 Notes, Try it, Review, Verification plan and Report alone — they are
 filled later. Do not start any of the work, and do not create cards
