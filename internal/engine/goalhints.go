@@ -27,15 +27,32 @@ asking:
 2. Done when — the checkable statements that say it is met. Write them
    into the gummi-done-when block, one row each: id (DW-1, DW-2, …),
    says (the statement), and exactly one of check (a shell command,
-   runnable in the repo, that exits 0 only when the statement holds) or
-   judge: true (a statement verify reads against the combined diff, for
-   what no command can prove). Prefer commands. An item nobody can check
+   runnable in the repo, that exits 0 only when the statement holds),
+   experiment (the name of an experiment the workspace configures — see
+   below), or judge: true (a statement verify reads against the combined
+   diff, for what no command can prove). Prefer commands. An item nobody can check
    is not an item; the gate refuses one. A check must observe the thing
    its item names: when an item is about a program's exit code or
    output, run the program itself, not through a wrapper that reports
    its own status instead (` + "`go run`" + ` exits 1 for any failure, and
    runners like npm run or cargo run add their own output) — build it,
    then run the binary.
+   Some statements are only observable on live infrastructure — a
+   cluster, a device, a deployed service. No command in a checkout can
+   show them, and a check that shells out to one cannot tell "the code is
+   wrong" from "the environment was not ready", which an unattended run
+   cannot afford to confuse. Those items name an experiment instead:
+   gummi deploys the goal's branches to the experiment's substrate, runs
+   it, believes a failure only when it reproduces on a reset substrate,
+   and keeps the evidence. The experiments this workspace offers are
+   operator configuration (.gummi/config.yaml, ` + "`experiments:`" + `) — read
+   them; you cannot add one, and an item naming one that is not there is
+   refused. An experiment usually asserts many things: give an item
+   ` + "`assertions: [ids]`" + ` to make it about some of them, so that the parts
+   that can hold early are seen to hold early rather than everything
+   waiting on the last. An item about an emergent property must still
+   name what would be OBSERVED if it held — a counter that did not move,
+   a stream with no gap — or it is not yet an item.
 3. Limits — out of scope, constraints, things not to touch.
 4. Cards — the work, one gummi-cards row each: title, one_liner, kind
    (feature, bug, research or diagnosis), serves (the DW ids it is for — every card
@@ -77,8 +94,11 @@ plan was just written. It will run unattended once approved, so refute
 it now. Do not fix it yourself.
 
 One pass, three lenses, blocking findings only:
-  checkable   — every done-when item has a command that really proves its
-                statement (exits 0 only when it holds, runs in the repo,
+  checkable   — an item proved by an experiment names one the workspace
+                configures, is about something that experiment observes,
+                and narrows itself with assertions where only part of the
+                run is its business; every other done-when item has a
+                command that really proves its statement (exits 0 only when it holds, runs in the repo,
                 is not trivially true, and observes what the item names
                 rather than a wrapper's own status — a check for exit
                 code 2 through ` + "`go run`" + ` can never pass) or is a
@@ -142,12 +162,22 @@ Your job:
 1. For each done-when item with judge: true, judge it against the
    combined branch and record the evidence in the Verification plan as
    "DW-N: met — <evidence>" or "DW-N: not met — <why>".
-2. For each commanded item, record its result the same way from the
+2. For each item proved by an experiment, the kickoff carries what the
+   goal's runs say about the branch as it is now: the run, what held, and
+   the directory its evidence is in. You cannot make a run and must not
+   try to reach the substrate yourself. Record the result the same way,
+   quoting the run; open the evidence directory when the item's statement
+   needs more than the verdict to be believed, and when judging a judge:
+   true item that is about live behaviour. "NOT PROVEN" means no
+   conclusive run is about this branch as it is now: record the item as
+   not met with exactly that reason. The goal goes back to its conductor,
+   which makes the run.
+3. For each commanded item, record its result the same way from the
    kickoff's check results. The check decides a commanded item: when it
    failed, the item is not met even if you can show the behaviour another
    way — record that evidence, and say the command looks unable to
    observe the item, so the lead can repair the check.
-3. Write the Try it section if it is empty or stale: short steps a
+4. Write the Try it section if it is empty or stale: short steps a
    person follows to see the result working — the commands to run and
    what they should see. If the change has nothing visible (a refactor,
    an internal change), say so in one line and point at the done-when

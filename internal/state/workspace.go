@@ -71,6 +71,13 @@ func (w Workspace) ScratchFilesDir(id domain.FeatureID) string {
 	return filepath.Join(w.StateDir(), "scratch", string(id))
 }
 
+// EvidenceDir holds what an owner's experiment runs left behind — one
+// directory per run (internal/experiment). It is a record, not a cache: a
+// hand-over points into it, so nothing cleans it up behind a reader.
+func (w Workspace) EvidenceDir(owner domain.FeatureID) string {
+	return filepath.Join(w.GummiDir(), "evidence", string(owner))
+}
+
 // ConfigFile is the repo-controlled config (verify checks, permissions).
 func (w Workspace) ConfigFile() string { return filepath.Join(w.GummiDir(), "config.yaml") }
 

@@ -30,6 +30,30 @@ type DoneWhen struct {
 	// is configured at all is the plan gate's question (it needs the
 	// workspace's repo set); this is only where the answer is written.
 	Repo string `yaml:"repo,omitempty"`
+	// Experiment names a configured experiment as the item's means of
+	// proof: an orchestrated run on a substrate, for a statement no command
+	// in a checkout can show. The third means beside Check and Judge, and
+	// exclusive with both.
+	Experiment string `yaml:"experiment,omitempty"`
+	// Assertions narrows an experiment item to some of what the run
+	// asserts, by id. It is what lets "ingress from the first router works"
+	// be met weeks before "a migration keeps its connections" can be, by
+	// the same experiment. Empty means the whole run.
+	Assertions []string `yaml:"assertions,omitempty"`
+}
+
+// Means names how the item is shown to hold: "check", "judge" or
+// "experiment".
+func (d DoneWhen) Means() string {
+	switch {
+	case strings.TrimSpace(d.Experiment) != "":
+		return "experiment"
+	case strings.TrimSpace(d.Check) != "":
+		return "check"
+	case d.Judge:
+		return "judge"
+	}
+	return ""
 }
 
 var doneWhenIDRe = regexp.MustCompile(`^DW-[0-9]+$`)
@@ -45,11 +69,23 @@ func (d DoneWhen) Validate() error {
 	if strings.TrimSpace(d.Says) == "" {
 		return fmt.Errorf("done-when %s says nothing", d.ID)
 	}
-	if strings.TrimSpace(d.Check) == "" && !d.Judge {
-		return fmt.Errorf("done-when %s has no way to check it: give it a check command or judge: true", d.ID)
+	means := 0
+	for _, has := range []bool{strings.TrimSpace(d.Check) != "", d.Judge, strings.TrimSpace(d.Experiment) != ""} {
+		if has {
+			means++
+		}
+	}
+	if means == 0 {
+		return fmt.Errorf("done-when %s has no way to check it: give it a check command, an experiment, or judge: true", d.ID)
 	}
 	if strings.TrimSpace(d.Check) != "" && d.Judge {
 		return fmt.Errorf("done-when %s has both a check and judge: true; pick one", d.ID)
+	}
+	if means > 1 {
+		return fmt.Errorf("done-when %s names more than one of check, experiment and judge; pick one", d.ID)
+	}
+	if len(d.Assertions) > 0 && strings.TrimSpace(d.Experiment) == "" {
+		return fmt.Errorf("done-when %s lists assertions but names no experiment to report them", d.ID)
 	}
 	return nil
 }

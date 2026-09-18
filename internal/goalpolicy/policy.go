@@ -31,6 +31,12 @@
 //     review of the combined branch starts.
 //  10. When nothing can move and a blocked card is why, the goal stalls:
 //     it stops, drops nothing, and says what it is waiting on.
+//  11. A goal whose items are proved by an experiment does not finish on
+//     heads no conclusive run is about: it makes the run first. A run that
+//     failed goes to the lead once before the goal goes on to be judged
+//     on it; runs that keep judging nothing, or a rig that fails its own
+//     control, stall the goal — evidence that cannot be believed is not
+//     something more turns can fix.
 package goalpolicy
 
 import (
@@ -100,6 +106,37 @@ type Card struct {
 	Retry bool
 }
 
+// Experiment is one experiment the goal's done-when items name, read
+// against the heads the goal has now.
+type Experiment struct {
+	Name string
+	// Problem is set when the experiment cannot be run at all.
+	Problem string
+	// Running: a run of it is in flight.
+	Running bool
+	// Proven: a conclusive run — pass or fail — is about the current heads.
+	Proven bool
+	// Failed: that run failed. LeadSaw: a lead turn has run since it did.
+	Failed, LeadSaw bool
+	// FailedWhy is the sentence the lead is woken with.
+	FailedWhy string
+	// Inconclusive counts the runs about the current heads, since the last
+	// conclusive one and since a person was last here, that judged
+	// nothing; Why is the newest of them saying why.
+	Inconclusive int
+	Why          string
+	// ControlFailed: the newest of those failed the rig's own control.
+	ControlFailed bool
+	// Held: someone else has the substrate right now.
+	Held bool
+}
+
+// MaxInconclusive is how many runs in a row may judge nothing before the
+// goal stops making them. Each is substrate time spent learning only that
+// the substrate is not to be trusted, and the third says what the first
+// two did.
+const MaxInconclusive = 3
+
 // Input is a goal snapshot.
 type Input struct {
 	Stage      domain.Stage
@@ -126,6 +163,8 @@ type Input struct {
 	// Reviewing reports that the goal's own review or verify session is in
 	// flight; nothing is conducted meanwhile.
 	Reviewing bool
+	// Experiments lists the experiments the goal's items are proved by.
+	Experiments []Experiment
 }
 
 // MaxLeadFailures is how many lead turns in a row may fail before the goal
@@ -188,10 +227,13 @@ const (
 	// had just defunded. Verified cards still land; the waiting card
 	// keeps its branch and its spend, and a top-up continues it.
 	NeedBudget
+	// Run makes a run of the experiment named in Experiment, for the
+	// purpose in Reason.
+	Run
 )
 
 func (k Kind) String() string {
-	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget"}[k]
+	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget", "run"}[k]
 }
 
 // MinCardEnvelope is the smallest envelope worth giving a card. Below it a
@@ -214,6 +256,9 @@ type Action struct {
 	To      int
 	Reason  string
 	Reasons []string // Lead only
+	// Experiment names the experiment a Run makes, or the one a Stall is
+	// waiting to be able to believe.
+	Experiment string
 }
 
 func (a Action) String() string {
@@ -221,6 +266,9 @@ func (a Action) String() string {
 	b.WriteString(a.Kind.String())
 	if a.Card != "" {
 		b.WriteString(" " + string(a.Card))
+	}
+	if a.Experiment != "" {
+		b.WriteString(" " + a.Experiment)
 	}
 	if a.To != 0 {
 		fmt.Fprintf(&b, " → %d", a.To)
@@ -505,6 +553,13 @@ func Decide(in Input) []Action {
 	}
 
 	if settled(cards, state) && len(leadReasons) == 0 && !hasKind(out, Land) {
+		// The work has settled. Before it is judged, the items an experiment
+		// proves need evidence about the heads the goal has NOW — and a goal
+		// wrapping up gets the same, because a partial result still has to
+		// say truthfully which of its items hold.
+		if acts, wait := proveFirst(in); wait {
+			return append(out, acts...)
+		}
 		reason := ""
 		if wrap {
 			reason = wrapReason
@@ -515,6 +570,44 @@ func Decide(in Input) []Action {
 		out = append(out, Action{Kind: Finish, Reason: reason})
 	}
 	return out
+}
+
+// proveFirst is what stands between settled work and the goal's review:
+// the runs its experiment items still need. wait reports that the goal is
+// not ready to finish; the actions are what to do about it (none, while a
+// run is in flight or someone else has the substrate).
+func proveFirst(in Input) (acts []Action, wait bool) {
+	for _, x := range in.Experiments {
+		switch {
+		case x.Problem != "":
+			// nothing a run could be made of: the item goes to verify as it
+			// is, and is reported not checked, with this as the reason
+			continue
+		case x.Running, x.Held && !x.Proven:
+			wait = true
+		case x.Proven && x.Failed && !x.LeadSaw && in.LeadAvailable && !in.WrapUp:
+			// One look before the goal is judged on it. The lead can turn a
+			// failed run into a card while that still costs a card; after
+			// the goal's verify it costs a rework round as well.
+			return []Action{{Kind: Lead, Reasons: []string{x.FailedWhy}}}, true
+		case x.Proven:
+		case x.ControlFailed:
+			return []Action{{Kind: Stall, Experiment: x.Name,
+				Reason: fmt.Sprintf("%s cannot judge anything: %s", x.Name, x.Why)}}, true
+		case x.Inconclusive >= MaxInconclusive:
+			return []Action{{Kind: Stall, Experiment: x.Name,
+				Reason: fmt.Sprintf("%s judged nothing %d times running, most recently: %s", x.Name, x.Inconclusive, x.Why)}}, true
+		default:
+			acts = append(acts, Action{Kind: Run, Experiment: x.Name, Reason: "verify"})
+			wait = true
+		}
+	}
+	// one run at a time per tick is plenty: experiments that share a
+	// substrate would only queue behind each other
+	if len(acts) > 1 {
+		acts = acts[:1]
+	}
+	return acts, wait
 }
 
 func depsLanded(c Card, state map[domain.FeatureID]CardState) bool {

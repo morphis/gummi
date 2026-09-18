@@ -68,6 +68,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(experimentCmd)
 }
 
 // runBoardCobra is the root command's RunE. --version/-v short-circuits to

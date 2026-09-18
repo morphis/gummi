@@ -11,6 +11,7 @@ import (
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/experiment"
 	"github.com/morphis/gummi/internal/goalpolicy"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -91,6 +92,61 @@ type GoalLogLine struct {
 	By          string           `json:"by,omitempty"`
 }
 
+// GoalReportExperiment is one experiment at the hand-over: what it proved
+// about the heads the goal has now, and how far the rig that proved it can
+// be believed. A pass from a rig that judged nothing four runs in ten
+// reads differently from one that never wavered, and honest reporting
+// says which this was.
+type GoalReportExperiment struct {
+	Name      string   `json:"name"`
+	Substrate string   `json:"substrate,omitempty"`
+	Items     []string `json:"items"`
+	Problem   string   `json:"problem,omitempty"`
+	// Outcome is the newest conclusive run about the current heads, ""
+	// when there is none.
+	Outcome  string `json:"outcome,omitempty"`
+	Run      string `json:"run,omitempty"`
+	Evidence string `json:"evidence,omitempty"` // the run directory
+	Passed   int    `json:"assertions_held,omitempty"`
+	Total    int    `json:"assertions,omitempty"`
+	Running  string `json:"running,omitempty"`
+	// Runs, Conclusive, Inconclusive and Flaky count every run the goal
+	// made of it; Minutes is the substrate time they held.
+	Runs         int     `json:"runs"`
+	Conclusive   int     `json:"conclusive"`
+	Inconclusive int     `json:"inconclusive"`
+	Flaky        int     `json:"flaky"`
+	Minutes      float64 `json:"substrate_minutes"`
+	// Assertions is the newest conclusive run's, so a reader sees which
+	// held without opening the bundle.
+	Assertions []experiment.Assertion `json:"assertion_results,omitempty"`
+}
+
+func reportExperiment(x GoalExperiment) GoalReportExperiment {
+	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem, Runs: len(x.Runs)}
+	for _, r := range x.Runs {
+		out.Minutes += r.Seconds / 60
+		switch {
+		case r.State == experiment.StateRunning:
+		case r.Outcome.Conclusive():
+			out.Conclusive++
+		default:
+			out.Inconclusive++
+		}
+		if r.Flaky {
+			out.Flaky++
+		}
+	}
+	if x.Running != nil {
+		out.Running = x.Running.ID
+	}
+	if ev := x.Evidence; ev != nil {
+		out.Outcome, out.Run, out.Evidence, out.Assertions = string(ev.Outcome), ev.ID, ev.Dir, ev.Assertions
+		out.Passed, out.Total = ev.Passed()
+	}
+	return out
+}
+
 // GoalReport is the hand-over of one goal.
 type GoalReport struct {
 	ID      domain.FeatureID `json:"id"`
@@ -112,11 +168,13 @@ type GoalReport struct {
 	Budget     GoalReportBudget `json:"budget"`
 	Lanes      int              `json:"lanes"`
 	DoneWhen   []DoneWhenStatus `json:"done_when"`
-	Repos      []GoalReportRepo `json:"repos,omitempty"`
-	Cards      []GoalReportCard `json:"cards"`
-	Decisions  []GoalLogLine    `json:"decisions,omitempty"`
-	Declined   []GoalLogLine    `json:"declined_findings,omitempty"`
-	Found      []GoalLogLine    `json:"found_along_the_way,omitempty"`
+	// Experiments lists the experiments the goal's items are proved by.
+	Experiments []GoalReportExperiment `json:"experiments,omitempty"`
+	Repos       []GoalReportRepo       `json:"repos,omitempty"`
+	Cards       []GoalReportCard       `json:"cards"`
+	Decisions   []GoalLogLine          `json:"decisions,omitempty"`
+	Declined    []GoalLogLine          `json:"declined_findings,omitempty"`
+	Found       []GoalLogLine          `json:"found_along_the_way,omitempty"`
 	// Unread lists notes that reached the goal after its last lead turn.
 	// A note is delivered to the conductor, which reads it at implement —
 	// so one that arrives while the goal is reviewing, verifying or
@@ -233,7 +291,7 @@ func buildGoalReport(v GoalView) GoalReport {
 			// a check that passes after an item was marked not met settles it
 			for _, d := range v.DoneWhen {
 				for _, c := range rs {
-					if c.OK && d.Check != "" && c.Name == d.CheckName() {
+					if c.OK && (d.Check != "" || d.Experiment != "") && c.Name == d.CheckName() {
 						delete(notMet, d.ID)
 					}
 				}
@@ -294,6 +352,13 @@ func buildGoalReport(v GoalView) GoalReport {
 			tryIt, _ = spec.ViewSection(string(raw), spec.GoalSectionTryIt)
 		}
 	}
+	liveProof := map[string]goalItemResult{}
+	for _, p := range experimentCheckResults(v.DoneWhen, v.Experiments) {
+		liveProof[p.Item.ID] = p
+	}
+	for _, x := range v.Experiments {
+		r.Experiments = append(r.Experiments, reportExperiment(x))
+	}
 	judged := map[string][2]string{}
 	for _, m := range judgedLineRe.FindAllStringSubmatch(verification, -1) {
 		judged[strings.ToUpper(m[1])] = [2]string{strings.ToLower(m[2]), strings.TrimSpace(m[3])}
@@ -302,7 +367,30 @@ func buildGoalReport(v GoalView) GoalReport {
 
 	for _, d := range v.DoneWhen {
 		st := DoneWhenStatus{ID: d.ID, Says: d.Says, How: "judged", Status: DoneWhenUnknown}
-		if d.Check != "" {
+		if d.Experiment != "" {
+			st.How = "experiment: " + d.Experiment
+			if len(d.Assertions) > 0 {
+				st.How += " [" + strings.Join(d.Assertions, ", ") + "]"
+			}
+			if res, ok := checkByName[d.CheckName()]; ok {
+				// what the goal's verify read — the evidence it was judged on
+				if res.OK {
+					st.Status = DoneWhenMet
+				} else {
+					st.Status = DoneWhenNotMet
+				}
+				st.Evidence = firstNonEmpty(res.Evidence, res.Status)
+			} else if live, ok := liveProof[d.ID]; ok && live.Known {
+				// not judged yet: what the runs say so far
+				st.Status = DoneWhenNotMet
+				if live.Held {
+					st.Status = DoneWhenMet
+				}
+				st.Evidence = live.Detail
+			} else if ok {
+				st.Evidence = live.Detail
+			}
+		} else if d.Check != "" {
 			st.How = "check: " + d.Check
 			if res, ok := checkByName[d.CheckName()]; ok {
 				if res.OK {
@@ -404,6 +492,38 @@ func RenderGoalReport(r GoalReport) string {
 			b.WriteString(": " + d.Evidence)
 		}
 		b.WriteString("\n")
+	}
+
+	if len(r.Experiments) > 0 {
+		b.WriteString("\n### Experiments\n\n")
+		for _, x := range r.Experiments {
+			fmt.Fprintf(&b, "- **%s** on %s, proving %s — ", x.Name, x.Substrate, strings.Join(x.Items, ", "))
+			switch {
+			case x.Problem != "":
+				b.WriteString("cannot be run: " + x.Problem)
+			case x.Outcome == "" && x.Running != "":
+				fmt.Fprintf(&b, "run %s is in flight", x.Running)
+			case x.Outcome == "":
+				b.WriteString("no conclusive run is about the goal's current heads")
+			default:
+				fmt.Fprintf(&b, "%s (run %s", x.Outcome, x.Run)
+				if x.Total > 0 {
+					fmt.Fprintf(&b, ", %d of %d assertions held", x.Passed, x.Total)
+				}
+				fmt.Fprintf(&b, "); evidence in `%s`", x.Evidence)
+			}
+			// how far the rig can be believed, in the same breath as what it said
+			fmt.Fprintf(&b, "\n  %d run(s): %d conclusive, %d judged nothing", x.Runs, x.Conclusive, x.Inconclusive)
+			if x.Flaky > 0 {
+				fmt.Fprintf(&b, " (%d of them a failure that did not reproduce)", x.Flaky)
+			}
+			fmt.Fprintf(&b, "; %.0f substrate minutes\n", x.Minutes)
+			for _, a := range x.Assertions {
+				if !a.OK {
+					fmt.Fprintf(&b, "  - ✗ %s %s\n", a.ID, a.Detail)
+				}
+			}
+		}
 	}
 
 	// One repository is the ordinary case and says nothing worth a

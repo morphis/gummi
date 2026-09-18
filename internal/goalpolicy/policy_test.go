@@ -445,3 +445,67 @@ func TestWrappingUpDropsABlockedCardLikeAnyOther(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// An item proved by an experiment needs evidence about the heads the goal
+// has now, so settled work is proven before it is judged.
+func TestSettledWorkIsProvenBeforeTheGoalFinishes(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.Cards = []Card{{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300}}
+	in.Experiments = []Experiment{{Name: "matrix"}}
+	if got, want := acts(in), "run matrix: verify"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Experiments[0].Running = true
+	if got := acts(in); got != "" {
+		t.Fatalf("a run in flight is waited for, got %q", got)
+	}
+	in.Experiments[0] = Experiment{Name: "matrix", Held: true}
+	if got := acts(in); got != "" {
+		t.Fatalf("so is a substrate someone else has, got %q", got)
+	}
+	in.Experiments[0] = Experiment{Name: "matrix", Proven: true}
+	if got, want := acts(in), "finish"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// a failed run goes to the lead once, then the goal is judged on it
+	in.Experiments[0] = Experiment{Name: "matrix", Proven: true, Failed: true, FailedWhy: "matrix failed: egress 0/4"}
+	if got, want := acts(in), "lead [matrix failed: egress 0/4]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Experiments[0].LeadSaw = true
+	if got, want := acts(in), "finish"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// an experiment that cannot be run does not hold the goal for ever
+	in.Experiments[0] = Experiment{Name: "matrix", Problem: "not configured"}
+	if got, want := acts(in), "finish"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// nothing is proven while work is still in flight
+	in.Experiments[0] = Experiment{Name: "matrix"}
+	in.Cards = append(in.Cards, Card{ID: "FD-003", State: Running, Envelope: 500})
+	if got := acts(in); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// Evidence that cannot be believed is not something more turns can fix.
+func TestRunsThatKeepJudgingNothingStallTheGoal(t *testing.T) {
+	in := base()
+	in.Cards = []Card{{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300}}
+	in.Experiments = []Experiment{{Name: "matrix", Inconclusive: MaxInconclusive - 1, Why: "bgp never converged"}}
+	if got, want := acts(in), "run matrix: verify"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Experiments[0].Inconclusive = MaxInconclusive
+	got := Decide(in)
+	if len(got) != 1 || got[0].Kind != Stall || got[0].Experiment != "matrix" || !strings.Contains(got[0].Reason, "bgp never converged") {
+		t.Fatalf("got %v", got)
+	}
+	in.Experiments[0] = Experiment{Name: "matrix", Inconclusive: 1, ControlFailed: true, Why: "reference topology 19/27"}
+	got = Decide(in)
+	if len(got) != 1 || got[0].Kind != Stall || !strings.Contains(got[0].Reason, "cannot judge anything") {
+		t.Fatalf("a rig that fails its own control stops the goal at once: %v", got)
+	}
+}

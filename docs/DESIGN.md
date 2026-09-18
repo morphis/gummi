@@ -2464,8 +2464,8 @@ todo ──▶ plan ──────────▶ implement ─────�
 
 - **Plan** is the architect's conversation. The goal doc
   (`.gummi/goals/GL-NNN-slug.md`) carries the objective, a
-  `gummi-done-when` block (each item `says` a statement and has either a
-  `check:` command or `judge: true`), limits, a budget section with a rough
+  `gummi-done-when` block (each item `says` a statement and has exactly
+  one of a `check:` command, an `experiment:` (§17.8) or `judge: true`), limits, a budget section with a rough
   cost per item and a `gummi-goal` block naming the lanes, and a
   `gummi-cards` block — one row per card, each serving at least one item;
   a row with an existing card's `id` attaches it. A row names the `repo:`
@@ -2735,6 +2735,81 @@ substrate its plan cites probes ready — read at most every two minutes, and
 at most twice between one visit from a person and the next, because a card
 that keeps blocking against a passing probe is waiting for something the
 probe cannot see.
+
+### 17.8 Experiments — the third means of proof
+
+A done-when item is shown to hold by a `check:` (a command in a checkout),
+by `judge: true` (read against the diff), or by an **`experiment:`** — an
+orchestrated run on a substrate, for a statement that is only observable on
+live infrastructure. It is a different noun from a check and is not a long
+check: `verify.MaxCheckTimeout` stays thirty minutes because that is right
+for a command. What a check cannot carry is not the duration but the
+*answer*. "It failed" has two meanings on a substrate — the code is wrong,
+or the environment was not ready — they exit the same, and a budgeted
+unattended run that cannot tell them apart spends itself chasing the
+environment.
+
+So a run (`internal/experiment`) has four outcomes:
+
+| outcome | when | means |
+|---|---|---|
+| `pass` | every phase passed | the item holds for these heads |
+| `fail` | a phase failed, **and failed again in the same phase on a reset substrate** | a verdict on the work |
+| `inconclusive` | the substrate could not be made ready; the rig failed its own `control`; a phase exited 75; the runner died; or a failure did not reproduce (`flaky`) | no opinion — decision 21's rule, "a check that cannot run is no opinion rather than a block" |
+| `not-run` | the substrate was held, or would expire before the run could end and cannot be renewed | — |
+
+Three generic things make the split: **phase attribution** (bringing the
+substrate up and proving the rig against its own reference are the
+environment's), an **explicit signal** (exit 75, `EX_TEMPFAIL`, from any
+phase), and **reproduce-before-believing**. None of them knows what is being
+tested.
+
+- **Evidence is about heads.** A run records the commit of every input —
+  the goal's trees, and the trunk of any input repository the goal never
+  touched — and is evidence only while each is still at that commit
+  (`Result.About`). A landing makes it stale; so does the catch-up before a
+  goal lands, which therefore sends the goal back to its conductor to make
+  the run on what would actually land, rather than landing on proof of
+  something else.
+- **Assertions.** A run reports `{"id","ok","detail"}` lines, and an item
+  may be about some of them (`assertions:`). That is what lets the parts of
+  a matrix that can hold early be *seen* to hold early, and it is judged per
+  assertion: an item whose assertions held is met by a run that failed
+  elsewhere.
+- **The record is the directory.** `.gummi/evidence/<goal>/<run>/` holds the
+  job (with its own copy of the definitions — what a run did is decided when
+  it starts), the result as it is written, a log per phase, and whatever
+  `collect` gathered. Nothing about a run lives only in a process.
+- **The runner holds the lease.** A run is made by a detached
+  `gummi __experiment` process, not by the engine. It outlasts the gummi
+  that asked for it, and the substrate is held exactly as long as something
+  is really using it: a runner that dies lets go (and its run reads
+  inconclusive, never failed), and a gummi that dies does not take a running
+  experiment's exclusivity down with it.
+- **The judge is not the work's to edit.** Experiments are operator config
+  from outside every worktree, as env probes are. A goal may well change the
+  harness it is tested on — that is part of the work — but the definition of
+  passing is not on any branch it can reach.
+
+In a goal (`goalpolicy.proveFirst`): settled work is **proven before it is
+judged**. With every card landed or dropped, an experiment item with no
+conclusive run about the current heads gets one (`Run`), and the goal waits
+for it — also while someone else holds the substrate. A run that *failed*
+goes to the lead once, while turning it into a card still costs only a card;
+after that the goal is judged on it. Runs that judge nothing three times
+running, or one that fails the rig's control, **stall** the goal: evidence
+that cannot be believed is not something more turns can fix, and each
+further run would be substrate time spent learning the same thing. The first
+run of an experiment for a goal proves the rig (`control`) first; later ones
+do not pay for it again.
+
+The goal's verify makes no run. It reads what the runs say about the branch
+as it is, as results beside its commands' — so the verdict floor, the
+hand-over and `status --json` treat an item proved by an experiment exactly
+as one proved by a command — and the hand-over says, per experiment, how far
+the rig could be believed: runs made, how many judged nothing, how many were
+failures that did not reproduce, and the substrate minutes they held. A pass
+from a rig that wavered reads differently from one that never did.
 
 ## 18. Stacks — slicing one piece of work into several landings
 

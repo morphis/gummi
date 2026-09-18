@@ -1015,6 +1015,13 @@ func (m *Manager) MainHead(ctx context.Context) (string, error) {
 	return runGit(ctx, m.repo, "rev-parse", "HEAD")
 }
 
+// HeadOf returns the commit checked out in dir — any checkout, not one a
+// manager owns. It is what names the state an experiment ran on: a goal's
+// trees, and the trunk of a repository the goal never touched.
+func HeadOf(ctx context.Context, dir string) (string, error) {
+	return runGit(ctx, dir, "rev-parse", "HEAD")
+}
+
 // BaseHead returns the current tip of the revision f forks from — the
 // commit a rebase of f targets, exposed so an agent-driven rebase can be
 // pointed at the exact same target.

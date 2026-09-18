@@ -131,6 +131,9 @@ func New(stateDir, root string, specs map[string]config.Substrate) *Manager {
 	return &Manager{dir: filepath.Join(stateDir, "substrates"), root: root, specs: specs, Now: time.Now}
 }
 
+// Root is where the substrates' commands run.
+func (m *Manager) Root() string { return m.root }
+
 // Names lists the configured substrates, sorted.
 func (m *Manager) Names() []string {
 	out := make([]string, 0, len(m.specs))
@@ -199,7 +202,7 @@ func (m *Manager) base(name string, spec config.Substrate) Status {
 // probe classifies the way an env probe does, then lets expiry outrank a
 // passing answer.
 func (m *Manager) probe(ctx context.Context, spec config.Substrate, st *Status) {
-	out, code, err := runShell(ctx, m.root, spec.Probe, probeTimeout, []string{"GUMMI_SUBSTRATE=" + st.Name}, nil)
+	out, code, err := RunShell(ctx, m.root, spec.Probe, probeTimeout, []string{"GUMMI_SUBSTRATE=" + st.Name}, nil)
 	st.Detail = strings.TrimSpace(out)
 	switch {
 	case err != nil || code == 126 || code == 127 || code < 0:
@@ -323,6 +326,20 @@ func (l *Lease) EnsureReady(ctx context.Context, log io.Writer) ([]Op, Status, e
 	return ops, st, fmt.Errorf("%s is %s: %w", l.name, st.State, ErrNotReady)
 }
 
+// Provision brings the held substrate up again whatever state it is in —
+// for a substrate that is ready but will not live long enough for the job
+// that wants it.
+func (l *Lease) Provision(ctx context.Context, log io.Writer) (Op, bool) {
+	if l.spec.Provision == "" {
+		return Op{}, false
+	}
+	op := l.run(ctx, "provision", l.spec.Provision, log)
+	if op.OK {
+		l.m.stampProvisioned(l.name)
+	}
+	return op, true
+}
+
 // Reset returns the held substrate to its known state. A substrate with no
 // reset command is left as it is, which is reported as having done nothing.
 func (l *Lease) Reset(ctx context.Context, log io.Writer) (Op, bool) {
@@ -334,7 +351,7 @@ func (l *Lease) Reset(ctx context.Context, log io.Writer) (Op, bool) {
 
 func (l *Lease) run(ctx context.Context, kind, cmd string, log io.Writer) Op {
 	start := l.m.Now()
-	out, code, err := runShell(ctx, l.m.root, cmd, l.spec.OpTimeout(), []string{"GUMMI_SUBSTRATE=" + l.name}, log)
+	out, code, err := RunShell(ctx, l.m.root, cmd, l.spec.OpTimeout(), []string{"GUMMI_SUBSTRATE=" + l.name}, log)
 	return Op{Kind: kind, OK: err == nil && code == 0, Took: l.m.Now().Sub(start), Output: out}
 }
 
@@ -353,11 +370,11 @@ const probeTimeout = 3 * time.Minute
 // gets all of it.
 const maxOutput = 16 << 10
 
-// runShell runs cmd through sh in dir, in its own process group so a
+// RunShell runs cmd through sh in dir, in its own process group so a
 // timeout takes the whole tree with it. It returns the (bounded) combined
 // output, the exit code (-1 when the command never produced one) and an
 // error only for the ways a command fails to give an answer at all.
-func runShell(ctx context.Context, dir, cmd string, timeout time.Duration, env []string, log io.Writer) (string, int, error) {
+func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env []string, log io.Writer) (string, int, error) {
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c := exec.CommandContext(rctx, "sh", "-c", cmd) //nolint:gosec // operator config from outside the worktree

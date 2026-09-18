@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/experiment"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -312,5 +313,62 @@ func TestAGoalVerifyTheEnvironmentCouldNotRunJudgesNothing(t *testing.T) {
 	got, _ = h.store.GetFeature(ctx, g.ID)
 	if got.Goal.Partial != "" {
 		t.Fatalf("a verify that could run found nothing wrong: partial %q", got.Goal.Partial)
+	}
+}
+
+// A goal whose item is proved by an experiment, end to end: the conductor
+// makes the run once the work has settled, the goal's verify reads the
+// evidence beside its commands' results, and the hand-over points at it.
+func TestDriveGoalProvedByAnExperiment(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	h := goalHarness(t)
+	rig := t.TempDir()
+	cfg := "substrates:\n  rig:\n    probe: test -f " + rig + "/up\n    provision: touch " + rig + "/up\n" +
+		"experiments:\n  live:\n    substrate: rig\n    run: |\n" +
+		"      printf '{\"id\":\"cache\",\"ok\":true}\\n{\"id\":\"flag\",\"ok\":true}\\n' > \"$GUMMI_EVIDENCE/results.ndjson\"\n" +
+		"      test -f \"$GUMMI_TREE_HOME/cache.txt\" && test -f \"$GUMMI_TREE_HOME/flag.txt\"\n" +
+		"    collect: echo dump > \"$GUMMI_EVIDENCE/state.txt\"\n"
+	if err := os.WriteFile(h.ws.ConfigFile(), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.SetExperimentSpawner(func(dir string) error {
+		job, err := experiment.LoadJob(dir)
+		if err != nil {
+			return err
+		}
+		experiment.Execute(context.Background(), job)
+		return nil
+	})
+	doc := strings.Replace(driverGoalDoc, "  check: test -f flag.txt\n", "  experiment: live\n", 1)
+	ctx := context.Background()
+	d := h.driver(Options{Envelope: 6000, Autonomous: true, GoalDoc: doc})
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.Drive(ctx, g)
+	if err != nil || out.Status != StatusVerified {
+		t.Fatalf("status %s err %v\n%s", out.Status, err, h.buf.String())
+	}
+	got, _ := h.store.GetFeature(ctx, g.ID)
+	if got.Goal.Partial != "" {
+		t.Fatalf("whole: %q", got.Goal.Partial)
+	}
+	runs := h.eng.ExperimentRuns(g.ID)
+	if len(runs) != 1 || runs[0].Outcome != experiment.Pass {
+		t.Fatalf("one run, made once the work settled: %+v", runs)
+	}
+	if _, err := os.Stat(filepath.Join(runs[0].Dir, "evidence", "state.txt")); err != nil {
+		t.Fatal("the bundle a reviewer reads is there")
+	}
+	rep, err := h.eng.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if met, total := rep.Met(); met != 2 || total != 2 {
+		t.Fatalf("met %d of %d: %+v", met, total, rep.DoneWhen)
+	}
+	if ev := rep.DoneWhen[1].Evidence; !strings.Contains(ev, runs[0].ID) || !strings.Contains(ev, runs[0].Dir) {
+		t.Fatalf("the item's evidence is the run and where its bundle is: %q", ev)
 	}
 }

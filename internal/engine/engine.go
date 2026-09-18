@@ -411,6 +411,10 @@ type Engine struct {
 	repoInstructions map[string]string
 
 	// goalLocks serializes the conductor per goal (goal.go's goalLock).
+	// spawnExperiment starts the process that makes a prepared run; nil
+	// means spawnDetached
+	spawnExperiment ExperimentSpawner
+
 	// substrates remembers the last reading of each substrate, so a goal
 	// that ticks every few seconds does not probe real machines that often
 	substrates substrateCache
@@ -1405,7 +1409,16 @@ func (e *Engine) runSpecChecks(s *Session) string {
 		// a goal's done-when checks run whatever its checks block says
 		checks = withDoneWhenChecks(string(raw), checks)
 	}
-	if len(checks) == 0 {
+	// A goal's items may be proved by an experiment rather than a command.
+	// gummi does not run one here — a run is long, remote and exclusive,
+	// and the conductor made it before the goal finished — it reads what
+	// the runs say about the heads the goal has now, as results that sit
+	// beside the commands' and count exactly as they do.
+	var proven []verify.Result
+	if s.Feature.IsGoal() {
+		proven = e.goalExperimentResults(context.Background(), s.Feature, string(raw))
+	}
+	if len(checks) == 0 && len(proven) == 0 {
 		return ""
 	}
 	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
@@ -1425,6 +1438,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	if err != nil {
 		return ""
 	}
+	results = append(results, proven...)
 
 	// The approval-time baseline separates failures the feature caused
 	// from ones the branch was born with. A baseline entry speaks for a
@@ -1450,6 +1464,20 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	b.WriteString("gummi already ran the spec's gummi-checks commands in this worktree — do NOT re-run them:\n")
 	for _, r := range results {
 		var status string
+		switch {
+		case strings.HasPrefix(r.Cmd, experimentCmdPrefix) && r.Status == verify.StatusNotRun:
+			status = "NOT PROVEN (no conclusive run on these heads)"
+			liveFailures = append(liveFailures, r.Name)
+		case strings.HasPrefix(r.Cmd, experimentCmdPrefix) && r.Status == verify.StatusFail:
+			status = "FAIL (the experiment's verdict)"
+			liveFailures = append(liveFailures, r.Name)
+		}
+		if status != "" {
+			s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
+			recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status, Evidence: r.Output})
+			fmt.Fprintf(&b, "- %s: %s\n%s\n", r.Name, status, indentLines(r.Output))
+			continue
+		}
 		switch r.Status {
 		case verify.StatusPass:
 			status = "pass"
@@ -1469,7 +1497,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
-		recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status})
+		recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status, Evidence: experimentEvidence(r)})
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK && len(r.Output) > 0 {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))

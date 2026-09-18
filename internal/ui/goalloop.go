@@ -129,6 +129,13 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 			// what the board can do, and the goal picks itself back up on
 			// the next tick after the backend returns.
 			m.notice = noticeMsg{text: string(msg.goal) + ": waiting on the agent backend — " + sanitize(msg.res.Stalled), isErr: true, id: msg.goal}
+			if msg.res.StalledExperiment != "" {
+				// Not the backend either: evidence the goal cannot believe.
+				// More runs would spend substrate time learning the same
+				// thing, so it waits for someone to look at the rig.
+				m.notice = noticeMsg{text: string(msg.goal) + ": stopped making runs — " + sanitize(msg.res.Stalled) +
+					" · tell the goal when the rig is fixed", isErr: true, id: msg.goal}
+			}
 			if msg.res.StalledOn != "" {
 				// Not the backend: a card's environment. The goal kept the
 				// card and will not retry on its own, because a retry is a

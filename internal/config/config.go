@@ -75,6 +75,14 @@ type Config struct {
 	// worktree, and that ownership is the point: the commands that decide
 	// whether work is proven must not be editable by the work.
 	Substrates map[string]Substrate `yaml:"substrates"`
+	// Experiments names the orchestrated live runs that prove work on a
+	// substrate: deploy what was built, wait for it to settle, probe it,
+	// collect what a reader will want to see. A goal's done-when item names
+	// one as its means of proof (`experiment:`), beside `check:` and
+	// `judge:`. Operator config for the same reason substrates are — and
+	// here it is the whole point: a goal may change the rig it is tested
+	// on, and must not thereby change what counts as passing.
+	Experiments map[string]Experiment `yaml:"experiments"`
 	// Instructions is a list of extra instruction-file paths that are
 	// appended to the workspace environment card, in user-then-workspace
 	// order. Every entry must be an absolute path; Load rejects relative or
@@ -148,6 +156,102 @@ func (s Substrate) OpTimeout() time.Duration {
 func (s Substrate) Lifetime() time.Duration {
 	d, _ := time.ParseDuration(s.TTL)
 	return d
+}
+
+// Experiment is one operator-configured live run. Every command runs via
+// `sh -c` in the workspace root with the run's environment: GUMMI_EVIDENCE
+// (a directory to write into), GUMMI_TREE_<REPO> and GUMMI_HEAD_<REPO> for
+// each input, GUMMI_SUBSTRATE, GUMMI_EXPERIMENT, GUMMI_RUN, GUMMI_PURPOSE
+// and GUMMI_ATTEMPT. A command that exits 75 (EX_TEMPFAIL) is saying the
+// run could not be judged, whatever phase it is in.
+type Experiment struct {
+	Describe string `yaml:"describe"`
+	// Substrate is the substrate the run needs, exclusively, for as long
+	// as it takes.
+	Substrate string `yaml:"substrate"`
+	// Inputs names the repositories whose state the run is about. The
+	// evidence a run leaves is evidence about exactly these heads, and is
+	// stale the moment one of them moves. Empty means every repository the
+	// goal has a tree in.
+	Inputs []string `yaml:"inputs"`
+	// Control proves the rig against its own reference, on a freshly reset
+	// substrate, before anything of the goal's is deployed. A rig that
+	// cannot pass it is not a judge, and says nothing about the work.
+	Control string `yaml:"control"`
+	// Deploy puts the inputs onto the substrate.
+	Deploy string `yaml:"deploy"`
+	// Settle waits until the deployed system is worth probing.
+	Settle string `yaml:"settle"`
+	// Run is the experiment itself. It may write one JSON object per line
+	// to $GUMMI_EVIDENCE/results.ndjson — {"id","ok","detail"} — so that a
+	// done-when item can be about some of its assertions and a reader can
+	// see which moved.
+	Run string `yaml:"run"`
+	// Collect gathers what a reviewer will want — dumps, tables, traces —
+	// into $GUMMI_EVIDENCE. It runs after every attempt, pass or fail.
+	Collect string `yaml:"collect"`
+	// Timeout bounds each phase (a Go duration). Empty means
+	// DefaultExperimentPhaseTimeout.
+	Timeout string `yaml:"timeout"`
+}
+
+// DefaultExperimentPhaseTimeout bounds a phase whose experiment names none.
+const DefaultExperimentPhaseTimeout = 30 * time.Minute
+
+// PhaseTimeout resolves the experiment's per-phase bound.
+func (x Experiment) PhaseTimeout() time.Duration {
+	if d, err := time.ParseDuration(x.Timeout); err == nil && d > 0 {
+		return d
+	}
+	return DefaultExperimentPhaseTimeout
+}
+
+// Phases lists the experiment's configured phases in the order they run.
+func (x Experiment) Phases() [][2]string {
+	var out [][2]string
+	for _, p := range [][2]string{{"deploy", x.Deploy}, {"settle", x.Settle}, {"run", x.Run}} {
+		if strings.TrimSpace(p[1]) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Longest is the longest one attempt can take: every phase at its bound.
+// It is what a substrate's remaining lifetime is measured against.
+func (x Experiment) Longest() time.Duration {
+	n := len(x.Phases()) + 1 // and the reset before it
+	if strings.TrimSpace(x.Control) != "" {
+		n++
+	}
+	if strings.TrimSpace(x.Collect) != "" {
+		n++
+	}
+	return time.Duration(n) * x.PhaseTimeout()
+}
+
+func validateExperiments(path string, c Config) error {
+	for name, x := range c.Experiments {
+		if err := validateEnvName(path, "experiments", name); err != nil {
+			return err
+		}
+		if strings.TrimSpace(x.Run) == "" {
+			return fmt.Errorf("%s: experiments: %q has no run command", path, name)
+		}
+		if strings.TrimSpace(x.Substrate) == "" {
+			return fmt.Errorf("%s: experiments: %q names no substrate", path, name)
+		}
+		if x.Timeout != "" {
+			d, err := time.ParseDuration(x.Timeout)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("%s: experiments: %q has an invalid timeout %q", path, name, x.Timeout)
+			}
+			if d > MaxSubstrateOpTimeout {
+				return fmt.Errorf("%s: experiments: %q timeout %s exceeds maximum %s", path, name, d, MaxSubstrateOpTimeout)
+			}
+		}
+	}
+	return nil
 }
 
 func validateSubstrates(path string, c Config) error {
@@ -243,6 +347,9 @@ func Load(path string) (Config, error) {
 		}
 	}
 	if err := validateSubstrates(path, c); err != nil {
+		return Config{}, err
+	}
+	if err := validateExperiments(path, c); err != nil {
 		return Config{}, err
 	}
 	for i, inst := range c.Instructions {
@@ -408,6 +515,23 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	for name := range merged.Substrates {
 		if _, dup := merged.Env[name]; dup {
 			return Config{}, nil, fmt.Errorf("substrates: %q is also an env prerequisite (%s); a name cited as [env: %s] must mean one thing", name, sources["env."+name], name)
+		}
+	}
+
+	merged.Experiments = make(map[string]Experiment, len(user.Experiments)+len(ws.Experiments))
+	for k, v := range user.Experiments {
+		merged.Experiments[k] = v
+		sources["experiments."+k] = userPath
+	}
+	for k, v := range ws.Experiments {
+		merged.Experiments[k] = v
+		sources["experiments."+k] = workspacePath
+	}
+	// Checked on the merged view, not per file: an experiment in the
+	// workspace file may well run on a substrate the user file describes.
+	for name, x := range merged.Experiments {
+		if _, ok := merged.Substrates[x.Substrate]; !ok {
+			return Config{}, nil, fmt.Errorf("experiments: %q runs on substrate %q, which is not configured", name, x.Substrate)
 		}
 	}
 

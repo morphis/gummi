@@ -1,0 +1,202 @@
+package engine
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/experiment"
+	"github.com/morphis/gummi/internal/goalpolicy"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
+)
+
+const experimentGoalDoc = "# GL-001: Export works offline\n\n" +
+	"## Objective\n\nExport works with no network.\n\n" +
+	"## Done when\n\n```gummi-done-when\n" +
+	"- id: DW-1\n  says: a deployed build serves the cache\n  experiment: matrix\n" +
+	"- id: DW-2\n  says: the first probe of the matrix holds\n  experiment: matrix\n  assertions: [first]\n```\n\n" +
+	"## Limits\n\nNone.\n\n" +
+	"## Budget\n\nAbout 1500 credits.\n\n```gummi-goal\nlanes: 1\n```\n\n" +
+	"## Cards\n\n```gummi-cards\n" +
+	"- title: local cache for export\n  serves: [DW-1, DW-2]\n  envelope: 600\n```\n\n" +
+	"## Notes\n\n\n## Try it\n\n\n## Review\n\n\n## Verification plan\n\nRun the matrix.\n\n## Report\n\n\n"
+
+// experimentRig configures a substrate made of files and an experiment
+// that passes when the deployed tree carries cache.txt. run is the
+// experiment's run command.
+func experimentRig(t *testing.T, e *Engine, wt *worktree.Manager, run string) string {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	rig := t.TempDir()
+	cfg := "substrates:\n  rig:\n    probe: test -f " + rig + "/up\n    provision: touch " + rig + "/up\n    reset: echo r >> " + rig + "/resets\n" +
+		"experiments:\n  matrix:\n    substrate: rig\n    run: |\n      " + run + "\n"
+	if err := os.WriteFile(filepath.Join(wt.Root(), ".gummi", "config.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// in-process and synchronous: the run is over by the time the tick that
+	// asked for it returns
+	e.SetExperimentSpawner(func(dir string) error {
+		job, err := experiment.LoadJob(dir)
+		if err != nil {
+			return err
+		}
+		experiment.Execute(context.Background(), job)
+		return nil
+	})
+	return rig
+}
+
+const matrixRun = `printf '{"id":"first","ok":true}\n' > "$GUMMI_EVIDENCE/results.ndjson"; if test -f "$GUMMI_TREE_HOME/cache.txt"; then printf '{"id":"second","ok":true}\n' >> "$GUMMI_EVIDENCE/results.ndjson"; else printf '{"id":"second","ok":false,"detail":"no cache"}\n' >> "$GUMMI_EVIDENCE/results.ndjson"; exit 1; fi`
+
+func TestThePlanGateRefusesAnExperimentNobodyConfigured(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	e, _, store, wt := advanceEngine(t)
+	g := goalAtPlan(t, store, wt, experimentGoalDoc, 4000)
+	res, err := e.Advance(context.Background(), g.ID, "user")
+	if err != nil || res.Status != StatusBlockedGoalPlan || !strings.Contains(res.Reason, `experiment "matrix"`) {
+		t.Fatalf("%v %v %q", res.Status, err, res.Reason)
+	}
+}
+
+// Settled work is proven on the heads the goal has before it is judged,
+// and the evidence is what its verify and its hand-over read.
+func TestAGoalProvesItsExperimentItemsBeforeItFinishes(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, matrixRun)
+	g := goalAtPlan(t, store, wt, experimentGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	card := goalCards(t, store, g.ID)[0]
+	tick(t, e, g.ID) // starts the card
+	verifyCard(t, e, store, wt.Root(), card.ID, "cache.txt")
+	if res := tick(t, e, g.ID); len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Land {
+		t.Fatalf("lands: %v", res.Actions)
+	}
+
+	res := tick(t, e, g.ID)
+	if len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run || res.Finished {
+		t.Fatalf("settled, and unproven: it makes the run before it finishes: %v", res.Actions)
+	}
+	runs := e.ExperimentRuns(g.ID)
+	if len(runs) != 1 || runs[0].Outcome != experiment.Pass || runs[0].Purpose != PurposeVerify {
+		t.Fatalf("runs: %+v", runs)
+	}
+	view, _ := e.GoalView(ctx, g.ID)
+	if len(view.Experiments) != 1 || view.Experiments[0].Evidence == nil || len(view.Experiments[0].Items) != 2 {
+		t.Fatalf("the run is about the goal's heads: %+v", view.Experiments)
+	}
+
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range rep.DoneWhen {
+		if d.Status != DoneWhenMet || !strings.Contains(d.Evidence, runs[0].ID) {
+			t.Fatalf("both items are met on the run's evidence: %+v", d)
+		}
+	}
+	if !strings.Contains(rep.DoneWhen[1].How, "[first]") {
+		t.Fatalf("an item about some assertions says which: %q", rep.DoneWhen[1].How)
+	}
+	if body := RenderGoalReport(rep); !strings.Contains(body, "### Experiments") || !strings.Contains(body, "1 conclusive, 0 judged nothing") {
+		t.Fatalf("the hand-over says how far the rig can be believed:\n%s", body)
+	}
+
+	if res = tick(t, e, g.ID); !res.Finished {
+		t.Fatalf("proven, it finishes: %v", res.Actions)
+	}
+	if got := e.ExperimentRuns(g.ID); len(got) != 1 {
+		t.Fatalf("and does not pay for the same evidence twice: %d runs", len(got))
+	}
+}
+
+// Evidence is about the heads it ran on. A landing moves them, and what
+// was proven before it says nothing about what is there after.
+func TestEvidenceGoesStaleWhenAHeadMoves(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, matrixRun)
+	doc := strings.Replace(experimentGoalDoc, "  envelope: 600\n", "  envelope: 600\n- title: second card\n  serves: [DW-1]\n", 1)
+	g := goalAtPlan(t, store, wt, doc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	goal, _ := store.GetFeature(ctx, g.ID)
+	if _, err := e.StartExperiment(ctx, goal, ExperimentStart{Name: "matrix", Purpose: PurposeIntegration}); err != nil {
+		t.Fatal(err)
+	}
+	view, _ := e.GoalView(ctx, g.ID)
+	if ev := view.Experiments[0].Evidence; ev == nil || ev.Outcome != experiment.Fail {
+		t.Fatalf("nothing has landed, so the matrix fails — and says so twice before it is believed: %+v", view.Experiments[0])
+	}
+	if held, ok := view.Experiments[0].Evidence.Holds([]string{"first"}); !held || !ok {
+		t.Fatal("the assertion that held is evidence for the item that is only about it")
+	}
+
+	cards := goalCards(t, store, g.ID)
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, wt.Root(), cards[0].ID, "cache.txt")
+	tick(t, e, g.ID) // lands it: the home head moves
+	view, _ = e.GoalView(ctx, g.ID)
+	if view.Experiments[0].Evidence != nil {
+		t.Fatalf("the old run is about heads the goal no longer has: %+v", view.Experiments[0].Evidence)
+	}
+	if len(view.Experiments[0].Runs) != 1 {
+		t.Fatal("it is still on record")
+	}
+}
+
+// Runs that keep judging nothing stop the goal; a person's return is what
+// buys another.
+func TestAGoalStopsMakingRunsThatJudgeNothing(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, "echo 'routing never converged'; exit 75")
+	g := goalAtPlan(t, store, wt, experimentGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	card := goalCards(t, store, g.ID)[0]
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, wt.Root(), card.ID, "cache.txt")
+	tick(t, e, g.ID)
+
+	var res GoalTickResult
+	for i := 0; i < goalpolicy.MaxInconclusive+3; i++ {
+		res = tick(t, e, g.ID)
+		if res.Finished {
+			t.Fatal("a goal with no evidence does not go on to be judged")
+		}
+	}
+	if res.StalledExperiment != "matrix" || !strings.Contains(res.Stalled, "routing never converged") {
+		t.Fatalf("it stops and says why: %+v", res)
+	}
+	if got := len(e.ExperimentRuns(g.ID)); got != goalpolicy.MaxInconclusive {
+		t.Fatalf("%d runs; each is substrate time spent learning the substrate is not to be trusted", got)
+	}
+	if got, _ := store.GetFeature(ctx, card.ID); got.GoalDropped() || got.Stage != domain.StageDone {
+		t.Fatal("nothing is dropped")
+	}
+	if err := e.GoalResumed(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res = tick(t, e, g.ID); len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run {
+		t.Fatalf("someone has been there: one more run: %v", res.Actions)
+	}
+	log, _ := store.GoalLog(ctx, g.ID)
+	n := 0
+	for _, en := range log {
+		if en.Action == state.GoalRun {
+			n++
+		}
+	}
+	if n != goalpolicy.MaxInconclusive+1 {
+		t.Fatalf("every run is in the goal's log: %d", n)
+	}
+}

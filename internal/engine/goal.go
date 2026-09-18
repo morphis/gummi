@@ -28,6 +28,7 @@ import (
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/experiment"
 	"github.com/morphis/gummi/internal/goalpolicy"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -126,6 +127,9 @@ type GoalView struct {
 	// NeedsBudget is the goal's standing request for more budget, derived
 	// from the log: which card is waiting and what it asked for.
 	NeedsBudget GoalNeedsBudget
+	// Experiments lists the experiments the goal's items are proved by,
+	// read against the heads the goal has now.
+	Experiments []GoalExperiment
 }
 
 // Card returns the goal card with id, and whether it belongs to the goal.
@@ -208,6 +212,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	dropReason := map[domain.FeatureID]string{}
 	leadSeen := map[domain.FeatureID][]int64{}
 	var lastLeadOK, lastLeadAny, retrySince int64
+	var lastLeadAt, visitedAt time.Time
 	autoRetries := map[domain.FeatureID]int{}
 	failures := 0
 	outage, stalled := "", ""
@@ -227,7 +232,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			// only a wake turn names the cards it was woken over in Ref;
 			// a turn answering a card's question or checking its plan
 			// carries the card in Card and is not a try at unsticking it
-			lastLeadOK, lastLeadAny = en.Seq, en.Seq
+			lastLeadOK, lastLeadAny, lastLeadAt = en.Seq, en.Seq, en.At
 			failures = 0
 			for _, id := range strings.Split(en.Ref, ",") {
 				if id = strings.TrimSpace(id); id != "" {
@@ -263,9 +268,10 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			outage = ""
 			failures++
 		case state.GoalStalled:
-			if en.Card != "" {
-				// stopped on a card's environment, not on the backend: the
-				// lead can run, and nothing here is an outage to wait out
+			if en.Card != "" || en.Ref != "" {
+				// stopped on a card's environment or on evidence it cannot
+				// believe, not on the backend: the lead can run, and
+				// nothing here is an outage to wait out
 				continue
 			}
 			// the goal has already stopped on this outage and said so
@@ -273,7 +279,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		case state.GoalNote, state.GoalResumed:
 			// a person acted: whatever a blocked card was waiting for may
 			// be there now
-			retrySince = en.Seq
+			retrySince, visitedAt = en.Seq, en.At
 			autoRetries = map[domain.FeatureID]int{}
 		}
 		if en.Action == state.GoalStarted && en.Ref == goalRetryRef {
@@ -363,6 +369,25 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings,
 			LeadTries: gc.LeadTries, Reason: gc.Reason, Retry: gc.Retry,
 		})
+	}
+	if goal.Stage == domain.StageImplement || goal.Stage == domain.StageVerify {
+		v.Experiments = e.goalExperiments(ctx, goal, v.DoneWhen, visitedAt.UnixNano())
+	}
+	for _, x := range v.Experiments {
+		px := goalpolicy.Experiment{
+			Name: x.Name, Problem: x.Problem, Running: x.Running != nil, Proven: x.Evidence != nil,
+			Inconclusive: x.Inconclusive, Why: x.LastReason, ControlFailed: x.ControlFailed,
+		}
+		if x.Evidence != nil && x.Evidence.Outcome == experiment.Fail {
+			px.Failed, px.LeadSaw = true, lastLeadAt.After(x.Evidence.Ended)
+			px.FailedWhy = fmt.Sprintf("the %s experiment failed on the goal's current heads — %s. Its evidence is in %s. "+
+				"Turn what it shows into a card (card_create, card_send_back) or, if the item cannot be met, say so (done_when_not_met); "+
+				"leave it and the goal goes on to be judged on this result.", x.Name, describeEvidence(*x.Evidence, nil), x.Evidence.Dir)
+		}
+		if !px.Proven && !px.Running && x.Problem == "" {
+			px.Held = e.substrateHeld(ctx, x.Substrate)
+		}
+		in.Experiments = append(in.Experiments, px)
 	}
 	v.Ledger = goalpolicy.ComputeLedger(in)
 	// a lead turn spends from what the goal has left to give; with less
@@ -588,6 +613,9 @@ type GoalTickResult struct {
 	// StalledOn names the card whose environment the goal is waiting for,
 	// when that and not the backend is what Stalled is about.
 	StalledOn domain.FeatureID
+	// StalledExperiment names the experiment whose evidence the goal has
+	// stopped being able to believe, when that is what Stalled is about.
+	StalledExperiment string
 }
 
 // GoalNeedsBudget is a goal's standing request for more budget: which
@@ -674,8 +702,20 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		}
 		return nil
 	case goalpolicy.Stall:
-		e.goalStall(ctx, goal.ID, a.Card, a.Reason)
-		res.Stalled, res.StalledOn = a.Reason, a.Card
+		e.goalStall(ctx, goal.ID, a.Card, a.Experiment, a.Reason)
+		res.Stalled, res.StalledOn, res.StalledExperiment = a.Reason, a.Card, a.Experiment
+		return nil
+	case goalpolicy.Run:
+		run, err := e.StartExperiment(ctx, goal, ExperimentStart{Name: a.Experiment, Purpose: a.Reason, Control: e.needsControl(goal.ID, a.Experiment)})
+		if err != nil {
+			// not the conductor's failure to pass up: the run is on record
+			// as not run, and the next tick reads that like any other
+			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadNote, By: ActorGoal,
+				Detail: fmt.Sprintf("a %s run of %s could not start: %v", a.Reason, a.Experiment, err)})
+			return nil
+		}
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRun, Ref: run.ID, Item: a.Experiment, By: ActorGoal,
+			Detail: fmt.Sprintf("%s run of %s on %s", a.Reason, a.Experiment, describeHeads(run.Heads))})
 		return nil
 	case goalpolicy.Lead:
 		starts, err := e.runLeadTurn(ctx, view, a.Reasons)
@@ -1048,7 +1088,7 @@ func (e *Engine) logLeadFailure(ctx context.Context, goal domain.FeatureID, card
 // could not serve it. Unlike a wrap-up it drops nothing: every card keeps
 // its branch, its spend and its place, and the next tick after the
 // backend returns carries on.
-func (e *Engine) goalStall(ctx context.Context, goal, card domain.FeatureID, reason string) {
+func (e *Engine) goalStall(ctx context.Context, goal, card domain.FeatureID, experimentName, reason string) {
 	log, err := e.cfg.Store.GoalLog(ctx, goal)
 	if err == nil {
 		for i := len(log) - 1; i >= 0; i-- {
@@ -1062,7 +1102,11 @@ func (e *Engine) goalStall(ctx context.Context, goal, card domain.FeatureID, rea
 			}
 		}
 	}
-	e.goalLog(ctx, goal, state.GoalPayload{Action: state.GoalStalled, Card: card, Detail: reason, By: ActorGoal})
+	p := state.GoalPayload{Action: state.GoalStalled, Card: card, Detail: reason, By: ActorGoal}
+	if experimentName != "" {
+		p.Ref = "experiment:" + experimentName
+	}
+	e.goalLog(ctx, goal, p)
 }
 
 // GoalResumed records that a person picked a stopped goal back up. It is
@@ -1080,11 +1124,14 @@ func (e *Engine) GoalResumed(ctx context.Context, goalID domain.FeatureID) error
 		case state.GoalResumed:
 			return nil
 		case state.GoalStalled:
-			if log[i].Card == "" {
-				return nil
+			switch {
+			case log[i].Card != "":
+				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: "user",
+					Detail: "picked back up after waiting on " + string(log[i].Card) + "'s environment"})
+			case log[i].Ref != "":
+				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: "user",
+					Detail: "picked back up after " + strings.TrimPrefix(log[i].Ref, "experiment:") + " could not be believed"})
 			}
-			e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: "user",
-				Detail: "picked back up after waiting on " + string(log[i].Card) + "'s environment"})
 			return nil
 		}
 	}
@@ -1373,6 +1420,9 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 				return fmt.Sprintf("%s's check %s", it.ID, problem)
 			}
 		}
+	}
+	if problem := e.goalExperimentProblem(items); problem != "" {
+		return problem
 	}
 	rows, found, err := spec.ParseGoalCards(doc, items)
 	if err != nil {
@@ -1898,6 +1948,18 @@ func (e *Engine) LandGoal(ctx context.Context, goalID domain.FeatureID, message,
 		}
 	}
 	if anyMerged {
+		// Evidence is about the heads it ran on, and the catch-up just moved
+		// them. A command can be run again here and now; an experiment is an
+		// hour on a substrate, so the goal goes back to its conductor, which
+		// makes the run on what would actually land and brings it back.
+		if names := e.goalExperimentNames(goal); len(names) > 0 {
+			note := "Catching up with main moved the goal's branch, and the evidence for " + strings.Join(names, ", ") +
+				" is about the branch before it did. The goal makes the run again on what it would land."
+			if serr := e.SendBackGoal(ctx, goalID, note, ActorGoal); serr != nil {
+				return "", serr
+			}
+			return "", fmt.Errorf("%w: %s", ErrGoalSentBack, note)
+		}
 		rv, err := e.Reverify(ctx, goalID, by)
 		if err != nil {
 			return "", err
@@ -2042,6 +2104,9 @@ type goalCheckResult struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
 	Status string `json:"status"`
+	// Evidence is what an experiment item's result rests on — the run, what
+	// held, and where its bundle is. Empty for a command's.
+	Evidence string `json:"evidence,omitempty"`
 }
 
 func firstNonEmpty(ss ...string) string {
