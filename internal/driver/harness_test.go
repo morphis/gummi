@@ -371,6 +371,26 @@ func convAsk(model, question string, options ...string) []agent.Event {
 	return msgIdle(model, "Considering.\n```gummi-ask\n"+string(body)+"\n```")
 }
 
+// toolAsk is an ask_user turn through the client tool — the path a
+// backend with tools takes, and the one a real drive's questions come
+// through. It names the section its answer changes, which the tool
+// requires before it will put a question at all.
+func toolAsk(model, section, question string, options ...string) []agent.Event {
+	opts := make([]map[string]string, 0, len(options))
+	for _, o := range options {
+		opts = append(opts, map[string]string{"label": o})
+	}
+	args, _ := json.Marshal(map[string]any{
+		"question": question, "options": opts, "allow_free_form": true,
+		"changes_section": section,
+	})
+	return []agent.Event{
+		{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "ask-1", Name: "ask_user", Args: args}},
+		{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 1, Model: model}},
+		{Kind: agent.EventIdle},
+	}
+}
+
 // harnessRoot is the repo root the harness resolves card artifacts under:
 // the pool's root for a multi-repo harness, the manager's for a single-repo
 // one.

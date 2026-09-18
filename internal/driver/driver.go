@@ -1063,43 +1063,18 @@ func (d *Driver) driveDesign(ctx context.Context, f domain.Feature) (Outcome, er
 		case endError:
 			return Outcome{}, firstErr(end.err, errors.New("agent session failed"))
 		case endQuestion:
-			ask := d.pendingAsk(f.ID)
-			if ask == nil {
-				// no question actually pending — treat as a finished turn.
-				return d.designComplete(ctx, f)
+			out, stop, answered, qerr := d.answerAsk(ctx, f)
+			if qerr != nil {
+				return Outcome{}, qerr
 			}
-			if d.opts.Autonomous {
-				rec := engine.RecommendedOption(ask)
-				// a goal card's question goes to its goal's lead first; the
-				// answerer on record stays the unattended loop (no person
-				// typed it), and the goal's log names the lead
-				if f.InGoal() {
-					if ans, ok, gerr := d.eng.GoalAnswer(ctx, f.ID, ask); gerr == nil && ok && ans != "" {
-						rec = ans
-					}
-				}
-				// the answerer declares itself: the record must say an
-				// unattended loop took it, whoever's stored mode the card
-				// runs under, or the morning receipt under-counts it.
-				if err := d.eng.AnswerAs(ctx, f.ID, rec, state.ActorAutopilot); err != nil {
-					return Outcome{}, err
-				}
-				d.out.activity(string(f.ID), string(f.Stage), "auto-answered: "+rec)
+			if stop {
+				return out, nil
+			}
+			if answered {
 				continue // the turn resumes with the answer; keep reading
 			}
-			decisionID := ""
-			if ask.DecisionID != "" {
-				decisionID = ask.DecisionID
-			}
-			d.out.emit(questionEvent{
-				Event: "question", ID: string(f.ID), Q: ask.Question,
-				Options: askLabels(ask), Recommended: engine.RecommendedOption(ask),
-				FreeForm: true, Resume: string(f.ID),
-				Next:     d.resumeCmd(string(f.ID), "--answer", `"<answer>"`),
-				Decision: decisionID,
-			})
-			d.logPark(f, state.ParkReasonNeedsYou, ask.Question)
-			return Outcome{Status: StatusQuestion, ID: string(f.ID)}, nil
+			// no question actually pending — treat as a finished turn.
+			return d.designComplete(ctx, f)
 		case endIdle:
 			// a finished conversation with no open question: hand it to
 			// the critique, which decides whether the gate is reached.
@@ -1434,20 +1409,89 @@ func reworkLabel(stage domain.Stage) string {
 	return "reworking"
 }
 
-// awaitRework waits for a rework pass to finish, then critiques again.
-func (d *Driver) awaitRework(ctx context.Context, f domain.Feature) (Outcome, error) {
-	end, err := d.awaitStage(ctx, f.ID)
-	if err != nil {
-		return Outcome{}, err
+// answerAsk decides what a stage's open question means for the drive. It
+// is one function because every loop that waits on a session owes the same
+// answer: an unattended run answers the question itself (a goal card's
+// goes to its lead first), and an attended one stops and asks.
+//
+// stop says the drive is over and out is its outcome; answered says the
+// question was answered and the session is carrying on; neither means
+// there was no question after all, which only the caller can interpret.
+func (d *Driver) answerAsk(ctx context.Context, f domain.Feature) (out Outcome, stop, answered bool, err error) {
+	ask := d.pendingAsk(f.ID)
+	if ask == nil {
+		return Outcome{}, false, false, nil
 	}
-	switch end.kind {
-	case endExhausted:
-		return d.exhausted(ctx, f, end.committed), nil
-	case endTimeout:
-		return d.timeout(f), nil
-	case endError:
-		return Outcome{}, firstErr(end.err, errors.New("rework session failed"))
-	default:
+	if d.opts.Autonomous {
+		rec := engine.RecommendedOption(ask)
+		// a goal card's question goes to its goal's lead first; the
+		// answerer on record stays the unattended loop (no person typed
+		// it), and the goal's log names the lead
+		if f.InGoal() {
+			if ans, ok, gerr := d.eng.GoalAnswer(ctx, f.ID, ask); gerr == nil && ok && ans != "" {
+				rec = ans
+			}
+		}
+		// the answerer declares itself: the record must say an unattended
+		// loop took it, whoever's stored mode the card runs under, or the
+		// morning receipt under-counts it.
+		if err := d.eng.AnswerAs(ctx, f.ID, rec, state.ActorAutopilot); err != nil {
+			return Outcome{}, false, false, err
+		}
+		d.out.activity(string(f.ID), string(f.Stage), "auto-answered: "+rec)
+		return Outcome{}, false, true, nil
+	}
+	decisionID := ""
+	if ask.DecisionID != "" {
+		decisionID = ask.DecisionID
+	}
+	d.out.emit(questionEvent{
+		Event: "question", ID: string(f.ID), Q: ask.Question,
+		Options: askLabels(ask), Recommended: engine.RecommendedOption(ask),
+		FreeForm: true, Resume: string(f.ID),
+		Next:     d.resumeCmd(string(f.ID), "--answer", `"<answer>"`),
+		Decision: decisionID,
+	})
+	d.logPark(f, state.ParkReasonNeedsYou, ask.Question)
+	return Outcome{Status: StatusQuestion, ID: string(f.ID)}, true, false, nil
+}
+
+// awaitRework waits for a rework pass to finish, then critiques again.
+//
+// A rework pass is a session like any other and may ask a question — the
+// replan after a critique asked for changes is exactly where one gets
+// asked. Until this loop answered it, the question was read as a finished
+// turn: the critique was then dispatched into a session still blocked on
+// the open tool call, nothing could be delivered, and the stage sat
+// silent until the whole stage timeout ran out.
+func (d *Driver) awaitRework(ctx context.Context, f domain.Feature) (Outcome, error) {
+	for {
+		end, err := d.awaitStage(ctx, f.ID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		switch end.kind {
+		case endExhausted:
+			return d.exhausted(ctx, f, end.committed), nil
+		case endTimeout:
+			return d.timeout(f), nil
+		case endError:
+			return Outcome{}, firstErr(end.err, errors.New("rework session failed"))
+		}
+		// A question is not a finished turn, whether the session ended on
+		// it or merely left it open behind an idle message.
+		if d.pendingAsk(f.ID) != nil {
+			out, stop, answered, qerr := d.answerAsk(ctx, f)
+			if qerr != nil {
+				return Outcome{}, qerr
+			}
+			if stop {
+				return out, nil
+			}
+			if answered {
+				continue
+			}
+		}
 		// re-critique the revised output (mirrors ReCritiqueNote intent).
 		if err := d.dispatchCritique(f, verdict.ReCritiqueNote); err != nil {
 			return Outcome{}, err
