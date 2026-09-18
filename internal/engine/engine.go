@@ -1497,7 +1497,8 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
-		recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status, Evidence: experimentEvidence(r)})
+		recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status,
+			Evidence: firstNonEmpty(experimentEvidence(r), checkFailureNote(r))})
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK && len(r.Output) > 0 {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))

@@ -473,6 +473,9 @@ func buildGoalReport(v GoalView) GoalReport {
 					st.Status, st.Evidence = DoneWhenMet, "check passed"
 				} else {
 					st.Status, st.Evidence = DoneWhenNotMet, "check "+res.Status
+					if res.Evidence != "" {
+						st.Evidence += " — " + res.Evidence
+					}
 				}
 			}
 		} else if j, ok := judged[d.ID]; ok {

@@ -33,6 +33,7 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/substrate"
+	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -2553,6 +2554,30 @@ func (e *Engine) recordGoalChecks(f domain.Feature, results []goalCheckResult) {
 		return
 	}
 	e.goalLog(context.Background(), f.ID, state.GoalPayload{Action: state.GoalChecks, Detail: string(raw), By: ActorGoal})
+}
+
+// checkFailureNote is the little a hand-over keeps of what a failing
+// command said. An exit code alone cannot tell a done-when item that is
+// not met yet from one whose command never ran at all — a directory that
+// is not there, a binary that is not on the path — and the person reading
+// the hand-over is the only one who can act on the difference.
+func checkFailureNote(r verify.Result) string {
+	if r.OK {
+		return ""
+	}
+	var lines []string
+	for _, l := range strings.Split(r.Output, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) > 3 {
+		lines = lines[len(lines)-3:]
+	}
+	return clip(strings.Join(lines, " / "), 300)
 }
 
 // goalCheckResult is one check outcome as a goal records it.
