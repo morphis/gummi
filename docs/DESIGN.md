@@ -2921,6 +2921,61 @@ What the lead may *not* settle is a finding that contradicts a done-when
 item or the reference: that changes what "done" means, and is the owner's
 (§17.11).
 
+### 17.11 What a plan does not know, and what is not the goal's to decide
+
+The plan gate demands that every done-when item be checkable, served by a
+card, and funded. Of work that begins with discovery that demands a list
+nobody can honestly write — and gets an invented one, which the budget is
+then committed to.
+
+**A deliberate unknown.** A `gummi-cards` row of kind `tbd` is not a card
+yet: it has a title, the items it serves, the rows it waits for
+(`depends_on`, required — an unknown no research can resolve is not a plan)
+and an envelope (required — it is what bounds the unknown). It serves its
+items, so "every item is served" stays true without anyone pretending. Its
+envelope is a **tranche** the ledger holds exactly as it holds a waiting
+card's. When everything it waited for has landed or been dropped the lead is
+woken once, creates the cards the findings call for with `card_create` and
+`from: "<title>"` — funded from the tranche, not from what is left to give,
+and refused beyond it or for items it was not held for — and the tranche is
+closed after that turn, returning what it did not use. A goal does not
+finish past an open tranche. The critique's `covered` lens asks whether each
+unknown is one its research can actually resolve.
+
+**The question that is the owner's.** Autopilot may create work inside a
+goal *within* the agreed items (decision 20). That is not enough when a
+finding changes what an item should say — the release has no such option;
+the design's assumption is wrong. "What a done-when item says is the owner's
+and no tool changes it" must not bend: it is the only thing between a
+budgeted unattended run and a goal that redefines success until it succeeds.
+And `done_when_not_met` is the wrong tool too — it decides, for the owner,
+that the goal should fail the item.
+
+So the lead asks (`owner_ask`: the item, what was found, and the amendment
+it would propose), and the answer is `NeedBudget`'s shape once more:
+
+- the cards that serve **only** that item are *frozen* — never started,
+  landed, raised or shown to the lead — and keep everything they have;
+- everything else runs on;
+- the board is told at once (`GoalTickResult.NeedsOwner` — the one thing a
+  goal otherwise silent until it is ready says first);
+- when nothing else can move the goal **stops** (`NeedOwner`; headless:
+  `owner_question`, the question status). It does not finish past an open
+  question either: a goal that goes on to be judged with the question open
+  has answered it by default.
+
+Anything the owner says answers it — accept the proposal, amend the item in
+the goal doc themselves, or say it stands — and the lead reads the note on
+its next turn. One question at a time.
+
+**A goal that changes its own rig.** A programme's test harness is often
+part of the programme. The judge still cannot be edited by the work, and
+needs no guard to make it so: an experiment's commands are operator config
+and run in the **workspace root** — the trunk's harness — while they deploy
+from snapshots of the *goal's* heads (`GUMMI_TREE_<REPO>`). A goal's changes
+to the harness are product like any other, reach the substrate as something
+deployed, and only become the judge once a person has landed them.
+
 ## 18. Stacks — slicing one piece of work into several landings
 
 A **stack** is an ordered chain of cards in one repository whose branches

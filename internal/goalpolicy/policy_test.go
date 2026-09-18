@@ -702,3 +702,65 @@ func TestALiveCardIsProvenBeforeItLands(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// A tranche is held like a waiting card's envelope, goes to the lead once
+// what it waited for has settled, and is closed after that look.
+func TestATrancheIsHeldThenOfferedThenClosed(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.Cards = []Card{{ID: "RS-002", State: Running, Envelope: 500, Spent: 100}}
+	in.Tranches = []Tranche{{Title: "topology cards", Envelope: 1500, Given: 400}}
+	if l := ComputeLedger(in); l.Given != 500+1100 {
+		t.Fatalf("held against the ledger, less what its cards were given: %+v", l)
+	}
+	if got := acts(in); got != "" {
+		t.Fatalf("nothing to do while what it waits for is in flight, got %q", got)
+	}
+	in.Cards[0].State = Landed
+	in.Tranches[0].Ready = true
+	if got := acts(in); !strings.Contains(got, `lead [what "topology cards" was waiting for has settled`) || strings.Contains(got, "finish") {
+		t.Fatalf("got %q", got)
+	}
+	in.Tranches[0].LeadSaw = true
+	if got, want := acts(in), "close-tranche: topology cards"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Tranches = nil
+	if got, want := acts(in), "finish"; got != want {
+		t.Fatalf("closed, the goal can finish: got %q, want %q", got, want)
+	}
+}
+
+// A question only the owner can answer freezes what it is about, leaves
+// the rest running, and stops the goal when nothing else can move.
+func TestAQuestionForTheOwnerFreezesOnlyWhatItIsAbout(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.NeedOwner = "DW-3 says no-learning; OVN 24.03 has no such option"
+	in.Cards = []Card{
+		{ID: "FD-002", State: Waiting, Envelope: 500, Frozen: true},
+		{ID: "FD-003", State: Verified, Envelope: 500, Frozen: true},
+		{ID: "FD-004", State: Stuck, Envelope: 500, Frozen: true, Reason: "verify failed"},
+		{ID: "FD-005", State: Waiting, Envelope: 500},
+	}
+	if got, want := acts(in), "start FD-005"; got != want {
+		t.Fatalf("everything else runs on: got %q, want %q", got, want)
+	}
+	in.Cards[3].State = Landed
+	got := Decide(in)
+	if len(got) != 1 || got[0].Kind != NeedOwner || !strings.Contains(got[0].Reason, "no-learning") {
+		t.Fatalf("nothing else can move: it stops and asks, dropping nothing: %v", got)
+	}
+	// and a goal whose work is all landed does not go on to be judged with
+	// the question open
+	for i := range in.Cards {
+		in.Cards[i].State, in.Cards[i].Frozen = Landed, false
+	}
+	if got = Decide(in); len(got) != 1 || got[0].Kind != NeedOwner {
+		t.Fatalf("got %v", got)
+	}
+	in.NeedOwner = ""
+	if got, want := acts(in), "finish"; got != want {
+		t.Fatalf("answered, it finishes: got %q, want %q", got, want)
+	}
+}

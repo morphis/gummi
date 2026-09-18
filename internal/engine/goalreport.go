@@ -169,6 +169,11 @@ type GoalReport struct {
 	// NeedsSubstrate is NeedsBudget for the goal's other ceiling: it cannot
 	// afford the run it has to make in order to be judged.
 	NeedsSubstrate GoalNeedsSubstrate `json:"needs_substrate,omitempty"`
+	// NeedsOwner is a question only the goal's owner can answer: something
+	// found means an agreed item cannot hold as written.
+	NeedsOwner GoalNeedsOwner `json:"needs_owner,omitempty"`
+	// Tranches lists the budget the plan held for cards it could not name.
+	Tranches []GoalReportTranche `json:"tranches,omitempty"`
 	// WaitingOn is set when a card of the goal is waiting for an
 	// environment that could not run its verification plan: the sentence
 	// that says which card and what it lacked. Like NeedsBudget it says
@@ -206,6 +211,16 @@ type GoalReportBudget struct {
 	Total     float64 `json:"total_spend"`
 	// Substrate is the goal's other ledger, absent when none was agreed.
 	Substrate *GoalReportSubstrate `json:"substrate,omitempty"`
+}
+
+// GoalReportTranche is one tbd row of the plan at the hand-over.
+type GoalReportTranche struct {
+	Title    string             `json:"title"`
+	Serves   []string           `json:"serves"`
+	Envelope int                `json:"envelope"`
+	Given    float64            `json:"given_to_cards"`
+	Cards    []domain.FeatureID `json:"cards,omitempty"`
+	Closed   bool               `json:"closed"`
 }
 
 // GoalReportSubstrate is the substrate budget at the hand-over: what was
@@ -282,7 +297,10 @@ func buildGoalReport(v GoalView) GoalReport {
 			MinutesSpent: v.Substrate.MinutesSpent, ReserveRuns: goalpolicy.ReserveRuns,
 		}
 	}
-	r.NeedsSubstrate = v.NeedsSubstrate
+	r.NeedsSubstrate, r.NeedsOwner = v.NeedsSubstrate, v.NeedsOwner
+	for _, t := range v.Tranches {
+		r.Tranches = append(r.Tranches, GoalReportTranche{Title: t.Title, Serves: t.Serves, Envelope: t.Envelope, Given: t.Given, Cards: t.Cards, Closed: t.Closed})
+	}
 	if g.Stage == domain.StageImplement {
 		for _, c := range v.Cards {
 			if c.State == goalpolicy.Blocked {
@@ -492,6 +510,8 @@ func RenderGoalReport(r GoalReport) string {
 		// Not "ready": work remains and a top-up continues it. Saying
 		// ready here would report an unfinished result as a finished one.
 		state = "waiting for you — " + r.NeedsBudget.Reason
+	case r.NeedsOwner.Waiting():
+		state = "waiting for you — " + r.NeedsOwner.Item + " cannot hold as it is written"
 	case r.NeedsSubstrate.Waiting():
 		state = "waiting for you — " + r.NeedsSubstrate.Reason
 	case r.WaitingOn != "":
@@ -500,6 +520,10 @@ func RenderGoalReport(r GoalReport) string {
 		state = "ready for you — partial: " + r.Partial
 	}
 	fmt.Fprintf(&b, "%s. %d of %d done-when items met.\n\n", capitalize(state), met, total)
+	if r.NeedsOwner.Waiting() {
+		fmt.Fprintf(&b, "**%s.** %s\n\nThe lead would propose: %s\n\nWhat the item says is yours and nothing changes it for you. Nothing was dropped; the cards that serve only %s are frozen where they are. Answer with a note — accept the proposal, amend the item in the goal doc yourself, or say the item stands — and the goal carries on:\n\n```sh\ngummi resume %s --goal-note \"<your answer>\"\n```\n\n",
+			r.NeedsOwner.Item, r.NeedsOwner.Question, r.NeedsOwner.Proposal, r.NeedsOwner.Item, r.ID)
+	}
 	if r.NeedsSubstrate.Waiting() && !r.NeedsBudget.Waiting() {
 		fmt.Fprintf(&b, "Nothing was dropped. Raise the goal's substrate budget and it makes the run and carries on:\n\n```sh\ngummi resume %s --runs <more> --minutes <more>\n```\n\n", r.ID)
 	}
@@ -648,6 +672,13 @@ func RenderGoalReport(r GoalReport) string {
 	}
 	fmt.Fprintf(&b, "\n### Spend\n\n- budget %d · goal %.0f · cards %.0f · total %.0f · reserve %d\n",
 		r.Budget.Envelope, r.Budget.Own, r.Budget.CardSpent, r.Budget.Total, r.Budget.Reserve)
+	for _, t := range r.Tranches {
+		state := "open"
+		if t.Closed {
+			state = "closed"
+		}
+		fmt.Fprintf(&b, "- held for %q (%s): %d credits, %.0f given to %d card(s), %s\n", t.Title, strings.Join(t.Serves, ", "), t.Envelope, t.Given, len(t.Cards), state)
+	}
 	if sb := r.Budget.Substrate; sb != nil {
 		fmt.Fprintf(&b, "- substrate: %d of %s runs · %.0f of %s minutes · %d run(s) held back for being judged\n",
 			sb.RunsSpent, orUnbounded(sb.Runs), sb.MinutesSpent, orUnbounded(sb.Minutes), sb.ReserveRuns)

@@ -31,6 +31,13 @@
 //     review of the combined branch starts.
 //  10. When nothing can move and a blocked card is why, the goal stalls:
 //     it stops, drops nothing, and says what it is waiting on.
+//  14. A tranche — budget a plan held for cards nobody could name yet —
+//     goes to the lead once what it waited for has settled, and is closed
+//     after that look: what it did not give to cards returns to the goal.
+//  15. A question only the owner can answer — a finding that would change
+//     what "done" means — freezes the cards that serve only the items it
+//     is about, leaves everything else running, and stops the goal when
+//     nothing else can move. It is never answered by more turns.
 //  12. While work is still in flight the goal finds out early: when cards
 //     have landed on heads no conclusive run is about, and the substrate
 //     is idle, it makes an integration run — from what is left above the
@@ -121,12 +128,33 @@ type Card struct {
 	LiveWhy   string
 	// LiveExperiment is the experiment that proves it.
 	LiveExperiment string
+	// Frozen marks a card that serves only items the owner has been asked
+	// about. It keeps everything it has — its branch, its spend, its place —
+	// and nothing is done to it or for it until the owner answers: building
+	// on towards a "done" that may be about to change is spending on a
+	// guess.
+	Frozen bool
 	// Retry marks a Blocked card there is a reason to try again: something
 	// happened since it stopped that may have changed its environment. A
 	// retry is a verify session and costs what one costs, so the goal
 	// never retries on a timer.
 	Retry bool
 }
+
+// Tranche is part of the budget a plan held for cards it could not name
+// yet (a `tbd` row). While open it is held against the ledger as a waiting
+// card's envelope is, less what cards created from it have been given.
+type Tranche struct {
+	Title    string
+	Envelope int
+	Given    float64 // envelopes of the cards created from it
+	// Ready: everything it waited for has landed or been dropped.
+	// LeadSaw: a lead turn has run since.
+	Ready, LeadSaw bool
+}
+
+// Held is what the tranche still holds against the goal budget.
+func (t Tranche) Held() float64 { return math.Max(0, float64(t.Envelope)-t.Given) }
 
 // Experiment is one experiment the goal's done-when items name, read
 // against the heads the goal has now.
@@ -327,6 +355,11 @@ type Input struct {
 	// Substrate is the goal's substrate budget and what its runs have
 	// spent of it.
 	Substrate SubstrateBudget
+	// Tranches lists the open tranches.
+	Tranches []Tranche
+	// NeedOwner is the standing question only the owner can answer, empty
+	// when there is none.
+	NeedOwner string
 	// IntegrateEvery is how many landings pile up before an integration
 	// run; 0 reads as 1 — whenever the substrate is idle and the heads are
 	// unproven, because an idle scarce resource is pure waste.
@@ -401,10 +434,19 @@ const (
 	// NeedBudget's twin, for the same reason — which proof to go without is
 	// no more the goal's decision than which work to abandon.
 	NeedSubstrate
+	// CloseTranche closes the tranche titled Reason: what it did not give
+	// to cards returns to the goal.
+	CloseTranche
+	// NeedOwner stops the goal on a question only its owner can answer.
+	// Nothing is dropped. It is the one reason a goal that is otherwise
+	// silent until it is ready speaks first, and it exists because the
+	// alternative is a lead that, unable to meet what "done" says, quietly
+	// decides what "done" should have said.
+	NeedOwner
 )
 
 func (k Kind) String() string {
-	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget", "run", "need-substrate"}[k]
+	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget", "run", "need-substrate", "close-tranche", "need-owner"}[k]
 }
 
 // MinCardEnvelope is the smallest envelope worth giving a card. Below it a
@@ -490,6 +532,9 @@ func ComputeLedger(in Input) Ledger {
 	l := Ledger{Envelope: in.Envelope, Own: in.OwnSpent, Reserve: in.Reserve}
 	for _, c := range in.Cards {
 		l.Given += c.Held()
+	}
+	for _, t := range in.Tranches {
+		l.Given += t.Held()
 	}
 	l.Available = float64(in.Envelope) - l.Own - l.Given - float64(in.Reserve)
 	return l
@@ -578,7 +623,7 @@ func Decide(in Input) []Action {
 	// land one verified card per tick
 	idle := substrateIdle(in)
 	for _, c := range cards {
-		if c.State != Verified {
+		if c.State != Verified || (c.Frozen && !wrap) {
 			continue
 		}
 		if c.Findings > 0 && c.LeadTries == 0 && in.LeadAvailable && !wrap {
@@ -629,7 +674,7 @@ func Decide(in Input) []Action {
 	needBudget := false
 	if !wrap {
 		for _, c := range cards {
-			if c.TakenOver {
+			if c.TakenOver || c.Frozen {
 				continue
 			}
 			switch c.State {
@@ -714,6 +759,18 @@ func Decide(in Input) []Action {
 		}
 	}
 
+	// tranches: one look for the lead once what they waited for has
+	// settled, then closed — and closed at once by a wrap-up
+	for _, tr := range in.Tranches {
+		switch {
+		case wrap, tr.Ready && (tr.LeadSaw || !in.LeadAvailable):
+			out = append(out, Action{Kind: CloseTranche, Reason: tr.Title})
+		case tr.Ready:
+			addLead(fmt.Sprintf("what %q was waiting for has settled: create the cards it calls for (card_create with from: %q) within the %.0f credits held for it — what you do not use returns to the goal after this turn",
+				tr.Title, tr.Title, tr.Held()))
+		}
+	}
+
 	// finding out early: regressions first, then heads nobody has proven
 	if !wrap && !needBudget {
 		acts, reasons := integrate(in, idle && !hasKind(out, Run), settled(cards, state))
@@ -745,7 +802,7 @@ func Decide(in Input) []Action {
 			if running >= lanes {
 				break
 			}
-			if c.TakenOver {
+			if c.TakenOver || c.Frozen {
 				continue
 			}
 			switch {
@@ -772,7 +829,14 @@ func Decide(in Input) []Action {
 		}
 	}
 
-	if settled(cards, state) && len(leadReasons) == 0 && !hasKind(out, Land) {
+	// A question for the owner stops the goal once nothing else can move —
+	// including at the point it would otherwise finish, because a goal that
+	// goes on to be judged with the question open has answered it by default.
+	if !wrap && in.NeedOwner != "" && len(out) == 0 && len(leadReasons) == 0 && count(state, Running) == 0 && !anyRunning(in) {
+		return []Action{{Kind: NeedOwner, Reason: in.NeedOwner}}
+	}
+
+	if settled(cards, state) && len(leadReasons) == 0 && !hasKind(out, Land) && !hasKind(out, CloseTranche) && !openTranche(in, wrap) {
 		// The work has settled. Before it is judged, the items an experiment
 		// proves need evidence about the heads the goal has NOW — and a goal
 		// wrapping up gets the same, because a partial result still has to
@@ -902,6 +966,12 @@ func proveFirst(in Input) (acts []Action, wait bool) {
 		acts = acts[:1]
 	}
 	return acts, wait
+}
+
+// openTranche reports that a tranche still stands between the goal and
+// finishing: work it was held for may yet be created.
+func openTranche(in Input, wrap bool) bool {
+	return !wrap && len(in.Tranches) > 0
 }
 
 func depsLanded(c Card, state map[domain.FeatureID]CardState) bool {

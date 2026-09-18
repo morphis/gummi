@@ -360,6 +360,17 @@ hand-over's `needs_substrate` saying which run it cannot afford.
 gummi resume GL-004 --runs 40 --minutes 1800   # more substrate, and it makes the run
 ```
 
+One stop is a question rather than a ceiling. When the goal's lead finds that
+an agreed done-when item cannot hold as written — the thing it assumes is not
+so — it may not change the item and must not quietly fail it: it asks. The
+cards that serve only that item freeze, everything else runs on, and when
+nothing else can move the run exits `question` with an `owner_question` event
+carrying the item, what was found and the amendment the lead would propose.
+
+```sh
+gummi resume GL-004 --goal-note "accepted — DW-3 amended in the doc"
+```
+
 A wrap-up you ask for (`--wrap-up`) still drops what is unfinished: that is
 what finishing now means.
 

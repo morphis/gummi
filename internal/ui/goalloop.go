@@ -145,6 +145,14 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 					" · tell the goal when it is fixed", isErr: true, id: msg.goal}
 			}
 		}
+		if need := msg.res.NeedsOwner; need.Waiting() {
+			// The one thing a running goal says before it is ready, and it
+			// reaches you at once rather than when the rest has settled:
+			// what it found would change what "done" means, and that is
+			// yours. Raised once — the inbox knows what it already holds.
+			m.raiseEscalation(msg.goal, need.Item+" cannot hold as it is written — "+sanitize(need.Question)+
+				" · the lead would propose: "+sanitize(need.Proposal)+" · answer with a note to the goal; everything that does not depend on it keeps running")
+		}
 		if need := msg.res.NeedsSubstrate; need.Waiting() {
 			m.notice = noticeMsg{text: string(msg.goal) + ": out of substrate budget — " + sanitize(need.Reason) +
 				" · raise it with `gummi resume " + string(msg.goal) + " --runs N --minutes M`", isErr: true, id: msg.goal}

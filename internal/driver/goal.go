@@ -255,6 +255,16 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 			wg.Wait()
 			return d.goalStalled(ctx, f, res.Stalled), nil
 		}
+		if res.OwnerStop {
+			// The one question a running goal has for a person before it is
+			// ready: what it found would change what "done" means. Nothing
+			// else can move, nothing was dropped, and a note is the answer.
+			for _, cancel := range running {
+				cancel()
+			}
+			wg.Wait()
+			return d.goalNeedsOwner(ctx, f, res.NeedsOwner), nil
+		}
 		if res.NeedsSubstrate.Waiting() {
 			// the other ceiling, the same ending: only a person raises it
 			wg.Wait()
@@ -561,6 +571,22 @@ func (d *Driver) goalNeedsSubstrate(ctx context.Context, f domain.Feature, need 
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
 }
 
+// goalNeedsOwner reports a goal stopped on a question only its owner can
+// answer. It is a question checkpoint like any card's, and takes that
+// status; the answer is a note to the goal.
+func (d *Driver) goalNeedsOwner(ctx context.Context, f domain.Feature, need engine.GoalNeedsOwner) Outcome {
+	ev := goalStopEvent{
+		Event: "owner_question", ID: string(f.ID), Stage: string(f.Stage),
+		Item: need.Item, Reason: need.Question, Proposal: need.Proposal,
+		Resume: fmt.Sprintf("gummi resume %s --goal-note \"<your answer>\"", f.ID),
+	}
+	if r, err := d.eng.GoalReport(ctx, f.ID); err == nil {
+		ev.Goal = &r
+	}
+	d.out.emit(ev)
+	return Outcome{Status: StatusQuestion, ID: string(f.ID)}
+}
+
 // goalStalled reports a goal whose agent backend could not serve it. It
 // is an error exit — nothing was produced — but a resumable one that
 // dropped nothing: every card keeps its branch, its spend and its place,
@@ -580,14 +606,18 @@ func (d *Driver) goalStalled(ctx context.Context, f domain.Feature, reason strin
 // goalStopEvent is the stream's record of a goal that stopped on a
 // question only a person can answer.
 type goalStopEvent struct {
-	Event  string             `json:"event"`
-	ID     string             `json:"id"`
-	Stage  string             `json:"stage,omitempty"`
-	Reason string             `json:"reason,omitempty"`
-	Card   string             `json:"card,omitempty"`
-	Needs  int                `json:"needs,omitempty"`
-	Resume string             `json:"resume,omitempty"`
-	Goal   *engine.GoalReport `json:"goal,omitempty"`
+	Event  string `json:"event"`
+	ID     string `json:"id"`
+	Stage  string `json:"stage,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Card   string `json:"card,omitempty"`
+	Needs  int    `json:"needs,omitempty"`
+	// Item and Proposal belong to an owner question: the done-when item it
+	// is about, and the amendment the lead would propose.
+	Item     string             `json:"item,omitempty"`
+	Proposal string             `json:"proposal,omitempty"`
+	Resume   string             `json:"resume,omitempty"`
+	Goal     *engine.GoalReport `json:"goal,omitempty"`
 }
 
 // goalReviewUnactionable ends a goal's own review loop. The critique

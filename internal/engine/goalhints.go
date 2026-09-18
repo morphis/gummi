@@ -68,7 +68,18 @@ asking:
    landing it unproven would poison everything that forks from the goal
    branch after it: such a card gets a run of its own, on its own branch,
    before it lands, and each of those is a run the rest of the goal does
-   not get. A card is PR-sized: one coherent change
+   not get.
+   When part of the work cannot be named yet — which cards an item needs
+   depends on what a research or diagnosis row finds — do not invent
+   them. Write a row of kind tbd instead: a title, serves (the items the
+   unnamed cards are for), depends_on (the rows whose findings will say
+   what they are) and an envelope, which is required: it is the part of
+   the budget held for those cards, and what bounds the unknown. The
+   goal's lead turns it into real cards once those rows have landed, and
+   what it does not use returns to the goal. A plan that is honest about
+   what it does not know is a better plan than a complete-looking one;
+   one where every row is tbd is not a plan.
+   A card is PR-sized: one coherent change
    an autopilot can plan, build and verify alone. To hand an existing
    board card to the goal, give its row that card's id; only the user may
    do that, so ask.
@@ -127,7 +138,11 @@ One pass, three lenses, blocking findings only:
                 rather than a wrapper's own status — a check for exit
                 code 2 through ` + "`go run`" + ` can never pass) or is a
                 genuine judgment call
-  covered     — the cards together meet every item; no card is outside
+  covered     — every tbd row is an unknown the rows it depends on can
+                actually resolve, holds an envelope in proportion to what
+                it might become, and is not standing in for work the plan
+                could have named today;
+                the cards together meet every item; no card is outside
                 the objective or the limits; dependencies are in the right
                 order; no two cards will fight over the same code while
                 running in parallel lanes

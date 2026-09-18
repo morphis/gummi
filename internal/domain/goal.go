@@ -160,6 +160,9 @@ func (r GoalCardRow) Validate(items map[string]bool) error {
 	if strings.TrimSpace(r.Title) == "" && r.ID == "" {
 		return fmt.Errorf("a card row has neither a title nor an id")
 	}
+	if r.IsTBD() {
+		return r.validateTBD(name, items)
+	}
 	ct, ok := r.EffectiveType()
 	if !ok || ct.Kind == KindGoal {
 		return fmt.Errorf("card %q: kind %q cannot run inside a goal (feature, bug, research or diagnosis)", name, r.Kind)
@@ -182,6 +185,48 @@ func (r GoalCardRow) Validate(items map[string]bool) error {
 	}
 	if r.Envelope < 0 {
 		return fmt.Errorf("card %q: negative envelope", name)
+	}
+	return nil
+}
+
+// GoalRowTBD is the kind of a row that is not a card yet: work the plan
+// knows it will need and cannot describe until other rows have found
+// something out.
+const GoalRowTBD = "tbd"
+
+// IsTBD reports whether the row is a deliberate unknown.
+//
+// A plan gate that demands every card be named demands, of work that
+// begins with discovery, a list nobody can honestly write — and gets an
+// invented one, which the budget is then committed to. A tbd row says the
+// true thing instead: these items need more cards, which cards depends on
+// what these rows find, and this much of the budget is held for them. It
+// serves its items, so "every item is served" stays true without anyone
+// pretending; its envelope is a tranche the ledger holds, as it holds a
+// waiting card's; and the lead turns it into real cards, within that
+// tranche, once what it waits for has landed.
+func (r GoalCardRow) IsTBD() bool { return strings.EqualFold(strings.TrimSpace(r.Kind), GoalRowTBD) }
+
+func (r GoalCardRow) validateTBD(name string, items map[string]bool) error {
+	if r.ID != "" {
+		return fmt.Errorf("card %q: a tbd row is not a card yet and cannot name one", name)
+	}
+	if len(r.Serves) == 0 {
+		return fmt.Errorf("card %q serves no done-when item; an unknown that serves none is not the goal's work", name)
+	}
+	for _, s := range r.Serves {
+		if !items[s] {
+			return fmt.Errorf("card %q serves %s, which is not on the done-when list", name, s)
+		}
+	}
+	if r.Envelope <= 0 {
+		return fmt.Errorf("card %q: a tbd row holds part of the budget for cards nobody can name yet — give it an envelope, or the unknown is unbounded", name)
+	}
+	if len(r.DependsOn) == 0 {
+		return fmt.Errorf("card %q: a tbd row waits for something to be found out — name the rows (depends_on) whose findings will say what its cards are", name)
+	}
+	if r.Live {
+		return fmt.Errorf("card %q: a tbd row is not a card; mark the cards it becomes live when they are created", name)
 	}
 	return nil
 }

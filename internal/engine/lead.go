@@ -415,6 +415,20 @@ is yours to record (notebook_finding) before the cards that depend on it
 start. A goal whose lead decides nothing leaves each card to decide for
 itself, and they will not decide alike.
 
+When the plan has a tbd row — credits held for cards nobody could name
+until some research landed — you are woken once that research has settled.
+That turn is when the row becomes cards: read what was found, create the
+cards it calls for with card_create and from: "<the row's title>", and the
+row is closed after the turn, returning what you did not use. Create none
+only if the findings show the items need no more work.
+
+One kind of question is not yours: when what you have found means an
+agreed done-when item cannot hold as written, or contradicts the owner's
+reference documents, ask them (owner_ask) with the amendment you would
+propose. Do not mark the item not met to get past it, and do not steer the
+cards towards what you think the item should have said. Everything that
+does not depend on the answer keeps running.
+
 What you never do: go past the goal budget (the tools refuse it), change
 what an agreed done-when item says or remove one (repairing a check's
 command so it can observe the item is not that; weakening it so it
@@ -690,6 +704,8 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 				"repo":       str("The managed repository the card is in; omit for the goal's own."),
 				"depends_on": strs("Card ids that must land first."),
 				"envelope":   num("Credits for the card; 0 for a fair share of what is left."),
+				"from":       str("The title of the plan's tbd row this card comes out of, when it does: its credits come from what that row holds rather than from what the goal has left to give."),
+				"live":       map[string]any{"type": "boolean", "description": "True for a card whose whole point is live behaviour: it proves itself on the substrate, on its own branch, before it lands. Each costs a run the rest of the goal does not get."},
 			}, "title", "serves"),
 		leadTool("card_drop", "Drop a goal card. An attached card goes back to the board with its work kept.", map[string]any{"card": card, "reason": str("Why.")}, "card", "reason"),
 		leadTool("card_raise", "Raise a goal card's envelope from what the goal has left to give.", map[string]any{"card": card, "envelope": num("The new envelope in credits."), "reason": str("Why.")}, "card", "envelope", "reason"),
@@ -722,6 +738,13 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 		leadTool("backlog_file", "File a real bug or idea outside this goal as a card on the open board. The goal never works it.", map[string]any{"kind": str("bug or feature"), "description": str("First line is the title."), "repo": str("The managed repository it is in; omit for the goal's own.")}, "description"),
 		leadTool("reserve_set", "Set the credits you hold back for finishing the goal cleanly.", map[string]any{"credits": num("The reserve."), "reason": str("Your estimate's basis.")}, "credits"),
 		leadTool("goal_doc_write", "Write the goal doc's Try it section.", map[string]any{"section": str("Try it"), "body": str("The section body.")}, "section", "body"),
+		leadTool("owner_ask", "Stop and ask the goal's owner the one kind of question that is theirs alone: something you have found means an agreed done-when item cannot hold as it is written, or contradicts the reference documents the goal was agreed against. You may not change what an item says, and marking it not met would be deciding for them that the goal should fail it. The cards that serve only that item are frozen where they are, everything else runs on, and the goal stops for the owner when nothing else can move. Use it once per question, with a proposal they can simply accept.",
+			map[string]any{
+				"item":     str("The done-when id the question is about (DW-N)."),
+				"question": str("What you found and why the item cannot hold as written, in a few sentences, with the evidence."),
+				"proposal": str("The amendment you would make if it were yours to make — what the item should say instead."),
+				"finding":  str("The notebook finding that records it (F-N), if you recorded one."),
+			}, "item", "question", "proposal"),
 		leadTool("notebook_read", "Read the goal's notebook — what the goal knows that no card owns: the owner's reference documents, the registry of constants you have decided, and the findings recorded so far. Every card's kickoff carries its index; this reads the bodies.",
 			map[string]any{"what": str("index (default), registry, findings, or the name of a reference document.")}),
 		leadTool("notebook_set", "Decide a constant every card must agree on — a name, a number, an allocation scheme, a priority table — and put it in the registry. You are its only writer, which is the point: two cards cannot disagree about a constant neither of them may decide. It is recorded as a decision for review. Deciding a key again replaces it and tells you which cards cite it.",
@@ -772,6 +795,10 @@ type leadArgs struct {
 	Evidence    string          `json:"evidence"`
 	Supersedes  int             `json:"supersedes"`
 	Refuted     bool            `json:"refuted"`
+	From        string          `json:"from"`
+	Live        bool            `json:"live"`
+	Question    string          `json:"question"`
+	Proposal    string          `json:"proposal"`
 }
 
 // dependsOn reads depends_on as a list (card_create) or a single id
@@ -880,7 +907,10 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		if goal.Goal.WrappingUp() {
 			return "", errors.New("the goal is wrapping up; nothing new starts")
 		}
-		row := domain.GoalCardRow{Title: strings.TrimSpace(a.Title), OneLiner: a.OneLiner, Kind: strings.TrimSpace(a.Kind), Serves: a.Serves, Envelope: a.Envelope, Repo: strings.TrimSpace(a.Repo)}
+		row := domain.GoalCardRow{Title: strings.TrimSpace(a.Title), OneLiner: a.OneLiner, Kind: strings.TrimSpace(a.Kind), Serves: a.Serves, Envelope: a.Envelope, Repo: strings.TrimSpace(a.Repo), Live: a.Live}
+		if row.IsTBD() {
+			return "", errors.New("a tbd row is the plan's way of holding budget for cards nobody could name; you are naming one now — give it a real kind")
+		}
 		if row.Repo == "" {
 			row.Repo = goal.Repo
 		}
@@ -902,6 +932,33 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 			}
 		}
 		avail := view.Ledger.Available
+		mintedFrom := ""
+		if from := strings.TrimSpace(a.From); from != "" {
+			// out of a tranche: credits the plan already set aside for
+			// exactly this, so they are not asked of what is left to give
+			var tr *GoalTranche
+			for i := range view.Tranches {
+				if strings.EqualFold(view.Tranches[i].Title, from) {
+					tr = &view.Tranches[i]
+				}
+			}
+			switch {
+			case tr == nil:
+				return "", fmt.Errorf("the plan has no tbd row titled %q", from)
+			case tr.Closed:
+				return "", fmt.Errorf("%q is closed: what it held has returned to the goal — create the card from what the goal has left to give", tr.Title)
+			case !tr.Ready:
+				return "", fmt.Errorf("%q is still waiting for what its cards depend on; creating them now is guessing at what that will find", tr.Title)
+			}
+			shared := false
+			for _, sv := range row.Serves {
+				shared = shared || slices.Contains(tr.Serves, sv)
+			}
+			if !shared {
+				return "", fmt.Errorf("%q was held for %s; this card serves none of them", tr.Title, strings.Join(tr.Serves, ", "))
+			}
+			avail, mintedFrom = float64(tr.Envelope)-tr.Given, trancheRef+tr.Title
+		}
 		env := a.Envelope
 		if env <= 0 {
 			env = int(avail / 2)
@@ -910,6 +967,9 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 			env = domain.MinEnvelope
 		}
 		if float64(env) > avail {
+			if mintedFrom != "" {
+				return "", fmt.Errorf("a %d-credit card needs more than the %.0f credits %q still holds", env, max(0, avail), a.From)
+			}
 			return "", fmt.Errorf("a %d-credit card needs more than the %.0f credits the goal has left to give", env, max(0, avail))
 		}
 		// row.Validate above has already refused an unresolvable kind.
@@ -937,7 +997,7 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		row.ID = f.ID
 		row.DependsOn = deps
 		lt.appendCardRow(row)
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalMinted, Card: f.ID, Detail: f.Title, To: env, By: "lead"})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalMinted, Card: f.ID, Detail: f.Title, To: env, Ref: mintedFrom, By: "lead"})
 		mark()
 		e.send(Event{Feature: f.ID, Kind: EventCardCreated})
 		return fmt.Sprintf("created %s with %d credits; gummi starts it once its dependencies land", f.ID, env), nil
@@ -1163,6 +1223,36 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		}
 		mark()
 		return "Try it written", nil
+
+	case "owner_ask":
+		item := strings.ToUpper(strings.TrimSpace(a.Item))
+		found := false
+		for _, d := range view.DoneWhen {
+			found = found || d.ID == item
+		}
+		switch {
+		case !found:
+			return "", fmt.Errorf("%q is not on the done-when list", a.Item)
+		case strings.TrimSpace(a.Question) == "" || strings.TrimSpace(a.Proposal) == "":
+			return "", errors.New("the owner needs what you found and what you would change: give the question and the proposal")
+		case view.NeedsOwner.Waiting():
+			return "", fmt.Errorf("the owner has already been asked about %s and has not answered; one question at a time", view.NeedsOwner.Item)
+		}
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalNeedOwner, Item: item, Detail: strings.TrimSpace(a.Question),
+			Alternative: strings.TrimSpace(a.Proposal), Ref: strings.TrimSpace(a.Finding), By: "lead"})
+		mark()
+		e.send(Event{Feature: goal.ID, Stage: goal.Stage, Kind: EventGoal})
+		var frozen []string
+		for _, c := range view.Cards {
+			if servesOnly(c.Serves, item) && c.State != goalpolicy.Landed && c.State != goalpolicy.Dropped {
+				frozen = append(frozen, string(c.Feature.ID))
+			}
+		}
+		out := "asked. The goal stops for the owner once nothing else can move"
+		if len(frozen) > 0 {
+			out += "; frozen meanwhile, with everything they have: " + strings.Join(frozen, ", ")
+		}
+		return out + ". Do not work around the question: leave " + item + " and the cards that serve it as they are.", nil
 
 	case "notebook_read":
 		return lt.notebookRead(goal, a)

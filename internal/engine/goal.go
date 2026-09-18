@@ -110,6 +110,7 @@ type GoalCard struct {
 	LeadTries   int
 	TakenOver   bool
 	Retry       bool     // a blocked card there is a reason to try again
+	Frozen      bool     // serves only an item the owner has been asked about
 	WaitsOn     []string // the substrates a blocked card's plan cites
 	// Live marks a card that proves itself on the substrate before it lands
 	// (its row's `live: true`); LiveExperiment is the experiment that does,
@@ -147,6 +148,57 @@ type GoalView struct {
 	NeedsSubstrate GoalNeedsSubstrate
 	// Notebook is the index of what the goal knows that no card owns.
 	Notebook string
+	// Tranches lists the budget held for cards the plan could not name yet.
+	Tranches []GoalTranche
+	// NeedsOwner is the standing question only the owner can answer.
+	NeedsOwner GoalNeedsOwner
+}
+
+// GoalTranche is one tbd row of the plan and what has become of it.
+type GoalTranche struct {
+	Title    string
+	Serves   []string
+	Envelope int
+	Given    float64            // envelopes of the cards created from it
+	Cards    []domain.FeatureID // those cards
+	Closed   bool
+	// Ready: every row it waited for has landed or been dropped, at
+	// SettledAt.
+	Ready     bool
+	SettledAt time.Time
+}
+
+// GoalNeedsOwner is a question only the goal's owner can answer: a finding
+// that would change what an agreed done-when item means.
+type GoalNeedsOwner struct {
+	Item     string `json:"item,omitempty"`
+	Question string `json:"question,omitempty"`
+	Proposal string `json:"proposal,omitempty"`
+	Finding  string `json:"finding,omitempty"`
+}
+
+// Waiting reports whether the goal has a question open.
+func (n GoalNeedsOwner) Waiting() bool { return n.Question != "" }
+
+// needsOwnerFrom derives the standing question from the log: the newest one
+// the owner has not spoken after. Anything the owner says answers it — a
+// note, a send-back, a reversal — because what they say is theirs to choose,
+// and the lead reads it on its next turn either way.
+func needsOwnerFrom(log []state.GoalEntry) GoalNeedsOwner {
+	var out GoalNeedsOwner
+	for _, en := range log {
+		switch en.Action {
+		case state.GoalNeedOwner:
+			out = GoalNeedsOwner{Item: en.Item, Question: en.Detail, Proposal: en.Alternative, Finding: en.Ref}
+		case state.GoalNote, state.GoalReversed:
+			out = GoalNeedsOwner{}
+		case state.GoalRework:
+			if en.By == "user" {
+				out = GoalNeedsOwner{}
+			}
+		}
+	}
+	return out
 }
 
 // Card returns the goal card with id, and whether it belongs to the goal.
@@ -181,6 +233,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		return v, err
 	}
 	v.NeedsBudget = needsBudgetFrom(v.Log)
+	v.NeedsOwner = needsOwnerFrom(v.Log)
 	v.Notebook = e.goalNotebook(goal.ID).Index()
 	v.DocPath = e.artifactFile(&goal)
 	if v.DocPath != "" {
@@ -394,6 +447,14 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		v.Cards = append(v.Cards, gc)
 	}
 
+	droppedAt := map[domain.FeatureID]time.Time{}
+	for _, en := range v.Log {
+		if en.Action == state.GoalDropped {
+			droppedAt[en.Card] = en.At
+		}
+	}
+	v.Tranches = goalTranches(v.Rows, v.Log, v.Cards, landedAt, droppedAt)
+
 	in := goalpolicy.Input{
 		Stage:        goal.Stage,
 		Envelope:     goal.Budget.Envelope,
@@ -406,9 +467,20 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		LeadOutage:   outage,
 		Reviewing:    e.Get(goal.ID) != nil,
 	}
+	in.NeedOwner = v.NeedsOwner.Question
+	for _, t := range v.Tranches {
+		if !t.Closed {
+			in.Tranches = append(in.Tranches, goalpolicy.Tranche{Title: t.Title, Envelope: t.Envelope, Given: t.Given,
+				Ready: t.Ready, LeadSaw: t.Ready && lastLeadAt.After(t.SettledAt)})
+		}
+	}
+	for i := range v.Cards {
+		v.Cards[i].Frozen = v.NeedsOwner.Waiting() && servesOnly(v.Cards[i].Serves, v.NeedsOwner.Item)
+	}
 	for _, gc := range v.Cards {
 		in.Cards = append(in.Cards, goalpolicy.Card{
-			ID: gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
+			Frozen: gc.Frozen,
+			ID:     gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
 			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings, Discoveries: gc.Discoveries,
 			LeadTries: gc.LeadTries, Reason: gc.Reason, Retry: gc.Retry,
 			Live: gc.Live, LiveExperiment: gc.LiveExperiment, LiveProof: gc.LiveProof, LiveWhy: gc.LiveWhy,
@@ -689,6 +761,12 @@ type GoalTickResult struct {
 	// NeedsSubstrate is set when the tick stopped the goal on a run it
 	// cannot afford.
 	NeedsSubstrate GoalNeedsSubstrate
+	// NeedsOwner is the goal's standing question for its owner, set on
+	// every tick while it stands: a board says so at once, because it is
+	// the one thing a running goal has to say before it is ready. OwnerStop
+	// reports that nothing else can move and the goal has stopped on it.
+	NeedsOwner GoalNeedsOwner
+	OwnerStop  bool
 }
 
 // GoalNeedsSubstrate is a goal's standing request for more substrate
@@ -784,7 +862,7 @@ func (e *Engine) GoalTick(ctx context.Context, goalID domain.FeatureID) (GoalTic
 		return res, err
 	}
 	acts := goalpolicy.Decide(view.Input)
-	res.Actions = acts
+	res.Actions, res.NeedsOwner = acts, view.NeedsOwner
 	for _, a := range acts {
 		if err := e.goalExecute(ctx, view, a, &res); err != nil {
 			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadNote, Card: a.Card, By: ActorGoal,
@@ -848,6 +926,19 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 	case goalpolicy.Stall:
 		e.goalStall(ctx, goal.ID, a.Card, a.Experiment, a.Reason)
 		res.Stalled, res.StalledOn, res.StalledExperiment = a.Reason, a.Card, a.Experiment
+		return nil
+	case goalpolicy.CloseTranche:
+		for _, t := range view.Tranches {
+			if t.Title == a.Reason && !t.Closed {
+				back := max(0, float64(t.Envelope)-t.Given)
+				e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTrancheClosed, Ref: t.Title, To: int(back), By: ActorGoal,
+					Detail: fmt.Sprintf("%d card(s) created from it; %.0f credits return to the goal", len(t.Cards), back)})
+			}
+		}
+		res.Again = true
+		return nil
+	case goalpolicy.NeedOwner:
+		res.OwnerStop = true
 		return nil
 	case goalpolicy.NeedSubstrate:
 		res.NeedsSubstrate = GoalNeedsSubstrate{Experiment: a.Experiment, Reason: a.Reason}
@@ -956,6 +1047,78 @@ func (e *Engine) RaiseGoalSubstrate(ctx context.Context, goalID domain.FeatureID
 func mustGoalLog(ctx context.Context, e *Engine, id domain.FeatureID) []state.GoalEntry {
 	log, _ := e.cfg.Store.GoalLog(ctx, id)
 	return log
+}
+
+// trancheRef marks the log entry of a card created from a tranche.
+const trancheRef = "tranche:"
+
+// goalTranches reads the plan's tbd rows against the log: what each holds,
+// what it has given to cards, whether what it waited for has settled.
+func goalTranches(rows []domain.GoalCardRow, log []state.GoalEntry, cards []GoalCard, landedAt, droppedAt map[domain.FeatureID]time.Time) []GoalTranche {
+	byTitle := map[string]domain.FeatureID{}
+	for _, r := range rows {
+		if r.ID != "" {
+			byTitle[strings.ToLower(strings.TrimSpace(r.Title))] = r.ID
+			byTitle[strings.ToLower(string(r.ID))] = r.ID
+		}
+	}
+	stateOf := map[domain.FeatureID]goalpolicy.CardState{}
+	for _, c := range cards {
+		stateOf[c.Feature.ID] = c.State
+	}
+	var out []GoalTranche
+	for _, r := range rows {
+		if !r.IsTBD() {
+			continue
+		}
+		t := GoalTranche{Title: r.Title, Serves: r.Serves, Envelope: r.Envelope, Ready: true}
+		opened := false
+		for _, en := range log {
+			switch {
+			case en.Action == state.GoalTranche && en.Ref == r.Title:
+				opened = true
+			case en.Action == state.GoalTrancheClosed && en.Ref == r.Title:
+				t.Closed = true
+			case en.Action == state.GoalMinted && en.Ref == trancheRef+r.Title:
+				t.Given += float64(en.To)
+				t.Cards = append(t.Cards, en.Card)
+			}
+		}
+		if !opened {
+			continue // the plan has not been approved yet
+		}
+		for _, d := range r.DependsOn {
+			id := byTitle[strings.ToLower(strings.TrimSpace(d))]
+			switch stateOf[id] {
+			case goalpolicy.Landed:
+				if at := landedAt[id]; at.After(t.SettledAt) {
+					t.SettledAt = at
+				}
+			case goalpolicy.Dropped:
+				if at := droppedAt[id]; at.After(t.SettledAt) {
+					t.SettledAt = at
+				}
+			default:
+				t.Ready = false
+			}
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// servesOnly reports that every item a card serves is item: the card has no
+// other reason to go on while item is in question.
+func servesOnly(serves []string, item string) bool {
+	if len(serves) == 0 || item == "" {
+		return false
+	}
+	for _, s := range serves {
+		if s != item {
+			return false
+		}
+	}
+	return true
 }
 
 // goalNeedBudget stops the goal on a card it cannot fund and records what
@@ -1660,7 +1823,12 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 		return err.Error()
 	}
 	var want []int
+	tranches := 0
 	for _, r := range rows {
+		if r.IsTBD() {
+			tranches += r.Envelope
+			continue
+		}
 		if r.ID == "" {
 			// A goal is not in a repository: each row says where its card
 			// goes, and the only thing the gate asks is that the name is
@@ -1694,8 +1862,25 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 	if goal.Budget.Envelope <= 0 {
 		return "the goal has no budget"
 	}
-	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows))
+	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows)) - float64(tranches)
+	if tranches > 0 {
+		startable := 0
+		for _, r := range rows {
+			if !r.IsTBD() {
+				startable++
+			}
+		}
+		if startable == 0 {
+			return "every row is tbd — a goal needs at least one card that can start, and what a tbd row waits for is one of them"
+		}
+		if pool < 0 {
+			return fmt.Sprintf("the tbd rows hold %d credits, more than the goal budget leaves for cards at all", tranches)
+		}
+	}
 	if _, err := goalpolicy.StartEnvelopes(want, pool); err != nil && len(want) > 0 {
+		if tranches > 0 {
+			return fmt.Sprintf("%v — after the %d credits its tbd rows hold", err, tranches)
+		}
 		return err.Error()
 	}
 	return ""
@@ -1762,6 +1947,9 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		return err
 	}
 	for _, r := range rows {
+		if r.IsTBD() {
+			continue // not a card yet: the cards it becomes cut their own trees
+		}
 		repo := r.Repo
 		if r.ID != "" {
 			c, cerr := e.cfg.Store.GetFeature(ctx, r.ID)
@@ -1804,12 +1992,26 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		itemText[it.ID] = it.Says
 	}
 	var want []int
+	tranches := 0
+	opened := map[string]bool{}
+	for _, en := range mustGoalLog(ctx, e, goal.ID) {
+		if en.Action == state.GoalTranche {
+			opened[en.Ref] = true
+		}
+	}
 	for _, r := range rows {
-		if r.ID == "" {
+		switch {
+		case r.IsTBD():
+			tranches += r.Envelope
+			if !opened[r.Title] { // a crossing resumed half-way opens it once
+				e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTranche, Ref: r.Title, To: r.Envelope, By: ActorGoal,
+					Detail: fmt.Sprintf("held for cards nobody can name until %s has settled", strings.Join(r.DependsOn, ", "))})
+			}
+		case r.ID == "":
 			want = append(want, r.Envelope)
 		}
 	}
-	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows))
+	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows)) - float64(tranches)
 	envs, err := goalpolicy.StartEnvelopes(want, pool)
 	if err != nil && len(want) > 0 {
 		return err
@@ -1818,6 +2020,9 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	byTitle := map[string]domain.FeatureID{}
 	for i := range rows {
 		r := &rows[i]
+		if r.IsTBD() {
+			continue
+		}
 		if r.ID == "" {
 			// Validate has already refused every row whose kind does not
 			// resolve, so the discard here can only be the feature default.
@@ -1853,6 +2058,9 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		}
 	}
 	for _, r := range rows {
+		if r.IsTBD() {
+			continue // what a tbd row waits for is read from the plan, not the dependency table
+		}
 		for _, d := range r.DependsOn {
 			dep := byTitle[strings.ToLower(strings.TrimSpace(d))]
 			if dep == "" || dep == r.ID {
