@@ -173,3 +173,21 @@ func TestARunWhoseRunnerDiedIsInconclusive(t *testing.T) {
 		t.Fatalf("%+v", runs)
 	}
 }
+
+// TestASubstrateJustProvisionedIsNotProvisionedAgain: a run whose worst
+// case is longer than the substrate's whole lifetime never fits, and
+// bringing the substrate up is the slowest and scarcest thing gummi asks
+// of it. Making it ready and then renewing it in the same breath measures
+// the same lifetime twice and pays for it twice.
+func TestASubstrateJustProvisionedIsNotProvisionedAgain(t *testing.T) {
+	j := job(t, config.Experiment{
+		Deploy: "true", Settle: "true", Run: "true", Timeout: "30m",
+	}, config.Substrate{TTL: "1m", Provision: "touch up; echo up >> provisions"})
+	res := Execute(context.Background(), j)
+	if res.Outcome != Pass {
+		t.Fatalf("the run did not go ahead: %s — %s", res.Outcome, res.Reason)
+	}
+	if n := count(t, j.Root, "provisions"); n != 1 {
+		t.Fatalf("the substrate was provisioned %d times to be given the same lifetime: %v", n, res.Ops)
+	}
+}

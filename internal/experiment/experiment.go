@@ -338,6 +338,18 @@ func (r *runner) save() {
 	}
 }
 
+// justProvisioned reports whether making the substrate ready included a
+// provision that worked — in which case its lifetime is already as long as
+// this substrate's lifetimes get.
+func justProvisioned(ops []substrate.Op) bool {
+	for _, op := range ops {
+		if op.Kind == "provision" && op.OK {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *runner) end(o Outcome, reason string) Result {
 	r.res.State, r.res.Outcome, r.res.Reason = StateDone, o, reason
 	r.res.Ended = r.now().UTC()
@@ -379,14 +391,23 @@ func Execute(ctx context.Context, job Job) Result {
 		return finish(Inconclusive, "the substrate could not be made ready: "+err.Error())
 	}
 	if !st.Fits(job.Def.Longest()) {
-		op, could := lease.Provision(ctx, r.logFile(0, "substrate"))
-		if !could {
-			return finish(NotRun, fmt.Sprintf("%s expires at %s, before a run of up to %s could finish, and there is no provision command to renew it",
-				job.Def.Substrate, st.ExpiresAt.Format(time.RFC3339), job.Def.Longest()))
-		}
-		r.noteOps([]substrate.Op{op})
-		if st = lease.Status(ctx); st.State != substrate.Ready {
-			return finish(Inconclusive, "the substrate was renewed before its expiry and did not come back ready")
+		// Renewing is the slowest thing gummi asks of a substrate, so it is
+		// asked for only when it can change the answer. A substrate whose
+		// whole lifetime is shorter than one run's worst case never fits,
+		// however freshly it is provisioned — and when EnsureReady has just
+		// provisioned it on the way in, a second provision is measuring the
+		// same lifetime twice. The run goes ahead either way (a worst case
+		// is not a forecast); what it must not do is pay for that twice.
+		if !justProvisioned(ops) {
+			op, could := lease.Provision(ctx, r.logFile(0, "substrate"))
+			if !could {
+				return finish(NotRun, fmt.Sprintf("%s expires at %s, before a run of up to %s could finish, and there is no provision command to renew it",
+					job.Def.Substrate, st.ExpiresAt.Format(time.RFC3339), job.Def.Longest()))
+			}
+			r.noteOps([]substrate.Op{op})
+			if st = lease.Status(ctx); st.State != substrate.Ready {
+				return finish(Inconclusive, "the substrate was renewed before its expiry and did not come back ready")
+			}
 		}
 	}
 
