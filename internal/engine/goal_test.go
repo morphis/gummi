@@ -953,3 +953,43 @@ func TestACheckRunInTheGoalTreeDoesNotStopTheNextLanding(t *testing.T) {
 	}
 }
 
+// A note is delivered to the conductor, which reads it at implement. One
+// that arrives while the goal is reviewing, verifying or already ready
+// for you has nobody left to read it — so the hand-over says so, instead
+// of leaving it in the doc for nobody.
+func TestANoteThatArrivedTooLateIsOnTheHandOver(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("goal plan gate: %v %v", res.Status, err)
+	}
+	if _, err := store.AppendGoalEvent(ctx, g.ID, state.GoalPayload{Action: state.GoalLeadTurn, Detail: "kickoff"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.GoalNote(ctx, g.ID, "the hex path is broken too"); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Unread) != 1 || rep.Unread[0].Detail != "the hex path is broken too" {
+		t.Fatalf("unread notes = %+v", rep.Unread)
+	}
+	if !strings.Contains(RenderGoalReport(rep), "Notes nobody read") {
+		t.Errorf("the report does not say the note went unread:\n%s", RenderGoalReport(rep))
+	}
+
+	// a lead turn after it reads it; it is no longer unread
+	if _, err := store.AppendGoalEvent(ctx, g.ID, state.GoalPayload{Action: state.GoalLeadTurn, Detail: "read the note"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Unread) != 0 {
+		t.Errorf("a note the lead has read is still listed as unread: %+v", rep.Unread)
+	}
+}

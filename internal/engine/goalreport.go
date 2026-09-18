@@ -107,7 +107,14 @@ type GoalReport struct {
 	Decisions   []GoalLogLine    `json:"decisions,omitempty"`
 	Declined    []GoalLogLine    `json:"declined_findings,omitempty"`
 	Found       []GoalLogLine    `json:"found_along_the_way,omitempty"`
-	TryIt       string           `json:"try_it,omitempty"`
+	// Unread lists notes that reached the goal after its last lead turn.
+	// A note is delivered to the conductor, which reads it at implement —
+	// so one that arrives while the goal is reviewing, verifying or
+	// already ready for you has nobody left to read it. It is not lost,
+	// but it was not acted on either, and the hand-over is where that has
+	// to be said rather than left in the doc for nobody.
+	Unread []GoalLogLine `json:"unread_notes,omitempty"`
+	TryIt  string        `json:"try_it,omitempty"`
 }
 
 // GoalReportBudget is the budget tree at the hand-over.
@@ -186,8 +193,18 @@ func buildGoalReport(v GoalView) GoalReport {
 	landedSubject := map[domain.FeatureID]string{}
 	var lastChecks []goalCheckResult
 	notMet := map[string]string{}
+	type seqNote struct {
+		seq  int64
+		line GoalLogLine
+	}
+	var notes []seqNote
+	var lastLeadSeq int64
 	for _, en := range v.Log {
 		switch en.Action {
+		case state.GoalLeadTurn:
+			lastLeadSeq = en.Seq
+		case state.GoalNote:
+			notes = append(notes, seqNote{en.Seq, GoalLogLine{Detail: en.Detail, By: en.By}})
 		case state.GoalLanded:
 			landedSubject[en.Card] = en.Detail
 		case state.GoalChecks:
@@ -242,6 +259,11 @@ func buildGoalReport(v GoalView) GoalReport {
 		}
 	}
 	r.Budget.Total = r.Budget.Own + r.Budget.CardSpent
+	for _, n := range notes {
+		if n.seq > lastLeadSeq {
+			r.Unread = append(r.Unread, n.line)
+		}
+	}
 
 	checkByName := map[string]goalCheckResult{}
 	for _, c := range lastChecks {
@@ -414,6 +436,13 @@ func RenderGoalReport(r GoalReport) string {
 		b.WriteString("\n### Declined findings\n\n")
 		for _, d := range r.Declined {
 			fmt.Fprintf(&b, "- %s: %s — declined: %s\n", d.Card, d.Finding, d.Detail)
+		}
+	}
+	if len(r.Unread) > 0 {
+		b.WriteString("\n### Notes nobody read\n\n")
+		b.WriteString("These arrived after the goal's last lead turn, so nothing acted on them:\n\n")
+		for _, n := range r.Unread {
+			fmt.Fprintf(&b, "- %s\n", n.Detail)
 		}
 	}
 	if len(r.Found) > 0 {
