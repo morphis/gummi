@@ -336,3 +336,46 @@ func TestShrinkGivesUpWhenThereIsNoRoom(t *testing.T) {
 		t.Errorf("a goal that genuinely cannot fund its card must wrap up and drop it: %v", acts)
 	}
 }
+
+// The measured failure. Three ticks in two seconds each got the same
+// "You've hit your session limit · resets 3:10pm (UTC)" back from the
+// backend, which spent MaxLeadFailures and wrapped the goal up — dropping
+// two cards that had working branches and 124 credits of plan work
+// between them. A backend that cannot serve a turn says nothing about the
+// work, and waiting is not abandoning.
+func TestAnOutageStopsTheGoalWithoutDroppingItsWork(t *testing.T) {
+	in := Input{
+		Stage: domain.StageImplement, Envelope: 3000, Lanes: 2,
+		LeadAvailable: true, LeadOutage: "You've hit your session limit · resets 3:10pm (UTC)",
+		Cards: []Card{
+			{ID: "BG-002", State: Running, Envelope: 1048, Spent: 55},
+			{ID: "BG-003", State: Waiting, Envelope: 1048},
+		},
+	}
+	acts := Decide(in)
+	if len(acts) != 1 || acts[0].Kind != Stall {
+		t.Fatalf("an outage must stop the goal and do nothing else: %v", acts)
+	}
+	if acts[0].Reason != in.LeadOutage {
+		t.Errorf("reason = %q, want the backend's own words", acts[0].Reason)
+	}
+	for _, a := range acts {
+		if a.Kind == Drop || a.Kind == WrapUp || a.Kind == Start || a.Kind == Finish {
+			t.Errorf("an outage decided %s — the work is not at fault", a)
+		}
+	}
+
+	// the same snapshot with the lead genuinely failing still wraps up:
+	// MaxLeadFailures is for a lead that cannot do its job.
+	broken := in
+	broken.LeadOutage, broken.LeadFailures = "", MaxLeadFailures
+	var wrapped bool
+	for _, a := range Decide(broken) {
+		if a.Kind == WrapUp {
+			wrapped = true
+		}
+	}
+	if !wrapped {
+		t.Error("a lead that keeps failing still wraps the goal up")
+	}
+}

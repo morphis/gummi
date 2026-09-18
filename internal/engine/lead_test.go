@@ -670,3 +670,78 @@ func TestGoalDoneWhenChecksComeFromTheDoneWhenBlock(t *testing.T) {
 		t.Fatalf("a lost copy is restored from the done-when block: %+v", got)
 	}
 }
+
+// A backend that is rate-limited answers every tick the same way and
+// instantly. Three of those in two seconds used to spend MaxLeadFailures
+// and wrap the goal up, dropping cards that had branches and work on
+// them. The turn's failure now carries what it was, and the conductor
+// stops on it without deciding anything about the work.
+func TestABackendOutageStopsTheGoalAndKeepsItsCards(t *testing.T) {
+	lf := newLeadFake(func(string) []agent.Event { return nil })
+	lf.SendErr = &agent.RunFailure{
+		Backend: "claude", FirstTurn: true,
+		Diagnostic: "You've hit your session limit · resets 3:10pm (UTC)",
+	}
+	e, store, _, g := leadEngine(t, lf)
+	ctx := context.Background()
+
+	before := goalCards(t, store, g.ID)
+	if len(before) == 0 {
+		t.Fatal("the goal minted no cards")
+	}
+	var res GoalTickResult
+	for i := 0; i < goalpolicy.MaxLeadFailures+1; i++ {
+		res = tick(t, e, g.ID)
+	}
+	if res.Stalled == "" {
+		t.Fatalf("an outage did not stall the goal: %+v", res.Actions)
+	}
+	if !strings.Contains(res.Stalled, "resets 3:10pm") {
+		t.Errorf("stall reason = %q, want the backend's own words", res.Stalled)
+	}
+
+	got, _ := store.GetFeature(ctx, g.ID)
+	if got.Goal.WrappingUp() {
+		t.Error("an outage wrapped the goal up — waiting is not abandoning")
+	}
+	for _, c := range goalCards(t, store, g.ID) {
+		if c.GoalDropped() {
+			t.Errorf("%s was dropped for a backend outage", c.ID)
+		}
+	}
+
+	// said once, not once per tick
+	log, _ := store.GoalLog(ctx, g.ID)
+	stalls, outages := 0, 0
+	for _, en := range log {
+		switch {
+		case en.Action == state.GoalStalled:
+			stalls++
+		case en.Action == state.GoalLeadFailed && en.Outage:
+			outages++
+		}
+	}
+	if stalls != 1 {
+		t.Errorf("the log says the goal stalled %d times, want 1", stalls)
+	}
+	if outages == 0 {
+		t.Error("the lead failures were not recorded as the backend's")
+	}
+
+	// inside the cool-off the goal sits still rather than spawning a
+	// doomed session on every tick, and says nothing new
+	if res = tick(t, e, g.ID); res.Stalled == "" {
+		t.Error("the goal retried the backend immediately after stalling")
+	}
+	after, _ := store.GoalLog(ctx, g.ID)
+	if len(after) != len(log) {
+		t.Errorf("a tick inside the cool-off wrote %d new log entries", len(after)-len(log))
+	}
+
+	// past it, one tick tries again — and the backend is back
+	lf.SendErr = nil
+	e.now = func() time.Time { return time.Now().Add(goalOutageRetry + time.Minute) }
+	if res = tick(t, e, g.ID); res.Stalled != "" {
+		t.Errorf("the goal stayed stalled after the backend returned: %q", res.Stalled)
+	}
+}

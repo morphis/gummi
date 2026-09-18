@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
@@ -53,6 +54,14 @@ const ActorGoal = "goal"
 // tick, while the cost of restarting one that is not is a lead turn and a
 // duplicated pass.
 const goalIdleGrace = 5 * time.Minute
+
+// goalOutageRetry is how long a goal waits before asking a backend that
+// could not serve it to try again. A rate limit lasts minutes to hours
+// and every attempt inside it costs a process spawn and another failure
+// in the log, so the conductor sits still between tries rather than
+// retrying on its poll interval — while still recovering on its own,
+// which is what a person expects to come back to.
+const goalOutageRetry = 2 * time.Minute
 
 // goalLock serializes everything the conductor does for one goal: two
 // ticks of the same goal must never land two cards on its branch at once
@@ -167,6 +176,8 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	leadSeen := map[domain.FeatureID][]int64{}
 	var lastLeadOK, lastLeadAny int64
 	failures := 0
+	outage, stalled := "", ""
+	var stalledAt time.Time
 	for _, en := range v.Log {
 		switch en.Action {
 		case state.GoalStarted, state.GoalBounced, state.GoalRaised, state.GoalAnswered,
@@ -178,6 +189,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		case state.GoalDropped:
 			dropReason[en.Card] = en.Detail
 		case state.GoalLeadTurn:
+			outage, stalled = "", ""
 			// only a wake turn names the cards it was woken over in Ref;
 			// a turn answering a card's question or checking its plan
 			// carries the card in Card and is not a try at unsticking it
@@ -190,7 +202,18 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			}
 		case state.GoalLeadFailed:
 			lastLeadAny = en.Seq
+			if en.Outage {
+				// not the lead's failure: the backend could not serve the
+				// turn. It neither counts against the lead nor clears a
+				// previous count — nothing was learned either way.
+				outage = en.Detail
+				continue
+			}
+			outage = ""
 			failures++
+		case state.GoalStalled:
+			// the goal has already stopped on this outage and said so
+			outage, stalled, stalledAt = "", en.Detail, en.At
 		}
 		if en.Action == state.GoalAttached {
 			attachSpent[en.Card] = en.From
@@ -198,6 +221,13 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	}
 
 	now := e.now()
+	if outage == "" && stalled != "" && now.Sub(stalledAt) < goalOutageRetry {
+		// Already reported, and the backend is unlikely to have come back
+		// in the last few seconds. Staying stopped keeps the goal from
+		// spawning a doomed session on every tick; after the window one
+		// tick tries again, and either carries on or stalls afresh.
+		outage = stalled
+	}
 	for _, c := range cards {
 		gc := GoalCard{Feature: c, Serves: serves[c.ID], TakenOver: c.GateMode() == domain.GateAttended}
 		before := attachSpent[c.ID]
@@ -253,6 +283,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		WrapUp:       goal.Goal.WrappingUp(),
 		WrapReason:   e.goalWrapReason(v.Log),
 		LeadFailures: failures,
+		LeadOutage:   outage,
 		Reviewing:    e.Get(goal.ID) != nil,
 	}
 	for _, gc := range v.Cards {
@@ -426,6 +457,11 @@ type GoalTickResult struct {
 	// cannot fund: the driving loop reports it to whoever is listening
 	// rather than carrying on.
 	NeedsBudget GoalNeedsBudget
+	// Stalled carries the backend's own words when the tick stopped
+	// because the agent backend could not serve the goal at all. Nothing
+	// was dropped: the driving loop reports it and stops, and picking the
+	// goal back up once the backend is available carries on.
+	Stalled string
 }
 
 // GoalNeedsBudget is a goal's standing request for more budget: which
@@ -511,12 +547,16 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 			return err
 		}
 		return nil
+	case goalpolicy.Stall:
+		e.goalStall(ctx, goal.ID, a.Reason)
+		res.Stalled = a.Reason
+		return nil
 	case goalpolicy.Lead:
 		starts, err := e.runLeadTurn(ctx, view, a.Reasons)
 		res.Start = append(res.Start, starts...)
 		res.Again = true
 		if err != nil {
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Detail: err.Error(), By: ActorGoal})
+			e.logLeadFailure(ctx, goal.ID, "", err)
 		}
 		return nil
 	case goalpolicy.Start:
@@ -856,6 +896,39 @@ func (e *Engine) goalLand(ctx context.Context, goal, card domain.Feature) ([]Goa
 	subject, _, _ := strings.Cut(msg, "\n")
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLanded, Card: card.ID, Detail: shortSHA(sha) + " " + subject, Ref: sha, By: ActorGoal})
 	return nil, nil
+}
+
+// logLeadFailure records a failed lead turn, marking the ones the lead
+// is not responsible for. A backend that cannot serve the turn — a
+// provider quota, a rate limit, an overload — says so in its own words,
+// and those words mean "wait", not "this lead is broken".
+func (e *Engine) logLeadFailure(ctx context.Context, goal domain.FeatureID, card domain.FeatureID, err error) {
+	p := state.GoalPayload{Action: state.GoalLeadFailed, Card: card, Detail: err.Error(), By: ActorGoal}
+	if words, out := agent.Unavailable(err); out {
+		p.Outage, p.Detail = true, words
+	}
+	e.goalLog(ctx, goal, p)
+}
+
+// goalStall records that the goal stopped because its agent backend
+// could not serve it. Unlike a wrap-up it drops nothing: every card keeps
+// its branch, its spend and its place, and the next tick after the
+// backend returns carries on.
+func (e *Engine) goalStall(ctx context.Context, goal domain.FeatureID, reason string) {
+	log, err := e.cfg.Store.GoalLog(ctx, goal)
+	if err == nil {
+		for i := len(log) - 1; i >= 0; i-- {
+			switch log[i].Action {
+			case state.GoalStalled:
+				if log[i].Detail == reason {
+					return // already said, and nothing has happened since
+				}
+			case state.GoalLeadTurn, state.GoalLanded, state.GoalStarted:
+				i = 0 // something worked since the last stall: say it again
+			}
+		}
+	}
+	e.goalLog(ctx, goal, state.GoalPayload{Action: state.GoalStalled, Detail: reason, By: ActorGoal})
 }
 
 // tidyGoalTree puts a goal tree's tracked files back the way its branch

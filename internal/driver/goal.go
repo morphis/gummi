@@ -244,6 +244,17 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 			wg.Wait()
 			return d.awaitCritique(ctx, f)
 		}
+		if res.Stalled != "" {
+			// The backend cannot serve this goal at all. Nothing was
+			// dropped and nothing is in flight that finishing would help,
+			// so the run stops where it is and says what the backend
+			// said — which generally names the hour it comes back.
+			for _, cancel := range running {
+				cancel()
+			}
+			wg.Wait()
+			return d.goalStalled(ctx, f, res.Stalled), nil
+		}
 		if res.NeedsBudget.Waiting() {
 			// The envelope is spent and only a person raises it. Exit 5
 			// with the report, the same status and the same answer a card
@@ -506,6 +517,22 @@ func (d *Driver) goalNeedsBudget(ctx context.Context, f domain.Feature, need eng
 	}
 	d.out.emit(ev)
 	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
+}
+
+// goalStalled reports a goal whose agent backend could not serve it. It
+// is an error exit — nothing was produced — but a resumable one that
+// dropped nothing: every card keeps its branch, its spend and its place,
+// and the same resume carries on once the backend is back.
+func (d *Driver) goalStalled(ctx context.Context, f domain.Feature, reason string) Outcome {
+	ev := goalStopEvent{
+		Event: "stalled", ID: string(f.ID), Stage: string(f.Stage),
+		Reason: reason, Resume: d.resumeCmd(string(f.ID)),
+	}
+	if r, err := d.eng.GoalReport(ctx, f.ID); err == nil {
+		ev.Goal = &r
+	}
+	d.out.emit(ev)
+	return Outcome{Status: StatusStalled, ID: string(f.ID)}
 }
 
 // goalStopEvent is the stream's record of a goal that stopped on a

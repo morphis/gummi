@@ -93,8 +93,14 @@ type Input struct {
 	// LeadAvailable reports that a lead turn can run: a lead role resolves
 	// and the goal has not given up on it.
 	LeadAvailable bool
-	// LeadFailures counts consecutive failed lead turns.
+	// LeadFailures counts consecutive failed lead turns — the lead's own
+	// failures. A turn that failed because the backend could not serve it
+	// is not one of them; it is LeadOutage.
 	LeadFailures int
+	// LeadOutage carries the backend's own words when the newest lead
+	// turn could not run at all and nothing has succeeded since. The goal
+	// stops on it and keeps everything.
+	LeadOutage string
 	// LeadPending lists wake reasons no lead turn has handled yet.
 	LeadPending []string
 	// Reviewing reports that the goal's own review or verify session is in
@@ -133,6 +139,19 @@ const (
 	// the goal. The opposite of Raise, and the step that was missing
 	// between "the ledger went negative" and "drop a card".
 	Shrink
+	// Stall stops the goal because its agent backend could not serve it —
+	// a provider quota, a rate limit, an overload. Reason is the
+	// backend's own words, which generally say when it will serve again.
+	//
+	// It is the answer to a lead that is not failing at its job but
+	// cannot run at all, and it drops nothing: MaxLeadFailures exists for
+	// a lead that keeps getting the work wrong, and counting an outage
+	// towards it spent a goal's whole tolerance in two seconds — three
+	// identical "you've hit your session limit" replies, one per tick,
+	// and every card dropped with a working branch. Which work to abandon
+	// is no more the goal's decision here than it is when the budget runs
+	// out (NeedBudget); waiting is not abandoning.
+	Stall
 	// NeedBudget stops the goal and asks for more. Card cannot go on
 	// without credits the envelope cannot give, and To is what it asks
 	// for — only a person raises a goal's envelope.
@@ -148,7 +167,7 @@ const (
 )
 
 func (k Kind) String() string {
-	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "need-budget"}[k]
+	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget"}[k]
 }
 
 // MinCardEnvelope is the smallest envelope worth giving a card. Below it a
@@ -237,6 +256,14 @@ func Decide(in Input) []Action {
 	wrapReason := in.WrapReason
 
 	ledger := ComputeLedger(in)
+	// An outage outranks every other reading of the snapshot: a goal
+	// whose backend cannot serve a turn cannot start a card, land one, or
+	// ask its lead anything, and the one thing it must not do is decide
+	// that the work is at fault. Nothing is dropped, nothing is started,
+	// and the goal waits to be picked back up.
+	if !wrap && in.LeadOutage != "" {
+		return []Action{{Kind: Stall, Reason: in.LeadOutage}}
+	}
 	if !wrap && in.LeadFailures >= MaxLeadFailures {
 		wrap, wrapReason = true, "the lead kept failing"
 		out = append(out, Action{Kind: WrapUp, Reason: wrapReason})

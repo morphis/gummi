@@ -188,7 +188,7 @@ func (e *Engine) GoalAnswer(ctx context.Context, id domain.FeatureID, ask *Ask) 
 	lt := &leadTurn{e: e, view: view, question: &leadQuestion{card: id, ask: ask}}
 	text, lerr := e.leadSession(ctx, lt, leadQuestionPrompt(view, card, ask))
 	if lerr != nil {
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Card: id, Detail: lerr.Error(), By: ActorGoal})
+		e.logLeadFailure(ctx, goal.ID, id, lerr)
 		return e.goalFallbackAnswer(ctx, goal, card, ask, fallback, "the lead turn failed"), true, nil
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadTurn, Card: id, Detail: clip(text, 600), By: "lead"})
@@ -231,7 +231,7 @@ func (e *Engine) GoalPlanCheck(ctx context.Context, id domain.FeatureID) (approv
 	lt := &leadTurn{e: e, view: view, planCard: id}
 	text, lerr := e.leadSession(ctx, lt, leadPlanPrompt(view, card, e.artifactFile(&card)))
 	if lerr != nil {
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadFailed, Card: id, Detail: lerr.Error(), By: ActorGoal})
+		e.logLeadFailure(ctx, goal.ID, id, lerr)
 		return true, "", true, nil
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadTurn, Card: id, Detail: clip(text, 600), By: "lead"})

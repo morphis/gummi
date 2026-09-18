@@ -123,6 +123,13 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 		if msg.err != nil {
 			m.notice = noticeMsg{text: string(msg.goal) + ": " + sanitize(msg.err.Error()), isErr: true, id: msg.goal}
 		}
+		if msg.res.Stalled != "" {
+			// The backend could not serve the goal. The conductor dropped
+			// nothing and started nothing; saying so once is the whole of
+			// what the board can do, and the goal picks itself back up on
+			// the next tick after the backend returns.
+			m.notice = noticeMsg{text: string(msg.goal) + ": waiting on the agent backend — " + sanitize(msg.res.Stalled), isErr: true, id: msg.goal}
+		}
 		for _, st := range msg.res.Start {
 			cmds = append(cmds, m.goalStartCmd(st))
 		}

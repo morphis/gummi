@@ -43,6 +43,7 @@ const (
 	GoalFound        = "found"         // a backlog card filed along the way
 	GoalLeadTurn     = "lead-turn"     // the lead took a turn
 	GoalLeadFailed   = "lead-failed"   // a lead turn failed
+	GoalStalled      = "stalled"       // the agent backend could not serve the goal; nothing was dropped
 	GoalCaughtUp     = "caught-up"     // the goal branch caught up with main
 	GoalTidied       = "tidied"        // the goal tree was put back after a check run changed tracked files
 	GoalCatchUpFail  = "catch-up-failed"
@@ -81,6 +82,13 @@ type GoalPayload struct {
 	// By is who acted: "lead", "goal" (the conductor's own rule), or
 	// "user".
 	By string `json:"by,omitempty"`
+	// Outage marks a lead-failed entry whose cause was the agent backend
+	// being unable to serve the turn at all — a provider quota, a rate
+	// limit, an overload (agent.Unavailable) — rather than the lead
+	// failing at its job. The two look identical in a log and mean
+	// opposite things: one is a reason to stop relying on the lead, the
+	// other is a reason to wait.
+	Outage bool `json:"outage,omitempty"`
 }
 
 // GoalEntry is one decoded goal log entry with its place in the log.

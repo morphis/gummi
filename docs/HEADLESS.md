@@ -165,6 +165,7 @@ branches on:
 | `5` | `exhausted` | envelope dry. `resume --envelope N` with a higher number |
 | `6` | `timeout` | a stage went quiet. Report; resumable |
 | `1` | `error` | setup or agent failure. Nothing partial landed |
+| `1` | `stalled` | a goal's agent backend could not serve it (a quota, a rate limit, an overload). Nothing was dropped — the event's `reason` carries the backend's own words, and the same `resume` continues it |
 
 `gummi doctor` has its own exit status, outside this table: **7** while any
 check is failing, 0 once the workspace is ready. It applies to `--json` too,
@@ -353,6 +354,14 @@ gummi resume GL-004 --envelope 6000     # more budget, and it carries on
 
 A wrap-up you ask for (`--wrap-up`) still drops what is unfinished: that is
 what finishing now means.
+
+A backend that cannot serve the goal at all — a provider quota, a rate
+limit, an overload — is neither a budget question nor the work's fault, so
+it is not a wrap-up either. The run exits `stalled` with the backend's own
+sentence (which usually says when it comes back) on a `stalled` event, every
+card keeps its branch, its spend and its place, and `gummi resume GL-NNN`
+carries on. A goal left running in the board picks itself back up on its own,
+asking the backend again a couple of minutes after each refusal.
 
 **Hand-over.** When its cards have settled, the goal reviews and verifies
 the combined branch. The run exits `verified` with the hand-over on the event's
