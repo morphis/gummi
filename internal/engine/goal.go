@@ -105,10 +105,12 @@ type GoalCard struct {
 	Spent     float64            // the spend that counts against the goal
 	DependsOn []domain.FeatureID // other cards of this goal
 	Findings  int                // open reviewer findings on a verified card
-	LeadTries int
-	TakenOver bool
-	Retry     bool     // a blocked card there is a reason to try again
-	WaitsOn   []string // the substrates a blocked card's plan cites
+	// Discoveries counts the FINDING: lines in a verified card's spec.
+	Discoveries int
+	LeadTries   int
+	TakenOver   bool
+	Retry       bool     // a blocked card there is a reason to try again
+	WaitsOn     []string // the substrates a blocked card's plan cites
 	// Live marks a card that proves itself on the substrate before it lands
 	// (its row's `live: true`); LiveExperiment is the experiment that does,
 	// LiveHead the commit a proof has to be about, LiveProof how far that
@@ -143,6 +145,8 @@ type GoalView struct {
 	Substrate goalpolicy.SubstrateBudget
 	// NeedsSubstrate is the goal's standing request for more of it.
 	NeedsSubstrate GoalNeedsSubstrate
+	// Notebook is the index of what the goal knows that no card owns.
+	Notebook string
 }
 
 // Card returns the goal card with id, and whether it belongs to the goal.
@@ -177,6 +181,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		return v, err
 	}
 	v.NeedsBudget = needsBudgetFrom(v.Log)
+	v.Notebook = e.goalNotebook(goal.ID).Index()
 	v.DocPath = e.artifactFile(&goal)
 	if v.DocPath != "" {
 		if raw, rerr := os.ReadFile(v.DocPath); rerr == nil {
@@ -352,6 +357,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		}
 		if gc.State == goalpolicy.Verified {
 			gc.Findings = e.openReviewerFindings(&c)
+			gc.Discoveries = e.reportedDiscoveries(&c)
 		}
 		if gc.State == goalpolicy.Verified && live[c.ID] {
 			for _, item := range gc.Serves {
@@ -403,7 +409,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	for _, gc := range v.Cards {
 		in.Cards = append(in.Cards, goalpolicy.Card{
 			ID: gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
-			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings,
+			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings, Discoveries: gc.Discoveries,
 			LeadTries: gc.LeadTries, Reason: gc.Reason, Retry: gc.Retry,
 			Live: gc.Live, LiveExperiment: gc.LiveExperiment, LiveProof: gc.LiveProof, LiveWhy: gc.LiveWhy,
 		})
@@ -1725,6 +1731,12 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		if err := e.cfg.Store.SetGoalLanes(ctx, goal.ID, lanes); err != nil {
 			return err
 		}
+	}
+	// The reference is the owner's from here on: what is in it now is what
+	// the goal was agreed against, and a document that changes later is
+	// reported as changed wherever it is listed.
+	if err := e.goalNotebook(goal.ID).Pin(); err != nil {
+		return err
 	}
 	if budget, _, berr := spec.ParseGoalSubstrate(doc); berr != nil {
 		return berr

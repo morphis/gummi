@@ -1704,6 +1704,11 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		}
 	}
 	hints := stageHints(f, specPath, scratch, flavor)
+	if nb := e.notebookHint(f); nb != "" {
+		// what the goal knows that this card does not own: a line per
+		// entry, however much that comes to
+		hints = append(hints, nb)
+	}
 	if f.IsGoal() {
 		// A goal may span repositories, and nothing else in its contract
 		// says so: its plan has to know it may put a card in one, and its

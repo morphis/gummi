@@ -100,6 +100,11 @@ type Card struct {
 	TakenOver bool
 	// Findings counts reviewer findings still open on a verified card.
 	Findings int
+	// Discoveries counts what a verified card says it found out about the
+	// system the goal is building on (FINDING: lines in its spec) — things
+	// other cards need to know, which only the lead can put where they
+	// will see them.
+	Discoveries int
 	// LeadTries counts lead turns that have already seen this card's
 	// current problem and left it as it was.
 	LeadTries int
@@ -578,6 +583,11 @@ func Decide(in Input) []Action {
 		}
 		if c.Findings > 0 && c.LeadTries == 0 && in.LeadAvailable && !wrap {
 			addLead(fmt.Sprintf("%s verified with %d open reviewer finding(s) to settle", c.ID, c.Findings))
+			break
+		}
+		if c.Discoveries > 0 && c.LeadTries == 0 && in.LeadAvailable && !wrap {
+			addLead(fmt.Sprintf("%s verified and reports %d thing(s) it found out about the system (FINDING: lines in its spec) — "+
+				"record what holds in the notebook (notebook_finding) so the cards after it build on it", c.ID, c.Discoveries))
 			break
 		}
 		if c.Live && !wrap && !c.TakenOver {

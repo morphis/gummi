@@ -36,6 +36,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/goalpolicy"
 	"github.com/morphis/gummi/internal/mcp"
+	"github.com/morphis/gummi/internal/notebook"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
@@ -401,7 +402,18 @@ observe what its item says (done_when_check_fix), add a done-when item
 that one of the owner's notes asked for (done_when_add), file an
 out-of-goal bug or idea on the open board (backlog_file), set the reserve
 you hold back for finishing (reserve_set), write the Try it section
-(goal_doc_write), and wrap the goal up now (goal_wrap_up).
+(goal_doc_write), keep the goal's notebook (notebook_read, notebook_set,
+notebook_finding), and wrap the goal up now (goal_wrap_up).
+
+The notebook is how the goal's cards come to agree. Each card sees only
+its own spec and the notebook's index; none of them sees another's. So a
+constant two cards must share — a naming or addressing scheme, a priority
+table, an interface between them — is yours to decide, once, in the
+registry (notebook_set), BEFORE the first card that needs it plans; and
+what a research card or an experiment shows to be true about the system
+is yours to record (notebook_finding) before the cards that depend on it
+start. A goal whose lead decides nothing leaves each card to decide for
+itself, and they will not decide alike.
 
 What you never do: go past the goal budget (the tools refuse it), change
 what an agreed done-when item says or remove one (repairing a check's
@@ -526,6 +538,9 @@ func goalDocBrief(v GoalView) string {
 			body = body[:runeCut(body, goalDocBriefMax)] + "\n[… cut; goal_doc has the rest]"
 		}
 		fmt.Fprintf(&b, "\nGoal doc — %s:\n%s\n", name, body)
+	}
+	if v.Notebook != "" {
+		fmt.Fprintf(&b, "\nThe goal's notebook (notebook_read has the bodies):\n%s\n", v.Notebook)
 	}
 	return b.String()
 }
@@ -707,6 +722,23 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 		leadTool("backlog_file", "File a real bug or idea outside this goal as a card on the open board. The goal never works it.", map[string]any{"kind": str("bug or feature"), "description": str("First line is the title."), "repo": str("The managed repository it is in; omit for the goal's own.")}, "description"),
 		leadTool("reserve_set", "Set the credits you hold back for finishing the goal cleanly.", map[string]any{"credits": num("The reserve."), "reason": str("Your estimate's basis.")}, "credits"),
 		leadTool("goal_doc_write", "Write the goal doc's Try it section.", map[string]any{"section": str("Try it"), "body": str("The section body.")}, "section", "body"),
+		leadTool("notebook_read", "Read the goal's notebook — what the goal knows that no card owns: the owner's reference documents, the registry of constants you have decided, and the findings recorded so far. Every card's kickoff carries its index; this reads the bodies.",
+			map[string]any{"what": str("index (default), registry, findings, or the name of a reference document.")}),
+		leadTool("notebook_set", "Decide a constant every card must agree on — a name, a number, an allocation scheme, a priority table — and put it in the registry. You are its only writer, which is the point: two cards cannot disagree about a constant neither of them may decide. It is recorded as a decision for review. Deciding a key again replaces it and tells you which cards cite it.",
+			map[string]any{
+				"key":         str("One word a spec can cite, e.g. transit-mac-scheme."),
+				"value":       str("The constant itself, complete enough to implement from."),
+				"reason":      str("Why this and not the alternative."),
+				"alternative": str("The option not taken."),
+			}, "key", "value", "reason", "alternative"),
+		leadTool("notebook_finding", "Record something that turned out to be true about the system the goal is building on — from a research card's document, an experiment's evidence, a card's discovery. Append-only: a finding is never edited, only superseded (give `supersedes`), and you are told which cards cite the one it replaces. Record what contradicts what a card was told to assume; do not record opinions. A finding that contradicts a done-when item or the owner's reference is not yours to settle.",
+			map[string]any{
+				"finding":    str("The claim, in a sentence or two a card can act on."),
+				"evidence":   str("What showed it: a run id, a card's document and section, a source file and line."),
+				"card":       str("The card whose work found it, if one."),
+				"supersedes": num("The number N of the finding F-N this replaces, if it replaces one."),
+				"refuted":    map[string]any{"type": "boolean", "description": "True to record that something the goal assumed is NOT so."},
+			}, "finding", "evidence"),
 		leadTool("goal_wrap_up", "Wrap the goal up now: nothing new starts, verified work lands, the rest is dropped.", map[string]any{"reason": str("Why.")}, "reason"),
 	}
 }
@@ -734,6 +766,12 @@ type leadArgs struct {
 	Description string          `json:"description"`
 	Credits     int             `json:"credits"`
 	Body        string          `json:"body"`
+	What        string          `json:"what"`
+	Key         string          `json:"key"`
+	Value       string          `json:"value"`
+	Evidence    string          `json:"evidence"`
+	Supersedes  int             `json:"supersedes"`
+	Refuted     bool            `json:"refuted"`
 }
 
 // dependsOn reads depends_on as a list (card_create) or a single id
@@ -1125,6 +1163,45 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		}
 		mark()
 		return "Try it written", nil
+
+	case "notebook_read":
+		return lt.notebookRead(goal, a)
+
+	case "notebook_set":
+		if strings.TrimSpace(a.Reason) == "" || strings.TrimSpace(a.Alternative) == "" {
+			return "", errors.New("a decided constant is a decision for review: give the reason and the alternative not taken")
+		}
+		nb := e.goalNotebook(goal.ID)
+		en := e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, By: "lead",
+			Detail: "registry: " + strings.TrimSpace(a.Key) + " = " + clip(a.Value, 200), Alternative: a.Alternative})
+		prev, err := nb.Set(notebook.Entry{Key: a.Key, Value: a.Value, Why: a.Reason, Decision: en.DecisionRef(), At: e.now()})
+		if err != nil {
+			return "", err
+		}
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalKnown, Ref: strings.TrimSpace(a.Key), Detail: clip(a.Value, 200), By: "lead"})
+		mark()
+		out := "decided " + strings.TrimSpace(a.Key) + " (" + en.DecisionRef() + ")"
+		if prev != nil {
+			out += "; it was " + clip(prev.Value, 120) + citingCards(e, view, strings.TrimSpace(a.Key))
+		}
+		return out, nil
+
+	case "notebook_finding":
+		f := notebook.Finding{Claim: a.Finding, Evidence: a.Evidence, Card: a.Card, Supersedes: a.Supersedes, At: e.now()}
+		if a.Refuted {
+			f.Status = notebook.Refuted
+		}
+		got, err := e.goalNotebook(goal.ID).Record(f)
+		if err != nil {
+			return "", err
+		}
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalKnown, Card: domain.FeatureID(a.Card), Ref: got.Ref(), Detail: clip(got.Claim, 200), By: "lead"})
+		mark()
+		out := "recorded " + got.Ref()
+		if a.Supersedes != 0 {
+			out += fmt.Sprintf("; F-%d is superseded%s", a.Supersedes, citingCards(e, view, fmt.Sprintf("F-%d", a.Supersedes)))
+		}
+		return out, nil
 
 	case "goal_wrap_up":
 		if err := e.goalWrapUp(ctx, goal.ID, firstNonEmpty(a.Reason, "the lead wrapped the goal up"), "lead"); err != nil {

@@ -99,6 +99,11 @@ asking:
    minted, so the number's whole job is to tell a person whether the
    budget they are about to approve is the right order of magnitude.
 
+If the goal was given reference documents, its notebook's index is in
+this kickoff: plan against them, and quote them by name where a done-when
+item or a card stands on one. They are the user's, and are pinned when the
+plan is approved.
+
 Keep the doc current as answers arrive through gummi's spec tools. Leave
 Notes, Try it, Review, Verification plan and Report alone — they are
 filled later. Do not start any of the work, and do not create cards

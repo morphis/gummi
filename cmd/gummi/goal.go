@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
+	"github.com/morphis/gummi/internal/notebook"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -56,6 +57,17 @@ func runGoal(args []string) error {
 		if err != nil {
 			return driver.Outcome{}, err
 		}
+		// The owner's reference documents go into the goal's notebook before
+		// the plan conversation starts: the architect plans against them,
+		// and the plan gate pins them.
+		for _, p := range strings.Split(*gv.reference, ",") {
+			if p = strings.TrimSpace(p); p == "" {
+				continue
+			}
+			if err := notebook.Open(ws.GoalNotebookDir(f.ID)).AddReference(p); err != nil {
+				return driver.Outcome{}, fmt.Errorf("--reference %s: %w", p, err)
+			}
+		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
 			return driver.Outcome{}, err
@@ -77,7 +89,7 @@ type goalFlagValues struct {
 	envelope            *int
 	profile, gate, ref  *string
 	until, base         *string
-	planFile            *string
+	planFile, reference *string
 	autonomous, verbose *bool
 	timeout             *time.Duration
 }
@@ -96,5 +108,6 @@ func registerGoalFlags(fs *flag.FlagSet) *goalFlagValues {
 		base:       fs.String("base", "", "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)"),
 		planFile:   fs.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)"),
+		reference:  fs.String("reference", "", "documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff"),
 	}
 }

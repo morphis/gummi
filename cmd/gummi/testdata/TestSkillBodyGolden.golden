@@ -112,6 +112,7 @@ gummi goal [flags] "<objective>"
     --plan-file string        a complete goal doc to start the plan conversation from (a file path, or - for stdin)
     --profile string          profile mapping roles to models, the lead included (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
+    --reference string        documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff
     --stage-timeout duration  per-stage inactivity timeout for the goal and each of its cards (0 disables)
     --until string            stop cleanly before the goal's plan is approved (only "plan" is a valid stop)
     --verbose                 add per-tool-call activity lines to the stream

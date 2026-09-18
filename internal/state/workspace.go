@@ -71,6 +71,15 @@ func (w Workspace) ScratchFilesDir(id domain.FeatureID) string {
 	return filepath.Join(w.StateDir(), "scratch", string(id))
 }
 
+// GoalNotebookDir is where a goal keeps what it knows that no card owns —
+// the owner's reference documents, the constants it has decided, what it
+// found to be true (internal/notebook). Beside the goal doc and, like it,
+// never on a branch: a goal is in no repository, so its knowledge is in
+// none.
+func (w Workspace) GoalNotebookDir(goal domain.FeatureID) string {
+	return filepath.Join(w.GummiDir(), "goals", string(goal))
+}
+
 // EvidenceDir holds what an owner's experiment runs left behind — one
 // directory per run (internal/experiment). It is a record, not a cache: a
 // hand-over points into it, so nothing cleans it up behind a reader.

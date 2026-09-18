@@ -2884,6 +2884,43 @@ still runs in parallel — while live proof is a second, serial queue. After
 mutual exclusion that is the honest concurrency figure for a programme like
 this: as many cards thinking as the lanes allow, and one experiment.
 
+### 17.10 The notebook — what a goal knows that no card owns
+
+The durable context carrier is a markdown spec on the card's branch. That is
+right for a card and wrong for a programme. The design a goal implements,
+the allocation scheme its parts must agree on, what was learned about how
+the system under it really behaves: every card needs these and none owns
+them. Re-deriving them per card is expensive, and worse — two cards that
+derive a scheme differently produce parts that do not fit, and each one's
+own review and verify pass.
+
+A goal is in no repository (§17.2a), so its knowledge is in none: the
+notebook (`internal/notebook`) is a directory beside the goal doc,
+`.gummi/goals/GL-NNN/`, never on a branch an upstream would receive. Its
+three parts are told apart by **who may write them**:
+
+| part | writer | rule |
+|---|---|---|
+| `reference/` | the owner (`gummi goal --reference`, or by hand before the gate) | hashed at the plan gate; a document that changes or goes missing afterwards is reported as such wherever it is listed |
+| registry (`REGISTRY.md`) | the lead, `notebook_set` | decided constants — names, numbers, schemes, tables. One writer, so two cards cannot disagree about one: neither may decide it. Every entry is a decision for review |
+| findings (`FINDINGS.md`) | the lead, `notebook_finding` | what turned out to be true, with its evidence. Append-only: never edited, only superseded, so a spec that cites `F-7` cites something that will always say what it said |
+
+Every session inside the goal — each card's stages, the goal's own, the
+lead's turns — is shown the **index**, a line per entry, and reads a body
+from disk when its work touches one. The token window stays small however
+much a goal comes to know. Cards cite what they stand on by key or
+F-number, which makes the dependency mechanical: the moment the lead
+replaces a constant or supersedes a finding, the tool's own result names the
+unfinished cards whose specs cite it, while the lead is still in the turn
+that can send them a note. A card that discovers something writes a
+`FINDING:` line in its spec, and a verified card with one goes to the lead
+once before it lands — only the lead can put it where the cards after it
+will see it.
+
+What the lead may *not* settle is a finding that contradicts a done-when
+item or the reference: that changes what "done" means, and is the owner's
+(§17.11).
+
 ## 18. Stacks — slicing one piece of work into several landings
 
 A **stack** is an ordered chain of cards in one repository whose branches
