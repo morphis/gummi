@@ -1407,7 +1407,15 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// checks' own timeouts (or the package default) plus a small slack,
 	// bounded below by verifyStageTimeout. Each check also gets its own
 	// per-check bound so one hung command cannot starve the rest.
-	results, err := verify.RunWithBudget(context.Background(), workDir, checks, verifyStageTimeout)
+	var results []verify.Result
+	if s.Feature.IsGoal() {
+		// A goal's checks do not all run in one place: a done-when item
+		// names the repository its command proves the goal in, and each
+		// group runs in that repository's goal tree (goalchecks.go).
+		results, err = e.runGoalChecks(context.Background(), s.Feature, string(raw), checks)
+	} else {
+		results, err = verify.RunWithBudget(context.Background(), workDir, checks, verifyStageTimeout)
+	}
 	if err != nil {
 		return ""
 	}
@@ -1662,6 +1670,15 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		}
 	}
 	hints := stageHints(f, specPath, scratch, flavor)
+	if f.IsGoal() {
+		// A goal may span repositories, and nothing else in its contract
+		// says so: its plan has to know it may put a card in one, and its
+		// review and verify have to know the combined change is in
+		// several trees rather than the one they are standing in.
+		if card := e.goalReposCard(ctx, f); card != "" {
+			hints = append(hints, card)
+		}
+	}
 	// The repository orientation card sits directly under the operator's
 	// environment card: the operator's own words lead, because they are a
 	// deliberate instruction, and the file tree is reference material the

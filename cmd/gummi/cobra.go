@@ -451,8 +451,7 @@ func bindGoalFlags(cmd *cobra.Command) {
 	f.Bool("autonomous", false, "let the architect take its recommended answer instead of asking during the plan conversation")
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
-	f.String("repo", "", "managed repository for the goal and all its cards (a configured `repos:` name; required when `repos:` is configured)")
-	f.String("base", "", "branch the goal branch forks from and lands on (default: whatever the repository has checked out)")
+	f.String("base", "", "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)")
 	f.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)")
 }

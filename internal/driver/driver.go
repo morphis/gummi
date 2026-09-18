@@ -2118,9 +2118,17 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 // MCP endpoint's card_new tool — this is now just the translation from a
 // Driver's own Options to a cardmint.Input.
 func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
+	repo := d.opts.Repo
+	if ct.Kind == domain.KindGoal && repo == "" {
+		// A goal names no repository — its cards do, and its plan gate
+		// settles its own home from them. Until then its branch has to be
+		// cut somewhere, and in a `repos:`-only workspace there is no
+		// default to cut it in.
+		repo = d.eng.ProvisionalRepo()
+	}
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: ct.Kind, Mode: ct.Mode, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
-		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
+		Repo: repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 		GoalDoc: d.opts.GoalDoc,
 	})

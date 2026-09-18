@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -215,5 +216,46 @@ func TestSingleNamedRepoIsNotATabStop(t *testing.T) {
 	}
 	if seen[cardStopRepo] {
 		t.Error("focus landed on the read-only repo row")
+	}
+}
+
+// TestCardFormNeverAsksAGoalForARepo: a goal is not in a repository —
+// the cards its plan agrees name their own, and the goal's own home is
+// settled from them at its plan gate. So the dialog does not open on the
+// repo row, does not offer it, and does not refuse to create without one.
+func TestCardFormNeverAsksAGoalForARepo(t *testing.T) {
+	var got formResult
+	var created bool
+	f := newCardForm(domain.CardType{Kind: domain.KindGoal}, nil, []string{"a", "b"}, false, "", nil, 0, func(res formResult) tea.Cmd {
+		got, created = res, true
+		return nil
+	})
+	if f.focus != cardStopText {
+		t.Fatalf("focus = %d, want the text box", f.focus)
+	}
+	if slices.Contains(f.stops(), cardStopRepo) {
+		t.Fatal("the repo row is not in a goal's focus ring")
+	}
+	f.SetText("export works offline")
+	f.env.SetValue("4000")
+	if view := f.View(theme.New(theme.GummiDark()), 80, 24); strings.Contains(view, "repo") {
+		t.Errorf("a goal's dialog shows no repo row:\n%s", view)
+	}
+	if done, _ := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); !done || !created {
+		t.Fatalf("form did not submit: done=%v created=%v err=%q", done, created, f.errText)
+	}
+	if got.Repo != "" {
+		t.Errorf("created repo = %q, want none — the plan gate settles it", got.Repo)
+	}
+
+	// and switching the kind row onto a goal takes the focus off a repo
+	// row that is no longer there
+	g := newCardForm(domain.CardType{Kind: domain.KindFeature}, nil, []string{"a", "b"}, false, "", nil, 0, nil)
+	if g.focus != cardStopRepo {
+		t.Fatalf("a feature still opens on the repo row, got %d", g.focus)
+	}
+	g.setKind(domain.CardType{Kind: domain.KindGoal})
+	if g.focus != cardStopText {
+		t.Fatalf("focus = %d after switching to a goal, want the text box", g.focus)
 	}
 }

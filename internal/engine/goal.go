@@ -801,35 +801,45 @@ func (e *Engine) goalCardMessage(ctx context.Context, card domain.Feature) strin
 	return fmt.Sprintf("%s: %s\n\n%s", typ, title, strings.TrimSpace(card.OneLiner))
 }
 
-// goalCatchUp merges main into the goal branch when main has moved. A
-// conflict is handed to the resolver (resolveGoalCatchUp); when that
-// cannot finish the merge, the catch-up is aborted and logged, and the
-// goal carries on — landing still works on the older base, and the goal
-// catches up again before it lands on main.
+// goalCatchUp merges main into each of the goal's branches whose repo has
+// moved — one repository at a time, since git has no merge that spans
+// them. A conflict is handed to the resolver (resolveGoalCatchUp) in that
+// repository's goal tree; when that cannot finish the merge, the catch-up
+// is aborted and logged, and the goal carries on — landing still works on
+// the older base, and the goal catches up again before it lands.
 func (e *Engine) goalCatchUp(ctx context.Context, goal domain.Feature) {
-	main, err := e.mgr(ctx, &goal)
+	trees, err := e.goalTrees(ctx, goal)
 	if err != nil {
 		return
 	}
-	behind, err := main.GoalBehindMain(ctx, &goal)
+	for _, t := range trees {
+		e.goalCatchUpTree(ctx, goal, t)
+	}
+}
+
+func (e *Engine) goalCatchUpTree(ctx context.Context, goal domain.Feature, t worktree.GoalTree) {
+	if !t.Exists() {
+		return
+	}
+	behind, err := t.Behind(ctx)
 	if err != nil || !behind {
 		return
 	}
-	merged, err := main.CatchUpGoal(ctx, &goal, true)
+	merged, err := t.CatchUp(ctx, true)
 	var cc *worktree.CatchUpConflictError
 	switch {
 	case err == nil && merged:
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCaughtUp, Detail: "merged main into the goal branch", By: ActorGoal})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCaughtUp, Detail: "merged main into " + t.Label(), By: ActorGoal})
 	case errors.As(err, &cc):
-		if rerr := e.resolveGoalCatchUp(ctx, goal, cc.Files); rerr == nil {
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCaughtUp, Detail: "merged main into the goal branch, resolving " + strings.Join(cc.Files, ", "), By: ActorGoal})
+		if rerr := e.resolveGoalCatchUp(ctx, goal, t, cc.Files); rerr == nil {
+			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCaughtUp, Detail: "merged main into " + t.Label() + ", resolving " + strings.Join(cc.Files, ", "), By: ActorGoal})
 			return
 		} else {
-			_, _ = main.AbortGoalMerge(ctx, &goal)
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCatchUpFail, Detail: fmt.Sprintf("conflicts in %s: %v", strings.Join(cc.Files, ", "), rerr), By: ActorGoal})
+			_, _ = t.AbortMerge(ctx)
+			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCatchUpFail, Detail: fmt.Sprintf("%s: conflicts in %s: %v", t.Label(), strings.Join(cc.Files, ", "), rerr), By: ActorGoal})
 		}
 	case err != nil:
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCatchUpFail, Detail: err.Error(), By: ActorGoal})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCatchUpFail, Detail: t.Label() + ": " + err.Error(), By: ActorGoal})
 	}
 }
 
@@ -911,6 +921,16 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 	if !found || len(items) == 0 {
 		return "the goal has no done-when items — agree at least one checkable statement"
 	}
+	for _, it := range items {
+		// A check is a command and a command needs somewhere to run. The
+		// item may name that repository; what it may not do is name one
+		// this workspace does not manage.
+		if it.Check != "" && it.Repo != "" {
+			if problem := e.goalRepoProblem(it.Repo); problem != "" {
+				return fmt.Sprintf("%s's check %s", it.ID, problem)
+			}
+		}
+	}
 	rows, found, err := spec.ParseGoalCards(doc, items)
 	if err != nil {
 		return err.Error()
@@ -935,6 +955,13 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 	var want []int
 	for _, r := range rows {
 		if r.ID == "" {
+			// A goal is not in a repository: each row says where its card
+			// goes, and the only thing the gate asks is that the name is
+			// one this workspace manages. A row that names none is fine
+			// wherever there is a default repo to mean.
+			if problem := e.goalRepoProblem(r.Repo); problem != "" {
+				return fmt.Sprintf("card %q %s", r.Title, problem)
+			}
 			want = append(want, r.Envelope)
 			continue
 		}
@@ -949,8 +976,12 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 			return fmt.Sprintf("%s already belongs to %s", r.ID, c.GoalID)
 		case c.Stage == domain.StageDone && c.GoalID != goal.ID:
 			return fmt.Sprintf("%s is already done", r.ID)
-		case c.Repo != goal.Repo:
-			return fmt.Sprintf("%s is in a different repository than the goal", r.ID)
+		}
+		// An attached card keeps its own repository, and the goal grows a
+		// branch there rather than the card moving; a repository gummi
+		// cannot resolve is still a tree it could not cut.
+		if problem := e.goalRepoProblem(c.Repo); problem != "" {
+			return fmt.Sprintf("%s %s", r.ID, problem)
 		}
 	}
 	if goal.Budget.Envelope <= 0 {
@@ -991,6 +1022,39 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	}
 	if lanes > 0 {
 		if err := e.cfg.Store.SetGoalLanes(ctx, goal.ID, lanes); err != nil {
+			return err
+		}
+	}
+	// Where the goal itself belongs is settled here, from the plan, before
+	// a single card exists: the goal was minted into a provisional repo
+	// (nobody was asked for one) and the plan is the first thing that
+	// knows where its work actually is. Nothing has landed on the goal
+	// branch yet, so moving it is dropping an empty branch.
+	if err := e.settleGoalHome(ctx, goal, rows); err != nil {
+		return err
+	}
+	// The home tree first — the goal's own branch, where its lead works,
+	// its checks run and its review reads — then one for every repository
+	// the plan names, since a card forks from its repository's goal
+	// branch and cannot be minted before there is one.
+	if _, err := e.goalTreeIn(ctx, *goal, goal.Repo); err != nil {
+		return err
+	}
+	for _, r := range rows {
+		repo := r.Repo
+		if r.ID != "" {
+			c, cerr := e.cfg.Store.GetFeature(ctx, r.ID)
+			if cerr != nil {
+				return cerr
+			}
+			repo = c.Repo
+			if c.Kind == domain.KindResearch {
+				continue // research never cuts a branch
+			}
+		} else if ct, ok := r.EffectiveType(); ok && ct.Kind == domain.KindResearch {
+			continue
+		}
+		if _, err := e.goalTreeIn(ctx, *goal, repo); err != nil {
 			return err
 		}
 	}
@@ -1043,7 +1107,8 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 				Description:  goalCardDescription(*goal, *r, itemText),
 				Profile:      goal.Profile,
 				Envelope:     envs[next],
-				Repo:         goal.Repo,
+				Repo:         r.Repo,
+				RequireRepo:  e.RequireRepo,
 				GateApproval: domain.GateAutopilot,
 				Goal:         goal.ID,
 			})
@@ -1122,6 +1187,15 @@ func (e *Engine) goalAttach(ctx context.Context, goal domain.Feature, id domain.
 	main, err := e.pool.ManagerFor(ctx, &c)
 	if err != nil {
 		return err
+	}
+	// An attached card keeps its repository and the goal grows a branch
+	// there, rather than the card moving to the goal's — a card's work is
+	// in the checkout it was written in, and no rebase moves it between
+	// repositories.
+	if c.Kind != domain.KindResearch {
+		if _, terr := e.goalTreeIn(ctx, goal, c.Repo); terr != nil {
+			return terr
+		}
 	}
 	fork, _ := main.ForkPoint(ctx, &c)
 	hasTree, _ := main.Exists(ctx, &c)
@@ -1312,11 +1386,27 @@ func (e *Engine) RaiseGoalBudget(ctx context.Context, goalID domain.FeatureID, t
 // the goal up with main broke its checks; the goal went back to its cards.
 var ErrGoalSentBack = errors.New("the goal went back to its cards")
 
-// LandGoal lands a verified goal on main: it catches the goal branch up
-// with main first and, when that brought anything in, runs the goal's
-// checks again — a failure sends the goal back to its cards rather than
-// landing what was never checked. Then one merge commit joins the cards'
-// commits on main, and the goal is done.
+// ErrGoalPartlyLanded reports a landing that stopped part way through a
+// goal that spans repositories: some repos have the goal, the rest do not.
+var ErrGoalPartlyLanded = errors.New("the goal landed in some of its repositories")
+
+// LandGoal lands a verified goal: it catches each of the goal's branches
+// up with its own repository's main first and, when that brought anything
+// in, runs the goal's checks again — a failure sends the goal back to its
+// cards rather than landing what was never checked. Then each repository
+// gets one merge commit joining the cards' commits there, home repo first,
+// and the goal is done.
+//
+// Git has no merge that spans repositories, so a goal in several of them
+// lands several times and can stop half-way: a repo that fails leaves the
+// ones before it landed and the goal short of done, with
+// ErrGoalPartlyLanded naming both halves. Retrying is safe — a repository
+// whose goal branch is already in its main is skipped — and that is the
+// honest shape of the thing. Pretending it is one landing would be the
+// lie.
+//
+// It returns the merge commit in the goal's home repository, which is the
+// goal card's landed commit.
 func (e *Engine) LandGoal(ctx context.Context, goalID domain.FeatureID, message, by string) (string, error) {
 	goal, err := e.cfg.Store.GetFeature(ctx, goalID)
 	if err != nil {
@@ -1325,26 +1415,35 @@ func (e *Engine) LandGoal(ctx context.Context, goalID domain.FeatureID, message,
 	if !goal.IsGoal() {
 		return "", fmt.Errorf("%s is not a goal", goalID)
 	}
-	main, err := e.mgr(ctx, &goal)
+	trees, err := e.goalTrees(ctx, goal)
 	if err != nil {
 		return "", err
 	}
-	// no final checkpoint: nothing in the goal worktree that is not
+	// no final checkpoint: nothing in a goal worktree that is not
 	// committed belongs on the goal branch (see Engine.checkpoint)
-	merged, err := main.CatchUpGoal(ctx, &goal, false)
-	if err != nil {
-		var cc *worktree.CatchUpConflictError
-		if errors.As(err, &cc) {
-			note := "Landing needs the goal branch caught up with main, and that conflicts in " + strings.Join(cc.Files, ", ") + "."
-			if serr := e.SendBackGoal(ctx, goalID, note, ActorGoal); serr != nil {
-				return "", serr
-			}
-			return "", fmt.Errorf("%w: %s", ErrGoalSentBack, note)
+	anyMerged := false
+	for _, t := range trees {
+		if !t.Exists() {
+			continue
 		}
-		return "", err
+		merged, cerr := t.CatchUp(ctx, false)
+		if cerr != nil {
+			var cc *worktree.CatchUpConflictError
+			if errors.As(cerr, &cc) {
+				note := "Landing needs " + t.Label() + " caught up with main, and that conflicts in " + strings.Join(cc.Files, ", ") + "."
+				if serr := e.SendBackGoal(ctx, goalID, note, ActorGoal); serr != nil {
+					return "", serr
+				}
+				return "", fmt.Errorf("%w: %s", ErrGoalSentBack, note)
+			}
+			return "", cerr
+		}
+		if merged {
+			anyMerged = true
+			e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalCaughtUp, Detail: "merged main into " + t.Label() + " before landing", By: ActorGoal})
+		}
 	}
-	if merged {
-		e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalCaughtUp, Detail: "merged main into the goal branch before landing", By: ActorGoal})
+	if anyMerged {
 		rv, err := e.Reverify(ctx, goalID, by)
 		if err != nil {
 			return "", err
@@ -1360,18 +1459,44 @@ func (e *Engine) LandGoal(ctx context.Context, goalID domain.FeatureID, message,
 	if strings.TrimSpace(message) == "" {
 		message = e.GoalMergeMessage(ctx, goal)
 	}
-	sha, err := main.MergeGoal(ctx, &goal, message)
-	if err != nil {
-		return "", err
+	home := ""
+	var landed []string
+	for _, t := range trees {
+		done, lerr := t.Landed(ctx)
+		if lerr != nil {
+			return "", lerr
+		}
+		if done {
+			// an earlier attempt already merged this one
+			continue
+		}
+		sha, merr := t.Merge(ctx, message)
+		if merr != nil {
+			if len(landed) == 0 {
+				return "", merr
+			}
+			return "", fmt.Errorf("%w: landed in %s, but %s did not: %w",
+				ErrGoalPartlyLanded, strings.Join(landed, ", "), repoName(t.Repo), merr)
+		}
+		landed = append(landed, repoName(t.Repo))
+		e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalLanded, Detail: "landed on " + repoMain(t.Repo) + " as " + shortSHA(sha), Ref: sha, By: by})
+		if t.Home {
+			home = sha
+		}
+	}
+	if home == "" {
+		// every repo was already landed by an earlier attempt that failed
+		// further down the list: the goal's commit is the one it recorded
+		home, _ = e.cfg.Store.LandedSHA(ctx, goalID)
 	}
 	if goal.HandedOff() {
 		_ = e.cfg.Store.ClearHandedOffAt(ctx, goalID)
 	}
 	if _, err := e.cfg.Store.Transition(ctx, goalID, domain.StageDone, by); err != nil {
-		return sha, err
+		return home, err
 	}
 	e.Drop(goalID)
-	return sha, nil
+	return home, nil
 }
 
 // GoalMergeMessage is the merge commit a goal lands with: the goal on the

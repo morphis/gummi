@@ -181,6 +181,31 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 		wrap(detail, 7, st.Render)
 	}
 
+	// One repository says nothing worth a section. Several is the thing a
+	// reader has to know at the hand-over, because the goal lands once in
+	// each and can be in some of them and not the others.
+	if len(r.Repos) > 1 {
+		section("repositories")
+		for _, rp := range r.Repos {
+			mark, st := s.Faint.Render("○"), s.Faint
+			if rp.Landed {
+				mark, st = s.Success.Render("✓"), s.Success
+			}
+			name := rp.Name
+			if name == "" {
+				name = "default"
+			}
+			tail := " · not landed"
+			if rp.Landed {
+				tail = " · landed"
+			}
+			if rp.Home {
+				tail += " · the goal's own"
+			}
+			add("   " + mark + " " + name + st.Render(tail))
+		}
+	}
+
 	section("cards")
 	if len(r.Cards) == 0 {
 		add("   " + s.Faint.Render("none yet"))
@@ -198,6 +223,9 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) []string {
 			glyph = s.Warning.Render("!")
 		}
 		tail := fmt.Sprintf(" · %s · %.0f/%d", c.State, c.Spent, c.Envelope)
+		if len(r.Repos) > 1 && c.Repo != "" {
+			tail = " · " + c.Repo + tail
+		}
 		if len(c.Serves) > 0 {
 			tail += " · " + strings.Join(c.Serves, ",")
 		}

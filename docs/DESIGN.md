@@ -1466,6 +1466,12 @@ Decided in the design interview (2026-07-03):
     so a multi-repo board keeps one `.gummi`. Dependency edges cross repos
     freely — `feature_deps` references `features(id)` with no repo
     awareness.
+
+    A **goal** is the one card that is not a per-card choice: it is in no
+    repository, its cards each name one, and it keeps a branch in every
+    repository they are in (§17.2a, decision 20). The creation surfaces
+    therefore never ask a goal which repo it is in, and `gummi goal` has no
+    `--repo`.
 11. **Spec drafts** live in `.gummi/state/drafts/` while a card is at its
     design stage and has never run one; at the design gate the worktree +
     branch are ensured and the spec is promoted to `.gummi/specs/FD-NNN-slug.md` in
@@ -1614,6 +1620,13 @@ Decided in the design interview (2026-07-03):
     - **A landing on main is a merge commit** over the cards' commits, not
       one squash, so `git log --first-parent` reads one line per goal and
       any one card can be reverted.
+    - **A card's repository is not the goal's** (2026-09-18, §17.2a): an
+      outcome may need changes in several repositories, so a goal is in
+      none of them. Its cards name their own, it has a branch in each, and
+      it lands once per repository — the one place gummi cannot promise
+      atomicity, because git has no merge that spans repositories, and so
+      the one place it says plainly which repositories have the goal and
+      which do not.
 
     What does not bend: no implementation without an approved plan (each
     card's own plan crosses its own gate, and the lead reads it first), no
@@ -2438,9 +2451,11 @@ todo ──▶ plan ──────────▶ implement ─────�
   `check:` command or `judge: true`), limits, a budget section with a rough
   cost per item and a `gummi-goal` block naming the lanes, and a
   `gummi-cards` block — one row per card, each serving at least one item;
-  a row with an existing card's `id` attaches it. The gate
-  (`goalPlanProblems`) refuses an item nothing can check, an item no card
-  serves, an attachment that belongs elsewhere, and a card list the budget
+  a row with an existing card's `id` attaches it. A row names the `repo:`
+  its card is minted into and a commanded item names the `repo:` its check
+  runs in (§17.2a). The gate (`goalPlanProblems`) refuses an item nothing
+  can check, an item no card serves, an attachment that belongs elsewhere,
+  a repository the workspace does not manage, and a card list the budget
   cannot fund. Crossing it (`startGoal`) mints and attaches the cards, puts
   every done-when command into the doc's `gummi-checks` (never baselined),
   and hands the goal to autopilot.
@@ -2452,13 +2467,15 @@ todo ──▶ plan ──────────▶ implement ─────�
   tick names through its ordinary autopilot path. A run of the goal's
   implement stage (a review's changes, a failed verify, your send-back) is
   recorded as rework the lead reads, never a session.
-- **Verify** runs the goal's checks on the goal worktree and the goal's
+- **Verify** runs the goal's checks, each in the goal tree of the
+  repository its done-when item names, and the goal's
   verify contract: judge the judged items, record each item met or not, and
   write and run the try-it guide. A goal whose verify does not pass goes
   back to its cards for its rework rounds, then stops ready for you,
   partial.
-- **Done** is a merge commit on main (`LandGoal`: a last catch-up with main,
-  the checks again if it brought anything in, then `MergeGoal`), a
+- **Done** is a merge commit on main — one per repository the goal touches
+  (`LandGoal`: a last catch-up per repo, the checks again if any of them
+  brought something in, then `GoalTree.Merge`, home repo first) — a
   hand-off, or an abandonment.
 
 ### 17.2 The goal branch
@@ -2469,13 +2486,54 @@ whose repo is the goal's worktree. With no other change its branch forks
 from the goal branch, `SquashMerge` lands it there as one commit,
 `Landed`/`BranchAhead`/`Diff` read against the goal branch, and the
 dependency gate's "met at done" means "landed on the goal branch". The
-goal catches up with main by *merging* main in (`CatchUpGoal`), never by
-rebasing, so no running card's recorded fork point drifts; a conflict gets
-an implementer pass in the goal worktree, and gummi concludes the merge
-only when nothing is left unmerged. Attaching or detaching a started card
-moves its own commits with `rebase --onto` (`RebaseOnto`). Once a goal has
-ended and its worktree is gone, its cards fall back to the repository's
-manager.
+goal catches up with main by *merging* main in (`GoalTree.CatchUp`), never
+by rebasing, so no running card's recorded fork point drifts; a conflict
+gets an implementer pass in the goal worktree, and gummi concludes the
+merge only when nothing is left unmerged. Attaching or detaching a started
+card moves its own commits with `rebase --onto` (`RebaseOnto`). Once a goal
+has ended and its trees are gone, its cards fall back to their own
+repository's manager.
+
+### 17.2a A goal is not in a repository
+
+An outcome is not a checkout. A goal's cards name their own repositories
+(`gummi-cards`' `repo:`, or an attached card's own), and the goal has a
+**goal tree** — a worktree on a branch of its name — in each of them. The
+paragraph above then holds once per repository instead of once per goal,
+and a single-repo goal is the case where that is the same sentence.
+
+- **Nobody is asked.** The creation dialogs skip the repo row for a goal
+  (`cardForm.asksRepo`) and `gummi goal` has no `--repo`. A goal is minted
+  into a *provisional* home — the workspace default, or the first
+  configured repo where there is none — because its own branch has to be
+  cut somewhere while its plan is still being agreed.
+- **The plan settles the home.** Crossing the plan gate (`settleGoalHome`)
+  moves the goal card to the repository most of its cards are in, ties
+  going to the first row. Nothing has landed on the goal branch yet — the
+  doc lives in `.gummi/goals/`, never in the tree — so re-homing is
+  dropping an empty branch and cutting it again elsewhere. `SetRepo`
+  refuses a goal, for the same reason the dialog does not ask.
+- **Where the trees are.** The home tree is the goal card's own worktree,
+  `.gummi/worktrees/GL-NNN`; every other repository's is
+  `.gummi/worktrees/GL-NNN@<repo>`, its sibling. `Pool.EnsureGoalTree` cuts
+  one whenever a card reaches a repository the goal has not touched yet
+  (the plan gate, an attachment, the lead's `card_create`), and
+  `managerForGoalCard` resolves a card to the tree of ITS repository.
+- **Checks name their repository.** A done-when `check:` is a command and a
+  command needs a directory, so the item carries `repo:` (default: the
+  home) and `runGoalChecks` runs each group where it belongs. The trees are
+  siblings on disk, so a check that genuinely needs two repositories at
+  once reaches the other by relative path.
+- **Landing is N landings.** Git has no merge that spans repositories.
+  `LandGoal` catches each tree up, then merges each — home first, skipping
+  any whose branch is already in its main, so a retry is safe — and a
+  failure part way through returns `ErrGoalPartlyLanded` naming what landed
+  and what did not. The hand-over's `repos` says the same. The alternative
+  was pretending a goal lands once, which would be a lie about the one
+  thing a reader needs to know at that moment.
+
+A **stack** is still one repository (§18.1): a branch can only fork from a
+branch in its own. What spans repositories is the goal.
 
 A dropped card leaves the goal at once. One you attached goes back to the
 board with its commits moved onto main. One the goal created has no other

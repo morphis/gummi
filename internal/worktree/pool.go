@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -133,6 +134,24 @@ func (p *Pool) Known(name string) bool {
 	}
 	_, ok := p.byName[name]
 	return ok
+}
+
+// ProvisionalRepo is the repository a card gets when nobody named one: the
+// workspace default when there is one, else the first configured name.
+//
+// Only a goal takes it. A goal is not in a repository — its cards name
+// their own — but its own branch has to be cut somewhere while its plan
+// is still being agreed, and in a repos:-only workspace there is no
+// default to cut it in. The plan gate settles the goal's home for real,
+// from the repos its cards turned out to be in.
+func (p *Pool) ProvisionalRepo() string {
+	if p.Known("") {
+		return ""
+	}
+	if names := p.Names(); len(names) > 0 {
+		return names[0]
+	}
+	return ""
 }
 
 // Names returns the sorted configured repo names (excluding the empty
@@ -450,12 +469,46 @@ func (p *Pool) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 	return wt.ReanchorOnMain(ctx, f)
 }
 
+// Remove removes the card's worktree. A goal has one per repository it
+// touched (goal.go), and a cleanup that took only the one named after the
+// card would leave the others checked out forever — so the siblings go
+// first, each with the branch it was holding.
 func (p *Pool) Remove(ctx context.Context, f *domain.Feature, force bool) error {
+	if f.IsGoal() {
+		if err := p.removeGoalTrees(ctx, f); err != nil {
+			return err
+		}
+	}
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
 		return err
 	}
 	return wt.Remove(ctx, f, force)
+}
+
+// removeGoalTrees removes a goal's trees in every repository but its home,
+// and the branch each was holding when that branch is fully merged. A
+// branch git refuses to delete (commits nothing has) is left alone with
+// its tree gone: the cleanup's job is the checkouts, and unmerged work is
+// never a cleanup's to discard.
+func (p *Pool) removeGoalTrees(ctx context.Context, goal *domain.Feature) error {
+	for _, repo := range p.goalTreeRepos(*goal) {
+		if repo == goal.Repo {
+			continue
+		}
+		m, err := p.ManagerForName(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if err := m.RemoveGoalTree(ctx, goal, goalTreeName(*goal, repo)); err != nil {
+			var unmerged *unmergedBranchError
+			if errors.As(err, &unmerged) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // DiskSize reports the bytes f's worktree holds. See Manager.DiskSize —

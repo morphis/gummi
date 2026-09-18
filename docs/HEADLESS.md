@@ -303,10 +303,19 @@ done-when item. A row with an existing card's `id:` hands that card to the
 goal. The gate refuses a done-when item nothing can check, an item no card
 serves, and a card list the budget cannot fund.
 
+**Repositories.** `gummi goal` takes no `--repo`: a goal is not in a
+repository. Each card row names its own `repo:` (omit it where the
+workspace has a default), an attached row brings its card's, and a
+done-when item whose `check:` must run somewhere else names that
+repository too. The gate refuses a name the workspace does not manage.
+The goal's own home — where its card, its lead and its review are — is
+settled from its cards when the plan is approved, and it grows a branch of
+the same name in every other repository its cards are in.
+
 **Run.** Approving the plan starts the goal, and from there it runs itself.
 It mints its cards and runs each on autopilot on the goal branch
-`gummi/GL-NNN-slug`, up to its lanes. When a card verifies it lands on the
-goal branch as one commit — after the goal branch catches up with main, and
+`gummi/GL-NNN-slug` **of the card's own repository**, up to its lanes. When
+a card verifies it lands on that goal branch as one commit — after the goal branch catches up with main, and
 after the card is rebased and re-checked if the goal branch moved under
 it. The goal's **lead** (the `lead` role, or the architect's model) answers
 the cards' questions, reads their plans before they implement, re-plans
@@ -329,8 +338,14 @@ the combined branch. The run exits `verified` with the hand-over on the event's
 dropped, decisions for review, and the full report — and `status --json`
 carries the same report under `goal`. From there:
 
+A goal across repositories lands once in each — git has no merge that
+spans them — so `merge` walks them home repository first and the
+hand-over's `repos` says which have the goal and which do not. A merge
+that stops half-way leaves the rest to a second `gummi merge GL-NNN`,
+which skips what already landed.
+
 ```sh
-gummi merge GL-004                                   # one merge commit on main over its cards' commits
+gummi merge GL-004                                   # one merge commit on main over its cards' commits, per repository
 gummi resume GL-004 --request-changes "<notes>"     # back to its cards, with the notes
 gummi resume GL-004 --reverse D-2                    # take the other way on a decision
 gummi handoff GL-004                                 # close it, keep the branch

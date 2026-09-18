@@ -244,10 +244,23 @@ func (m *Manager) worktreesDir() string {
 // single chokepoint every operation goes through — both the card's branch
 // worktree (.gummi/worktrees) and its scratch tree (.gummi/scratch).
 func (m *Manager) cardTreePath(base string, f *domain.Feature) (string, error) {
+	return m.cardTreePathNamed(base, f, string(f.ID))
+}
+
+// cardTreePathNamed is cardTreePath for a tree whose directory is not
+// simply the card's id. A goal has one tree per repository it touches
+// (goal.go), and only the one in its home repo is named after the card;
+// the rest carry the repo as a suffix. The escape check is the same one,
+// which is the point of routing them through here: a directory name is a
+// directory name, however it was spelled.
+func (m *Manager) cardTreePathNamed(base string, f *domain.Feature, name string) (string, error) {
 	if err := f.Validate(); err != nil {
 		return "", fmt.Errorf("refusing worktree operation: %w", err)
 	}
-	p := filepath.Clean(filepath.Join(base, string(f.ID)))
+	if name == "" {
+		return "", fmt.Errorf("refusing worktree operation: %s has no tree name", f.ID)
+	}
+	p := filepath.Clean(filepath.Join(base, name))
 	if filepath.Dir(p) != base {
 		return "", fmt.Errorf("refusing worktree operation: %s escapes %s", p, base)
 	}
@@ -685,7 +698,14 @@ func (m *Manager) TrackedDirty(ctx context.Context, f *domain.Feature) (bool, er
 	if err != nil {
 		return false, err
 	}
-	out, err := runGit(ctx, p, "status", "--porcelain", "--untracked-files=no")
+	return trackedDirtyIn(ctx, p)
+}
+
+// trackedDirtyIn is TrackedDirty for a checkout named by path rather than
+// by card — a goal's tree in a repository that is not its home has no card
+// of its own to name it (goal.go).
+func trackedDirtyIn(ctx context.Context, dir string) (bool, error) {
+	out, err := runGit(ctx, dir, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return false, err
 	}

@@ -10,6 +10,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -323,7 +324,19 @@ func (m *Shell) landGoal(f domain.Feature, message string) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true, reload: true}
 		}
-		return noticeMsg{text: string(f.ID) + " landed on " + m.baseBranch(f) + " as " + shortHash(sha) + " → done", reload: true, clearInbox: f.ID}
+		where := m.baseBranch(f)
+		// A goal across repositories landed once in each; naming one
+		// branch would say a third of what happened.
+		if r, rerr := eng.GoalReport(context.Background(), f.ID); rerr == nil && len(r.Repos) > 1 {
+			names := make([]string, 0, len(r.Repos))
+			for _, rp := range r.Repos {
+				if rp.Name != "" {
+					names = append(names, rp.Name)
+				}
+			}
+			where = strings.Join(names, " and ")
+		}
+		return noticeMsg{text: string(f.ID) + " landed on " + where + " as " + shortHash(sha) + " → done", reload: true, clearInbox: f.ID}
 	})
 }
 

@@ -22,6 +22,12 @@ func (e *Engine) SetRepo(ctx context.Context, id domain.FeatureID, repo string) 
 	if err != nil {
 		return domain.Feature{}, err
 	}
+	if f.IsGoal() {
+		// A goal is not in a repository of its own choosing: its home is
+		// settled from its cards at its plan gate (goalrepos.go), and
+		// moving it by hand would strand the branch its cards fork from.
+		return domain.Feature{}, fmt.Errorf("%s: a goal's repository follows its cards; set each card's `repo:` in the goal doc", id)
+	}
 	// The repo is locked once the card has a worktree: the tree is cut
 	// from that repo, so moving the card would orphan it. Under one
 	// worktree per card that happens at the card's first stage run, so

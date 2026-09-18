@@ -23,6 +23,13 @@ type DoneWhen struct {
 	Says  string `yaml:"says"`            // the statement, in the reader's words
 	Check string `yaml:"check,omitempty"` // a shell command that exits 0 when met
 	Judge bool   `yaml:"judge,omitempty"` // judged by verify against the combined diff
+	// Repo is the configured repository whose goal tree the check runs in.
+	// Empty is the goal's home repo, which is the only repo a single-repo
+	// goal has. A command needs a directory, and a goal that spans
+	// repositories has several — so the item says which. Whether the name
+	// is configured at all is the plan gate's question (it needs the
+	// workspace's repo set); this is only where the answer is written.
+	Repo string `yaml:"repo,omitempty"`
 }
 
 var doneWhenIDRe = regexp.MustCompile(`^DW-[0-9]+$`)
@@ -72,6 +79,11 @@ type GoalCardRow struct {
 	DependsOn []string  `yaml:"depends_on,omitempty"` // titles (or ids) of other rows
 	Envelope  int       `yaml:"envelope,omitempty"`   // credits; 0 = the conductor splits
 	ID        FeatureID `yaml:"id,omitempty"`         // set once minted or when attaching
+	// Repo is the configured repository the row's card is minted into.
+	// Empty is the workspace default, exactly as for a card created any
+	// other way. A row that names an existing card (ID) ignores it: that
+	// card already has a repository and it is not the row's to change.
+	Repo string `yaml:"repo,omitempty"`
 }
 
 // EffectiveType resolves the row's `kind:` to a card type, defaulting the

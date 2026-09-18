@@ -349,9 +349,17 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 		if res.Envelope != nil {
 			env = *res.Envelope
 		}
+		repo := res.Repo
+		if kind == domain.KindGoal {
+			// A goal is not in a repository (DESIGN §17.2): the dialog
+			// never asked, and its home is settled from its cards at its
+			// plan gate. Until then its own branch has to be cut
+			// somewhere, which is what a provisional home is.
+			repo = m.provisionalRepo()
+		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
 			Kind: kind, Mode: res.Mode, Description: res.Desc, Profile: res.Profile, Envelope: env,
-			Repo: res.Repo, RequireRepo: m.requireRepo, Base: res.Base,
+			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion: res.Discussion,
 		})
@@ -380,6 +388,15 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 		return cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker,
 			stack: stacked, warn: strings.Join(warn, "; ")}
 	}
+}
+
+// provisionalRepo is the repository a goal is minted into before its plan
+// says where its cards are. See worktree.Pool.ProvisionalRepo.
+func (m *Shell) provisionalRepo() string {
+	if m.wt == nil {
+		return ""
+	}
+	return m.wt.ProvisionalRepo()
 }
 
 // requireRepo is cardmint's repository check for this workspace: a name

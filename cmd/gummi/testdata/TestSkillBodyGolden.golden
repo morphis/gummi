@@ -106,13 +106,12 @@ gummi diagnose [flags] "<symptom>"
 
 gummi goal [flags] "<objective>"
     --autonomous              let the architect take its recommended answer instead of asking during the plan conversation
-    --base string             branch the goal branch forks from and lands on (default: whatever the repository has checked out)
+    --base string             branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)
     --envelope int            the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)
     --plan-file string        a complete goal doc to start the plan conversation from (a file path, or - for stdin)
     --profile string          profile mapping roles to models, the lead included (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
-    --repo string             managed repository for the goal and all its cards (a configured repos: name; required when repos: is configured)
     --stage-timeout duration  per-stage inactivity timeout for the goal and each of its cards (0 disables)
     --until string            stop cleanly before the goal's plan is approved (only "plan" is a valid stop)
     --verbose                 add per-tool-call activity lines to the stream

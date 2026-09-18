@@ -39,6 +39,7 @@ import (
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // leadTurnTimeout bounds one lead turn. A lead that cannot decide in this
@@ -275,6 +276,9 @@ func (e *Engine) leadSession(ctx context.Context, lt *leadTurn, prompt string) (
 	}
 	docPath := lt.view.DocPath
 	hints := []string{leadHint(goal, docPath)}
+	if card := e.goalReposCard(ctx, goal); card != "" {
+		hints = append(hints, card)
+	}
 	if env := e.environmentCard(); env != "" {
 		hints = append([]string{env}, hints...)
 	}
@@ -618,6 +622,7 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 				"title":      str("Short title."),
 				"one_liner":  str("What the card must do, in a sentence or two."),
 				"serves":     strs("Done-when ids this card is for."),
+				"repo":       str("The managed repository the card is in; omit for the goal's own."),
 				"depends_on": strs("Card ids that must land first."),
 				"envelope":   num("Credits for the card; 0 for a fair share of what is left."),
 			}, "title", "serves"),
@@ -646,9 +651,10 @@ func (lt *leadTurn) tools() []agent.ToolDef {
 			map[string]any{"item": str("DW-N"), "check": str("The repaired command."), "reason": str("Why the agreed command cannot prove the statement, with evidence.")}, "item", "check", "reason"),
 		leadTool("done_when_add", "Add a done-when item one of the owner's notes asked for.", map[string]any{
 			"says": str("The statement."), "check": str("A command that exits 0 when it holds; empty to have verify judge it."),
+			"repo": str("The managed repository the check runs in; omit for the goal's own."),
 			"note": str("The note that asked for it, quoted."),
 		}, "says", "note"),
-		leadTool("backlog_file", "File a real bug or idea outside this goal as a card on the open board. The goal never works it.", map[string]any{"kind": str("bug or feature"), "description": str("First line is the title.")}, "description"),
+		leadTool("backlog_file", "File a real bug or idea outside this goal as a card on the open board. The goal never works it.", map[string]any{"kind": str("bug or feature"), "description": str("First line is the title."), "repo": str("The managed repository it is in; omit for the goal's own.")}, "description"),
 		leadTool("reserve_set", "Set the credits you hold back for finishing the goal cleanly.", map[string]any{"credits": num("The reserve."), "reason": str("Your estimate's basis.")}, "credits"),
 		leadTool("goal_doc_write", "Write the goal doc's Try it section.", map[string]any{"section": str("Try it"), "body": str("The section body.")}, "section", "body"),
 		leadTool("goal_wrap_up", "Wrap the goal up now: nothing new starts, verified work lands, the rest is dropped.", map[string]any{"reason": str("Why.")}, "reason"),
@@ -662,6 +668,7 @@ type leadArgs struct {
 	Title       string          `json:"title"`
 	OneLiner    string          `json:"one_liner"`
 	Serves      []string        `json:"serves"`
+	Repo        string          `json:"repo"`
 	DependsOn   json.RawMessage `json:"depends_on"`
 	Envelope    int             `json:"envelope"`
 	Reason      string          `json:"reason"`
@@ -785,7 +792,13 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		if goal.Goal.WrappingUp() {
 			return "", errors.New("the goal is wrapping up; nothing new starts")
 		}
-		row := domain.GoalCardRow{Title: strings.TrimSpace(a.Title), OneLiner: a.OneLiner, Kind: strings.TrimSpace(a.Kind), Serves: a.Serves, Envelope: a.Envelope}
+		row := domain.GoalCardRow{Title: strings.TrimSpace(a.Title), OneLiner: a.OneLiner, Kind: strings.TrimSpace(a.Kind), Serves: a.Serves, Envelope: a.Envelope, Repo: strings.TrimSpace(a.Repo)}
+		if row.Repo == "" {
+			row.Repo = goal.Repo
+		}
+		if problem := e.goalRepoProblem(row.Repo); problem != "" {
+			return "", fmt.Errorf("the card %s", problem)
+		}
 		items := map[string]bool{}
 		itemText := map[string]string{}
 		for _, d := range view.DoneWhen {
@@ -813,9 +826,17 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		}
 		// row.Validate above has already refused an unresolvable kind.
 		ct, _ := row.EffectiveType()
+		// A card forks from the goal branch of its own repository, so one
+		// has to be there before the card is — the lead is free to put a
+		// card in a repository the goal has not touched yet.
+		if ct.Kind != domain.KindResearch {
+			if _, terr := e.goalTreeIn(ctx, goal, row.Repo); terr != nil {
+				return "", terr
+			}
+		}
 		f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
 			Kind: ct.Kind, Mode: ct.Mode, Description: goalCardDescription(goal, row, itemText), Profile: goal.Profile,
-			Envelope: env, Repo: goal.Repo, GateApproval: domain.GateAutopilot, Goal: goal.ID,
+			Envelope: env, Repo: row.Repo, RequireRepo: e.RequireRepo, GateApproval: domain.GateAutopilot, Goal: goal.ID,
 		})
 		if err != nil {
 			return "", err
@@ -1002,8 +1023,15 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		if strings.TrimSpace(a.Kind) == string(domain.KindFeature) {
 			kind = domain.KindFeature
 		}
+		repo := strings.TrimSpace(a.Repo)
+		if repo == "" {
+			repo = goal.Repo
+		}
+		if problem := e.goalRepoProblem(repo); problem != "" {
+			return "", fmt.Errorf("the card %s", problem)
+		}
 		f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
-			Kind: kind, Description: a.Description, Profile: goal.Profile, Repo: goal.Repo, FoundBy: goal.ID,
+			Kind: kind, Description: a.Description, Profile: goal.Profile, Repo: repo, RequireRepo: e.RequireRepo, FoundBy: goal.ID,
 		})
 		if err != nil {
 			return "", err
@@ -1101,10 +1129,15 @@ func (lt *leadTurn) addDoneWhen(ctx context.Context, goal domain.Feature, view G
 	if err != nil {
 		return "", err
 	}
-	it := domain.DoneWhen{ID: fmt.Sprintf("DW-%d", len(items)+1), Says: strings.TrimSpace(a.Says), Check: strings.TrimSpace(a.Check)}
+	it := domain.DoneWhen{ID: fmt.Sprintf("DW-%d", len(items)+1), Says: strings.TrimSpace(a.Says), Check: strings.TrimSpace(a.Check), Repo: strings.TrimSpace(a.Repo)}
 	it.Judge = it.Check == ""
 	if err := it.Validate(); err != nil {
 		return "", err
+	}
+	if it.Check != "" && it.Repo != "" {
+		if problem := e.goalRepoProblem(it.Repo); problem != "" {
+			return "", fmt.Errorf("the check %s", problem)
+		}
 	}
 	items = append(items, it)
 	doc, err := spec.SetDoneWhen(string(raw), items)
@@ -1171,7 +1204,15 @@ func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, v
 	old := items[idx]
 	probe := domain.Check{Name: old.CheckName(), Cmd: cmd}
 
-	main, err := e.pool.ManagerFor(ctx, &goal)
+	// The item's own repository, both times: what makes a check a check is
+	// that it fails on that repo's main and passes on that repo's goal
+	// branch, and a goal that spans repositories has one of each per repo.
+	itemRepo := goalItemRepo(old, goal.Repo)
+	tree, err := e.pool.GoalTree(&goal, itemRepo)
+	if err != nil {
+		return "", err
+	}
+	main, err := e.pool.ManagerForName(ctx, itemRepo)
 	if err != nil {
 		return "", err
 	}
@@ -1183,7 +1224,7 @@ func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, v
 		return "", err
 	}
 	if onMain.OK {
-		return "", fmt.Errorf("the new command already passes on main, where none of the goal's work is — it cannot tell whether %s holds", id)
+		return "", fmt.Errorf("the new command already passes on %s, where none of the goal's work is — it cannot tell whether %s holds", repoMain(itemRepo), id)
 	}
 	landed := true
 	for _, c := range view.Cards {
@@ -1192,8 +1233,10 @@ func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, v
 		}
 	}
 	if landed {
-		dir := filepath.Join(e.pool.Root(), goal.WorktreePath())
-		if res := verify.Run(ctx, dir, []domain.Check{probe})[0]; !res.OK {
+		if !tree.Exists() {
+			return "", fmt.Errorf("%s has no goal tree in %s, so the new command has nowhere to be proved", goal.ID, repoName(itemRepo))
+		}
+		if res := verify.Run(ctx, tree.Dir, []domain.Check{probe})[0]; !res.OK {
 			return "", fmt.Errorf("the new command does not pass on the goal branch (exit %d):\n%s\nIf %s really is not met, mark it not met instead", res.ExitCode, clip(res.Output, 1500), id)
 		}
 	}
@@ -1227,11 +1270,11 @@ func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, v
 
 // --- catch-up resolver ------------------------------------------------------
 
-// resolveGoalCatchUp resolves an open catch-up merge on a goal branch: an
-// implementer session in the goal worktree, told to resolve the conflicted
-// files and nothing else. gummi — not the session — concludes the merge,
-// and only when no path is left unmerged.
-func (e *Engine) resolveGoalCatchUp(ctx context.Context, goal domain.Feature, files []string) error {
+// resolveGoalCatchUp resolves an open catch-up merge on one of the goal's
+// branches: an implementer session in that repository's goal tree, told to
+// resolve the conflicted files and nothing else. gummi — not the session —
+// concludes the merge, and only when no path is left unmerged.
+func (e *Engine) resolveGoalCatchUp(ctx context.Context, goal domain.Feature, tree worktree.GoalTree, files []string) error {
 	rc, backend := e.resolveRole(goal.Profile, agent.RoleImplementer)
 	ag := e.agentFor(backend)
 	if ag == nil {
@@ -1244,7 +1287,7 @@ func (e *Engine) resolveGoalCatchUp(ctx context.Context, goal domain.Feature, fi
 	if view.Ledger.OwnBudget() < e.turnReserve() {
 		return errors.New("the goal has no budget left to resolve conflicts")
 	}
-	workDir := filepath.Join(e.pool.Root(), goal.WorktreePath())
+	workDir := tree.Dir
 	tctx, cancel := context.WithTimeout(ctx, leadTurnTimeout)
 	defer cancel()
 	sess, err := ag.NewSession(tctx, agent.SessionOpts{
@@ -1280,11 +1323,7 @@ drain:
 			return tctx.Err()
 		}
 	}
-	main, err := e.mgr(ctx, &goal)
-	if err != nil {
-		return err
-	}
-	return main.ConcludeGoalMerge(ctx, &goal)
+	return tree.ConcludeMerge(ctx)
 }
 
 // --- a tool endpoint for MCP backends --------------------------------------

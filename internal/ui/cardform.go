@@ -213,7 +213,9 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 	d.buttons.SetCursor(1)
 	// the repository is the one field with no default, so a form that
 	// still needs one opens on it; everything else opens in the text.
-	if d.repo.needsChoice() {
+	// A goal is never asked (asksRepo), so it opens in the text like any
+	// card in a workspace with one repository.
+	if d.asksRepo() && d.repo.needsChoice() {
 		d.setFocus(cardStopRepo)
 	} else {
 		d.setFocus(cardStopText)
@@ -274,10 +276,19 @@ func (d *cardForm) Kind() domain.Kind { return d.ct.Kind }
 // CardType is the row's current choice, kind and research mode together.
 func (d *cardForm) CardType() domain.CardType { return d.ct }
 
+// asksRepo reports whether this card's repository is the dialog's to ask
+// for. Every kind's is, except a goal's: a goal is not in a repository —
+// you describe an outcome, and the cards that meet it name their own
+// (DESIGN §17.2). Its own home is derived from those cards at its plan
+// gate, so asking here would be asking for an answer nobody has yet.
+func (d *cardForm) asksRepo() bool {
+	return d.ct.Kind != domain.KindGoal && d.repo.multi()
+}
+
 // stops is the live focus ring, in tab order.
 func (d *cardForm) stops() []int {
 	s := []int{cardStopKind}
-	if d.repo.multi() {
+	if d.asksRepo() {
 		s = append(s, cardStopRepo)
 	}
 	s = append(s, cardStopText)
@@ -347,6 +358,9 @@ func (d *cardForm) setKind(c domain.CardType) {
 	if d.focus == cardStopSeverity && c.Kind != domain.KindBug {
 		d.setFocus(cardStopAfter)
 	}
+	if d.focus == cardStopRepo && !d.asksRepo() {
+		d.setFocus(cardStopText)
+	}
 }
 
 func (d *cardForm) cycleKind(delta int) {
@@ -358,6 +372,15 @@ func (d *cardForm) cycleKind(delta int) {
 		}
 	}
 	d.setKind(domain.CardTypes[((i+delta)%n+n)%n])
+}
+
+// formRepo is the repository the card is created in: the chosen one, and
+// nothing at all for a goal, whose home the plan gate settles.
+func (d *cardForm) formRepo() string {
+	if d.ct.Kind == domain.KindGoal {
+		return ""
+	}
+	return d.repo.name()
 }
 
 // origin resolves the chosen repo's origin, caching per name. The zero
@@ -702,7 +725,7 @@ func (d *cardForm) failImport(err error) {
 
 // submit validates and fires onSubmit. start marks Create & autopilot.
 func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
-	if d.repo.needsChoice() {
+	if d.asksRepo() && d.repo.needsChoice() {
 		d.errText = repoUnchosenErr
 		d.setFocus(cardStopRepo)
 		return false, nil
@@ -745,7 +768,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	}
 	res := formResult{
 		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
-		Repo: d.repo.name(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
+		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start: start, FromPicker: d.fromPicker,
 	}
@@ -1351,7 +1374,7 @@ func (d *cardForm) layout(s *theme.Styles, textW, h, fold int, hint, spacers boo
 
 	rows = append(rows, s.DialogTitle.Render("new card"), "")
 	rows = append(rows, choiceRowLines(s, d.focus == cardStopKind, "kind", kinds, kindIdx, "", false, textW, fold)...)
-	if d.repo.shown() {
+	if d.repo.shown() && d.ct.Kind != domain.KindGoal {
 		rows = append(rows, d.repoRows(s, textW, fold)...)
 	}
 	if from := d.fromLine(s); from != "" {

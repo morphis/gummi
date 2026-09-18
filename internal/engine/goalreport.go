@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/goalpolicy"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // The hand-over: what a goal gives you when it is ready. Every surface —
@@ -37,10 +38,22 @@ type DoneWhenStatus struct {
 	Evidence string `json:"evidence,omitempty"`
 }
 
+// GoalReportRepo is one repository the goal has a branch in, at the
+// hand-over. A goal that spans repositories lands once in each, and git
+// has no merge that spans them — so the hand-over says which have the
+// goal and which do not, rather than one "landed" for all of them.
+type GoalReportRepo struct {
+	Name   string `json:"name,omitempty"` // the configured name; empty is the workspace default
+	Home   bool   `json:"home,omitempty"` // the goal card's own repository
+	Branch string `json:"branch"`
+	Landed bool   `json:"landed"` // the goal branch is in this repo's main
+}
+
 // GoalReportCard is one card at the hand-over.
 type GoalReportCard struct {
 	ID       domain.FeatureID `json:"id"`
 	Kind     domain.Kind      `json:"kind"`
+	Repo     string           `json:"repo,omitempty"` // empty is the workspace default
 	Title    string           `json:"title"`
 	State    string           `json:"state"`
 	Stage    domain.Stage     `json:"stage"`
@@ -78,6 +91,7 @@ type GoalReport struct {
 	Budget     GoalReportBudget `json:"budget"`
 	Lanes      int              `json:"lanes"`
 	DoneWhen   []DoneWhenStatus `json:"done_when"`
+	Repos      []GoalReportRepo `json:"repos,omitempty"`
 	Cards      []GoalReportCard `json:"cards"`
 	Decisions  []GoalLogLine    `json:"decisions,omitempty"`
 	Declined   []GoalLogLine    `json:"declined_findings,omitempty"`
@@ -115,13 +129,28 @@ func (e *Engine) GoalReport(ctx context.Context, goalID domain.FeatureID) (GoalR
 		return GoalReport{}, err
 	}
 	r := buildGoalReport(view)
-	// the diff by card: each landed card's commit, summarized
-	if main, merr := e.mgr(ctx, &view.Goal); merr == nil {
+	// The repositories the goal has a branch in, and which of them already
+	// have it: a landing that stopped half-way through a goal that spans
+	// repositories is a state the reader has to be able to see.
+	trees, terr := e.goalTrees(ctx, view.Goal)
+	if terr == nil {
+		byRepo := map[string]*worktree.Manager{}
+		for _, t := range trees {
+			landed, _ := t.Landed(ctx)
+			r.Repos = append(r.Repos, GoalReportRepo{Name: t.Repo, Home: t.Home, Branch: t.Branch(), Landed: landed})
+			byRepo[t.Repo] = t.Manager()
+		}
+		// the diff by card: each landed card's commit, summarized, read in
+		// the repository the card is in
 		for i, c := range r.Cards {
 			if c.Commit == "" {
 				continue
 			}
-			if stat, serr := main.CommitStat(ctx, c.Commit); serr == nil {
+			mgr := byRepo[c.Repo]
+			if mgr == nil {
+				continue
+			}
+			if stat, serr := mgr.CommitStat(ctx, c.Commit); serr == nil {
 				_, body, _ := strings.Cut(stat, "\n")
 				r.Cards[i].Stat = strings.TrimSpace(body)
 			}
@@ -183,7 +212,7 @@ func buildGoalReport(v GoalView) GoalReport {
 	servedBy := map[string][]GoalCard{}
 	for _, c := range v.Cards {
 		rc := GoalReportCard{
-			ID: c.Feature.ID, Kind: c.Feature.Kind, Title: c.Feature.Title, State: c.State.String(),
+			ID: c.Feature.ID, Kind: c.Feature.Kind, Repo: c.Feature.Repo, Title: c.Feature.Title, State: c.State.String(),
 			Stage: c.Feature.Stage, Envelope: c.Envelope, Spent: c.Spent, Serves: c.Serves,
 			Reason: c.Reason, Attached: c.Feature.GoalAttached,
 		}
@@ -290,9 +319,30 @@ func RenderGoalReport(r GoalReport) string {
 		b.WriteString("\n")
 	}
 
+	// One repository is the ordinary case and says nothing worth a
+	// section; several is the thing a reader has to know, because the
+	// goal then lands once in each and can be in some and not others.
+	if len(r.Repos) > 1 {
+		b.WriteString("\n### Repositories\n\n")
+		for _, rp := range r.Repos {
+			where := "not landed yet"
+			if rp.Landed {
+				where = "landed"
+			}
+			fmt.Fprintf(&b, "- %s — `%s`, %s", repoName(rp.Name), rp.Branch, where)
+			if rp.Home {
+				b.WriteString(" (the goal's own)")
+			}
+			b.WriteString("\n")
+		}
+	}
+
 	b.WriteString("\n### Cards\n\n")
 	for _, c := range r.Cards {
 		fmt.Fprintf(&b, "- %s %s — %s", c.ID, c.Title, c.State)
+		if len(r.Repos) > 1 && c.Repo != "" {
+			fmt.Fprintf(&b, " in %s", c.Repo)
+		}
 		if c.Commit != "" {
 			fmt.Fprintf(&b, " as %s", shortSHA(c.Commit))
 		}

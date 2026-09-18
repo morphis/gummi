@@ -255,13 +255,18 @@ todo → plan ─────────────▶ implement ────�
   held back so the goal always finishes cleanly: when the budget runs down
   to it, verified work lands, the rest is dropped, and the goal comes back
   **partial**.
+- **A goal is not in a repository.** You are never asked which one it is
+  in: the cards its plan agrees name their own `repo:`, and the goal keeps
+  a branch of its name in every repository they are in. It lands once in
+  each — git has no merge across repositories — and the hand-over says
+  which of them have it.
 - **You can still reach in.** Type into a running goal and the lead reads
   it as a note. Take over one of its cards with `A`. Stop it.
 - **Ready for you** is the one stop that reaches you. The goal page shows
   each done-when item met or not met with its evidence, a try-it guide, the
   decisions for review, the declined reviewer findings, what was found
   along the way, the diff by card, and the spend. Land it (`g`: one merge
-  commit over its cards' commits), send it back to its cards with your
+  commit over its cards' commits, per repository), send it back to its cards with your
   notes (`b`), reverse a decision, or hand it off (`h`).
 
 ## Bringing in existing work

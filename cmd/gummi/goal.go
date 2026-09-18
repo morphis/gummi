@@ -42,7 +42,10 @@ func runGoal(args []string) error {
 	if err != nil {
 		return fmt.Errorf("%s", strings.NewReplacer("--acceptance", "--plan-file").Replace(err.Error()))
 	}
-	opts, err := driverOptions(*gv.envelope, *gv.profile, *gv.gate, *gv.timeout, *gv.autonomous, *gv.verbose, *gv.ref, "", *gv.until, *gv.repo, *gv.base)
+	// no --repo: a goal is not in a repository. Its cards name their own
+	// in the plan, and the goal's own home is settled from them at the
+	// plan gate (DESIGN §17.2).
+	opts, err := driverOptions(*gv.envelope, *gv.profile, *gv.gate, *gv.timeout, *gv.autonomous, *gv.verbose, *gv.ref, "", *gv.until, "", *gv.base)
 	if err != nil {
 		return err
 	}
@@ -73,7 +76,7 @@ func runGoal(args []string) error {
 type goalFlagValues struct {
 	envelope            *int
 	profile, gate, ref  *string
-	repo, until, base   *string
+	until, base         *string
 	planFile            *string
 	autonomous, verbose *bool
 	timeout             *time.Duration
@@ -90,8 +93,7 @@ func registerGoalFlags(fs *flag.FlagSet) *goalFlagValues {
 		autonomous: fs.Bool("autonomous", false, "let the architect take its recommended answer instead of asking during the plan conversation"),
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
-		repo:       fs.String("repo", "", "managed repository for the goal and all its cards (a configured `repos:` name; required when `repos:` is configured)"),
-		base:       fs.String("base", "", "branch the goal branch forks from and lands on (default: whatever the repository has checked out)"),
+		base:       fs.String("base", "", "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)"),
 		planFile:   fs.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)"),
 	}

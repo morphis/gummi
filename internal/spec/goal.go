@@ -39,10 +39,10 @@ const (
 
 const (
 	promptGoalObjective = "%% @gummi: the outcome, in the requester's own words — what will be true when this goal is met"
-	promptGoalDoneWhen  = "%% @gummi: the checkable statements that say the goal is met — one gummi-done-when row each, with a `check:` command or `judge: true`"
+	promptGoalDoneWhen  = "%% @gummi: the checkable statements that say the goal is met — one gummi-done-when row each, with a `check:` command or `judge: true`; a check names the `repo:` its command runs in when the goal spans several"
 	promptGoalLimits    = "%% @gummi: out of scope, constraints, and things not to touch"
 	promptGoalBudget    = "%% @gummi: a rough cost range per done-when item, and a plain warning when the budget looks too small; the lanes line says how many cards may run at once"
-	promptGoalCards     = "%% @gummi: the cards this goal runs — one gummi-cards row each, every row serving at least one done-when item"
+	promptGoalCards     = "%% @gummi: the cards this goal runs — one gummi-cards row each, every row serving at least one done-when item; a row names its `repo:` when the workspace manages several"
 	promptGoalNotes     = "%% @gummi: notes you type into the goal land here; the lead reads them on its next turn"
 	promptGoalTryIt     = "%% @gummi: short steps to see the result working — commands to run and what you should see; if nothing is visible, say so and point at the done-when checks"
 	promptGoalReview    = "%% @gummi: the goal review's findings on the combined change land here"
@@ -54,7 +54,7 @@ const (
 // architect never improvises the block shapes.
 const (
 	doneWhenScaffold = "```gummi-done-when\n" +
-		"# id / says / check (a command) or judge: true\n" +
+		"# id / says / check (a command) or judge: true / repo (where the check runs)\n" +
 		"- id: DW-1\n" +
 		"  says: \"\"\n" +
 		"  check: \"\"\n" +
@@ -63,7 +63,7 @@ const (
 		"lanes: 2\n" +
 		"```"
 	cardsScaffold = "```gummi-cards\n" +
-		"# title / one_liner / kind (feature, bug, research, diagnosis) / serves / depends_on / envelope / id (set when minted or attached)\n" +
+		"# title / one_liner / kind (feature, bug, research, diagnosis) / repo / serves / depends_on / envelope / id (set when minted or attached)\n" +
 		"- title: \"\"\n" +
 		"  one_liner: \"\"\n" +
 		"  serves: []\n" +

@@ -2988,6 +2988,13 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "o":
 		if r, ok := m.selected(); ok {
+			if r.F.IsGoal() {
+				// A goal's home repo is derived from its cards at its plan
+				// gate, not chosen: retargeting it here would be moving the
+				// branch its cards fork from out from under them.
+				m.notice = noticeMsg{text: string(r.F.ID) + ": a goal's repository follows its cards — set each card's `repo:` in the goal doc", isErr: true}
+				return nil
+			}
 			if r.HasWorktree {
 				m.notice = noticeMsg{text: string(r.F.ID) + ": repo is fixed once a worktree exists", isErr: true}
 				return nil

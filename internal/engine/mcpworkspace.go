@@ -634,9 +634,16 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 	} else {
 		gate = norm
 	}
+	repo := a.Repo
+	if ct.Kind == domain.KindGoal && repo == "" {
+		// A goal is in no repository: its cards name their own in the
+		// plan, and its own home is settled from them at the plan gate.
+		// Until then its branch has to be cut somewhere (goalrepos.go).
+		repo = e.ProvisionalRepo()
+	}
 	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
 		Kind: ct.Kind, Mode: ct.Mode, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
-		Repo: a.Repo, RequireRepo: e.RequireRepo, GateApproval: gate,
+		Repo: repo, RequireRepo: e.RequireRepo, GateApproval: gate,
 	})
 	if err != nil {
 		return "", err
@@ -847,7 +854,7 @@ func cardNewTool() agent.ToolDef {
 				"description": map[string]any{"type": "string", "description": "Free-form description. The first line becomes the title; anything beyond it seeds the design draft."},
 				"profile":     map[string]any{"type": "string", "description": "Optional model-role profile (workspace default if omitted)."},
 				"envelope":    map[string]any{"type": "integer", "description": "Optional credit budget; omit or 0 for no cap."},
-				"repo":        map[string]any{"type": "string", "description": "Optional configured repo name (workspace default if omitted)."},
+				"repo":        map[string]any{"type": "string", "description": "Optional configured repo name (workspace default if omitted). Ignored for a goal, which is in no repository: its cards name theirs."},
 				"gate_approval": map[string]any{
 					"type":        "string",
 					"description": "Optional: \"auto\" or \"caller\" (default \"caller\" — see description).",
